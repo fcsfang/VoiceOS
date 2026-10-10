@@ -26,6 +26,8 @@ final class ControlCenter: ObservableObject {
     @Published var player: AVPlayer?
     @Published var history: [TranscriptVersion] = []
     @Published var claims: [CandidateClaim] = []
+    @Published var claimHistory: [ClaimReviewVersion] = []
+    @Published var reviewingClaim = false
     private var store: VoiceOSStore?
     private var worker: Task<Void, Never>?
     func start() async {
@@ -184,6 +186,20 @@ final class ControlCenter: ObservableObject {
             await refresh(); status = "文本处理权限已更新 · 原始音频仍仅本机"
         } catch { status = error.localizedDescription }
     }
+    func review(_ claim: CandidateClaim, action: ClaimReviewAction, statement: String? = nil, ownership: CandidateOwnership? = nil, note: String = "") async -> Bool {
+        guard let store, !reviewingClaim else { return false }
+        reviewingClaim = true; defer { reviewingClaim = false }
+        do {
+            _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: claim.reviewVersion, action: action, statement: statement, ownership: ownership, note: note)
+            await refresh()
+            status = action == .correct ? "认知更正已保存 · 重新待核对，原始结果与历史保留" : (action == .endorse ? "已记录明确认可 · 来源与未验证状态保留" : "已记录拒绝 · 保留历史，停止当前使用")
+            return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
+    }
+    func reviewHistory(_ claim: CandidateClaim) async {
+        do { claimHistory = try await store?.claimReviewHistory(claimID: claim.id) ?? [] }
+        catch { status = error.localizedDescription }
+    }
     func play(_ record: SourceRecord) async {
         do { if let url = try await store?.playableURL(sourceID: record.id) { NSWorkspace.shared.open(url) } }
         catch { status = error.localizedDescription; await refresh() }
@@ -197,6 +213,8 @@ struct CenterView: View {
     @ObservedObject var model: ControlCenter
     @State private var editing: SourceRecord?
     @State private var showHistory = false
+    @State private var correctingClaim: CandidateClaim?
+    @State private var showClaimHistory = false
     var body: some View {
         NavigationSplitView {
             List(model.filtered, selection: $model.selected) { record in
@@ -275,7 +293,16 @@ struct CenterView: View {
                                 ForEach(related) { claim in
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(claim.statement).textSelection(.enabled)
-                                        Text("\(claim.ownership == "ai_candidate" ? "AI 候选" : (claim.ownership == "external" ? "外部主张" : "归属待核对")) · 未验证 · \(claim.validity == "frozen" ? "依据或授权已变化，暂停使用" : "待核对")").font(.caption).foregroundStyle(.secondary)
+                                        Text("\(claim.ownership == "ai_candidate" ? "AI 候选" : (claim.ownership == "external" ? "外部主张" : "归属待核对")) · 未验证 · \(claim.validity == "frozen" ? "依据或授权已变化，暂停使用" : (claim.reviewState == "rejected" ? "已停止当前使用" : "出处可回溯"))").font(.caption).foregroundStyle(.secondary)
+                                        Text(claim.reviewState == "endorsed" ? "明确认可 · 不等于已验证或已经理解" : (claim.reviewState == "rejected" ? "已拒绝 · 保留历史，不用于当前认知" : "尚未认可")).font(.caption).foregroundStyle(.secondary)
+                                        HStack {
+                                            Button("我认可这个观点") { Task { _ = await model.review(claim, action: .endorse) } }
+                                                .disabled(model.reviewingClaim || claim.validity == "frozen" || claim.reviewState == "endorsed")
+                                            Button("拒绝候选") { Task { _ = await model.review(claim, action: .reject) } }
+                                                .disabled(model.reviewingClaim || claim.validity == "frozen" || claim.reviewState == "rejected")
+                                            Button("更正认知") { correctingClaim = claim }.disabled(model.reviewingClaim || claim.validity == "frozen")
+                                            Button("审阅历史") { Task { await model.reviewHistory(claim); showClaimHistory = true } }
+                                        }
                                         ForEach(Array(claim.references.enumerated()), id: \.offset) { _, ref in
                                             if ref.sourceID == record.id, ref.transcriptVersionID == record.transcriptVersionID,
                                                let span = record.spans.first(where: { $0.id == ref.spanID }), let text = record.transcript {
@@ -322,9 +349,44 @@ struct CenterView: View {
                 HStack { Spacer(); Button("完成") { showHistory = false }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 660, height: 440)
         }
+        .sheet(item: $correctingClaim) { claim in
+            ClaimCorrectionView(claim: claim, model: model) { correctingClaim = nil }
+        }
+        .sheet(isPresented: $showClaimHistory) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("认知审阅历史").font(.title2)
+                Text("认可不等于已验证；更正不代表真实观点变化。").foregroundStyle(.secondary)
+                ScrollView {
+                    ForEach(model.claimHistory) { revision in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("第 \(revision.version) 版 · \(reviewReason(revision.reason))").font(.headline)
+                            Text(revision.statement).textSelection(.enabled)
+                            Text("\(ownershipLabel(revision.ownership)) · \(reviewLabel(revision.decision))").font(.caption).foregroundStyle(.secondary)
+                            if !revision.note.isEmpty { Text("原因：" + revision.note).font(.callout) }
+                            Divider()
+                        }
+                    }
+                }
+                HStack { Spacer(); Button("完成") { showClaimHistory = false }.keyboardShortcut(.defaultAction) }
+            }.padding(24).frame(width: 660, height: 440)
+        }
         .onChange(of: model.selected) { _, _ in model.player?.pause(); model.player = nil }
         .frame(minWidth: 840, minHeight: 540)
         .task { await model.start() }
+    }
+    private func ownershipLabel(_ value: String) -> String {
+        value == "external" ? "外部主张" : (value == "ai_candidate" ? "AI 候选" : "归属待核对")
+    }
+    private func reviewLabel(_ value: String) -> String {
+        value == "endorsed" ? "明确认可" : (value == "rejected" ? "已拒绝" : "待核对")
+    }
+    private func reviewReason(_ reason: String) -> String {
+        switch reason {
+        case "explicit_endorsement": return "明确认可"
+        case "explicit_rejection": return "拒绝候选"
+        case "correction": return "认知更正"
+        default: return "模型原始结果"
+        }
     }
     private func attemptLabel(_ attempt: ModelAttemptRecord) -> String {
         switch attempt.state {
@@ -380,6 +442,41 @@ private struct TranscriptCorrectionView: View {
                     saving = true
                     Task { let saved = await model.correct(record, text: text); saving = false; if saved { dismiss() } }
                 }.keyboardShortcut(.defaultAction).disabled(saving || text == record.transcript)
+            }
+            Text(model.status).font(.caption).foregroundStyle(.secondary)
+        }.padding(24).frame(width: 660, height: 440)
+    }
+}
+private struct ClaimCorrectionView: View {
+    let claim: CandidateClaim
+    @ObservedObject var model: ControlCenter
+    let dismiss: () -> Void
+    @State private var text: String
+    @State private var ownership: String
+    @State private var note = ""
+    @State private var saving = false
+    init(claim: CandidateClaim, model: ControlCenter, dismiss: @escaping () -> Void) {
+        self.claim = claim; self.model = model; self.dismiss = dismiss
+        _text = State(initialValue: claim.statement); _ownership = State(initialValue: claim.ownership)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("更正认知").font(.title2)
+            Text("修正 AI 的表述或归属；更正后重新待核对。原始模型结果、出处和历史保留。").foregroundStyle(.secondary)
+            TextEditor(text: $text).font(.body).border(.secondary.opacity(0.3))
+            Picker("内容归属", selection: $ownership) {
+                Text("外部主张").tag("external"); Text("AI 候选").tag("ai_candidate"); Text("归属待核对").tag("unresolved")
+            }
+            TextField("更正原因（必填）", text: $note)
+            HStack {
+                Spacer(); Button("取消", action: dismiss).disabled(saving)
+                Button("保存更正") {
+                    saving = true
+                    Task {
+                        let saved = await model.review(claim, action: .correct, statement: text, ownership: CandidateOwnership(rawValue: ownership), note: note)
+                        saving = false; if saved { dismiss() }
+                    }
+                }.keyboardShortcut(.defaultAction).disabled(saving || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (text == claim.statement && ownership == claim.ownership))
             }
             Text(model.status).font(.caption).foregroundStyle(.secondary)
         }.padding(24).frame(width: 660, height: 440)

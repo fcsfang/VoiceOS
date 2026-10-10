@@ -25,6 +25,8 @@ public struct CandidateClaim: Identifiable, Sendable {
     public let evidenceState: String
     public let validity: String
     public let references: [ClaimReference]
+    public let reviewVersion: Int
+    public let reviewState: String
 }
 extension VoiceOSStore {
     @discardableResult
@@ -104,9 +106,9 @@ extension VoiceOSStore {
         for row in try db.query("SELECT id FROM contexts WHERE state='current'") {
             do { _ = try localContext(id: row["id"]!) } catch { try db.transaction { try freezeContext(row["id"]!) } }
         }
-        let whereClause = includeFrozen ? "" : "WHERE c.validity='current' AND x.state='current'"
-        return try db.query("SELECT c.* FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id \(whereClause) ORDER BY c.created_at,c.id").map {
-            CandidateClaim(id: $0["id"]!, statement: $0["statement"]!, ownership: $0["ownership"]!, evidenceState: $0["evidence_state"]!, validity: $0["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data($0["refs_json"]!.utf8)))
+        let whereClause = includeFrozen ? "" : "WHERE c.validity='current' AND x.state='current' AND COALESCE(r.decision,'pending')!='rejected'"
+        return try db.query("SELECT c.*,r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision AS review_state FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version \(whereClause) ORDER BY c.created_at,c.id").map {
+            CandidateClaim(id: $0["id"]!, statement: $0["reviewed_statement"] ?? $0["statement"]!, ownership: $0["reviewed_ownership"] ?? $0["ownership"]!, evidenceState: $0["evidence_state"]!, validity: $0["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data($0["refs_json"]!.utf8)), reviewVersion: Int($0["review_version"]!)!, reviewState: $0["review_state"] ?? "pending")
         }
     }
     static func validateProposals(_ proposals: [ClaimProposal], context: LocalTranscriptContext) throws {
@@ -173,6 +175,7 @@ extension VoiceOSStore {
             let digest = SHA256.hash(data: try encoder.encode(proposals)).map { String(format: "%02x", $0) }.joined()
             guard digest == attempt["result_digest"] else { throw VoiceOSError("迁移调用结果摘要不一致") }
         }
+        try validateStoredClaimReviews(db)
     }
     // Call inside the same transaction as a correction/quarantine.
     func invalidateCognition(sourceID: String) throws {

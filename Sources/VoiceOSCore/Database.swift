@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -171,6 +171,22 @@ final class Database {
                 try execute("DROP TABLE old_claims")
                 try execute("DROP TABLE old_model_attempts")
                 try execute("PRAGMA user_version=5")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "5" {
+            try transaction {
+                try execute("ALTER TABLE claims ADD COLUMN review_version INTEGER NOT NULL DEFAULT 0 CHECK(review_version>=0)")
+                try execute("""
+                CREATE TABLE claim_reviews (
+                  id TEXT PRIMARY KEY, claim_id TEXT NOT NULL REFERENCES claims(id), version INTEGER NOT NULL CHECK(version>0),
+                  from_version INTEGER NOT NULL CHECK(from_version>=0), decision TEXT NOT NULL CHECK(decision IN ('pending','endorsed','rejected')),
+                  statement TEXT NOT NULL, ownership TEXT NOT NULL CHECK(ownership IN ('external','ai_candidate','unresolved')),
+                  reason TEXT NOT NULL CHECK(reason IN ('explicit_endorsement','explicit_rejection','correction')), note TEXT NOT NULL,
+                  actor TEXT NOT NULL CHECK(actor='user'), command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL,
+                  UNIQUE(claim_id,version)
+                )
+                """)
+                try execute("PRAGMA user_version=6")
             }
         }
     }

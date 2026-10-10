@@ -116,6 +116,67 @@ final class StoreTests: XCTestCase {
         do { _ = try await restored.understandSource(sourceID: source, using: port); XCTFail("restored unknown resend") } catch {}
         let finalCalls = await port.calls; XCTAssertEqual(finalCalls, 1)
     }
+    private func reviewFixture(_ store: VoiceOSStore) async throws -> CandidateClaim {
+        let source = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "外部测试资料"))
+        _ = try await store.understandSource(sourceID: source, using: TestModelPort())
+        let claims = try await store.candidateClaims(); return try XCTUnwrap(claims.first)
+    }
+    func testClaimEndorsementReceiptRejectAndCASRemainSeparateFromEvidence() async throws {
+        let store = try await store(); let claim = try await reviewFixture(store)
+        _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 0, action: .endorse, commandID: "endorse")
+        let replay = try await store.reviewClaim(claimID: claim.id, expectedVersion: 0, action: .endorse, commandID: "endorse")
+        XCTAssertEqual(replay, 1)
+        do { _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 0, action: .reject); XCTFail("stale review") } catch {}
+        do { _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 0, action: .reject, commandID: "endorse"); XCTFail("changed receipt") } catch {}
+        var claims = try await store.candidateClaims(); XCTAssertEqual(claims[0].reviewState, "endorsed")
+        XCTAssertEqual(claims[0].evidenceState, "unverified"); XCTAssertEqual(claims[0].ownership, "ai_candidate")
+        _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 1, action: .reject)
+        claims = try await store.candidateClaims(); XCTAssertTrue(claims.isEmpty)
+        let history = try await store.claimReviewHistory(claimID: claim.id); XCTAssertEqual(history.count, 3)
+        let historical = try await store.candidateClaims(includeFrozen: true); XCTAssertEqual(historical[0].reviewState, "rejected")
+    }
+    func testClaimCorrectionPreservesOriginalAndResetsEndorsementAcrossRestore() async throws {
+        let store = try await store(); let claim = try await reviewFixture(store)
+        _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 0, action: .endorse)
+        _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 1, action: .correct, statement: "用户纠正后的外部说法", ownership: .external, note: "纠正 AI 错误归属")
+        let current = try await store.candidateClaims()[0]
+        XCTAssertEqual(current.reviewState, "pending"); XCTAssertEqual(current.ownership, "external")
+        XCTAssertEqual(current.evidenceState, "unverified")
+        let history = try await store.claimReviewHistory(claimID: claim.id)
+        XCTAssertEqual(history[0].statement, claim.statement); XCTAssertEqual(history.last?.reason, "correction")
+        let package = base.appendingPathComponent("claim-reviews"); try await store.exportPackage(to: package, includeMedia: true)
+        let root = base.appendingPathComponent("reviews-restored")
+        try await VoiceOSStore.restorePackage(from: package, to: root, inspector: Inspector())
+        let restored = try VoiceOSStore(root: root, inspector: Inspector()); try await restored.recover()
+        let versions = try await restored.claimReviewHistory(claimID: claim.id)
+        XCTAssertEqual(versions.map(\.statement), history.map(\.statement))
+        let read = try await restored.candidateClaims()[0]; XCTAssertEqual(read.reviewVersion, 2)
+    }
+    func testFrozenClaimCannotBeEndorsedAndEmptyCorrectionCannotCommit() async throws {
+        let store = try await store(); let claim = try await reviewFixture(store)
+        do { _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 0, action: .correct, statement: "更正", note: ""); XCTFail("missing correction reason") } catch {}
+        let source = try await store.sources()[0]
+        _ = try await store.correctTranscript(sourceID: source.id, expectedVersionID: source.transcriptVersionID!, text: "新来源文字")
+        do { _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 0, action: .endorse); XCTFail("frozen endorsement") } catch {}
+        let history = try await store.claimReviewHistory(claimID: claim.id); XCTAssertEqual(history.count, 1)
+    }
+    func testRestoreRejectsMissingClaimReviewHistoryDespiteMatchingFileHashes() async throws {
+        let store = try await store(); let claim = try await reviewFixture(store)
+        _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 0, action: .endorse)
+        let package = base.appendingPathComponent("broken-review-history"); try await store.exportPackage(to: package)
+        let file = package.appendingPathComponent("claim_reviews.jsonl"); try Data().write(to: file)
+        let manifestFile = package.appendingPathComponent("manifest.json")
+        var manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestFile)) as! [String: Any]
+        var counts = manifest["counts"] as! [String: Int]; counts["claim_reviews"] = 0; manifest["counts"] = counts
+        var files = manifest["files"] as! [[String: Any]]; let index = files.firstIndex { $0["path"] as? String == "claim_reviews.jsonl" }!
+        let digest = try DurableFiles.hash(file); files[index]["sha256"] = digest.1; files[index]["bytes"] = digest.0; manifest["files"] = files
+        try JSONSerialization.data(withJSONObject: manifest).write(to: manifestFile)
+        let target = base.appendingPathComponent("review-history-rejected")
+        do { try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector()); XCTFail("missing review history") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("审阅历史")) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+    }
     func testSameCommandIsIdempotentButNewCommandKeepsDistinctEvent() async throws {
         let store = try await store(); let input = try fixture()
         let a = try await store.importFile(input, commandID: "one")

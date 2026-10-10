@@ -39,6 +39,7 @@ public enum SaveCheckpoint: String, Sendable {
     case jobClaimed, transcriptUncommitted, transcriptCommitted
     case modelReserved, claimsUncommitted, claimsCommitted, correctionUncommitted, correctionCommitted
     case policyUncommitted, policyCommitted
+    case reviewUncommitted, reviewCommitted
 }
 
 public struct TranscriptSpan: Codable, Sendable, Identifiable {

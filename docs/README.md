@@ -52,3 +52,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M2 文本模型真实驱动](engineering/m2-responses-driver.md)：现有密钥单次合成调用、严格解析、用量与迁移证据。
 
 - [M2 控制中心理解](engineering/m2-control-center-understanding.md)：显式文本执行、用量/出处呈现、持久防重发与原生界面验证。
+
+- [M2 候选审阅与更正](engineering/m2-claim-review.md)：认可/拒绝、独立证据、版本历史与原子恢复。
