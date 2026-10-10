@@ -22,8 +22,17 @@ public struct RetrievalMatch: Sendable {
     public init(documentID: String, score: Double, method: String) { self.documentID = documentID; self.score = score; self.method = method }
 }
 public protocol LocalRetrievalPort: Sendable {
+    var semanticWindow: RetrievalWindow { get }
     /// Implementations process locally; this boundary is never a cloud authorization.
     func rank(query: String, documents: [RetrievalDocument], semantic: Bool) async throws -> [RetrievalMatch]
+}
+public struct RetrievalWindow: Sendable {
+    public let scalars: Int
+    public let overlap: Int
+    public init(scalars:Int,overlap:Int) { self.scalars = scalars; self.overlap = overlap }
+}
+extension LocalRetrievalPort {
+    public var semanticWindow: RetrievalWindow { RetrievalWindow(scalars:800,overlap:512) }
 }
 public struct RetrievalHit: Codable, Sendable, Identifiable {
     public var id: String { document.id }
@@ -39,8 +48,9 @@ public struct RetrievalResult: Sendable {
 }
 extension VoiceOSStore {
     /// Read current originals, never frozen derived claims or old transcript versions.
-    private func retrievalDocuments() throws -> [RetrievalDocument] {
+    private func retrievalDocuments(window: RetrievalWindow) throws -> [RetrievalDocument] {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
+        guard (1...800).contains(window.scalars), (0..<window.scalars).contains(window.overlap) else { throw VoiceOSError("本地检索切片配置无效") }
         let rows = try db.query("""
         SELECT s.*,v.id AS transcript_version_id,v.text,v.spans_json FROM sources s
         JOIN transcripts t ON t.source_id=s.id AND t.input_version_id=s.version_id
@@ -59,10 +69,10 @@ extension VoiceOSStore {
                 // Overlap preserves nearby context at fragment boundaries. Every fragment retains exact scalar offsets.
                 var start = span.textStart
                 while start < span.textEnd {
-                    let end = min(start + 800,span.textEnd)
+                    let end = min(start + window.scalars,span.textEnd)
                     docs.append(RetrievalDocument(id:row["id"]!+":"+row["transcript_version_id"]!+":"+String(start),sourceID:row["id"]!,sourceVersionID:row["version_id"]!,transcriptVersionID:row["transcript_version_id"]!,policyVersion:Int(row["policy_version"]!)!,spanID:span.id,textStart:start,textEnd:end,text:String(String.UnicodeScalarView(scalars[start..<end])),name:row["name"]!,createdAt:row["created_at"]!,origin:row["origin"]!,localOnly:row["local_only"] != "0"))
                     guard docs.count <= 10000 else { throw VoiceOSError("当前本地检索超过一万片段范围，请先缩小资料库；未按位置截断历史") }
-                    if end == span.textEnd { break }; start = end - 512
+                    if end == span.textEnd { break }; start = end - window.overlap
                 }
             }
         }
@@ -89,7 +99,7 @@ extension VoiceOSStore {
     }
     public func retrieve(_ query: String, semantic: Bool = false, limit: Int = 20, using port: any LocalRetrievalPort) async throws -> RetrievalResult {
         guard !query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty, query.unicodeScalars.count <= 512, (1...100).contains(limit) else { throw VoiceOSError("请填写不超过 512 字的查询并使用有效结果数量") }
-        let docs = try retrievalDocuments()
+        let docs = try retrievalDocuments(window:semantic ? port.semanticWindow : RetrievalWindow(scalars:800,overlap:512))
         let matches = try await port.rank(query:query,documents:docs,semantic:semantic)
         try Task.checkCancellation()
         let lookup = Dictionary(uniqueKeysWithValues:docs.map { ($0.id,$0) })

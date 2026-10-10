@@ -13,6 +13,8 @@ final class ControlCenter: ObservableObject {
     @Published var retrievalStatus = ""
     @Published var searchingHistory = false
     private let retrieval = NativeRetrieval()
+    private let semanticRetrieval: CoreMLRetrieval? = Bundle.main.resourceURL.map { $0.appendingPathComponent("BGE",isDirectory:true) }.flatMap { FileManager.default.fileExists(atPath:$0.appendingPathComponent("manifest.json").path) ? CoreMLRetrieval(root:$0) : nil }
+    var semanticAvailable: Bool { semanticRetrieval != nil }
     private var retrievalWorker: Task<Void,Never>?
     private var retrievalGeneration = UUID()
     let relevance = RelevanceQueryCoordinator()
@@ -33,13 +35,18 @@ final class ControlCenter: ObservableObject {
     func searchHistory(query: String, semantic: Bool) {
         guard let store else { return }
         cancelHistorySearch(); let generation = retrievalGeneration
+        let port: any LocalRetrievalPort
+        if semantic {
+            guard let semanticRetrieval else { retrievalStatus = "本地语义资源未安装，请使用关键词查找"; return }
+            port = semanticRetrieval
+        } else { port = retrieval }
         searchingHistory = true; retrievalStatus = "正在本机查找历史文字…"
         retrievalWorker = Task {
             do {
-                let result = try await store.retrieve(query,semantic:semantic,using:retrieval)
+                let result = try await store.retrieve(query,semantic:semantic,limit:semantic ? 8 : 20,using:port)
                 guard generation == retrievalGeneration else { return }
                 retrievalResult = result
-                retrievalStatus = "此次扫描 \(result.scannedSources) 份资料 · 找到 \(result.matchingSources) 份，显示 \(result.hits.count) 份"
+                retrievalStatus = semantic ? "本机扫描 \(result.scannedSources) 份资料 · 显示 \(result.hits.count) 份按排序候选，尚未判断相关性" : "此次扫描 \(result.scannedSources) 份资料 · 找到 \(result.matchingSources) 份，显示 \(result.hits.count) 份"
             } catch {
                 guard generation == retrievalGeneration else { return }
                 retrievalStatus = error.localizedDescription
@@ -993,14 +1000,16 @@ struct HistorySearchView: View {
     @State private var query = ""
     @State private var question = ""
     @State private var selectedIDs: Set<String> = []
+    @State private var semantic = false
     private var candidates: [RetrievalHit] { (model.retrievalResult?.hits ?? []).filter { selectedIDs.contains($0.id) } }
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
             Text("查找历史文字").font(.title2)
-            TextField("先输入原文关键词",text:$query).onSubmit { model.searchHistory(query:query,semantic:false) }
-            Text("关键词查找在本机进行。选中原文后，可让文本模型判断它们与你的问题是否相关；跨措辞的自动召回尚未开启。").font(.caption).foregroundStyle(.secondary)
+            TextField(semantic ? "输入想找回的问题或想法" : "先输入原文关键词",text:$query).onSubmit { model.searchHistory(query:query,semantic:semantic) }
+            Toggle("按意思找原文（本机）",isOn:$semantic).disabled(!model.semanticAvailable)
+            Text(model.semanticAvailable ? "查找仅在本机进行；按意思找到的只是候选。选中原文后，可单独让文本模型判断与你的问题是否直接相关。" : "关键词查找在本机进行。这个构建尚未包含本地语义资源；选中原文后仍可单独判断相关性。").font(.caption).foregroundStyle(.secondary)
             HStack {
-                Button(model.searchingHistory ? "正在查找…" : "查找") { model.searchHistory(query:query,semantic:false) }.disabled(model.searchingHistory || query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || query.unicodeScalars.count > 512)
+                Button(model.searchingHistory ? "正在查找…" : "查找") { model.searchHistory(query:query,semantic:semantic) }.disabled(model.searchingHistory || query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || query.unicodeScalars.count > 512)
                 if model.searchingHistory { Button("停止查找") { model.cancelHistorySearch() } }
                 Text("\(query.unicodeScalars.count)/512").font(.caption)
             }
@@ -1029,6 +1038,7 @@ struct HistorySearchView: View {
         .onChange(of:query) { selectedIDs = []; model.cancelHistorySearch() }
         .onChange(of:selectedIDs) { model.relevance.cancel() }
         .onChange(of:question) { model.relevance.cancel() }
+        .onChange(of:semantic) { selectedIDs = []; model.cancelHistorySearch() }
         .onDisappear { model.cancelHistorySearch() }
     }
 }

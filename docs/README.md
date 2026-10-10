@@ -1,6 +1,6 @@
 # VoiceOS 文档索引
 
-更新日期：2026-10-10。
+更新日期：2026-10-11。
 
 ## 当前文档
 
@@ -82,3 +82,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 相关性实际驱动](engineering/m4-relevance-driver.md)：既有 API 配置、严格 ID 输出、一次真实合成调用与持久回执迁移，124 项测试通过。
 
 - [M4 控制中心相关性判断](engineering/m4-relevance-control-center.md)：关键词候选选择、显式发送、出处返回与取消/旧结果屏障；128 项测试及实际界面合成验证通过。
+
+- [M4 原生本地语义召回](engineering/m4-native-semantic-recall.md)：固定 BGE/CoreML 资源、完整窗口出处、136 项测试与实际界面/链路验证。

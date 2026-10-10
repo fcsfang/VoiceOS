@@ -37,3 +37,5 @@
 2026-10-11 补充：[语义候选质量比较](../engineering/m4-semantic-retrieval-quality.md)记录扩大样本后的反证、独立本地模型及重排实验。采用范围仍限可靠文字检索与版本出处屏障。
 
 参考：Apple [sentenceEmbedding](https://developer.apple.com/documentation/naturallanguage/nlembedding/sentenceembedding(for:)) 返回资源可用时的模型；[NLContextualEmbeddingResult](https://developer.apple.com/documentation/naturallanguage/nlcontextualembeddingresult) 提供 token 向量，整体表示需池化。[requestAssets](https://developer.apple.com/documentation/naturallanguage/nlcontextualembedding/requestassets(completionhandler:)) 会请求/下载资产，本轮未调用。具体可用性来自本机实测，不从文档推断已安装。
+
+2026-10-11 后续：相关性快照/持久驱动/界面及独立原生模型已完成增量，见 [ADR-010](010-durable-relevance-attempts.md)、[ADR-011](011-native-semantic-recall.md)。原文与出处原则保留；原生语义端口使用 256/96 窗口、八个排序候选与独立相关性判断，不沿用系统向量质量结论。

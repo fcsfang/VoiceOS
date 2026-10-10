@@ -34,12 +34,40 @@ private struct InvalidSearch: LocalRetrievalPort {
         return [RetrievalMatch(documentID:id,score:1,method:"exact"),RetrievalMatch(documentID:id,score:1,method:"exact")]
     }
 }
+private actor WindowSearch: LocalRetrievalPort {
+    nonisolated let semanticWindow: RetrievalWindow
+    var documents: [RetrievalDocument] = []
+    init(_ window:RetrievalWindow) { semanticWindow = window }
+    func rank(query:String,documents:[RetrievalDocument],semantic:Bool) async throws -> [RetrievalMatch] {
+        self.documents = documents
+        return documents.map { RetrievalMatch(documentID:$0.id,score:Double($0.textEnd)/1000,method:"local_semantic") }
+    }
+}
 final class RetrievalTests: XCTestCase {
     var base: URL!
     override func setUpWithError() throws { base = FileManager.default.temporaryDirectory.appendingPathComponent("retrieval-"+UUID().uuidString) }
     override func tearDownWithError() throws { try FileManager.default.removeItem(at:base) }
     func store() async throws -> VoiceOSStore {
         let s = try VoiceOSStore(root:base.appendingPathComponent("root"),inspector:RetrievalInspector()); try await s.recover(); return s
+    }
+    func testSemanticWindowPreservesOffsetsAndCoversLongOriginalWithoutTruncation() async throws {
+        let s = try await store(), port = WindowSearch(RetrievalWindow(scalars:256,overlap:96))
+        let text = String(repeating:"中",count:680)+"末尾条件尚未验证。"
+        _ = try await s.recordUserExpression(text)
+        let result = try await s.retrieve("尾部条件",semantic:true,using:port)
+        let docs = await port.documents
+        XCTAssertEqual(docs.map(\.textStart),[0,160,320,480])
+        XCTAssertEqual(docs.last?.textEnd,text.unicodeScalars.count)
+        XCTAssertTrue(docs.allSatisfy { $0.textEnd - $0.textStart <= 256 })
+        let hit = try XCTUnwrap(result.hits.first)
+        XCTAssertTrue(hit.document.text.contains("末尾条件")); try await s.validateRetrievalHit(hit)
+        XCTAssertEqual(result.scannedFragments,4); XCTAssertEqual(result.scannedSources,1)
+    }
+    func testInvalidSemanticWindowFailsBeforePortGetsContent() async throws {
+        let s = try await store(), port = WindowSearch(RetrievalWindow(scalars:256,overlap:256))
+        _ = try await s.recordUserExpression("仅本地原文")
+        do { _ = try await s.retrieve("原文",semantic:true,using:port); XCTFail() } catch {}
+        let docs = await port.documents; XCTAssertTrue(docs.isEmpty)
     }
     func testLocalPrivateSearchReturnsOriginalQuoteAndStableProvenance() async throws {
         let s = try await store(); let id = try await s.recordUserExpression("只有检索可靠时，增加上下文才可能有用；我还没验证。🧠")

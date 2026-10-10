@@ -22,3 +22,5 @@
 - [009 本地检索](009-versioned-local-retrieval.md)：原文检索与语义实验分离、可替换端口与读时版本屏障。
 
 - [010 相关性持久调用](010-durable-relevance-attempts.md)：独立调用与完整输入历史，未知不重发，迁移冻结执行；该切片 accepted。
+
+- [011 原生本地语义召回](011-native-semantic-recall.md)：CoreML float32、显式模型资源、可重建投影与排序候选，开发切片 accepted。
