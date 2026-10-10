@@ -15,7 +15,18 @@ final class ControlCenter: ObservableObject {
     private let retrieval = NativeRetrieval()
     private var retrievalWorker: Task<Void,Never>?
     private var retrievalGeneration = UUID()
+    let relevance = RelevanceQueryCoordinator()
+    private var relevanceModel: ResponsesRelevancePort?
+    func prepareRelevance(query: String, candidates: [RetrievalHit]) async {
+        guard let store else { return }
+        await relevance.prepare(query:query,candidates:candidates,store:store)
+    }
+    func judgeRelevance() {
+        guard let store, let port = relevanceModel else { return }
+        relevance.run(store:store,port:port)
+    }
     func cancelHistorySearch() {
+        relevance.cancel()
         retrievalWorker?.cancel(); retrievalWorker = nil; retrievalGeneration = UUID()
         searchingHistory = false; retrievalResult = nil; retrievalStatus = ""
     }
@@ -124,6 +135,7 @@ final class ControlCenter: ObservableObject {
             }) { cancelHistorySearch(); retrievalStatus = "历史资料已变化，请重新查找" }
 
             if let store {
+                await relevance.validate(store:store)
                 var loaded: [String: [ModelAttemptRecord]] = [:]
                 for record in records { loaded[record.id] = try await store.modelAttempts(sourceID: record.id) }
                 attempts = loaded
@@ -142,6 +154,8 @@ final class ControlCenter: ObservableObject {
     private func configureTextModel(_ file: URL) {
         do {
             let port = try LocalTextModel.load(from: file)
+            let selector = try LocalTextModel.loadRelevance(from:file)
+            relevance.cancel(); relevanceModel = selector
             textModel = port; modelConfigured = true
             modelSummary = "gpt-6.1-sol · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
             status = "文本模型已就绪 · 只处理你选择并授权的文字"
@@ -442,7 +456,7 @@ struct CenterView: View {
                             Button("查看关联行动") { Task { await model.actionHistory(action); showActionHistory = true } }
                         }
                         Button(record.localOnly ? "允许这份资料的文本用于云端" : "将这份资料限制为仅本地") { Task { await model.changeTextPolicy(record) } }.disabled(model.changingPolicy)
-                        Text("此选项仅授权文本；点击“理解这份文字”才发送所选文字，原始音频和视频仍仅本机。").font(.caption).foregroundStyle(.secondary)
+                        Text("此选项仅授权文本；执行文字理解或相关性判断时才发送选中的文字，原始音频和视频仍仅本机。").font(.caption).foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Button(model.understandingSource == record.id ? "正在理解…" : "理解这份文字", systemImage: "sparkles") { model.understand(record) }
@@ -977,23 +991,30 @@ struct HistorySearchView: View {
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
     @State private var query = ""
+    @State private var question = ""
+    @State private var selectedIDs: Set<String> = []
+    private var candidates: [RetrievalHit] { (model.retrievalResult?.hits ?? []).filter { selectedIDs.contains($0.id) } }
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
             Text("查找历史文字").font(.title2)
-            TextField("输入关键词或想找回的想法",text:$query).onSubmit { model.searchHistory(query:query,semantic:false) }
-            Text("按输入的连续文字查找当前版本原文，保留上下文与出处。跨措辞语义检索仍在验证；当前结果不代表观点立场或事实已验证，不创建任务或发送云端。").font(.caption).foregroundStyle(.secondary)
+            TextField("先输入原文关键词",text:$query).onSubmit { model.searchHistory(query:query,semantic:false) }
+            Text("关键词查找在本机进行。选中原文后，可让文本模型判断它们与你的问题是否相关；跨措辞的自动召回尚未开启。").font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button(model.searchingHistory ? "正在查找…" : "查找") { model.searchHistory(query:query,semantic:false) }.disabled(model.searchingHistory || query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || query.unicodeScalars.count > 512)
                 if model.searchingHistory { Button("停止查找") { model.cancelHistorySearch() } }
                 Text("\(query.unicodeScalars.count)/512").font(.caption)
             }
             Text(model.retrievalStatus).font(.caption)
+            RelevanceSearchPanel(model:model,coordinator:model.relevance,question:$question,candidates:candidates,dismiss:dismiss)
             ScrollView {
                 if let result = model.retrievalResult {
                     if result.hits.isEmpty { Text("未找到候选。不代表历史中一定没有相关内容，可以换个表述或关键词。").foregroundStyle(.secondary) }
                     ForEach(result.hits) { hit in
                         VStack(alignment:.leading,spacing:6) {
                             Text(hit.document.name).font(.headline)
+                            Toggle("加入相关性判断",isOn:Binding(get:{ selectedIDs.contains(hit.id) },set:{ value in
+                                if value { selectedIDs.insert(hit.id) } else { selectedIDs.remove(hit.id) }
+                            })).disabled(!selectedIDs.contains(hit.id) && selectedIDs.count >= 8)
                             Text("\(hit.method == "exact" ? "文字匹配" : "语义候选 · 待核对") · \(hit.document.origin == "user" ? "用户原文" : "外部原文 · 说话人待核对") · \(hit.document.localOnly ? "仅本地" : "文本可用于云端")").font(.caption).foregroundStyle(.secondary)
                             Text(hit.document.text).textSelection(.enabled)
                             Text(hit.document.createdAt).font(.caption).foregroundStyle(.secondary)
@@ -1004,8 +1025,47 @@ struct HistorySearchView: View {
                 }
             }
             Button("完成",action:dismiss)
-        }.padding(24).frame(width:680,height:580)
-        .onChange(of:query) { model.cancelHistorySearch() }
+        }.padding(24).frame(width:720,height:740)
+        .onChange(of:query) { selectedIDs = []; model.cancelHistorySearch() }
+        .onChange(of:selectedIDs) { model.relevance.cancel() }
+        .onChange(of:question) { model.relevance.cancel() }
         .onDisappear { model.cancelHistorySearch() }
+    }
+}
+
+struct RelevanceSearchPanel: View {
+    @ObservedObject var model: ControlCenter
+    @ObservedObject var coordinator: RelevanceQueryCoordinator
+    @Binding var question: String
+    let candidates: [RetrievalHit]
+    let dismiss: () -> Void
+    private var scalars: Int { question.unicodeScalars.count + candidates.reduce(0) { $0 + $1.document.text.unicodeScalars.count } }
+    var body: some View {
+        VStack(alignment:.leading,spacing:8) {
+            TextField("想找回的问题或想法",text:$question)
+            Text("已选 \(candidates.count)/8 份原文 · 问题与原文共 \(scalars)/4000 字符").font(.caption)
+            Text("判断时发送本次问题与所选原文，不发送音视频。仅本地资料需先到出处页面授权；相关不表示支持或已验证，也不创建行动。").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("准备所选原文") { Task { await model.prepareRelevance(query:question,candidates:candidates) } }
+                    .disabled(coordinator.busy || candidates.isEmpty || question.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || question.unicodeScalars.count > 512 || scalars > 4000)
+                Button("用文本模型判断") { model.judgeRelevance() }
+                    .disabled(coordinator.busy || coordinator.snapshot == nil || !model.modelConfigured)
+                if coordinator.busy { Button("停止判断") { coordinator.stop() } }
+                if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
+            }
+            Text(coordinator.status).font(.caption).accessibilityIdentifier("relevanceStatus")
+            if let usage = coordinator.usage {
+                Text("输入 \(usage["input_tokens"].map(String.init) ?? "未知") · 输出 \(usage["output_tokens"].map(String.init) ?? "未知") token · 账单费用未知").font(.caption).foregroundStyle(.secondary)
+            }
+            if let hits = coordinator.hits {
+                ForEach(hits) { hit in
+                    HStack(alignment:.top) {
+                        Text(hit.document.text).lineLimit(3).textSelection(.enabled)
+                        Spacer()
+                        Button("核对相关原文") { Task { if await model.openRetrievalHit(hit) { dismiss() } } }
+                    }
+                }
+            }
+        }.padding(12).background(.quaternary.opacity(0.35),in:RoundedRectangle(cornerRadius:8))
     }
 }

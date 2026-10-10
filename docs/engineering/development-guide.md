@@ -97,4 +97,4 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 
 ## 相关性开发验证
 
-独立相关性调用、输入历史和恢复屏障已实现，实际文本驱动可复用同一本地配置。详情见[相关性驱动](m4-relevance-driver.md)。控制中心目前未提供语义相关性操作；已有关键词查询保持可用，不据驱动测试推定界面已完成。
+独立相关性调用、输入历史和恢复屏障已实现，实际文本驱动可复用同一本地配置。详情见[相关性驱动](m4-relevance-driver.md)。控制中心“查找历史文字”现支持从关键词结果选定原文、准备并执行文本模型相关性判断，再查看出处；见[界面实施记录](m4-relevance-control-center.md)。跨措辞自动召回仍待接入。

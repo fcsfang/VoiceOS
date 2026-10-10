@@ -80,3 +80,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 相关性持久调用](engineering/m4-durable-relevance.md)：117 项测试、三处真实强退、v1–v10 旧包恢复；调用状态与出处有效性独立，迁移后不自动执行。
 
 - [M4 相关性实际驱动](engineering/m4-relevance-driver.md)：既有 API 配置、严格 ID 输出、一次真实合成调用与持久回执迁移，124 项测试通过。
+
+- [M4 控制中心相关性判断](engineering/m4-relevance-control-center.md)：关键词候选选择、显式发送、出处返回与取消/旧结果屏障；128 项测试及实际界面合成验证通过。
