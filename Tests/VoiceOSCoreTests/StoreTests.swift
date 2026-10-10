@@ -10,10 +10,10 @@ private struct Inspector: MediaInspector {
 }
 private struct Speech: SpeechPort {
     let text: String
-    func transcribe(_ url: URL, locale: String) async throws -> String { text }
+    func transcribe(_ url: URL, locale: String) async throws -> SpeechText { SpeechText(text: text) }
 }
 private struct FailedSpeech: SpeechPort {
-    func transcribe(_ url: URL, locale: String) async throws -> String { throw VoiceOSError("backend unavailable") }
+    func transcribe(_ url: URL, locale: String) async throws -> SpeechText { throw VoiceOSError("backend unavailable") }
 }
 final class StoreTests: XCTestCase {
     private var base: URL!
@@ -162,6 +162,33 @@ final class StoreTests: XCTestCase {
         try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector())
         let restored = try VoiceOSStore(root: target, inspector: Inspector()); try await restored.recover()
         let restoredRow = try await restored.sources().first!; XCTAssertEqual(restoredRow.transcript, expected)
+    }
+
+    func testCorrectionPreservesOriginalAndRejectsStaleVersion() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "识别有误"))
+        let original = try await store.sources().first!
+        let version = try await store.correctTranscript(sourceID: id, expectedVersionID: original.transcriptVersionID!, text: "识别正确", commandID: "correction-one")
+        let replay = try await store.correctTranscript(sourceID: id, expectedVersionID: original.transcriptVersionID!, text: "识别正确", commandID: "correction-one")
+        XCTAssertEqual(version, replay)
+        do { _ = try await store.correctTranscript(sourceID: id, expectedVersionID: original.transcriptVersionID!, text: "过期编辑"); XCTFail("must reject stale editor") } catch {}
+        let current = try await store.sources().first!
+        XCTAssertEqual(current.transcript, "识别正确"); XCTAssertEqual(current.transcriptVersionID, version)
+        let history = try await store.transcriptHistory(sourceID: id)
+        XCTAssertEqual(history.count, 2); XCTAssertEqual(history[1].text, "识别有误"); XCTAssertEqual(history[0].reason, "transcription_error")
+        let oldTrusted = try await store.isCurrentTranscriptVersion(original.transcriptVersionID!); XCTAssertFalse(oldTrusted)
+        let newTrusted = try await store.isCurrentTranscriptVersion(version); XCTAssertTrue(newTrusted)
+        let package = base.appendingPathComponent("corrected-package"); try await store.exportPackage(to: package, includeMedia: true)
+        let target = base.appendingPathComponent("restored")
+        try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector())
+        let restored = try VoiceOSStore(root: target, inspector: Inspector()); try await restored.recover()
+        let restoredHistory = try await restored.transcriptHistory(sourceID: id)
+        XCTAssertEqual(restoredHistory.map(\.id), history.map(\.id)); XCTAssertEqual(restoredHistory.map(\.text), history.map(\.text))
+    }
+    func testInvalidTranscriptOffsetsAndTimesRejected() throws {
+        XCTAssertThrowsError(try SpeechText(text: "🙂中", spans: [TranscriptSpan(textStart: 0, textEnd: 3)]).validate(duration: 1))
+        XCTAssertThrowsError(try SpeechText(text: "🙂中", spans: [TranscriptSpan(textStart: 0, textEnd: 2, startMS: 0, endMS: 2000)]).validate(duration: 1))
+        XCTAssertNoThrow(try SpeechText(text: "🙂中", spans: [TranscriptSpan(textStart: 0, textEnd: 2, startMS: 0, endMS: 800)]).validate(duration: 1))
     }
 
 }

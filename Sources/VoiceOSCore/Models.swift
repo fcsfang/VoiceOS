@@ -14,7 +14,7 @@ public protocol MediaInspector: Sendable {
     func inspect(_ url: URL) async throws -> MediaInfo
 }
 public protocol SpeechPort: Sendable {
-    func transcribe(_ url: URL, locale: String) async throws -> String
+    func transcribe(_ url: URL, locale: String) async throws -> SpeechText
 }
 public struct SourceRecord: Identifiable, Sendable {
     public let id: String
@@ -29,8 +29,50 @@ public struct SourceRecord: Identifiable, Sendable {
     public let transcript: String?
     public let error: String?
     public let relativePath: String
+    public let transcriptVersionID: String?
+    public let spans: [TranscriptSpan]
 }
 public enum SaveCheckpoint: String, Sendable {
     case intent, copyChunk, copyComplete, sealed, renamed, savedUncommitted, savedCommitted
     case jobClaimed, transcriptUncommitted, transcriptCommitted
+}
+
+public struct TranscriptSpan: Codable, Sendable, Identifiable {
+    public let id: String
+    public let textStart: Int
+    public let textEnd: Int
+    public let startMS: Int?
+    public let endMS: Int?
+    public init(id: String = UUID().uuidString, textStart: Int, textEnd: Int, startMS: Int? = nil, endMS: Int? = nil) {
+        self.id = id; self.textStart = textStart; self.textEnd = textEnd; self.startMS = startMS; self.endMS = endMS
+    }
+}
+public struct SpeechText: Sendable {
+    public let text: String
+    public let spans: [TranscriptSpan]
+    public init(text: String, spans: [TranscriptSpan]? = nil) {
+        self.text = text
+        self.spans = spans ?? (text.isEmpty ? [] : [TranscriptSpan(textStart: 0, textEnd: text.unicodeScalars.count)])
+    }
+    public func validate(duration: Double?) throws {
+        let count = text.unicodeScalars.count
+        var offset = 0
+        guard Set(spans.map(\.id)).count == spans.count else { throw VoiceOSError("逐字稿片段身份重复") }
+        for span in spans {
+            guard UUID(uuidString: span.id) != nil, span.textStart == offset, span.textEnd > span.textStart, span.textEnd <= count else { throw VoiceOSError("逐字稿文字定位不一致") }
+            if let start = span.startMS, let end = span.endMS {
+                guard start >= 0, end >= start, let duration, Double(end) <= duration * 1000 + 1 else { throw VoiceOSError("逐字稿媒体定位越界") }
+            } else if span.startMS != nil || span.endMS != nil { throw VoiceOSError("逐字稿媒体定位不完整") }
+            offset = span.textEnd
+        }
+        guard offset == count else { throw VoiceOSError("逐字稿片段未覆盖实际文字") }
+    }
+}
+public struct TranscriptVersion: Identifiable, Sendable {
+    public let id: String
+    public let number: Int
+    public let text: String
+    public let reason: String
+    public let createdAt: String
+    public let isCurrent: Bool
 }

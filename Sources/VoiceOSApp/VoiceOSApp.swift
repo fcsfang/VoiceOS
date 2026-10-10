@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import AVKit
 import UniformTypeIdentifiers
 import VoiceOSCore
 import VoiceOSPlatform
@@ -15,6 +16,8 @@ final class ControlCenter: ObservableObject {
     @Published var status = "正在检查资料库…"
     @Published var importing = false
     @Published var initialized = false
+    @Published var player: AVPlayer?
+    @Published var history: [TranscriptVersion] = []
     private var store: VoiceOSStore?
     private var worker: Task<Void, Never>?
     func start() async {
@@ -101,6 +104,27 @@ final class ControlCenter: ObservableObject {
         catch { status = error.localizedDescription }
         await refresh()
     }
+    func playSpan(_ record: SourceRecord, milliseconds: Int) async {
+        do {
+            guard let url = try await store?.playableURL(sourceID: record.id) else { return }
+            player?.pause()
+            let playback = AVPlayer(url: url)
+            player = playback
+            await playback.seek(to: CMTime(value: Int64(milliseconds), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
+            playback.play()
+        } catch { status = error.localizedDescription; await refresh() }
+    }
+    func historyFor(_ record: SourceRecord) async {
+        do { history = try await store?.transcriptHistory(sourceID: record.id) ?? [] }
+        catch { status = error.localizedDescription }
+    }
+    func correct(_ record: SourceRecord, text: String) async -> Bool {
+        guard let version = record.transcriptVersionID else { return false }
+        do {
+            _ = try await store?.correctTranscript(sourceID: record.id, expectedVersionID: version, text: text)
+            await refresh(); status = "更正已保存 · 原件和旧逐字稿保留"; return true
+        } catch { status = error.localizedDescription; return false }
+    }
     func play(_ record: SourceRecord) async {
         do { if let url = try await store?.playableURL(sourceID: record.id) { NSWorkspace.shared.open(url) } }
         catch { status = error.localizedDescription; await refresh() }
@@ -112,6 +136,9 @@ final class ControlCenter: ObservableObject {
 }
 struct CenterView: View {
     @ObservedObject var model: ControlCenter
+    @State private var editing: SourceRecord?
+    @State private var editedText = ""
+    @State private var showHistory = false
     var body: some View {
         NavigationSplitView {
             List(model.filtered, selection: $model.selected) { record in
@@ -133,11 +160,31 @@ struct CenterView: View {
                         Text("\(String(format: "%.1f", record.duration ?? 0)) 秒 · \(ByteCountFormatter.string(fromByteCount: record.bytes, countStyle: .file))").font(.caption).foregroundStyle(.secondary)
                         if record.state == "saved" { Button("打开保存的原件", systemImage: "play.circle") { Task { await model.play(record) } } }
                         Divider()
-                        Text("逐字稿").font(.headline)
+                        HStack {
+                            Text("逐字稿").font(.headline)
+                            Spacer()
+                            if record.transcript != nil {
+                                Button("更正文字") { editedText = record.transcript ?? ""; editing = record }
+                                Button("版本历史") { Task { await model.historyFor(record); showHistory = true } }
+                            }
+                        }
                         if let transcript = record.transcript {
                             if transcript.isEmpty { Text("本次转写没有返回文字。可以播放原件核对；这不代表音轨没有人声。").foregroundStyle(.secondary) }
                             else { Text(transcript).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                            Text("Apple 本地转写 · 中文 · 尚未人工校对").font(.caption).foregroundStyle(.secondary)
+                            Text(record.spans.contains(where: { $0.startMS != nil }) ? "Apple 本地转写 · 中文 · 识别时间定位待核对" : "中文逐字稿 · 时间定位未确认").font(.caption).foregroundStyle(.secondary)
+                            if !record.spans.isEmpty {
+                                DisclosureGroup("来源片段") {
+                                    ForEach(record.spans) { span in
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            if let start = span.startMS, let end = span.endMS, record.state == "saved" {
+                                                Button("\(timeLabel(start))—\(timeLabel(end)) · 播放核对", systemImage: "play.circle") { Task { await model.playSpan(record, milliseconds: start) } }
+                                            } else { Text("时间未确认").font(.caption).foregroundStyle(.secondary) }
+                                            Text(String(String.UnicodeScalarView(Array(transcript.unicodeScalars)[span.textStart..<span.textEnd]))).textSelection(.enabled)
+                                        }.padding(.vertical, 6)
+                                    }
+                                }
+                            }
+                            if let player = model.player { VideoPlayer(player: player).frame(height: record.kind == "video" ? 260 : 80) }
                         } else { Text(transcriptStatus(record)).foregroundStyle(.secondary) }
                         if let error = record.error { Text(error).foregroundStyle(.orange) }
                         if ["failed", "blocked"].contains(record.jobState ?? ""), record.state == "saved" {
@@ -156,9 +203,35 @@ struct CenterView: View {
             } label: { Label("导出资料", systemImage: "square.and.arrow.up") }.disabled(!model.initialized || model.importing)
         }
         .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Spacer(); Text("开发预览 · 文件导入与本地转写").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
+        .sheet(item: $editing) { record in
+            VStack(alignment: .leading, spacing: 14) {
+                Text("更正逐字稿").font(.title2)
+                Text("仅更正识别文字；原件和旧逐字稿保留。新文字的时间定位会标为未确认。").foregroundStyle(.secondary)
+                TextEditor(text: $editedText).font(.body).border(.secondary.opacity(0.3))
+                HStack { Spacer(); Button("取消") { editing = nil }; Button("保存更正") { Task { if await model.correct(record, text: editedText) { editing = nil } } }.keyboardShortcut(.defaultAction) }
+                Text(model.status).font(.caption).foregroundStyle(.secondary)
+            }.padding(24).frame(width: 660, height: 440)
+        }
+        .sheet(isPresented: $showHistory) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("逐字稿版本历史").font(.title2)
+                ScrollView {
+                    ForEach(model.history) { version in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("第 \(version.number) 版 · \(version.reason == "original" ? "本地识别原稿" : "识别文字更正")\(version.isCurrent ? " · 当前" : " · 历史")").font(.headline)
+                            Text(version.text.isEmpty ? "（空文字）" : version.text).textSelection(.enabled)
+                            Divider()
+                        }
+                    }
+                }
+                HStack { Spacer(); Button("完成") { showHistory = false }.keyboardShortcut(.defaultAction) }
+            }.padding(24).frame(width: 660, height: 440)
+        }
+        .onChange(of: model.selected) { _, _ in model.player?.pause(); model.player = nil }
         .frame(minWidth: 840, minHeight: 540)
         .task { await model.start() }
     }
+    private func timeLabel(_ ms: Int) -> String { String(format: "%02d:%02d", ms / 60000, (ms / 1000) % 60) }
     private func label(_ record: SourceRecord) -> String {
         switch record.state {
         case "saved": return "原件已保存"

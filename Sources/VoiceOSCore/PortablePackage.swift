@@ -16,8 +16,9 @@ private struct PackageManifest: Codable {
     let omittedAssetIDs: [String]
 }
 private enum PackageLayout {
-    static let tables = ["sources", "assets", "jobs", "transcripts"]
-    static let integerFields: Set<String> = ["version", "expected_bytes", "local_only", "bytes", "attempts"]
+    static let legacyTables = ["sources", "assets", "jobs", "transcripts"]
+    static let tables = legacyTables + ["transcript_versions", "transcript_revisions"]
+    static let integerFields: Set<String> = ["version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
     static func json(_ row: [String: String]) -> [String: Any] {
         row.reduce(into: [String: Any]()) { out, pair in
             if integerFields.contains(pair.key), let number = Int64(pair.value) { out[pair.key] = number }
@@ -76,7 +77,7 @@ extension VoiceOSStore {
                 files.append(verified)
             }
             if includeMedia { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 1, databaseSchema: 2, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 2, databaseSchema: 3, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)
@@ -93,9 +94,10 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("恢复目标必须是新的空目录；现有资料库不会被覆盖") }
         let manifestURL = try PackageLayout.safeFile(package, "manifest.json")
         let manifest = try JSONDecoder().decode(PackageManifest.self, from: Data(contentsOf: manifestURL))
-        guard manifest.format == "VoiceOS-local-package", manifest.version == 1, manifest.databaseSchema == 2 else { throw VoiceOSError("不支持此迁移包格式") }
+        guard manifest.format == "VoiceOS-local-package", ((manifest.version == 1 && manifest.databaseSchema == 2) || (manifest.version == 2 && manifest.databaseSchema == 3)) else { throw VoiceOSError("不支持此迁移包格式") }
+        let tables = manifest.version == 1 ? PackageLayout.legacyTables : PackageLayout.tables
         guard Set(manifest.files.map(\.path)).count == manifest.files.count,
-              Set(manifest.counts.keys) == Set(PackageLayout.tables),
+              Set(manifest.counts.keys) == Set(tables),
               Set(manifest.omittedAssetIDs).count == manifest.omittedAssetIDs.count else { throw VoiceOSError("迁移清单重复或缺少记录") }
         var verifiedFiles: [String: URL] = [:]
         for entry in manifest.files {
@@ -105,7 +107,7 @@ extension VoiceOSStore {
             verifiedFiles[entry.path] = file
         }
         var rows: [String: [[String: String]]] = [:]
-        for table in PackageLayout.tables {
+        for table in tables {
             guard let file = verifiedFiles["\(table).jsonl"] else { throw VoiceOSError("迁移包缺少结构化记录") }
             let text = try String(contentsOf: file, encoding: .utf8)
             var records: [[String: String]] = []
@@ -122,7 +124,7 @@ extension VoiceOSStore {
             guard records.count == manifest.counts[table], Set(records.compactMap { $0["id"] }).count == records.count else { throw VoiceOSError("迁移包记录数量或身份重复") }
             rows[table] = records
         }
-        for table in PackageLayout.tables {
+        for table in tables {
             for row in rows[table]! {
                 guard let id = row["id"], UUID(uuidString: id) != nil else { throw VoiceOSError("迁移包对象身份格式错误") }
             }
@@ -145,7 +147,7 @@ extension VoiceOSStore {
         do {
             try FileManager.default.createDirectory(at: temporary.appendingPathComponent("assets"), withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
             var omittedSources: Set<String> = []
-            var expectedPaths = Set(PackageLayout.tables.map { "\($0).jsonl" })
+            var expectedPaths = Set(tables.map { "\($0).jsonl" })
             for asset in rows["assets"]! {
                 guard let id = asset["id"], let sourceID = asset["source_id"], let source = sources[sourceID],
                       source["asset_id"] == id, source["relative_path"] == asset["relative_path"],
@@ -164,18 +166,18 @@ extension VoiceOSStore {
                 guard copied.0 == actual.0, copied.1 == actual.1 else { throw VoiceOSError("恢复副本完整性校验失败") }
             }
             guard Set(verifiedFiles.keys) == expectedPaths else { throw VoiceOSError("迁移清单包含不受支持的文件") }
-            try populateRestore(temporary, rows: rows, omittedSources: omittedSources)
+            try populateRestore(temporary, rows: rows, omittedSources: omittedSources, tables: tables)
             try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets"))
             try DurableFiles.syncDirectory(temporary)
             try FileManager.default.moveItem(at: temporary, to: destination)
             try DurableFiles.syncDirectory(destination.deletingLastPathComponent())
         } catch { try? FileManager.default.removeItem(at: temporary); throw error }
     }
-    private static func populateRestore(_ directory: URL, rows: [String: [[String: String]]], omittedSources: Set<String>) throws {
+    private static func populateRestore(_ directory: URL, rows: [String: [[String: String]]], omittedSources: Set<String>, tables: [String]) throws {
         let database = try Database(directory.appendingPathComponent("voiceos.sqlite"))
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: directory.appendingPathComponent("voiceos.sqlite").path)
         try database.transaction {
-            for table in PackageLayout.tables {
+            for table in tables {
                 let columns = Set(try database.query("PRAGMA table_info(\(table))").compactMap { $0["name"] })
                 for var row in rows[table]! {
                     guard Set(row.keys).isSubset(of: columns), row["id"] != nil else { throw VoiceOSError("迁移包有未知字段或缺少身份") }
@@ -184,6 +186,19 @@ extension VoiceOSStore {
                     let keys = row.keys.sorted()
                     try database.execute("INSERT INTO \(table)(\(keys.joined(separator: ","))) VALUES(\(keys.map { _ in "?" }.joined(separator: ",")))", keys.map { row[$0] })
                 }
+            }
+            if tables == PackageLayout.legacyTables { try database.backfillTranscriptVersions() }
+            guard try database.query("""
+            SELECT t.id FROM transcripts t LEFT JOIN transcript_versions v ON v.id=t.current_version_id
+            WHERE v.id IS NULL OR v.transcript_id!=t.id OR v.version_no!=t.version
+            UNION ALL
+            SELECT r.id FROM transcript_revisions r JOIN transcript_versions f ON f.id=r.from_version_id
+            JOIN transcript_versions n ON n.id=r.to_version_id
+            WHERE f.transcript_id!=r.transcript_id OR n.transcript_id!=r.transcript_id OR n.version_no!=f.version_no+1
+            """).isEmpty else { throw VoiceOSError("恢复的逐字稿版本链不一致") }
+            for version in try database.query("SELECT v.*,s.duration FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id") {
+                let spans = try JSONDecoder().decode([TranscriptSpan].self, from: Data(version["spans_json"]!.utf8))
+                try SpeechText(text: version["text"]!, spans: spans).validate(duration: version["duration"].flatMap(Double.init))
             }
             guard try database.query("""
             SELECT s.id FROM sources s LEFT JOIN assets a ON a.id=s.asset_id

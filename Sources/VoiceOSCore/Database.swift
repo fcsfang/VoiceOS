@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -74,6 +74,31 @@ final class Database {
                 try execute("PRAGMA user_version=2")
             }
         }
+        if try query("PRAGMA user_version").first?["user_version"] == "2" {
+            try transaction {
+                try execute("ALTER TABLE transcripts ADD COLUMN current_version_id TEXT")
+                try execute("ALTER TABLE transcripts ADD COLUMN version INTEGER NOT NULL DEFAULT 1")
+                try execute("""
+                CREATE TABLE transcript_versions (
+                    id TEXT PRIMARY KEY, transcript_id TEXT NOT NULL REFERENCES transcripts(id),
+                    version_no INTEGER NOT NULL, text TEXT NOT NULL, spans_json TEXT NOT NULL,
+                    reason TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL,
+                    UNIQUE(transcript_id,version_no)
+                )
+                """)
+                try execute("""
+                CREATE TABLE transcript_revisions (
+                    id TEXT PRIMARY KEY, transcript_id TEXT NOT NULL REFERENCES transcripts(id),
+                    from_version_id TEXT NOT NULL REFERENCES transcript_versions(id),
+                    to_version_id TEXT NOT NULL UNIQUE REFERENCES transcript_versions(id),
+                    command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL,
+                    reason TEXT NOT NULL CHECK(reason='transcription_error'), actor TEXT NOT NULL CHECK(actor='user'), created_at TEXT NOT NULL
+                )
+                """)
+                try backfillTranscriptVersions()
+                try execute("PRAGMA user_version=3")
+            }
+        }
     }
     deinit { sqlite3_close(handle) }
     func execute(_ sql: String, _ arguments: [String?] = []) throws { _ = try query(sql, arguments) }
@@ -109,6 +134,15 @@ final class Database {
         try execute("BEGIN IMMEDIATE")
         do { let result = try body(); try execute("COMMIT"); return result }
         catch { try? execute("ROLLBACK"); throw error }
+    }
+    func backfillTranscriptVersions() throws {
+        for row in try query("SELECT * FROM transcripts WHERE current_version_id IS NULL") {
+            let versionID = UUID().uuidString
+            let speech = SpeechText(text: row["text"]!)
+            let spans = String(decoding: try JSONEncoder().encode(speech.spans), as: UTF8.self)
+            try execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?, 'original','system',?)", [versionID,row["id"],row["text"],spans,row["created_at"]])
+            try execute("UPDATE transcripts SET current_version_id=? WHERE id=?", [versionID,row["id"]])
+        }
     }
     private func error() -> VoiceOSError { VoiceOSError("资料库错误：\(String(cString: sqlite3_errmsg(handle)))") }
 }

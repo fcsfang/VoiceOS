@@ -100,11 +100,11 @@ public actor VoiceOSStore {
     }
     public func sources() throws -> [SourceRecord] {
         try db.query("""
-        SELECT s.*,j.state AS job_state,j.error AS job_error,t.text AS transcript
+        SELECT s.*,j.state AS job_state,j.error AS job_error,v.text AS transcript,t.current_version_id AS transcript_version_id,v.spans_json
         FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
-        LEFT JOIN transcripts t ON t.job_id=j.id ORDER BY s.created_at DESC,s.id
+        LEFT JOIN transcripts t ON t.job_id=j.id LEFT JOIN transcript_versions v ON v.id=t.current_version_id ORDER BY s.created_at DESC,s.id
         """).map { row in
-            SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!)
+            SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!, transcriptVersionID: row["transcript_version_id"], spans: try row["spans_json"].map { try JSONDecoder().decode([TranscriptSpan].self, from: Data($0.utf8)) } ?? [])
         }
     }
     public func playableURL(sourceID: String) throws -> URL {
@@ -133,18 +133,26 @@ public actor VoiceOSStore {
             do {
                 try checkpoint(.jobClaimed)
                 let url = try playableURL(sourceID: source)
-                let text = try await speech.transcribe(url, locale: "zh_CN")
+                let result = try await speech.transcribe(url, locale: "zh_CN")
+                let duration = try db.query("SELECT duration FROM sources WHERE id=?", [source]).first?["duration"].flatMap(Double.init)
+                try result.validate(duration: duration)
+                let text = result.text
                 _ = try playableURL(sourceID: source)
                 try db.transaction {
                     guard !(try db.query("""
                     SELECT j.id FROM jobs j JOIN sources s ON s.id=j.source_id
                     WHERE j.id=? AND j.lease_token=? AND j.state='running' AND s.state='saved' AND s.version_id=j.input_version_id
                     """, [job,lease])).isEmpty else { return }
+                    let transcriptID = UUID().uuidString
                     try db.execute("""
                     INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at)
                     VALUES(?,?,?,?,?,'verbatim',?,'zh_CN','Apple SpeechAnalyzer',?)
-                    """, [UUID().uuidString,source,row["asset_id"],row["input_version_id"],job,text,Self.now()])
-                    try db.execute("UPDATE jobs SET state='completed',lease_token=NULL,error=NULL WHERE id=?", [job])
+                    """, [transcriptID,source,row["asset_id"],row["input_version_id"],job,text,Self.now()])
+                    let versionID = UUID().uuidString
+                    let spans = String(decoding: try JSONEncoder().encode(result.spans), as: UTF8.self)
+                    try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?, 'original','system',?)", [versionID,transcriptID,text,spans,Self.now()])
+                    try db.execute("UPDATE transcripts SET current_version_id=? WHERE id=?", [versionID,transcriptID])
+                    try db.execute("UPDATE jobs SET state='completed' ,lease_token=NULL,error=NULL WHERE id=?", [job])
                     try checkpoint(.transcriptUncommitted)
                 }
                 try checkpoint(.transcriptCommitted)

@@ -34,6 +34,18 @@ SCHEMA = object_schema({
 })
 
 
+def schema_valid(value, schema):
+    kind = schema["type"]
+    if kind == "string":
+        return isinstance(value, str)
+    if kind == "array":
+        return isinstance(value, list) and all(schema_valid(item, schema["items"]) for item in value)
+    if kind == "object":
+        return isinstance(value, dict) and set(value) == set(schema["required"]) and all(
+            schema_valid(value[name], subschema) for name, subschema in schema["properties"].items())
+    return False
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -129,8 +141,10 @@ def main():
             try:
                 parsed = json.loads(output)
                 evidence["root_fields_present"] = isinstance(parsed, dict) and set(parsed) == set(SCHEMA["properties"])
+                evidence["schema_valid"] = schema_valid(parsed, SCHEMA)
             except (json.JSONDecodeError, TypeError):
                 evidence["root_fields_present"] = False
+                evidence["schema_valid"] = False
             evidence["refusal_present"] = any(part.get("type") == "refusal" for item in response.get("output", []) for part in item.get("content", []))
         except urllib.error.HTTPError as error:
             evidence.update(executed=True, http_status=error.code, status="http-error")
@@ -148,7 +162,7 @@ def main():
         evidence["elapsed_seconds"] = round(time.monotonic() - start, 3)
         destination.write_text(json.dumps(evidence, ensure_ascii=False, indent=2))
         print(json.dumps({field: evidence.get(field) for field in ("case_id", "requested_model", "status", "http_status", "elapsed_seconds", "root_fields_present")}), flush=True)
-        if evidence.get("http_status") != 200 or evidence.get("status") == "transport-unknown":
+        if evidence.get("http_status") != 200 or evidence.get("status") != "completed" or evidence.get("refusal_present") or not evidence.get("schema_valid"):
             break  # Fail the route once; no repeated failed calls or implicit provider fallback.
         usage = evidence.get("usage") or {}
         if "counted_input_tokens" in evidence and "input_tokens" in usage:

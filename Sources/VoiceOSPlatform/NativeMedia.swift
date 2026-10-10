@@ -24,7 +24,7 @@ public struct NativeMediaInspector: MediaInspector {
 }
 public struct NativeSpeechPort: SpeechPort {
     public init() {}
-    public func transcribe(_ url: URL, locale identifier: String) async throws -> String {
+    public func transcribe(_ url: URL, locale identifier: String) async throws -> SpeechText {
         guard SpeechTranscriber.isAvailable else { throw VoiceOSError("此设备暂不支持本地转写") }
         let locale = Locale(identifier: identifier)
         guard await SpeechTranscriber.installedLocales.contains(where: { $0.identifier == locale.identifier }) else { throw VoiceOSError("本地中文语音模型尚未安装；未下载模型或上传音频") }
@@ -41,10 +41,20 @@ public struct NativeSpeechPort: SpeechPort {
         defer { try? FileManager.default.removeItem(at: temporary) }
         let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
         let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let sourceDuration = try await AVURLAsset(url: url).load(.duration).seconds
         let reader = Task {
-            var texts: [String] = []
-            for try await result in transcriber.results { texts.append(String(result.text.characters)) }
-            return texts.joined()
+            var text = ""; var spans: [TranscriptSpan] = []; var offset = 0
+            for try await result in transcriber.results {
+                let part = String(result.text.characters)
+                guard !part.isEmpty else { continue }
+                let endOffset = offset + part.unicodeScalars.count
+                let start = result.range.start.seconds * 1000
+                let end = CMTimeRangeGetEnd(result.range).seconds * 1000
+                let known = start.isFinite && end.isFinite && start >= 0 && end >= start && end <= sourceDuration * 1000 + 0.5
+                spans.append(TranscriptSpan(textStart: offset, textEnd: endOffset, startMS: known ? Int(start.rounded()) : nil, endMS: known ? Int(end.rounded()) : nil))
+                text += part; offset = endOffset
+            }
+            return SpeechText(text: text, spans: spans)
         }
         do {
             try await analyzer.start(inputAudioFile: file, finishAfterFile: true)
