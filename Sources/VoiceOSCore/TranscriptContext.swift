@@ -1,8 +1,8 @@
 import Foundation
 import CryptoKit
 
-/// Local, ephemeral input for the next cognitive slice. Not a persisted ContextBundle,
-/// a cloud grant, or evidence that the speaker is the user.
+/// Locally constructed snapshot; persist it with destination and policy versions before use.
+/// The snapshot alone is neither a cloud grant nor evidence that the speaker is the user.
 public struct LocalTranscriptContext: Codable, Sendable {
     public let sources: [ContextTranscript]
     public let scalarBudget: Int
@@ -45,8 +45,7 @@ extension VoiceOSStore {
     }
 
     /// Invoke again before consuming the snapshot or accepting an asynchronous result.
-    /// No network send or result commit exists yet; those must combine this check with
-    /// their eventual persisted policy epochs/job identity and transaction.
+    /// Persistent model boundaries also check policy versions and attempt state.
     public func validateLocalTranscriptContext(_ context: LocalTranscriptContext) throws {
         let current = try prepareLocalTranscriptContext(sourceIDs: context.sources.map(\.sourceID), scalarBudget: context.scalarBudget)
         guard try contextDigest(context.sources) == context.contentDigest,

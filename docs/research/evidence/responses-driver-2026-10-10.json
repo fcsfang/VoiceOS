@@ -1,0 +1,47 @@
+{
+  "accepted": true,
+  "attempts": [
+    {
+      "billing_state": "unknown",
+      "model": "gpt-6.1-sol",
+      "provider": "responses:api.chiyi.cc",
+      "state": "completed",
+      "usage": {
+        "input_tokens": 373,
+        "output_tokens": 238
+      }
+    }
+  ],
+  "audio_uploaded": false,
+  "claim_count": 2,
+  "date": "2026-10-10",
+  "elapsed_seconds": 8.008746027946472,
+  "integrity": true,
+  "network_generation_attempts": 1,
+  "personal_text_sent": false,
+  "synthetic_only": true,
+  "core_tests": {
+    "count": 37,
+    "failures": 0
+  },
+  "migration": {
+    "cognitive_tables_preserved": true,
+    "foreign_keys_valid": true,
+    "no_network_during_restore": true
+  },
+  "repeat_same_experiment": {
+    "rejected_before_network": true,
+    "attempt_count_after_repeat": 1
+  },
+  "semantic_check": {
+    "external_ownership_preserved": true,
+    "unverified_evidence_preserved": true,
+    "user_belief_or_task_created": false
+  },
+  "vision_baseline_unchanged": true,
+  "limitations": [
+    "single synthetic case does not establish route stability or cognitive quality",
+    "third-party fee and model provenance remain unknown",
+    "control center has no cloud execution button yet"
+  ]
+}

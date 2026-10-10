@@ -9,6 +9,7 @@ struct Check {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
             guard args.count >= 2 else { throw VoiceOSError("usage: voiceos-check <import|read|transcribe> <isolated-root> [file] [command-id]") }
+            if args[0] == "cloud-fixture" { try await runCloudFixture(args); return }
             if args[0] == "restore" {
                 guard args.count == 3 else { throw VoiceOSError("restore requires package path") }
                 try await VoiceOSStore.restorePackage(from: URL(fileURLWithPath: args[2]), to: URL(fileURLWithPath: args[1]), inspector: NativeMediaInspector())

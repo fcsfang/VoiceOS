@@ -37,6 +37,11 @@ private actor TestModelPort: ModelPort {
     func waitStarted() async { if gate == nil { await withCheckedContinuation { started = $0 } } }
     func release() { gate?.resume(); gate = nil }
 }
+private struct MalformedModelHTTP: ModelHTTPTransport {
+    func send(_ request: URLRequest) async throws -> ModelHTTPReply {
+        ModelHTTPReply(status: 200, body: Data(#"{"status":"completed","usage":{"input_tokens":12,"output_tokens":7},"output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"{\"claims\":[{\"userConfirmed\":true}]}"}]}]}"#.utf8))
+    }
+}
 final class StoreTests: XCTestCase {
     private var base: URL!
     override func setUpWithError() throws {
@@ -53,6 +58,19 @@ final class StoreTests: XCTestCase {
         let store = try VoiceOSStore(root: base.appendingPathComponent("store"), inspector: Inspector())
         try await store.recover()
         return store
+    }
+    func testMalformedRealDriverResponseRetainsUsageButNeverCommitsClaims() async throws {
+        let store = try await store(); let source = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "外部测试观点"))
+        _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: 1, localOnly: false)
+        let snapshot = try await store.prepareLocalTranscriptContext(sourceIDs: [source])
+        let context = try await store.persistLocalContext(snapshot, destination: .cloud)
+        let port = try ResponsesModelPort(baseURL: URL(string: "https://api.chiyi.cc/v1")!, apiKey: "test", model: "test", transport: MalformedModelHTTP())
+        do { _ = try await store.generateClaims(contextID: context, using: port); XCTFail("must reject") } catch {}
+        let attempts = try await store.modelAttempts(); XCTAssertEqual(attempts.count, 1)
+        XCTAssertEqual(attempts[0].state, "rejected"); XCTAssertEqual(attempts[0].usage?["input_tokens"], 12)
+        XCTAssertEqual(attempts[0].usage?["output_tokens"], 7)
+        let claims = try await store.candidateClaims(); XCTAssertTrue(claims.isEmpty)
     }
     func testSameCommandIsIdempotentButNewCommandKeepsDistinctEvent() async throws {
         let store = try await store(); let input = try fixture()

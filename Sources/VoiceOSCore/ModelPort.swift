@@ -76,6 +76,17 @@ extension VoiceOSStore {
         try checkpoint(.modelReserved)
         let response: ModelResponse
         do { response = try await port.generate(ModelRequest(attemptID: attempt, context: context, configuration: config)) }
+        catch ModelPortFailure.rejected(let reason, let input, let output) {
+            var usage: [String: Int] = [:]
+            if let input { usage["input_tokens"] = input }
+            if let output { usage["output_tokens"] = output }
+            if !usage.isEmpty {
+                let encoded = try JSONSerialization.data(withJSONObject: usage, options: [.sortedKeys])
+                try db.execute("UPDATE model_attempts SET usage_json=? WHERE id=?", [String(decoding: encoded, as: UTF8.self),attempt])
+            }
+            try db.execute("UPDATE model_attempts SET state='rejected',error=? WHERE id=? AND state='reserved'", [reason,attempt])
+            throw VoiceOSError("模型响应被拒绝：" + reason)
+        }
         catch {
             try db.execute("UPDATE model_attempts SET state='unknown',error='传输未返回结果；费用未知，不自动重发' WHERE id=? AND state='reserved'", [attempt])
             throw VoiceOSError("模型请求结果未知，已保留调用记录，不会自动重发")
