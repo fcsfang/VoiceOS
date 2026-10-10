@@ -119,9 +119,9 @@ final class ControlCenter: ObservableObject {
         catch { status = error.localizedDescription }
     }
     func correct(_ record: SourceRecord, text: String) async -> Bool {
-        guard let version = record.transcriptVersionID else { return false }
+        guard let store, let version = record.transcriptVersionID else { return false }
         do {
-            _ = try await store?.correctTranscript(sourceID: record.id, expectedVersionID: version, text: text)
+            _ = try await store.correctTranscript(sourceID: record.id, expectedVersionID: version, text: text)
             await refresh(); status = "更正已保存 · 原件和旧逐字稿保留"; return true
         } catch { status = error.localizedDescription; return false }
     }
@@ -137,7 +137,6 @@ final class ControlCenter: ObservableObject {
 struct CenterView: View {
     @ObservedObject var model: ControlCenter
     @State private var editing: SourceRecord?
-    @State private var editedText = ""
     @State private var showHistory = false
     var body: some View {
         NavigationSplitView {
@@ -164,7 +163,7 @@ struct CenterView: View {
                             Text("逐字稿").font(.headline)
                             Spacer()
                             if record.transcript != nil {
-                                Button("更正文字") { editedText = record.transcript ?? ""; editing = record }
+                                Button("更正文字") { editing = record }
                                 Button("版本历史") { Task { await model.historyFor(record); showHistory = true } }
                             }
                         }
@@ -179,7 +178,7 @@ struct CenterView: View {
                                             if let start = span.startMS, let end = span.endMS, record.state == "saved" {
                                                 Button("\(timeLabel(start))—\(timeLabel(end)) · 播放核对", systemImage: "play.circle") { Task { await model.playSpan(record, milliseconds: start) } }
                                             } else { Text("时间未确认").font(.caption).foregroundStyle(.secondary) }
-                                            Text(String(String.UnicodeScalarView(Array(transcript.unicodeScalars)[span.textStart..<span.textEnd]))).textSelection(.enabled)
+                                            Text(quote(span, text: transcript)).textSelection(.enabled)
                                         }.padding(.vertical, 6)
                                     }
                                 }
@@ -204,13 +203,7 @@ struct CenterView: View {
         }
         .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Spacer(); Text("开发预览 · 文件导入与本地转写").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
         .sheet(item: $editing) { record in
-            VStack(alignment: .leading, spacing: 14) {
-                Text("更正逐字稿").font(.title2)
-                Text("仅更正识别文字；原件和旧逐字稿保留。新文字的时间定位会标为未确认。").foregroundStyle(.secondary)
-                TextEditor(text: $editedText).font(.body).border(.secondary.opacity(0.3))
-                HStack { Spacer(); Button("取消") { editing = nil }; Button("保存更正") { Task { if await model.correct(record, text: editedText) { editing = nil } } }.keyboardShortcut(.defaultAction) }
-                Text(model.status).font(.caption).foregroundStyle(.secondary)
-            }.padding(24).frame(width: 660, height: 440)
+            TranscriptCorrectionView(record: record, model: model) { editing = nil }
         }
         .sheet(isPresented: $showHistory) {
             VStack(alignment: .leading, spacing: 12) {
@@ -231,6 +224,11 @@ struct CenterView: View {
         .frame(minWidth: 840, minHeight: 540)
         .task { await model.start() }
     }
+    private func quote(_ span: TranscriptSpan, text: String) -> String {
+        let scalars = Array(text.unicodeScalars)
+        guard span.textStart >= 0, span.textEnd >= span.textStart, span.textEnd <= scalars.count else { return "片段定位无效，请检查资料" }
+        return String(String.UnicodeScalarView(scalars[span.textStart..<span.textEnd]))
+    }
     private func timeLabel(_ ms: Int) -> String { String(format: "%02d:%02d", ms / 60000, (ms / 1000) % 60) }
     private func label(_ record: SourceRecord) -> String {
         switch record.state {
@@ -248,6 +246,33 @@ struct CenterView: View {
         case "failed", "blocked": return "转写暂未完成"
         default: return "完整保存后开始转写"
         }
+    }
+}
+private struct TranscriptCorrectionView: View {
+    let record: SourceRecord
+    @ObservedObject var model: ControlCenter
+    let dismiss: () -> Void
+    @State private var text: String
+    @State private var saving = false
+    init(record: SourceRecord, model: ControlCenter, dismiss: @escaping () -> Void) {
+        self.record = record; self.model = model; self.dismiss = dismiss
+        _text = State(initialValue: record.transcript ?? "")
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("更正逐字稿").font(.title2)
+            Text("仅更正识别文字；原件和旧逐字稿保留。新文字的时间定位会标为未确认。").foregroundStyle(.secondary)
+            TextEditor(text: $text).font(.body).border(.secondary.opacity(0.3))
+            HStack {
+                Spacer()
+                Button("取消", action: dismiss).disabled(saving)
+                Button("保存更正") {
+                    saving = true
+                    Task { let saved = await model.correct(record, text: text); saving = false; if saved { dismiss() } }
+                }.keyboardShortcut(.defaultAction).disabled(saving || text == record.transcript)
+            }
+            Text(model.status).font(.caption).foregroundStyle(.secondary)
+        }.padding(24).frame(width: 660, height: 440)
     }
 }
 final class ApplicationDelegate: NSObject, NSApplicationDelegate {

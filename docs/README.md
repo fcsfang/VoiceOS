@@ -17,8 +17,8 @@
 | [技术验证初步报告](research/technical-validation-2026-10-10.md) | 第三阶段进行中，部分探针完成 | 实测范围、证据、官方来源、备选与下一步 |
 | [可靠性补充报告](research/reliability-validation-2026-10-10.md) | 合成实验完成，真实接口待测 | 恢复、核对去重、备份迁移与结果边界 |
 | [提醒事项探针说明](research/reminders-probe-guide.md) | 已进行单项真实创建/改名/完成/重开验证 | 实际权限、选定清单和回读验证步骤 |
-| [GPT 首轮试验方案](research/cloud-evaluation-plan.md) | 配置已接入，三次生成尝试后因服务错误停止 | 两模型十样本、费用配置和语义评分 |
-| [GPT 合成样本](research/cognitive-evaluation-cases.json) | 十条参考案例，仅 SEM-01 有成功生成，完整对照未执行 | 归属、意图、纠错、历史关联与英语边界 |
+| [GPT 首轮试验方案](research/cloud-evaluation-plan.md) | 配置已接入，累计六次尝试、三次成功，完整对照未完成 | 两模型十样本、费用配置和语义评分 |
+| [GPT 合成样本](research/cognitive-evaluation-cases.json) | 十条参考案例，SEM-01/03/04 有成功生成，完整对照未完成 | 归属、意图、纠错、历史关联与英语边界 |
 | [API 与提醒事项实测](research/api-reminders-validation-2026-10-10.md) | 正常提醒事项路径完成，API 试验部分完成 | 三次生成尝试、单项真实写入/改名/完成/重开证据 |
 | [API 配置使用说明](research/api-setup-guide.md) | 本地配置已整理并验证连接 | OpenCode 配置转换、密钥隔离和复现入口 |
 | [现有短音视频验证](research/existing-media-validation-2026-10-10.md) | M0/W01 部分推进，非软件验收 | 现有视频音轨/一分钟中文音频复制、提取、完整解码与本地转写 |
@@ -29,6 +29,8 @@
 | [架构审查与需求映射](architecture/review.md) | 覆盖检查，输入子集已实现 | 31 条需求对应机制与 AC、验证门槛、产品边界复核 |
 | [ADR 索引](adr/README.md) | 开发切片部分采用，其余待验证 | 重大技术备选、取舍、证据与退出路径 |
 | [M1 文件输入实施记录](engineering/m1-file-input.md) | 已实现的开发预览，非完整 MVP | 同一应用核心、15 项测试、26 项媒体恢复检查与未完成范围 |
+| [M2 逐字稿基础](engineering/m2-transcript-provenance.md) | 已实现的增量切片，非完整 M2 | 来源时间、原稿保留、更正历史、格式升级与验证 |
+| [云端测试增量](research/cloud-evaluation-update-2026-10-10.md) | 六次尝试，三次成功，因超时停止 | 嵌套结构、归属与机会边界、未知结果/费用 |
 | [开发指南](engineering/development-guide.md) | 可复现工程入口 | 应用构建、数据位置、导出/恢复和测试 |
 | [实施路线图 v0.1](planning/implementation-roadmap.md) | 实施中，M1 输入子集已实现 | 六个里程碑、24 个工作包、31 条需求对应实现责任 |
 | [详细测试计划 v0.1](testing/test-plan.md) | 可审查计划，产品案例未执行 | 22 个 AC 执行步骤、14 个 FI 子场景、判定/指标/自然试用 |

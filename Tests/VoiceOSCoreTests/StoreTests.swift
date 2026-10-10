@@ -191,4 +191,69 @@ final class StoreTests: XCTestCase {
         XCTAssertNoThrow(try SpeechText(text: "🙂中", spans: [TranscriptSpan(textStart: 0, textEnd: 2, startMS: 0, endMS: 800)]).validate(duration: 1))
     }
 
+    func testRestoreRejectsMissingRevisionEvenWhenPackageHashesMatch() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "原稿"))
+        let original = try await store.sources().first!
+        _ = try await store.correctTranscript(sourceID: id, expectedVersionID: original.transcriptVersionID!, text: "更正稿")
+        let package = base.appendingPathComponent("broken-history")
+        try await store.exportPackage(to: package)
+        let revisionFile = package.appendingPathComponent("transcript_revisions.jsonl")
+        try Data().write(to: revisionFile)
+        let manifestFile = package.appendingPathComponent("manifest.json")
+        var manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestFile)) as! [String: Any]
+        var counts = manifest["counts"] as! [String: Int]; counts["transcript_revisions"] = 0; manifest["counts"] = counts
+        var files = manifest["files"] as! [[String: Any]]
+        let index = files.firstIndex { $0["path"] as? String == "transcript_revisions.jsonl" }!
+        let digest = try DurableFiles.hash(revisionFile)
+        files[index]["bytes"] = digest.0; files[index]["sha256"] = digest.1; manifest["files"] = files
+        try JSONSerialization.data(withJSONObject: manifest).write(to: manifestFile)
+        let target = base.appendingPathComponent("must-not-restore")
+        do {
+            try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector())
+            XCTFail("matching checksums must not conceal a missing correction receipt")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("版本链")) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+    }
+
+    func testLocalContextRetainsExternalIdentityAndRejectsStaleInput() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "外部材料中的观点🙂"))
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [id])
+        XCTAssertEqual(context.sources[0].origin, "external")
+        XCTAssertEqual(context.sources[0].speaker, "unknown")
+        XCTAssertTrue(context.sources[0].localOnly)
+        XCTAssertEqual(context.sources[0].text, "外部材料中的观点🙂")
+        try await store.validateLocalTranscriptContext(context)
+        _ = try await store.correctTranscript(sourceID: id, expectedVersionID: context.sources[0].transcriptVersionID, text: "更正的材料")
+        do { try await store.validateLocalTranscriptContext(context); XCTFail("old async input must fail revalidation") } catch {}
+        let current = try await store.prepareLocalTranscriptContext(sourceIDs: [id])
+        try await store.validateLocalTranscriptContext(current)
+        XCTAssertNotEqual(current.contentDigest, context.contentDigest)
+    }
+    func testLocalContextRejectsPartialSelectionAndBudgetOverflow() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture())
+        do { _ = try await store.prepareLocalTranscriptContext(sourceIDs: [id]); XCTFail("untranscribed input must fail") } catch {}
+        try await store.processTranscriptions(using: Speech(text: "🙂中"))
+        let exact = try await store.prepareLocalTranscriptContext(sourceIDs: [id], scalarBudget: 2)
+        XCTAssertEqual(exact.sources[0].text, "🙂中")
+        for ids in [[id,id], [id,UUID().uuidString], []] {
+            do { _ = try await store.prepareLocalTranscriptContext(sourceIDs: ids); XCTFail("selection must fail atomically") } catch {}
+        }
+        do { _ = try await store.prepareLocalTranscriptContext(sourceIDs: [id], scalarBudget: 1); XCTFail("do not silently truncate") } catch {}
+    }
+    func testLocalContextRejectsTamperedTextAndQuarantinedSource() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "原始材料"))
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [id])
+        var raw = try JSONSerialization.jsonObject(with: JSONEncoder().encode(context)) as! [String: Any]
+        var sources = raw["sources"] as! [[String: Any]]; sources[0]["text"] = "篡改材料"; raw["sources"] = sources
+        let tampered = try JSONDecoder().decode(LocalTranscriptContext.self, from: JSONSerialization.data(withJSONObject: raw))
+        do { try await store.validateLocalTranscriptContext(tampered); XCTFail("must reject altered snapshot") } catch {}
+        let file = try await store.playableURL(sourceID: id)
+        try Data("damaged".utf8).write(to: file)
+        do { try await store.validateLocalTranscriptContext(context); XCTFail("quarantine must block old input") } catch {}
+        let row = try await store.sources().first!; XCTAssertEqual(row.state, "quarantined")
+    }
+
 }

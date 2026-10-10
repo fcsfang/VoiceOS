@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-10",
+  "scope": "M2 transcript provenance and correction foundations; not complete M2 or MVP",
+  "database_schema": 3,
+  "package_format": 2,
+  "core_tests_passed": 21,
+  "native_process_integration": {
+    "cases_passed": 26,
+    "sigkill_count": 20,
+    "same_core_as_application": true,
+    "initial_version_consistency_databases_verified": 6
+  },
+  "native_ui": {
+    "first_editor_loads_original": true,
+    "unchanged_save_disabled": true,
+    "correction_and_history_verified": true,
+    "original_preserved": true,
+    "roundtrip_preserves_version_ids_and_text": true,
+    "original_unicode_scalars": 286,
+    "original_timed_spans": 3,
+    "corrected_timestamps_unknown": true,
+    "test_annotation_only": true,
+    "restored_history_ui_verified": true
+  },
+  "legacy_format_1_restore_verified": true,
+  "audio_uploaded": false,
+  "microphone_used": false,
+  "full_product_acceptance_passed": false,
+  "local_context": {
+    "explicit_selection": true,
+    "external_unknown_identity_preserved": true,
+    "unicode_scalar_budget_not_token_budget": true,
+    "stale_or_tampered_context_rejected": true,
+    "damaged_media_revalidation_quarantines": true,
+    "network_send_implemented": false,
+    "durable_context_bundle_implemented": false
+  }
+}

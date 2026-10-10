@@ -192,6 +192,16 @@ extension VoiceOSStore {
             SELECT t.id FROM transcripts t LEFT JOIN transcript_versions v ON v.id=t.current_version_id
             WHERE v.id IS NULL OR v.transcript_id!=t.id OR v.version_no!=t.version
             UNION ALL
+            SELECT t.id FROM transcripts t LEFT JOIN transcript_versions v ON v.transcript_id=t.id AND v.version_no=1
+            WHERE v.id IS NULL OR v.text!=t.text OR v.reason!='original' OR v.actor!='system'
+            UNION ALL
+            SELECT t.id FROM transcripts t JOIN transcript_versions v ON v.transcript_id=t.id GROUP BY t.id HAVING COUNT(v.id)!=t.version
+            UNION ALL
+            SELECT v.id FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id
+            LEFT JOIN transcript_revisions r ON r.to_version_id=v.id
+            WHERE v.version_no<1 OR v.version_no>t.version OR (v.version_no>1 AND
+            (r.id IS NULL OR v.reason!='transcription_error' OR v.actor!='user'))
+            UNION ALL
             SELECT r.id FROM transcript_revisions r JOIN transcript_versions f ON f.id=r.from_version_id
             JOIN transcript_versions n ON n.id=r.to_version_id
             WHERE f.transcript_id!=r.transcript_id OR n.transcript_id!=r.transcript_id OR n.version_no!=f.version_no+1

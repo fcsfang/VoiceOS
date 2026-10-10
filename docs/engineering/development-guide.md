@@ -1,6 +1,6 @@
 # VoiceOS 开发预览与复现
 
-日期：2026-10-10。此版本是 M1 文件输入切片，加上本地逐字稿与首批数据迁移能力；尚不是完整 MVP。当前状态与证据见[实施记录](m1-file-input.md)。
+日期：2026-10-10。此版本包含 M1 文件输入切片与 M2 逐字稿来源/更正基础；尚不是完整 MVP。当前状态与证据见 [M1 实施记录](m1-file-input.md)及 [M2 增量记录](m2-transcript-provenance.md)。
 
 ## 打开应用
 
@@ -11,6 +11,8 @@
 有效扩展名候选：m4a、mp3、wav、aiff/aif、caf、aac、flac、mp4、mov、m4v；实际支持还取决于系统能否完整解码音轨。当前真实样本验证仅覆盖 M4A 与含音轨 MP4。没有可处理音轨的视频会返回原因，不能将扩展名清单当成所有编码的支持承诺。模型不可用时保留原件和失败原因；已安装模型查询通过后才启动转写，无云端回退。
 
 导入内容一律是外部/未知说话人来源，不创建个人观点或任务。逐字稿标为尚未人工校对，空结果也保留为实际空输出，不推断没有人声。搜索只做文件名/逐字稿文字匹配，没有语义检索。
+
+逐字稿可查看来源时间片段、更正文字和查看版本历史。更正保留原稿，当前更正版的时间定位标为未确认；此处只表示识别文字更正。片段播放由用户点击发起，实际对齐质量待人工核对。
 
 ## 数据与生命周期
 
@@ -28,7 +30,7 @@ VOICEOS_DATA_DIR="$PWD/runtime/my-local-test" dist/VoiceOS.app/Contents/MacOS/Vo
 
 ## 导出与空库恢复
 
-工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v1，存储 schema 2，含 manifest 与 sources/assets/jobs/transcripts 四类 UTF-8 JSONL；它仅覆盖当前已实现的实体，未来认知/行动/修订历史加入时必须升级格式。没有凭据或外部连接数据。
+工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v2，存储 schema 3，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions 六类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 包。它仅覆盖当前已实现的实体，未来认知/行动加入时必须升级格式。没有凭据或外部连接数据。
 
 导出记录文件数量、长度、SHA-256 与未打包原件 ID；原件包先核验原件，再逐字节复制核验。包先在临时目录生成，完成后改名到新目标；不覆盖现有目录。当前同步 actor 快照依靠单写者和原件不可变契约，尚未实现删除，因此不存在资产删除竞态；加入删除/异步导出前必须实现 pin 与取消屏障，不能照搬当前边界。
 
@@ -45,7 +47,7 @@ VOICEOS_DATA_DIR="$PWD/runtime/restored" dist/VoiceOS.app/Contents/MacOS/VoiceOS
 
 ## 工程入口与验证
 
-- `Sources/VoiceOSCore`：SQLite、命令身份、可靠媒体副本、恢复、持久转写 jobs、迁移包。
+- `Sources/VoiceOSCore`：SQLite、命令身份、可靠媒体副本、恢复、持久转写 jobs、版本历史、临时本地上下文与迁移包。
 - `Sources/VoiceOSPlatform`：完整音轨解码与已安装 Apple Speech；通过协议与 Core 隔离。
 - `Sources/VoiceOSApp`：SwiftUI 控制中心与应用持有的后台 worker。
 - `Sources/VoiceOSCheck`：与应用使用同一核心的进程集成检查入口，不是另一套保存实现。
