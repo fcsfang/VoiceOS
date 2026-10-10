@@ -1,6 +1,6 @@
 import Foundation
 
-public struct RetrievalDocument: Sendable, Identifiable {
+public struct RetrievalDocument: Codable, Sendable, Identifiable {
     public let id: String
     public let sourceID: String
     public let sourceVersionID: String
@@ -69,6 +69,7 @@ extension VoiceOSStore {
         return docs
     }
     public func validateRetrievalHit(_ hit: RetrievalHit) throws {
+        guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
         let doc = hit.document
         guard let row = try db.query("""
         SELECT s.*,t.current_version_id,v.text,v.spans_json FROM sources s JOIN transcripts t ON t.source_id=s.id
@@ -76,6 +77,8 @@ extension VoiceOSStore {
         WHERE s.id=? AND t.input_version_id=s.version_id AND s.state IN ('saved','reference_only')
         """,[doc.sourceID]).first,
           row["version_id"] == doc.sourceVersionID, row["current_version_id"] == doc.transcriptVersionID,
+          doc.id == doc.sourceID + ":" + doc.transcriptVersionID + ":" + String(doc.textStart),
+          row["origin"] == doc.origin, row["name"] == doc.name, row["created_at"] == doc.createdAt,
           row["policy_version"] == String(doc.policyVersion), (row["local_only"] != "0") == doc.localOnly else { throw VoiceOSError("检索出处或权限已变化，请重新查找") }
         if row["state"] == "saved" { _ = try playableURL(sourceID:doc.sourceID) }
         let scalars = Array(row["text"]!.unicodeScalars)

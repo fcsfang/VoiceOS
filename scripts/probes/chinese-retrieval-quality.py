@@ -78,6 +78,9 @@ def main():
     p.add_argument("output", type=Path)
     p.add_argument("--download", action="store_true")
     p.add_argument("--reranker-dir", type=Path, help="Optional local top8 cross-encoder experiment")
+    p.add_argument("--fragment-scalars", type=int, help="Explicit scalar windows; retain offsets and aggregate source by best window")
+    p.add_argument("--overlap", type=int, default=96)
+    p.add_argument("--fixed-threshold", type=float, help="Frozen prior threshold; bypass calibration selection")
     args = p.parse_args()
     fixture_bytes = args.fixture.read_bytes()
     fixture = json.loads(fixture_bytes)
@@ -95,6 +98,10 @@ def main():
         p.error("Require separate calibration and holdout queries")
     if any(not d["text"].strip() for d in documents) or any(not q["text"].strip() for q in queries):
         p.error("Empty text is not a valid fixture")
+    if args.fragment_scalars is not None and not (0 <= args.overlap < args.fragment_scalars <= 800):
+        p.error("Require 0 <= overlap < fragment-scalars <= 800")
+    if args.fixed_threshold is not None and not (0 <= args.fixed_threshold <= 1):
+        p.error("Fixed threshold must be finite in [0,1]")
     identity = artifacts(args.model_dir, MODEL, REVISION, FILES, args.download)
     rerank_identity = artifacts(args.reranker_dir, RERANKER, RERANK_REVISION, RERANK_FILES, args.download) if args.reranker_dir else None
     os.environ["HF_HUB_OFFLINE"] = "1"
@@ -103,7 +110,7 @@ def main():
     import transformers
     from transformers import AutoModel, AutoTokenizer
     torch.set_num_threads(4)
-    start = time.perf_counter()
+    inference_start = time.perf_counter()
     tokenizer = AutoTokenizer.from_pretrained(args.model_dir, local_files_only=True, trust_remote_code=False)
     model = AutoModel.from_pretrained(args.model_dir, local_files_only=True,
                                      trust_remote_code=False, use_safetensors=True).eval()
@@ -120,12 +127,27 @@ def main():
                 vectors.append(torch.nn.functional.normalize(cls, p=2, dim=1))
         return torch.cat(vectors)
 
-    corpus = encode([d["text"] for d in documents])
+    fragments = []
+    for doc in documents:
+        step = args.fragment_scalars - args.overlap if args.fragment_scalars else len(doc["text"])
+        start = 0
+        while start < len(doc["text"]):
+            end = min(start + (args.fragment_scalars or len(doc["text"])), len(doc["text"]))
+            fragments.append(dict(id=doc["id"], text=doc["text"][start:end], text_start=start, text_end=end))
+            if end == len(doc["text"]):
+                break
+            start += step
+    corpus = encode([d["text"] for d in fragments])
     query_vectors = encode([INSTRUCTION + q["text"] for q in queries])
     scores = (query_vectors @ corpus.T).tolist()
-    rankings = {q["id"]: sorted([dict(id=ids[j], score=s) for j, s in enumerate(row)],
-                               key=lambda x: (-x["score"], x["id"]))
-                for q, row in zip(queries, scores)}
+    rankings = {}
+    for q, row in zip(queries, scores):
+        best = {}
+        for fragment, score in zip(fragments, row):
+            hit = dict(id=fragment["id"], score=score, text_start=fragment["text_start"], text_end=fragment["text_end"])
+            if hit["id"] not in best or score > best[hit["id"]]["score"]:
+                best[hit["id"]] = hit
+        rankings[q["id"]] = sorted(best.values(), key=lambda x: (-x["score"], x["id"]))
     if args.reranker_dir:
         from transformers import AutoModelForSequenceClassification
         rerank_tokenizer = AutoTokenizer.from_pretrained(args.reranker_dir, local_files_only=True, trust_remote_code=False)
@@ -136,7 +158,7 @@ def main():
         reranked = {q["id"]: [] for q in queries}
         for offset in range(0, len(candidates), 8):
             batch = candidates[offset:offset + 8]
-            pairs = [(q["text"], by_id[hit["id"]]) for q, hit in batch]
+            pairs = [(q["text"], by_id[hit["id"]][hit["text_start"]:hit["text_end"]]) for q, hit in batch]
             if any(len(rerank_tokenizer.encode(a, b)) > 512 for a, b in pairs):
                 raise ValueError("Rerank pair would be truncated")
             tokens = rerank_tokenizer(pairs, padding=True, truncation=False, return_tensors="pt")
@@ -152,15 +174,17 @@ def main():
     grid = [(i / 100, metrics(calibration, rankings, i / 100)) for i in range(0, 101)]
     admissible = [(t, m) for t, m in grid if m["precision"] >= .8 and
                   m["no_match_total"] > 0 and m["no_match_abstained"] == m["no_match_total"]]
-    threshold = max(admissible, key=lambda x: (x[1]["recall"], x[1]["precision"], x[0]))[0] if admissible else 1.0
+    threshold = args.fixed_threshold if args.fixed_threshold is not None else (max(admissible, key=lambda x: (x[1]["recall"], x[1]["precision"], x[0]))[0] if admissible else 1.0)
     result = dict(identity=identity, fixture_sha256=hashlib.sha256(fixture_bytes).hexdigest(),
                   synthetic=True, inference="CPU float32 CLS L2-normalized; instructed queries; offline",
                   dependencies=dict(torch=torch.__version__, transformers=transformers.__version__),
                   reranker=rerank_identity,
                   rerank_candidates=8 if rerank_identity else None,
+                  fragment_scalars=args.fragment_scalars, overlap=args.overlap if args.fragment_scalars else None,
+                  fragment_count=len(fragments),
                   score_meaning="Sigmoid of uncalibrated relevance logit; not truth or calibrated probability" if rerank_identity else "Cosine similarity; not truth",
-                  seconds=time.perf_counter() - start, top_k=3, threshold=threshold,
-                  threshold_selection="Calibration only: precision >=0.8 and all no-match abstain; maximize recall, precision, threshold",
+                  seconds=time.perf_counter() - inference_start, top_k=3, threshold=threshold,
+                  threshold_selection="Frozen explicit threshold; not selected from this fixture" if args.fixed_threshold is not None else "Calibration only: precision >=0.8 and all no-match abstain; maximize recall, precision, threshold",
                   calibration=metrics(calibration, rankings, threshold),
                   holdout=metrics(holdout, rankings, threshold), rankings=rankings)
     args.output.parent.mkdir(parents=True, exist_ok=True)

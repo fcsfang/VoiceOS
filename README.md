@@ -12,6 +12,8 @@ VoiceOS 是语音优先的多模态个人智能系统：让自然表达形成可
 
 ## 本地应用
 
+2026-10-11 后续：独立长文本样本与新提示验证、千条容量探针及[相关性快照边界](docs/engineering/m4-relevance-boundaries.md)已完成；107 项测试通过。相关性云端调用与语义界面尚未接入。
+
 运行 `python3 scripts/app/build.py` 后，双击 `dist/VoiceOS.app`。当前仅在本机处理媒体，默认数据位于 `~/Library/Application Support/VoiceOS`。详见[开发指南](docs/engineering/development-guide.md)、[M1 实施记录](docs/engineering/m1-file-input.md)、[逐字稿记录](docs/engineering/m2-transcript-provenance.md)、[认知基础记录](docs/engineering/m2-cognitive-foundation.md)与 [权限/端口记录](docs/engineering/m2-source-policy-model-port.md)与 [真实驱动记录](docs/engineering/m2-responses-driver.md)与[控制中心理解记录](docs/engineering/m2-control-center-understanding.md)与[候选审阅记录](docs/engineering/m2-claim-review.md)及[行动与机会池](docs/engineering/m2-actions-opportunity.md)与[提醒事项反馈](docs/engineering/m3-reminders-feedback.md)及[持续连接与自动回读](docs/engineering/m3-continuous-reminders.md)与[表达行动闭环](docs/engineering/m3-expression-actions.md)。
 
 ## 阅读入口
