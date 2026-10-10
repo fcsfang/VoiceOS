@@ -257,6 +257,7 @@ final class ControlCenter: ObservableObject {
             reminderAccess = try await store.setReminderAccess(calendarID: calendar.id, title: calendar.title, enabled: true, expectedVersion: reminderAccess?.version ?? 0)
             choosingReminderCalendar = false
             status = "提醒事项持续授权已保存"
+            reminderSyncStatus = "正在核对所选清单的任务"
             await refresh(); requestReminderRefresh()
         } catch { status = error.localizedDescription }
     }

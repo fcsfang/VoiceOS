@@ -62,3 +62,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M3 持续连接与自动回读](engineering/m3-continuous-reminders.md)：本机持久清单授权、事件合并、停止和迁移不携带连接权限。
 
 - [M3 用户表达与行动提取](engineering/m3-expression-actions.md)：明确文字身份、真实模型提取、普通任务自主创建与完成回流。
+
+- [M3 回读超时与取消](engineering/m3-reminders-read-lifecycle.md)：有限回调等待、主动取消、晚到忽略与串行调度恢复。

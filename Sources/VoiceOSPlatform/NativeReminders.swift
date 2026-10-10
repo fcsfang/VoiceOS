@@ -11,6 +11,7 @@ public struct ReminderCalendar: Identifiable, Sendable {
 public final class NativeReminders: RemindersPort {
     private let store = EKEventStore()
     private var reading = false
+    private let readTimeout: Duration = .seconds(8)
     public init() {}
     public var isAuthorized: Bool { EKEventStore.authorizationStatus(for: .reminder) == .fullAccess }
     public func observeChanges(_ handler: @escaping @MainActor () -> Void) -> NSObjectProtocol {
@@ -28,22 +29,34 @@ public final class NativeReminders: RemindersPort {
         return calendar
     }
     public func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
+        try Task.checkCancellation()
         guard !reading else { throw VoiceOSError("提醒事项读取正在进行") }
         reading = true; defer { reading = false }
         // No pending writes; fetch a fresh store view without retaining stale EKObjects.
         store.reset()
         let target = try calendar(calendarID)
         let predicate = store.predicateForReminders(in: [target])
-        let items: [EKReminder]? = await withCheckedContinuation { continuation in
-            store.fetchReminders(matching: predicate) { continuation.resume(returning: $0) }
+        let gate = CallbackWait<[ReminderSnapshot]>()
+        let snapshots = try await gate.wait(timeout: readTimeout) { complete in
+            let token = store.fetchReminders(matching: predicate) { items in
+                Task { @MainActor in
+                    // Do not touch stale EKObjects from a late or canceled callback.
+                    guard gate.isWaiting else { return }
+                    guard let items else { complete(.failure(VoiceOSError("提醒事项读取未返回结果"))); return }
+                    guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess else { complete(.failure(VoiceOSError("回读期间权限已变化"))); return }
+                    let results = items.filter { $0.calendar.calendarIdentifier == calendarID && ($0.notes == marker || (externalID != nil && $0.calendarItemIdentifier == externalID)) }.map {
+                        ReminderSnapshot(id: $0.calendarItemIdentifier, title: $0.title ?? "", completed: $0.isCompleted, marker: $0.notes ?? "")
+                    }
+                    complete(.success(results))
+                }
+            }
+            return { [store] in store.cancelFetchRequest(token) }
         }
-        guard let items else { throw VoiceOSError("提醒事项读取未返回结果") }
-        guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess else { throw VoiceOSError("回读期间权限已变化") }
-        return items.filter { $0.calendar.calendarIdentifier == calendarID && ($0.notes == marker || (externalID != nil && $0.calendarItemIdentifier == externalID)) }.map {
-            ReminderSnapshot(id: $0.calendarItemIdentifier, title: $0.title ?? "", completed: $0.isCompleted, marker: $0.notes ?? "")
-        }
+        try Task.checkCancellation()
+        return snapshots
     }
     public func create(calendarID: String, title: String, marker: String) async throws {
+        try Task.checkCancellation()
         guard !reading else { throw VoiceOSError("提醒事项读取正在进行") }
         let target = try calendar(calendarID)
         let item = EKReminder(eventStore: store)

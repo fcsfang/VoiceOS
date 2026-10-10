@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-10",
+  "tests_passed": true,
+  "automated_tests": 74,
+  "new_callback_tests": 5,
+  "callback_timeout_seconds": 8,
+  "schema": 10,
+  "package_format": 9,
+  "real_native_read": true,
+  "existing_synthetic_link_only": true,
+  "link_count": 1,
+  "observation_count": 2,
+  "task_version": 2,
+  "new_model_calls": 0,
+  "new_external_tasks": 0,
+  "connection_paused": true,
+  "fault_backend": "controlled callback stand-in, not hung native EventKit",
+  "not_verified": [
+    "sync native hang",
+    "real OS revocation",
+    "physical wake",
+    "iCloud offline/delay",
+    "production sandbox"
+  ],
+  "build_passed": true,
+  "development_signature_verified": true,
+  "vision_baseline_files": 23,
+  "agents_unchanged": true
+}
