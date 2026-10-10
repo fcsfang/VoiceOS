@@ -21,6 +21,7 @@ private actor DurableSelector: RelevanceModelPort {
     func select(_ request: RelevanceModelRequest) async throws -> RelevanceModelResponse {
         calls += 1
         if mode == "throw" { throw VoiceOSError("sensitive error must not persist") }
+        if mode == "parse-rejected" { throw ModelPortFailure.rejected("sensitive response",inputTokens:55,outputTokens:8) }
         let ids = mode == "empty" ? [] : (mode == "invalid" ? ["invented"] : [request.snapshot.candidates[0].id])
         return RelevanceModelResponse(status:mode == "incomplete" ? .incomplete : .completed,
                                       selection:RelevanceSelection(snapshotID:request.snapshot.id,queryID:request.snapshot.queryID,candidateIDs:ids),
@@ -168,5 +169,13 @@ final class DurableRelevanceTests: XCTestCase {
         XCTAssertEqual(rows.count,1); XCTAssertEqual(rows[0].state,"completed"); XCTAssertEqual(rows[0].validity,"frozen")
         let sources = try await restored.sources(); XCTAssertTrue(sources[0].localOnly)
         do { _ = try await restored.relevanceResult(attemptID:rows[0].id,currentQueryID:cloud.queryID); XCTFail() } catch {}
+    }
+    func testKnownParserRejectionPersistsUsageAndCannotResend() async throws {
+        let s = try await store(), snap = try await snapshot(s), port = DurableSelector("parse-rejected")
+        do { _ = try await s.performRelevanceSelection(snap,using:port); XCTFail() } catch {}
+        do { _ = try await s.performRelevanceSelection(snap,using:port); XCTFail() } catch {}
+        let rows = try await s.relevanceAttempts(), calls = await port.calls
+        XCTAssertEqual(calls,1); XCTAssertEqual(rows[0].state,"rejected")
+        XCTAssertEqual(rows[0].usage,["input_tokens":55,"output_tokens":8])
     }
 }

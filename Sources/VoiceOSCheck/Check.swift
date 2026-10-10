@@ -11,6 +11,7 @@ struct Check {
             guard args.count >= 2 else { throw VoiceOSError("usage: voiceos-check <import|read|transcribe> <isolated-root> [file] [command-id]") }
             if args[0] == "retrieval-fixture" { try await runRetrievalFixture(args); return }
             if args[0] == "relevance-fixture" { try await runRelevanceFixture(args); return }
+            if args[0] == "relevance-cloud-fixture" { try await runRelevanceCloudFixture(args); return }
             if args[0] == "expression-eval-fixture" { try await runExpressionEvaluation(args); return }
             if args[0] == "expression-cloud-fixture" { try await runExpressionCloudFixture(args); return }
             if args[0] == "cloud-fixture" { try await runCloudFixture(args); return }

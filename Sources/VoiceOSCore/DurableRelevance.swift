@@ -60,6 +60,12 @@ extension VoiceOSStore {
             // Synchronous recheck immediately before entering the direct-send contract.
             try validateRelevanceSnapshot(snapshot, currentQueryID: snapshot.queryID)
             response = try await port.select(RelevanceModelRequest(attemptID: id, snapshot: snapshot, configuration: config))
+        } catch ModelPortFailure.rejected(_, let input, let output) {
+            var usage: [String: Int] = [:]
+            if let input, input >= 0 { usage["input_tokens"] = input }
+            if let output, output >= 0 { usage["output_tokens"] = output }
+            try db.execute("UPDATE relevance_attempts SET state='rejected',usage_json=?,error='模型响应拒绝或格式不符；不自动重发' WHERE id=? AND state='reserved'", [usage.isEmpty ? nil : try Self.relevanceJSON(usage),id])
+            throw VoiceOSError("相关性响应未接纳，已保留调用及已知用量")
         } catch {
             try db.execute("UPDATE relevance_attempts SET state='unknown',error='传输未登记结果；费用未知，不自动重发' WHERE id=? AND state='reserved'", [id])
             throw VoiceOSError("相关性调用结果未知，已保留记录，不会自动重发")

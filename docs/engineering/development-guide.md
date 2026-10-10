@@ -94,3 +94,7 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 恢复与多库窗口的实际验证见[控制中心恢复](m3-package-restore-ui.md)。
 
 控制中心“查找历史文字”按连续文字查询本机当前原文并返回出处；语义选项仅在独立工程夹具内验证，不对用户声称已支持跨措辞关联。见[检索记录](m4-local-retrieval.md)。
+
+## 相关性开发验证
+
+独立相关性调用、输入历史和恢复屏障已实现，实际文本驱动可复用同一本地配置。详情见[相关性驱动](m4-relevance-driver.md)。控制中心目前未提供语义相关性操作；已有关键词查询保持可用，不据驱动测试推定界面已完成。
