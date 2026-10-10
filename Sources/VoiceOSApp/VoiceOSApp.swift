@@ -53,13 +53,17 @@ final class ControlCenter: ObservableObject {
         guard let claim = claims.first(where: { $0.id == action.claimID }) else { return false }
         return !claim.references.isEmpty && claim.references.allSatisfy { ref in records.contains { $0.id == ref.sourceID && !$0.localOnly } }
     }
+    private let rootOverride: URL?
+    var libraryTitle: String { rootOverride == nil ? "VoiceOS" : "独立资料库 · " + rootOverride!.lastPathComponent }
+    init(root: URL? = nil) { rootOverride = root }
     private var store: VoiceOSStore?
     private var worker: Task<Void, Never>?
     func start() async {
         guard store == nil else { return }
         do {
             let root: URL
-            if let path = ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"] { root = URL(fileURLWithPath: path, isDirectory: true) }
+            if let override = rootOverride { root = override }
+            else if let path = ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"] { root = URL(fileURLWithPath: path, isDirectory: true) }
             else { root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("VoiceOS", isDirectory: true) }
             let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
             self.store = store
@@ -366,6 +370,18 @@ struct CenterView: View {
     @State private var showActionHistory = false
     @State private var writingExpression = false
     @State private var feedbackAction: ActionRecord?
+    @State private var showingRestore = false
+    @Environment(\.openWindow) private var openWindow
+    private func chooseLibrary() {
+        let panel = NSOpenPanel(); panel.title = "打开已有 VoiceOS 资料库"; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else { return }
+            guard FileManager.default.fileExists(atPath:url.appendingPathComponent("voiceos.sqlite").path) else { model.status = "所选文件夹不是已有的 VoiceOS 资料库"; return }
+            openWindow(id:"restored-library",value:url.path)
+        }
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow { panel.beginSheetModal(for:window,completionHandler:completion) }
+        else { panel.begin(completionHandler:completion) }
+    }
     var body: some View {
         NavigationSplitView {
             List(model.filtered, selection: $model.selected) { record in
@@ -522,11 +538,17 @@ struct CenterView: View {
             Button("记录我的表达", systemImage: "square.and.pencil") { writingExpression = true }.disabled(!model.initialized)
             Button("导入文件", systemImage: "square.and.arrow.down") { model.chooseFiles() }.disabled(!model.initialized || model.importing)
             Menu {
+                Button("打开已有资料库…",action:chooseLibrary)
+                Button("从迁移包恢复…") { showingRestore = true }
+                Divider()
                 Button("导出结构化资料…") { model.export(includeMedia: false) }
                 Button("导出资料与原件…") { model.export(includeMedia: true) }
             } label: { Label("导出资料", systemImage: "square.and.arrow.up") }.disabled(!model.initialized || model.importing)
         }
         .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
+        .focusedSceneValue(\.voiceOSController, model)
+        .navigationTitle(model.libraryTitle)
+        .sheet(isPresented: $showingRestore) { PackageRestoreView { showingRestore = false } }
         .sheet(item: $feedbackAction) { action in ActionFeedbackView(action: action, model: model) { feedbackAction = nil } }
         .sheet(isPresented: $writingExpression) { UserExpressionView(model: model) { writingExpression = false } }
         .sheet(item: $editing) { record in
@@ -739,9 +761,13 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
 struct VoiceOSApp: App {
     @NSApplicationDelegateAdaptor(ApplicationDelegate.self) var delegate
     @StateObject private var model = ControlCenter()
+    @FocusedValue(\.voiceOSController) private var focusedModel
     var body: some Scene {
         Window("VoiceOS", id: "control-center") { CenterView(model: model) }
-        .commands { CommandGroup(after: .newItem) { Button("导入音频或视频…") { model.chooseFiles() }.keyboardShortcut("i").disabled(!model.initialized || model.importing) } }
+        WindowGroup("独立资料库", id: "restored-library", for: String.self) { path in
+            if let path = path.wrappedValue { RestoredLibraryView(path: path) }
+        }
+        .commands { CommandGroup(after: .newItem) { Button("导入音频或视频…") { focusedModel?.chooseFiles() }.keyboardShortcut("i").disabled(focusedModel?.initialized != true || focusedModel?.importing == true) } }
     }
 }
 
@@ -830,5 +856,80 @@ struct ActionFeedbackView: View {
                 }.keyboardShortcut(.defaultAction).disabled(saving || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
             }
         }.padding(24).frame(width:620)
+    }
+}
+
+struct RestoredLibraryView: View {
+    @StateObject private var model: ControlCenter
+    init(path: String) { _model = StateObject(wrappedValue: ControlCenter(root: URL(fileURLWithPath:path,isDirectory:true))) }
+    var body: some View { CenterView(model:model) }
+}
+struct PackageRestoreView: View {
+    let dismiss: () -> Void
+    @Environment(\.openWindow) private var openWindow
+    @State private var package: URL?
+    @State private var summary: PackageSummary?
+    @State private var parent: URL?
+    @State private var folderName = "VoiceOS-恢复-" + String(ISO8601DateFormatter().string(from:Date()).prefix(10))
+    @State private var restoring = false
+    @State private var errorText = ""
+    @State private var restored: URL?
+    private var destination: URL? {
+        guard let parent, !folderName.isEmpty, folderName != ".", folderName != "..", !folderName.contains("/"), !folderName.contains("\0") else { return nil }
+        return parent.appendingPathComponent(folderName,isDirectory:true)
+    }
+    private func choosePackage() {
+        let panel = NSOpenPanel(); panel.title = "选择 VoiceOS 迁移包文件夹"; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            package = nil; summary = nil; errorText = ""
+            do { summary = try VoiceOSStore.packageSummary(at:url); package = url }
+            catch { errorText = error.localizedDescription }
+        }
+    }
+    private func chooseParent() {
+        let panel = NSOpenPanel(); panel.title = "选择新资料库的上级文件夹"; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        panel.begin { response in if response == .OK { parent = panel.url; errorText = "" } }
+    }
+    var body: some View {
+        VStack(alignment:.leading,spacing:16) {
+            Text("从迁移包恢复").font(.title2)
+            Text("恢复到一个新资料库，保留当前资料库。完成后可在新窗口打开；提醒事项需要重新连接。").foregroundStyle(.secondary)
+            Button("选择迁移包文件夹…",action:choosePackage).disabled(restoring || restored != nil)
+            if let package, let summary {
+                Text(package.path).font(.caption).textSelection(.enabled)
+                Text("包版本 \(summary.version) · \(summary.sourceCount) 份资料 · \(summary.mediaIncluded ? "包含原件" : "结构化记录")")
+                Text(summary.omittedAssetCount > 0 ? "\(summary.omittedAssetCount) 份原件未打包：恢复后可读文字与历史，无法播放缺失原件。" : "清单中没有省略的原件。恢复时仍会核对文件与关联完整性。").font(.callout)
+            }
+            Button("选择保存位置…",action:chooseParent).disabled(restoring || restored != nil)
+            TextField("新资料库文件夹名称",text:$folderName).disabled(restoring || restored != nil)
+            if let destination { Text(destination.path).font(.caption).textSelection(.enabled) }
+            if !errorText.isEmpty { Text(errorText).foregroundStyle(.red).textSelection(.enabled) }
+            if let restored { Text("恢复完成 · 当前库保留，外部连接未启用").foregroundStyle(.green); Button("打开恢复的资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() } }
+            HStack {
+                Button(restored == nil ? "取消" : "完成",action:dismiss).disabled(restoring)
+                Spacer()
+                if restored == nil {
+                    Button(restoring ? "正在校验与恢复…" : "校验并恢复") {
+                        guard let package, let destination else { return }
+                        guard !destination.standardizedFileURL.resolvingSymlinksInPath().path.hasPrefix(package.standardizedFileURL.resolvingSymlinksInPath().path + "/") else { errorText = "请选择迁移包之外的新资料库位置"; return }
+                        restoring = true; errorText = ""
+                        Task {
+                            do { try await VoiceOSStore.restorePackage(from:package,to:destination,inspector:NativeMediaInspector()); restored = destination }
+                            catch { errorText = error.localizedDescription }
+                            restoring = false
+                        }
+                    }.keyboardShortcut(.defaultAction).disabled(restoring || package == nil || destination == nil)
+                }
+            }
+        }.padding(24).frame(width:640)
+    }
+}
+
+private struct VoiceOSControllerKey: FocusedValueKey { typealias Value = ControlCenter }
+extension FocusedValues {
+    var voiceOSController: ControlCenter? {
+        get { self[VoiceOSControllerKey.self] }
+        set { self[VoiceOSControllerKey.self] = newValue }
     }
 }

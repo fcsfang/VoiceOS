@@ -44,7 +44,23 @@ private enum PackageLayout {
         return file
     }
 }
+public struct PackageSummary: Sendable {
+    public let version: Int
+    public let createdAt: String
+    public let sourceCount: Int
+    public let omittedAssetCount: Int
+    public let mediaIncluded: Bool
+}
 extension VoiceOSStore {
+    /// Metadata preview only; restore still verifies every file and record.
+    public static func packageSummary(at package: URL) throws -> PackageSummary {
+        let file = try PackageLayout.safeFile(package, "manifest.json")
+        guard let size = try file.resourceValues(forKeys:[.fileSizeKey]).fileSize, size > 0, size <= 1048576 else { throw VoiceOSError("迁移清单过大或为空") }
+        let manifest = try JSONDecoder().decode(PackageManifest.self,from:Data(contentsOf:file))
+        guard manifest.format == "VoiceOS-local-package", (1...10).contains(manifest.version), manifest.databaseSchema == manifest.version + 1,
+              let count = manifest.counts["sources"], count >= 0, manifest.counts.values.allSatisfy({ $0 >= 0 && $0 <= 1000000 }) else { throw VoiceOSError("不支持此迁移包格式或记录数量") }
+        return PackageSummary(version:manifest.version,createdAt:manifest.createdAt,sourceCount:count,omittedAssetCount:manifest.omittedAssetIDs.count,mediaIncluded:manifest.mediaIncluded)
+    }
     /// A synchronous actor turn snapshots rows and immutable media together.
     /// Includes external mapping/history, never credentials or live authorization.
     public func exportPackage(to destination: URL, includeMedia: Bool = false) throws {

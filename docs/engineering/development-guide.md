@@ -34,7 +34,7 @@ VOICEOS_DATA_DIR="$PWD/runtime/my-local-test" dist/VoiceOS.app/Contents/MacOS/Vo
 
 导出记录文件数量、长度、SHA-256 与未打包原件 ID；原件包先核验原件，再逐字节复制核验。包先在临时目录生成，完成后改名到新目标；不覆盖现有目录。当前同步 actor 快照依靠单写者和原件不可变契约，尚未实现删除，因此不存在资产删除竞态；加入删除/异步导出前必须实现 pin 与取消屏障，不能照搬当前边界。
 
-恢复入口暂为开发工具，尚未加入控制中心。只恢复到不存在的新目录，先检查格式、文件摘要、身份唯一性、字段与外键/版本关联、路径逃逸/符号链接、完整媒体解码及数据库完整性；预检失败不建立目标资料库。未包含原件的来源为 reference_only，文本可读、原件不伪装可播放。所有未完成 jobs 暂停，明确重试才运行；恢复和启动不会自动外写；已有提醒事项关联须重新明确选清单后回读。
+控制中心提供“从迁移包恢复…”及“打开已有资料库…”，也保留开发工具入口。恢复后可在独立窗口继续使用，主库保留，默认库位置不自动替换。只恢复到不存在的新目录，先检查格式、文件摘要、身份唯一性、字段与外键/版本关联、路径逃逸/符号链接、完整媒体解码及数据库完整性；预检失败不建立目标资料库。未包含原件的来源为 reference_only，文本可读、原件不伪装可播放。所有未完成 jobs 暂停，明确重试才运行；恢复和启动不会自动外写；已有提醒事项关联须重新明确选清单后回读。
 
 ```sh
 .build/debug/voiceos-check export "$PWD/runtime/my-local-test" "$PWD/runtime/package-text"
@@ -90,3 +90,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 `python3 scripts/app/validate_expression.py --output "$PWD/runtime/new-expression-check"` 在新隔离目录终止八个进程，检验文字与原子行动结果，无模型/外部写。云端合成 fixture 要求新目录并使用本地配置，禁止对已有目录重复请求；质量样本结果不代表全面验收。
 
 行动结果与反思可选记录，默认仅本地保存；详情能回到关联行动历史，保存不更改任务或证据状态。实现与恢复边界见[行动反馈](m3-action-feedback.md)。
+
+恢复与多库窗口的实际验证见[控制中心恢复](m3-package-restore-ui.md)。

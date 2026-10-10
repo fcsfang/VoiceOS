@@ -75,4 +75,24 @@ final class ActionFeedbackTests: XCTestCase {
         do { try await VoiceOSStore.restorePackage(from:package,to:target,inspector:FeedbackInspector()); XCTFail() } catch { XCTAssertTrue(error.localizedDescription.contains("反馈")) }
         XCTAssertFalse(FileManager.default.fileExists(atPath:target.path))
     }
+    func testPackagePreviewDescribesOmittedOriginalsWithoutCreatingLibrary() async throws {
+        let (s,_) = try await fixture(); let package = base.appendingPathComponent("preview")
+        try await s.exportPackage(to:package)
+        let summary = try VoiceOSStore.packageSummary(at:package)
+        XCTAssertEqual(summary.version,10); XCTAssertEqual(summary.sourceCount,1)
+        XCTAssertEqual(summary.omittedAssetCount,1); XCTAssertFalse(summary.mediaIncluded)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:package.appendingPathComponent("voiceos.sqlite").path))
+    }
+    func testPackagePreviewRejectsSymlinkManifestAndUnknownVersion() async throws {
+        let (s,_) = try await fixture(); let package = base.appendingPathComponent("preview")
+        try await s.exportPackage(to:package)
+        let mf = package.appendingPathComponent("manifest.json")
+        var manifest = try JSONSerialization.jsonObject(with:Data(contentsOf:mf)) as! [String:Any]
+        manifest["version"] = 999; try JSONSerialization.data(withJSONObject:manifest).write(to:mf)
+        XCTAssertThrowsError(try VoiceOSStore.packageSummary(at:package))
+        let outside = base.appendingPathComponent("outside-manifest"); try FileManager.default.moveItem(at:mf,to:outside)
+        try FileManager.default.createSymbolicLink(at:mf,withDestinationURL:outside)
+        XCTAssertThrowsError(try VoiceOSStore.packageSummary(at:package))
+    }
+
 }
