@@ -6,11 +6,11 @@ VoiceOS 是语音优先的多模态个人智能系统：让自然表达形成可
 
 ## 当前阶段
 
-2026-10-10：产品/工程文档草稿已交付，M1 文件输入开发预览已实现：Mac 控制中心、音视频导入、可靠保存/重开、本地逐字稿、关键词查询、导出及开发工具空库恢复。M2 已增加来源片段、逐字稿更正与版本历史，持久上下文、候选出处与更正冻结基础已建立；来源文本权限版本与模型响应端口已建立；37 项核心测试通过；此前 26 项媒体恢复和 7 项认知故障检查通过。真实文本驱动已完成一次合成调用与候选入库，控制中心尚未装配云端入口；完整 MVP 和 22 项产品验收尚未完成。
+2026-10-10：产品/工程文档草稿已交付，M1 文件输入开发预览已实现：Mac 控制中心、音视频导入、可靠保存/重开、本地逐字稿、关键词查询、导出及开发工具空库恢复。M2 已增加来源片段、逐字稿更正与版本历史，持久上下文、候选出处与更正冻结基础已建立；来源文本权限版本与模型响应端口已建立；41 项核心测试通过；此前 26 项媒体恢复和 7 项认知故障检查通过。真实文本驱动与控制中心理解入口已接入，合成资料的执行、出处、用量及重复发送保护已验证；完整 MVP 和 22 项产品验收尚未完成。
 
 ## 本地应用
 
-运行 `python3 scripts/app/build.py` 后，双击 `dist/VoiceOS.app`。当前仅在本机处理媒体，默认数据位于 `~/Library/Application Support/VoiceOS`。详见[开发指南](docs/engineering/development-guide.md)、[M1 实施记录](docs/engineering/m1-file-input.md)、[逐字稿记录](docs/engineering/m2-transcript-provenance.md)、[认知基础记录](docs/engineering/m2-cognitive-foundation.md)与 [权限/端口记录](docs/engineering/m2-source-policy-model-port.md)与 [真实驱动记录](docs/engineering/m2-responses-driver.md)。
+运行 `python3 scripts/app/build.py` 后，双击 `dist/VoiceOS.app`。当前仅在本机处理媒体，默认数据位于 `~/Library/Application Support/VoiceOS`。详见[开发指南](docs/engineering/development-guide.md)、[M1 实施记录](docs/engineering/m1-file-input.md)、[逐字稿记录](docs/engineering/m2-transcript-provenance.md)、[认知基础记录](docs/engineering/m2-cognitive-foundation.md)与 [权限/端口记录](docs/engineering/m2-source-policy-model-port.md)与 [真实驱动记录](docs/engineering/m2-responses-driver.md)与[控制中心理解记录](docs/engineering/m2-control-center-understanding.md)。
 
 ## 阅读入口
 

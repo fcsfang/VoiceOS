@@ -16,6 +16,12 @@ final class ControlCenter: ObservableObject {
     @Published var status = "正在检查资料库…"
     @Published var importing = false
     @Published var changingPolicy = false
+    @Published var understandingSource: String?
+    @Published var modelConfigured = false
+    @Published var modelSummary = "尚未配置文本模型"
+    @Published var attempts: [String: [ModelAttemptRecord]] = [:]
+    private var textModel: ResponsesModelPort?
+    private var understandingWorker: Task<Void, Never>?
     @Published var initialized = false
     @Published var player: AVPlayer?
     @Published var history: [TranscriptVersion] = []
@@ -32,6 +38,9 @@ final class ControlCenter: ObservableObject {
             self.store = store
             try await store.recover()
             initialized = true; status = "准备就绪 · 媒体只在本机处理"
+            if let path = ProcessInfo.processInfo.environment["VOICEOS_MODEL_CONFIG_FILE"] {
+                configureTextModel(URL(fileURLWithPath: path))
+            }
             await refresh()
             scheduleProcessing()
         } catch { status = error.localizedDescription }
@@ -40,8 +49,44 @@ final class ControlCenter: ObservableObject {
         do {
             claims = try await store?.candidateClaims(includeFrozen: true) ?? []
             records = try await store?.sources() ?? []
+            if let store {
+                var loaded: [String: [ModelAttemptRecord]] = [:]
+                for record in records { loaded[record.id] = try await store.modelAttempts(sourceID: record.id) }
+                attempts = loaded
+            }
         }
         catch { status = error.localizedDescription }
+    }
+    func chooseTextModel() {
+        let panel = NSOpenPanel()
+        panel.title = "选择本地文本模型配置"; panel.prompt = "使用配置"
+        panel.showsHiddenFiles = true; panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
+        panel.begin { response in
+            if response == .OK, let url = panel.url { self.configureTextModel(url) }
+        }
+    }
+    private func configureTextModel(_ file: URL) {
+        do {
+            let port = try LocalTextModel.load(from: file)
+            textModel = port; modelConfigured = true
+            modelSummary = "gpt-6.1-sol · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
+            status = "文本模型已就绪 · 只处理你选择并授权的文字"
+        } catch { status = error.localizedDescription }
+    }
+    func understand(_ record: SourceRecord) {
+        guard let store, let port = textModel, understandingWorker == nil, !record.localOnly,
+              !(record.transcript ?? "").isEmpty else { return }
+        understandingSource = record.id
+        status = "正在理解所选文字 · 原始音视频仍在本机"
+        // Application-owned: changing selection or closing the window does not resend/cancel.
+        understandingWorker = Task {
+            do {
+                let ids = try await store.understandSource(sourceID: record.id, using: port)
+                status = ids.isEmpty ? "理解完成 · 没有提取到陈述" : "理解完成 · \(ids.count) 条陈述待核对"
+            } catch { status = error.localizedDescription }
+            await refresh()
+            understandingSource = nil; understandingWorker = nil
+        }
     }
     func export(includeMedia: Bool) {
         let panel = NSSavePanel()
@@ -171,7 +216,28 @@ struct CenterView: View {
                         HStack { Label(label(record), systemImage: record.state == "saved" ? "checkmark.circle" : "exclamationmark.circle"); Spacer(); Text(record.kind == "video" ? "视频" : "音频") }
                         Text("外部资料 · 说话人待核对 · \(record.localOnly ? "仅本机处理" : "文本可用于云端")").font(.callout).foregroundStyle(.secondary)
                         Button(record.localOnly ? "允许这份资料的文本用于云端" : "将这份资料限制为仅本地") { Task { await model.changeTextPolicy(record) } }.disabled(model.changingPolicy)
-                        Text("当前处理仍在本机；此选项仅授权文本，原始音频和视频仍仅本机。").font(.caption).foregroundStyle(.secondary)
+                        Text("此选项仅授权文本；点击“理解这份文字”才发送所选文字，原始音频和视频仍仅本机。").font(.caption).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Button(model.understandingSource == record.id ? "正在理解…" : "理解这份文字", systemImage: "sparkles") { model.understand(record) }
+                                    .disabled(!model.modelConfigured || record.localOnly || (record.transcript ?? "").isEmpty || model.understandingSource != nil)
+                                if model.understandingSource == record.id { ProgressView().controlSize(.small) }
+                                Button("配置文本模型…") { model.chooseTextModel() }.disabled(model.understandingSource != nil)
+                            }
+                            Text(model.modelSummary).font(.caption).foregroundStyle(.secondary)
+                            if record.localOnly { Text("允许这份资料的文本用于云端后，可以理解文字。").font(.caption).foregroundStyle(.secondary) }
+                            if let attempts = model.attempts[record.id], !attempts.isEmpty {
+                                DisclosureGroup("理解调用记录（\(attempts.count)）") {
+                                    ForEach(attempts) { attempt in
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(attemptLabel(attempt)).font(.callout)
+                                            Text("\(attempt.model) · \(attempt.provider.replacingOccurrences(of: "responses:", with: ""))").font(.caption).foregroundStyle(.secondary)
+                                            Text("输入 \(attempt.usage?["input_tokens"].map(String.init) ?? "未知") / 输出 \(attempt.usage?["output_tokens"].map(String.init) ?? "未知") tokens · 实际费用未知").font(.caption).foregroundStyle(.secondary)
+                                        }.padding(.vertical, 5).frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                            }
+                        }
                         Text("\(String(format: "%.1f", record.duration ?? 0)) 秒 · \(ByteCountFormatter.string(fromByteCount: record.bytes, countStyle: .file))").font(.caption).foregroundStyle(.secondary)
                         if record.state == "saved" { Button("打开保存的原件", systemImage: "play.circle") { Task { await model.play(record) } } }
                         Divider()
@@ -237,7 +303,7 @@ struct CenterView: View {
                 Button("导出资料与原件…") { model.export(includeMedia: true) }
             } label: { Label("导出资料", systemImage: "square.and.arrow.up") }.disabled(!model.initialized || model.importing)
         }
-        .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Spacer(); Text("开发预览 · 文件导入与本地转写").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
+        .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
         .sheet(item: $editing) { record in
             TranscriptCorrectionView(record: record, model: model) { editing = nil }
         }
@@ -259,6 +325,14 @@ struct CenterView: View {
         .onChange(of: model.selected) { _, _ in model.player?.pause(); model.player = nil }
         .frame(minWidth: 840, minHeight: 540)
         .task { await model.start() }
+    }
+    private func attemptLabel(_ attempt: ModelAttemptRecord) -> String {
+        switch attempt.state {
+        case "completed": return attempt.contextState == "stale" ? "已完成 · 依据或授权已变化，保留历史" : "已完成 · 结果待核对"
+        case "reserved": return "正在处理；重启后结果可能未知，不自动重发"
+        case "unknown": return "结果未知 · 不自动重发"
+        default: return "未接纳结果 · 不自动重发"
+        }
     }
     private func quote(_ span: TranscriptSpan, text: String) -> String {
         let scalars = Array(text.unicodeScalars)

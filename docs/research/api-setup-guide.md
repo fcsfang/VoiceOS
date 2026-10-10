@@ -49,3 +49,5 @@ python3 scripts/probes/cloud-text-evaluation.py --execute --model gpt-6.1-sol --
 ## 原生驱动接入进度
 
 2026-10-10：Core 已接入同一配置的文本驱动，开发工具固定使用 `gpt-6.1-sol` 做一次合成验证，约 8.01 秒完成、报告 373 输入/238 输出 tokens；费用未知。控制中心尚未装配云端执行。复现、边界与证据见[真实驱动记录](../engineering/m2-responses-driver.md)。
+
+控制中心现在可通过 `python3 scripts/app/run.py` 使用现有配置，或在应用中选择本地 `.env`；仅显式点击理解选中并授权的文字才发送请求。详见[原生入口](../engineering/m2-control-center-understanding.md)。

@@ -117,11 +117,33 @@ public struct ModelAttemptRecord: Identifiable, Sendable {
     public let model: String
     public let usage: [String: Int]?
     public let billingState: String
+    public let contextState: String
 }
 extension VoiceOSStore {
-    public func modelAttempts() throws -> [ModelAttemptRecord] {
-        try db.query("SELECT * FROM model_attempts ORDER BY created_at,id").map { row in
-            ModelAttemptRecord(id: row["id"]!, state: row["state"]!, provider: row["provider"]!, model: row["model"]!, usage: try row["usage_json"].map { try JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) }, billingState: "unknown")
+    public func modelAttempts(sourceID: String? = nil) throws -> [ModelAttemptRecord] {
+        let rows: [[String: String]]
+        if let sourceID {
+            rows = try db.query("SELECT a.*,c.state AS context_state FROM model_attempts a JOIN contexts c ON c.id=a.context_id WHERE a.context_id IN (SELECT context_id FROM context_inputs WHERE source_id=?) ORDER BY a.created_at,a.id", [sourceID])
+        } else { rows = try db.query("SELECT a.*,c.state AS context_state FROM model_attempts a JOIN contexts c ON c.id=a.context_id ORDER BY a.created_at,a.id") }
+        return try rows.map { row in
+            ModelAttemptRecord(id: row["id"]!, state: row["state"]!, provider: row["provider"]!, model: row["model"]!, usage: try row["usage_json"].map { try JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) }, billingState: "unknown", contextState: row["context_state"]!)
         }
+    }
+}
+
+// A source version/configuration has one explicit understanding attempt, including failures.
+// New source text or policy permits new work; reopening a window never resends old work.
+extension VoiceOSStore {
+    public func understandSource(sourceID: String, using port: any ModelPort) async throws -> [String] {
+        let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID])
+        let policy = try sourcePolicy(sourceID: sourceID)
+        let config = port.configuration
+        let identity = ["understand-v1", sourceID, context.contentDigest, String(policy.version), config.provider, config.model, config.promptVersion, config.schemaVersion, config.destination.rawValue]
+        let digest = SHA256.hash(data: try JSONSerialization.data(withJSONObject: identity)).map { String(format: "%02x", $0) }.joined()
+        let contextID = try persistLocalContext(context, commandID: "understand:" + digest, destination: config.destination)
+        guard try db.query("SELECT id FROM model_attempts WHERE context_id=?", [contextID]).isEmpty else {
+            throw VoiceOSError("这份文字与授权版本已有理解记录；请查看结果，不会重复发送")
+        }
+        return try await generateClaims(contextID: contextID, using: port)
     }
 }

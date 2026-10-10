@@ -12,17 +12,7 @@ extension Check {
         guard args.count == 3 else { throw VoiceOSError("cloud-fixture requires a NEW isolated root and local .env path") }
         let root = URL(fileURLWithPath: args[1], isDirectory: true)
         guard !FileManager.default.fileExists(atPath: root.path) else { throw VoiceOSError("此合成云端试验已有目录，禁止重复发送；保留原结果") }
-        let port: ResponsesModelPort
-        do {
-            var settings: [String: String] = [:]
-            for line in try String(contentsOfFile: args[2], encoding: .utf8).split(separator: "\n") where !line.hasPrefix("#") && !line.trimmingCharacters(in: .whitespaces).isEmpty {
-                let fields = line.split(separator: "=", maxSplits: 1)
-                guard fields.count == 2 else { throw VoiceOSError("本地配置格式错误") }
-                settings[String(fields[0])] = try JSONDecoder().decode(String.self, from: Data(fields[1].utf8))
-            }
-            guard let address = settings["OPENAI_BASE_URL"].flatMap(URL.init(string:)), let key = settings["OPENAI_API_KEY"] else { throw VoiceOSError("缺少本地配置") }
-            port = try ResponsesModelPort(baseURL: address, apiKey: key, model: "gpt-6.1-sol")
-        } catch { throw VoiceOSError("无法读取有效的本地模型配置；未发送请求") }
+        let port = try LocalTextModel.load(from: URL(fileURLWithPath: args[2]))
         // A generated silent WAV anchors a synthetic transcript in the normal data path.
         // No original recording or actual ASR is used by this fixture.
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

@@ -1,6 +1,6 @@
 # VoiceOS 开发预览与复现
 
-日期：2026-10-10。此版本包含 M1 文件输入切片与 M2 逐字稿来源/更正基础；尚不是完整 MVP。当前状态与证据见 [M1 实施记录](m1-file-input.md)、[逐字稿增量记录](m2-transcript-provenance.md)、[认知基础记录](m2-cognitive-foundation.md)及 [权限/端口记录](m2-source-policy-model-port.md)与[真实驱动记录](m2-responses-driver.md)。
+日期：2026-10-10。此版本包含 M1 文件输入切片与 M2 逐字稿来源/更正基础；尚不是完整 MVP。当前状态与证据见 [M1 实施记录](m1-file-input.md)、[逐字稿增量记录](m2-transcript-provenance.md)、[认知基础记录](m2-cognitive-foundation.md)及 [权限/端口记录](m2-source-policy-model-port.md)与[真实驱动记录](m2-responses-driver.md)与[控制中心理解记录](m2-control-center-understanding.md)。
 
 ## 打开应用
 
@@ -71,4 +71,6 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 
 脚本要求新输出目录，要求输入包有非空逐字稿且没有认知回执，恢复后在独立测试库实际终止七个进程，核对提交及冻结原子性，不发送请求或操作提醒事项。查看候选时 current 表示依据未失效；未验证仍是未验证。历史被保留不等于认可。
 
-来源详情可允许文本用于云端或限制为仅本地。Core 已有真实文本驱动，控制中心尚未装配云端执行入口；点击只更新授权与依赖状态，不触发网络发送。原始音视频权限独立，保持本机处理。
+来源详情可允许文本用于云端或限制为仅本地。授权按钮只更新权限，不触发网络发送。配置文本模型后，点击“理解这份文字”才发送选中资料的文字；原始音视频权限独立，保持本机处理。
+
+使用现有模型配置启动开发预览：`python3 scripts/app/run.py`。也可直接打开应用并通过“配置文本模型…”选择项目 `.env`。这不会自动发送内容。配置暂为开发文件，正式钥匙串待实现；同一文字/权限/模型身份的已完成、失败或未知调用不会重复发送，详见[控制中心理解记录](m2-control-center-understanding.md)。

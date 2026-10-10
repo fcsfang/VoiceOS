@@ -72,6 +72,50 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(attempts[0].usage?["output_tokens"], 7)
         let claims = try await store.candidateClaims(); XCTAssertTrue(claims.isEmpty)
     }
+    func testUnderstandingDoesNotRepeatCompletedVersionButAllowsCorrection() async throws {
+        let store = try await store(); let source = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "外部资料"))
+        let port = TestModelPort()
+        _ = try await store.understandSource(sourceID: source, using: port)
+        do { _ = try await store.understandSource(sourceID: source, using: port); XCTFail("must not resend") } catch {}
+        var calls = await port.calls; XCTAssertEqual(calls, 1)
+        let package = base.appendingPathComponent("completed-understanding-package")
+        try await store.exportPackage(to: package, includeMedia: true)
+        let root = base.appendingPathComponent("completed-understanding-restored")
+        try await VoiceOSStore.restorePackage(from: package, to: root, inspector: Inspector())
+        let restored = try VoiceOSStore(root: root, inspector: Inspector()); try await restored.recover()
+        do { _ = try await restored.understandSource(sourceID: source, using: port); XCTFail("restored completed resend") } catch {}
+        calls = await port.calls; XCTAssertEqual(calls, 1)
+        let rows = try await store.sources()
+        let version = try XCTUnwrap(rows.first?.transcriptVersionID)
+        _ = try await store.correctTranscript(sourceID: source, expectedVersionID: version, text: "更正后的外部资料")
+        _ = try await store.understandSource(sourceID: source, using: port)
+        calls = await port.calls; XCTAssertEqual(calls, 2)
+        let all = try await store.candidateClaims(includeFrozen: true)
+        XCTAssertEqual(all.filter { $0.validity == "frozen" }.count, 1)
+        XCTAssertEqual(all.filter { $0.validity == "current" }.count, 1)
+    }
+    func testUnderstandingUnknownAndConcurrentAttemptsNeverResend() async throws {
+        let store = try await store(); let source = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "外部资料"))
+        let port = TestModelPort(suspended: true, fail: true)
+        let running = Task { try await store.understandSource(sourceID: source, using: port) }
+        await port.waitStarted()
+        do { _ = try await store.understandSource(sourceID: source, using: port); XCTFail("concurrent resend") } catch {}
+        await port.release()
+        do { _ = try await running.value; XCTFail("transport must fail") } catch {}
+        do { _ = try await store.understandSource(sourceID: source, using: port); XCTFail("unknown resend") } catch {}
+        let calls = await port.calls; XCTAssertEqual(calls, 1)
+        let attempts = try await store.modelAttempts(sourceID: source)
+        XCTAssertEqual(attempts.count, 1); XCTAssertEqual(attempts[0].state, "unknown")
+        let package = base.appendingPathComponent("understanding-package")
+        try await store.exportPackage(to: package, includeMedia: true)
+        let root = base.appendingPathComponent("understanding-restored")
+        try await VoiceOSStore.restorePackage(from: package, to: root, inspector: Inspector())
+        let restored = try VoiceOSStore(root: root, inspector: Inspector()); try await restored.recover()
+        do { _ = try await restored.understandSource(sourceID: source, using: port); XCTFail("restored unknown resend") } catch {}
+        let finalCalls = await port.calls; XCTAssertEqual(finalCalls, 1)
+    }
     func testSameCommandIsIdempotentButNewCommandKeepsDistinctEvent() async throws {
         let store = try await store(); let input = try fixture()
         let a = try await store.importFile(input, commandID: "one")

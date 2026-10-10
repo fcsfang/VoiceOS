@@ -50,3 +50,5 @@
 PRD 负责用户行为和验收，架构负责模块与运行机制，数据模型负责实体及历史，ADR 负责重大技术取舍。细节在所属文档维护，避免全部复制进 AGENTS.md。
 
 - [M2 文本模型真实驱动](engineering/m2-responses-driver.md)：现有密钥单次合成调用、严格解析、用量与迁移证据。
+
+- [M2 控制中心理解](engineering/m2-control-center-understanding.md)：显式文本执行、用量/出处呈现、持久防重发与原生界面验证。
