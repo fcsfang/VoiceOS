@@ -25,7 +25,7 @@ public protocol LocalRetrievalPort: Sendable {
     /// Implementations process locally; this boundary is never a cloud authorization.
     func rank(query: String, documents: [RetrievalDocument], semantic: Bool) async throws -> [RetrievalMatch]
 }
-public struct RetrievalHit: Sendable, Identifiable {
+public struct RetrievalHit: Codable, Sendable, Identifiable {
     public var id: String { document.id }
     public let document: RetrievalDocument
     public let method: String

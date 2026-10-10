@@ -20,3 +20,5 @@
 - [008 行动反馈](008-action-feedback.md)：复用用户文字来源与独立反馈关联表，原文和关联原子保存。
 
 - [009 本地检索](009-versioned-local-retrieval.md)：原文检索与语义实验分离、可替换端口与读时版本屏障。
+
+- [010 相关性持久调用](010-durable-relevance-attempts.md)：独立调用与完整输入历史，未知不重发，迁移冻结执行；该切片 accepted。

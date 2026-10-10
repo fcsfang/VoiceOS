@@ -76,3 +76,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 语义候选质量比较](engineering/m4-semantic-retrieval-quality.md)：24 个主题的固定样本、中文专用向量/本地重排对比、离线复现和后续质量门槛。
 
 - [M4 独立样本与相关性快照](engineering/m4-relevance-boundaries.md)：长原文分段、直接相关/类比区分、新样本与千条规模、查询/权限/出处检查。
+
+- [M4 相关性持久调用](engineering/m4-durable-relevance.md)：117 项测试、三处真实强退、v1–v10 旧包恢复；调用状态与出处有效性独立，迁移后不自动执行。

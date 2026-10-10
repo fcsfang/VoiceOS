@@ -3,7 +3,7 @@ import CryptoKit
 
 /// A bounded, immutable preview. A cloud preview is not a durable send reservation.
 /// Production cloud dispatch still requires a persisted attempt and policy checks.
-public struct RelevanceSnapshot: Sendable {
+public struct RelevanceSnapshot: Codable, Sendable {
     public let id: String
     public let queryID: UUID
     public let query: String
@@ -48,7 +48,7 @@ extension VoiceOSStore {
                 throw VoiceOSError("查询或候选未授权云端处理；没有自动过滤或上传仅本地内容")
             }
         }
-        let digest = try relevanceDigest(query: query, queryID: queryID, candidates: candidates,
+        let digest = try Self.relevanceDigest(query: query, queryID: queryID, candidates: candidates,
                                          destination: destination, cloudQueryAllowed: cloudQueryAllowed, scalarBudget: scalarBudget)
         return RelevanceSnapshot(id: UUID().uuidString, queryID: queryID, query: query, destination: destination,
                                  cloudQueryAllowed: cloudQueryAllowed, candidates: candidates,
@@ -92,7 +92,7 @@ extension VoiceOSStore {
         return try acceptRelevanceSelection(selection, for: snapshot, currentQueryID: queryID)
     }
 
-    private func relevanceDigest(query: String, queryID: UUID, candidates: [RetrievalHit],
+    static func relevanceDigest(query: String, queryID: UUID, candidates: [RetrievalHit],
                                   destination: ModelDestination, cloudQueryAllowed: Bool, scalarBudget: Int) throws -> String {
         struct Payload: Encodable {
             let purpose = "relevance-preview-v1"

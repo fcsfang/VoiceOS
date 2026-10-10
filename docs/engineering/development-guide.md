@@ -30,7 +30,7 @@ VOICEOS_DATA_DIR="$PWD/runtime/my-local-test" dist/VoiceOS.app/Contents/MacOS/Vo
 
 ## 导出与空库恢复
 
-工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v10，存储 schema 11，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews/actions/action_revisions/reminder_links/reminder_observations/action_feedback 十七类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 、v4/schema 5 、v5/schema 6 、v6/schema 7 、v7/schema 8 、v8/schema 9 与 v9/schema 10 包。它仅覆盖当前已实现的实体，未来新增实体时必须升级格式。包含外部身份映射和回读历史，不包含凭据或系统权限；恢复不携带本机持续连接授权。
+工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v11，存储 schema 12，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews/actions/action_revisions/reminder_links/reminder_observations/action_feedback/relevance_attempts/relevance_inputs 十九类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 、v4/schema 5 、v5/schema 6 、v6/schema 7 、v7/schema 8 、v8/schema 9 、v9/schema 10 与 v10/schema 11 包。它仅覆盖当前已实现的实体，未来新增实体时必须升级格式。包含外部身份映射和回读历史，不包含凭据或系统权限；恢复不携带本机持续连接授权。
 
 导出记录文件数量、长度、SHA-256 与未打包原件 ID；原件包先核验原件，再逐字节复制核验。包先在临时目录生成，完成后改名到新目标；不覆盖现有目录。当前同步 actor 快照依靠单写者和原件不可变契约，尚未实现删除，因此不存在资产删除竞态；加入删除/异步导出前必须实现 pin 与取消屏障，不能照搬当前边界。
 

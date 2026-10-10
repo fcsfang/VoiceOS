@@ -119,3 +119,9 @@ Task.business_state=`planned/active/completed/cancelled/deferred`。本地请求
 Core 持有这些身份/版本契约；未来完整应用、思源或不同任务系统作为适配器使用它们。模型、UI、索引改变不会重新给历史分配 ID；派生重分析保留新模型/提示版本及来源。正式 schema 与升级工具在路线图阶段安排，实现前按[审查表](review.md)检查本稿的约束能否执行。
 
 2026-10-10 开发切片增量：schema 10/逻辑包 9 已实现显式用户文字 origin=user/speaker=user、保留原文资产与文字版本；user_tentative 归属和 nullable action 提案与行动同事务提交，auto_send 默认 0，普通明确提取任务经本机连接/来源权限核对有限激活。外部完成仍独立反馈，不认可观点。恢复原提取/行动关系、旧格式 1–8 和旧 schema 9 已核对；完整目标、语音身份与长期闭环未完成。实际字段/边界见[表达行动记录](../engineering/m3-expression-actions.md)与[ADR-007](../adr/007-expression-action-extraction.md)。
+
+## 2026-10-11 已实现的相关性调用增量
+
+存储 schema 12 / 迁移包 v11 新增 `relevance_attempts` 与 `relevance_inputs`，独立于生成观点的模型调用。前者保存查询、完整有界快照、模型/提示/结构版本、调用状态、输入有效性、最多三个候选 ID、用量与摘要；后者按 ordinal 引用每个来源、文字版本及权限版本。
+
+调用结果状态 reserved/completed/rejected/unknown 与输入有效性 current/frozen 分离。来源更正、权限变化及隔离冻结完整输入；恢复包时所有记录 frozen，未完成调用 unknown。历史权限按策略修订链核验，历史文字按不可变版本核验，不能用当前文字替换旧出处。完整性摘要不代替来源和引用校验。该切片不产生 Relation/Claim/Action，实际云端相关性适配器仍待实现；见[ADR-010](../adr/010-durable-relevance-attempts.md)。

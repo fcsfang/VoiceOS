@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -285,6 +285,29 @@ final class Database {
                 )
                 """)
                 try execute("PRAGMA user_version=11")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "11" {
+            try transaction {
+                try execute("""
+                CREATE TABLE relevance_attempts (
+                  id TEXT PRIMARY KEY, command_id TEXT NOT NULL UNIQUE, fingerprint TEXT NOT NULL,
+                  snapshot_json TEXT NOT NULL, snapshot_digest TEXT NOT NULL, destination TEXT NOT NULL CHECK(destination IN ('local','cloud')),
+                  provider TEXT NOT NULL, model TEXT NOT NULL, prompt_version TEXT NOT NULL, schema_version TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','completed','rejected','unknown')),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')), created_at TEXT NOT NULL,
+                  selection_json TEXT, result_digest TEXT, usage_json TEXT, error TEXT
+                )
+                """)
+                try execute("""
+                CREATE TABLE relevance_inputs (
+                  id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL REFERENCES relevance_attempts(id),
+                  source_id TEXT NOT NULL REFERENCES sources(id), transcript_version_id TEXT NOT NULL REFERENCES transcript_versions(id),
+                  policy_version INTEGER NOT NULL CHECK(policy_version>=1), ordinal INTEGER NOT NULL CHECK(ordinal>=0),
+                  UNIQUE(attempt_id,ordinal)
+                )
+                """)
+                try execute("PRAGMA user_version=12")
             }
         }
     }

@@ -43,6 +43,7 @@ public enum SaveCheckpoint: String, Sendable {
     case intent, copyChunk, copyComplete, sealed, renamed, savedUncommitted, savedCommitted
     case jobClaimed, transcriptUncommitted, transcriptCommitted
     case modelReserved, claimsUncommitted, claimsCommitted, correctionUncommitted, correctionCommitted
+    case relevanceReserved, relevanceUncommitted, relevanceCommitted
     case policyUncommitted, policyCommitted
     case reviewUncommitted, reviewCommitted
     case reminderReserved, reminderSaved, reminderFeedbackUncommitted, reminderFeedbackCommitted

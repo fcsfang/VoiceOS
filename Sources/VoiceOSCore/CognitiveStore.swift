@@ -223,6 +223,7 @@ extension VoiceOSStore {
     }
     // Call inside the same transaction as a correction/quarantine.
     func invalidateCognition(sourceID: String) throws {
+        try db.execute("UPDATE relevance_attempts SET validity='frozen' WHERE id IN (SELECT attempt_id FROM relevance_inputs WHERE source_id=?)", [sourceID])
         for row in try db.query("SELECT context_id FROM context_inputs WHERE source_id=?", [sourceID]) { try freezeContext(row["context_id"]!) }
     }
     private func freezeContext(_ id: String) throws {
