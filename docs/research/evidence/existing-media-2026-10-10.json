@@ -1,0 +1,103 @@
+{
+  "run_id": "existing-media-2026-10-10",
+  "date": "2026-10-10",
+  "scope": "authorized local existing-media capability probes, not software acceptance",
+  "private_sources_and_transcripts_committed": false,
+  "new_API_calls": 0,
+  "new_reminders_operations": 0,
+  "samples": [
+    {
+      "sample_id": "V01",
+      "input_kind": "existing-media",
+      "human_voice_provenance": "unknown",
+      "source_media_type": "video/mp4",
+      "source_bytes": 2547636,
+      "source_duration_seconds": 26.9,
+      "clip_start_seconds": 0,
+      "clip_requested_seconds": 26.9,
+      "clip_decoded_seconds": 26.910476190476192,
+      "audio_tracks": 1,
+      "video_tracks": 1,
+      "copy_digest_matches": true,
+      "original_digest_unchanged_after_all_probes": true,
+      "clip_digest_matches": true,
+      "signal": {
+        "all_decoded_samples_zero": false,
+        "declared_frames": 1186752,
+        "decode_complete": true,
+        "decoded_frames": 1186752,
+        "peak_absolute": 0.3923764228820801,
+        "probe": "local-audio-signal-v1",
+        "rms": 0.038030037341198995,
+        "sample_count": 1186752
+      },
+      "transcription": {
+        "engine": "Apple SpeechAnalyzer / SpeechTranscriber",
+        "locale": "zh_CN",
+        "elapsed_seconds": 0.5783690214157104,
+        "elapsed_scope": "analyzer start through final results; excludes compile/import/model initialization",
+        "output_unicode_character_count": 0,
+        "status": "completed_empty",
+        "synthetic_fixture_only": false,
+        "model_download_requested": false
+      },
+      "microphone_used": false,
+      "cloud_upload_executed": false,
+      "manual_audio_reference_scored": false,
+      "source_container": "mp4"
+    },
+    {
+      "sample_id": "A01",
+      "input_kind": "existing-media",
+      "human_voice_provenance": "unknown",
+      "source_media_type": "audio/mp4",
+      "source_bytes": 46657564,
+      "source_duration_seconds": 1449.643537414966,
+      "clip_start_seconds": 0,
+      "clip_requested_seconds": 60,
+      "clip_decoded_seconds": 60,
+      "audio_tracks": 1,
+      "video_tracks": 0,
+      "copy_digest_matches": true,
+      "original_digest_unchanged_after_all_probes": true,
+      "clip_digest_matches": true,
+      "signal": {
+        "all_decoded_samples_zero": false,
+        "declared_frames": 2646000,
+        "decode_complete": true,
+        "decoded_frames": 2646000,
+        "peak_absolute": 0.7103100419044495,
+        "probe": "local-audio-signal-v1",
+        "rms": 0.0836755927533468,
+        "sample_count": 5292000
+      },
+      "transcription": {
+        "engine": "Apple SpeechAnalyzer / SpeechTranscriber",
+        "locale": "zh_CN",
+        "elapsed_seconds": 0.9877079725265503,
+        "elapsed_scope": "analyzer start through final results; excludes compile/import/model initialization",
+        "output_unicode_character_count": 286,
+        "status": "completed_with_text",
+        "synthetic_fixture_only": false,
+        "model_download_requested": false
+      },
+      "microphone_used": false,
+      "cloud_upload_executed": false,
+      "manual_audio_reference_scored": false,
+      "source_container": "m4a"
+    }
+  ],
+  "limitations": [
+    "No manual listening/ground-truth alignment; no accuracy estimate.",
+    "Video has nonzero decoded signal but no speech output; cause unverified.",
+    "No microphone recording, sleep/crash test, durable database import, or end-to-end cognition/action loop.",
+    "Original human/synthetic production provenance unknown."
+  ],
+  "signal_checker_initial_failure": "Temporary checker read beyond declared frame range and failed; limiting reads to remaining frames enabled complete decoding. Not an observed product app defect.",
+  "environment": {
+    "macos": "27.0.1",
+    "build": "26A434",
+    "sdk": "26.5",
+    "compile_target": "arm64-apple-macosx26.0"
+  }
+}

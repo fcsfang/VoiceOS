@@ -21,6 +21,7 @@
 | [GPT 合成样本](research/cognitive-evaluation-cases.json) | 十条参考案例，仅 SEM-01 有成功生成，完整对照未执行 | 归属、意图、纠错、历史关联与英语边界 |
 | [API 与提醒事项实测](research/api-reminders-validation-2026-10-10.md) | 正常提醒事项路径完成，API 试验部分完成 | 三次生成尝试、单项真实写入/改名/完成/重开证据 |
 | [API 配置使用说明](research/api-setup-guide.md) | 本地配置已整理并验证连接 | OpenCode 配置转换、密钥隔离和复现入口 |
+| [现有短音视频验证](research/existing-media-validation-2026-10-10.md) | M0/W01 部分推进，非软件验收 | 现有视频音轨/一分钟中文音频复制、提取、完整解码与本地转写 |
 | [系统架构 v0.1](architecture/system-architecture.md) | 可审查工程草稿 | 模块、接口、闭环、上下文与生命周期 |
 | [数据模型 v0.1](architecture/data-model.md) | 可审查工程草稿 | 实体/数据字典、版本、权限、事务、备份迁移与删除 |
 | [状态机与恢复](architecture/state-machines.md) | 可审查工程草稿 | 保存/处理/外部操作分层、失败窗口与纠错阻断 |

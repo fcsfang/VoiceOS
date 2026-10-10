@@ -1,4 +1,4 @@
-// Transcribes a supplied synthetic test file using an already-installed model.
+// Transcribes a supplied authorized test file using an already-installed model.
 // No microphone, model download, legacy speech API, or cloud API.
 import Foundation
 import AVFoundation
@@ -7,8 +7,12 @@ import Speech
 @main
 struct LocalTranscription {
     static func main() async throws {
-        guard CommandLine.arguments.count == 3 else {
-            throw NSError(domain: "VoiceOSProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: "provide synthetic audio file and locale"])
+        guard (3...4).contains(CommandLine.arguments.count) else {
+            throw NSError(domain: "VoiceOSProbe", code: 1, userInfo: [NSLocalizedDescriptionKey: "provide audio file, locale, and optional synthetic/existing-media kind"])
+        }
+        let inputKind = CommandLine.arguments.count == 4 ? CommandLine.arguments[3] : "synthetic"
+        guard ["synthetic", "existing-media"].contains(inputKind) else {
+            throw NSError(domain: "VoiceOSProbe", code: 4, userInfo: [NSLocalizedDescriptionKey: "unsupported input kind"])
         }
         guard #available(macOS 26.0, *), SpeechTranscriber.isAvailable else {
             throw NSError(domain: "VoiceOSProbe", code: 2, userInfo: [NSLocalizedDescriptionKey: "SpeechTranscriber unavailable"])
@@ -33,7 +37,8 @@ struct LocalTranscription {
             try await analyzer.start(inputAudioFile: file, finishAfterFile: true)
             let segments = try await reader.value
             let result: [String: Any] = [
-                "probe": "local-synthetic-transcription-v1",
+                "probe": inputKind == "synthetic" ? "local-synthetic-transcription-v1" : "local-existing-media-transcription-v1",
+                "input_kind": inputKind,
                 "locale": locale.identifier,
                 "audio_seconds": Double(file.length) / file.processingFormat.sampleRate,
                 "elapsed_seconds": Date().timeIntervalSince(began),
@@ -42,7 +47,7 @@ struct LocalTranscription {
                 "engine": "Apple SpeechAnalyzer / SpeechTranscriber",
                 "model_download_requested": false,
                 "microphone_used": false,
-                "synthetic_fixture_only": true
+                "synthetic_fixture_only": inputKind == "synthetic"
             ]
             let data = try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
             print(String(decoding: data, as: UTF8.self))

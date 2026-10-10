@@ -6,7 +6,7 @@ VoiceOS 是语音优先的多模态个人智能系统：让自然表达形成可
 
 ## 当前阶段
 
-2026-10-10：第一阶段基础已完成；PRD、架构/数据模型、六项 ADR 及第五阶段实施路线图/详细测试计划 v0.1 草稿已交付。第三阶段关键技术验证继续，P05 数值待测。已有合成探针和单项真实提醒事项/API 实测，尚无业务功能代码或已通过的软件验收结果。
+2026-10-10：第一阶段基础已完成；PRD、架构/数据模型、六项 ADR 及第五阶段实施路线图/详细测试计划 v0.1 草稿已交付。第三阶段验证继续，工程 M0 已补现有短音视频导入/本地转写探针，P05 数值待测。尚无业务功能代码或已通过的软件验收结果。
 
 ## 阅读入口
 
@@ -21,6 +21,7 @@ VoiceOS 是语音优先的多模态个人智能系统：让自然表达形成可
 - [GPT 首轮试验方案](docs/research/cloud-evaluation-plan.md)：模型对照、十条合成样本与费用控制；本轮因服务错误提前停止。
 - [API 与提醒事项实测](docs/research/api-reminders-validation-2026-10-10.md)：配置已落地，单项任务回流通过；模型服务存在超时和 503。
 - [API 配置使用说明](docs/research/api-setup-guide.md)：本地设置、运行入口和实测边界。
+- [现有短音视频验证](docs/research/existing-media-validation-2026-10-10.md)：27 秒视频音轨及一分钟中文音频的复制/提取/解码/本地转写。
 - [系统架构 v0.1](docs/architecture/system-architecture.md)：模块、接口、完整闭环和生命周期推荐。
 - [数据模型 v0.1](docs/architecture/data-model.md)：实体、版本、权限、事务、导出恢复和删除约束。
 - [状态机与恢复](docs/architecture/state-machines.md)：保存、处理、外部操作、冲突和旧结果阻断。
