@@ -8,7 +8,7 @@ public actor VoiceOSStore {
     private var ready = false
     private var activeImports: Set<String> = []
     private var processing = false
-    private let checkpoint: @Sendable (SaveCheckpoint) throws -> Void
+    let checkpoint: @Sendable (SaveCheckpoint) throws -> Void
 
     public init(root: URL, inspector: any MediaInspector,
                 checkpoint: @escaping @Sendable (SaveCheckpoint) throws -> Void = { _ in }) throws {
@@ -25,6 +25,7 @@ public actor VoiceOSStore {
         guard !ready, activeImports.isEmpty else { return }
         // Startup only: the process lock proves the previous worker no longer owns a lease.
         try db.execute("UPDATE jobs SET state='queued', lease_token=NULL WHERE state='running'")
+        try db.execute("UPDATE model_attempts SET state='unknown',error='进程退出前结果未登记；不会自动重发' WHERE state='reserved'")
         for row in try db.query("SELECT * FROM sources ORDER BY created_at") {
             let id = row["id"]!
             if ["interrupted", "quarantined", "reference_only"].contains(row["state"]!) { continue }
@@ -51,6 +52,7 @@ public actor VoiceOSStore {
                 }
             } catch { try quarantine(id, "无法验证媒体原件，请保留副本并检查文件") }
         }
+        try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT a.id FROM model_attempts a JOIN contexts x ON x.id=a.context_id WHERE x.state='stale')")
         ready = true
     }
     @discardableResult
@@ -177,6 +179,7 @@ public actor VoiceOSStore {
         try db.transaction {
             try db.execute("UPDATE sources SET state='quarantined',error=? WHERE id=?", [reason,id])
             try db.execute("UPDATE jobs SET state='blocked',lease_token=NULL,error=? WHERE source_id=?", [reason,id])
+            try invalidateCognition(sourceID: id)
         }
     }
     private func place(_ staging: URL, _ final: URL) throws {

@@ -18,6 +18,7 @@ final class ControlCenter: ObservableObject {
     @Published var initialized = false
     @Published var player: AVPlayer?
     @Published var history: [TranscriptVersion] = []
+    @Published var claims: [CandidateClaim] = []
     private var store: VoiceOSStore?
     private var worker: Task<Void, Never>?
     func start() async {
@@ -35,7 +36,10 @@ final class ControlCenter: ObservableObject {
         } catch { status = error.localizedDescription }
     }
     func refresh() async {
-        do { records = try await store?.sources() ?? [] }
+        do {
+            claims = try await store?.candidateClaims(includeFrozen: true) ?? []
+            records = try await store?.sources() ?? []
+        }
         catch { status = error.localizedDescription }
     }
     func export(includeMedia: Bool) {
@@ -186,6 +190,26 @@ struct CenterView: View {
                             if let player = model.player { VideoPlayer(player: player).frame(height: record.kind == "video" ? 260 : 80) }
                         } else { Text(transcriptStatus(record)).foregroundStyle(.secondary) }
                         if let error = record.error { Text(error).foregroundStyle(.orange) }
+                        let related = model.claims.filter { $0.references.contains(where: { $0.sourceID == record.id }) }
+                        if !related.isEmpty {
+                            Divider()
+                            DisclosureGroup("认知候选与历史（\(related.count)）") {
+                                ForEach(related) { claim in
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text(claim.statement).textSelection(.enabled)
+                                        Text("\(claim.ownership == "ai_candidate" ? "AI 候选" : (claim.ownership == "external" ? "外部主张" : "归属待核对")) · 未验证 · \(claim.validity == "frozen" ? "依据已变化，暂停使用" : "待核对")").font(.caption).foregroundStyle(.secondary)
+                                        ForEach(Array(claim.references.enumerated()), id: \.offset) { _, ref in
+                                            if ref.sourceID == record.id, ref.transcriptVersionID == record.transcriptVersionID,
+                                               let span = record.spans.first(where: { $0.id == ref.spanID }), let text = record.transcript {
+                                                Text("依据：" + quote(span, text: text)).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                                            } else if ref.sourceID == record.id {
+                                                Button("查看历史逐字稿依据") { Task { await model.historyFor(record); showHistory = true } }
+                                            }
+                                        }
+                                    }.padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
                         if ["failed", "blocked"].contains(record.jobState ?? ""), record.state == "saved" {
                             Button("重试本地转写") { Task { await model.retry(record) } }
                         }

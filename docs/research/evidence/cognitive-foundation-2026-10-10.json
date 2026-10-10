@@ -1,0 +1,51 @@
+{
+  "date": "2026-10-10",
+  "synthetic_local_proposals": true,
+  "count": 5,
+  "sigkill_count": 5,
+  "passed": true,
+  "cases": [
+    {
+      "checkpoint": "modelReserved",
+      "passed": true,
+      "stable_reopen": true
+    },
+    {
+      "checkpoint": "claimsUncommitted",
+      "passed": true,
+      "stable_reopen": true
+    },
+    {
+      "checkpoint": "claimsCommitted",
+      "passed": true,
+      "stable_reopen": true
+    },
+    {
+      "checkpoint": "correctionUncommitted",
+      "passed": true,
+      "stable_reopen": true
+    },
+    {
+      "checkpoint": "correctionCommitted",
+      "passed": true,
+      "stable_reopen": true
+    }
+  ],
+  "network_calls": 0,
+  "external_actions": 0,
+  "core_tests": 25,
+  "native_media_cases_passed": 26,
+  "native_media_sigkill_count": 20,
+  "package_format": 3,
+  "database_schema": 4,
+  "legacy_package_formats_restored": [
+    1,
+    2
+  ],
+  "ui_candidate_display_verified": true,
+  "ui_correction_freeze_verified": true,
+  "full_product_acceptance_passed": false,
+  "ui_restored_frozen_history_verified": true,
+  "full_media_cognitive_history_exact_roundtrip": true,
+  "ui_fixture_note": "UI correction exercised claimsCommitted test root after the process report; final state there is frozen."
+}

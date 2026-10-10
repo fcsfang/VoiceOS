@@ -256,4 +256,91 @@ final class StoreTests: XCTestCase {
         let row = try await store.sources().first!; XCTAssertEqual(row.state, "quarantined")
     }
 
+    func testPersistedContextReceiptAndCorrectionFreezeClaims() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "材料中的观点"))
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [id])
+        let contextID = try await store.persistLocalContext(context, commandID: "context-one")
+        let replay = try await store.persistLocalContext(context, commandID: "context-one"); XCTAssertEqual(replay, contextID)
+        let attempt = try await store.reserveLocalModelAttempt(contextID: contextID, model: "fixture", promptVersion: "v1", schemaVersion: "v1")
+        let source = context.sources[0]
+        let proposals = [ClaimProposal(statement: "候选解释", ownership: .aiCandidate, references: [ClaimReference(sourceID: id, transcriptVersionID: source.transcriptVersionID, spanID: source.spans[0].id)])]
+        let claims = try await store.commitLocalClaims(attemptID: attempt, proposals: proposals)
+        let replayClaims = try await store.commitLocalClaims(attemptID: attempt, proposals: proposals); XCTAssertEqual(claims, replayClaims)
+        let before = try await store.candidateClaims(); XCTAssertEqual(before.count, 1); XCTAssertEqual(before[0].ownership, "ai_candidate"); XCTAssertEqual(before[0].evidenceState, "unverified")
+        _ = try await store.correctTranscript(sourceID: id, expectedVersionID: source.transcriptVersionID, text: "更正材料")
+        let visible = try await store.candidateClaims(); XCTAssertTrue(visible.isEmpty)
+        let historical = try await store.candidateClaims(includeFrozen: true); XCTAssertEqual(historical[0].validity, "frozen")
+        do { _ = try await store.localContext(id: contextID); XCTFail("stale context must not reopen as current") } catch {}
+        let receipt = try await store.persistLocalContext(context, commandID: "context-one"); XCTAssertEqual(receipt, contextID)
+        let current = try await store.prepareLocalTranscriptContext(sourceIDs: [id])
+        do { _ = try await store.persistLocalContext(current, commandID: "context-one"); XCTFail("receipt cannot change input") } catch {}
+        let package = base.appendingPathComponent("frozen-package"); try await store.exportPackage(to: package)
+        let target = base.appendingPathComponent("frozen-restored")
+        try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector())
+        let restored = try VoiceOSStore(root: target, inspector: Inspector()); try await restored.recover()
+        let restoredClaims = try await restored.candidateClaims(includeFrozen: true)
+        XCTAssertEqual(restoredClaims.map(\.id), historical.map(\.id)); XCTAssertEqual(restoredClaims[0].validity, "frozen")
+    }
+    func testLateModelResultAndForeignReferencesNeverCommit() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "旧材料"))
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [id])
+        let contextID = try await store.persistLocalContext(context)
+        let bad = try await store.reserveLocalModelAttempt(contextID: contextID, model: "fixture", promptVersion: "v1", schemaVersion: "v1")
+        let input = context.sources[0]
+        let valid = ClaimProposal(statement: "解释", ownership: .aiCandidate, references: [ClaimReference(sourceID: id, transcriptVersionID: input.transcriptVersionID, spanID: input.spans[0].id)])
+        let invalid = ClaimProposal(statement: "无依据", ownership: .external, references: [ClaimReference(sourceID: id, transcriptVersionID: input.transcriptVersionID, spanID: UUID().uuidString)])
+        do { _ = try await store.commitLocalClaims(attemptID: bad, proposals: [valid,invalid]); XCTFail("no partial output") } catch {}
+        let empty = try await store.candidateClaims(includeFrozen: true); XCTAssertTrue(empty.isEmpty)
+        let late = try await store.reserveLocalModelAttempt(contextID: contextID, model: "fixture", promptVersion: "v1", schemaVersion: "v1")
+        _ = try await store.correctTranscript(sourceID: id, expectedVersionID: input.transcriptVersionID, text: "新材料")
+        do { _ = try await store.commitLocalClaims(attemptID: late, proposals: [valid]); XCTFail("late callback must not revive input") } catch {}
+        let stillEmpty = try await store.candidateClaims(includeFrozen: true); XCTAssertTrue(stillEmpty.isEmpty)
+    }
+    func testReservedAttemptBecomesUnknownAfterRestartAndRestore() async throws {
+        let input = try fixture(); let target = base.appendingPathComponent("store"); let package = base.appendingPathComponent("reserved-package")
+        var attempt = ""; var contextID = ""
+        do {
+            let first = try VoiceOSStore(root: target, inspector: Inspector()); try await first.recover()
+            let id = try await first.importFile(input); try await first.processTranscriptions(using: Speech(text: "待处理"))
+            let context = try await first.prepareLocalTranscriptContext(sourceIDs: [id]); contextID = try await first.persistLocalContext(context)
+            attempt = try await first.reserveLocalModelAttempt(contextID: contextID, model: "fixture", promptVersion: "v1", schemaVersion: "v1")
+            try await first.exportPackage(to: package)
+        }
+        let reopened = try VoiceOSStore(root: target, inspector: Inspector()); try await reopened.recover()
+        do { _ = try await reopened.commitLocalClaims(attemptID: attempt, proposals: []); XCTFail("unknown must not replay") } catch {}
+        _ = try await reopened.localContext(id: contextID)
+        let restoreRoot = base.appendingPathComponent("reserved-restored")
+        try await VoiceOSStore.restorePackage(from: package, to: restoreRoot, inspector: Inspector())
+        let restored = try VoiceOSStore(root: restoreRoot, inspector: Inspector()); try await restored.recover()
+        do { _ = try await restored.commitLocalClaims(attemptID: attempt, proposals: []); XCTFail("restore must not replay unknown attempt") } catch {}
+        _ = try await restored.localContext(id: contextID)
+    }
+    func testCognitiveRestoreRejectsResultMismatchAndCorruptionFreezesRead() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "测试材料"))
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [id]); let input = context.sources[0]
+        let contextID = try await store.persistLocalContext(context)
+        let attempt = try await store.reserveLocalModelAttempt(contextID: contextID, model: "fixture", promptVersion: "v1", schemaVersion: "v1")
+        _ = try await store.commitLocalClaims(attemptID: attempt, proposals: [ClaimProposal(statement: "候选解释", ownership: .aiCandidate, references: [ClaimReference(sourceID: id, transcriptVersionID: input.transcriptVersionID, spanID: input.spans[0].id)])])
+        let package = base.appendingPathComponent("altered-candidate"); try await store.exportPackage(to: package)
+        let file = package.appendingPathComponent("claims.jsonl")
+        var claim = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
+        claim["statement"] = "改写的候选"
+        var bytes = try JSONSerialization.data(withJSONObject: claim); bytes.append(0x0A); try bytes.write(to: file)
+        let manifestFile = package.appendingPathComponent("manifest.json")
+        var manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestFile)) as! [String: Any]
+        var files = manifest["files"] as! [[String: Any]]; let index = files.firstIndex { $0["path"] as? String == "claims.jsonl" }!
+        let digest = try DurableFiles.hash(file); files[index]["sha256"] = digest.1; files[index]["bytes"] = digest.0; manifest["files"] = files
+        try JSONSerialization.data(withJSONObject: manifest).write(to: manifestFile)
+        let target = base.appendingPathComponent("rejected-candidate")
+        do { try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector()); XCTFail("file checksums cannot override original result receipt") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("结果摘要")) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+        let media = try await store.playableURL(sourceID: id); try Data("broken".utf8).write(to: media)
+        let current = try await store.candidateClaims(); XCTAssertTrue(current.isEmpty)
+        let history = try await store.candidateClaims(includeFrozen: true); XCTAssertEqual(history[0].validity, "frozen")
+    }
+
 }

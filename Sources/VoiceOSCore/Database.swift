@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -97,6 +97,40 @@ final class Database {
                 """)
                 try backfillTranscriptVersions()
                 try execute("PRAGMA user_version=3")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "3" {
+            try transaction {
+                try execute("""
+                CREATE TABLE contexts (
+                  id TEXT PRIMARY KEY, command_id TEXT NOT NULL UNIQUE, snapshot_json TEXT NOT NULL,
+                  digest TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('current','stale')), created_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE context_inputs (
+                  id TEXT PRIMARY KEY, context_id TEXT NOT NULL REFERENCES contexts(id),
+                  source_id TEXT NOT NULL REFERENCES sources(id), transcript_version_id TEXT NOT NULL REFERENCES transcript_versions(id),
+                  UNIQUE(context_id,source_id)
+                )
+                """)
+                try execute("""
+                CREATE TABLE model_attempts (
+                  id TEXT PRIMARY KEY, context_id TEXT NOT NULL REFERENCES contexts(id), provider TEXT NOT NULL CHECK(provider='local_fixture'),
+                  model TEXT NOT NULL, prompt_version TEXT NOT NULL, schema_version TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','completed','unknown','rejected')),
+                  result_digest TEXT, usage_json TEXT, error TEXT, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE claims (
+                  id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL REFERENCES model_attempts(id), ordinal INTEGER NOT NULL CHECK(ordinal>=0), statement TEXT NOT NULL,
+                  ownership TEXT NOT NULL CHECK(ownership IN ('external','ai_candidate','unresolved')),
+                  evidence_state TEXT NOT NULL CHECK(evidence_state='unverified'),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')), refs_json TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(attempt_id,ordinal)
+                )
+                """)
+                try execute("PRAGMA user_version=4")
             }
         }
     }

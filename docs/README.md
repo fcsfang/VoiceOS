@@ -31,6 +31,7 @@
 | [M1 文件输入实施记录](engineering/m1-file-input.md) | 已实现的开发预览，非完整 MVP | 同一应用核心、15 项测试、26 项媒体恢复检查与未完成范围 |
 | [M2 逐字稿基础](engineering/m2-transcript-provenance.md) | 已实现的增量切片，非完整 M2 | 来源时间、原稿保留、更正历史、格式升级与验证 |
 | [云端测试增量](research/cloud-evaluation-update-2026-10-10.md) | 六次尝试，三次成功，因超时停止 | 嵌套结构、归属与机会边界、未知结果/费用 |
+| [M2 认知基础](engineering/m2-cognitive-foundation.md) | 本地工程切片，非完整 M2 | 持久上下文、调用回执、候选出处、原子冻结及迁移 |
 | [开发指南](engineering/development-guide.md) | 可复现工程入口 | 应用构建、数据位置、导出/恢复和测试 |
 | [实施路线图 v0.1](planning/implementation-roadmap.md) | 实施中，M1 输入子集已实现 | 六个里程碑、24 个工作包、31 条需求对应实现责任 |
 | [详细测试计划 v0.1](testing/test-plan.md) | 可审查计划，产品案例未执行 | 22 个 AC 执行步骤、14 个 FI 子场景、判定/指标/自然试用 |

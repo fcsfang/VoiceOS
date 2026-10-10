@@ -26,6 +26,16 @@ struct Check {
             } else if args[0] == "export" {
                 guard args.count >= 3 else { throw VoiceOSError("export requires new package directory") }
                 try await store.exportPackage(to: URL(fileURLWithPath: args[2]), includeMedia: args.count == 4 && args[3] == "media")
+            } else if args[0] == "cognition-fixture" {
+                guard let source = try await store.sources().first(where: { !($0.transcript ?? "").isEmpty }) else { throw VoiceOSError("test fixture requires an existing transcript") }
+                let context = try await store.prepareLocalTranscriptContext(sourceIDs: [source.id])
+                let contextID = try await store.persistLocalContext(context, commandID: "local-cognition-fixture")
+                let attempt = try await store.reserveLocalModelAttempt(contextID: contextID, model: "development-fixture", promptVersion: "fixture-v1", schemaVersion: "claims-v1")
+                let input = context.sources[0]
+                _ = try await store.commitLocalClaims(attemptID: attempt, proposals: [ClaimProposal(statement: "开发测试候选，不代表模型理解结果或用户观点", ownership: .aiCandidate, references: [ClaimReference(sourceID: source.id, transcriptVersionID: input.transcriptVersionID, spanID: input.spans[0].id)])])
+            } else if args[0] == "correction-fixture" {
+                guard let source = try await store.sources().first(where: { $0.transcript != nil }), let version = source.transcriptVersionID else { throw VoiceOSError("test fixture requires a transcript") }
+                _ = try await store.correctTranscript(sourceID: source.id, expectedVersionID: version, text: source.transcript! + "（开发故障验证注记）", commandID: "fixture-correction")
             } else if args[0] == "transcribe" { try await store.processTranscriptions(using: NativeSpeechPort()) }
             else if args[0] != "read" { throw VoiceOSError("unknown command") }
             let records = try await store.sources()

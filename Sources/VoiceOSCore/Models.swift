@@ -35,6 +35,7 @@ public struct SourceRecord: Identifiable, Sendable {
 public enum SaveCheckpoint: String, Sendable {
     case intent, copyChunk, copyComplete, sealed, renamed, savedUncommitted, savedCommitted
     case jobClaimed, transcriptUncommitted, transcriptCommitted
+    case modelReserved, claimsUncommitted, claimsCommitted, correctionUncommitted, correctionCommitted
 }
 
 public struct TranscriptSpan: Codable, Sendable, Identifiable {

@@ -18,7 +18,7 @@ extension VoiceOSStore {
             guard existing["input_fingerprint"] == fingerprint else { throw VoiceOSError("同一更正命令不能更换内容") }
             return existing["to_version_id"]!
         }
-        return try db.transaction {
+        let result = try db.transaction {
             guard let row = try db.query("""
             SELECT t.* FROM transcripts t JOIN sources s ON s.id=t.source_id
             WHERE s.id=? AND s.state IN ('saved','reference_only') AND t.current_version_id=?
@@ -32,8 +32,12 @@ extension VoiceOSStore {
             try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,?,?,?,'transcription_error','user',?)", [versionID,row["id"],String(next),text,spans,now])
             try db.execute("INSERT INTO transcript_revisions(id,transcript_id,from_version_id,to_version_id,command_id,input_fingerprint,reason,actor,created_at) VALUES(?,?,?,?,?,?,'transcription_error','user',?)", [UUID().uuidString,row["id"],expectedVersionID,versionID,commandID,fingerprint,now])
             try db.execute("UPDATE transcripts SET current_version_id=?,version=? WHERE id=?", [versionID,String(next),row["id"]])
+            try invalidateCognition(sourceID: sourceID)
+            try checkpoint(.correctionUncommitted)
             return versionID
         }
+        try checkpoint(.correctionCommitted)
+        return result
     }
     public func isCurrentTranscriptVersion(_ id: String) throws -> Bool {
         !(try db.query("""
