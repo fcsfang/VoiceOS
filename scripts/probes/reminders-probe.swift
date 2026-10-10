@@ -66,6 +66,9 @@ final class Probe: ObservableObject {
     }
 
     func readback() async {
+        // Source refresh can leave fetched objects stale. Reset before reacquiring by ID.
+        // This probe has no pending edits when querying; reset would discard such edits.
+        store?.reset()
         guard attempted, let calendar = target(), let store else { return }
         busy = true
         defer { busy = false }

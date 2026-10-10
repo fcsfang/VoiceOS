@@ -1,5 +1,6 @@
 .DS_Store
 .env
+docs/模型api 配置.md
 .env.*
 !.env.example
 *.pem

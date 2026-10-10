@@ -18,7 +18,9 @@ VoiceOS 是语音优先的多模态个人智能系统：让自然表达形成可
 - [产品审查问题](docs/product/review-questions.md)：P01–P04/P06 已确认，P05 授权先测。
 - [技术验证初步报告](docs/research/technical-validation-2026-10-10.md)：本地中文转写、音频文件、持久化探针与官方接口调查。
 - [可靠性补充报告](docs/research/reliability-validation-2026-10-10.md)：跨资源中断、外部未知结果、可迁移包与原生探针准备。
-- [GPT 首轮试验方案](docs/research/cloud-evaluation-plan.md)：模型对照、十条合成样本与费用控制；待凭据配置。
+- [GPT 首轮试验方案](docs/research/cloud-evaluation-plan.md)：模型对照、十条合成样本与费用控制；本轮因服务错误提前停止。
+- [API 与提醒事项实测](docs/research/api-reminders-validation-2026-10-10.md)：配置已落地，单项任务回流通过；模型服务存在超时和 503。
+- [API 配置使用说明](docs/research/api-setup-guide.md)：本地设置、运行入口和实测边界。
 - [工程协作规则](AGENTS.md)：四条必要边界。
 
 个人录音、运行数据、密钥和临时产物不进入 Git。核心数据模型和技术栈尚未冻结；后续重大技术选择通过 ADR 说明备选方案、证据与迁移影响。
