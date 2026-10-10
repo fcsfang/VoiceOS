@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -254,6 +254,26 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=9")
             }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "9" {
+            try execute("PRAGMA foreign_keys=OFF")
+            do {
+                try transaction {
+                    for table in ["claims", "claim_reviews"] {
+                        guard let original = try query("SELECT sql FROM sqlite_master WHERE name=?", [table]).first?["sql"] else { throw VoiceOSError("认知表缺失，不能升级") }
+                        let revised = original.replacingOccurrences(of: "CREATE TABLE \(table)", with: "CREATE TABLE \(table)_next").replacingOccurrences(of: "'external','ai_candidate','unresolved'", with: "'external','ai_candidate','unresolved','user_tentative'")
+                        try execute(revised)
+                        try execute("INSERT INTO \(table)_next SELECT * FROM \(table)")
+                        try execute("DROP TABLE \(table)")
+                        try execute("ALTER TABLE \(table)_next RENAME TO \(table)")
+                    }
+                    guard try query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("认知升级引用校验失败") }
+                    try execute("ALTER TABLE claims ADD COLUMN action_json TEXT")
+                    try execute("ALTER TABLE actions ADD COLUMN auto_send INTEGER NOT NULL DEFAULT 0 CHECK(auto_send IN (0,1))")
+                    try execute("PRAGMA user_version=10")
+                }
+            } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
+            try execute("PRAGMA foreign_keys=ON")
         }
     }
     deinit { sqlite3_close(handle) }

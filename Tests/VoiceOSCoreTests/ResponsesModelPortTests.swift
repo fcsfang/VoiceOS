@@ -56,6 +56,17 @@ final class ResponsesModelPortTests: XCTestCase {
         extra = claim; extra["references"] = [["sourceID": "invented", "transcriptVersionID": "invented", "spanID": "invented"]]
         XCTAssertThrowsError(try ResponsesModelPort.parse(response([extra])))
     }
+    func testActionPayloadParsesButMalformedActionAndExtraAuthorityReject() throws {
+        let ref = ["sourceID": UUID().uuidString, "transcriptVersionID": UUID().uuidString, "spanID": UUID().uuidString]
+        let action: [String: Any] = ["title":"整理素材", "kind":"task", "quote":"我会整理素材", "autoSend":true]
+        let claim: [String: Any] = ["statement":"我会整理素材", "ownership":"user_tentative", "references":[ref], "action":action]
+        let parsed = try ResponsesModelPort.parse(response([claim])); XCTAssertEqual(parsed.claims[0].action?.kind,.task); XCTAssertEqual(parsed.claims[0].action?.autoSend,true)
+        var modified = action; modified["calendarID"] = "model-selected-calendar"
+        var bad = claim; bad["action"] = modified; XCTAssertThrowsError(try ResponsesModelPort.parse(response([bad])))
+        for value: Any in [1,"true",NSNull()] { modified = action; modified["autoSend"] = value; bad["action"] = modified; XCTAssertThrowsError(try ResponsesModelPort.parse(response([bad]))) }
+        modified = action; modified["kind"] = "delete"; bad["action"] = modified; XCTAssertThrowsError(try ResponsesModelPort.parse(response([bad])))
+        bad["action"] = NSNull(); XCTAssertNil(try ResponsesModelPort.parse(response([bad])).claims[0].action)
+    }
     func testIncompleteRefusalAndUnknownUsage() throws {
         let incomplete = try ResponsesModelPort.parse(response(status: "incomplete"))
         XCTAssertEqual(incomplete.status, .incomplete); XCTAssertEqual(incomplete.outputTokens, 5)

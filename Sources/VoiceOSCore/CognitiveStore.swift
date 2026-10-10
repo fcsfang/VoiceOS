@@ -9,13 +9,23 @@ public struct ClaimReference: Codable, Sendable {
         self.sourceID = sourceID; self.transcriptVersionID = transcriptVersionID; self.spanID = spanID
     }
 }
-public enum CandidateOwnership: String, Codable, Sendable { case external, aiCandidate = "ai_candidate", unresolved }
+public enum CandidateOwnership: String, Codable, Sendable { case external, aiCandidate = "ai_candidate", unresolved, userTentative = "user_tentative" }
+public struct ExtractedAction: Codable, Sendable {
+    public let title: String
+    public let kind: ActionKind
+    public let quote: String
+    public let autoSend: Bool
+    public init(title: String, kind: ActionKind, quote: String, autoSend: Bool = false) {
+        self.title = title; self.kind = kind; self.quote = quote; self.autoSend = autoSend
+    }
+}
 public struct ClaimProposal: Codable, Sendable {
     public let statement: String
     public let ownership: CandidateOwnership
     public let references: [ClaimReference]
-    public init(statement: String, ownership: CandidateOwnership, references: [ClaimReference]) {
-        self.statement = statement; self.ownership = ownership; self.references = references
+    public let action: ExtractedAction?
+    public init(statement: String, ownership: CandidateOwnership, references: [ClaimReference], action: ExtractedAction? = nil) {
+        self.statement = statement; self.ownership = ownership; self.references = references; self.action = action
     }
 }
 public struct CandidateClaim: Identifiable, Sendable {
@@ -93,7 +103,13 @@ extension VoiceOSStore {
         try db.transaction {
             for (ordinal, proposal) in proposals.enumerated() {
                 let id = UUID().uuidString; ids.append(id)
-                try db.execute("INSERT INTO claims(id,attempt_id,ordinal,statement,ownership,evidence_state,validity,refs_json,created_at) VALUES(?,?,?,?,?,'unverified','current',?,?)", [id,attemptID,String(ordinal),proposal.statement,proposal.ownership.rawValue,try json(proposal.references),timestamp()])
+                try db.execute("INSERT INTO claims(id,attempt_id,ordinal,statement,ownership,evidence_state,validity,refs_json,created_at,action_json) VALUES(?,?,?,?,?,'unverified','current',?,?,?)", [id,attemptID,String(ordinal),proposal.statement,proposal.ownership.rawValue,try json(proposal.references),timestamp(),try proposal.action.map { try json($0) }])
+                if let action = proposal.action {
+                    let actor = action.kind == .aiSuggestion ? "ai" : "user"
+                    let command = "extracted:" + attemptID + ":" + String(ordinal)
+                    let fingerprint = try Self.actionHash([id,"0",action.title,action.kind.rawValue,actor,action.quote])
+                    try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,auto_send) VALUES(?,?,0,?,?,?,?,'open','current',?,?,?,?)", [UUID().uuidString,id,action.title,action.kind.rawValue,actor,action.quote,command,fingerprint,timestamp(),action.autoSend ? "1" : "0"])
+                }
             }
             try db.execute("UPDATE model_attempts SET state='completed',result_digest=? WHERE id=? AND state='reserved'", [digest,attemptID])
             try checkpoint(.claimsUncommitted)
@@ -112,10 +128,25 @@ extension VoiceOSStore {
         }
     }
     static func validateProposals(_ proposals: [ClaimProposal], context: LocalTranscriptContext) throws {
+        guard proposals.count <= 32, proposals.filter({ $0.action?.autoSend == true }).count <= 3 else { throw VoiceOSError("行动提取超过单次范围") }
         for proposal in proposals {
-            guard !proposal.statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !proposal.references.isEmpty else { throw VoiceOSError("认知候选缺少内容或出处") }
+            guard !proposal.statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !proposal.references.isEmpty, proposal.references.count <= 32, proposal.statement.unicodeScalars.count <= 2000 else { throw VoiceOSError("认知候选缺少内容或出处") }
             for ref in proposal.references {
-                guard context.sources.contains(where: { $0.sourceID == ref.sourceID && $0.transcriptVersionID == ref.transcriptVersionID && $0.spans.contains(where: { $0.id == ref.spanID }) && (proposal.ownership != .external || $0.origin == "external") }) else { throw VoiceOSError("认知候选引用了未选入或错误版本的来源片段") }
+                guard context.sources.contains(where: { $0.sourceID == ref.sourceID && $0.transcriptVersionID == ref.transcriptVersionID && $0.spans.contains(where: { $0.id == ref.spanID }) && (proposal.ownership != .external || $0.origin == "external") && (proposal.ownership != .userTentative || ($0.origin == "user" && $0.speaker == "user")) }) else { throw VoiceOSError("认知候选引用了未选入或错误版本的来源片段") }
+            }
+            if let action = proposal.action {
+                guard !action.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action.title.unicodeScalars.count <= 2000,
+                      !action.quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action.quote.unicodeScalars.count <= 2000,
+                      !action.autoSend || action.kind == .task,
+                      (action.kind == .aiSuggestion && proposal.ownership == .aiCandidate) || (action.kind != .aiSuggestion && proposal.ownership == .userTentative),
+                      proposal.references.contains(where: { ref in
+                          context.sources.contains { source in
+                              guard source.sourceID == ref.sourceID, source.transcriptVersionID == ref.transcriptVersionID,
+                                    let span = source.spans.first(where: { $0.id == ref.spanID }) else { return false }
+                              let scalars = Array(source.text.unicodeScalars)
+                              return String(String.UnicodeScalarView(scalars[span.textStart..<span.textEnd])).contains(action.quote)
+                          }
+                      }) else { throw VoiceOSError("行动提取缺少原话、正确归属或可执行范围") }
             }
         }
     }
@@ -162,19 +193,29 @@ extension VoiceOSStore {
                 guard claim["attempt_state"] == "completed", let owner = CandidateOwnership(rawValue: claim["ownership"]!),
                       claim["validity"] != "current" || row["state"] == "current" else { throw VoiceOSError("迁移认知候选状态不一致") }
                 let refs = try JSONDecoder().decode([ClaimReference].self, from: Data(claim["refs_json"]!.utf8))
-                try validateProposals([ClaimProposal(statement: claim["statement"]!, ownership: owner, references: refs)], context: context)
+                try validateProposals([ClaimProposal(statement: claim["statement"]!, ownership: owner, references: refs, action: try claim["action_json"].map { try JSONDecoder().decode(ExtractedAction.self, from: Data($0.utf8)) })], context: context)
             }
         }
         for attempt in try db.query("SELECT * FROM model_attempts WHERE state='completed'") {
             var proposals: [ClaimProposal] = []
             for (index, claim) in try db.query("SELECT * FROM claims WHERE attempt_id=? ORDER BY ordinal", [attempt["id"]]).enumerated() {
                 guard claim["ordinal"] == String(index), let owner = CandidateOwnership(rawValue: claim["ownership"]!) else { throw VoiceOSError("迁移候选顺序不一致") }
-                proposals.append(ClaimProposal(statement: claim["statement"]!, ownership: owner, references: try JSONDecoder().decode([ClaimReference].self, from: Data(claim["refs_json"]!.utf8))))
+                proposals.append(ClaimProposal(statement: claim["statement"]!, ownership: owner, references: try JSONDecoder().decode([ClaimReference].self, from: Data(claim["refs_json"]!.utf8)), action: try claim["action_json"].map { try JSONDecoder().decode(ExtractedAction.self, from: Data($0.utf8)) }))
             }
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             let digest = SHA256.hash(data: try encoder.encode(proposals)).map { String(format: "%02x", $0) }.joined()
             guard digest == attempt["result_digest"] else { throw VoiceOSError("迁移调用结果摘要不一致") }
         }
+        try validateStoredUserExpressions(db)
+        for claim in try db.query("SELECT * FROM claims WHERE action_json IS NOT NULL") {
+            let proposal = try JSONDecoder().decode(ExtractedAction.self, from: Data(claim["action_json"]!.utf8))
+            let command = "extracted:" + claim["attempt_id"]! + ":" + claim["ordinal"]!
+            let rows = try db.query("SELECT * FROM actions WHERE command_id=?", [command])
+            guard rows.count == 1, let action = rows.first, action["claim_id"] == claim["id"], action["claim_review_version"] == "0",
+                  action["title"] == proposal.title, action["kind"] == proposal.kind.rawValue, action["note"] == proposal.quote,
+                  action["intent_actor"] == (proposal.kind == .aiSuggestion ? "ai" : "user"), action["auto_send"] == (proposal.autoSend ? "1" : "0") else { throw VoiceOSError("行动提取结果与原始调用不一致") }
+        }
+        guard try db.query("SELECT a.id FROM actions a JOIN claims c ON c.id=a.claim_id WHERE a.auto_send=1 AND (c.action_json IS NULL OR a.command_id!=('extracted:' || c.attempt_id || ':' || c.ordinal))").isEmpty else { throw VoiceOSError("自动行动缺少提取依据") }
         try validateStoredClaimReviews(db)
         try validateStoredActions(db)
         try validateStoredReminders(db)

@@ -1,6 +1,6 @@
 # VoiceOS 开发预览与复现
 
-日期：2026-10-10。此版本包含 M1 文件输入切片与 M2 逐字稿来源/更正基础；尚不是完整 MVP。当前状态与证据见 [M1 实施记录](m1-file-input.md)、[逐字稿增量记录](m2-transcript-provenance.md)、[认知基础记录](m2-cognitive-foundation.md)及 [权限/端口记录](m2-source-policy-model-port.md)与[真实驱动记录](m2-responses-driver.md)与[控制中心理解记录](m2-control-center-understanding.md)与[候选审阅记录](m2-claim-review.md)及[提醒事项反馈](m3-reminders-feedback.md)。
+日期：2026-10-10。此版本包含文件输入、文本理解与用户文字行动闭环；尚不是完整 MVP。当前状态与证据见 [M1 实施记录](m1-file-input.md)、[逐字稿增量记录](m2-transcript-provenance.md)、[认知基础记录](m2-cognitive-foundation.md)及 [权限/端口记录](m2-source-policy-model-port.md)与[真实驱动记录](m2-responses-driver.md)与[控制中心理解记录](m2-control-center-understanding.md)与[候选审阅记录](m2-claim-review.md)及[提醒事项反馈](m3-reminders-feedback.md)。
 
 ## 打开应用
 
@@ -30,7 +30,7 @@ VOICEOS_DATA_DIR="$PWD/runtime/my-local-test" dist/VoiceOS.app/Contents/MacOS/Vo
 
 ## 导出与空库恢复
 
-工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v8，存储 schema 9，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews/actions/action_revisions/reminder_links/reminder_observations 十六类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 、v4/schema 5 、v5/schema 6 、v6/schema 7 与 v7/schema 8 包。它仅覆盖当前已实现的实体，未来新增实体时必须升级格式。包含外部身份映射和回读历史，不包含凭据或系统权限；恢复不携带本机持续连接授权。
+工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v9，存储 schema 10，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews/actions/action_revisions/reminder_links/reminder_observations 十六类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 、v4/schema 5 、v5/schema 6 、v6/schema 7 、v7/schema 8 与 v8/schema 9 包。它仅覆盖当前已实现的实体，未来新增实体时必须升级格式。包含外部身份映射和回读历史，不包含凭据或系统权限；恢复不携带本机持续连接授权。
 
 导出记录文件数量、长度、SHA-256 与未打包原件 ID；原件包先核验原件，再逐字节复制核验。包先在临时目录生成，完成后改名到新目标；不覆盖现有目录。当前同步 actor 快照依靠单写者和原件不可变契约，尚未实现删除，因此不存在资产删除竞态；加入删除/异步导出前必须实现 pin 与取消屏障，不能照搬当前边界。
 
@@ -63,7 +63,7 @@ python3 scripts/app/validate.py --audio /absolute/authorized-short.m4a --video /
 
 ## 认知切片检查
 
-当前只有本地候选存储与失效机制，未接真实模型自动理解。`voiceos-check cognition-fixture` 与 `correction-fixture` 专用于隔离开发库，生成明确测试注记，不是用户功能。原生应用不调用它们。
+当前支持真实文本理解与行动提取；以下夹具用于本地故障验证。`voiceos-check cognition-fixture` 与 `correction-fixture` 专用于隔离开发库，生成明确测试注记，不是用户功能。原生应用不调用它们。
 
 ```sh
 python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-package-with-transcript" --output "$PWD/runtime/new-cognition-run"
@@ -80,3 +80,11 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 本地行动意图可在候选中显式记录，默认进入机会池，明确任务可完成；状态历史保留，认知/来源/权限版本变化会暂停依赖行动。行动语义详见[行动与机会池记录](m2-actions-opportunity.md)。明确任务的提醒事项创建与完成回读现已接入，详见[提醒事项反馈](m3-reminders-feedback.md)。
 
 提醒事项入口：工具栏“连接提醒事项…”授予系统权限后选择明确清单，再从明确任务发送。选择后保存持续授权；原库重启自动恢复，导出恢复须重新连接。已有尝试只回读，不重建。仅本地来源依赖不可发送。当前本地完成/重新跟进不向外更新，外部状态以详情回读记录为准；应用内有变化通知、启动/激活/唤醒核对及五分钟兜底回读，工具栏可停止。详见[持续连接与自动回读](m3-continuous-reminders.md)。开发包包含提醒事项使用说明，正式沙盒与签名尚待验证。
+
+## 用户文字与普通任务自主执行
+
+“记录我的表达”保存自己的原文（最多 4000 Unicode scalar），默认仅本地；不伪造语音转写。音视频导入保持外部/未知身份。授权来源文字并理解后，可提取用户暂定表达与原话行动；已保存清单连接自动发送具有资格的普通任务，机会/AI 建议留本地，期限或复杂任务暂不自动发送。
+
+连接保存会激活此前提取的普通任务；“暂停提醒事项连接”停止后台创建和回读。当前只同步标题，不设置日期/闹钟。更正同一已外发来源的新结果先留本地，避免自动重复承诺。操作和限制见[表达行动闭环](m3-expression-actions.md)。
+
+`python3 scripts/app/validate_expression.py --output "$PWD/runtime/new-expression-check"` 在新隔离目录终止八个进程，检验文字与原子行动结果，无模型/外部写。云端合成 fixture 要求新目录并使用本地配置，禁止对已有目录重复请求；质量样本结果不代表全面验收。

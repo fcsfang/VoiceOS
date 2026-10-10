@@ -78,7 +78,7 @@ final class ControlCenter: ObservableObject {
             reminderLinks = try await store?.reminderLinks() ?? []
             reminderAccess = try await store?.reminderAccess()
             reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
-            if reminderAccess?.enabled == false { reminderSyncStatus = "自动回读已停止 · 外部任务和历史保留" }
+            if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
             records = try await store?.sources() ?? []
             if let store {
                 var loaded: [String: [ModelAttemptRecord]] = [:]
@@ -115,9 +115,17 @@ final class ControlCenter: ObservableObject {
                 let ids = try await store.understandSource(sourceID: record.id, using: port)
                 status = ids.isEmpty ? "理解完成 · 没有提取到陈述" : "理解完成 · \(ids.count) 条陈述待核对"
             } catch { status = error.localizedDescription }
-            await refresh()
+            await refresh(); requestReminderRefresh()
             understandingSource = nil; understandingWorker = nil
         }
+    }
+    func saveExpression(_ text: String, commandID: String) async -> Bool {
+        guard let store else { return false }
+        do {
+            selected = try await store.recordUserExpression(text, commandID: commandID)
+            await refresh(); status = "表达原文已保存 · 仅本地，尚未发送模型或提醒事项"
+            return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
     }
     func export(includeMedia: Bool) {
         let panel = NSSavePanel()
@@ -240,7 +248,7 @@ final class ControlCenter: ObservableObject {
             reminderCalendars = try await reminders.authorize()
             proposedReminderCalendarID = reminderCalendarID
             choosingReminderCalendar = true
-            status = "请选择明确授权的清单 · 尚未读取或写入任务"
+            status = "请选择明确授权的清单 · 本次尚未更改连接"
         } catch { status = error.localizedDescription }
     }
     func saveReminderConnection() async {
@@ -257,7 +265,7 @@ final class ControlCenter: ObservableObject {
         do {
             _ = try await store.setReminderAccess(calendarID: access.calendarID, title: access.title, enabled: false, expectedVersion: access.version)
             reminderRefresh.stop()
-            await refresh(); reminderSyncStatus = "自动回读已停止 · 外部任务和历史保留"
+            await refresh(); reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留"
         } catch { status = error.localizedDescription }
     }
     private func installReminderRefresh() {
@@ -278,6 +286,7 @@ final class ControlCenter: ObservableObject {
         remindersBusy = true
         defer { remindersBusy = false }
         do {
+            try await store.activateExtractedTasks(expectedAccessVersion: access.version, using: reminders)
             try await store.reconcileReminders(expectedAccessVersion: access.version, using: reminders)
             try Task.checkCancellation()
             if reminderAccess?.version == access.version { reminderSyncStatus = "已自动核对「\(access.title)」的关联任务" }
@@ -338,6 +347,7 @@ struct CenterView: View {
     @State private var showClaimHistory = false
     @State private var actionClaim: CandidateClaim?
     @State private var showActionHistory = false
+    @State private var writingExpression = false
     var body: some View {
         NavigationSplitView {
             List(model.filtered, selection: $model.selected) { record in
@@ -354,8 +364,8 @@ struct CenterView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
                         Text(record.name).font(.title2).textSelection(.enabled)
-                        HStack { Label(label(record), systemImage: record.state == "saved" ? "checkmark.circle" : "exclamationmark.circle"); Spacer(); Text(record.kind == "video" ? "视频" : "音频") }
-                        Text("外部资料 · 说话人待核对 · \(record.localOnly ? "仅本机处理" : "文本可用于云端")").font(.callout).foregroundStyle(.secondary)
+                        HStack { Label(label(record), systemImage: record.state == "saved" ? "checkmark.circle" : "exclamationmark.circle"); Spacer(); Text(record.kind == "user_text" ? "文字" : (record.kind == "video" ? "视频" : "音频")) }
+                        Text("\(record.origin == "user" ? "我的直接表达" : "外部资料 · 说话人待核对") · \(record.localOnly ? "仅本机处理" : "文本可用于云端")").font(.callout).foregroundStyle(.secondary)
                         Button(record.localOnly ? "允许这份资料的文本用于云端" : "将这份资料限制为仅本地") { Task { await model.changeTextPolicy(record) } }.disabled(model.changingPolicy)
                         Text("此选项仅授权文本；点击“理解这份文字”才发送所选文字，原始音频和视频仍仅本机。").font(.caption).foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 8) {
@@ -379,11 +389,11 @@ struct CenterView: View {
                                 }
                             }
                         }
-                        Text("\(String(format: "%.1f", record.duration ?? 0)) 秒 · \(ByteCountFormatter.string(fromByteCount: record.bytes, countStyle: .file))").font(.caption).foregroundStyle(.secondary)
+                        Text("\(record.kind == "user_text" ? "原始文字" : String(format: "%.1f 秒", record.duration ?? 0)) · \(ByteCountFormatter.string(fromByteCount: record.bytes, countStyle: .file))").font(.caption).foregroundStyle(.secondary)
                         if record.state == "saved" { Button("打开保存的原件", systemImage: "play.circle") { Task { await model.play(record) } } }
                         Divider()
                         HStack {
-                            Text("逐字稿").font(.headline)
+                            Text(record.kind == "user_text" ? "表达原文" : "逐字稿").font(.headline)
                             Spacer()
                             if record.transcript != nil {
                                 Button("更正文字") { editing = record }
@@ -393,7 +403,7 @@ struct CenterView: View {
                         if let transcript = record.transcript {
                             if transcript.isEmpty { Text("本次转写没有返回文字。可以播放原件核对；这不代表音轨没有人声。").foregroundStyle(.secondary) }
                             else { Text(transcript).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                            Text(record.spans.contains(where: { $0.startMS != nil }) ? "Apple 本地转写 · 中文 · 识别时间定位待核对" : "中文逐字稿 · 时间定位未确认").font(.caption).foregroundStyle(.secondary)
+                            Text(record.kind == "user_text" ? "用户原文 · 无媒体时间定位" : record.spans.contains(where: { $0.startMS != nil }) ? "Apple 本地转写 · 中文 · 识别时间定位待核对" : "中文逐字稿 · 时间定位未确认").font(.caption).foregroundStyle(.secondary)
                             if !record.spans.isEmpty {
                                 DisclosureGroup("来源片段") {
                                     ForEach(record.spans) { span in
@@ -463,6 +473,7 @@ struct CenterView: View {
                                             if let done = link.remoteCompleted { Text(done ? "外部回读：已完成" : "外部回读：未完成").font(.caption) }
                                             Button("回读提醒事项") { Task { await model.readReminder(link) } }.disabled(model.remindersBusy || model.reminderCalendarID != link.calendarID)
                                         } else if action.kind == "task" {
+                                            Text("当前只同步任务标题，不设置期限或提醒时间。").font(.caption).foregroundStyle(.secondary)
                                             Text("目标清单：" + model.reminderCalendarTitle).font(.caption).foregroundStyle(.secondary)
                                             if !model.reminderSourceAllowed(action) { Text("依据包含仅本地资料，不可外发").font(.caption).foregroundStyle(.secondary) }
                                             Button("发送到所选提醒事项清单") { Task { await model.sendReminder(action) } }
@@ -484,7 +495,8 @@ struct CenterView: View {
         }
         .toolbar {
             Button("连接提醒事项…") { Task { await model.connectReminders() } }.disabled(!model.initialized || model.remindersBusy)
-            if model.reminderAccess?.enabled == true { Button("停止自动回读") { Task { await model.disconnectReminders() } } }
+            if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
+            Button("记录我的表达", systemImage: "square.and.pencil") { writingExpression = true }.disabled(!model.initialized)
             Button("导入文件", systemImage: "square.and.arrow.down") { model.chooseFiles() }.disabled(!model.initialized || model.importing)
             Menu {
                 Button("导出结构化资料…") { model.export(includeMedia: false) }
@@ -492,6 +504,7 @@ struct CenterView: View {
             } label: { Label("导出资料", systemImage: "square.and.arrow.up") }.disabled(!model.initialized || model.importing)
         }
         .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
+        .sheet(isPresented: $writingExpression) { UserExpressionView(model: model) { writingExpression = false } }
         .sheet(item: $editing) { record in
             TranscriptCorrectionView(record: record, model: model) { editing = nil }
         }
@@ -513,13 +526,13 @@ struct CenterView: View {
         .sheet(isPresented: $model.choosingReminderCalendar) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("选择提醒事项清单").font(.title2)
-                Text("系统权限覆盖全部提醒事项。VoiceOS 只读写你在这里明确选定清单中的关联任务；选择清单不会发送任务。").foregroundStyle(.secondary)
+                Text("系统权限覆盖全部提醒事项。VoiceOS 只在你明确选定的清单内处理任务。保存授权后会核对已有关联，并自动创建已提取、允许外发的普通明确任务。").foregroundStyle(.secondary)
                 Picker("授权清单", selection: $model.proposedReminderCalendarID) {
                     Text("请选择清单").tag("")
                     ForEach(model.reminderCalendars) { calendar in Text(calendar.title).tag(calendar.id) }
                 }
-                Text("此清单持续授权保存在本机。重开、变化或唤醒后只回读已关联任务，可随时停止；导出恢复不会携带此权限。").font(.caption)
-                HStack { Button("取消") { model.choosingReminderCalendar = false }; Spacer(); Button("保存授权并自动回读") { Task { await model.saveReminderConnection() } }.disabled(model.proposedReminderCalendarID.isEmpty) }
+                Text("此清单持续授权保存在本机。重开、变化或唤醒后核对关联任务，并自动发送已提取、文本允许外发的普通明确任务，可随时停止；导出恢复不会携带此权限。").font(.caption)
+                HStack { Button("取消") { model.choosingReminderCalendar = false }; Spacer(); Button("保存连接授权") { Task { await model.saveReminderConnection() } }.disabled(model.proposedReminderCalendarID.isEmpty) }
             }.padding(24).frame(width: 600)
         }
         .sheet(isPresented: $showActionHistory) {
@@ -531,7 +544,7 @@ struct CenterView: View {
                         VStack(alignment: .leading) {
                             Text("第 \(version.version) 版 · \(version.state == "completed" ? "已完成" : (version.state == "dismissed" ? "暂不跟进" : "待跟进"))")
                             if !version.note.isEmpty { Text(version.note) }
-                            Text(version.actor == "external" ? "来自提醒事项回读" : "明确本地操作").font(.caption)
+                            Text(version.actor == "external" ? "来自提醒事项回读" : (version.actor == "ai" ? "AI 行动候选" : "用户表达或明确操作")).font(.caption)
                             Text(version.createdAt).font(.caption).foregroundStyle(.secondary)
                             Divider()
                         }
@@ -577,7 +590,7 @@ struct CenterView: View {
         }
     }
     private func ownershipLabel(_ value: String) -> String {
-        value == "external" ? "外部主张" : (value == "ai_candidate" ? "AI 候选" : "归属待核对")
+        value == "user_tentative" ? "用户暂定表达" : value == "external" ? "外部主张" : (value == "ai_candidate" ? "AI 候选" : "归属待核对")
     }
     private func reviewLabel(_ value: String) -> String {
         value == "endorsed" ? "明确认可" : (value == "rejected" ? "已拒绝" : "待核对")
@@ -667,7 +680,7 @@ private struct ClaimCorrectionView: View {
             Text("修正 AI 的表述或归属；更正后重新待核对。原始模型结果、出处和历史保留。").foregroundStyle(.secondary)
             TextEditor(text: $text).font(.body).border(.secondary.opacity(0.3))
             Picker("内容归属", selection: $ownership) {
-                Text("外部主张").tag("external"); Text("AI 候选").tag("ai_candidate"); Text("归属待核对").tag("unresolved")
+                Text("用户暂定表达").tag("user_tentative"); Text("外部主张").tag("external"); Text("AI 候选").tag("ai_candidate"); Text("归属待核对").tag("unresolved")
             }
             TextField("更正原因（必填）", text: $note)
             HStack {
@@ -724,5 +737,30 @@ struct ActionCreationView: View {
                     .disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 600)
+    }
+}
+
+struct UserExpressionView: View {
+    @ObservedObject var model: ControlCenter
+    let dismiss: () -> Void
+    @State private var text = ""
+    @State private var saving = false
+    @State private var commandID = UUID().uuidString
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("记录我的表达").font(.title2)
+            Text("在这里写下你自己的想法或行动。引用他人时请明确说明；音视频导入仍按外部资料保存。").foregroundStyle(.secondary)
+            TextEditor(text: $text).frame(minHeight: 200).border(.secondary.opacity(0.2))
+            Text("原文先仅本地保存。允许文字用于云端并发起理解后，普通明确任务会按已保存的提醒事项清单授权自动发送；愿望与 AI 建议留在本地。").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("取消", action: dismiss).disabled(saving)
+                Spacer()
+                Text("\(text.unicodeScalars.count)/4000").font(.caption)
+                Button(saving ? "正在保存…" : "保存表达") {
+                    saving = true
+                    Task { if await model.saveExpression(text, commandID: commandID) { dismiss() }; saving = false }
+                }.keyboardShortcut(.defaultAction).disabled(saving || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
+            }
+        }.padding(24).frame(width: 620)
     }
 }

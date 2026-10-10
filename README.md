@@ -6,11 +6,11 @@ VoiceOS 是语音优先的多模态个人智能系统：让自然表达形成可
 
 ## 当前阶段
 
-2026-10-10：产品/工程文档草稿已交付，M1 文件输入开发预览已实现：Mac 控制中心、音视频导入、可靠保存/重开、本地逐字稿、关键词查询、导出及开发工具空库恢复。M2 已增加来源片段、逐字稿更正与版本历史，持久上下文、候选出处与更正冻结基础已建立；来源文本权限版本与模型响应端口已建立；64 项自动化测试通过；此前 26 项媒体恢复和 7 项认知故障检查通过。真实文本驱动与控制中心理解入口已接入，合成资料的执行、出处、用量及重复发送保护已验证；候选认可/拒绝、更正与审阅历史已实现，十七项认知/行动/提醒事项故障检查通过；本地明确任务、机会池、状态历史和认知依赖冻结已实现；提醒事项创建、唯一回读和外部完成反馈已通过专用清单实测；持续清单授权与自动回读已实现，真实外部修改、重启和停止验证通过；完整 MVP 和 22 项产品验收尚未完成。
+2026-10-10：产品/工程文档草稿已交付，M1 文件输入开发预览已实现：Mac 控制中心、音视频导入、可靠保存/重开、本地逐字稿、关键词查询、导出及开发工具空库恢复。M2 已增加来源片段、逐字稿更正与版本历史，持久上下文、候选出处与更正冻结基础已建立；来源文本权限版本与模型响应端口已建立；69 项自动化测试通过；此前 26 项媒体恢复和 7 项认知故障检查通过。真实文本驱动与控制中心理解入口已接入，合成资料的执行、出处、用量及重复发送保护已验证；候选认可/拒绝、更正与审阅历史已实现，25 项文字/认知/行动/提醒事项故障检查通过；本地明确任务、机会池、状态历史和认知依赖冻结已实现；提醒事项创建、唯一回读和外部完成反馈已通过专用清单实测；持续清单授权与自动回读已实现，真实外部修改、重启和停止验证通过；用户文字原文、自然语言行动提取和普通任务自主创建闭环已验证；完整 MVP 和 22 项产品验收尚未完成。
 
 ## 本地应用
 
-运行 `python3 scripts/app/build.py` 后，双击 `dist/VoiceOS.app`。当前仅在本机处理媒体，默认数据位于 `~/Library/Application Support/VoiceOS`。详见[开发指南](docs/engineering/development-guide.md)、[M1 实施记录](docs/engineering/m1-file-input.md)、[逐字稿记录](docs/engineering/m2-transcript-provenance.md)、[认知基础记录](docs/engineering/m2-cognitive-foundation.md)与 [权限/端口记录](docs/engineering/m2-source-policy-model-port.md)与 [真实驱动记录](docs/engineering/m2-responses-driver.md)与[控制中心理解记录](docs/engineering/m2-control-center-understanding.md)与[候选审阅记录](docs/engineering/m2-claim-review.md)及[行动与机会池](docs/engineering/m2-actions-opportunity.md)与[提醒事项反馈](docs/engineering/m3-reminders-feedback.md)及[持续连接与自动回读](docs/engineering/m3-continuous-reminders.md)。
+运行 `python3 scripts/app/build.py` 后，双击 `dist/VoiceOS.app`。当前仅在本机处理媒体，默认数据位于 `~/Library/Application Support/VoiceOS`。详见[开发指南](docs/engineering/development-guide.md)、[M1 实施记录](docs/engineering/m1-file-input.md)、[逐字稿记录](docs/engineering/m2-transcript-provenance.md)、[认知基础记录](docs/engineering/m2-cognitive-foundation.md)与 [权限/端口记录](docs/engineering/m2-source-policy-model-port.md)与 [真实驱动记录](docs/engineering/m2-responses-driver.md)与[控制中心理解记录](docs/engineering/m2-control-center-understanding.md)与[候选审阅记录](docs/engineering/m2-claim-review.md)及[行动与机会池](docs/engineering/m2-actions-opportunity.md)与[提醒事项反馈](docs/engineering/m3-reminders-feedback.md)及[持续连接与自动回读](docs/engineering/m3-continuous-reminders.md)与[表达行动闭环](docs/engineering/m3-expression-actions.md)。
 
 ## 阅读入口
 
@@ -31,7 +31,7 @@ VoiceOS 是语音优先的多模态个人智能系统：让自然表达形成可
 - [数据模型 v0.1](docs/architecture/data-model.md)：实体、版本、权限、事务、导出恢复和删除约束。
 - [状态机与恢复](docs/architecture/state-machines.md)：保存、处理、外部操作、冲突和旧结果阻断。
 - [架构审查](docs/architecture/review.md)：31 条需求映射、未关闭验证门槛与下一阶段。
-- [技术决策草案](docs/adr/README.md)：六项推荐方案及备选、代价、采用条件。
+- [技术决策草案](docs/adr/README.md)：七项推荐方案及备选、代价、采用条件。
 - [实施路线图](docs/planning/implementation-roadmap.md)：六个里程碑、24 个工作包与全部需求映射。
 - [详细测试计划](docs/testing/test-plan.md)：22 个 AC 的执行步骤、14 项故障子场景、质量与试用判定。
 - [测试夹具目录](docs/testing/fixture-catalog.md)：合成输入、参考依据、权限变体与三条闭环。

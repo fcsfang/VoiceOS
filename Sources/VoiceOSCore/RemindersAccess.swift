@@ -26,6 +26,33 @@ extension VoiceOSStore {
         guard let expectedVersion else { return }
         guard let access = try reminderAccess(), access.enabled, access.calendarID == calendarID, access.version == expectedVersion else { throw VoiceOSError("提醒事项持续授权已变化，停止旧请求") }
     }
+    /// Ordinary extracted tasks only. Durable links still prohibit repeat creation.
+    public func activateExtractedTasks(expectedAccessVersion: Int, using port: any RemindersPort) async throws {
+        guard let access = try reminderAccess() else { throw VoiceOSError("尚未授权提醒事项清单") }
+        try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
+        let linked = Set(try reminderLinks().map(\.actionID))
+        let pending = try actions().filter { $0.autoSend && $0.kind == "task" && !linked.contains($0.id) }
+        var activated = 0
+        for action in pending {
+            if activated == 3 { break }
+            try Task.checkCancellation()
+            try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
+            // Do not let a local-only source block unrelated authorized tasks.
+            let claim = try candidateClaims().first { $0.id == action.claimID }
+            guard let claim, try claim.references.allSatisfy({ try sourcePolicy(sourceID: $0.sourceID).localOnly == false }) else { continue }
+            // Reinterpreting a previously sent source is not fresh user intent.
+            // Keep new proposals local until the user explicitly sends them.
+            let attempt = try db.query("SELECT attempt_id FROM claims WHERE id=?", [claim.id]).first?["attempt_id"]
+            var oldIntent = false
+            for row in try db.query("SELECT c.attempt_id,c.refs_json FROM reminder_links l JOIN actions a ON a.id=l.action_id JOIN claims c ON c.id=a.claim_id WHERE c.attempt_id!=?", [attempt]) {
+                let refs = try JSONDecoder().decode([ClaimReference].self, from: Data(row["refs_json"]!.utf8))
+                if !Set(refs.map(\.sourceID)).isDisjoint(with: Set(claim.references.map(\.sourceID))) { oldIntent = true; break }
+            }
+            if oldIntent { continue }
+            activated += 1
+            try await sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
+        }
+    }
     /// Only reconciles already attempted links; never invokes create or selects another list.
     public func reconcileReminders(expectedAccessVersion: Int, using port: any RemindersPort) async throws {
         guard let access = try reminderAccess() else { throw VoiceOSError("尚未授权提醒事项清单") }

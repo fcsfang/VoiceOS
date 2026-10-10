@@ -33,6 +33,8 @@ public struct SourceRecord: Identifiable, Sendable {
     public let spans: [TranscriptSpan]
     public let localOnly: Bool
     public let policyVersion: Int
+    public let origin: String
+    public let speaker: String
 }
 public enum SaveCheckpoint: String, Sendable {
     case intent, copyChunk, copyComplete, sealed, renamed, savedUncommitted, savedCommitted

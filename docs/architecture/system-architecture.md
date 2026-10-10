@@ -118,3 +118,5 @@ flowchart TD
 ## 7. 审查门槛
 
 本稿能解释机制，不证明它已实现。进入实施基线前，按[审查表](review.md)补足录制边界、模型与检索质量、稳定应用身份、恢复/权限/冲突、备份与删除的实测。无法满足 PRD 时提出证据和产品影响，不悄悄删掉基础 B、英语或完整闭环。
+
+2026-10-10 开发切片增量：schema 10/逻辑包 9 已实现显式用户文字 origin=user/speaker=user、保留原文资产与文字版本；user_tentative 归属和 nullable action 提案与行动同事务提交，auto_send 默认 0，普通明确提取任务经本机连接/来源权限核对有限激活。外部完成仍独立反馈，不认可观点。恢复原提取/行动关系、旧格式 1–8 和旧 schema 9 已核对；完整目标、语音身份与长期闭环未完成。实际字段/边界见[表达行动记录](../engineering/m3-expression-actions.md)与[ADR-007](../adr/007-expression-action-extraction.md)。

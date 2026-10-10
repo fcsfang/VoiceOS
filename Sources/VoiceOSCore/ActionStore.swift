@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-public enum ActionKind: String, Sendable { case task, opportunity, aiSuggestion = "ai_suggestion" }
+public enum ActionKind: String, Codable, Sendable { case task, opportunity, aiSuggestion = "ai_suggestion" }
 public enum ActionIntentActor: String, Sendable { case user, ai }
 public enum LocalActionState: String, Sendable { case open, completed, dismissed }
 public struct ActionRecord: Identifiable, Sendable {
@@ -15,6 +15,7 @@ public struct ActionRecord: Identifiable, Sendable {
     public let state: String
     public let validity: String
     public let version: Int
+    public let autoSend: Bool
 }
 public struct ActionRevision: Identifiable, Sendable {
     public let id: String
@@ -50,7 +51,7 @@ extension VoiceOSStore {
         return try db.query("SELECT * FROM actions \(clause) ORDER BY created_at,id").map(Self.actionRecord)
     }
     private static func actionRecord(_ row: [String: String]) -> ActionRecord {
-        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!)
+        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1")
     }
     @discardableResult
     public func setActionState(actionID: String, expectedVersion: Int, state: LocalActionState, note: String = "", commandID: String = UUID().uuidString) throws -> Int {
@@ -73,11 +74,11 @@ extension VoiceOSStore {
     }
     public func actionHistory(actionID: String) throws -> [ActionRevision] {
         guard let initial = try db.query("SELECT * FROM actions WHERE id=?", [actionID]).first else { throw VoiceOSError("行动不存在") }
-        return [ActionRevision(id: actionID, version: 1, state: "open", note: initial["note"]!, createdAt: initial["created_at"]!, actor: "user")] + (try db.query("SELECT * FROM action_revisions WHERE action_id=? ORDER BY version", [actionID])).map {
+        return [ActionRevision(id: actionID, version: 1, state: "open", note: initial["note"]!, createdAt: initial["created_at"]!, actor: initial["intent_actor"]!)] + (try db.query("SELECT * FROM action_revisions WHERE action_id=? ORDER BY version", [actionID])).map {
             ActionRevision(id: $0["id"]!, version: Int($0["version"]!)!, state: $0["state"]!, note: $0["note"]!, createdAt: $0["created_at"]!, actor: $0["actor"]!)
         }
     }
-    private static func actionHash(_ fields: [String]) throws -> String {
+    static func actionHash(_ fields: [String]) throws -> String {
         SHA256.hash(data: try JSONSerialization.data(withJSONObject: fields)).map { String(format: "%02x", $0) }.joined()
     }
     static func validateStoredActions(_ db: Database) throws {

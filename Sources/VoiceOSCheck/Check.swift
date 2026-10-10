@@ -9,6 +9,8 @@ struct Check {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
             guard args.count >= 2 else { throw VoiceOSError("usage: voiceos-check <import|read|transcribe> <isolated-root> [file] [command-id]") }
+            if args[0] == "expression-eval-fixture" { try await runExpressionEvaluation(args); return }
+            if args[0] == "expression-cloud-fixture" { try await runExpressionCloudFixture(args); return }
             if args[0] == "cloud-fixture" { try await runCloudFixture(args); return }
             if args[0] == "restore" {
                 guard args.count == 3 else { throw VoiceOSError("restore requires package path") }
@@ -24,6 +26,16 @@ struct Check {
             if args[0] == "import" {
                 guard args.count >= 3 else { throw VoiceOSError("missing file") }
                 _ = try await store.importFile(URL(fileURLWithPath: args[2]), commandID: args.count > 3 ? args[3] : UUID().uuidString)
+            } else if args[0] == "expression-fixture" {
+                _ = try await store.recordUserExpression("我会整理开发验证素材。以后也许研究检索。我现在不打算学习摄影。", commandID: "synthetic-expression")
+            } else if args[0] == "extracted-action-fixture" {
+                guard let source = try await store.sources().first(where: { $0.origin == "user" }) else { throw VoiceOSError("fixture requires user text") }
+                let snapshot = try await store.prepareLocalTranscriptContext(sourceIDs: [source.id])
+                let context = try await store.persistLocalContext(snapshot, commandID: "synthetic-action-context")
+                let attempt = try await store.reserveLocalModelAttempt(contextID: context, model: "fixture", promptVersion: "v2", schemaVersion: "v2")
+                let input = snapshot.sources[0]
+                let refs = [ClaimReference(sourceID: source.id, transcriptVersionID: input.transcriptVersionID, spanID: input.spans[0].id)]
+                _ = try await store.commitLocalClaims(attemptID: attempt, proposals: [ClaimProposal(statement: "我会整理开发验证素材", ownership: .userTentative, references: refs, action: ExtractedAction(title: "整理开发验证素材", kind: .task, quote: "我会整理开发验证素材", autoSend: true))])
             } else if args[0] == "export" {
                 guard args.count >= 3 else { throw VoiceOSError("export requires new package directory") }
                 try await store.exportPackage(to: URL(fileURLWithPath: args[2]), includeMedia: args.count == 4 && args[3] == "media")
