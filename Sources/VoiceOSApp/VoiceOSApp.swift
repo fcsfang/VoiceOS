@@ -34,10 +34,18 @@ final class ControlCenter: ObservableObject {
     @Published var reminderLinks: [ReminderLink] = []
     @Published var reminderCalendars: [ReminderCalendar] = []
     @Published var reminderCalendarID = ""
+    @Published var proposedReminderCalendarID = ""
+    @Published var reminderAccess: ReminderAccess?
+    @Published var reminderSyncStatus = "尚未启用自动回读"
+    private var reminderObservers: [NSObjectProtocol] = []
+    private var wakeObserver: NSObjectProtocol?
+    private var reminderTimer: Timer?
+    private lazy var reminderRefresh = ReminderRefreshCoordinator { [weak self] in await self?.automaticReminderRefresh() }
+
     @Published var remindersBusy = false
     @Published var choosingReminderCalendar = false
     private let reminders = NativeReminders()
-    var reminderCalendarTitle: String { reminderCalendars.first { $0.id == reminderCalendarID }?.title ?? "未选择清单" }
+    var reminderCalendarTitle: String { reminderCalendars.first { $0.id == reminderCalendarID }?.title ?? (reminderAccess?.enabled == true ? reminderAccess!.title : "未选择清单") }
     func reminderSourceAllowed(_ action: ActionRecord) -> Bool {
         guard let claim = claims.first(where: { $0.id == action.claimID }) else { return false }
         return !claim.references.isEmpty && claim.references.allSatisfy { ref in records.contains { $0.id == ref.sourceID && !$0.localOnly } }
@@ -59,6 +67,8 @@ final class ControlCenter: ObservableObject {
             }
             await refresh()
             scheduleProcessing()
+            installReminderRefresh()
+            requestReminderRefresh()
         } catch { status = error.localizedDescription }
     }
     func refresh() async {
@@ -66,6 +76,9 @@ final class ControlCenter: ObservableObject {
             claims = try await store?.candidateClaims(includeFrozen: true) ?? []
             actionRecords = try await store?.actions(includeHistory: true) ?? []
             reminderLinks = try await store?.reminderLinks() ?? []
+            reminderAccess = try await store?.reminderAccess()
+            reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
+            if reminderAccess?.enabled == false { reminderSyncStatus = "自动回读已停止 · 外部任务和历史保留" }
             records = try await store?.sources() ?? []
             if let store {
                 var loaded: [String: [ModelAttemptRecord]] = [:]
@@ -225,24 +238,68 @@ final class ControlCenter: ObservableObject {
         remindersBusy = true; defer { remindersBusy = false }
         do {
             reminderCalendars = try await reminders.authorize()
+            proposedReminderCalendarID = reminderCalendarID
             choosingReminderCalendar = true
             status = "请选择明确授权的清单 · 尚未读取或写入任务"
         } catch { status = error.localizedDescription }
     }
-    func sendReminder(_ action: ActionRecord) async {
-        guard let store, !remindersBusy, !reminderCalendarID.isEmpty else { return }
-        remindersBusy = true; defer { remindersBusy = false }
+    func saveReminderConnection() async {
+        guard let store, let calendar = reminderCalendars.first(where: { $0.id == proposedReminderCalendarID }) else { return }
         do {
-            try await store.sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: reminderCalendarID, using: reminders)
+            reminderAccess = try await store.setReminderAccess(calendarID: calendar.id, title: calendar.title, enabled: true, expectedVersion: reminderAccess?.version ?? 0)
+            choosingReminderCalendar = false
+            status = "提醒事项持续授权已保存"
+            await refresh(); requestReminderRefresh()
+        } catch { status = error.localizedDescription }
+    }
+    func disconnectReminders() async {
+        guard let store, let access = reminderAccess else { return }
+        do {
+            _ = try await store.setReminderAccess(calendarID: access.calendarID, title: access.title, enabled: false, expectedVersion: access.version)
+            reminderRefresh.stop()
+            await refresh(); reminderSyncStatus = "自动回读已停止 · 外部任务和历史保留"
+        } catch { status = error.localizedDescription }
+    }
+    private func installReminderRefresh() {
+        guard reminderObservers.isEmpty else { return }
+        reminderObservers.append(reminders.observeChanges { [weak self] in self?.requestReminderRefresh() })
+        reminderObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh() } })
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh() } }
+        reminderTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh() } }
+    }
+    private func requestReminderRefresh() {
+        guard reminderAccess?.enabled == true else { return }
+        reminderRefresh.request()
+    }
+    private func automaticReminderRefresh() async {
+        guard let store, let access = reminderAccess, access.enabled else { return }
+        if remindersBusy { return }
+        guard reminders.isAuthorized else { reminderSyncStatus = "系统权限不可用 · 自动回读暂停"; return }
+        remindersBusy = true
+        defer { remindersBusy = false }
+        do {
+            try await store.reconcileReminders(expectedAccessVersion: access.version, using: reminders)
+            try Task.checkCancellation()
+            if reminderAccess?.version == access.version { reminderSyncStatus = "已自动核对「\(access.title)」的关联任务" }
+        } catch {
+            if reminderAccess?.version == access.version { reminderSyncStatus = "自动回读未完成 · 保留历史，不自动重建" }
+        }
+        await refresh()
+    }
+    func sendReminder(_ action: ActionRecord) async {
+        guard let store, let access = reminderAccess, access.enabled, !remindersBusy, !reminderCalendarID.isEmpty else { return }
+        remindersBusy = true; defer { remindersBusy = false; requestReminderRefresh() }
+        do {
+            try await store.sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: reminderCalendarID, using: reminders, expectedAccessVersion: access.version)
             status = "提醒事项尝试已记录 · 以回读状态为准"
         } catch { status = error.localizedDescription }
         await refresh()
     }
     func readReminder(_ link: ReminderLink) async {
-        guard let store, !remindersBusy, reminderCalendarID == link.calendarID else { return }
-        remindersBusy = true; defer { remindersBusy = false }
+        guard let store, let access = reminderAccess, access.enabled, !remindersBusy, reminderCalendarID == link.calendarID else { return }
+        remindersBusy = true; defer { remindersBusy = false; requestReminderRefresh() }
         do {
-            try await store.readReminder(linkID: link.id, calendarID: reminderCalendarID, using: reminders)
+            try await store.readReminder(linkID: link.id, calendarID: reminderCalendarID, using: reminders, expectedAccessVersion: access.version)
             status = "已回读关联任务 · 外部改名保留，完成反馈独立记录"
         } catch { status = error.localizedDescription }
         await refresh()
@@ -402,7 +459,7 @@ struct CenterView: View {
                                         if let link {
                                             Text("提醒事项：" + reminderLabel(link.state)).font(.caption).foregroundStyle(.secondary)
                                             if let title = link.remoteTitle { Text("外部标题：" + title).font(.caption) }
-                                            if let at = link.lastObservedAt { Text("最近回读记录：" + at).font(.caption).foregroundStyle(.secondary) }
+                                            if let at = link.lastCheckedAt ?? link.lastObservedAt { Text("最近核对：" + at).font(.caption).foregroundStyle(.secondary) }
                                             if let done = link.remoteCompleted { Text(done ? "外部回读：已完成" : "外部回读：未完成").font(.caption) }
                                             Button("回读提醒事项") { Task { await model.readReminder(link) } }.disabled(model.remindersBusy || model.reminderCalendarID != link.calendarID)
                                         } else if action.kind == "task" {
@@ -427,13 +484,14 @@ struct CenterView: View {
         }
         .toolbar {
             Button("连接提醒事项…") { Task { await model.connectReminders() } }.disabled(!model.initialized || model.remindersBusy)
+            if model.reminderAccess?.enabled == true { Button("停止自动回读") { Task { await model.disconnectReminders() } } }
             Button("导入文件", systemImage: "square.and.arrow.down") { model.chooseFiles() }.disabled(!model.initialized || model.importing)
             Menu {
                 Button("导出结构化资料…") { model.export(includeMedia: false) }
                 Button("导出资料与原件…") { model.export(includeMedia: true) }
             } label: { Label("导出资料", systemImage: "square.and.arrow.up") }.disabled(!model.initialized || model.importing)
         }
-        .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
+        .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
         .sheet(item: $editing) { record in
             TranscriptCorrectionView(record: record, model: model) { editing = nil }
         }
@@ -456,12 +514,12 @@ struct CenterView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("选择提醒事项清单").font(.title2)
                 Text("系统权限覆盖全部提醒事项。VoiceOS 只读写你在这里明确选定清单中的关联任务；选择清单不会发送任务。").foregroundStyle(.secondary)
-                Picker("授权清单", selection: $model.reminderCalendarID) {
+                Picker("授权清单", selection: $model.proposedReminderCalendarID) {
                     Text("请选择清单").tag("")
                     ForEach(model.reminderCalendars) { calendar in Text(calendar.title).tag(calendar.id) }
                 }
-                Text("重开应用后需重新选择清单；已有尝试只回读，不自动重建。").font(.caption)
-                Button("完成") { model.choosingReminderCalendar = false }
+                Text("此清单持续授权保存在本机。重开、变化或唤醒后只回读已关联任务，可随时停止；导出恢复不会携带此权限。").font(.caption)
+                HStack { Button("取消") { model.choosingReminderCalendar = false }; Spacer(); Button("保存授权并自动回读") { Task { await model.saveReminderConnection() } }.disabled(model.proposedReminderCalendarID.isEmpty) }
             }.padding(24).frame(width: 600)
         }
         .sheet(isPresented: $showActionHistory) {

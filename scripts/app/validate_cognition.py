@@ -19,6 +19,7 @@ for checkpoint in ['modelReserved','claimsUncommitted','claimsCommitted','correc
     run('restore', root, extra=[a.package.resolve()])
     with sqlite3.connect(root/'voiceos.sqlite') as db:
         assert db.execute('select count(*) from contexts').fetchone()[0] == 0, 'Use an input-only package without existing cognitive receipts.'
+        assert db.execute('select count(*) from transcripts').fetchone()[0] == 1, 'Use a single-transcript fixture so correction and cognition target the same source.'
     if checkpoint.startswith(('correction','policy','review','action')):
         run('cognition-fixture', root)
     if checkpoint.startswith(('correction','policy','review','actionState')):

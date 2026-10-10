@@ -30,7 +30,7 @@ VOICEOS_DATA_DIR="$PWD/runtime/my-local-test" dist/VoiceOS.app/Contents/MacOS/Vo
 
 ## 导出与空库恢复
 
-工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v7，存储 schema 8，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews/actions/action_revisions/reminder_links/reminder_observations 十六类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 、v4/schema 5 、v5/schema 6 与 v6/schema 7 包。它仅覆盖当前已实现的实体，未来新增实体时必须升级格式。包含外部身份映射和回读历史，不包含凭据或系统权限；恢复不携带本次会话选择的授权清单。
+工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v8，存储 schema 9，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews/actions/action_revisions/reminder_links/reminder_observations 十六类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 、v4/schema 5 、v5/schema 6 、v6/schema 7 与 v7/schema 8 包。它仅覆盖当前已实现的实体，未来新增实体时必须升级格式。包含外部身份映射和回读历史，不包含凭据或系统权限；恢复不携带本机持续连接授权。
 
 导出记录文件数量、长度、SHA-256 与未打包原件 ID；原件包先核验原件，再逐字节复制核验。包先在临时目录生成，完成后改名到新目标；不覆盖现有目录。当前同步 actor 快照依靠单写者和原件不可变契约，尚未实现删除，因此不存在资产删除竞态；加入删除/异步导出前必须实现 pin 与取消屏障，不能照搬当前边界。
 
@@ -69,7 +69,7 @@ python3 scripts/app/validate.py --audio /absolute/authorized-short.m4a --video /
 python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-package-with-transcript" --output "$PWD/runtime/new-cognition-run"
 ```
 
-脚本要求新输出目录，要求输入包有非空逐字稿且没有认知回执，恢复后在独立测试库实际终止九个进程，核对提交及冻结原子性，不发送请求或操作提醒事项。查看候选时 current 表示依据未失效；未验证仍是未验证。历史被保留不等于认可。
+脚本要求新输出目录，要求输入包有且仅有一份非空逐字稿且没有认知回执，恢复后在独立测试库实际终止十三个进程，核对提交及冻结原子性，不发送请求或操作提醒事项。查看候选时 current 表示依据未失效；未验证仍是未验证。历史被保留不等于认可。
 
 来源详情可允许文本用于云端或限制为仅本地。授权按钮只更新权限，不触发网络发送。配置文本模型后，点击“理解这份文字”才发送选中资料的文字；原始音视频权限独立，保持本机处理。
 
@@ -79,4 +79,4 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 
 本地行动意图可在候选中显式记录，默认进入机会池，明确任务可完成；状态历史保留，认知/来源/权限版本变化会暂停依赖行动。行动语义详见[行动与机会池记录](m2-actions-opportunity.md)。明确任务的提醒事项创建与完成回读现已接入，详见[提醒事项反馈](m3-reminders-feedback.md)。
 
-提醒事项入口：工具栏“连接提醒事项…”授予系统权限后选择明确清单，再从明确任务发送。每次重开需重新选清单；已有尝试只回读，不重建。仅本地来源依赖不可发送。当前本地完成/重新跟进不向外更新，外部状态以详情回读记录为准；无后台监听或自动轮询。开发包包含提醒事项使用说明，正式沙盒与签名尚待验证。
+提醒事项入口：工具栏“连接提醒事项…”授予系统权限后选择明确清单，再从明确任务发送。选择后保存持续授权；原库重启自动恢复，导出恢复须重新连接。已有尝试只回读，不重建。仅本地来源依赖不可发送。当前本地完成/重新跟进不向外更新，外部状态以详情回读记录为准；应用内有变化通知、启动/激活/唤醒核对及五分钟兜底回读，工具栏可停止。详见[持续连接与自动回读](m3-continuous-reminders.md)。开发包包含提醒事项使用说明，正式沙盒与签名尚待验证。

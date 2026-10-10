@@ -65,6 +65,7 @@ private actor TestReminders: RemindersPort {
     func duplicate() { let item = items[0]; items.append(ReminderSnapshot(id: UUID().uuidString, title: item.title, completed: item.completed, marker: item.marker)) }
     func removeAll() { items = [] }
     func setDeny() { deny = true }
+    func suspendRead() { suspended = true }
     func waitStarted() async { if gate == nil { await withCheckedContinuation { started = $0 } } }
     func release() { gate?.resume(); gate = nil }
 }
@@ -394,6 +395,47 @@ final class StoreTests: XCTestCase {
         let target = base.appendingPathComponent("missing-feedback-target")
         do { try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector()); XCTFail("missing remote evidence") } catch { XCTAssertTrue(error.localizedDescription.contains("回读")) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+    }
+    func testReminderAccessCASPersistenceAndPortableRestoreDoesNotTransferAuthority() async throws {
+        let store = try await store(); _ = try await reminderFixture(store)
+        let access = try await store.setReminderAccess(calendarID: "authorized", title: "专用清单", enabled: true, expectedVersion: 0)
+        XCTAssertEqual(access.version, 1)
+        let same = try await store.setReminderAccess(calendarID: "authorized", title: "专用清单", enabled: true, expectedVersion: 1); XCTAssertEqual(same.version, 1)
+        do { _ = try await store.setReminderAccess(calendarID: "other", title: "另一个", enabled: true, expectedVersion: 0); XCTFail("stale authorization") } catch {}
+        let package = base.appendingPathComponent("local-access-package"); try await store.exportPackage(to: package)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: package.appendingPathComponent("reminder_access.jsonl").path))
+        let root = base.appendingPathComponent("local-access-restored"); try await VoiceOSStore.restorePackage(from: package, to: root, inspector: Inspector())
+        let restored = try VoiceOSStore(root: root, inspector: Inspector()); try await restored.recover()
+        let migratedAccess = try await restored.reminderAccess(); XCTAssertNil(migratedAccess)
+        let stop = try await store.setReminderAccess(calendarID: "authorized", title: "专用清单", enabled: false, expectedVersion: 1); XCTAssertEqual(stop.version, 2)
+    }
+    func testRevokedAccessDiscardsLateReadWithoutCompletingAction() async throws {
+        let store = try await store(); let (_,id) = try await reminderFixture(store); let port = TestReminders()
+        let access = try await store.setReminderAccess(calendarID: "authorized", title: "专用清单", enabled: true, expectedVersion: 0)
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port, expectedAccessVersion: access.version)
+        let link = try await store.reminderLinks()[0]; await port.suspendRead()
+        let running = Task { try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port, expectedAccessVersion: 1) }
+        await port.waitStarted()
+        _ = try await store.setReminderAccess(calendarID: "authorized", title: "专用清单", enabled: false, expectedVersion: 1)
+        await port.edit(completed: true); await port.release()
+        do { try await running.value; XCTFail("late completion") } catch {}
+        let action = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(action.state, "open"); XCTAssertEqual(action.version, 1)
+        let updated = try await store.reminderLinks()[0]; XCTAssertEqual(updated.remoteCompleted, false)
+        do { try await store.reconcileReminders(expectedAccessVersion: 2, using: port); XCTFail("disabled access") } catch {}
+    }
+    func testAutomaticReconciliationOnlyReadsExistingScopedLinksAndDeduplicatesHistory() async throws {
+        let store = try await store(); let (claim,id) = try await reminderFixture(store); let port = TestReminders(loseReceipt: true)
+        do { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port) } catch {}
+        _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "尚未发送的明确任务", kind: .task)
+        _ = try await store.setReminderAccess(calendarID: "other", title: "其他清单", enabled: true, expectedVersion: 0)
+        try await store.reconcileReminders(expectedAccessVersion: 1, using: port)
+        var link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "unknown")
+        _ = try await store.setReminderAccess(calendarID: "authorized", title: "专用清单", enabled: true, expectedVersion: 1)
+        for _ in 0..<3 { try await store.reconcileReminders(expectedAccessVersion: 2, using: port) }
+        link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "linked"); XCTAssertNotNil(link.lastCheckedAt)
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
+        let package = base.appendingPathComponent("deduplicated-observations"); try await store.exportPackage(to: package)
+        let lines = try String(contentsOf: package.appendingPathComponent("reminder_observations.jsonl")).split(separator: "\n"); XCTAssertEqual(lines.count, 1)
     }
     func testSameCommandIsIdempotentButNewCommandKeepsDistinctEvent() async throws {
         let store = try await store(); let input = try fixture()

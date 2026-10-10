@@ -12,6 +12,11 @@ public final class NativeReminders: RemindersPort {
     private let store = EKEventStore()
     private var reading = false
     public init() {}
+    public var isAuthorized: Bool { EKEventStore.authorizationStatus(for: .reminder) == .fullAccess }
+    public func observeChanges(_ handler: @escaping @MainActor () -> Void) -> NSObjectProtocol {
+        NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: store, queue: .main) { _ in Task { @MainActor in handler() } }
+    }
+
     public func authorize() async throws -> [ReminderCalendar] {
         guard try await store.requestFullAccessToReminders() else { throw VoiceOSError("提醒事项权限未授予；没有读取或写入任务") }
         return store.calendars(for: .reminder).filter(\.allowsContentModifications).map { ReminderCalendar(id: $0.calendarIdentifier, title: $0.title) }

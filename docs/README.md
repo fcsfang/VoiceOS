@@ -58,3 +58,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M2 明确行动与机会池](engineering/m2-actions-opportunity.md)：任务/探索意图、状态反馈、认知版本依赖和迁移验证。
 
 - [M3 提醒事项创建与完成反馈](engineering/m3-reminders-feedback.md)：原生清单范围、未知结果核对、外部编辑保留与反馈历史。
+
+- [M3 持续连接与自动回读](engineering/m3-continuous-reminders.md)：本机持久清单授权、事件合并、停止和迁移不携带连接权限。

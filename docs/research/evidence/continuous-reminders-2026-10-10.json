@@ -1,0 +1,59 @@
+{
+  "date": "2026-10-10",
+  "slice": "persistent local connection and automatic scoped readback",
+  "automated_tests": 64,
+  "tests_passed": true,
+  "sigkill_checks": 17,
+  "sigkill_reminders_backend": "durable service simulator; not native EventKit crash",
+  "real_ui": {
+    "existing_test_list_only": true,
+    "existing_synthetic_task_only": true,
+    "external_rename_without_manual_read": true,
+    "external_reopen_retains_local_completed_conflict": true,
+    "external_recompletion_no_new_action_version": true,
+    "actual_process_restart_restores_enabled_scope": true,
+    "stop_persisted": true,
+    "external_edit_and_activation_after_stop_no_readback": true,
+    "disabled_scope_survives_restart": true,
+    "new_tasks_created": 0,
+    "deleted_tasks": 0,
+    "access_versions": 2,
+    "observations": 5,
+    "external_completion_revisions": 1,
+    "action_version": 2
+  },
+  "migration": {
+    "roundtrip_format": 8,
+    "schema": 9,
+    "portable_tables": 16,
+    "grant_restored": false,
+    "identical_history_tables": 11,
+    "legacy_formats": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "schema8_existing_tables_preserved": 16
+  },
+  "vision_baseline_files": 23,
+  "agents_unchanged": true,
+  "new_model_calls": 0,
+  "raw_media_cloud_uploads": 0,
+  "fixture_correction": "Three-transcript package failed single-source assumptions; reran all 13 with existing single-transcript package and added early guard",
+  "not_verified": [
+    "physical sleep/wake",
+    "isolated five-minute timer trigger",
+    "real OS permission revocation",
+    "iCloud offline or delayed identity changes",
+    "native EventKit save hard crash",
+    "bounded fetch cancellation",
+    "production sandbox/signing",
+    "full product MVP"
+  ],
+  "build_passed": true,
+  "development_signature_verified": true
+}

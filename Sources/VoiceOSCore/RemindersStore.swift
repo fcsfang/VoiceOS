@@ -23,18 +23,20 @@ public struct ReminderLink: Identifiable, Sendable {
     public let remoteTitle: String?
     public let remoteCompleted: Bool?
     public let lastObservedAt: String?
+    public let lastCheckedAt: String?
 }
 extension VoiceOSStore {
     public func reminderLinks() throws -> [ReminderLink] {
         try db.query("SELECT l.*,o.title AS remote_title,o.completed AS remote_completed,o.created_at AS observed_at FROM reminder_links l LEFT JOIN reminder_observations o ON o.id=(SELECT id FROM reminder_observations WHERE link_id=l.id ORDER BY sequence DESC LIMIT 1) ORDER BY l.created_at,l.id").map {
-            ReminderLink(id: $0["id"]!, actionID: $0["action_id"]!, calendarID: $0["calendar_id"]!, state: $0["state"]!, externalID: $0["external_id"], remoteTitle: $0["remote_title"], remoteCompleted: $0["remote_completed"].map { $0 == "1" }, lastObservedAt: $0["observed_at"])
+            ReminderLink(id: $0["id"]!, actionID: $0["action_id"]!, calendarID: $0["calendar_id"]!, state: $0["state"]!, externalID: $0["external_id"], remoteTitle: $0["remote_title"], remoteCompleted: $0["remote_completed"].map { $0 == "1" }, lastObservedAt: $0["observed_at"], lastCheckedAt: $0["last_checked_at"])
         }
     }
     /// One create attempt per action identity. Every subsequent invocation only reads.
-    public func sendTaskToReminders(actionID: String, expectedVersion: Int, calendarID: String, using port: any RemindersPort) async throws {
+    public func sendTaskToReminders(actionID: String, expectedVersion: Int, calendarID: String, using port: any RemindersPort, expectedAccessVersion: Int? = nil) async throws {
+        try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
         if let existing = try db.query("SELECT * FROM reminder_links WHERE action_id=?", [actionID]).first {
             guard existing["calendar_id"] == calendarID else { throw VoiceOSError("已有提醒事项尝试，不能更换清单重复创建") }
-            try await readReminder(linkID: existing["id"]!, calendarID: calendarID, using: port); return
+            try await readReminder(linkID: existing["id"]!, calendarID: calendarID, using: port, expectedAccessVersion: expectedAccessVersion); return
         }
         guard !calendarID.isEmpty, calendarID.utf8.count <= 4096,
               let action = try actions().first(where: { $0.id == actionID }), action.version == expectedVersion, action.kind == "task", action.intentActor == "user" else {
@@ -48,6 +50,7 @@ extension VoiceOSStore {
             try checkpoint(.reminderReserved)
             // Explicit preflight query. Absence after a prior attempt never permits recreation.
             let found = try await port.find(calendarID: calendarID, externalID: nil, marker: marker)
+            try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
             guard found.isEmpty else { throw VoiceOSError("操作标记已有匹配，停止新建并请回读") }
             guard let current = try actions().first(where: { $0.id == actionID }), current.version == expectedVersion, try reminderSourceAllowed(current) else { throw VoiceOSError("发送前行动或依据已变化") }
             try await port.create(calendarID: calendarID, title: action.title, marker: marker)
@@ -55,6 +58,8 @@ extension VoiceOSStore {
             // Save return is not readback evidence. Record ambiguity before the next await.
             try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=?", [id])
             let matches = try await port.find(calendarID: calendarID, externalID: nil, marker: marker)
+            try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
+            try Task.checkCancellation()
             try applyReminder(matches, linkID: id)
         } catch {
             try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=? AND state='reserved'", [id])
@@ -67,12 +72,15 @@ extension VoiceOSStore {
             try db.query("SELECT local_only FROM sources WHERE id=?", [ref.sourceID]).first?["local_only"] == "0"
         }
     }
-    public func readReminder(linkID: String, calendarID: String, using port: any RemindersPort) async throws {
+    public func readReminder(linkID: String, calendarID: String, using port: any RemindersPort, expectedAccessVersion: Int? = nil) async throws {
+        try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
         guard !activeReminderLinks.contains(linkID) else { throw VoiceOSError("提醒事项操作正在进行") }
         guard let link = try db.query("SELECT * FROM reminder_links WHERE id=?", [linkID]).first, link["calendar_id"] == calendarID else { throw VoiceOSError("只能回读明确选定清单内的关联任务") }
         activeReminderLinks.insert(linkID); defer { activeReminderLinks.remove(linkID) }
         do {
             let matches = try await port.find(calendarID: calendarID, externalID: link["external_id"], marker: link["marker"]!)
+            try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
+            try Task.checkCancellation()
             try applyReminder(matches, linkID: linkID)
         } catch {
             try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=?", [linkID])
@@ -82,7 +90,7 @@ extension VoiceOSStore {
     private func applyReminder(_ matches: [ReminderSnapshot], linkID: String) throws {
         guard let link = try db.query("SELECT * FROM reminder_links WHERE id=?", [linkID]).first else { throw VoiceOSError("提醒事项关联缺失") }
         guard matches.count == 1, let remote = matches.first else {
-            try db.execute("UPDATE reminder_links SET state=? WHERE id=?", [matches.isEmpty ? "missing" : "conflict",linkID]); return
+            try db.execute("UPDATE reminder_links SET state=?,last_checked_at=? WHERE id=?", [matches.isEmpty ? "missing" : "conflict",ISO8601DateFormatter().string(from: Date()),linkID]); return
         }
         guard !remote.id.isEmpty, remote.id.utf8.count <= 4096, remote.title.unicodeScalars.count <= 10000, remote.marker.utf8.count <= 4096 else { throw VoiceOSError("提醒事项字段无效或过长") }
         let action = try actions(includeHistory: true).first { $0.id == link["action_id"] }
@@ -107,8 +115,12 @@ extension VoiceOSStore {
                     conflict = true
                 }
             }
-            try db.execute("INSERT INTO reminder_observations(id,link_id,external_id,title,completed,marker_valid,feedback_revision_id,created_at,sequence) VALUES(?,?,?,?,?,?,?,?,?)", [observationID,linkID,remote.id,remote.title,remote.completed ? "1" : "0",validMarker ? "1" : "0",feedbackID,ISO8601DateFormatter().string(from: Date()),String(sequence)])
-            try db.execute("UPDATE reminder_links SET state=?,external_id=? WHERE id=?", [conflict ? "conflict" : "linked",remote.id,linkID])
+            let prior = try db.query("SELECT * FROM reminder_observations WHERE link_id=? ORDER BY sequence DESC LIMIT 1", [linkID]).first
+            let changed = prior?["external_id"] != remote.id || prior?["title"] != remote.title || prior?["completed"] != (remote.completed ? "1" : "0") || prior?["marker_valid"] != (validMarker ? "1" : "0")
+            if changed || feedbackID != nil {
+                try db.execute("INSERT INTO reminder_observations(id,link_id,external_id,title,completed,marker_valid,feedback_revision_id,created_at,sequence) VALUES(?,?,?,?,?,?,?,?,?)", [observationID,linkID,remote.id,remote.title,remote.completed ? "1" : "0",validMarker ? "1" : "0",feedbackID,ISO8601DateFormatter().string(from: Date()),String(sequence)])
+            }
+            try db.execute("UPDATE reminder_links SET state=?,external_id=?,last_checked_at=? WHERE id=?", [conflict ? "conflict" : "linked",remote.id,ISO8601DateFormatter().string(from: Date()),linkID])
             try checkpoint(.reminderFeedbackUncommitted)
         }
         try checkpoint(.reminderFeedbackCommitted)
