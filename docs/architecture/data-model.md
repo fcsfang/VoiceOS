@@ -1,6 +1,6 @@
 # VoiceOS 数据模型 v0.1
 
-日期：2026-10-10。状态：工程草稿；字段、枚举与格式尚未冻结，无数据库实现。依据：[PRD](../product/prd.md)；配套：[架构](system-architecture.md)、[状态机](state-machines.md)、[ADR](../adr/README.md)。
+日期：2026-10-10。状态：工程草稿；完整概念模型尚未冻结；Source/Asset/Job/Transcript 输入子集已有版本化 SQLite 实现，见[实施记录](../engineering/m1-file-input.md)。依据：[PRD](../product/prd.md)；配套：[架构](system-architecture.md)、[状态机](state-machines.md)、[ADR](../adr/README.md)。
 
 ## 1. 身份、版本与时间
 

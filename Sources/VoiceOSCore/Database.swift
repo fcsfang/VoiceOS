@@ -1,0 +1,114 @@
+import Foundation
+import CSQLite
+
+// Confined to the Store actor. No SQLite transaction spans an await.
+final class Database {
+    private var handle: OpaquePointer?
+    init(_ url: URL) throws {
+        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            throw VoiceOSError("无法打开资料库")
+        }
+        do { try configure() }
+        catch { sqlite3_close(handle); handle = nil; throw error }
+    }
+    private func configure() throws {
+        sqlite3_busy_timeout(handle, 5000)
+        try execute("PRAGMA foreign_keys=ON")
+        try execute("PRAGMA journal_mode=WAL")
+        try execute("PRAGMA synchronous=FULL")
+        let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
+        guard ["0", "1", "2"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        if version == "1" {
+            // Add reference-only state without silently rewriting a newer schema.
+            guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
+            let revised = original.replacingOccurrences(of: "CREATE TABLE sources", with: "CREATE TABLE sources_next").replacingOccurrences(of: "'quarantined'))", with: "'quarantined','reference_only'))")
+            try execute("PRAGMA foreign_keys=OFF")
+            do {
+                try transaction {
+                    try execute(revised)
+                    try execute("INSERT INTO sources_next SELECT * FROM sources")
+                    try execute("DROP TABLE sources")
+                    try execute("ALTER TABLE sources_next RENAME TO sources")
+                    guard try query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("资料库升级引用校验失败") }
+                    try execute("PRAGMA user_version=2")
+                }
+            } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
+            try execute("PRAGMA foreign_keys=ON")
+        }
+        if version == "0" {
+            try transaction {
+                try execute("""
+                CREATE TABLE sources (
+                  id TEXT PRIMARY KEY, command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL,
+                  asset_id TEXT NOT NULL UNIQUE, version_id TEXT NOT NULL UNIQUE, version INTEGER NOT NULL DEFAULT 1,
+                  name TEXT NOT NULL, kind TEXT NOT NULL, speaker TEXT NOT NULL DEFAULT 'unknown', origin TEXT NOT NULL DEFAULT 'external',
+                  state TEXT NOT NULL CHECK(state IN ('receiving','sealed','saved','interrupted','quarantined','reference_only')),
+                  created_at TEXT NOT NULL, timezone TEXT NOT NULL, expected_bytes INTEGER NOT NULL,
+                  expected_hash TEXT NOT NULL, relative_path TEXT NOT NULL UNIQUE, duration REAL,
+                  local_only INTEGER NOT NULL DEFAULT 1, error TEXT
+                )
+                """)
+                try execute("""
+                CREATE TABLE assets (
+                  id TEXT PRIMARY KEY, source_id TEXT NOT NULL UNIQUE REFERENCES sources(id),
+                  relative_path TEXT NOT NULL UNIQUE, bytes INTEGER NOT NULL, sha256 TEXT NOT NULL,
+                  role TEXT NOT NULL CHECK(role='original')
+                )
+                """)
+                try execute("""
+                CREATE TABLE jobs (
+                  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), input_version_id TEXT NOT NULL,
+                  stage TEXT NOT NULL, config TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('queued','running','completed','blocked','failed')),
+                  attempts INTEGER NOT NULL DEFAULT 0, lease_token TEXT, error TEXT,
+                  UNIQUE(source_id,input_version_id,stage,config)
+                )
+                """)
+                try execute("""
+                CREATE TABLE transcripts (
+                  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), input_asset_id TEXT NOT NULL REFERENCES assets(id),
+                  input_version_id TEXT NOT NULL, job_id TEXT NOT NULL UNIQUE REFERENCES jobs(id),
+                  kind TEXT NOT NULL CHECK(kind='verbatim'), text TEXT NOT NULL, locale TEXT NOT NULL, backend TEXT NOT NULL,
+                  created_at TEXT NOT NULL
+                )
+                """)
+                try execute("PRAGMA user_version=2")
+            }
+        }
+    }
+    deinit { sqlite3_close(handle) }
+    func execute(_ sql: String, _ arguments: [String?] = []) throws { _ = try query(sql, arguments) }
+    func query(_ sql: String, _ arguments: [String?] = []) throws -> [[String: String]] {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { throw error() }
+        defer { sqlite3_finalize(stmt) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        for (i, value) in arguments.enumerated() {
+            let code: Int32
+            if let value {
+                guard value.utf8.count < Int(Int32.max) else { throw VoiceOSError("资料字段过大") }
+                code = value.utf8CString.withUnsafeBufferPointer { bytes in
+                    sqlite3_bind_text(stmt, Int32(i + 1), bytes.baseAddress, Int32(bytes.count - 1), transient)
+                }
+            } else { code = sqlite3_bind_null(stmt, Int32(i + 1)) }
+            guard code == SQLITE_OK else { throw error() }
+        }
+        var rows: [[String: String]] = []
+        while true {
+            let result = sqlite3_step(stmt)
+            if result == SQLITE_DONE { return rows }
+            guard result == SQLITE_ROW else { throw error() }
+            var row: [String: String] = [:]
+            for i in 0..<sqlite3_column_count(stmt) where sqlite3_column_type(stmt, i) != SQLITE_NULL {
+                let key = String(cString: sqlite3_column_name(stmt, i))
+                if let value = sqlite3_column_text(stmt, i) { row[key] = String(decoding: UnsafeBufferPointer(start: value, count: Int(sqlite3_column_bytes(stmt, i))), as: UTF8.self) }
+            }
+            rows.append(row)
+        }
+    }
+    func transaction<T>(_ body: () throws -> T) throws -> T {
+        try execute("BEGIN IMMEDIATE")
+        do { let result = try body(); try execute("COMMIT"); return result }
+        catch { try? execute("ROLLBACK"); throw error }
+    }
+    private func error() -> VoiceOSError { VoiceOSError("资料库错误：\(String(cString: sqlite3_errmsg(handle)))") }
+}
