@@ -54,3 +54,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M2 控制中心理解](engineering/m2-control-center-understanding.md)：显式文本执行、用量/出处呈现、持久防重发与原生界面验证。
 
 - [M2 候选审阅与更正](engineering/m2-claim-review.md)：认可/拒绝、独立证据、版本历史与原子恢复。
+
+- [M2 明确行动与机会池](engineering/m2-actions-opportunity.md)：任务/探索意图、状态反馈、认知版本依赖和迁移验证。

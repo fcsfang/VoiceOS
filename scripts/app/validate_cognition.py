@@ -14,15 +14,19 @@ def run(command, root, crash=None, extra=()):
     assert r.returncode == (-signal.SIGKILL if crash else 0), r.stderr
     return r.stdout
 cases = []
-for checkpoint in ['modelReserved','claimsUncommitted','claimsCommitted','correctionUncommitted','correctionCommitted','policyUncommitted','policyCommitted','reviewUncommitted','reviewCommitted']:
+for checkpoint in ['modelReserved','claimsUncommitted','claimsCommitted','correctionUncommitted','correctionCommitted','policyUncommitted','policyCommitted','reviewUncommitted','reviewCommitted','actionUncommitted','actionCommitted','actionStateUncommitted','actionStateCommitted']:
     root = a.output / checkpoint
     run('restore', root, extra=[a.package.resolve()])
     with sqlite3.connect(root/'voiceos.sqlite') as db:
         assert db.execute('select count(*) from contexts').fetchone()[0] == 0, 'Use an input-only package without existing cognitive receipts.'
-    if checkpoint.startswith(('correction','policy','review')):
+    if checkpoint.startswith(('correction','policy','review','action')):
         run('cognition-fixture', root)
+    if checkpoint.startswith(('correction','policy','review','actionState')):
+        run('action-fixture', root)
     before = sqlite3.connect(root/'voiceos.sqlite').execute('select version from transcripts').fetchone()[0]
     command = 'review-fixture' if checkpoint.startswith('review') else ('policy-fixture' if checkpoint.startswith('policy') else ('correction-fixture' if checkpoint.startswith('correction') else 'cognition-fixture'))
+    if checkpoint.startswith('actionState'): command = 'action-state-fixture'
+    elif checkpoint.startswith('action'): command = 'action-fixture'
     run(command, root, crash=checkpoint)
     assert run('read', root) == run('read', root)
     with sqlite3.connect(root/'voiceos.sqlite') as db:
@@ -55,6 +59,15 @@ for checkpoint in ['modelReserved','claimsUncommitted','claimsCommitted','correc
             assert db.execute('select review_version from claims').fetchall() == [(1,)]
             assert db.execute('select decision,actor from claim_reviews').fetchall() == [('endorsed','user')]
             assert db.execute('select evidence_state,ownership from claims').fetchall() == [('unverified','ai_candidate')]
+        actions = db.execute('select state,validity,version from actions').fetchall()
+        if checkpoint == 'actionUncommitted': assert actions == []
+        elif checkpoint == 'actionCommitted': assert actions == [('open','current',1)]
+        elif checkpoint == 'actionStateUncommitted': assert actions == [('open','current',1)]
+        elif checkpoint == 'actionStateCommitted': assert actions == [('completed','current',2)]
+        elif checkpoint.startswith(('correction','policy','review')):
+            assert actions == [('open','frozen' if checkpoint.endswith('Committed') else 'current',1)]
+        if checkpoint.startswith('action'):
+            assert db.execute('select count(*) from action_revisions').fetchone()[0] == (1 if checkpoint == 'actionStateCommitted' else 0)
     cases.append({'checkpoint':checkpoint,'passed':True,'stable_reopen':True})
 report = {'date':'2026-10-10','synthetic_local_proposals':True,'count':len(cases),'sigkill_count':len(cases),'passed':True,'cases':cases,'network_calls':0,'external_actions':0}
 (a.output/'summary.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')

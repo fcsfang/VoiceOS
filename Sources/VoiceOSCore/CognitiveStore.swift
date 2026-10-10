@@ -176,6 +176,7 @@ extension VoiceOSStore {
             guard digest == attempt["result_digest"] else { throw VoiceOSError("迁移调用结果摘要不一致") }
         }
         try validateStoredClaimReviews(db)
+        try validateStoredActions(db)
     }
     // Call inside the same transaction as a correction/quarantine.
     func invalidateCognition(sourceID: String) throws {
@@ -183,6 +184,7 @@ extension VoiceOSStore {
     }
     private func freezeContext(_ id: String) throws {
         try db.execute("UPDATE contexts SET state='stale' WHERE id=?", [id])
+        try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT id FROM claims WHERE attempt_id IN (SELECT id FROM model_attempts WHERE context_id=?))", [id])
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT id FROM model_attempts WHERE context_id=?)", [id])
     }
     private func json<T: Encodable>(_ value: T) throws -> String {

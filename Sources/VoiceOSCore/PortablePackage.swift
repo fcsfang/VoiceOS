@@ -20,8 +20,9 @@ private enum PackageLayout {
     static let version2Tables = legacyTables + ["transcript_versions", "transcript_revisions"]
     static let version3Tables = version2Tables + ["contexts", "context_inputs", "model_attempts", "claims"]
     static let version4Tables = version3Tables + ["source_policy_revisions"]
-    static let tables = version4Tables + ["claim_reviews"]
-    static let integerFields: Set<String> = ["review_version", "policy_version", "from_version", "to_version", "from_local_only", "to_local_only", "ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
+    static let version5Tables = version4Tables + ["claim_reviews"]
+    static let tables = version5Tables + ["actions", "action_revisions"]
+    static let integerFields: Set<String> = ["claim_review_version", "review_version", "policy_version", "from_version", "to_version", "from_local_only", "to_local_only", "ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
     static func json(_ row: [String: String]) -> [String: Any] {
         row.reduce(into: [String: Any]()) { out, pair in
             if integerFields.contains(pair.key), let number = Int64(pair.value) { out[pair.key] = number }
@@ -80,7 +81,7 @@ extension VoiceOSStore {
                 files.append(verified)
             }
             if includeMedia { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 5, databaseSchema: 6, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 6, databaseSchema: 7, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)
@@ -97,8 +98,8 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("恢复目标必须是新的空目录；现有资料库不会被覆盖") }
         let manifestURL = try PackageLayout.safeFile(package, "manifest.json")
         let manifest = try JSONDecoder().decode(PackageManifest.self, from: Data(contentsOf: manifestURL))
-        guard manifest.format == "VoiceOS-local-package", ((manifest.version == 1 && manifest.databaseSchema == 2) || (manifest.version == 2 && manifest.databaseSchema == 3) || (manifest.version == 3 && manifest.databaseSchema == 4) || (manifest.version == 4 && manifest.databaseSchema == 5) || (manifest.version == 5 && manifest.databaseSchema == 6)) else { throw VoiceOSError("不支持此迁移包格式") }
-        let tables = manifest.version == 1 ? PackageLayout.legacyTables : (manifest.version == 2 ? PackageLayout.version2Tables : (manifest.version == 3 ? PackageLayout.version3Tables : (manifest.version == 4 ? PackageLayout.version4Tables : PackageLayout.tables)))
+        guard manifest.format == "VoiceOS-local-package", ((manifest.version == 1 && manifest.databaseSchema == 2) || (manifest.version == 2 && manifest.databaseSchema == 3) || (manifest.version == 3 && manifest.databaseSchema == 4) || (manifest.version == 4 && manifest.databaseSchema == 5) || (manifest.version == 5 && manifest.databaseSchema == 6) || (manifest.version == 6 && manifest.databaseSchema == 7)) else { throw VoiceOSError("不支持此迁移包格式") }
+        let tables = manifest.version == 1 ? PackageLayout.legacyTables : (manifest.version == 2 ? PackageLayout.version2Tables : (manifest.version == 3 ? PackageLayout.version3Tables : (manifest.version == 4 ? PackageLayout.version4Tables : (manifest.version == 5 ? PackageLayout.version5Tables : PackageLayout.tables))))
         guard Set(manifest.files.map(\.path)).count == manifest.files.count,
               Set(manifest.counts.keys) == Set(tables),
               Set(manifest.omittedAssetIDs).count == manifest.omittedAssetIDs.count else { throw VoiceOSError("迁移清单重复或缺少记录") }

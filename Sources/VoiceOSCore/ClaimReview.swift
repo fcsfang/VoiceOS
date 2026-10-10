@@ -43,6 +43,7 @@ extension VoiceOSStore {
         try db.transaction {
             try db.execute("INSERT INTO claim_reviews(id,claim_id,version,from_version,decision,statement,ownership,reason,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,claimID,String(next),String(expectedVersion),decision,text,owner,reason,note,commandID,fingerprint,ISO8601DateFormatter().string(from: Date())])
             try db.execute("UPDATE claims SET review_version=? WHERE id=? AND review_version=?", [String(next),claimID,String(expectedVersion)])
+            try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id=?", [claimID])
             try checkpoint(.reviewUncommitted)
         }
         try checkpoint(.reviewCommitted)

@@ -177,6 +177,64 @@ final class StoreTests: XCTestCase {
         catch { XCTAssertTrue(error.localizedDescription.contains("审阅历史")) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
     }
+    func testActionKindsCannotTurnAISuggestionOrOpportunityIntoCompletedTask() async throws {
+        let store = try await store(); let claim = try await reviewFixture(store)
+        let opportunity = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "有空探索", kind: .opportunity)
+        _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "AI 提议", kind: .aiSuggestion, intentActor: .ai)
+        do { _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "AI 承诺", kind: .task, intentActor: .ai); XCTFail("AI cannot commit") } catch {}
+        do { _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "假归属", kind: .aiSuggestion); XCTFail("actor mismatch") } catch {}
+        do { _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: " ", kind: .task); XCTFail("empty task") } catch {}
+        do { _ = try await store.setActionState(actionID: opportunity, expectedVersion: 1, state: .completed); XCTFail("opportunity completion") } catch {}
+        let actions = try await store.actions(); XCTAssertEqual(actions.count, 2)
+    }
+    func testActionReceiptsCASCompletionAndHistorySurviveRestoreWithoutVerifyingClaim() async throws {
+        let store = try await store(); let claim = try await reviewFixture(store)
+        let id = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "验证说法", kind: .task, commandID: "task")
+        let replay = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "验证说法", kind: .task, commandID: "task")
+        XCTAssertEqual(id, replay)
+        do { _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "更换", kind: .task, commandID: "task"); XCTFail("changed receipt") } catch {}
+        _ = try await store.setActionState(actionID: id, expectedVersion: 1, state: .completed, note: "完成操作，不是证据", commandID: "done")
+        let version = try await store.setActionState(actionID: id, expectedVersion: 1, state: .completed, note: "完成操作，不是证据", commandID: "done")
+        XCTAssertEqual(version, 2)
+        do { _ = try await store.setActionState(actionID: id, expectedVersion: 1, state: .open); XCTFail("stale state") } catch {}
+        let active = try await store.actions(); XCTAssertTrue(active.isEmpty)
+        let candidate = try await store.candidateClaims()[0]; XCTAssertEqual(candidate.evidenceState, "unverified"); XCTAssertEqual(candidate.reviewState, "pending")
+        let package = base.appendingPathComponent("actions-package"); try await store.exportPackage(to: package, includeMedia: true)
+        let root = base.appendingPathComponent("actions-restored"); try await VoiceOSStore.restorePackage(from: package, to: root, inspector: Inspector())
+        let restored = try VoiceOSStore(root: root, inspector: Inspector()); try await restored.recover()
+        let history = try await restored.actionHistory(actionID: id); XCTAssertEqual(history.map(\.state), ["open","completed"])
+        XCTAssertEqual(history.last?.note, "完成操作，不是证据")
+    }
+    func testReviewAndSourceChangesFreezeActionsWithoutErasingCompletionOrReactivatingReceipt() async throws {
+        let store = try await store(); let claim = try await reviewFixture(store)
+        let id = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "任务", kind: .task, commandID: "task")
+        _ = try await store.setActionState(actionID: id, expectedVersion: 1, state: .completed)
+        _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 0, action: .endorse)
+        var actions = try await store.actions(includeHistory: true); XCTAssertEqual(actions[0].validity, "frozen"); XCTAssertEqual(actions[0].state, "completed")
+        _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "任务", kind: .task, commandID: "task")
+        do { _ = try await store.setActionState(actionID: id, expectedVersion: 2, state: .open); XCTFail("frozen action") } catch {}
+        do { _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "旧认知", kind: .task); XCTFail("stale claim pin") } catch {}
+        _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 1, title: "新版探索", kind: .opportunity)
+        let source = try await store.sources()[0]
+        _ = try await store.correctTranscript(sourceID: source.id, expectedVersionID: source.transcriptVersionID!, text: "来源更正")
+        actions = try await store.actions(includeHistory: true); XCTAssertTrue(actions.allSatisfy { $0.validity == "frozen" })
+    }
+    func testRestoreRejectsMissingActionHistoryDespiteMatchingManifestHashes() async throws {
+        let store = try await store(); let claim = try await reviewFixture(store)
+        let id = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "任务", kind: .task)
+        _ = try await store.setActionState(actionID: id, expectedVersion: 1, state: .completed)
+        let package = base.appendingPathComponent("broken-actions"); try await store.exportPackage(to: package)
+        let file = package.appendingPathComponent("action_revisions.jsonl"); try Data().write(to: file)
+        let manifestFile = package.appendingPathComponent("manifest.json")
+        var manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestFile)) as! [String: Any]
+        var counts = manifest["counts"] as! [String: Int]; counts["action_revisions"] = 0; manifest["counts"] = counts
+        var files = manifest["files"] as! [[String: Any]]; let index = files.firstIndex { $0["path"] as? String == "action_revisions.jsonl" }!
+        let digest = try DurableFiles.hash(file); files[index]["sha256"] = digest.1; files[index]["bytes"] = digest.0; manifest["files"] = files
+        try JSONSerialization.data(withJSONObject: manifest).write(to: manifestFile)
+        let target = base.appendingPathComponent("invalid-actions-target")
+        do { try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector()); XCTFail("missing action history") } catch { XCTAssertTrue(error.localizedDescription.contains("行动状态历史")) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+    }
     func testSameCommandIsIdempotentButNewCommandKeepsDistinctEvent() async throws {
         let store = try await store(); let input = try fixture()
         let a = try await store.importFile(input, commandID: "one")

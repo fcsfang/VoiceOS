@@ -30,7 +30,7 @@ VOICEOS_DATA_DIR="$PWD/runtime/my-local-test" dist/VoiceOS.app/Contents/MacOS/Vo
 
 ## 导出与空库恢复
 
-工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v5，存储 schema 6，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews 十二类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 与 v4/schema 5 包。它仅覆盖当前已实现的实体，未来认知/行动加入时必须升级格式。没有凭据或外部连接数据。
+工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v6，存储 schema 7，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews/actions/action_revisions 十四类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 、v4/schema 5 与 v5/schema 6 包。它仅覆盖当前已实现的实体，未来新增实体时必须升级格式。没有凭据或外部连接数据。
 
 导出记录文件数量、长度、SHA-256 与未打包原件 ID；原件包先核验原件，再逐字节复制核验。包先在临时目录生成，完成后改名到新目标；不覆盖现有目录。当前同步 actor 快照依靠单写者和原件不可变契约，尚未实现删除，因此不存在资产删除竞态；加入删除/异步导出前必须实现 pin 与取消屏障，不能照搬当前边界。
 
@@ -76,3 +76,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 使用现有模型配置启动开发预览：`python3 scripts/app/run.py`。也可直接打开应用并通过“配置文本模型…”选择项目 `.env`。这不会自动发送内容。配置暂为开发文件，正式钥匙串待实现；同一文字/权限/模型身份的已完成、失败或未知调用不会重复发送，详见[控制中心理解记录](m2-control-center-understanding.md)与[候选审阅记录](m2-claim-review.md)。
 
 候选可明确认可、拒绝或更正，认可保持证据状态独立，更正后重新待核对；审阅历史与原始模型结果随包保留。冻结候选只可回溯，详见[候选审阅记录](m2-claim-review.md)。
+
+本地行动意图可在候选中显式记录，默认进入机会池，明确任务可完成；状态历史保留，认知/来源/权限版本变化会暂停依赖行动。尚未同步 Apple 提醒事项，详见[行动与机会池记录](m2-actions-opportunity.md)。

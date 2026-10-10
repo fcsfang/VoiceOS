@@ -34,6 +34,12 @@ struct Check {
                 let attempt = try await store.reserveLocalModelAttempt(contextID: contextID, model: "development-fixture", promptVersion: "fixture-v1", schemaVersion: "claims-v1")
                 let input = context.sources[0]
                 _ = try await store.commitLocalClaims(attemptID: attempt, proposals: [ClaimProposal(statement: "开发测试候选，不代表模型理解结果或用户观点", ownership: .aiCandidate, references: [ClaimReference(sourceID: source.id, transcriptVersionID: input.transcriptVersionID, spanID: input.spans[0].id)])])
+            } else if args[0] == "action-fixture" {
+                guard let claim = try await store.candidateClaims().first else { throw VoiceOSError("fixture requires a candidate") }
+                _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: claim.reviewVersion, title: "开发验证任务，不代表真实用户任务", kind: .task, commandID: "fixture-action")
+            } else if args[0] == "action-state-fixture" {
+                guard let action = try await store.actions().first else { throw VoiceOSError("fixture requires an action") }
+                _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: .completed, commandID: "fixture-action-state")
             } else if args[0] == "review-fixture" {
                 guard let claim = try await store.candidateClaims().first else { throw VoiceOSError("test fixture requires a current candidate") }
                 _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: claim.reviewVersion, action: .endorse, commandID: "fixture-review")

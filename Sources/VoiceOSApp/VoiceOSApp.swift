@@ -28,6 +28,9 @@ final class ControlCenter: ObservableObject {
     @Published var claims: [CandidateClaim] = []
     @Published var claimHistory: [ClaimReviewVersion] = []
     @Published var reviewingClaim = false
+    @Published var actionRecords: [ActionRecord] = []
+    @Published var savingAction = false
+    @Published var actionVersions: [ActionRevision] = []
     private var store: VoiceOSStore?
     private var worker: Task<Void, Never>?
     func start() async {
@@ -50,6 +53,7 @@ final class ControlCenter: ObservableObject {
     func refresh() async {
         do {
             claims = try await store?.candidateClaims(includeFrozen: true) ?? []
+            actionRecords = try await store?.actions(includeHistory: true) ?? []
             records = try await store?.sources() ?? []
             if let store {
                 var loaded: [String: [ModelAttemptRecord]] = [:]
@@ -196,6 +200,27 @@ final class ControlCenter: ObservableObject {
             return true
         } catch { status = error.localizedDescription; await refresh(); return false }
     }
+    func createAction(_ claim: CandidateClaim, title: String, kind: ActionKind, note: String, commandID: String) async -> Bool {
+        guard let store, !savingAction else { return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: claim.reviewVersion, title: title, kind: kind, note: note, commandID: commandID)
+            await refresh(); status = "意图已保存到 VoiceOS · 尚未写入提醒事项"; return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
+    }
+    func actionHistory(_ action: ActionRecord) async {
+        do { actionVersions = try await store?.actionHistory(actionID: action.id) ?? [] }
+        catch { status = error.localizedDescription }
+    }
+    func changeAction(_ action: ActionRecord, state: LocalActionState) async {
+        guard let store, !savingAction else { return }
+        savingAction = true; defer { savingAction = false }
+        do {
+            _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state)
+            status = "行动状态已保存 · 观点仍需独立验证"
+        } catch { status = error.localizedDescription }
+        await refresh()
+    }
     func reviewHistory(_ claim: CandidateClaim) async {
         do { claimHistory = try await store?.claimReviewHistory(claimID: claim.id) ?? [] }
         catch { status = error.localizedDescription }
@@ -215,6 +240,8 @@ struct CenterView: View {
     @State private var showHistory = false
     @State private var correctingClaim: CandidateClaim?
     @State private var showClaimHistory = false
+    @State private var actionClaim: CandidateClaim?
+    @State private var showActionHistory = false
     var body: some View {
         NavigationSplitView {
             List(model.filtered, selection: $model.selected) { record in
@@ -303,6 +330,7 @@ struct CenterView: View {
                                             Button("更正认知") { correctingClaim = claim }.disabled(model.reviewingClaim || claim.validity == "frozen")
                                             Button("审阅历史") { Task { await model.reviewHistory(claim); showClaimHistory = true } }
                                         }
+                                        Button("记录行动意图") { actionClaim = claim }.disabled(claim.validity == "frozen" || claim.reviewState == "rejected")
                                         ForEach(Array(claim.references.enumerated()), id: \.offset) { _, ref in
                                             if ref.sourceID == record.id, ref.transcriptVersionID == record.transcriptVersionID,
                                                let span = record.spans.first(where: { $0.id == ref.spanID }), let text = record.transcript {
@@ -312,6 +340,28 @@ struct CenterView: View {
                                             }
                                         }
                                     }.padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                        let relatedActions = model.actionRecords.filter { action in related.contains { $0.id == action.claimID } }
+                        if !relatedActions.isEmpty {
+                            DisclosureGroup("行动与机会池（\(relatedActions.count)）") {
+                                ForEach(relatedActions) { action in
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text(action.title).font(.headline)
+                                        Text("\(action.kind == "task" ? "明确任务" : (action.kind == "opportunity" ? "探索意图" : "AI 建议")) · \(action.state == "completed" ? "已完成" : (action.state == "dismissed" ? "暂不跟进" : "待跟进")) · 第 \(action.version) 版").font(.caption)
+                                        Text(action.validity == "frozen" ? "认知或授权已变化，暂停使用；历史保留" : "仅保存在 VoiceOS，尚未写入提醒事项").font(.caption).foregroundStyle(.secondary)
+                                        Text("认知依据：第 \(action.claimReviewVersion) 版").font(.caption).foregroundStyle(.secondary)
+                                        if !action.note.isEmpty { Text(action.note) }
+                                        HStack {
+                                            if action.state == "open" {
+                                                if action.kind == "task" { Button("标记任务完成") { Task { await model.changeAction(action, state: .completed) } } }
+                                                Button("暂不跟进") { Task { await model.changeAction(action, state: .dismissed) } }
+                                            } else { Button("重新跟进") { Task { await model.changeAction(action, state: .open) } } }
+                                        }.disabled(model.savingAction || action.validity == "frozen")
+                                        Button("行动历史") { Task { await model.actionHistory(action); showActionHistory = true } }
+                                        Divider()
+                                    }.padding(.vertical, 8)
                                 }
                             }
                         }
@@ -348,6 +398,26 @@ struct CenterView: View {
                 }
                 HStack { Spacer(); Button("完成") { showHistory = false }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 660, height: 440)
+        }
+        .sheet(isPresented: $showActionHistory) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("行动状态历史").font(.title2)
+                Text("任务完成不等于观点已验证。").foregroundStyle(.secondary)
+                ScrollView {
+                    ForEach(model.actionVersions) { version in
+                        VStack(alignment: .leading) {
+                            Text("第 \(version.version) 版 · \(version.state == "completed" ? "已完成" : (version.state == "dismissed" ? "暂不跟进" : "待跟进"))")
+                            if !version.note.isEmpty { Text(version.note) }
+                            Text(version.createdAt).font(.caption).foregroundStyle(.secondary)
+                            Divider()
+                        }
+                    }
+                }
+                Button("完成") { showActionHistory = false }
+            }.padding(24).frame(width: 600, height: 380)
+        }
+        .sheet(item: $actionClaim) { claim in
+            ActionCreationView(claim: claim, model: model) { actionClaim = nil }
         }
         .sheet(item: $correctingClaim) { claim in
             ClaimCorrectionView(claim: claim, model: model) { correctingClaim = nil }
@@ -492,5 +562,35 @@ struct VoiceOSApp: App {
     var body: some Scene {
         Window("VoiceOS", id: "control-center") { CenterView(model: model) }
         .commands { CommandGroup(after: .newItem) { Button("导入音频或视频…") { model.chooseFiles() }.keyboardShortcut("i").disabled(!model.initialized || model.importing) } }
+    }
+}
+
+struct ActionCreationView: View {
+    let claim: CandidateClaim
+    @ObservedObject var model: ControlCenter
+    let close: () -> Void
+    @State private var title = ""
+    @State private var kind: ActionKind = .opportunity
+    @State private var note = ""
+    @State private var commandID = UUID().uuidString
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("记录行动意图").font(.title2)
+            Text("认可观点不等于承诺任务。选择明确任务，或先放入机会池；尚未写入提醒事项。").foregroundStyle(.secondary)
+            Text("依据：" + claim.statement).lineLimit(4)
+            Picker("意图", selection: $kind) {
+                Text("探索意图 · 机会池").tag(ActionKind.opportunity)
+                Text("明确任务").tag(ActionKind.task)
+            }.pickerStyle(.segmented)
+            TextField("要做什么", text: $title)
+            TextField("补充说明（可选）", text: $note)
+            Text(model.status).font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("取消", action: close).disabled(model.savingAction)
+                Spacer()
+                Button("保存意图") { Task { if await model.createAction(claim, title: title, kind: kind, note: note, commandID: commandID) { close() } } }
+                    .disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
+            }
+        }.padding(24).frame(width: 600)
     }
 }
