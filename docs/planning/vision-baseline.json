@@ -1,0 +1,123 @@
+{
+  "date": "2026-10-10",
+  "vision_version": "v1.1",
+  "baseline_commit": "ba9c806",
+  "note": "Original product materials; no modifications made. Paths are repository-relative.",
+  "files": [
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/README.md",
+      "bytes": 852,
+      "sha256": "49435b516ecd5303b4ed417e5089f8af29a2aaac2aa5e31cedb73594b6856c65"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/VoiceOS_产品愿景与概念设计文档_v1.1.md",
+      "bytes": 44205,
+      "sha256": "47d4d6468cfca3941b3365c5edb50fc0e67182be775ee6563280c4c532d0f2b5"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/01_system_overview.png",
+      "bytes": 200480,
+      "sha256": "02982a19cae341d51e38c799f5a6f4cf895e8c13a4b45fe70175b2ed8fdfa7df"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/01_system_overview.svg",
+      "bytes": 9522,
+      "sha256": "2072b26b79d374909f53ce92c08bd19fafd49a5884cac259c0530787e03f358c"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/02_interaction_modes.png",
+      "bytes": 192027,
+      "sha256": "4ec0fc8a513908beec0ab0e6c29d551e5e683cfa1c1e71c186752127a2888744"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/02_interaction_modes.svg",
+      "bytes": 7001,
+      "sha256": "8282dd90ba588c1350b48367359ce904490eec9d43cd82fe6ed6a435b3626c5d"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/03_knowledge_layers.png",
+      "bytes": 197580,
+      "sha256": "a8d520d5b354880f6d4702fde9c54348e8b46384db646ef16cd59eafb2331b46"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/03_knowledge_layers.svg",
+      "bytes": 4649,
+      "sha256": "7a95b83f7b866190f8ba991b84a2ba834402f01a5bc9abb3d99f90bb34b24d4e"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/04_graded_confirmation.png",
+      "bytes": 195545,
+      "sha256": "ccf131affcd81792b2c4f9575a3a511ab40b6454a10279e631fda28cad0cfff8"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/04_graded_confirmation.svg",
+      "bytes": 5863,
+      "sha256": "450533de7e543de6dab415497ff975941c1fcf74a79ce830e4a5053fabf7e6e6"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/05_action_management.png",
+      "bytes": 168221,
+      "sha256": "6fc3d3826b8de2f38be209ff9875a78797faf11f70038ccf9d2bf548247f58f3"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/05_action_management.svg",
+      "bytes": 6337,
+      "sha256": "97ff29ec00b35c97bc6e8520c7ff633649bf07aa54f6d857c16a476c27516f59"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/06_adaptive_proactivity.png",
+      "bytes": 166200,
+      "sha256": "93d67697dff76ba85c5c8aceeea91e88bddbe8bd46c2dbea84aba16f4be80daa"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/06_adaptive_proactivity.svg",
+      "bytes": 5327,
+      "sha256": "32bbc9ef53769ec1bda2fe71d0be4bbe0e5a3d5f733917ae0c42aff5ec27baa2"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/07_cognitive_timeline.png",
+      "bytes": 158769,
+      "sha256": "4e1587ced7b76ee2ef437df8c42725ad071c3417814939cf75904c0f5158abea"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/07_cognitive_timeline.svg",
+      "bytes": 5167,
+      "sha256": "2f5e06ecf90636d0a60524852bd5b4c55c53d331552eb023e6fee8ff7535d01e"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/08_cognitive_action_loop.png",
+      "bytes": 178183,
+      "sha256": "1588173385ec55ce850064474cfbf9042322a3cd0a02edfb6d1e9541d63f8396"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/08_cognitive_action_loop.svg",
+      "bytes": 6367,
+      "sha256": "850368947c2b4188330a5f875d938d343a1430e4b8cdd772096f3df09e68ef29"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/09_error_correction.png",
+      "bytes": 184284,
+      "sha256": "6468d3a2f42d87f30620168a426efe9b1108a359e70e9893c3b8abddf38f9b8e"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/09_error_correction.svg",
+      "bytes": 5552,
+      "sha256": "9d18775e8edecb87b07a4677677a3da95498887473d453cc977397d6a724d79c"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/10_product_roadmap.png",
+      "bytes": 182761,
+      "sha256": "55269198b2401148934828c352f1f7821d22ea2d0af299652f280cc38e6d8d58"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1/assets/10_product_roadmap.svg",
+      "bytes": 5178,
+      "sha256": "a6045ee42805b4991a96de917cd1c8643f1554a59c1a66aff4f176e55dab9966"
+    },
+    {
+      "path": "docs/VoiceOS：产品愿景与概念设计文档 v1.1.pdf",
+      "bytes": 2692948,
+      "sha256": "7792e04537fd8676abd5fd71a80f51e3cfc5765663a6aa720c9717e63517cc59"
+    }
+  ]
+}
