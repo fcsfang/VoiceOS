@@ -73,3 +73,5 @@
 工程 M2 增量：来源时间与逐字稿更正/历史、schema 3 与包格式 2 已建立；21 项核心测试及更新后的 26 项媒体恢复检查通过，旧包可恢复。见[实施记录](../engineering/m2-transcript-provenance.md)。上下文、认知依赖冻结和外部闭环仍待实现，云端增量试验见[报告](../research/cloud-evaluation-update-2026-10-10.md)。
 
 M2 认知基础增量：持久本地上下文、调用未知结果、认知候选来源引用与更正原子冻结已[实现并验证](../engineering/m2-cognitive-foundation.md)，包格式 3/schema 4 保留旧包恢复。真实模型端口、权限 epoch、用户认可和跨模块派生图仍待实现；完整闭环未完成。
+
+M2 权限/端口增量：来源文本权限版本、local/cloud 目的地、端口响应与晚到结果处理已[实现并用本地模拟验证](../engineering/m2-source-policy-model-port.md)。未调用真实云端，旧包兼容到格式 4/schema 5；用户明确认可与完整闭环仍待实现。

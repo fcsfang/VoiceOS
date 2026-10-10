@@ -14,13 +14,16 @@ def run(command, root, crash=None, extra=()):
     assert r.returncode == (-signal.SIGKILL if crash else 0), r.stderr
     return r.stdout
 cases = []
-for checkpoint in ['modelReserved','claimsUncommitted','claimsCommitted','correctionUncommitted','correctionCommitted']:
+for checkpoint in ['modelReserved','claimsUncommitted','claimsCommitted','correctionUncommitted','correctionCommitted','policyUncommitted','policyCommitted']:
     root = a.output / checkpoint
     run('restore', root, extra=[a.package.resolve()])
-    if checkpoint.startswith('correction'):
+    with sqlite3.connect(root/'voiceos.sqlite') as db:
+        assert db.execute('select count(*) from contexts').fetchone()[0] == 0, 'Use an input-only package without existing cognitive receipts.'
+    if checkpoint.startswith(('correction','policy')):
         run('cognition-fixture', root)
     before = sqlite3.connect(root/'voiceos.sqlite').execute('select version from transcripts').fetchone()[0]
-    run('correction-fixture' if checkpoint.startswith('correction') else 'cognition-fixture', root, crash=checkpoint)
+    command = 'policy-fixture' if checkpoint.startswith('policy') else ('correction-fixture' if checkpoint.startswith('correction') else 'cognition-fixture')
+    run(command, root, crash=checkpoint)
     assert run('read', root) == run('read', root)
     with sqlite3.connect(root/'voiceos.sqlite') as db:
         assert db.execute('pragma integrity_check').fetchone()[0] == 'ok'
@@ -35,9 +38,17 @@ for checkpoint in ['modelReserved','claimsUncommitted','claimsCommitted','correc
             assert attempts == [('completed',)] and claims == [('current',)]
         elif checkpoint == 'correctionUncommitted':
             assert claims == [('current',)] and context == [('current',)] and version == before
-        else:
+        elif checkpoint == 'correctionCommitted':
             assert claims == [('frozen',)] and context == [('stale',)] and version == before+1
+        elif checkpoint == 'policyUncommitted':
+            assert claims == [('current',)] and context == [('current',)]
+            assert db.execute('select local_only,policy_version from sources').fetchone() == (1,1)
+            assert db.execute('select count(*) from source_policy_revisions').fetchone()[0] == 0
+        else:
+            assert claims == [('frozen',)] and context == [('stale',)]
+            assert db.execute('select local_only,policy_version from sources').fetchone() == (0,2)
+            assert db.execute('select count(*) from source_policy_revisions').fetchone()[0] == 1
     cases.append({'checkpoint':checkpoint,'passed':True,'stable_reopen':True})
-report = {'date':'2026-10-10','synthetic_local_proposals':True,'count':len(cases),'sigkill_count':5,'passed':True,'cases':cases,'network_calls':0,'external_actions':0}
+report = {'date':'2026-10-10','synthetic_local_proposals':True,'count':len(cases),'sigkill_count':len(cases),'passed':True,'cases':cases,'network_calls':0,'external_actions':0}
 (a.output/'summary.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
 print(json.dumps({'count':len(cases),'passed':True}))

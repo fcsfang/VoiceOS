@@ -28,19 +28,20 @@ public struct CandidateClaim: Identifiable, Sendable {
 }
 extension VoiceOSStore {
     @discardableResult
-    public func persistLocalContext(_ context: LocalTranscriptContext, commandID: String = UUID().uuidString) throws -> String {
+    public func persistLocalContext(_ context: LocalTranscriptContext, commandID: String = UUID().uuidString, destination: ModelDestination = .local) throws -> String {
         // Receipts replay original identity even after invalidation; never reactivate it.
         let snapshot = try json(context)
         if let existing = try db.query("SELECT * FROM contexts WHERE command_id=?", [commandID]).first {
-            guard existing["snapshot_json"] == snapshot else { throw VoiceOSError("同一上下文命令不能更换内容") }
+            guard existing["snapshot_json"] == snapshot, existing["destination"] == destination.rawValue else { throw VoiceOSError("同一上下文命令不能更换内容") }
             return existing["id"]!
         }
         try validateLocalTranscriptContext(context)
+        if destination == .cloud, context.sources.contains(where: \.localOnly) { throw VoiceOSError("仅本地来源不能用于云端处理") }
         let id = UUID().uuidString
         try db.transaction {
-            try db.execute("INSERT INTO contexts(id,command_id,snapshot_json,digest,state,created_at) VALUES(?,?,?,?,'current',?)", [id,commandID,snapshot,context.contentDigest,timestamp()])
+            try db.execute("INSERT INTO contexts(id,command_id,snapshot_json,digest,state,created_at,destination) VALUES(?,?,?,?,'current',?,?)", [id,commandID,snapshot,context.contentDigest,timestamp(),destination.rawValue])
             for input in context.sources {
-                try db.execute("INSERT INTO context_inputs(id,context_id,source_id,transcript_version_id) VALUES(?,?,?,?)", [UUID().uuidString,id,input.sourceID,input.transcriptVersionID])
+                try db.execute("INSERT INTO context_inputs(id,context_id,source_id,transcript_version_id,policy_version) VALUES(?,?,?,?,?)", [UUID().uuidString,id,input.sourceID,input.transcriptVersionID,try db.query("SELECT policy_version FROM sources WHERE id=?", [input.sourceID]).first?["policy_version"]])
             }
         }
         return id
@@ -48,13 +49,17 @@ extension VoiceOSStore {
     public func localContext(id: String) throws -> LocalTranscriptContext {
         guard let row = try db.query("SELECT * FROM contexts WHERE id=? AND state='current'", [id]).first else { throw VoiceOSError("上下文已失效或不存在") }
         let context = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(row["snapshot_json"]!.utf8))
-        do { try validateLocalTranscriptContext(context) }
+        do {
+            try validateLocalTranscriptContext(context)
+            guard try db.query("SELECT i.id FROM context_inputs i JOIN sources s ON s.id=i.source_id WHERE i.context_id=? AND i.policy_version!=s.policy_version", [id]).isEmpty else { throw VoiceOSError("来源授权版本已变化") }
+        }
         catch { try db.transaction { try freezeContext(id) }; throw error }
         return context
     }
     /// This slice only supports local fixtures. A reservation is durable before work;
     /// it is not a cloud grant and there is no automatic resend after interruption.
     public func reserveLocalModelAttempt(contextID: String, model: String, promptVersion: String, schemaVersion: String) throws -> String {
+        guard try db.query("SELECT destination FROM contexts WHERE id=?", [contextID]).first?["destination"] == "local" else { throw VoiceOSError("本地夹具不能使用云端上下文") }
         _ = try localContext(id: contextID)
         guard !model.isEmpty, !promptVersion.isEmpty, !schemaVersion.isEmpty else { throw VoiceOSError("模型调用配置缺少版本") }
         let id = UUID().uuidString
@@ -63,13 +68,17 @@ extension VoiceOSStore {
         return id
     }
     public func commitLocalClaims(attemptID: String, proposals: [ClaimProposal]) throws -> [String] {
+        guard try db.query("SELECT provider FROM model_attempts WHERE id=?", [attemptID]).first?["provider"] == "local_fixture" else { throw VoiceOSError("只能提交本地夹具调用") }
+        return try commitClaims(attemptID: attemptID, proposals: proposals)
+    }
+    func commitClaims(attemptID: String, proposals: [ClaimProposal]) throws -> [String] {
         guard let attempt = try db.query("SELECT * FROM model_attempts WHERE id=?", [attemptID]).first else { throw VoiceOSError("调用记录不存在") }
         let digest = try hash(proposals)
         if attempt["state"] == "completed" {
             guard attempt["result_digest"] == digest else { throw VoiceOSError("已提交调用不能改写结果") }
             return try db.query("SELECT id FROM claims WHERE attempt_id=? ORDER BY id", [attemptID]).map { $0["id"]! }
         }
-        guard attempt["state"] == "reserved", attempt["provider"] == "local_fixture" else { throw VoiceOSError("调用已结束或结果未知，不能重放提交") }
+        guard attempt["state"] == "reserved" else { throw VoiceOSError("调用已结束或结果未知，不能重放提交") }
         do {
             let context = try localContext(id: attempt["context_id"]!)
             try Self.validateProposals(proposals, context: context)
@@ -109,6 +118,19 @@ extension VoiceOSStore {
         }
     }
     static func validateStoredCognition(_ db: Database) throws {
+        for source in try db.query("SELECT id,local_only,policy_version FROM sources") {
+            guard let version = Int(source["policy_version"]!), version >= 1, ["0","1"].contains(source["local_only"]!) else { throw VoiceOSError("迁移来源授权格式错误") }
+            let history = try db.query("SELECT * FROM source_policy_revisions WHERE source_id=? ORDER BY to_version", [source["id"]])
+            guard history.count == version-1 else { throw VoiceOSError("迁移来源授权历史不完整") }
+            var flag = history.first?["from_local_only"] ?? source["local_only"]!
+            for (index, change) in history.enumerated() {
+                guard change["from_version"] == String(index+1), change["to_version"] == String(index+2),
+                      ["0","1"].contains(flag), change["from_local_only"] == flag,
+                      ["0","1"].contains(change["to_local_only"] ?? ""), change["to_local_only"] != flag else { throw VoiceOSError("迁移来源授权版本链不一致") }
+                flag = change["to_local_only"]!
+            }
+            guard flag == source["local_only"] else { throw VoiceOSError("迁移来源授权当前值不一致") }
+        }
         for row in try db.query("SELECT * FROM contexts") {
             let context = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(row["snapshot_json"]!.utf8))
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
@@ -121,7 +143,7 @@ extension VoiceOSStore {
             guard inputs.count == context.sources.count else { throw VoiceOSError("迁移上下文输入不完整") }
             for input in context.sources {
                 guard inputs.contains(where: { $0["source_id"] == input.sourceID && $0["transcript_version_id"] == input.transcriptVersionID }),
-                      let version = try db.query("SELECT v.*,t.source_id,t.current_version_id,s.version_id,s.duration,s.state,s.origin,s.speaker,s.local_only FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [input.transcriptVersionID]).first,
+                      let version = try db.query("SELECT v.*,t.source_id,t.current_version_id,s.version_id,s.duration,s.state,s.origin,s.speaker,s.local_only,s.policy_version FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [input.transcriptVersionID]).first,
                       version["source_id"] == input.sourceID, version["version_id"] == input.sourceVersionID,
                       version["text"] == input.text else { throw VoiceOSError("迁移上下文来源版本不一致") }
                 let spans = try JSONDecoder().decode([TranscriptSpan].self, from: Data(version["spans_json"]!.utf8))
@@ -130,6 +152,7 @@ extension VoiceOSStore {
                 if row["state"] == "current" {
                     guard version["current_version_id"] == input.transcriptVersionID,
                           ["saved","reference_only"].contains(version["state"] ?? ""),
+                          inputs.contains(where: { $0["source_id"] == input.sourceID && ($0["policy_version"] ?? "1") == version["policy_version"] }),
                           version["origin"] == input.origin, version["speaker"] == input.speaker, (version["local_only"] != "0") == input.localOnly else { throw VoiceOSError("迁移的当前上下文引用失效来源") }
                 }
             }

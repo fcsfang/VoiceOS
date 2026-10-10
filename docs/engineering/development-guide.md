@@ -1,6 +1,6 @@
 # VoiceOS 开发预览与复现
 
-日期：2026-10-10。此版本包含 M1 文件输入切片与 M2 逐字稿来源/更正基础；尚不是完整 MVP。当前状态与证据见 [M1 实施记录](m1-file-input.md)、[逐字稿增量记录](m2-transcript-provenance.md)及 [认知基础记录](m2-cognitive-foundation.md)。
+日期：2026-10-10。此版本包含 M1 文件输入切片与 M2 逐字稿来源/更正基础；尚不是完整 MVP。当前状态与证据见 [M1 实施记录](m1-file-input.md)、[逐字稿增量记录](m2-transcript-provenance.md)、[认知基础记录](m2-cognitive-foundation.md)及 [权限/端口记录](m2-source-policy-model-port.md)。
 
 ## 打开应用
 
@@ -30,7 +30,7 @@ VOICEOS_DATA_DIR="$PWD/runtime/my-local-test" dist/VoiceOS.app/Contents/MacOS/Vo
 
 ## 导出与空库恢复
 
-工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v3，存储 schema 4，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims 十类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 与 v2/schema 3 包。它仅覆盖当前已实现的实体，未来认知/行动加入时必须升级格式。没有凭据或外部连接数据。
+工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v4，存储 schema 5，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions 十一类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 与 v3/schema 4 包。它仅覆盖当前已实现的实体，未来认知/行动加入时必须升级格式。没有凭据或外部连接数据。
 
 导出记录文件数量、长度、SHA-256 与未打包原件 ID；原件包先核验原件，再逐字节复制核验。包先在临时目录生成，完成后改名到新目标；不覆盖现有目录。当前同步 actor 快照依靠单写者和原件不可变契约，尚未实现删除，因此不存在资产删除竞态；加入删除/异步导出前必须实现 pin 与取消屏障，不能照搬当前边界。
 
@@ -69,4 +69,6 @@ python3 scripts/app/validate.py --audio /absolute/authorized-short.m4a --video /
 python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-package-with-transcript" --output "$PWD/runtime/new-cognition-run"
 ```
 
-脚本要求新输出目录，恢复包后在独立测试库实际终止五个进程，核对提交及冻结原子性，不发送请求或操作提醒事项。查看候选时 current 表示依据未失效；未验证仍是未验证。历史被保留不等于认可。
+脚本要求新输出目录，要求输入包有非空逐字稿且没有认知回执，恢复后在独立测试库实际终止七个进程，核对提交及冻结原子性，不发送请求或操作提醒事项。查看候选时 current 表示依据未失效；未验证仍是未验证。历史被保留不等于认可。
+
+来源详情可允许文本用于云端或限制为仅本地。当前应用尚无真实云端驱动；点击只更新授权与依赖状态，不触发网络发送。原始音视频权限独立，保持本机处理。

@@ -18,8 +18,9 @@ private struct PackageManifest: Codable {
 private enum PackageLayout {
     static let legacyTables = ["sources", "assets", "jobs", "transcripts"]
     static let version2Tables = legacyTables + ["transcript_versions", "transcript_revisions"]
-    static let tables = version2Tables + ["contexts", "context_inputs", "model_attempts", "claims"]
-    static let integerFields: Set<String> = ["ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
+    static let version3Tables = version2Tables + ["contexts", "context_inputs", "model_attempts", "claims"]
+    static let tables = version3Tables + ["source_policy_revisions"]
+    static let integerFields: Set<String> = ["policy_version", "from_version", "to_version", "from_local_only", "to_local_only", "ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
     static func json(_ row: [String: String]) -> [String: Any] {
         row.reduce(into: [String: Any]()) { out, pair in
             if integerFields.contains(pair.key), let number = Int64(pair.value) { out[pair.key] = number }
@@ -78,7 +79,7 @@ extension VoiceOSStore {
                 files.append(verified)
             }
             if includeMedia { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 3, databaseSchema: 4, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 4, databaseSchema: 5, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)
@@ -95,8 +96,8 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("恢复目标必须是新的空目录；现有资料库不会被覆盖") }
         let manifestURL = try PackageLayout.safeFile(package, "manifest.json")
         let manifest = try JSONDecoder().decode(PackageManifest.self, from: Data(contentsOf: manifestURL))
-        guard manifest.format == "VoiceOS-local-package", ((manifest.version == 1 && manifest.databaseSchema == 2) || (manifest.version == 2 && manifest.databaseSchema == 3) || (manifest.version == 3 && manifest.databaseSchema == 4)) else { throw VoiceOSError("不支持此迁移包格式") }
-        let tables = manifest.version == 1 ? PackageLayout.legacyTables : (manifest.version == 2 ? PackageLayout.version2Tables : PackageLayout.tables)
+        guard manifest.format == "VoiceOS-local-package", ((manifest.version == 1 && manifest.databaseSchema == 2) || (manifest.version == 2 && manifest.databaseSchema == 3) || (manifest.version == 3 && manifest.databaseSchema == 4) || (manifest.version == 4 && manifest.databaseSchema == 5)) else { throw VoiceOSError("不支持此迁移包格式") }
+        let tables = manifest.version == 1 ? PackageLayout.legacyTables : (manifest.version == 2 ? PackageLayout.version2Tables : (manifest.version == 3 ? PackageLayout.version3Tables : PackageLayout.tables))
         guard Set(manifest.files.map(\.path)).count == manifest.files.count,
               Set(manifest.counts.keys) == Set(tables),
               Set(manifest.omittedAssetIDs).count == manifest.omittedAssetIDs.count else { throw VoiceOSError("迁移清单重复或缺少记录") }
@@ -136,7 +137,8 @@ extension VoiceOSStore {
                   let version = source["version"].flatMap(Int.init), version >= 1,
                   let bytes = source["expected_bytes"].flatMap(Int64.init), bytes > 0,
                   let hash = source["expected_hash"], hash.count == 64, hash.allSatisfy({ "0123456789abcdef".contains($0) }),
-                  source["origin"] == "external", source["speaker"] == "unknown", source["local_only"] == "1" else {
+                  source["origin"] == "external", source["speaker"] == "unknown",
+                  (source["local_only"] == "1" || (manifest.version == 4 && source["local_only"] == "0")) else {
                 throw VoiceOSError("迁移包来源字段与当前支持范围不符")
             }
         }

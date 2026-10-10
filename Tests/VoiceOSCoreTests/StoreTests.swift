@@ -15,6 +15,28 @@ private struct Speech: SpeechPort {
 private struct FailedSpeech: SpeechPort {
     func transcribe(_ url: URL, locale: String) async throws -> SpeechText { throw VoiceOSError("backend unavailable") }
 }
+private actor TestModelPort: ModelPort {
+    nonisolated let configuration: ModelConfiguration
+    let response: ModelResponse.Status
+    let suspended: Bool
+    let fail: Bool
+    var calls = 0
+    var started: CheckedContinuation<Void, Never>?
+    var gate: CheckedContinuation<Void, Never>?
+    init(destination: ModelDestination = .local, response: ModelResponse.Status = .completed, suspended: Bool = false, fail: Bool = false) {
+        configuration = ModelConfiguration(provider: "test_in_memory", model: "test", promptVersion: "p1", schemaVersion: "s1", destination: destination)
+        self.response = response; self.suspended = suspended; self.fail = fail
+    }
+    func generate(_ request: ModelRequest) async throws -> ModelResponse {
+        calls += 1
+        if suspended { await withCheckedContinuation { gate = $0; started?.resume(); started = nil } }
+        if fail { throw VoiceOSError("test transport failure") }
+        let input = request.context.sources[0]
+        return ModelResponse(status: response, claims: [ClaimProposal(statement: "模拟端口候选", ownership: .aiCandidate, references: [ClaimReference(sourceID: input.sourceID, transcriptVersionID: input.transcriptVersionID, spanID: input.spans[0].id)])], inputTokens: 10, outputTokens: 5)
+    }
+    func waitStarted() async { if gate == nil { await withCheckedContinuation { started = $0 } } }
+    func release() { gate?.resume(); gate = nil }
+}
 final class StoreTests: XCTestCase {
     private var base: URL!
     override func setUpWithError() throws {
@@ -341,6 +363,70 @@ final class StoreTests: XCTestCase {
         let media = try await store.playableURL(sourceID: id); try Data("broken".utf8).write(to: media)
         let current = try await store.candidateClaims(); XCTAssertTrue(current.isEmpty)
         let history = try await store.candidateClaims(includeFrozen: true); XCTAssertEqual(history[0].validity, "frozen")
+    }
+    func testCloudBoundaryRejectsLocalOnlyAndWrongDestinationBeforePortCall() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture()); try await store.processTranscriptions(using: Speech(text: "本地材料"))
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [id])
+        do { _ = try await store.persistLocalContext(context, destination: .cloud); XCTFail("no cloud context for local-only input") } catch {}
+        let contextID = try await store.persistLocalContext(context)
+        let port = TestModelPort(destination: .cloud)
+        do { _ = try await store.generateClaims(contextID: contextID, using: port); XCTFail("wrong destination must not reach port") } catch {}
+        let calls = await port.calls; XCTAssertEqual(calls, 0)
+        let attempts = try await store.modelAttempts(); XCTAssertTrue(attempts.isEmpty)
+    }
+    func testPolicyABAPreventsLateResultAndPreservesHistoryAcrossRestore() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture()); try await store.processTranscriptions(using: Speech(text: "授权文字"))
+        let version = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false, commandID: "allow-text")
+        let replay = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false, commandID: "allow-text"); XCTAssertEqual(version, replay)
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [id]); let contextID = try await store.persistLocalContext(context, destination: .cloud)
+        let port = TestModelPort(destination: .cloud, suspended: true)
+        let task = Task { try await store.generateClaims(contextID: contextID, using: port) }
+        await port.waitStarted()
+        _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: 2, localOnly: true)
+        _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: 3, localOnly: false)
+        await port.release()
+        do { _ = try await task.value; XCTFail("allow-revoke-allow cannot revive old request") } catch {}
+        let claims = try await store.candidateClaims(includeFrozen: true); XCTAssertTrue(claims.isEmpty)
+        let attempts = try await store.modelAttempts(); XCTAssertEqual(attempts[0].state, "rejected"); XCTAssertEqual(attempts[0].usage?["output_tokens"], 5); XCTAssertEqual(attempts[0].billingState, "unknown")
+        let package = base.appendingPathComponent("policy-history"); try await store.exportPackage(to: package)
+        let target = base.appendingPathComponent("policy-restored"); try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector())
+        let restored = try VoiceOSStore(root: target, inspector: Inspector()); try await restored.recover()
+        let policy = try await restored.sourcePolicy(sourceID: id); XCTAssertEqual(policy.version, 4); XCTAssertFalse(policy.localOnly)
+        do { _ = try await restored.localContext(id: contextID); XCTFail("old context must remain stale after migration") } catch {}
+    }
+    func testModelPortCompletedRejectedAndUnknownResponses() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture()); try await store.processTranscriptions(using: Speech(text: "端口输入"))
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [id]); let contextID = try await store.persistLocalContext(context)
+        let accepted = try await store.generateClaims(contextID: contextID, using: TestModelPort()); XCTAssertEqual(accepted.count, 1)
+        for status in [ModelResponse.Status.incomplete, .refused] {
+            do { _ = try await store.generateClaims(contextID: contextID, using: TestModelPort(response: status)); XCTFail("only completed response can commit") } catch {}
+        }
+        let failed = TestModelPort(fail: true)
+        do { _ = try await store.generateClaims(contextID: contextID, using: failed); XCTFail("unknown result must remain unknown") } catch {}
+        let calls = await failed.calls; XCTAssertEqual(calls, 1)
+        let attempts = try await store.modelAttempts()
+        XCTAssertEqual(attempts.filter { $0.state == "completed" }.count, 1)
+        XCTAssertEqual(attempts.filter { $0.state == "rejected" }.count, 2)
+        XCTAssertEqual(attempts.filter { $0.state == "unknown" }.count, 1)
+        XCTAssertTrue(attempts.filter { $0.state == "rejected" }.allSatisfy { $0.usage?["input_tokens"] == 10 })
+        XCTAssertNil(attempts.first { $0.state == "unknown" }?.usage)
+        let claims = try await store.candidateClaims(); XCTAssertEqual(claims.count, 1)
+    }
+    func testRestoreRejectsCloudPermissionWithoutItsRevisionHistory() async throws {
+        let store = try await store(); let id = try await store.importFile(fixture())
+        _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+        let package = base.appendingPathComponent("missing-policy-history"); try await store.exportPackage(to: package)
+        let file = package.appendingPathComponent("source_policy_revisions.jsonl"); try Data().write(to: file)
+        let manifestFile = package.appendingPathComponent("manifest.json")
+        var manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestFile)) as! [String: Any]
+        var counts = manifest["counts"] as! [String: Int]; counts["source_policy_revisions"] = 0; manifest["counts"] = counts
+        var files = manifest["files"] as! [[String: Any]]; let index = files.firstIndex { $0["path"] as? String == "source_policy_revisions.jsonl" }!
+        let digest = try DurableFiles.hash(file); files[index]["sha256"] = digest.1; files[index]["bytes"] = digest.0; manifest["files"] = files
+        try JSONSerialization.data(withJSONObject: manifest).write(to: manifestFile)
+        let target = base.appendingPathComponent("policy-history-rejected")
+        do { try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector()); XCTFail("permissions require a consistent history") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("授权历史")) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
     }
 
 }

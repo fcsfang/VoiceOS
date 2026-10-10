@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -131,6 +131,46 @@ final class Database {
                 )
                 """)
                 try execute("PRAGMA user_version=4")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "4" {
+            try transaction {
+                try execute("ALTER TABLE sources ADD COLUMN policy_version INTEGER NOT NULL DEFAULT 1")
+                try execute("ALTER TABLE context_inputs ADD COLUMN policy_version INTEGER NOT NULL DEFAULT 1")
+                try execute("ALTER TABLE contexts ADD COLUMN destination TEXT NOT NULL DEFAULT 'local' CHECK(destination IN ('local','cloud'))")
+                try execute("""
+                CREATE TABLE source_policy_revisions (
+                  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), from_version INTEGER NOT NULL,
+                  to_version INTEGER NOT NULL, from_local_only INTEGER NOT NULL, to_local_only INTEGER NOT NULL,
+                  command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, actor TEXT NOT NULL CHECK(actor='user'),
+                  created_at TEXT NOT NULL, UNIQUE(source_id,to_version)
+                )
+                """)
+                // Provider names are metadata; only an injected port can perform work.
+                try execute("ALTER TABLE model_attempts RENAME TO old_model_attempts")
+                try execute("""
+                CREATE TABLE model_attempts (
+                  id TEXT PRIMARY KEY, context_id TEXT NOT NULL REFERENCES contexts(id), provider TEXT NOT NULL,
+                  model TEXT NOT NULL, prompt_version TEXT NOT NULL, schema_version TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','completed','unknown','rejected')),
+                  result_digest TEXT, usage_json TEXT, error TEXT, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("INSERT INTO model_attempts SELECT * FROM old_model_attempts")
+                // Rebuild dependent table so its FK points at the new attempt table.
+                try execute("ALTER TABLE claims RENAME TO old_claims")
+                try execute("""
+                CREATE TABLE claims (
+                  id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL REFERENCES model_attempts(id), ordinal INTEGER NOT NULL CHECK(ordinal>=0), statement TEXT NOT NULL,
+                  ownership TEXT NOT NULL CHECK(ownership IN ('external','ai_candidate','unresolved')),
+                  evidence_state TEXT NOT NULL CHECK(evidence_state='unverified'),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')), refs_json TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(attempt_id,ordinal)
+                )
+                """)
+                try execute("INSERT INTO claims SELECT * FROM old_claims")
+                try execute("DROP TABLE old_claims")
+                try execute("DROP TABLE old_model_attempts")
+                try execute("PRAGMA user_version=5")
             }
         }
     }

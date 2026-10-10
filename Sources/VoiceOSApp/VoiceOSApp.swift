@@ -15,6 +15,7 @@ final class ControlCenter: ObservableObject {
     }
     @Published var status = "正在检查资料库…"
     @Published var importing = false
+    @Published var changingPolicy = false
     @Published var initialized = false
     @Published var player: AVPlayer?
     @Published var history: [TranscriptVersion] = []
@@ -129,6 +130,15 @@ final class ControlCenter: ObservableObject {
             await refresh(); status = "更正已保存 · 原件和旧逐字稿保留"; return true
         } catch { status = error.localizedDescription; return false }
     }
+    func changeTextPolicy(_ record: SourceRecord) async {
+        guard let store, !changingPolicy else { return }
+        changingPolicy = true
+        defer { changingPolicy = false }
+        do {
+            _ = try await store.setSourceLocalOnly(sourceID: record.id, expectedVersion: record.policyVersion, localOnly: !record.localOnly)
+            await refresh(); status = "文本处理权限已更新 · 原始音频仍仅本机"
+        } catch { status = error.localizedDescription }
+    }
     func play(_ record: SourceRecord) async {
         do { if let url = try await store?.playableURL(sourceID: record.id) { NSWorkspace.shared.open(url) } }
         catch { status = error.localizedDescription; await refresh() }
@@ -159,7 +169,9 @@ struct CenterView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         Text(record.name).font(.title2).textSelection(.enabled)
                         HStack { Label(label(record), systemImage: record.state == "saved" ? "checkmark.circle" : "exclamationmark.circle"); Spacer(); Text(record.kind == "video" ? "视频" : "音频") }
-                        Text("外部资料 · 说话人待核对 · 仅本机处理").font(.callout).foregroundStyle(.secondary)
+                        Text("外部资料 · 说话人待核对 · \(record.localOnly ? "仅本机处理" : "文本可用于云端")").font(.callout).foregroundStyle(.secondary)
+                        Button(record.localOnly ? "允许这份资料的文本用于云端" : "将这份资料限制为仅本地") { Task { await model.changeTextPolicy(record) } }.disabled(model.changingPolicy)
+                        Text("当前处理仍在本机；此选项仅授权文本，原始音频和视频仍仅本机。").font(.caption).foregroundStyle(.secondary)
                         Text("\(String(format: "%.1f", record.duration ?? 0)) 秒 · \(ByteCountFormatter.string(fromByteCount: record.bytes, countStyle: .file))").font(.caption).foregroundStyle(.secondary)
                         if record.state == "saved" { Button("打开保存的原件", systemImage: "play.circle") { Task { await model.play(record) } } }
                         Divider()
@@ -197,7 +209,7 @@ struct CenterView: View {
                                 ForEach(related) { claim in
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(claim.statement).textSelection(.enabled)
-                                        Text("\(claim.ownership == "ai_candidate" ? "AI 候选" : (claim.ownership == "external" ? "外部主张" : "归属待核对")) · 未验证 · \(claim.validity == "frozen" ? "依据已变化，暂停使用" : "待核对")").font(.caption).foregroundStyle(.secondary)
+                                        Text("\(claim.ownership == "ai_candidate" ? "AI 候选" : (claim.ownership == "external" ? "外部主张" : "归属待核对")) · 未验证 · \(claim.validity == "frozen" ? "依据或授权已变化，暂停使用" : "待核对")").font(.caption).foregroundStyle(.secondary)
                                         ForEach(Array(claim.references.enumerated()), id: \.offset) { _, ref in
                                             if ref.sourceID == record.id, ref.transcriptVersionID == record.transcriptVersionID,
                                                let span = record.spans.first(where: { $0.id == ref.spanID }), let text = record.transcript {
