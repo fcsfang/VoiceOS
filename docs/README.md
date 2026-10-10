@@ -70,3 +70,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [当前验收状态与后续顺序](testing/acceptance-status-2026-10-10.md)：22 个案例的已验证子集、未完成变体和下一切片。
 
 - [M3 控制中心恢复](engineering/m3-package-restore-ui.md)：包预览、目标保护、独立窗口与已有库重开。
+
+- [M4 本地检索与质量实验](engineering/m4-local-retrieval.md)：版本出处屏障、规模/负例结果及语义入口的未通过边界。

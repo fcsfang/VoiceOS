@@ -92,3 +92,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 行动结果与反思可选记录，默认仅本地保存；详情能回到关联行动历史，保存不更改任务或证据状态。实现与恢复边界见[行动反馈](m3-action-feedback.md)。
 
 恢复与多库窗口的实际验证见[控制中心恢复](m3-package-restore-ui.md)。
+
+控制中心“查找历史文字”按连续文字查询本机当前原文并返回出处；语义选项仅在独立工程夹具内验证，不对用户声称已支持跨措辞关联。见[检索记录](m4-local-retrieval.md)。

@@ -9,6 +9,38 @@ import VoiceOSPlatform
 final class ControlCenter: ObservableObject {
     @Published var records: [SourceRecord] = []
     @Published var selected: String?
+    @Published var retrievalResult: RetrievalResult?
+    @Published var retrievalStatus = ""
+    @Published var searchingHistory = false
+    private let retrieval = NativeRetrieval()
+    private var retrievalWorker: Task<Void,Never>?
+    private var retrievalGeneration = UUID()
+    func cancelHistorySearch() {
+        retrievalWorker?.cancel(); retrievalWorker = nil; retrievalGeneration = UUID()
+        searchingHistory = false; retrievalResult = nil; retrievalStatus = ""
+    }
+    func searchHistory(query: String, semantic: Bool) {
+        guard let store else { return }
+        cancelHistorySearch(); let generation = retrievalGeneration
+        searchingHistory = true; retrievalStatus = "正在本机查找历史文字…"
+        retrievalWorker = Task {
+            do {
+                let result = try await store.retrieve(query,semantic:semantic,using:retrieval)
+                guard generation == retrievalGeneration else { return }
+                retrievalResult = result
+                retrievalStatus = "此次扫描 \(result.scannedSources) 份资料 · 找到 \(result.matchingSources) 份，显示 \(result.hits.count) 份"
+            } catch {
+                guard generation == retrievalGeneration else { return }
+                retrievalStatus = error.localizedDescription
+            }
+            searchingHistory = false; retrievalWorker = nil
+        }
+    }
+    func openRetrievalHit(_ hit: RetrievalHit) async -> Bool {
+        guard let store else { return false }
+        do { try await store.validateRetrievalHit(hit); selected = hit.document.sourceID; await refresh(); return true }
+        catch { cancelHistorySearch(); retrievalStatus = error.localizedDescription; return false }
+    }
     @Published var query = ""
     var filtered: [SourceRecord] {
         query.isEmpty ? records : records.filter { $0.name.localizedCaseInsensitiveContains(query) || ($0.transcript?.localizedCaseInsensitiveContains(query) ?? false) }
@@ -87,6 +119,10 @@ final class ControlCenter: ObservableObject {
             reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
             if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
             records = try await store?.sources() ?? []
+            if let result = retrievalResult, result.hits.contains(where: { hit in
+                !records.contains { $0.id == hit.document.sourceID && $0.transcriptVersionID == hit.document.transcriptVersionID && $0.policyVersion == hit.document.policyVersion && ["saved","reference_only"].contains($0.state) }
+            }) { cancelHistorySearch(); retrievalStatus = "历史资料已变化，请重新查找" }
+
             if let store {
                 var loaded: [String: [ModelAttemptRecord]] = [:]
                 for record in records { loaded[record.id] = try await store.modelAttempts(sourceID: record.id) }
@@ -371,6 +407,7 @@ struct CenterView: View {
     @State private var writingExpression = false
     @State private var feedbackAction: ActionRecord?
     @State private var showingRestore = false
+    @State private var searching = false
     @Environment(\.openWindow) private var openWindow
     private func chooseLibrary() {
         let panel = NSOpenPanel(); panel.title = "打开已有 VoiceOS 资料库"; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
@@ -533,6 +570,7 @@ struct CenterView: View {
             } else { ContentUnavailableView("选择一份资料", systemImage: "doc.text.magnifyingglass", description: Text("原件和逐字稿保存在 VoiceOS 自己的资料库中。")) }
         }
         .toolbar {
+            Button("查找历史文字", systemImage: "text.magnifyingglass") { searching = true }.disabled(!model.initialized)
             Button("连接提醒事项…") { Task { await model.connectReminders() } }.disabled(!model.initialized || model.remindersBusy)
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
             Button("记录我的表达", systemImage: "square.and.pencil") { writingExpression = true }.disabled(!model.initialized)
@@ -548,6 +586,7 @@ struct CenterView: View {
         .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
         .focusedSceneValue(\.voiceOSController, model)
         .navigationTitle(model.libraryTitle)
+        .sheet(isPresented: $searching) { HistorySearchView(model:model) { searching = false } }
         .sheet(isPresented: $showingRestore) { PackageRestoreView { showingRestore = false } }
         .sheet(item: $feedbackAction) { action in ActionFeedbackView(action: action, model: model) { feedbackAction = nil } }
         .sheet(isPresented: $writingExpression) { UserExpressionView(model: model) { writingExpression = false } }
@@ -931,5 +970,42 @@ extension FocusedValues {
     var voiceOSController: ControlCenter? {
         get { self[VoiceOSControllerKey.self] }
         set { self[VoiceOSControllerKey.self] = newValue }
+    }
+}
+
+struct HistorySearchView: View {
+    @ObservedObject var model: ControlCenter
+    let dismiss: () -> Void
+    @State private var query = ""
+    var body: some View {
+        VStack(alignment:.leading,spacing:14) {
+            Text("查找历史文字").font(.title2)
+            TextField("输入关键词或想找回的想法",text:$query).onSubmit { model.searchHistory(query:query,semantic:false) }
+            Text("按输入的连续文字查找当前版本原文，保留上下文与出处。跨措辞语义检索仍在验证；当前结果不代表观点立场或事实已验证，不创建任务或发送云端。").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button(model.searchingHistory ? "正在查找…" : "查找") { model.searchHistory(query:query,semantic:false) }.disabled(model.searchingHistory || query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || query.unicodeScalars.count > 512)
+                if model.searchingHistory { Button("停止查找") { model.cancelHistorySearch() } }
+                Text("\(query.unicodeScalars.count)/512").font(.caption)
+            }
+            Text(model.retrievalStatus).font(.caption)
+            ScrollView {
+                if let result = model.retrievalResult {
+                    if result.hits.isEmpty { Text("未找到候选。不代表历史中一定没有相关内容，可以换个表述或关键词。").foregroundStyle(.secondary) }
+                    ForEach(result.hits) { hit in
+                        VStack(alignment:.leading,spacing:6) {
+                            Text(hit.document.name).font(.headline)
+                            Text("\(hit.method == "exact" ? "文字匹配" : "语义候选 · 待核对") · \(hit.document.origin == "user" ? "用户原文" : "外部原文 · 说话人待核对") · \(hit.document.localOnly ? "仅本地" : "文本可用于云端")").font(.caption).foregroundStyle(.secondary)
+                            Text(hit.document.text).textSelection(.enabled)
+                            Text(hit.document.createdAt).font(.caption).foregroundStyle(.secondary)
+                            Button("查看原文与出处") { Task { if await model.openRetrievalHit(hit) { dismiss() } } }
+                            Divider()
+                        }.frame(maxWidth:.infinity,alignment:.leading)
+                    }
+                }
+            }
+            Button("完成",action:dismiss)
+        }.padding(24).frame(width:680,height:580)
+        .onChange(of:query) { model.cancelHistorySearch() }
+        .onDisappear { model.cancelHistorySearch() }
     }
 }
