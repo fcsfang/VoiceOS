@@ -18,12 +18,16 @@
 | [可靠性补充报告](research/reliability-validation-2026-10-10.md) | 合成实验完成，真实接口待测 | 恢复、核对去重、备份迁移与结果边界 |
 | [提醒事项探针说明](research/reminders-probe-guide.md) | 已进行单项真实创建/改名/完成/重开验证 | 实际权限、选定清单和回读验证步骤 |
 | [GPT 首轮试验方案](research/cloud-evaluation-plan.md) | 配置已接入，三次生成尝试后因服务错误停止 | 两模型十样本、费用配置和语义评分 |
-| [GPT 合成样本](research/cognitive-evaluation-cases.json) | 十条参考案例，API 未执行 | 归属、意图、纠错、历史关联与英语边界 |
-
+| [GPT 合成样本](research/cognitive-evaluation-cases.json) | 十条参考案例，仅 SEM-01 有成功生成，完整对照未执行 | 归属、意图、纠错、历史关联与英语边界 |
 | [API 与提醒事项实测](research/api-reminders-validation-2026-10-10.md) | 正常提醒事项路径完成，API 试验部分完成 | 三次生成尝试、单项真实写入/改名/完成/重开证据 |
 | [API 配置使用说明](research/api-setup-guide.md) | 本地配置已整理并验证连接 | OpenCode 配置转换、密钥隔离和复现入口 |
+| [系统架构 v0.1](architecture/system-architecture.md) | 可审查工程草稿 | 模块、接口、闭环、上下文与生命周期 |
+| [数据模型 v0.1](architecture/data-model.md) | 可审查工程草稿 | 实体/数据字典、版本、权限、事务、备份迁移与删除 |
+| [状态机与恢复](architecture/state-machines.md) | 可审查工程草稿 | 保存/处理/外部操作分层、失败窗口与纠错阻断 |
+| [架构审查与需求映射](architecture/review.md) | 覆盖检查，软件未实现 | 31 条需求对应机制与 AC、验证门槛、产品边界复核 |
+| [ADR 索引](adr/README.md) | 六项 proposed 推荐，未冻结 | 重大技术备选、取舍、证据与退出路径 |
 
-第二阶段草稿已交付，P01–P04 和 P06 默认方案已获确认；P05 授权先选小规模试验，预算及体验指标待测后校准。第三阶段已开始，但整体未通过。架构、数据模型、ADR、实施路线图和详细测试计划尚未编写，不视为已批准方案。
+第二阶段草稿已交付，P01–P04 和 P06 默认方案已获确认；P05 授权先选小规模试验，预算及体验指标待测后校准。第三阶段整体未通过；第四阶段架构、数据模型、状态机与 ADR v0.1 草稿已交付，尚未成为冻结实施基线。实施路线图和详细测试计划为下一阶段。
 
 ## 审查方式
 
