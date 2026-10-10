@@ -8,6 +8,8 @@ VoiceOS 是语音优先的多模态个人智能系统：让自然表达形成可
 
 2026-10-10：产品/工程文档草稿已交付，M1 文件输入开发预览已实现：Mac 控制中心、音视频导入、可靠保存/重开、本地逐字稿、关键词查询、导出及空库恢复。M2 已增加来源片段、逐字稿更正与版本历史，持久上下文、候选出处与更正冻结基础已建立；来源文本权限版本与模型响应端口已建立；93 项自动化测试通过；此前 26 项媒体恢复和 7 项认知故障检查通过。真实文本驱动与控制中心理解入口已接入，合成资料的执行、出处、用量及重复发送保护已验证；候选认可/拒绝、更正与审阅历史已实现，31 项文字/认知/行动/提醒事项/结果反馈故障检查通过；本地明确任务、机会池、状态历史和认知依赖冻结已实现；提醒事项创建、唯一回读和外部完成反馈已通过专用清单实测；持续清单授权与自动回读已实现，真实外部修改、重启和停止验证通过；用户文字原文、自然语言行动提取和普通任务自主创建闭环已验证；可选结果与反思已保存为关联行动版本的独立原文，默认仅本地，状态与证据保持独立；控制中心已提供恢复/打开已有资料库与独立窗口；历史文字检索与版本出处屏障已实现；语义方法仍在质量验证，完整 MVP 和 22 项产品验收尚未完成。
 
+2026-10-11 增量：[语义候选质量比较](docs/engineering/m4-semantic-retrieval-quality.md)已完成 24 个主题的合成评估。本地召回加既有文本模型判定取得较好初测结果，仍需独立样本、长文本及生产权限验证；语义自动关联未开启。93 项自动化测试重新通过。
+
 ## 本地应用
 
 运行 `python3 scripts/app/build.py` 后，双击 `dist/VoiceOS.app`。当前仅在本机处理媒体，默认数据位于 `~/Library/Application Support/VoiceOS`。详见[开发指南](docs/engineering/development-guide.md)、[M1 实施记录](docs/engineering/m1-file-input.md)、[逐字稿记录](docs/engineering/m2-transcript-provenance.md)、[认知基础记录](docs/engineering/m2-cognitive-foundation.md)与 [权限/端口记录](docs/engineering/m2-source-policy-model-port.md)与 [真实驱动记录](docs/engineering/m2-responses-driver.md)与[控制中心理解记录](docs/engineering/m2-control-center-understanding.md)与[候选审阅记录](docs/engineering/m2-claim-review.md)及[行动与机会池](docs/engineering/m2-actions-opportunity.md)与[提醒事项反馈](docs/engineering/m3-reminders-feedback.md)及[持续连接与自动回读](docs/engineering/m3-continuous-reminders.md)与[表达行动闭环](docs/engineering/m3-expression-actions.md)。

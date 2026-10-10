@@ -10,9 +10,9 @@
 |---|---|---|
 | 原文连续文字匹配 | 易核对、无模型依赖、可立即提供出处 | 跨措辞漏检；采用为当前界面入口 |
 | 系统 NLEmbedding 中文句向量 | 本机资源已可用、640 维，无新增下载 | 1000 条样本误召回多，正例第 91 位，条件细化漏检；只保留工程实验，不进入日常界面 |
-| 系统 NLContextualEmbedding + token 均值池化 | 已有本机资产、512 维，无新增下载 | 两个正例在 1000 条探针中第 1 位，但只是少量样本，负例候选仍需复核；只作下一轮候选方案 |
-| 独立本地多语言模型 | 可替换、可针对检索任务评估 | 新依赖、资产/资源管理和分发成本；尚未下载或采用 |
-| 云端召回/重排 | 可能改善语义和关系判定 | 请求成本、权限闭包与晚到结果屏障；尚未将任何私人历史发送用于检索 |
+| 系统 NLContextualEmbedding + token 均值池化 | 已有本机资产、512 维，无新增下载 | 两个正例在厨房干扰中第 1 位；10-11 扩大到 24 个主题后目标第 20 位，无关分数重叠；不采用为产品语义方法 |
+| 独立本地中文向量/多语言重排 | 可替换、可针对检索任务评估 | 10-11 已研究 BGE-small-zh + BGE-reranker-base，保留组返回精确率改善但相关记录覆盖仅 50%；约 1.23 GB 资产，未增加应用依赖或采用 |
+| 本地召回 + 云端相关性判定 | 可明确选择为空，减少主题相近误回 | 10-11 单次合成测试两组返回精确率 100%，相关记录召回率 82%/90%；需独立样本、来源授权闭包和晚到结果屏障；尚未发送任何私人历史用于检索或接入产品 |
 
 ## 当前采用
 
@@ -33,5 +33,7 @@
 系统句向量的向量余弦距离与其 `distance` 接口尺度不同，最初实验错误沿用阈值造成全量误召回，已纠正为归一化 L2 并用系统接口独立校验；修正后仍有实际质量不足，不能靠修改阈值宣称已验收。上下文池化探针的正例排名改善也不能替代完整关系判定、长期使用和不同主题负例。
 
 下一步在同一版本/权限边界上比较上下文模型和重排，补充独立主题、否定/条件与无相关历史的样本，再决定语义入口。产品愿景和验收要求未降低。
+
+2026-10-11 补充：[语义候选质量比较](../engineering/m4-semantic-retrieval-quality.md)记录扩大样本后的反证、独立本地模型及重排实验。采用范围仍限可靠文字检索与版本出处屏障。
 
 参考：Apple [sentenceEmbedding](https://developer.apple.com/documentation/naturallanguage/nlembedding/sentenceembedding(for:)) 返回资源可用时的模型；[NLContextualEmbeddingResult](https://developer.apple.com/documentation/naturallanguage/nlcontextualembeddingresult) 提供 token 向量，整体表示需池化。[requestAssets](https://developer.apple.com/documentation/naturallanguage/nlcontextualembedding/requestassets(completionhandler:)) 会请求/下载资产，本轮未调用。具体可用性来自本机实测，不从文档推断已安装。
