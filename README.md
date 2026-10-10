@@ -6,7 +6,7 @@ VoiceOS 是语音优先的多模态个人智能系统：让自然表达形成可
 
 ## 当前阶段
 
-2026-10-10：第一阶段基础已完成；第二阶段 PRD v0.1 已按 P01–P04 答复修订；第三阶段关键技术验证已开始。已有本地合成数据探针，尚无业务功能代码或已通过的软件验收结果。
+2026-10-10：第一阶段基础已完成；第二阶段 PRD v0.1 已按 P01–P06 答复修订，P05 数值待测；第三阶段关键技术验证已开始。已有本地合成数据探针，尚无业务功能代码或已通过的软件验收结果。
 
 ## 阅读入口
 
@@ -15,8 +15,10 @@ VoiceOS 是语音优先的多模态个人智能系统：让自然表达形成可
 - [决策登记表](docs/product/decision-register.md)：已确认方向、待确认边界与技术验证事项。
 - [PRD v0.1](docs/product/prd.md)：首版范围、31 条需求、行为边界和验收要求。
 - [验收对照表](docs/testing/acceptance-matrix.md)：22 个待执行案例与需求映射。
-- [产品审查问题](docs/product/review-questions.md)：P01–P04 已确认，P05/P06 待审查。
+- [产品审查问题](docs/product/review-questions.md)：P01–P04/P06 已确认，P05 授权先测。
 - [技术验证初步报告](docs/research/technical-validation-2026-10-10.md)：本地中文转写、音频文件、持久化探针与官方接口调查。
+- [可靠性补充报告](docs/research/reliability-validation-2026-10-10.md)：跨资源中断、外部未知结果、可迁移包与原生探针准备。
+- [GPT 首轮试验方案](docs/research/cloud-evaluation-plan.md)：模型对照、十条合成样本与费用控制；待凭据配置。
 - [工程协作规则](AGENTS.md)：四条必要边界。
 
 个人录音、运行数据、密钥和临时产物不进入 Git。核心数据模型和技术栈尚未冻结；后续重大技术选择通过 ADR 说明备选方案、证据与迁移影响。

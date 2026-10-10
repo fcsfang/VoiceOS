@@ -1,0 +1,60 @@
+{
+  "probe": "cross-resource-recovery-v1",
+  "windows": {
+    "intent": {
+      "state": "interrupted-empty",
+      "checks": {
+        "expected_state": true,
+        "restart_stable": true
+      }
+    },
+    "chunk": {
+      "state": "interrupted-with-fragment",
+      "checks": {
+        "expected_state": true,
+        "restart_stable": true,
+        "fragment_retained": true
+      }
+    },
+    "sealed": {
+      "state": "ready",
+      "checks": {
+        "expected_state": true,
+        "restart_stable": true,
+        "exact_bytes": true
+      }
+    },
+    "renamed": {
+      "state": "ready",
+      "checks": {
+        "expected_state": true,
+        "restart_stable": true,
+        "exact_bytes": true
+      }
+    },
+    "ready": {
+      "state": "ready",
+      "checks": {
+        "expected_state": true,
+        "restart_stable": true,
+        "exact_bytes": true
+      }
+    },
+    "corrupt": {
+      "state": "quarantined",
+      "checks": {
+        "expected_state": true,
+        "restart_stable": true
+      }
+    },
+    "missing": {
+      "state": "quarantined",
+      "checks": {
+        "expected_state": true,
+        "restart_stable": true
+      }
+    }
+  },
+  "scope": "synthetic bytes and abrupt process exits; not media-container repair, microphone capture, power loss or Mac sleep",
+  "date": "2026-10-10"
+}

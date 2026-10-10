@@ -11,12 +11,16 @@
 | [项目计划](planning/project-plan.md) | 执行计划 | 文档阶段、审查门槛和下一步 |
 | [决策登记表](product/decision-register.md) | 已确认方向 + 待定清单 | 分开记录产品决策、用户待确认事项与技术假设 |
 | [原始资料校验清单](planning/vision-baseline.json) | 基线证据 | 原始愿景资料的 SHA-256 摘要；用于核对是否被修改 |
-| [PRD v0.1](product/prd.md) | 审查修订稿，P01–P04 已确认 | 首版范围、31 条需求、状态和权限边界、三条端到端验收 |
+| [PRD v0.1](product/prd.md) | 审查修订稿，P01–P04/P06 已确认 | 首版范围、31 条需求、状态和权限边界、三条端到端验收 |
 | [需求验收对照表](testing/acceptance-matrix.md) | 测试设计草稿，未执行 | 22 个案例，覆盖全部需求与关键失败边界 |
-| [产品审查问题](product/review-questions.md) | P01–P04 已确认，P05/P06 待审查 | 答复、产品细节、建议与取舍 |
+| [产品审查问题](product/review-questions.md) | P01–P04/P06 已确认，P05 授权先测 | 答复、产品细节、建议与取舍 |
 | [技术验证初步报告](research/technical-validation-2026-10-10.md) | 第三阶段进行中，部分探针完成 | 实测范围、证据、官方来源、备选与下一步 |
+| [可靠性补充报告](research/reliability-validation-2026-10-10.md) | 合成实验完成，真实接口待测 | 恢复、核对去重、备份迁移与结果边界 |
+| [提醒事项探针说明](research/reminders-probe-guide.md) | 编译及签名校验完成，未运行 | 实际权限、选定清单和回读验证步骤 |
+| [GPT 首轮试验方案](research/cloud-evaluation-plan.md) | 已选方案，待 API 配置 | 两模型十样本、费用配置和语义评分 |
+| [GPT 合成样本](research/cognitive-evaluation-cases.json) | 十条参考案例，API 未执行 | 归属、意图、纠错、历史关联与英语边界 |
 
-第二阶段草稿已交付，四项产品边界已获得用户确认；预算指标和数据控制细节仍待审查。第三阶段已开始，但整体未通过。架构、数据模型、ADR、实施路线图和详细测试计划尚未编写，不视为已批准方案。
+第二阶段草稿已交付，P01–P04 和 P06 默认方案已获确认；P05 授权先选小规模试验，预算及体验指标待测后校准。第三阶段已开始，但整体未通过。架构、数据模型、ADR、实施路线图和详细测试计划尚未编写，不视为已批准方案。
 
 ## 审查方式
 
