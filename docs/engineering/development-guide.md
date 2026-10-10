@@ -1,6 +1,6 @@
 # VoiceOS 开发预览与复现
 
-日期：2026-10-10。此版本包含 M1 文件输入切片与 M2 逐字稿来源/更正基础；尚不是完整 MVP。当前状态与证据见 [M1 实施记录](m1-file-input.md)、[逐字稿增量记录](m2-transcript-provenance.md)、[认知基础记录](m2-cognitive-foundation.md)及 [权限/端口记录](m2-source-policy-model-port.md)与[真实驱动记录](m2-responses-driver.md)与[控制中心理解记录](m2-control-center-understanding.md)与[候选审阅记录](m2-claim-review.md)。
+日期：2026-10-10。此版本包含 M1 文件输入切片与 M2 逐字稿来源/更正基础；尚不是完整 MVP。当前状态与证据见 [M1 实施记录](m1-file-input.md)、[逐字稿增量记录](m2-transcript-provenance.md)、[认知基础记录](m2-cognitive-foundation.md)及 [权限/端口记录](m2-source-policy-model-port.md)与[真实驱动记录](m2-responses-driver.md)与[控制中心理解记录](m2-control-center-understanding.md)与[候选审阅记录](m2-claim-review.md)及[提醒事项反馈](m3-reminders-feedback.md)。
 
 ## 打开应用
 
@@ -30,11 +30,11 @@ VOICEOS_DATA_DIR="$PWD/runtime/my-local-test" dist/VoiceOS.app/Contents/MacOS/Vo
 
 ## 导出与空库恢复
 
-工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v6，存储 schema 7，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews/actions/action_revisions 十四类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 、v4/schema 5 与 v5/schema 6 包。它仅覆盖当前已实现的实体，未来新增实体时必须升级格式。没有凭据或外部连接数据。
+工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v7，存储 schema 8，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews/actions/action_revisions/reminder_links/reminder_observations 十六类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 、v4/schema 5 、v5/schema 6 与 v6/schema 7 包。它仅覆盖当前已实现的实体，未来新增实体时必须升级格式。包含外部身份映射和回读历史，不包含凭据或系统权限；恢复不携带本次会话选择的授权清单。
 
 导出记录文件数量、长度、SHA-256 与未打包原件 ID；原件包先核验原件，再逐字节复制核验。包先在临时目录生成，完成后改名到新目标；不覆盖现有目录。当前同步 actor 快照依靠单写者和原件不可变契约，尚未实现删除，因此不存在资产删除竞态；加入删除/异步导出前必须实现 pin 与取消屏障，不能照搬当前边界。
 
-恢复入口暂为开发工具，尚未加入控制中心。只恢复到不存在的新目录，先检查格式、文件摘要、身份唯一性、字段与外键/版本关联、路径逃逸/符号链接、完整媒体解码及数据库完整性；预检失败不建立目标资料库。未包含原件的来源为 reference_only，文本可读、原件不伪装可播放。所有未完成 jobs 暂停，明确重试才运行；此版本没有外写适配器。
+恢复入口暂为开发工具，尚未加入控制中心。只恢复到不存在的新目录，先检查格式、文件摘要、身份唯一性、字段与外键/版本关联、路径逃逸/符号链接、完整媒体解码及数据库完整性；预检失败不建立目标资料库。未包含原件的来源为 reference_only，文本可读、原件不伪装可播放。所有未完成 jobs 暂停，明确重试才运行；恢复和启动不会自动外写；已有提醒事项关联须重新明确选清单后回读。
 
 ```sh
 .build/debug/voiceos-check export "$PWD/runtime/my-local-test" "$PWD/runtime/package-text"
@@ -73,8 +73,10 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 
 来源详情可允许文本用于云端或限制为仅本地。授权按钮只更新权限，不触发网络发送。配置文本模型后，点击“理解这份文字”才发送选中资料的文字；原始音视频权限独立，保持本机处理。
 
-使用现有模型配置启动开发预览：`python3 scripts/app/run.py`。也可直接打开应用并通过“配置文本模型…”选择项目 `.env`。这不会自动发送内容。配置暂为开发文件，正式钥匙串待实现；同一文字/权限/模型身份的已完成、失败或未知调用不会重复发送，详见[控制中心理解记录](m2-control-center-understanding.md)与[候选审阅记录](m2-claim-review.md)。
+使用现有模型配置启动开发预览：`python3 scripts/app/run.py`。也可直接打开应用并通过“配置文本模型…”选择项目 `.env`。这不会自动发送内容。配置暂为开发文件，正式钥匙串待实现；同一文字/权限/模型身份的已完成、失败或未知调用不会重复发送，详见[控制中心理解记录](m2-control-center-understanding.md)与[候选审阅记录](m2-claim-review.md)及[提醒事项反馈](m3-reminders-feedback.md)。
 
 候选可明确认可、拒绝或更正，认可保持证据状态独立，更正后重新待核对；审阅历史与原始模型结果随包保留。冻结候选只可回溯，详见[候选审阅记录](m2-claim-review.md)。
 
-本地行动意图可在候选中显式记录，默认进入机会池，明确任务可完成；状态历史保留，认知/来源/权限版本变化会暂停依赖行动。尚未同步 Apple 提醒事项，详见[行动与机会池记录](m2-actions-opportunity.md)。
+本地行动意图可在候选中显式记录，默认进入机会池，明确任务可完成；状态历史保留，认知/来源/权限版本变化会暂停依赖行动。行动语义详见[行动与机会池记录](m2-actions-opportunity.md)。明确任务的提醒事项创建与完成回读现已接入，详见[提醒事项反馈](m3-reminders-feedback.md)。
+
+提醒事项入口：工具栏“连接提醒事项…”授予系统权限后选择明确清单，再从明确任务发送。每次重开需重新选清单；已有尝试只回读，不重建。仅本地来源依赖不可发送。当前本地完成/重新跟进不向外更新，外部状态以详情回读记录为准；无后台监听或自动轮询。开发包包含提醒事项使用说明，正式沙盒与签名尚待验证。

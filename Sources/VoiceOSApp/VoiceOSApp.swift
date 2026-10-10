@@ -31,6 +31,17 @@ final class ControlCenter: ObservableObject {
     @Published var actionRecords: [ActionRecord] = []
     @Published var savingAction = false
     @Published var actionVersions: [ActionRevision] = []
+    @Published var reminderLinks: [ReminderLink] = []
+    @Published var reminderCalendars: [ReminderCalendar] = []
+    @Published var reminderCalendarID = ""
+    @Published var remindersBusy = false
+    @Published var choosingReminderCalendar = false
+    private let reminders = NativeReminders()
+    var reminderCalendarTitle: String { reminderCalendars.first { $0.id == reminderCalendarID }?.title ?? "未选择清单" }
+    func reminderSourceAllowed(_ action: ActionRecord) -> Bool {
+        guard let claim = claims.first(where: { $0.id == action.claimID }) else { return false }
+        return !claim.references.isEmpty && claim.references.allSatisfy { ref in records.contains { $0.id == ref.sourceID && !$0.localOnly } }
+    }
     private var store: VoiceOSStore?
     private var worker: Task<Void, Never>?
     func start() async {
@@ -54,6 +65,7 @@ final class ControlCenter: ObservableObject {
         do {
             claims = try await store?.candidateClaims(includeFrozen: true) ?? []
             actionRecords = try await store?.actions(includeHistory: true) ?? []
+            reminderLinks = try await store?.reminderLinks() ?? []
             records = try await store?.sources() ?? []
             if let store {
                 var loaded: [String: [ModelAttemptRecord]] = [:]
@@ -208,6 +220,33 @@ final class ControlCenter: ObservableObject {
             await refresh(); status = "意图已保存到 VoiceOS · 尚未写入提醒事项"; return true
         } catch { status = error.localizedDescription; await refresh(); return false }
     }
+    func connectReminders() async {
+        guard !remindersBusy else { return }
+        remindersBusy = true; defer { remindersBusy = false }
+        do {
+            reminderCalendars = try await reminders.authorize()
+            choosingReminderCalendar = true
+            status = "请选择明确授权的清单 · 尚未读取或写入任务"
+        } catch { status = error.localizedDescription }
+    }
+    func sendReminder(_ action: ActionRecord) async {
+        guard let store, !remindersBusy, !reminderCalendarID.isEmpty else { return }
+        remindersBusy = true; defer { remindersBusy = false }
+        do {
+            try await store.sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: reminderCalendarID, using: reminders)
+            status = "提醒事项尝试已记录 · 以回读状态为准"
+        } catch { status = error.localizedDescription }
+        await refresh()
+    }
+    func readReminder(_ link: ReminderLink) async {
+        guard let store, !remindersBusy, reminderCalendarID == link.calendarID else { return }
+        remindersBusy = true; defer { remindersBusy = false }
+        do {
+            try await store.readReminder(linkID: link.id, calendarID: reminderCalendarID, using: reminders)
+            status = "已回读关联任务 · 外部改名保留，完成反馈独立记录"
+        } catch { status = error.localizedDescription }
+        await refresh()
+    }
     func actionHistory(_ action: ActionRecord) async {
         do { actionVersions = try await store?.actionHistory(actionID: action.id) ?? [] }
         catch { status = error.localizedDescription }
@@ -350,7 +389,7 @@ struct CenterView: View {
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(action.title).font(.headline)
                                         Text("\(action.kind == "task" ? "明确任务" : (action.kind == "opportunity" ? "探索意图" : "AI 建议")) · \(action.state == "completed" ? "已完成" : (action.state == "dismissed" ? "暂不跟进" : "待跟进")) · 第 \(action.version) 版").font(.caption)
-                                        Text(action.validity == "frozen" ? "认知或授权已变化，暂停使用；历史保留" : "仅保存在 VoiceOS，尚未写入提醒事项").font(.caption).foregroundStyle(.secondary)
+                                        Text(action.validity == "frozen" ? "认知或授权已变化，暂停使用；历史保留" : "本地意图记录 · 外部同步状态见下方").font(.caption).foregroundStyle(.secondary)
                                         Text("认知依据：第 \(action.claimReviewVersion) 版").font(.caption).foregroundStyle(.secondary)
                                         if !action.note.isEmpty { Text(action.note) }
                                         HStack {
@@ -359,6 +398,19 @@ struct CenterView: View {
                                                 Button("暂不跟进") { Task { await model.changeAction(action, state: .dismissed) } }
                                             } else { Button("重新跟进") { Task { await model.changeAction(action, state: .open) } } }
                                         }.disabled(model.savingAction || action.validity == "frozen")
+                                        let link = model.reminderLinks.first { $0.actionID == action.id }
+                                        if let link {
+                                            Text("提醒事项：" + reminderLabel(link.state)).font(.caption).foregroundStyle(.secondary)
+                                            if let title = link.remoteTitle { Text("外部标题：" + title).font(.caption) }
+                                            if let at = link.lastObservedAt { Text("最近回读记录：" + at).font(.caption).foregroundStyle(.secondary) }
+                                            if let done = link.remoteCompleted { Text(done ? "外部回读：已完成" : "外部回读：未完成").font(.caption) }
+                                            Button("回读提醒事项") { Task { await model.readReminder(link) } }.disabled(model.remindersBusy || model.reminderCalendarID != link.calendarID)
+                                        } else if action.kind == "task" {
+                                            Text("目标清单：" + model.reminderCalendarTitle).font(.caption).foregroundStyle(.secondary)
+                                            if !model.reminderSourceAllowed(action) { Text("依据包含仅本地资料，不可外发").font(.caption).foregroundStyle(.secondary) }
+                                            Button("发送到所选提醒事项清单") { Task { await model.sendReminder(action) } }
+                                                .disabled(model.remindersBusy || model.reminderCalendarID.isEmpty || action.validity == "frozen" || action.state != "open" || !model.reminderSourceAllowed(action))
+                                        }
                                         Button("行动历史") { Task { await model.actionHistory(action); showActionHistory = true } }
                                         Divider()
                                     }.padding(.vertical, 8)
@@ -374,6 +426,7 @@ struct CenterView: View {
             } else { ContentUnavailableView("选择一份资料", systemImage: "doc.text.magnifyingglass", description: Text("原件和逐字稿保存在 VoiceOS 自己的资料库中。")) }
         }
         .toolbar {
+            Button("连接提醒事项…") { Task { await model.connectReminders() } }.disabled(!model.initialized || model.remindersBusy)
             Button("导入文件", systemImage: "square.and.arrow.down") { model.chooseFiles() }.disabled(!model.initialized || model.importing)
             Menu {
                 Button("导出结构化资料…") { model.export(includeMedia: false) }
@@ -399,6 +452,18 @@ struct CenterView: View {
                 HStack { Spacer(); Button("完成") { showHistory = false }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 660, height: 440)
         }
+        .sheet(isPresented: $model.choosingReminderCalendar) {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("选择提醒事项清单").font(.title2)
+                Text("系统权限覆盖全部提醒事项。VoiceOS 只读写你在这里明确选定清单中的关联任务；选择清单不会发送任务。").foregroundStyle(.secondary)
+                Picker("授权清单", selection: $model.reminderCalendarID) {
+                    Text("请选择清单").tag("")
+                    ForEach(model.reminderCalendars) { calendar in Text(calendar.title).tag(calendar.id) }
+                }
+                Text("重开应用后需重新选择清单；已有尝试只回读，不自动重建。").font(.caption)
+                Button("完成") { model.choosingReminderCalendar = false }
+            }.padding(24).frame(width: 600)
+        }
         .sheet(isPresented: $showActionHistory) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("行动状态历史").font(.title2)
@@ -408,6 +473,7 @@ struct CenterView: View {
                         VStack(alignment: .leading) {
                             Text("第 \(version.version) 版 · \(version.state == "completed" ? "已完成" : (version.state == "dismissed" ? "暂不跟进" : "待跟进"))")
                             if !version.note.isEmpty { Text(version.note) }
+                            Text(version.actor == "external" ? "来自提醒事项回读" : "明确本地操作").font(.caption)
                             Text(version.createdAt).font(.caption).foregroundStyle(.secondary)
                             Divider()
                         }
@@ -443,6 +509,14 @@ struct CenterView: View {
         .onChange(of: model.selected) { _, _ in model.player?.pause(); model.player = nil }
         .frame(minWidth: 840, minHeight: 540)
         .task { await model.start() }
+    }
+    private func reminderLabel(_ state: String) -> String {
+        switch state {
+        case "linked": return "唯一关联已回读"
+        case "missing": return "未找到关联项，不自动重建"
+        case "conflict": return "关联或状态冲突，保留双方内容"
+        default: return "结果待核对，不自动重发"
+        }
     }
     private func ownershipLabel(_ value: String) -> String {
         value == "external" ? "外部主张" : (value == "ai_candidate" ? "AI 候选" : "归属待核对")

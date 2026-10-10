@@ -40,6 +40,7 @@ public enum SaveCheckpoint: String, Sendable {
     case modelReserved, claimsUncommitted, claimsCommitted, correctionUncommitted, correctionCommitted
     case policyUncommitted, policyCommitted
     case reviewUncommitted, reviewCommitted
+    case reminderReserved, reminderSaved, reminderFeedbackUncommitted, reminderFeedbackCommitted
     case actionUncommitted, actionCommitted, actionStateUncommitted, actionStateCommitted
 }
 

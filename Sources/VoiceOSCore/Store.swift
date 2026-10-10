@@ -8,6 +8,7 @@ public actor VoiceOSStore {
     private var ready = false
     private var activeImports: Set<String> = []
     private var processing = false
+    var activeReminderLinks: Set<String> = []
     let checkpoint: @Sendable (SaveCheckpoint) throws -> Void
 
     public init(root: URL, inspector: any MediaInspector,
@@ -23,6 +24,7 @@ public actor VoiceOSStore {
     }
     public func recover() async throws {
         guard !ready, activeImports.isEmpty else { return }
+        try db.execute("UPDATE reminder_links SET state='unknown' WHERE state='reserved'")
         // Startup only: the process lock proves the previous worker no longer owns a lease.
         try db.execute("UPDATE jobs SET state='queued', lease_token=NULL WHERE state='running'")
         try db.execute("UPDATE model_attempts SET state='unknown',error='进程退出前结果未登记；不会自动重发' WHERE state='reserved'")

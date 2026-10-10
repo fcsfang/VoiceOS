@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -210,6 +210,36 @@ final class Database {
                 )
                 """)
                 try execute("PRAGMA user_version=7")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "7" {
+            try transaction {
+                try execute("ALTER TABLE action_revisions RENAME TO old_action_revisions")
+                try execute("""
+                CREATE TABLE action_revisions (
+                  id TEXT PRIMARY KEY, action_id TEXT NOT NULL REFERENCES actions(id), version INTEGER NOT NULL CHECK(version>1), from_version INTEGER NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('open','completed','dismissed')), note TEXT NOT NULL, actor TEXT NOT NULL CHECK(actor IN ('user','external')),
+                  command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(action_id,version)
+                )
+                """)
+                try execute("INSERT INTO action_revisions SELECT * FROM old_action_revisions")
+                try execute("DROP TABLE old_action_revisions")
+                try execute("""
+                CREATE TABLE reminder_links (
+                  id TEXT PRIMARY KEY, action_id TEXT NOT NULL UNIQUE REFERENCES actions(id), action_version INTEGER NOT NULL CHECK(action_version>=1),
+                  calendar_id TEXT NOT NULL, marker TEXT NOT NULL UNIQUE, desired_title TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','unknown','linked','missing','conflict')),
+                  external_id TEXT, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE reminder_observations (
+                  id TEXT PRIMARY KEY, link_id TEXT NOT NULL REFERENCES reminder_links(id), external_id TEXT NOT NULL,
+                  title TEXT NOT NULL, completed INTEGER NOT NULL CHECK(completed IN (0,1)), marker_valid INTEGER NOT NULL CHECK(marker_valid IN (0,1)),
+                  feedback_revision_id TEXT REFERENCES action_revisions(id), created_at TEXT NOT NULL, sequence INTEGER NOT NULL CHECK(sequence>=1), UNIQUE(link_id,sequence)
+                )
+                """)
+                try execute("PRAGMA user_version=8")
             }
         }
     }

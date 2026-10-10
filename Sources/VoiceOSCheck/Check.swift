@@ -34,6 +34,14 @@ struct Check {
                 let attempt = try await store.reserveLocalModelAttempt(contextID: contextID, model: "development-fixture", promptVersion: "fixture-v1", schemaVersion: "claims-v1")
                 let input = context.sources[0]
                 _ = try await store.commitLocalClaims(attemptID: attempt, proposals: [ClaimProposal(statement: "开发测试候选，不代表模型理解结果或用户观点", ownership: .aiCandidate, references: [ClaimReference(sourceID: source.id, transcriptVersionID: input.transcriptVersionID, spanID: input.spans[0].id)])])
+            } else if args[0] == "reminder-fixture" {
+                guard let action = try await store.actions().first(where: { $0.kind == "task" }) else { throw VoiceOSError("fixture requires a task") }
+                let port = FileRemindersFixture(file: URL(fileURLWithPath: args[1]).appendingPathComponent("fixture-reminders.json"))
+                try await store.sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: "development-fixture-calendar", using: port)
+            } else if args[0] == "reminder-read-fixture" {
+                guard let link = try await store.reminderLinks().first else { throw VoiceOSError("fixture requires a reminder link") }
+                let port = FileRemindersFixture(file: URL(fileURLWithPath: args[1]).appendingPathComponent("fixture-reminders.json"))
+                try await store.readReminder(linkID: link.id, calendarID: "development-fixture-calendar", using: port)
             } else if args[0] == "action-fixture" {
                 guard let claim = try await store.candidateClaims().first else { throw VoiceOSError("fixture requires a candidate") }
                 _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: claim.reviewVersion, title: "开发验证任务，不代表真实用户任务", kind: .task, commandID: "fixture-action")
@@ -58,5 +66,24 @@ struct Check {
             }]
             print(String(decoding: try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted,.sortedKeys]), as: UTF8.self))
         } catch { fputs("\(error.localizedDescription)\n", stderr); exit(1) }
+    }
+}
+
+// Development-only durable stand-in for an external service. Never uses EventKit.
+private actor FileRemindersFixture: RemindersPort {
+    let file: URL
+    init(file: URL) { self.file = file }
+    func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
+        guard FileManager.default.fileExists(atPath: file.path) else { return [] }
+        return try JSONDecoder().decode([ReminderSnapshot].self, from: Data(contentsOf: file)).filter { $0.marker == marker || $0.id == externalID }
+    }
+    func create(calendarID: String, title: String, marker: String) async throws {
+        guard !FileManager.default.fileExists(atPath: file.path) else { throw VoiceOSError("fixture must never duplicate a write") }
+        let data = try JSONEncoder().encode([ReminderSnapshot(id: UUID().uuidString, title: title, completed: true, marker: marker)])
+        try data.write(to: file, options: .withoutOverwriting)
+        let handle = try FileHandle(forWritingTo: file); try handle.synchronize(); try handle.close()
+        let fd = open(file.deletingLastPathComponent().path, O_RDONLY)
+        guard fd >= 0 else { throw VoiceOSError("fixture directory unavailable") }
+        defer { close(fd) }; guard fsync(fd) == 0 else { throw VoiceOSError("fixture directory sync failed") }
     }
 }

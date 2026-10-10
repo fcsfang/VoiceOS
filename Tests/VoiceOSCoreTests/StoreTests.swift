@@ -37,6 +37,37 @@ private actor TestModelPort: ModelPort {
     func waitStarted() async { if gate == nil { await withCheckedContinuation { started = $0 } } }
     func release() { gate?.resume(); gate = nil }
 }
+private actor TestReminders: RemindersPort {
+    var items: [ReminderSnapshot] = []
+    var creates = 0
+    var loseReceipt = false
+    var deny = false
+    var suspended = false
+    var suspendCreate = false
+    var gate: CheckedContinuation<Void, Never>?
+    var started: CheckedContinuation<Void, Never>?
+    init(loseReceipt: Bool = false, suspended: Bool = false, suspendCreate: Bool = false) { self.loseReceipt = loseReceipt; self.suspended = suspended; self.suspendCreate = suspendCreate }
+    func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
+        if suspended { suspended = false; await withCheckedContinuation { gate = $0; started?.resume(); started = nil } }
+        if deny { throw VoiceOSError("permission denied") }
+        return items.filter { $0.marker == marker || $0.id == externalID }
+    }
+    func create(calendarID: String, title: String, marker: String) async throws {
+        creates += 1
+        if deny { throw VoiceOSError("permission denied") }
+        items.append(ReminderSnapshot(id: UUID().uuidString, title: title, completed: false, marker: marker))
+        if suspendCreate { await withCheckedContinuation { gate = $0; started?.resume(); started = nil } }
+        if loseReceipt { throw VoiceOSError("lost receipt after save") }
+    }
+    func edit(title: String? = nil, completed: Bool = false, corruptMarker: Bool = false) {
+        let item = items[0]; items[0] = ReminderSnapshot(id: item.id, title: title ?? item.title, completed: completed, marker: corruptMarker ? "edited" : item.marker)
+    }
+    func duplicate() { let item = items[0]; items.append(ReminderSnapshot(id: UUID().uuidString, title: item.title, completed: item.completed, marker: item.marker)) }
+    func removeAll() { items = [] }
+    func setDeny() { deny = true }
+    func waitStarted() async { if gate == nil { await withCheckedContinuation { started = $0 } } }
+    func release() { gate?.resume(); gate = nil }
+}
 private struct MalformedModelHTTP: ModelHTTPTransport {
     func send(_ request: URLRequest) async throws -> ModelHTTPReply {
         ModelHTTPReply(status: 200, body: Data(#"{"status":"completed","usage":{"input_tokens":12,"output_tokens":7},"output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"{\"claims\":[{\"userConfirmed\":true}]}"}]}]}"#.utf8))
@@ -233,6 +264,135 @@ final class StoreTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: manifest).write(to: manifestFile)
         let target = base.appendingPathComponent("invalid-actions-target")
         do { try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector()); XCTFail("missing action history") } catch { XCTAssertTrue(error.localizedDescription.contains("行动状态历史")) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
+    }
+    private func reminderFixture(_ store: VoiceOSStore) async throws -> (CandidateClaim, String) {
+        let source = try await store.importFile(fixture())
+        _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: 1, localOnly: false)
+        try await store.processTranscriptions(using: Speech(text: "允许外发的合成测试资料"))
+        _ = try await store.understandSource(sourceID: source, using: TestModelPort())
+        let claim = try await store.candidateClaims()[0]
+        let id = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "明确验证任务", kind: .task)
+        return (claim,id)
+    }
+    func testLocalOnlyDerivedTaskCannotSendToExternalReminders() async throws {
+        let store = try await store(); let claim = try await reviewFixture(store)
+        let id = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: 0, title: "本地资料派生任务", kind: .task)
+        let port = TestReminders()
+        do { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port); XCTFail("local-only leak") } catch { XCTAssertTrue(error.localizedDescription.contains("仅本地")) }
+        let links = try await store.reminderLinks(); XCTAssertTrue(links.isEmpty)
+        let creates = await port.creates; XCTAssertEqual(creates, 0)
+    }
+    func testRemindersLostSaveReceiptOnlyReadsAndNeverCreatesAgain() async throws {
+        let store = try await store(); let (_,id) = try await reminderFixture(store); let port = TestReminders(loseReceipt: true)
+        do { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port); XCTFail("lost ack") } catch {}
+        let unknown = try await store.reminderLinks()[0]; XCTAssertEqual(unknown.state, "unknown")
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        let link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "linked")
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
+        do { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "other", using: port); XCTFail("scope change") } catch {}
+    }
+    func testRemindersExternalRenameCompletionAndRestoreKeepEvidenceSeparate() async throws {
+        let store = try await store(); let (_,id) = try await reminderFixture(store); let port = TestReminders()
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        let link = try await store.reminderLinks()[0]
+        await port.edit(title: "外部手动改名", completed: true)
+        try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port)
+        try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port)
+        let action = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(action.state, "completed"); XCTAssertEqual(action.version, 2); XCTAssertEqual(action.title, "明确验证任务")
+        let claim = try await store.candidateClaims()[0]; XCTAssertEqual(claim.reviewState, "pending"); XCTAssertEqual(claim.evidenceState, "unverified")
+        let package = base.appendingPathComponent("reminders-package"); try await store.exportPackage(to: package, includeMedia: true)
+        let root = base.appendingPathComponent("reminders-restored"); try await VoiceOSStore.restorePackage(from: package, to: root, inspector: Inspector())
+        let restored = try VoiceOSStore(root: root, inspector: Inspector()); try await restored.recover()
+        let restoredLink = try await restored.reminderLinks()[0]; XCTAssertEqual(restoredLink.remoteTitle, "外部手动改名"); XCTAssertEqual(restoredLink.remoteCompleted, true)
+        try await restored.sendTaskToReminders(actionID: id, expectedVersion: 2, calendarID: "authorized", using: port)
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
+        let history = try await restored.actionHistory(actionID: id); XCTAssertEqual(history.count, 2)
+    }
+    func testMissingDuplicateAndEditedReminderMarkersCannotCompleteOrRecreate() async throws {
+        for scenario in 0..<3 {
+            let root = base.appendingPathComponent("case-\(scenario)"); let store = try VoiceOSStore(root: root, inspector: Inspector()); try await store.recover()
+            let (_,id) = try await reminderFixture(store); let port = TestReminders()
+            try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+            let link = try await store.reminderLinks()[0]
+            if scenario == 0 { await port.removeAll() }
+            else if scenario == 1 { await port.edit(completed: true); await port.duplicate() }
+            else { await port.edit(completed: true, corruptMarker: true) }
+            try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port)
+            try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+            let current = try await store.reminderLinks()[0]; XCTAssertEqual(current.state, scenario == 0 ? "missing" : "conflict")
+            let action = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(action.state, "open")
+            let creates = await port.creates; XCTAssertEqual(creates, 1)
+        }
+    }
+    func testFrozenActionRetainsRemoteCompletionObservationWithoutChangingLocalFact() async throws {
+        let store = try await store(); let (claim,id) = try await reminderFixture(store); let port = TestReminders()
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 0, action: .reject)
+        await port.edit(completed: true)
+        let link = try await store.reminderLinks()[0]; try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port)
+        let action = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(action.validity, "frozen"); XCTAssertEqual(action.state, "open")
+        let current = try await store.reminderLinks()[0]; XCTAssertEqual(current.remoteCompleted, true)
+    }
+    func testLocalStateChangeAndExternalReopenRemainConflicts() async throws {
+        let store = try await store(); let (_,id) = try await reminderFixture(store); let port = TestReminders()
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        _ = try await store.setActionState(actionID: id, expectedVersion: 1, state: .dismissed)
+        await port.edit(completed: true)
+        let link = try await store.reminderLinks()[0]; try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port)
+        var current = try await store.reminderLinks()[0]; XCTAssertEqual(current.state, "conflict")
+        var action = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(action.state, "dismissed")
+        _ = try await store.setActionState(actionID: id, expectedVersion: 2, state: .completed)
+        await port.edit(completed: false)
+        try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port)
+        current = try await store.reminderLinks()[0]; XCTAssertEqual(current.state, "conflict")
+        action = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(action.state, "completed")
+    }
+    func testPreflightConcurrentSendAndChangedDependencyBlockExternalCreate() async throws {
+        let store = try await store(); let (claim,id) = try await reminderFixture(store); let port = TestReminders(suspended: true)
+        let running = Task { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port) }
+        await port.waitStarted()
+        do { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port); XCTFail("concurrent send") } catch {}
+        _ = try await store.reviewClaim(claimID: claim.id, expectedVersion: 0, action: .reject)
+        await port.release()
+        do { try await running.value; XCTFail("stale preflight") } catch {}
+        let creates = await port.creates; XCTAssertEqual(creates, 0)
+        let link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "unknown")
+    }
+    func testPermissionTighteningDuringInFlightSaveFreezesActionAndKeepsObservation() async throws {
+        let store = try await store(); let (_,id) = try await reminderFixture(store); let port = TestReminders(suspendCreate: true)
+        let running = Task { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port) }
+        await port.waitStarted()
+        let source = try await store.sources()[0]
+        _ = try await store.setSourceLocalOnly(sourceID: source.id, expectedVersion: source.policyVersion, localOnly: true)
+        await port.edit(completed: true); await port.release(); try await running.value
+        let action = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(action.validity, "frozen"); XCTAssertEqual(action.state, "open"); XCTAssertEqual(action.version, 1)
+        let link = try await store.reminderLinks()[0]; XCTAssertEqual(link.remoteCompleted, true)
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
+        let history = try await store.actionHistory(actionID: id); XCTAssertEqual(history.count, 1)
+    }
+    func testPermissionFailureCannotBecomeSuccessOrTriggerCreateRetry() async throws {
+        let store = try await store(); let (_,id) = try await reminderFixture(store); let port = TestReminders(); await port.setDeny()
+        do { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port); XCTFail("permission") } catch {}
+        do { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port); XCTFail("permission retry") } catch {}
+        let creates = await port.creates; XCTAssertEqual(creates, 0)
+        let link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "unknown")
+    }
+    func testRestoreRejectsMissingReminderFeedbackEvidenceEvenWithCorrectFileHashes() async throws {
+        let store = try await store(); let (_,id) = try await reminderFixture(store); let port = TestReminders()
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        await port.edit(completed: true)
+        let link = try await store.reminderLinks()[0]; try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port)
+        let package = base.appendingPathComponent("broken-reminder-feedback"); try await store.exportPackage(to: package)
+        let file = package.appendingPathComponent("reminder_observations.jsonl"); try Data().write(to: file)
+        let manifestFile = package.appendingPathComponent("manifest.json")
+        var manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestFile)) as! [String: Any]
+        var counts = manifest["counts"] as! [String: Int]; counts["reminder_observations"] = 0; manifest["counts"] = counts
+        var files = manifest["files"] as! [[String: Any]]; let index = files.firstIndex { $0["path"] as? String == "reminder_observations.jsonl" }!
+        let digest = try DurableFiles.hash(file); files[index]["sha256"] = digest.1; files[index]["bytes"] = digest.0; manifest["files"] = files
+        try JSONSerialization.data(withJSONObject: manifest).write(to: manifestFile)
+        let target = base.appendingPathComponent("missing-feedback-target")
+        do { try await VoiceOSStore.restorePackage(from: package, to: target, inspector: Inspector()); XCTFail("missing remote evidence") } catch { XCTAssertTrue(error.localizedDescription.contains("回读")) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
     }
     func testSameCommandIsIdempotentButNewCommandKeepsDistinctEvent() async throws {

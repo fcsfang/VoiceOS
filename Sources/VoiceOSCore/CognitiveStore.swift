@@ -177,6 +177,7 @@ extension VoiceOSStore {
         }
         try validateStoredClaimReviews(db)
         try validateStoredActions(db)
+        try validateStoredReminders(db)
     }
     // Call inside the same transaction as a correction/quarantine.
     func invalidateCognition(sourceID: String) throws {

@@ -22,6 +22,7 @@ public struct ActionRevision: Identifiable, Sendable {
     public let state: String
     public let note: String
     public let createdAt: String
+    public let actor: String
 }
 extension VoiceOSStore {
     /// Explicit local intent; endorsement alone never creates a task or external reminder.
@@ -72,8 +73,8 @@ extension VoiceOSStore {
     }
     public func actionHistory(actionID: String) throws -> [ActionRevision] {
         guard let initial = try db.query("SELECT * FROM actions WHERE id=?", [actionID]).first else { throw VoiceOSError("行动不存在") }
-        return [ActionRevision(id: actionID, version: 1, state: "open", note: initial["note"]!, createdAt: initial["created_at"]!)] + (try db.query("SELECT * FROM action_revisions WHERE action_id=? ORDER BY version", [actionID])).map {
-            ActionRevision(id: $0["id"]!, version: Int($0["version"]!)!, state: $0["state"]!, note: $0["note"]!, createdAt: $0["created_at"]!)
+        return [ActionRevision(id: actionID, version: 1, state: "open", note: initial["note"]!, createdAt: initial["created_at"]!, actor: "user")] + (try db.query("SELECT * FROM action_revisions WHERE action_id=? ORDER BY version", [actionID])).map {
+            ActionRevision(id: $0["id"]!, version: Int($0["version"]!)!, state: $0["state"]!, note: $0["note"]!, createdAt: $0["created_at"]!, actor: $0["actor"]!)
         }
     }
     private static func actionHash(_ fields: [String]) throws -> String {
