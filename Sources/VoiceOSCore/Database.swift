@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -274,6 +274,18 @@ final class Database {
                 }
             } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
             try execute("PRAGMA foreign_keys=ON")
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "10" {
+            try transaction {
+                try execute("ALTER TABLE sources ADD COLUMN feedback_json TEXT")
+                try execute("""
+                CREATE TABLE action_feedback (
+                  id TEXT PRIMARY KEY, action_id TEXT NOT NULL REFERENCES actions(id), action_version INTEGER NOT NULL CHECK(action_version>=1),
+                  source_id TEXT NOT NULL UNIQUE REFERENCES sources(id), kind TEXT NOT NULL CHECK(kind IN ('outcome','reflection')), created_at TEXT NOT NULL, sequence INTEGER NOT NULL CHECK(sequence>=1), UNIQUE(action_id,sequence)
+                )
+                """)
+                try execute("PRAGMA user_version=11")
+            }
         }
     }
     deinit { sqlite3_close(handle) }

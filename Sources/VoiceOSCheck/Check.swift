@@ -36,6 +36,9 @@ struct Check {
                 let input = snapshot.sources[0]
                 let refs = [ClaimReference(sourceID: source.id, transcriptVersionID: input.transcriptVersionID, spanID: input.spans[0].id)]
                 _ = try await store.commitLocalClaims(attemptID: attempt, proposals: [ClaimProposal(statement: "我会整理开发验证素材", ownership: .userTentative, references: refs, action: ExtractedAction(title: "整理开发验证素材", kind: .task, quote: "我会整理开发验证素材", autoSend: true))])
+            } else if args[0] == "feedback-fixture" {
+                guard let action = try await store.actions(includeHistory: true).first(where: { $0.kind == "task" }) else { throw VoiceOSError("fixture requires task") }
+                _ = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: .outcome, text: "合成结果验证：素材已整理，仅测试反馈回流。", commandID: "synthetic-feedback")
             } else if args[0] == "export" {
                 guard args.count >= 3 else { throw VoiceOSError("export requires new package directory") }
                 try await store.exportPackage(to: URL(fileURLWithPath: args[2]), includeMedia: args.count == 4 && args[3] == "media")

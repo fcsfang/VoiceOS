@@ -64,3 +64,7 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M3 用户表达与行动提取](engineering/m3-expression-actions.md)：明确文字身份、真实模型提取、普通任务自主创建与完成回流。
 
 - [M3 回读超时与取消](engineering/m3-reminders-read-lifecycle.md)：有限回调等待、主动取消、晚到忽略与串行调度恢复。
+
+- [M3 行动结果与反思](engineering/m3-action-feedback.md)：可选用户反馈、历史行动版本关联、原文回溯与迁移恢复。
+
+- [当前验收状态与后续顺序](testing/acceptance-status-2026-10-10.md)：22 个案例的已验证子集、未完成变体和下一切片。

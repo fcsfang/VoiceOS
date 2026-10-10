@@ -31,6 +31,9 @@ final class ControlCenter: ObservableObject {
     @Published var actionRecords: [ActionRecord] = []
     @Published var savingAction = false
     @Published var actionVersions: [ActionRevision] = []
+    @Published var feedbackRecords: [ActionFeedbackRecord] = []
+    @Published var activeActionTitle = ""
+    @Published var savingFeedback = false
     @Published var reminderLinks: [ReminderLink] = []
     @Published var reminderCalendars: [ReminderCalendar] = []
     @Published var reminderCalendarID = ""
@@ -315,8 +318,21 @@ final class ControlCenter: ObservableObject {
         await refresh()
     }
     func actionHistory(_ action: ActionRecord) async {
-        do { actionVersions = try await store?.actionHistory(actionID: action.id) ?? [] }
+        do {
+            actionVersions = try await store?.actionHistory(actionID: action.id) ?? []
+            feedbackRecords = try await store?.actionFeedback(actionID: action.id) ?? []
+            activeActionTitle = action.title
+        }
         catch { status = error.localizedDescription }
+    }
+    func saveFeedback(_ action: ActionRecord, kind: ActionFeedbackKind, text: String, commandID: String) async -> Bool {
+        guard let store, !savingFeedback else { return false }
+        savingFeedback = true; defer { savingFeedback = false }
+        do {
+            selected = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: kind, text: text, commandID: commandID)
+            await refresh(); status = "结果或反思已保存并关联原行动 · 未改变完成或证据状态"
+            return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
     }
     func changeAction(_ action: ActionRecord, state: LocalActionState) async {
         guard let store, !savingAction else { return }
@@ -349,6 +365,7 @@ struct CenterView: View {
     @State private var actionClaim: CandidateClaim?
     @State private var showActionHistory = false
     @State private var writingExpression = false
+    @State private var feedbackAction: ActionRecord?
     var body: some View {
         NavigationSplitView {
             List(model.filtered, selection: $model.selected) { record in
@@ -367,6 +384,10 @@ struct CenterView: View {
                         Text(record.name).font(.title2).textSelection(.enabled)
                         HStack { Label(label(record), systemImage: record.state == "saved" ? "checkmark.circle" : "exclamationmark.circle"); Spacer(); Text(record.kind == "user_text" ? "文字" : (record.kind == "video" ? "视频" : "音频")) }
                         Text("\(record.origin == "user" ? "我的直接表达" : "外部资料 · 说话人待核对") · \(record.localOnly ? "仅本机处理" : "文本可用于云端")").font(.callout).foregroundStyle(.secondary)
+                        if let actionID = record.feedbackActionID, let action = model.actionRecords.first(where: { $0.id == actionID }) {
+                            Text("\(record.feedbackKind == "outcome" ? "结果记录" : "反思记录") · 关联行动第 \(record.feedbackActionVersion ?? 1) 版").font(.caption)
+                            Button("查看关联行动") { Task { await model.actionHistory(action); showActionHistory = true } }
+                        }
                         Button(record.localOnly ? "允许这份资料的文本用于云端" : "将这份资料限制为仅本地") { Task { await model.changeTextPolicy(record) } }.disabled(model.changingPolicy)
                         Text("此选项仅授权文本；点击“理解这份文字”才发送所选文字，原始音频和视频仍仅本机。").font(.caption).foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 8) {
@@ -480,6 +501,7 @@ struct CenterView: View {
                                             Button("发送到所选提醒事项清单") { Task { await model.sendReminder(action) } }
                                                 .disabled(model.remindersBusy || model.reminderCalendarID.isEmpty || action.validity == "frozen" || action.state != "open" || !model.reminderSourceAllowed(action))
                                         }
+                                        Button("记录结果或反思") { feedbackAction = action }.disabled(model.savingFeedback)
                                         Button("行动历史") { Task { await model.actionHistory(action); showActionHistory = true } }
                                         Divider()
                                     }.padding(.vertical, 8)
@@ -505,6 +527,7 @@ struct CenterView: View {
             } label: { Label("导出资料", systemImage: "square.and.arrow.up") }.disabled(!model.initialized || model.importing)
         }
         .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
+        .sheet(item: $feedbackAction) { action in ActionFeedbackView(action: action, model: model) { feedbackAction = nil } }
         .sheet(isPresented: $writingExpression) { UserExpressionView(model: model) { writingExpression = false } }
         .sheet(item: $editing) { record in
             TranscriptCorrectionView(record: record, model: model) { editing = nil }
@@ -538,7 +561,8 @@ struct CenterView: View {
         }
         .sheet(isPresented: $showActionHistory) {
             VStack(alignment: .leading, spacing: 16) {
-                Text("行动状态历史").font(.title2)
+                Text(model.activeActionTitle).font(.title2)
+                Text("行动状态与结果历史").font(.headline)
                 Text("任务完成不等于观点已验证。").foregroundStyle(.secondary)
                 ScrollView {
                     ForEach(model.actionVersions) { version in
@@ -547,6 +571,16 @@ struct CenterView: View {
                             if !version.note.isEmpty { Text(version.note) }
                             Text(version.actor == "external" ? "来自提醒事项回读" : (version.actor == "ai" ? "AI 行动候选" : "用户表达或明确操作")).font(.caption)
                             Text(version.createdAt).font(.caption).foregroundStyle(.secondary)
+                            Divider()
+                        }
+                    }
+                    ForEach(model.feedbackRecords) { feedback in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("\(feedback.kind == "outcome" ? "结果" : "反思") · 关联第 \(feedback.actionVersion) 版").font(.headline)
+                            Text(feedback.text).textSelection(.enabled)
+                            Text("用户记录 · 不自动验证观点").font(.caption).foregroundStyle(.secondary)
+                            if feedback.sourceState == "quarantined" { Text("原件不可用，保留历史文本").font(.caption).foregroundStyle(.secondary) }
+                            Button("查看反馈原文") { model.selected = feedback.sourceID; showActionHistory = false }
                             Divider()
                         }
                     }
@@ -763,5 +797,38 @@ struct UserExpressionView: View {
                 }.keyboardShortcut(.defaultAction).disabled(saving || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
             }
         }.padding(24).frame(width: 620)
+    }
+}
+
+struct ActionFeedbackView: View {
+    let action: ActionRecord
+    @ObservedObject var model: ControlCenter
+    let dismiss: () -> Void
+    @State private var kind = "outcome"
+    @State private var text = ""
+    @State private var saving = false
+    @State private var errorText = ""
+    @State private var commandID = UUID().uuidString
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("记录结果或反思").font(.title2)
+            Text("关联：" + action.title + " · 第 \(action.version) 版").foregroundStyle(.secondary)
+            Picker("类型", selection: $kind) { Text("实际结果").tag("outcome"); Text("我的反思").tag("reflection") }.pickerStyle(.segmented).disabled(saving)
+            TextEditor(text: $text).frame(minHeight: 180).border(.secondary.opacity(0.2)).disabled(saving)
+            Text("这是可选记录。原文先仅本地保存，保留与原行动的关联；不会自动改变任务状态、认可观点或标记已验证。").font(.caption).foregroundStyle(.secondary)
+            if !errorText.isEmpty { Text(errorText).font(.callout).foregroundStyle(.red) }
+            HStack {
+                Button("取消", action:dismiss).disabled(saving)
+                Spacer(); Text("\(text.unicodeScalars.count)/4000").font(.caption)
+                Button(saving ? "正在保存…" : "保存反馈") {
+                    saving = true; errorText = ""
+                    Task {
+                        if await model.saveFeedback(action,kind:ActionFeedbackKind(rawValue:kind)!,text:text,commandID:commandID) { dismiss() }
+                        else { errorText = model.status }
+                        saving = false
+                    }
+                }.keyboardShortcut(.defaultAction).disabled(saving || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
+            }
+        }.padding(24).frame(width:620)
     }
 }

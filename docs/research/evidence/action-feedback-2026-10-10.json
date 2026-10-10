@@ -1,0 +1,114 @@
+{
+  "date": "2026-10-10",
+  "slice": "optional action outcomes and reflections",
+  "tests": {
+    "passed": 80,
+    "failures": 0,
+    "new_feedback_tests": 6
+  },
+  "faults": {
+    "date": "2026-10-10",
+    "passed": true,
+    "sigkill_count": 6,
+    "network_calls": 0,
+    "external_writes": 0,
+    "cases": [
+      {
+        "checkpoint": "intent",
+        "passed": true,
+        "stable_recovery": true,
+        "feedback_text_link_atomic": true
+      },
+      {
+        "checkpoint": "copyComplete",
+        "passed": true,
+        "stable_recovery": true,
+        "feedback_text_link_atomic": true
+      },
+      {
+        "checkpoint": "sealed",
+        "passed": true,
+        "stable_recovery": true,
+        "feedback_text_link_atomic": true
+      },
+      {
+        "checkpoint": "renamed",
+        "passed": true,
+        "stable_recovery": true,
+        "feedback_text_link_atomic": true
+      },
+      {
+        "checkpoint": "savedUncommitted",
+        "passed": true,
+        "stable_recovery": true,
+        "feedback_text_link_atomic": true
+      },
+      {
+        "checkpoint": "savedCommitted",
+        "passed": true,
+        "stable_recovery": true,
+        "feedback_text_link_atomic": true
+      }
+    ]
+  },
+  "migration": {
+    "format": 10,
+    "schema": 11,
+    "portable_tables": 17,
+    "legacy_versions_restored": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9
+    ],
+    "schema10_preserved": true,
+    "roundtrip_tables_equal": true,
+    "feedback_records": 1,
+    "action_states": [
+      [
+        "opportunity",
+        "open",
+        1
+      ],
+      [
+        "task",
+        "completed",
+        2
+      ]
+    ],
+    "model_attempts": 1,
+    "feedback_local_only": [
+      [
+        1
+      ]
+    ],
+    "claim_evidence": [
+      [
+        "unverified"
+      ]
+    ],
+    "local_grants": 0
+  },
+  "ui": {
+    "root": "runtime/app-validation-2026-10-10/feedback-ui-v1",
+    "synthetic_text": true,
+    "actual_native_app_flow": [
+      "completed task → record outcome",
+      "saved feedback → related action history",
+      "history → feedback original"
+    ],
+    "new_model_calls": 0,
+    "external_writes": 0
+  },
+  "limitations": [
+    "no automatic evidence verification",
+    "no automatic feedback synthesis",
+    "past-event action extraction requires separate quality evaluation",
+    "full MVP not accepted"
+  ]
+}

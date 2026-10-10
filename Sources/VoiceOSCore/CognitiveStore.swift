@@ -207,6 +207,7 @@ extension VoiceOSStore {
             guard digest == attempt["result_digest"] else { throw VoiceOSError("迁移调用结果摘要不一致") }
         }
         try validateStoredUserExpressions(db)
+        try validateStoredActionFeedback(db)
         for claim in try db.query("SELECT * FROM claims WHERE action_json IS NOT NULL") {
             let proposal = try JSONDecoder().decode(ExtractedAction.self, from: Data(claim["action_json"]!.utf8))
             let command = "extracted:" + claim["attempt_id"]! + ":" + claim["ordinal"]!

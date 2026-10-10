@@ -35,6 +35,9 @@ public struct SourceRecord: Identifiable, Sendable {
     public let policyVersion: Int
     public let origin: String
     public let speaker: String
+    public let feedbackActionID: String?
+    public let feedbackActionVersion: Int?
+    public let feedbackKind: String?
 }
 public enum SaveCheckpoint: String, Sendable {
     case intent, copyChunk, copyComplete, sealed, renamed, savedUncommitted, savedCommitted
