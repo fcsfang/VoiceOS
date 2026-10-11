@@ -88,6 +88,22 @@ private extension VoiceOSStore {
             """, [snapshot.context.sources[0].sourceID, snapshot.contentDigest, snapshot.association.provider,
                    snapshot.association.model, snapshot.association.promptVersion, snapshot.association.schemaVersion]).first?["id"]
     }
+
+    /// A late result received after cancellation remains auditable, but cannot
+    /// remain part of the current cognitive or association view.
+    func freezeProcessingCognitionAttempt(_ attemptID: String) throws {
+        guard let contextID = try db.query("SELECT context_id FROM model_attempts WHERE id=?", [attemptID]).first?["context_id"] else { return }
+        try db.transaction {
+            try db.execute("UPDATE contexts SET state='stale' WHERE id=?", [contextID])
+            try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id=?", [attemptID])
+            try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT id FROM claims WHERE attempt_id=?)", [attemptID])
+            try db.execute("UPDATE questions SET validity='frozen' WHERE claim_id IN (SELECT id FROM claims WHERE attempt_id=?)", [attemptID])
+        }
+    }
+
+    func freezeProcessingAssociationAttempt(_ attemptID: String) throws {
+        try db.execute("UPDATE expression_association_attempts SET validity='frozen' WHERE id=?", [attemptID])
+    }
 }
 
 extension VoiceOSStore {
@@ -161,11 +177,24 @@ extension VoiceOSStore {
             guard try db.query("SELECT state FROM processing_intents WHERE id=?", [id]).first?["state"] == "queued" else { return }
             try db.execute("UPDATE processing_intents SET state='running',phase='cognition',updated_at=?,error=NULL WHERE id=?", [Self.processingNow(), id])
         }
+        try checkpoint(.processingIntentReserved)
         row = try processingRow(id: id)
         if row["state"] == ExpressionProcessingIntentState.cancelled.rawValue { return try processingRecord(row) }
+        var cognitionAttemptForIntent: String?
+        var cognitionWasReused = false
+        var associationAttemptForIntent: String?
+        var associationStarted = false
         do {
             let cognition = try await continueSourceUnderstanding(sourceID: snapshot.context.sources[0].sourceID, using: cognitionPort)
-            if let attempt = try cognitionAttemptID(for: snapshot) { try updateProcessing(id, state: .running, phase: .cognition, cognitionAttemptID: attempt) }
+            let cognitionAttempt = try cognitionAttemptID(for: snapshot)
+            cognitionAttemptForIntent = cognitionAttempt
+            cognitionWasReused = cognition.reused
+            row = try processingRow(id: id)
+            if row["state"] == ExpressionProcessingIntentState.cancelled.rawValue {
+                if !cognition.reused, let cognitionAttempt { try freezeProcessingCognitionAttempt(cognitionAttempt) }
+                return try processingRecord(row)
+            }
+            if let cognitionAttempt { try updateProcessing(id, state: .running, phase: .cognition, cognitionAttemptID: cognitionAttempt) }
             guard cognition.state == "completed" || cognition.state == "frozen" || cognition.state == "discussion_completed" else {
                 let terminal: ExpressionProcessingIntentState = cognition.state.contains("rejected") ? .rejected : .unknown
                 try updateProcessing(id, state: terminal, phase: .cognition, error: "理解阶段状态为 \(cognition.state)，不会自动重发")
@@ -179,11 +208,19 @@ extension VoiceOSStore {
                 try updateProcessing(id, state: .blocked, phase: .association, error: "关联端口尚未配置")
                 return try processingIntent(id: id)
             }
+            associationStarted = true
             let association = try await processExpressionAssociation(sourceID: snapshot.context.sources[0].sourceID, retrieval: retrieval, semantic: semantic, model: associationPort)
-            if let attempt = association.attempt?.id {
-                try updateProcessing(id, state: .running, phase: .association, associationAttemptID: attempt)
-            } else if let attempt = try associationAttemptID(for: snapshot) {
-                try updateProcessing(id, state: .running, phase: .association, associationAttemptID: attempt)
+            let associationAttempt: String?
+            if let attempt = association.attempt?.id { associationAttempt = attempt }
+            else { associationAttempt = try associationAttemptID(for: snapshot) }
+            associationAttemptForIntent = associationAttempt
+            row = try processingRow(id: id)
+            if row["state"] == ExpressionProcessingIntentState.cancelled.rawValue {
+                if let associationAttempt { try freezeProcessingAssociationAttempt(associationAttempt) }
+                return try processingRecord(row)
+            }
+            if let associationAttempt {
+                try updateProcessing(id, state: .running, phase: .association, associationAttemptID: associationAttempt)
             }
             row = try processingRow(id: id)
             guard row["state"] == ExpressionProcessingIntentState.running.rawValue else { return try processingRecord(row) }
@@ -200,7 +237,11 @@ extension VoiceOSStore {
             if row["state"] != ExpressionProcessingIntentState.cancelled.rawValue { try updateProcessing(id, state: .unknown, error: "处理被取消，结果未知；不会自动重发") }
         } catch {
             row = try processingRow(id: id)
-            if row["state"] == ExpressionProcessingIntentState.cancelled.rawValue { return try processingRecord(row) }
+            if row["state"] == ExpressionProcessingIntentState.cancelled.rawValue {
+                if !associationStarted, !cognitionWasReused, let cognitionAttemptForIntent { try? freezeProcessingCognitionAttempt(cognitionAttemptForIntent) }
+                if let associationAttemptForIntent { try? freezeProcessingAssociationAttempt(associationAttemptForIntent) }
+                return try processingRecord(row)
+            }
             let associationUnknown = (try? db.query("SELECT id FROM expression_association_attempts WHERE current_source_id=? AND state='unknown' ORDER BY created_at DESC LIMIT 1", [snapshot.context.sources[0].sourceID]).first) != nil
             let cognitionUnknown = (try? cognitionAttemptID(for: snapshot).flatMap { try db.query("SELECT state FROM model_attempts WHERE id=?", [$0]).first?["state"] == "unknown" }) ?? false
             try updateProcessing(id, state: (associationUnknown || cognitionUnknown) ? .unknown : .blocked, error: error.localizedDescription)

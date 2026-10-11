@@ -1,0 +1,23 @@
+{
+  "probe": "expression-processing-recovery-v1",
+  "date": "2026-10-12",
+  "scope": "local synthetic ports and actual SIGKILL checkpoints; no cloud calls or reminders",
+  "cases": {
+    "processingIntentReserved": {
+      "description": "reserved queue state becomes unknown before any model reservation",
+      "state": "unknown",
+      "phase": "cognition"
+    },
+    "modelReserved": {
+      "description": "reserved cognition becomes unknown and queue does not replay",
+      "state": "unknown",
+      "phase": "cognition"
+    },
+    "associationReserved": {
+      "description": "reserved association becomes unknown after cognition commit",
+      "state": "unknown",
+      "phase": "association"
+    }
+  },
+  "second_recovery_stable": true
+}

@@ -44,6 +44,12 @@ struct Check {
             if args[0] == "typed-cognition-fixture" { try await runTypedCognitionFixture(store); return }
             if args[0] == "discussion-question-fixture" { try await runDiscussionQuestionFixture(store); return }
             if args[0] == "source-continuation-fixture" { try await runSourceContinuationFixture(store); return }
+            if args[0] == "expression-queue-fixture" { try await runExpressionQueueFixture(store); return }
+            if args[0] == "expression-queue-read" {
+                let intents = try await store.processingIntents()
+                let output:[String:Any] = ["integrity":try await store.integrityCheck(),"intents":intents.map { ["id":$0.id,"state":$0.state.rawValue,"phase":$0.phase.rawValue,"cognition_attempt_id":$0.cognitionAttemptID ?? "","association_attempt_id":$0.associationAttemptID ?? ""] as [String:Any] }]
+                print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)); return
+            }
             if args[0] == "association-fixture" { try await runAssociationFixture(store); return }
             if args[0] == "association-driver-fixture" {
                 guard args.count == 2 || args.count == 3 else { throw VoiceOSError("association-driver-fixture requires isolated root and optional reviewed semantic model") }
@@ -212,6 +218,41 @@ private actor FileRemindersFixture: RemindersPort {
         let fd = open(file.deletingLastPathComponent().path, O_RDONLY)
         guard fd >= 0 else { throw VoiceOSError("fixture directory unavailable") }
         defer { close(fd) }; guard fsync(fd) == 0 else { throw VoiceOSError("fixture directory sync failed") }
+    }
+}
+
+private func runExpressionQueueFixture(_ store: VoiceOSStore) async throws {
+    let existing = try await store.sources()
+    let current: String
+    if let found = existing.first(where: { $0.origin == "user" && $0.kind == "user_text" }) {
+        current = found.id
+    } else {
+        _ = try await store.recordUserExpression("合成历史表达：需要核对条件。", commandID: "queue-history")
+        current = try await store.recordUserExpression("合成当前表达：请理解并关联这次文字。", commandID: "queue-current")
+    }
+    let configuration = ModelConfiguration(provider: "queue-fixture", model: "synthetic", promptVersion: "v1", schemaVersion: "v1", destination: .local)
+    let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: current, cognition: configuration, association: configuration)
+    let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "queue-processing", cognition: configuration, association: configuration)
+    let result = try await store.runExpressionProcessingIntent(id: intent.id, retrieval: QueueFixtureRetrieval(), cognitionPort: QueueFixtureModel(configuration: configuration), associationPort: QueueFixtureAssociation(configuration: configuration))
+    let output:[String:Any] = ["integrity":try await store.integrityCheck(),"intent_id":result.id,"state":result.state.rawValue,"phase":result.phase.rawValue]
+    print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self))
+}
+
+private struct QueueFixtureRetrieval: LocalRetrievalPort {
+    func rank(query: String, documents: [RetrievalDocument], semantic: Bool) async throws -> [RetrievalMatch] {
+        documents.map { RetrievalMatch(documentID: $0.id, score: 1, method: "exact") }
+    }
+}
+private struct QueueFixtureModel: ModelPort {
+    let configuration: ModelConfiguration
+    func generate(_ request: ModelRequest) async throws -> ModelResponse {
+        ModelResponse(status: .completed, claims: [], inputTokens: 2, outputTokens: 1)
+    }
+}
+private struct QueueFixtureAssociation: ExpressionAssociationPort {
+    let configuration: ModelConfiguration
+    func associate(_ request: ExpressionAssociationRequest) async throws -> ExpressionAssociationResponse {
+        ExpressionAssociationResponse(proposals: [], inputTokens: 2, outputTokens: 1)
     }
 }
 
