@@ -38,3 +38,4 @@
 - [018 持久混合成果](018-durable-discussion-outcomes.md)：结束范围单次提取、原子回流、历史与迁移；真实驱动和共享身份尚待验证。
 
 - [019 成果生产者顺序](019-model-producer-sequence.md)：无await唯一预留顺序、迁移严格保留，旧包确定回溯基线；共享成果执行尚待接入。
+- [ADR-020 英文反馈记录](020-english-feedback-records.md)：独立保存原句、建议与练习比较，避免污染认知候选和行动。

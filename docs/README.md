@@ -122,3 +122,4 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 讨论任务提醒闭环](engineering/m4-discussion-outcome-reminders.md)：专用清单自动创建、外部完成v4回流、原v2反思保留及迁移不携带连接。
 - [M4 英文表达反馈契约](engineering/m4-english-feedback-contract.md)：个人英文原句、出处建议、跨练习比较与纠错/权限屏障；尚未接入真实模型或界面。
 - [英文表达文本模型端口](engineering/m4-english-feedback-contract.md)：Responses 严格结构化输出、原句/历史引文校验和文本授权屏障；尚未接入持久行动或英文 UI。
+- [ADR-020 英文反馈记录](adr/020-english-feedback-records.md)：英文反馈的持久身份、纠错冻结与迁移边界提案。
