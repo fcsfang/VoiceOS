@@ -343,6 +343,11 @@ final class ControlCenter: ObservableObject {
             textModel = port; modelConfigured = true
             modelSummary = "gpt-6.1-sol · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
             status = "文本模型已就绪 · 只处理你选择并授权的文字"
+            // A queued intent may have been restored before the user selected a
+            // configuration. Wake the durable worker exactly once after the
+            // new model identity is installed; scheduleProcessing() itself
+            // remains the single-owner gate for concurrent work.
+            scheduleProcessing()
         } catch { status = error.localizedDescription }
     }
     func prepareEnglishPractice(current: SourceRecord, priorIDs: [String]) async {
@@ -466,7 +471,16 @@ final class ControlCenter: ObservableObject {
             worker = nil
             if let store {
                 let pendingTranscription = (try? await store.sources())?.contains(where: { $0.jobState == "queued" }) == true
-                let pendingIntent = (try? await store.processingIntents())?.contains(where: { $0.state == .queued }) == true
+                // A queued expression intent is intentionally left durable while
+                // no text model is configured. It must not cause a tight retry
+                // loop; configureTextModel() wakes it after a real identity is
+                // available.
+                let pendingIntent: Bool
+                if textModel != nil {
+                    pendingIntent = (try? await store.processingIntents())?.contains(where: { $0.state == .queued }) == true
+                } else {
+                    pendingIntent = false
+                }
                 if pendingTranscription || pendingIntent { scheduleProcessing() }
             }
         }
