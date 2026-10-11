@@ -34,6 +34,13 @@ struct Check {
                 }
             })
             try await store.recover()
+            if args[0] == "outcome-ui-seed" {
+                guard try await store.sources().isEmpty else { throw VoiceOSError("synthetic UI seed requires an empty root") }
+                let first=try await seedOutcomeConversation(store,index:0,secondText:"合成个人：我会整理开发验证素材。如果条件不满足，我暂不调整实验；我现在不打算阅读论文。")
+                let restricted=try await seedOutcomeConversation(store,index:1,secondText:"合成个人：那就按第二个方案继续，但如果条件不满足就先不做。不要替我购买设备。",historyLocalOnly:true)
+                let data=try JSONSerialization.data(withJSONObject:["synthetic_only":true,"eligible_conversation_id":first,"restricted_conversation_id":restricted,"cloud_calls":0],options:[.sortedKeys])
+                print(String(decoding:data,as:UTF8.self));return
+            }
             if args[0] == "outcome-reuse-fixture" {
                 try await runOutcomeReuseFixture(store)
                 print("{\"integrity\":\(try await store.integrityCheck())}");return

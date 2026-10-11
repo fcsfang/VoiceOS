@@ -20,7 +20,7 @@ struct DiscussionView: View {
                 ForEach(model.discussionList) { session in
                     Text(String(session.id.prefix(8))+" · "+(session.state == "ended" ? "已结束" : "进行中")+(session.validity == "frozen" ? " · 只读历史" : "")).tag(session.id)
                 }
-            }.disabled(model.discussionSending || model.discussionSaving || model.dictationActive)
+            }.disabled(model.discussionSending || model.discussionSaving || model.discussionExtracting || model.dictationActive)
             if let session=model.discussionSession {
                 ScrollView {
                     VStack(alignment:.leading,spacing:16) {
@@ -73,7 +73,7 @@ struct DiscussionView: View {
                         }
                         ForEach(model.discussionOutcomes) { outcome in
                             Divider()
-                            Text(outcome.state == "completed" ? "讨论成果 · 待核对" : (outcome.state == "unknown" ? "成果提取结果未知 · 不自动重发" : "成果未接纳 · 不自动重发")).font(.headline)
+                            Text(outcomeTitle(outcome.state)).font(.headline)
                             if outcome.validity == "frozen" { Text("历史成果已冻结，身份与出处保留。").font(.caption).foregroundStyle(.secondary) }
                             if !outcome.priorClaimIDs.isEmpty {
                                 Text("沿用已有成果，保留原审阅与行动记录").font(.subheadline)
@@ -135,6 +135,14 @@ struct DiscussionView: View {
                 } else {
                     Text(session.state == "ended" ? "这段讨论已结束，历史可回溯。新的讨论请从资料明确进入。" : "资料迁移或来源/权限变化使这段讨论冻结，旧讨论保留历史；请核对后从资料另开讨论。").font(.callout)
                 }
+                if session.state == "ended",session.validity == "current",model.discussionOutcomes.isEmpty {
+                    HStack {
+                        Button(model.discussionExtracting ? "正在整理整段成果…" : "整理整段讨论成果") { model.extractDiscussionOutcome() }.disabled(!model.discussionCanExtract)
+                        Spacer()
+                    }
+                    Text("整理会使用本段已授权的原文与 AI 回复，沿用已有成果；明确普通任务遵循已有清单授权，AI 建议保持待核对。").font(.caption).foregroundStyle(.secondary)
+                    if !model.discussionCanExtract,!model.discussionExtracting { Text("请先配置文本模型、在来源详情允许本段文字用于云端，并等待在途回复完成。").font(.caption).foregroundStyle(.secondary) }
+                }
                 HStack {
                     Text(model.discussionStatus).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                     Spacer()
@@ -151,6 +159,14 @@ struct DiscussionView: View {
                 ScrollView { Text(preview.text).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
                 HStack { Spacer();Button("完成") { referencePreview=nil } }
             }.padding(24).frame(width:640,height:420)
+        }
+    }
+    private func outcomeTitle(_ state:String)->String {
+        switch state {
+        case "reserved":return "正在整理讨论成果 · 等待结果"
+        case "completed":return "讨论成果 · 待核对"
+        case "unknown":return "成果提取结果未知 · 不自动重发"
+        default:return "成果未接纳 · 不自动重发"
         }
     }
     private func recordingLabel(_ record:SourceRecord)->String {

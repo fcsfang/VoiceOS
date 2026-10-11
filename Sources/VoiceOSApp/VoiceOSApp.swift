@@ -21,6 +21,9 @@ final class ControlCenter: ObservableObject {
     @Published var discussionRecordingID:String?
     @Published var discussionSaving=false
     @Published var discussionSending=false
+    @Published var discussionExtracting=false
+    private var outcomeWorker:Task<Void,Never>?
+    private var outcomeModel:ResponsesOutcomePort?
     @Published var discussionStatus="选择一份历史，明确进入讨论。"
     private var discussionModel:ResponsesDiscussionPort?
     @Published var selected: String?
@@ -268,18 +271,16 @@ final class ControlCenter: ObservableObject {
     }
     private func configureTextModel(_ file: URL) {
         do {
-            let port = try LocalTextModel.load(from: file)
-            let selector = try LocalTextModel.loadRelevance(from:file)
-            let discussionPort = try LocalTextModel.loadDiscussion(from:file)
-            discussionModel = discussionPort
-            relevance.cancel(); relevanceModel = selector
+            let suite=try LocalTextModel.loadSuite(from:file),port=suite.cognition
+            discussionModel=suite.discussion;outcomeModel=suite.outcome
+            relevance.cancel();relevanceModel=suite.relevance
             textModel = port; modelConfigured = true
             modelSummary = "gpt-6.1-sol · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
             status = "文本模型已就绪 · 只处理你选择并授权的文字"
         } catch { status = error.localizedDescription }
     }
     func understand(_ record: SourceRecord) {
-        guard let store, let port = textModel, understandingWorker == nil, !record.localOnly,
+        guard let store, let port = textModel, understandingWorker == nil, !discussionExtracting, !record.localOnly,
               !(record.transcript ?? "").isEmpty else { return }
         understandingSource = record.id
         status = "正在理解所选文字 · 原始音视频仍在本机"
@@ -587,17 +588,17 @@ struct CenterView: View {
                                         Task { await model.openDiscussion(session.id);showingDiscussion=true }
                                     }
                                 }
-                            }.disabled(model.discussionSending || model.discussionSaving || model.dictationActive)
+                            }.disabled(model.discussionSending || model.discussionSaving || model.discussionExtracting || model.dictationActive)
                         }
                         Button("继续讨论",systemImage:"bubble.left.and.bubble.right") {
                             Task { if await model.beginDiscussion(record) { showingDiscussion = true } }
-                        }.disabled((record.transcript ?? "").isEmpty || !["saved","reference_only"].contains(record.state) || model.discussionSaving || model.discussionSending || model.dictationActive)
+                        }.disabled((record.transcript ?? "").isEmpty || !["saved","reference_only"].contains(record.state) || model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Button(model.understandingSource == record.id ? "正在理解…" : "理解这份文字", systemImage: "sparkles") { model.understand(record) }
-                                    .disabled(!model.modelConfigured || record.localOnly || (record.transcript ?? "").isEmpty || model.understandingSource != nil)
+                                    .disabled(!model.modelConfigured || record.localOnly || (record.transcript ?? "").isEmpty || model.understandingSource != nil || model.discussionExtracting)
                                 if model.understandingSource == record.id { ProgressView().controlSize(.small) }
-                                Button("配置文本模型…") { model.chooseTextModel() }.disabled(model.understandingSource != nil)
+                                Button("配置文本模型…") { model.chooseTextModel() }.disabled(model.understandingSource != nil || model.discussionExtracting)
                             }
                             Text(model.modelSummary).font(.caption).foregroundStyle(.secondary)
                             if record.localOnly { Text("允许这份资料的文本用于云端后，可以理解文字。").font(.caption).foregroundStyle(.secondary) }
@@ -1276,6 +1277,26 @@ extension ControlCenter {
         let ids=discussionHistory.map(\.sourceID)+discussionTurns.map(\.sourceID)
         return ids.allSatisfy { id in records.contains(where: { $0.id == id && !$0.localOnly }) }
     }
+    var discussionCanExtract:Bool {
+        guard let session=discussionSession,session.state == "ended",session.validity == "current",outcomeModel != nil,
+              discussionOutcomes.isEmpty,!discussionTurns.isEmpty,understandingWorker == nil,!discussionSending,!discussionSaving,!discussionExtracting,!dictationActive,
+              !discussionReplies.contains(where: { $0.state == "reserved" }) else { return false }
+        let inputs=discussionHistory.map { ($0.sourceID,$0.transcriptVersionID) }+discussionTurns.map { ($0.sourceID,$0.transcriptVersionID) }
+        return inputs.allSatisfy { id,version in records.contains { $0.id == id && $0.transcriptVersionID == version && !$0.localOnly } }
+    }
+    func extractDiscussionOutcome() {
+        guard let store,let session=discussionSession,let port=outcomeModel,discussionCanExtract,outcomeWorker == nil else { return }
+        discussionExtracting=true;discussionStatus="正在整理整段已授权文字；已有成果沿用，未登记结果不会自动重发。"
+        outcomeWorker=Task {
+            do {
+                let input=try await store.prepareReusableConversationOutcome(id:session.id,expectedVersion:session.version,destination:.cloud)
+                let ids=try await store.performConversationOutcome(input,using:port)
+                discussionStatus=ids.isEmpty ? "整段成果已保存 · 没有新增陈述，已有成果身份保留。":"整段成果已保存 · \(ids.count)条新陈述待核对；明确行动遵循已有清单授权。"
+            } catch { discussionStatus=error.localizedDescription }
+            await refresh();requestReminderRefresh()
+            discussionExtracting=false;outcomeWorker=nil
+        }
+    }
     var discussionRecordings:[SourceRecord] {
         records.filter { record in record.origin == "user" && record.kind == "audio" && record.state == "saved" && (record.transcript ?? "").unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) }) && !discussionTurns.contains(where: { $0.sourceID == record.id }) && !discussionHistory.contains(where: { $0.sourceID == record.id }) }
     }
@@ -1292,7 +1313,7 @@ extension ControlCenter {
         } catch { discussionStatus=error.localizedDescription }
     }
     func openDiscussion(_ id:String) async {
-        guard let store,!discussionSaving,!discussionSending,!dictationActive else { return }
+        guard let store,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return }
         do {
             discussionSession=try await store.conversation(id:id);discussionRecordingID=nil
             discussionStatus="已打开讨论历史；没有自动发送。"
@@ -1300,7 +1321,7 @@ extension ControlCenter {
         } catch { discussionStatus=error.localizedDescription }
     }
     func beginDiscussion(_ record:SourceRecord) async -> Bool {
-        guard let store,!discussionSaving,!discussionSending,!dictationActive else { return false }
+        guard let store,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return false }
         discussionSaving=true;defer { discussionSaving=false }
         do {
             let id=try await store.beginConversation(sourceIDs:[record.id])
@@ -1310,7 +1331,7 @@ extension ControlCenter {
         } catch { status=error.localizedDescription;return false }
     }
     func saveDiscussionText(_ text:String,allowCloud:Bool) async -> Bool {
-        guard let store,let session=discussionSession,discussionWritable,!discussionSaving,!discussionSending,!dictationActive else { return false }
+        guard let store,let session=discussionSession,discussionWritable,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return false }
         discussionSaving=true;defer { discussionSaving=false }
         do {
             let source=try await store.recordUserExpression(text)
@@ -1321,13 +1342,13 @@ extension ControlCenter {
         } catch { discussionStatus="关联未完成，已保存原文可在资料库核对："+error.localizedDescription;await refresh();return false }
     }
     func startDiscussionDictation() async {
-        guard discussionWritable,!discussionSaving,!discussionSending,!dictationActive else { return }
+        guard discussionWritable,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return }
         await startDictation()
         if dictationActive,let source=dictationSource { discussionRecordingID=source;discussionStatus="正在录制本轮口述；停止、本地转写与核对后再关联和发送。" }
     }
     func attachDiscussionRecording(allowCloud:Bool) async -> Bool {
         guard let store,let session=discussionSession,let id=discussionRecordingID,
-              let record=discussionRecordings.first(where: { $0.id == id }),discussionWritable,!discussionSaving,!discussionSending,!dictationActive,!dictationBusy else { return false }
+              let record=discussionRecordings.first(where: { $0.id == id }),discussionWritable,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive,!dictationBusy else { return false }
         discussionSaving=true;defer { discussionSaving=false }
         do {
             if allowCloud,record.localOnly { _=try await store.setSourceLocalOnly(sourceID:id,expectedVersion:record.policyVersion,localOnly:false) }
@@ -1337,7 +1358,7 @@ extension ControlCenter {
         } catch { discussionStatus=error.localizedDescription;await refresh();return false }
     }
     func sendDiscussion() async {
-        guard let store,let session=discussionSession,let port=discussionModel,discussionCanSend,!discussionSaving,!discussionSending,!dictationActive else { return }
+        guard let store,let session=discussionSession,let port=discussionModel,discussionCanSend,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return }
         discussionSending=true;defer { discussionSending=false }
         discussionStatus="正在回复本轮文字；可结束讨论，未登记结果不会自动重发。"
         do {
@@ -1355,7 +1376,7 @@ extension ControlCenter {
         } catch { if selected == source { sourceDiscussions=[];status=error.localizedDescription } }
     }
     func retainDiscussionCandidate(_ reply:DiscussionAttemptRecord,index:Int) async -> Bool {
-        guard let store,!discussionSaving,!discussionSending,!dictationActive else { return false }
+        guard let store,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return false }
         discussionSaving=true;defer { discussionSaving=false }
         do {
             let id=try await store.retainDiscussionAICandidate(attemptID:reply.id,partIndex:index)
@@ -1366,7 +1387,7 @@ extension ControlCenter {
         } catch { discussionStatus=error.localizedDescription;return false }
     }
     func canUnderstandDiscussionTurn(_ turn:ConversationUserTurn)->Bool {
-        modelConfigured && discussionSession?.validity == "current" && understandingWorker == nil && !discussionSending && !discussionSaving && !dictationActive && records.contains(where: { $0.id == turn.sourceID && $0.transcriptVersionID == turn.transcriptVersionID && !$0.localOnly && $0.origin == "user" && $0.speaker == "user" }) && !(attempts[turn.sourceID] ?? []).contains(where: { $0.executionKind == "model_request" })
+        modelConfigured && discussionSession?.validity == "current" && understandingWorker == nil && !discussionSending && !discussionSaving && !discussionExtracting && !dictationActive && records.contains(where: { $0.id == turn.sourceID && $0.transcriptVersionID == turn.transcriptVersionID && !$0.localOnly && $0.origin == "user" && $0.speaker == "user" }) && !(attempts[turn.sourceID] ?? []).contains(where: { $0.executionKind == "model_request" })
     }
     func understandDiscussionTurn(_ turn:ConversationUserTurn) {
         guard let store,let session=discussionSession,let port=textModel,canUnderstandDiscussionTurn(turn) else { return }

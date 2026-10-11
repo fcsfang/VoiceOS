@@ -116,3 +116,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [持久成果复用更新](engineering/m4-discussion-outcome-reuse.md)：244项测试，原审阅/完成任务保持、只新增未整理回合任务，三个强退/三个迁移往返及原生UI通过；生产驱动待接入。
 
 - [M4 实际混合成果驱动](engineering/m4-discussion-outcome-driver.md)：253项测试、两次合成云端提取/两次迁移，条件/否定、原拒绝保持、指代机会；提取按钮尚待接入。
+
+- [M4 讨论成果控制中心](engineering/m4-discussion-outcome-control-center.md)：显式单次提取、关闭重开、角色出处、任务与本地反馈、未知和迁移历史界面验证。

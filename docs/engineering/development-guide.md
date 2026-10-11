@@ -126,3 +126,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 显式复用准备端口现可持久执行，已有结果沿用原ID，新提案只覆盖未整理个人版本；244项测试、包v18/schema19共26表。`outcome-reuse-fixture <新库>`和`validate_discussion_outcome_reuse.py --root <新目录>`仅做合成本地验证，无云端/录音/外写；真实提取按钮未开放。见[实施更新](m4-discussion-outcome-reuse.md)。
 
 混合成果驱动可用现有本地配置；`outcome-cloud-fixture <新隔离目录> <本地配置>`最多两次合成提取，不重试。253项测试与实际条件/否定/指代及迁移验证通过，账单金额未知；仍无用户提取按钮。见[驱动记录](m4-discussion-outcome-driver.md)。
+
+结束后的当前讨论可点击“整理整段讨论成果”；完整文字须授权，打开历史不调用模型，已提取/未知/迁移历史不重发。`outcome-ui-seed <新空库>`仅准备两段合成讨论，无云端请求。253项测试和原生单次请求/任务反馈/重启/恢复检查通过，见[控制中心记录](m4-discussion-outcome-control-center.md)。
