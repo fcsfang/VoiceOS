@@ -20,14 +20,16 @@ def run(binary: str, command: str, root: Path, crash: str | None = None) -> subp
 def main() -> None:
     binary = os.environ.get("VOICEOS_CHECK_BINARY", ".build/debug/voiceos-check")
     cases = {
-        "processingIntentReserved": "running queue becomes unknown before any model reservation",
-        "modelReserved": "reserved cognition becomes unknown and queue does not replay",
-        "associationReserved": "reserved association becomes unknown after cognition commit",
+        "processingIntentUncommitted": ("uncommitted queue insert rolls back without leaving an intent", "empty"),
+        "processingIntentCommitted": ("committed queue insert remains queued after restart", "queued"),
+        "processingIntentReserved": ("running queue becomes unknown before any model reservation", "unknown"),
+        "modelReserved": ("reserved cognition becomes unknown and queue does not replay", "unknown"),
+        "associationReserved": ("reserved association becomes unknown after cognition commit", "unknown"),
     }
     results = {}
     with tempfile.TemporaryDirectory(prefix="voiceos-processing-recovery-") as scratch:
         base = Path(scratch)
-        for checkpoint, description in cases.items():
+        for checkpoint, (description, expected) in cases.items():
             root = base / checkpoint
             root.mkdir()
             crashed = run(binary, "expression-queue-fixture", root, checkpoint)
@@ -38,12 +40,15 @@ def main() -> None:
                 raise RuntimeError(f"{checkpoint}: recovery failed: {recovered.stdout} {recovered.stderr}")
             payload = json.loads(recovered.stdout)
             intents = payload["intents"]
-            if len(intents) != 1 or intents[0]["state"] != "unknown":
+            if expected == "empty":
+                if intents:
+                    raise RuntimeError(f"{checkpoint}: rolled-back insert left durable intents {payload}")
+            elif len(intents) != 1 or intents[0]["state"] != expected:
                 raise RuntimeError(f"{checkpoint}: unexpected recovery payload {payload}")
             second = run(binary, "expression-queue-read", root)
             if json.loads(second.stdout) != payload:
                 raise RuntimeError(f"{checkpoint}: second recovery changed durable state")
-            results[checkpoint] = {"description": description, "state": intents[0]["state"], "phase": intents[0]["phase"]}
+            results[checkpoint] = {"description": description, "state": intents[0]["state"] if intents else "absent", "phase": intents[0]["phase"] if intents else "absent"}
     print(json.dumps({"probe": "expression-processing-recovery-v1", "cases": results, "scope": "local synthetic ports and actual SIGKILL checkpoints; no cloud calls or reminders"}, ensure_ascii=False, indent=2, sort_keys=True))
 
 

@@ -155,6 +155,6 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 
 2026-10-12 持久处理意图切片：schema25 / PortablePackage v24 新增 `processing_intents`，实现入队、取消、单项串行执行、认知/关联阶段回执、恢复 unknown、迁移冻结及原生“保存并处理本次文字”入口。新增队列回归覆盖一次执行、终态不重发、取消和包往返；完整强退矩阵、真实原生 UI 检查和完整回归仍在本轮后续验证。
 
-处理意图强退探针已补齐：在入队 running、认知 reserved、关联 reserved 三个真实 SIGKILL 边界恢复为 unknown，第二次恢复不改变状态；无云端调用或提醒事项写入。见 [脱敏证据](research/evidence/expression-processing-recovery-2026-10-12.json) 和 [探针](../scripts/probes/expression-processing-recovery.py)。
+处理意图强退探针已补齐：覆盖入队未提交（不留意图）、入队已提交（恢复为 queued）、意图 running、认知 reserved、关联 reserved 五个真实 SIGKILL 边界；后三个阶段恢复为 unknown，第二次恢复不改变状态，无云端调用或提醒事项写入。见 [脱敏证据](research/evidence/expression-processing-recovery-2026-10-12.json) 和 [探针](../scripts/probes/expression-processing-recovery.py)。
 
-2026-10-12 夜间校验：提交 `6975f4e` 补齐处理意图篡改迁移包拒绝、认知/关联在途取消后的迟到结果冻结及对应回归；提交 `3b2759e` 记录验证结果，提交 `67f57ac` 接入处理记录菜单和取消入口。入队后文字/授权漂移回归已补齐；350 项全套测试、签名构建和三处实际 SIGKILL 恢复通过。原生 UI 仍因 macOS 锁屏未能运行时核对，不能据此宣称完整 MVP 或自然语音质量已验收。
+2026-10-12 夜间校验：提交 `6975f4e` 补齐处理意图篡改迁移包拒绝、认知/关联在途取消后的迟到结果冻结及对应回归；提交 `3b2759e` 记录验证结果，提交 `67f57ac` 接入处理记录菜单和取消入口。入队后文字/授权漂移回归已补齐；350 项全套测试、签名构建和五个实际 SIGKILL 恢复边界通过。原生 UI 仍因 macOS 锁屏未能运行时核对，不能据此宣称完整 MVP 或自然语音质量已验收。
