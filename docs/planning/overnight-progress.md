@@ -1,12 +1,12 @@
 # VoiceOS 夜间开发进度
 
-更新时间：2026-10-12 04:21（Asia/Shanghai）
+更新时间：2026-10-12 04:25（Asia/Shanghai）
 
 ## 当前目标
 
 完成明确个人文字的持久处理意图、可恢复执行器、迁移兼容和“保存并处理本次文字”入口，保持认知—行动—反馈边界与既有授权契约。
 
-最新提交：`5791659 docs: refresh overnight handoff state`；当前工作区已清理。若服务切换或上下文压缩，先核对该提交、`git status` 和本文件，再继续。
+最新提交：`f6e7afd test: freeze queued intent during migration`；当前工作区已清理。若服务切换或上下文压缩，先核对该提交、`git status` 和本文件，再继续。
 
 ## 接手核验
 
@@ -24,7 +24,7 @@ schema 25 与 `processing_intents` 持久身份/状态、串行执行器、迁�
 
 当前没有后台运行句柄。
 
-- `swift test`：352 项通过，0 failures（含取消竞态、快照/授权漂移、配置漂移、冻结认知和篡改迁移包负例）。
+- `swift test`：353 项通过，0 failures（含取消竞态、快照/授权漂移、配置漂移、冻结认知、queued 迁移冻结和篡改迁移包负例）。
 - `git diff --check`：通过。
 - `python3 scripts/app/build.py --semantic-model runtime/bge-coreml-2026-10-11`：最新签名构建通过。
 - `codesign --verify --deep --strict --verbose=2 dist/VoiceOS.app`：签名有效；`voiceos-check expression-queue-fixture` 在新隔离库完成认知/关联并保持完整性，读回显示两阶段 attempt 身份。
@@ -44,6 +44,7 @@ schema 25 与 `processing_intents` 持久身份/状态、串行执行器、迁�
 - 静态审查又发现冻结的既有认知被执行器当成成功并继续关联；`5d759b8` 已改为在 cognition 阶段落盘 `frozen` 终态并跳过关联，新增回归证明认知/关联调用均为 0。完整回归现为 351 项通过；恢复探针、签名构建和 codesign 验证继续通过。
 - `.build/debug/voiceos-check config-check 'docs/模型api 配置.md'` 脱敏检查通过：配置可加载，模型为 `gpt-6.1-sol`，识别六个端口；未发送请求且未输出密钥。
 - 已刷新原始夜间交接提示词，明确当前队列已完成、352 项回归通过以及 UI 锁定阻塞，避免后续服务切换重复实现队列。
+- 新增 queued 意图迁移回归：恢复后状态为 frozen，尝试执行不调用认知或关联端口；本轮完整回归为 353 项通过。
 
 ## 未完成与下一步
 
