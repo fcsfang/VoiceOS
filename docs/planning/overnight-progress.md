@@ -26,6 +26,7 @@ schema 25 与 `processing_intents` 持久身份/状态、串行执行器、迁�
 - `swift test`：348 项通过，0 failures（含取消竞态和篡改迁移包负例）。
 - `git diff --check`：通过。
 - `python3 scripts/app/build.py --semantic-model runtime/bge-coreml-2026-10-11`：最新签名构建通过。
+- `codesign --verify --deep --strict --verbose=2 dist/VoiceOS.app`：签名有效；`voiceos-check expression-queue-fixture` 在新隔离库完成认知/关联并保持完整性，读回显示两阶段 attempt 身份。
 - 新增队列夹具：一次认知/一次关联、终态不重发、取消不派发、PortablePackage v24 往返并冻结：通过。
 - `scripts/probes/expression-processing-recovery.py`：三个实际 SIGKILL 检查点（意图 running、认知 reserved、关联 reserved）恢复为 unknown，第二次恢复稳定；证据见 `docs/research/evidence/expression-processing-recovery-2026-10-12.json`。
 - 取消竞态回归：认知或关联在途时取消，迟到的已接收结果保留用量和历史，但认知上下文/候选及关联回执冻结，不进入下一阶段；关联和模型调用各执行一次。
