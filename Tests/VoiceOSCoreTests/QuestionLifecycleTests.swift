@@ -17,8 +17,8 @@ final class QuestionLifecycleTests: XCTestCase {
     var root: URL!
     override func setUpWithError() throws { root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: root) }
-    func fixture(ownership: CandidateOwnership = .userTentative, contentKind: CognitiveContentKind? = nil) async throws -> (VoiceOSStore, String, OutcomeSourceEvidence) {
-        let s = try VoiceOSStore(root: root, inspector: QuestionInspector()); try await s.recover()
+    func fixture(ownership: CandidateOwnership = .userTentative, contentKind: CognitiveContentKind? = nil, checkpoint: @escaping @Sendable (SaveCheckpoint) throws -> Void = { _ in }) async throws -> (VoiceOSStore, String, OutcomeSourceEvidence) {
+        let s = try VoiceOSStore(root: root, inspector: QuestionInspector(), checkpoint: checkpoint); try await s.recover()
         let id = try await s.recordUserExpression("我想知道：哪些反例可以限制猜想？")
         let context = try await s.prepareLocalTranscriptContext(sourceIDs: [id])
         let contextID = try await s.persistLocalContext(context)
@@ -43,7 +43,7 @@ final class QuestionLifecycleTests: XCTestCase {
         XCTAssertEqual(seed.contentKind, .question)
         let package = root.appendingPathComponent("typed-package"), restoredRoot = root.appendingPathComponent("restored")
         try await s.exportPackage(to: package)
-        XCTAssertEqual(try VoiceOSStore.packageSummary(at: package).version, 22)
+        XCTAssertEqual(try VoiceOSStore.packageSummary(at: package).version, 23)
         try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: QuestionInspector())
         let restored = try VoiceOSStore(root: restoredRoot, inspector: QuestionInspector()); try await restored.recover()
         let claims = try await restored.candidateClaims(includeFrozen: true)
@@ -58,9 +58,9 @@ final class QuestionLifecycleTests: XCTestCase {
         let bytes = try JSONEncoder().encode(legacy), json = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
         XCTAssertNil(json["contentKind"]); XCTAssertNil(try JSONDecoder().decode(ClaimProposal.self, from: bytes).contentKind)
         let dbURL = root.appendingPathComponent("old22.sqlite")
-        do { let db = try Database(dbURL); try db.execute("ALTER TABLE claims DROP COLUMN content_kind"); try db.execute("PRAGMA user_version=22") }
+        do { let db = try Database(dbURL); try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("ALTER TABLE claims DROP COLUMN content_kind"); try db.execute("PRAGMA user_version=22") }
         let upgraded = try Database(dbURL)
-        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "23")
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "24")
         XCTAssertTrue(try upgraded.query("PRAGMA table_info(claims)").contains(where: { $0["name"] == "content_kind" }))
     }
     func testAIQuestionCandidateStaysAIAndFakeQuoteFails() async throws {
@@ -82,6 +82,7 @@ final class QuestionLifecycleTests: XCTestCase {
         let (s, claim, quote) = try await fixture(), seed = try await s.prepareQuestionSeed(claimID: claim, expectedReviewVersion: 0, original: quote)
         do { _ = try await s.prepareQuestionTransition(seed: seed, expectedVersion: 1, from: .open, to: .resolved, reason: "猜测已有答案"); XCTFail("no answer evidence") } catch {}
         do { _ = try await s.prepareQuestionTransition(seed: seed, expectedVersion: 1, from: .open, to: .resolved, reason: "原问题不是答案", resolution: quote); XCTFail("question reused as answer") } catch {}
+        do { _ = try await s.prepareQuestionTransition(seed: seed, expectedVersion: 1, from: .open, to: .resolved, reason: "截短原问题仍不是答案", resolution: .init(reference: quote.reference, quote: "哪些反例可以限制猜想？")); XCTFail("partial question reused as answer") } catch {}
         let closed = try await s.prepareQuestionTransition(seed: seed, expectedVersion: 1, from: .open, to: .closed, reason: "暂时不追踪")
         XCTAssertNil(closed.resolution); XCTAssertEqual(closed.to, .closed)
         _ = try await s.prepareQuestionTransition(seed: seed, expectedVersion: 2, from: .closed, to: .open, reason: "我决定重新研究")

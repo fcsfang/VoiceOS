@@ -77,6 +77,7 @@ public actor VoiceOSStore {
         try Self.validateStoredEnglishFeedback(db)
         try Self.validateStoredExpressionAssociations(db)
         try Self.validateStoredExpressionAssociationIgnores(db)
+        try Self.validateStoredQuestions(db)
         ready = true
     }
     @discardableResult

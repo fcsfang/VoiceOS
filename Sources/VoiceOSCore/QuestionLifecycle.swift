@@ -52,7 +52,7 @@ extension VoiceOSStore {
             guard let resolution else { throw VoiceOSError("登记解决需要明确个人表达及答案依据") }
             guard resolution.reference.sourceID != seed.original.reference.sourceID ||
                   resolution.reference.transcriptVersionID != seed.original.reference.transcriptVersionID ||
-                  resolution.reference.spanID != seed.original.reference.spanID || resolution.quote != seed.original.quote else { throw VoiceOSError("原提问本身不能充当新增的答案依据") }
+                  resolution.reference.spanID != seed.original.reference.spanID else { throw VoiceOSError("原提问本身不能充当新增的答案依据") }
             let context = try prepareLocalTranscriptContext(sourceIDs: [resolution.reference.sourceID], scalarBudget: 8000)
             try Self.validateQuestionEvidence(resolution, context: context, personal: true)
             return .init(seed: seed, expectedVersion: expectedVersion, from: from, to: to, reason: reason, resolution: resolution, resolutionContext: context, resolutionPolicyVersion: try sourcePolicy(sourceID: resolution.reference.sourceID).version)
@@ -71,7 +71,7 @@ extension VoiceOSStore {
         }
         return relevanceHash(Data(try relevanceJSON(Payload(claimID: seed.claimID, claimReviewVersion: seed.claimReviewVersion, statement: seed.statement, ownership: seed.ownership, contentKind: seed.contentKind, original: seed.original, context: seed.context, policyVersions: seed.policyVersions)).utf8))
     }
-    private static func validateQuestionEvidence(_ evidence: OutcomeSourceEvidence, context: LocalTranscriptContext, personal: Bool) throws {
+    static func validateQuestionEvidence(_ evidence: OutcomeSourceEvidence, context: LocalTranscriptContext, personal: Bool) throws {
         let ref = evidence.reference
         guard !evidence.quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, evidence.quote.unicodeScalars.count <= 2000,
               let source = context.sources.first(where: { $0.sourceID == ref.sourceID && $0.transcriptVersionID == ref.transcriptVersionID }),

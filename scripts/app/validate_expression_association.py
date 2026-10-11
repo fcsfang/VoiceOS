@@ -44,7 +44,7 @@ for checkpoint in ['associationReserved', 'associationUncommitted', 'association
     package, target = args.root / (checkpoint + '-package'), args.root / (checkpoint + '-restored')
     run('export', root, package)
     manifest = json.loads((package / 'manifest.json').read_text())
-    assert manifest['version'] == 22 and manifest['databaseSchema'] == 23
+    assert manifest['version'] == 23 and manifest['databaseSchema'] == 24
     assert (package / 'expression_association_attempts.jsonl').exists()
     run('restore', target, package)
     restored = run(fixture, target)

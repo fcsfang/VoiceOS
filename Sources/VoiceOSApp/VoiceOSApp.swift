@@ -179,6 +179,9 @@ final class ControlCenter: ObservableObject {
     @Published var player: AVPlayer?
     @Published var history: [TranscriptVersion] = []
     @Published var claims: [CandidateClaim] = []
+    @Published var questionRecords: [QuestionRecord] = []
+    @Published var questionRevisions: [String: [QuestionRevision]] = [:]
+    @Published var savingQuestion = false
     @Published var claimHistory: [ClaimReviewVersion] = []
     @Published var reviewingClaim = false
     @Published var actionRecords: [ActionRecord] = []
@@ -292,6 +295,10 @@ final class ControlCenter: ObservableObject {
     func refresh() async {
         do {
             claims = try await store?.candidateClaims(includeFrozen: true) ?? []
+            questionRecords = try await store?.questions() ?? []
+            var questionHistory: [String: [QuestionRevision]] = [:]
+            for question in questionRecords { questionHistory[question.id] = try await store?.questionHistory(questionID: question.id) ?? [] }
+            questionRevisions = questionHistory
             claimOrigins = try await store?.discussionClaimOrigins() ?? []
             outcomeOrigins = try await store?.conversationOutcomeOrigins() ?? []
             actionRecords = try await store?.actions(includeHistory: true) ?? []
@@ -475,6 +482,22 @@ final class ControlCenter: ObservableObject {
             _ = try await store.setSourceLocalOnly(sourceID: record.id, expectedVersion: record.policyVersion, localOnly: !record.localOnly)
             await refresh(); status = "文本处理权限已更新 · 原始音频仍仅本机"
         } catch { status = error.localizedDescription }
+    }
+    func changeQuestion(_ question: QuestionRecord, to: QuestionStatus, reason: String, answerSourceID: String?, answerQuote: String?, commandID: String) async -> Bool {
+        guard let store, !savingQuestion else { return false }
+        savingQuestion = true; defer { savingQuestion = false }
+        do {
+            var evidence: OutcomeSourceEvidence?
+            if to == .resolved {
+                guard let answerSourceID, let answerQuote, !answerQuote.isEmpty,
+                      let source = records.first(where: { $0.id == answerSourceID }), let version = source.transcriptVersionID, let text = source.transcript,
+                      let span = source.spans.first(where: { String(String.UnicodeScalarView(Array(text.unicodeScalars)[$0.textStart..<$0.textEnd])).contains(answerQuote) }) else { throw VoiceOSError("请选择个人答案出处并填写其中连续的原话") }
+                evidence = .init(reference: .init(sourceID: answerSourceID, transcriptVersionID: version, spanID: span.id), quote: answerQuote)
+            }
+            let input = try await store.prepareStoredQuestionTransition(questionID: question.id, expectedVersion: question.version, to: to, reason: reason, resolution: evidence)
+            _ = try await store.transitionQuestion(questionID: question.id, input: input, commandID: commandID)
+            await refresh(); status = "问题状态已保存 · 原认知归属和未验证状态保留"; return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
     }
     func review(_ claim: CandidateClaim, action: ClaimReviewAction, statement: String? = nil, ownership: CandidateOwnership? = nil, note: String = "") async -> Bool {
         guard let store, !reviewingClaim else { return false }
@@ -880,6 +903,11 @@ struct CenterView: View {
                                                 .disabled(model.reviewingClaim || claim.validity == "frozen" || claim.reviewState == "rejected")
                                             Button("更正认知") { correctingClaim = claim }.disabled(model.reviewingClaim || claim.validity == "frozen")
                                             Button("审阅历史") { Task { await model.reviewHistory(claim); showClaimHistory = true } }
+                                        }
+                                        if let question = model.questionRecords.first(where: { $0.seed.claimID == claim.id }) {
+                                            QuestionStateView(question: question, model: model)
+                                        } else if claim.contentKind == .question {
+                                            Text("解决状态尚未登记").font(.caption).foregroundStyle(.secondary)
                                         }
                                         Button("记录行动意图") { actionClaim = claim }.disabled(claim.validity == "frozen" || claim.reviewState == "rejected")
                                         ForEach(Array(claim.references.enumerated()), id: \.offset) { _, ref in
@@ -1654,7 +1682,7 @@ private extension CognitiveContentKind {
     var displayName: String {
         switch self {
         case .statement: "陈述候选"
-        case .question: "问题候选 · 解决状态尚未登记"
+        case .question: "问题候选"
         case .hypothesis: "猜想候选"
         case .reflection: "反思候选"
         case .unclassified: "内容类型未分类"

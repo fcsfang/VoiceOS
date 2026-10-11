@@ -115,6 +115,17 @@ extension VoiceOSStore {
                 }
             }
             try db.execute("UPDATE model_attempts SET state='completed',result_digest=? WHERE id=? AND state='reserved'", [digest,attemptID])
+            // Typed questions share the claims transaction: no partial identity after a crash.
+            for (index, proposal) in proposals.enumerated() where proposal.contentKind == .question {
+                let ref = proposal.references[0]
+                let context = try localContext(id: attempt["context_id"]!)
+                guard let source = context.sources.first(where: { $0.sourceID == ref.sourceID }),
+                      let span = source.spans.first(where: { $0.id == ref.spanID }) else { throw VoiceOSError("问题出处缺失") }
+                let scalars = Array(source.text.unicodeScalars)
+                let quote = String(String.UnicodeScalarView(scalars[span.textStart..<min(span.textEnd, span.textStart + 2000)]))
+                let seed = try prepareQuestionSeed(claimID: ids[index], expectedReviewVersion: 0, original: .init(reference: ref, quote: quote))
+                _ = try insertQuestion(seed)
+            }
             try additionalCommit(ids)
             try checkpoint(.claimsUncommitted)
         }
