@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-11",
+  "capture_method": "native_UI_device_timed_stop",
+  "configured_seconds": 10,
+  "actual_seconds": 10.0,
+  "audio_bytes": 484096,
+  "source_local_only": true,
+  "asset_hash_verified": true,
+  "local_speech_state": "completed",
+  "local_speech_attempts": 1,
+  "transcript_scalars": 1,
+  "transcript_has_letter_or_number": false,
+  "natural_speech_quality_evaluated": false,
+  "raw_audio_uploaded": false,
+  "text_model_calls": 0,
+  "external_task_writes": 0,
+  "media_export_restore": "passed",
+  "schema": 15,
+  "package_version": 14,
+  "standing_local_capture_authorization": true
+}
