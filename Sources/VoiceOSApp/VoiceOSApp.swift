@@ -599,7 +599,24 @@ struct EnglishPracticeView: View {
             if !model.englishAttempts.isEmpty {
                 Divider(); Text("反馈历史（\(model.englishAttempts.count)）").font(.headline)
                 ForEach(model.englishAttempts) { attempt in
-                    Text("\(attempt.state == "completed" ? "已保存" : "结果未知") · \(attempt.createdAt)").font(.caption)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(attempt.state == "completed" ? "已保存" : "结果未知") · \(attempt.createdAt)").font(.caption)
+                        if let result = attempt.result {
+                            ForEach(Array(result.suggestions.enumerated()), id: \.offset) { index, suggestion in
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("建议 (index + 1) · \(suggestion.kind.rawValue)").font(.callout.bold())
+                                    Text("原句：\(suggestion.original.quote)").textSelection(.enabled)
+                                    Text("建议：\(suggestion.suggestedText)").textSelection(.enabled)
+                                    Text(suggestion.explanation).font(.caption).foregroundStyle(.secondary)
+                                    if suggestion.possibleTranscriptIssue { Text("可能是转写问题，需人工核对").font(.caption).foregroundStyle(.orange) }
+                                }.padding(8).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+                            }
+                            ForEach(Array(result.comparisons.enumerated()), id: \.offset) { _, comparison in
+                                Text("比较：\(comparison.explanation)").font(.caption).foregroundStyle(.secondary)
+                            }
+                            Text("文字建议不代表发音、熟练度或学习效果判断。").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }.padding(24).frame(width: 700, height: 600)
