@@ -120,3 +120,4 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 讨论成果控制中心](engineering/m4-discussion-outcome-control-center.md)：显式单次提取、关闭重开、角色出处、任务与本地反馈、未知和迁移历史界面验证。
 
 - [M4 讨论任务提醒闭环](engineering/m4-discussion-outcome-reminders.md)：专用清单自动创建、外部完成v4回流、原v2反思保留及迁移不携带连接。
+- [M4 英文表达反馈契约](engineering/m4-english-feedback-contract.md)：个人英文原句、出处建议、跨练习比较与纠错/权限屏障；尚未接入真实模型或界面。
