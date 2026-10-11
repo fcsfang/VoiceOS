@@ -146,13 +146,18 @@ final class ControlCenter: ObservableObject {
     func startDictation() async {
         guard let store, !dictationBusy, !dictationActive else { return }
         dictationBusy = true; defer { dictationBusy = false }
+        let duration: TimeInterval?
+        if let raw = ProcessInfo.processInfo.environment["VOICEOS_TEST_CAPTURE_SECONDS"] {
+            guard let seconds = Double(raw), seconds.isFinite, seconds > 0, seconds <= 60 else { status = "限时采集参数无效，未开启麦克风"; return }
+            duration = seconds
+        } else { duration = nil }
         guard await dictation.requestPermission() else { status = "麦克风未获授权，未开始录制；仍可导入文件"; return }
         do {
             let intent = try await store.beginDictation()
             dictationSource = intent.sourceID; dictationInterrupted = false
-            try dictation.start(at:intent.stagingURL) { [weak self] success in Task { await self?.finishDictation(success:success) } }
+            try dictation.start(at:intent.stagingURL,maximumDuration:duration) { [weak self] success in Task { await self?.finishDictation(success:success) } }
             dictationActive = true; selected = intent.sourceID
-            status = "正在录制我的口述 · 仅本地；停止后才核对并封存原件"
+            status = duration.map { "正在进行\($0)秒限时采集 · 到时自动停止 · 仅本地" } ?? "正在录制我的口述 · 仅本地；停止后才核对并封存原件"
             await refresh()
         } catch {
             if let id = dictationSource { try? await store.interruptDictation(sourceID:id) }

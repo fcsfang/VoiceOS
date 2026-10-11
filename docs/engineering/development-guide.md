@@ -102,3 +102,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 工具栏“静默回顾”展示已接纳且仍有效的相关原文；忽略、减少为每次一条及暂停持久保存，关闭不表示认可。见[当前实施与边界](m4-quiet-feedback.md)。
 
 点击“开始我的口述”才请求麦克风并录制本人表达；“停止并保存”通过原件核对后进入本地转写。中断片段保留待核对，录制中不导出；带原件导出遇未封存片段明确拒绝，结构化迁移不包含暂存音频。真实设备/权限/睡眠仍待验证，见[口述增量](m1-personal-dictation.md)。
+
+设备限时测试可使用`python3 scripts/app/run.py --data-dir <独立测试目录> --capture-limit-seconds 10`；它不会自动启动麦克风，点击开始后由设备到时停止。再次采集需具体测试授权；首次实测与时长偏差见[设备测试记录](m1-microphone-device-test.md)。

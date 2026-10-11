@@ -7,7 +7,7 @@ import VoiceOSPlatform
 final class RecordingCaptureTests: XCTestCase {
     var base:URL!
     override func setUpWithError() throws { base = FileManager.default.temporaryDirectory.appendingPathComponent("dictation-"+UUID().uuidString) }
-    override func tearDownWithError() throws { try FileManager.default.removeItem(at:base) }
+    override func tearDownWithError() throws { if FileManager.default.fileExists(atPath:base.path) { try FileManager.default.removeItem(at:base) } }
     func store(_ name:String = "root",checkpoint:@escaping @Sendable (SaveCheckpoint) throws -> Void = {_ in}) async throws -> VoiceOSStore {
         let s = try VoiceOSStore(root:base.appendingPathComponent(name),inspector:NativeMediaInspector(),checkpoint:checkpoint); try await s.recover(); return s
     }
@@ -92,5 +92,13 @@ final class RecordingCaptureTests: XCTestCase {
         try await VoiceOSStore.restorePackage(from:metadata,to:target,inspector:NativeMediaInspector())
         let r = try await store("restored"), rows = try await r.sources(); XCTAssertTrue(rows[0].error?.contains("暂存片段未随包迁移") == true)
         XCTAssertTrue(FileManager.default.fileExists(atPath:intent.stagingURL.path))
+    }
+    @MainActor
+    func testInvalidTimedLimitFailsBeforePermissionOrDeviceCreation() throws {
+        let recorder = NativeDictation(), file = base.appendingPathComponent("not-created.caf")
+        for seconds in [0.0,-1.0,Double.infinity,Double.nan,61.0] {
+            XCTAssertThrowsError(try recorder.start(at:file,maximumDuration:seconds) { _ in XCTFail("invalid duration must not begin capture") })
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath:file.path))
     }
 }
