@@ -10,6 +10,7 @@ struct Check {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
             guard args.count >= 2 else { throw VoiceOSError("usage: voiceos-check <import|read|transcribe> <isolated-root> [file] [command-id]") }
+            if args[0] == "config-check" { try runConfigCheck(URL(fileURLWithPath: args[1])); return }
             if args[0] == "outcome-cloud-fixture" { try await runOutcomeCloudFixture(args); return }
             if args[0] == "english-cloud-fixture" { try await runEnglishCloudFixture(args); return }
             if args[0] == "discussion-cloud-fixture" { try await runDiscussionCloudFixture(args); return }
