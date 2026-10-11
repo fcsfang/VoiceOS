@@ -121,6 +121,6 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 
 - [M4 讨论任务提醒闭环](engineering/m4-discussion-outcome-reminders.md)：专用清单自动创建、外部完成v4回流、原v2反思保留及迁移不携带连接。
 - [M4 英文表达反馈契约](engineering/m4-english-feedback-contract.md)：个人英文原句、出处建议、跨练习比较与纠错/权限屏障；尚未接入真实模型或界面。
-- [英文表达文本模型端口](engineering/m4-english-feedback-contract.md)：Responses 严格结构化输出、原句/历史引文校验和文本授权屏障；尚未接入持久行动或英文 UI。
+- [英文表达文本模型端口](engineering/m4-english-feedback-contract.md)：Responses 严格结构化输出、原句/历史引文校验和文本授权屏障；已接入持久英文反馈记录与轻量控制中心入口；自然质量仍待真实验证。
 - [ADR-020 英文反馈记录](adr/020-english-feedback-records.md)：独立英文反馈表、schema 19→20 迁移、v19 包恢复与未知终态边界。
 - [英文反馈首轮云端探针](research/evidence/english-feedback-cloud-2026-10-11.json)：合成文本单请求在 TLS 阶段失败，未重试、未保存反馈，质量验收未开始。
