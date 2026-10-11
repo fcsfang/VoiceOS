@@ -65,7 +65,7 @@ for media in [False, True]:
     assert row['validity'] == 'frozen' and row['parts'] == 2 and row['usage'] == {'input_tokens': 11, 'output_tokens': 5}
 
 report = {'date': '2026-10-11', 'synthetic_only': True, 'process_crashes': checks,
-          'portable_round_trips': 2, 'schema': 16, 'package_version': 15,
+          'portable_round_trips': 2, 'schema': 17, 'package_version': 16,
           'microphone_calls': 0, 'cloud_calls': 0, 'external_task_writes': 0}
 (args.root / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
 print(json.dumps(report, indent=2))

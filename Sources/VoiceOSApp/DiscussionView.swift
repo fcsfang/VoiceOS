@@ -46,10 +46,20 @@ struct DiscussionView: View {
                                 ForEach(model.discussionReplies.filter { $0.replyToTurnID == turn.id }) { reply in
                                     VStack(alignment:.leading,spacing:8) {
                                         Text(replyLabel(reply)).font(.headline)
-                                        ForEach(Array(reply.parts.enumerated()),id:\.offset) { _,part in
+                                        ForEach(Array(reply.parts.enumerated()),id:\.offset) { index,part in
                                             VStack(alignment:.leading,spacing:6) {
                                                 Text(part.kind == .quotation ? "原文引用" : "AI分析与建议").font(.caption).foregroundStyle(.secondary)
                                                 Text(part.text).textSelection(.enabled)
+                                                if part.kind == .aiSuggestion {
+                                                    let kept=model.discussionDerivations.first { $0.discussionAttemptID == reply.id && $0.partIndex == index }
+                                                    if let claimID=kept?.claimID,let claim=model.claims.first(where: { $0.id == claimID }) {
+                                                        Button("已保留 · 查看 AI 候选") { model.selected=claim.references.first?.sourceID;dismiss() }
+                                                    } else {
+                                                        Button("保留为 AI 候选") { Task { if await model.retainDiscussionCandidate(reply,index:index) { dismiss() } } }
+                                                            .disabled(reply.validity != "current" || session.validity != "current" || model.discussionSaving || model.discussionSending || model.dictationActive)
+                                                    }
+                                                    Text("待核对、未验证；保留不表示认可，也不创建行动。").font(.caption).foregroundStyle(.secondary)
+                                                }
                                                 ForEach(Array(part.references.enumerated()),id:\.offset) { _,ref in
                                                     Button("查看引用原文 · "+String(ref.sourceID.prefix(8))) { inspectReference(ref) }
                                                 }

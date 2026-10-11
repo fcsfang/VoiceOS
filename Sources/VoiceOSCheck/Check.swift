@@ -33,7 +33,7 @@ struct Check {
                 }
             })
             try await store.recover()
-            if ["conversation-entry-fixture","conversation-turn-fixture","conversation-end-fixture","discussion-fixture"].contains(args[0]) {
+            if ["conversation-entry-fixture","conversation-turn-fixture","conversation-end-fixture","discussion-fixture","discussion-candidate-fixture","discussion-anchor-fixture"].contains(args[0]) {
                 let source = try await store.recordUserExpression("合成旧观点：需要检验条件，尚未形成结论。",commandID:"synthetic-dialogue-history")
                 let id = try await store.beginConversation(sourceIDs:[source],commandID:"synthetic-dialogue-entry")
                 if args[0] != "conversation-entry-fixture" {
@@ -41,9 +41,13 @@ struct Check {
                     _ = try await store.appendConversationUserSource(conversationID:id,sourceID:turnSource,expectedVersion:1,commandID:"synthetic-dialogue-turn")
                 }
                 if args[0] == "conversation-end-fixture" { try await store.endConversation(id:id,expectedVersion:2,commandID:"synthetic-dialogue-end") }
-                if args[0] == "discussion-fixture", try await store.discussionAttempts(conversationID:id).isEmpty {
+                if ["discussion-fixture","discussion-candidate-fixture","discussion-anchor-fixture"].contains(args[0]), try await store.discussionAttempts(conversationID:id).isEmpty {
                     let input = try await store.prepareConversationInput(id:id,expectedVersion:2,destination:.local)
-                    _ = try await store.performConversationReply(input,using:LocalDiscussionFixture())
+                    _ = try await store.performConversationReply(input,using:LocalDiscussionFixture(cited:args[0] != "discussion-anchor-fixture"))
+                }
+                if args[0] == "discussion-candidate-fixture" {
+                    guard let reply=try await store.discussionAttempts(conversationID:id).first else { throw VoiceOSError("missing synthetic reply") }
+                    _=try await store.retainDiscussionAICandidate(attemptID:reply.id,partIndex:1,commandID:"synthetic-ai-candidate")
                 }
             } else if args[0] == "discussion-read" {
                 guard args.count == 3 else { throw VoiceOSError("discussion-read requires conversation ID") }
@@ -153,11 +157,12 @@ private actor FileRemindersFixture: RemindersPort {
 }
 
 private struct LocalDiscussionFixture: DiscussionModelPort {
+    var cited=true
     let configuration = ModelConfiguration(provider:"fixture",model:"discussion",promptVersion:"v1",schemaVersion:"v1",destination:.local)
     func reply(_ request:DiscussionModelRequest) async throws -> DiscussionModelResponse {
         let source=request.snapshot.context.sources[0]
         let ref=ClaimReference(sourceID:source.sourceID,transcriptVersionID:source.transcriptVersionID,spanID:source.spans[0].id)
-        return DiscussionModelResponse(status:.completed,parts:[DiscussionPart(kind:.quotation,text:source.text,references:[ref]),DiscussionPart(kind:.aiSuggestion,text:"合成AI建议：比较反例，尚未形成用户结论。",references:[ref])],inputTokens:11,outputTokens:5)
+        return DiscussionModelResponse(status:.completed,parts:[DiscussionPart(kind:.quotation,text:source.text,references:[ref]),DiscussionPart(kind:.aiSuggestion,text:"合成AI建议：比较反例，尚未形成用户结论。",references:cited ? [ref] : [])],inputTokens:11,outputTokens:5)
     }
 }
 

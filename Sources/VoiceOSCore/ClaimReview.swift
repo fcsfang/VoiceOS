@@ -51,7 +51,8 @@ extension VoiceOSStore {
     }
     public func claimReviewHistory(claimID: String) throws -> [ClaimReviewVersion] {
         guard let original = try db.query("SELECT * FROM claims WHERE id=?", [claimID]).first else { throw VoiceOSError("候选不存在") }
-        let first = ClaimReviewVersion(id: claimID, version: 0, statement: original["statement"]!, ownership: original["ownership"]!, decision: "pending", reason: "model_original", note: "", createdAt: original["created_at"]!)
+        let derived = try db.query("SELECT id FROM discussion_claim_derivations WHERE claim_id=?", [claimID]).first != nil
+        let first = ClaimReviewVersion(id: claimID, version: 0, statement: original["statement"]!, ownership: original["ownership"]!, decision: "pending", reason: derived ? "discussion_ai_original" : "model_original", note: "", createdAt: original["created_at"]!)
         return [first] + (try db.query("SELECT * FROM claim_reviews WHERE claim_id=? ORDER BY version", [claimID])).map {
             ClaimReviewVersion(id: $0["id"]!, version: Int($0["version"]!)!, statement: $0["statement"]!, ownership: $0["ownership"]!, decision: $0["decision"]!, reason: $0["reason"]!, note: $0["note"]!, createdAt: $0["created_at"]!)
         }

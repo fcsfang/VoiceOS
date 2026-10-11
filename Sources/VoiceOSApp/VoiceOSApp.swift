@@ -13,6 +13,8 @@ final class ControlCenter: ObservableObject {
     @Published var discussionSession:ConversationRecord?
     @Published var discussionTurns:[ConversationUserTurn] = []
     @Published var discussionReplies:[DiscussionAttemptRecord] = []
+    @Published var discussionDerivations:[DiscussionClaimDerivation] = []
+    @Published var claimOrigins:[DiscussionClaimDerivation] = []
     @Published var discussionHistory:[ContextTranscript] = []
     @Published var discussionRecordingID:String?
     @Published var discussionSaving=false
@@ -230,6 +232,7 @@ final class ControlCenter: ObservableObject {
     func refresh() async {
         do {
             claims = try await store?.candidateClaims(includeFrozen: true) ?? []
+            claimOrigins = try await store?.discussionClaimOrigins() ?? []
             actionRecords = try await store?.actions(includeHistory: true) ?? []
             reminderLinks = try await store?.reminderLinks() ?? []
             reminderAccess = try await store?.reminderAccess()
@@ -596,12 +599,14 @@ struct CenterView: View {
                             Text(model.modelSummary).font(.caption).foregroundStyle(.secondary)
                             if record.localOnly { Text("允许这份资料的文本用于云端后，可以理解文字。").font(.caption).foregroundStyle(.secondary) }
                             if let attempts = model.attempts[record.id], !attempts.isEmpty {
-                                DisclosureGroup("理解调用记录（\(attempts.count)）") {
+                                DisclosureGroup("理解与候选整理记录（\(attempts.count)）") {
                                     ForEach(attempts) { attempt in
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(attemptLabel(attempt)).font(.callout)
-                                            Text("\(attempt.model) · \(attempt.provider.replacingOccurrences(of: "responses:", with: ""))").font(.caption).foregroundStyle(.secondary)
-                                            Text("输入 \(attempt.usage?["input_tokens"].map(String.init) ?? "未知") / 输出 \(attempt.usage?["output_tokens"].map(String.init) ?? "未知") tokens · 实际费用未知").font(.caption).foregroundStyle(.secondary)
+                                            if attempt.executionKind != "discussion_derivation" { Text("\(attempt.model) · \(attempt.provider.replacingOccurrences(of: "responses:", with: ""))").font(.caption).foregroundStyle(.secondary) }
+                                            if attempt.executionKind == "discussion_derivation" {
+                                                Text("本地保留讨论 AI 段落 · 没有新增模型调用或费用").font(.caption).foregroundStyle(.secondary)
+                                            } else { Text("输入 \(attempt.usage?["input_tokens"].map(String.init) ?? "未知") / 输出 \(attempt.usage?["output_tokens"].map(String.init) ?? "未知") tokens · 实际费用未知").font(.caption).foregroundStyle(.secondary) }
                                         }.padding(.vertical, 5).frame(maxWidth: .infinity, alignment: .leading)
                                     }
                                 }
@@ -645,6 +650,10 @@ struct CenterView: View {
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(claim.statement).textSelection(.enabled)
                                         Text("\(claim.ownership == "ai_candidate" ? "AI 候选" : (claim.ownership == "external" ? "外部主张" : "归属待核对")) · 未验证 · \(claim.validity == "frozen" ? "依据或授权已变化，暂停使用" : (claim.reviewState == "rejected" ? "已停止当前使用" : "出处可回溯"))").font(.caption).foregroundStyle(.secondary)
+                                        if let origin=model.claimOrigins.first(where: { $0.claimID == claim.id }) {
+                                            Text(origin.referenceKind == "context_anchor" ? "来自讨论 AI 分析；下方原文只定位讨论触发点，不是结论证据。" : "来自讨论 AI 分析；模型引用保留，引用不代表结论已经验证。").font(.caption).foregroundStyle(.secondary)
+                                            Button("查看原讨论 AI 段落") { Task { await model.openDiscussion(origin.conversationID);showingDiscussion=true } }
+                                        }
                                         Text(claim.reviewState == "endorsed" ? "明确认可 · 不等于已验证或已经理解" : (claim.reviewState == "rejected" ? "已拒绝 · 保留历史，不用于当前认知" : "尚未认可")).font(.caption).foregroundStyle(.secondary)
                                         HStack {
                                             Button("我认可这个观点") { Task { _ = await model.review(claim, action: .endorse) } }
@@ -658,7 +667,7 @@ struct CenterView: View {
                                         ForEach(Array(claim.references.enumerated()), id: \.offset) { _, ref in
                                             if ref.sourceID == record.id, ref.transcriptVersionID == record.transcriptVersionID,
                                                let span = record.spans.first(where: { $0.id == ref.spanID }), let text = record.transcript {
-                                                Text("依据：" + quote(span, text: text)).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                                                Text((model.claimOrigins.first(where: { $0.claimID == claim.id })?.referenceKind == "context_anchor" ? "讨论触发原文（不证明 AI 猜想）：" : "引用原文：") + quote(span, text: text)).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
                                             } else if ref.sourceID == record.id {
                                                 Button("查看历史逐字稿依据") { Task { await model.historyFor(record); showHistory = true } }
                                             }
@@ -848,10 +857,12 @@ struct CenterView: View {
         case "explicit_endorsement": return "明确认可"
         case "explicit_rejection": return "拒绝候选"
         case "correction": return "认知更正"
+        case "discussion_ai_original": return "讨论 AI 段落原文 · 本地保留"
         default: return "模型原始结果"
         }
     }
     private func attemptLabel(_ attempt: ModelAttemptRecord) -> String {
+        if attempt.executionKind == "discussion_derivation" { return attempt.state == "completed" ? "本地候选已保留" : "本地整理未完成 · 可回到讨论显式恢复" }
         switch attempt.state {
         case "completed": return attempt.contextState == "stale" ? "已完成 · 依据或授权已变化，保留历史" : "已完成 · 结果待核对"
         case "reserved": return "正在处理；重启后结果可能未知，不自动重发"
@@ -1268,8 +1279,9 @@ extension ControlCenter {
             guard let id=discussionSession?.id else { return }
             let session=try await store.conversation(id:id),turns=try await store.conversationUserTurns(conversationID:id)
             let replies=try await store.discussionAttempts(conversationID:id),history=try await store.conversationHistorySources(conversationID:id)
+            let derivations=try await store.discussionClaimDerivations(conversationID:id)
             guard discussionSession?.id == id else { return }
-            discussionSession=session;discussionTurns=turns;discussionReplies=replies;discussionHistory=history
+            discussionSession=session;discussionTurns=turns;discussionReplies=replies;discussionHistory=history;discussionDerivations=derivations
         } catch { discussionStatus=error.localizedDescription }
     }
     func openDiscussion(_ id:String) async {
@@ -1335,8 +1347,19 @@ extension ControlCenter {
             if selected == source { sourceDiscussions=linked }
         } catch { if selected == source { sourceDiscussions=[];status=error.localizedDescription } }
     }
+    func retainDiscussionCandidate(_ reply:DiscussionAttemptRecord,index:Int) async -> Bool {
+        guard let store,!discussionSaving,!discussionSending,!dictationActive else { return false }
+        discussionSaving=true;defer { discussionSaving=false }
+        do {
+            let id=try await store.retainDiscussionAICandidate(attemptID:reply.id,partIndex:index)
+            await refresh()
+            if let claim=claims.first(where: { $0.id == id }) { selected=claim.references.first?.sourceID }
+            discussionStatus="已本地保留为待核对 AI 候选；没有调用模型或创建任务。"
+            return true
+        } catch { discussionStatus=error.localizedDescription;return false }
+    }
     func canUnderstandDiscussionTurn(_ turn:ConversationUserTurn)->Bool {
-        modelConfigured && discussionSession?.validity == "current" && understandingWorker == nil && !discussionSending && !discussionSaving && !dictationActive && records.contains(where: { $0.id == turn.sourceID && $0.transcriptVersionID == turn.transcriptVersionID && !$0.localOnly && $0.origin == "user" && $0.speaker == "user" }) && (attempts[turn.sourceID] ?? []).isEmpty
+        modelConfigured && discussionSession?.validity == "current" && understandingWorker == nil && !discussionSending && !discussionSaving && !dictationActive && records.contains(where: { $0.id == turn.sourceID && $0.transcriptVersionID == turn.transcriptVersionID && !$0.localOnly && $0.origin == "user" && $0.speaker == "user" }) && !(attempts[turn.sourceID] ?? []).contains(where: { $0.executionKind == "model_request" })
     }
     func understandDiscussionTurn(_ turn:ConversationUserTurn) {
         guard let store,let session=discussionSession,let port=textModel,canUnderstandDiscussionTurn(turn) else { return }

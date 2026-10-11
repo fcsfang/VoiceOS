@@ -89,7 +89,7 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 
 - [M1 个人口述增量](engineering/m1-personal-dictation.md)：显式开始/停止、持久捕获身份、片段核对、154项测试及六次强退；实际设备权限与睡眠仍待验证。
 
-- [首次真实麦克风测试](engineering/m1-microphone-device-test.md)：原件封存、本地空转写、重启及音频迁移通过；实际12.1204秒，手动停止超时已披露，设备限时修复未再次采集。
+- [首次真实麦克风测试](engineering/m1-microphone-device-test.md)：原件封存、本地空转写、重启及音频迁移通过；首次手动停止12.1204秒；后续10秒设备自动停止已验证，环境音不证明自然语音质量。
 
 - [M4 本地会话基础](engineering/m4-conversation-foundation.md)：170项测试、六次强退、两次新格式迁移与实际v1–v13恢复；尚未接入AI回复/界面。
 - [模式B实施契约](engineering/m4-dialogue-contract.md)：P07已确认逐轮语音＋文字，回合、引用、权限与回流验收。
@@ -102,3 +102,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 逐轮讨论控制中心](engineering/m4-discussion-control-center.md)：191项测试、实际文字回复与结束屏障、两次本地环境音测试和口述关联；成果回流/自然语音质量未完成。
 
 - [M4 个人发言回流](engineering/m4-discussion-user-return.md)：196项测试、一次实际个人原话整理、条件/否定、任务结果反馈及来源返回讨论；AI讨论候选回流仍待实现。
+
+- [M4 讨论AI候选回流](engineering/m4-discussion-candidates.md)：205项测试、三次强退、四个新包往返及旧v1–v15恢复；显式保留AI身份，引用/触发点分开，完整混合成果仍开放。

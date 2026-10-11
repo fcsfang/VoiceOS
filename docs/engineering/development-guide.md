@@ -112,3 +112,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 控制中心“继续讨论”与“讨论记录”已接入：每轮主动口述/文字、保存后明确发送、查看当时引用、明确结束；当前191项测试。文字许可按轮登记，音频保留本机。空/仅标点录音不会关联或发送；详情与实际边界见[逐轮讨论记录](m4-discussion-control-center.md)。
 
 讨论中的“整理我的这轮表达”只发送选定个人原话；候选与明确行动沿用原有流程，结束后可显式整理，已有记录不重发。原文“查看关联讨论”可回溯，当前196项测试；见[个人成果回流](m4-discussion-user-return.md)。
+
+讨论AI分析的“保留为AI候选”只做本地复制，待核对/未验证，不认可或创建行动；候选可返回原讨论。没有模型引用时，触发原文不作为结论证据。当前205项测试、包v16/schema17；见[候选回流](m4-discussion-candidates.md)。

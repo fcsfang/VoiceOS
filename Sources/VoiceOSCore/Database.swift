@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -370,6 +370,24 @@ final class Database {
                 try execute("PRAGMA user_version=16")
             }
         }
+        if try query("PRAGMA user_version").first?["user_version"] == "16" {
+            try transaction {
+                try execute("ALTER TABLE model_attempts ADD COLUMN execution_kind TEXT NOT NULL DEFAULT 'model_request' CHECK(execution_kind IN ('model_request','discussion_derivation'))")
+                try execute("""
+                CREATE TABLE discussion_claim_derivations (
+                  id TEXT PRIMARY KEY, command_id TEXT NOT NULL UNIQUE,
+                  discussion_attempt_id TEXT NOT NULL REFERENCES discussion_attempts(id),
+                  part_index INTEGER NOT NULL CHECK(part_index>=0 AND part_index<8), part_digest TEXT NOT NULL,
+                  reference_kind TEXT NOT NULL CHECK(reference_kind IN ('model_citation','context_anchor')),
+                  model_attempt_id TEXT NOT NULL UNIQUE REFERENCES model_attempts(id),
+                  claim_id TEXT UNIQUE REFERENCES claims(id), state TEXT NOT NULL CHECK(state IN ('pending','completed')),
+                  created_at TEXT NOT NULL, UNIQUE(discussion_attempt_id,part_index)
+                )
+                """)
+                try execute("PRAGMA user_version=17")
+            }
+        }
+
 
     }
     deinit { sqlite3_close(handle) }

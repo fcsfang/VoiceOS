@@ -68,7 +68,7 @@ final class RecordingCaptureTests: XCTestCase {
     func testSavedRecordingPortableRoundtripPreservesUserOriginAndMedia() async throws {
         let s = try await store(), intent = try await s.beginDictation(); try audio(intent); try await s.sealDictation(sourceID:intent.sourceID)
         let package = base.appendingPathComponent("package"), target = base.appendingPathComponent("restored")
-        try await s.exportPackage(to:package,includeMedia:true); XCTAssertEqual(try VoiceOSStore.packageSummary(at:package).version,15)
+        try await s.exportPackage(to:package,includeMedia:true); XCTAssertEqual(try VoiceOSStore.packageSummary(at:package).version,16)
         try await VoiceOSStore.restorePackage(from:package,to:target,inspector:NativeMediaInspector())
         let restored = try await store("restored"), rows = try await restored.sources(); XCTAssertEqual(rows[0].origin,"user"); XCTAssertTrue(rows[0].localOnly); XCTAssertEqual(rows[0].state,"saved"); XCTAssertEqual(rows[0].jobState,"blocked")
         _ = try await restored.playableURL(sourceID:intent.sourceID)

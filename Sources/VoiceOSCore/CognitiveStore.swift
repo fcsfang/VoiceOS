@@ -83,7 +83,7 @@ extension VoiceOSStore {
         guard try db.query("SELECT provider FROM model_attempts WHERE id=?", [attemptID]).first?["provider"] == "local_fixture" else { throw VoiceOSError("只能提交本地夹具调用") }
         return try commitClaims(attemptID: attemptID, proposals: proposals)
     }
-    func commitClaims(attemptID: String, proposals: [ClaimProposal]) throws -> [String] {
+    func commitClaims(attemptID: String, proposals: [ClaimProposal], additionalCommit: ([String]) throws -> Void = { _ in }) throws -> [String] {
         guard let attempt = try db.query("SELECT * FROM model_attempts WHERE id=?", [attemptID]).first else { throw VoiceOSError("调用记录不存在") }
         let digest = try hash(proposals)
         if attempt["state"] == "completed" {
@@ -112,6 +112,7 @@ extension VoiceOSStore {
                 }
             }
             try db.execute("UPDATE model_attempts SET state='completed',result_digest=? WHERE id=? AND state='reserved'", [digest,attemptID])
+            try additionalCommit(ids)
             try checkpoint(.claimsUncommitted)
         }
         try checkpoint(.claimsCommitted)
@@ -230,6 +231,7 @@ extension VoiceOSStore {
         try db.execute("UPDATE contexts SET state='stale' WHERE id=?", [id])
         try db.execute("UPDATE conversations SET validity='frozen' WHERE entry_context_id=? OR id IN (SELECT conversation_id FROM conversation_user_turns WHERE context_id=?)",[id,id])
         try db.execute("UPDATE discussion_attempts SET validity='frozen' WHERE context_id=? OR conversation_id IN (SELECT id FROM conversations WHERE validity='frozen')",[id])
+        try freezeDiscussionDerivations()
         try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT id FROM claims WHERE attempt_id IN (SELECT id FROM model_attempts WHERE context_id=?))", [id])
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT id FROM model_attempts WHERE context_id=?)", [id])
     }

@@ -113,7 +113,7 @@ final class ConversationStoreTests: XCTestCase {
         _ = try await s.appendConversationUserSource(conversationID:id,sourceID:source,expectedVersion:1)
         let package = base.appendingPathComponent("package"), target = base.appendingPathComponent("restored")
         try await s.exportPackage(to:package)
-        XCTAssertEqual(try VoiceOSStore.packageSummary(at:package).version,15)
+        XCTAssertEqual(try VoiceOSStore.packageSummary(at:package).version,16)
         try await VoiceOSStore.restorePackage(from:package,to:target,inspector:ConversationInspector())
         let r = try await store("restored"), session = try await r.conversation(id:id)
         XCTAssertEqual(session.validity,"frozen"); XCTAssertEqual(session.version,2)
