@@ -30,8 +30,8 @@ final class ResponsesOutcomeTests:XCTestCase {
     func valid(_ s:ConversationOutcomeSnapshot) -> [String:Any] {
         let source=s.context.sources[2],reply=s.replies[1]
         return ["proposals":[
-            ["statement":"我会校验迁移资料","ownership":"user_tentative","sourceEvidence":[["reference":["sourceID":source.sourceID,"transcriptVersionID":source.transcriptVersionID,"spanID":source.spans[0].id],"quote":"我会校验迁移资料"]],"replyEvidence":[],"action":["title":"校验迁移资料","kind":"task","quote":"我会校验迁移资料","autoSend":true]],
-            ["statement":"合成AI新分析：多个方案仍需比较。","ownership":"ai_candidate","sourceEvidence":[],"replyEvidence":[["attemptID":reply.attemptID,"partIndex":0,"quote":reply.parts[0].text]],"action":NSNull()]
+            ["contentKind":"statement","statement":"我会校验迁移资料","ownership":"user_tentative","sourceEvidence":[["reference":["sourceID":source.sourceID,"transcriptVersionID":source.transcriptVersionID,"spanID":source.spans[0].id],"quote":"我会校验迁移资料"]],"replyEvidence":[],"action":["title":"校验迁移资料","kind":"task","quote":"我会校验迁移资料","autoSend":true]],
+            ["contentKind":"hypothesis","statement":"合成AI新分析：多个方案仍需比较。","ownership":"ai_candidate","sourceEvidence":[],"replyEvidence":[["attemptID":reply.attemptID,"partIndex":0,"quote":reply.parts[0].text]],"action":NSNull()]
         ]]
     }
     func response(_ value:Any,status:String="completed",part:String="output_text") throws -> Data {
@@ -130,6 +130,28 @@ final class ResponsesOutcomeTests:XCTestCase {
         let root=try XCTUnwrap(JSONSerialization.jsonObject(with:try XCTUnwrap(http.httpBody)) as? [String:Any]),messages=root["input"] as! [[String:Any]]
         let body=try XCTUnwrap(JSONSerialization.jsonObject(with:Data((messages[0]["content"] as! String).utf8)) as? [String:Any]),timeline=body["timeline"] as! [[String:Any]]
         XCTAssertEqual(timeline.last?["role"] as? String,"reply_status");XCTAssertEqual(timeline.last?["state"] as? String,"unknown");XCTAssertTrue((timeline.last?["parts"] as! [Any]).isEmpty)
+    }
+
+    func testTypedV2ResponseAndLegacyOptionalKindBoundary() throws {
+        let s = try snapshot(), value = valid(s), bytes = try response(value)
+        let typed = try ResponsesOutcomePort.parse(bytes, snapshot: s, requireContentKind: true)
+        XCTAssertEqual(typed.proposals.first?.contentKind, .statement); XCTAssertEqual(typed.proposals.last?.contentKind, .hypothesis)
+        var old = value
+        old["proposals"] = (value["proposals"] as! [[String: Any]]).map { row in var row = row; row.removeValue(forKey: "contentKind"); return row }
+        let legacy = try response(old), parsed = try ResponsesOutcomePort.parse(legacy, snapshot: s)
+        XCTAssertNil(parsed.proposals.first?.contentKind)
+        XCTAssertThrowsError(try ResponsesOutcomePort.parse(legacy, snapshot: s, requireContentKind: true))
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(parsed.proposals), as: UTF8.self).contains("contentKind"))
+        let p = try port(); XCTAssertEqual(p.configuration.promptVersion, "discussion-outcomes-reuse-v2"); XCTAssertEqual(p.configuration.schemaVersion, "discussion-outcomes-v2")
+    }
+    func testQuestionCannotCarryActionAndInvalidTypeRetainsUsage() throws {
+        let s = try snapshot()
+        for kind in ["question", "resolved"] {
+            var value = valid(s), rows = value["proposals"] as! [[String: Any]]
+            rows[0]["contentKind"] = kind; value["proposals"] = rows
+            do { _ = try ResponsesOutcomePort.parse(try response(value), snapshot: s, requireContentKind: true); XCTFail("invalid type/action") }
+            catch ModelPortFailure.rejected(_, let input, let output) { XCTAssertEqual(input, 10); XCTAssertEqual(output, 20) }
+        }
     }
 
 }

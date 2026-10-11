@@ -26,12 +26,12 @@ public struct QuestionTransitionSnapshot: Codable, Sendable {
 }
 extension VoiceOSStore {
     /// Read-only; this never classifies punctuation, writes a question or invokes a model.
-    public func prepareQuestionSeed(claimID: String, expectedReviewVersion: Int, original: OutcomeSourceEvidence) throws -> QuestionSeedSnapshot {
-        guard ready, let claim = try candidateClaims().first(where: { $0.id == claimID }),
+    public func prepareQuestionSeed(claimID: String, expectedReviewVersion: Int, original: OutcomeSourceEvidence, scalarBudget: Int = 8000) throws -> QuestionSeedSnapshot {
+        guard ready, (1...12000).contains(scalarBudget), let claim = try candidateClaims().first(where: { $0.id == claimID }),
               claim.reviewVersion == expectedReviewVersion, claim.reviewState != "rejected",
               claim.references.contains(where: { $0.sourceID == original.reference.sourceID && $0.transcriptVersionID == original.reference.transcriptVersionID && $0.spanID == original.reference.spanID }) else { throw VoiceOSError("问题候选的认知版本或出处已变化") }
         let ids = Array(Set(claim.references.map(\.sourceID))).sorted()
-        let context = try prepareLocalTranscriptContext(sourceIDs: ids, scalarBudget: 8000)
+        let context = try prepareLocalTranscriptContext(sourceIDs: ids, scalarBudget: scalarBudget)
         try Self.validateQuestionEvidence(original, context: context, personal: claim.ownership == CandidateOwnership.userTentative.rawValue)
         var policies: [String: Int] = [:]
         for id in ids { policies[id] = try sourcePolicy(sourceID: id).version }
@@ -40,7 +40,7 @@ extension VoiceOSStore {
     }
     public func validateQuestionSeed(_ seed: QuestionSeedSnapshot) throws {
         guard UUID(uuidString: seed.id) != nil else { throw VoiceOSError("问题候选身份无效") }
-        let actual = try prepareQuestionSeed(claimID: seed.claimID, expectedReviewVersion: seed.claimReviewVersion, original: seed.original)
+        let actual = try prepareQuestionSeed(claimID: seed.claimID, expectedReviewVersion: seed.claimReviewVersion, original: seed.original, scalarBudget: seed.context.scalarBudget)
         guard actual.contentDigest == seed.contentDigest, try Self.questionSeedDigest(seed) == seed.contentDigest else { throw VoiceOSError("问题候选原文、归属或授权已变化") }
     }
     public func prepareQuestionTransition(seed: QuestionSeedSnapshot, expectedVersion: Int, from: QuestionStatus, to: QuestionStatus, reason: String, resolution: OutcomeSourceEvidence? = nil) throws -> QuestionTransitionSnapshot {

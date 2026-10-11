@@ -1680,7 +1680,7 @@ private extension ExpressionRelation {
     }
 }
 
-private extension CognitiveContentKind {
+extension CognitiveContentKind {
     var displayName: String {
         switch self {
         case .statement: "陈述候选"

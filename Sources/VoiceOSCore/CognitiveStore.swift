@@ -123,7 +123,7 @@ extension VoiceOSStore {
                       let span = source.spans.first(where: { $0.id == ref.spanID }) else { throw VoiceOSError("问题出处缺失") }
                 let scalars = Array(source.text.unicodeScalars)
                 let quote = String(String.UnicodeScalarView(scalars[span.textStart..<min(span.textEnd, span.textStart + 2000)]))
-                let seed = try prepareQuestionSeed(claimID: ids[index], expectedReviewVersion: 0, original: .init(reference: ref, quote: quote))
+                let seed = try prepareQuestionSeed(claimID: ids[index], expectedReviewVersion: 0, original: .init(reference: ref, quote: quote), scalarBudget: context.scalarBudget)
                 _ = try insertQuestion(seed)
             }
             try additionalCommit(ids)

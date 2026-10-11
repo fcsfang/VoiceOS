@@ -112,6 +112,14 @@ final class QuestionStoreTests: XCTestCase {
         let db = try Database(restoredRoot.appendingPathComponent("voiceos.sqlite")); try db.execute("UPDATE questions SET status='resolved'")
         do { _ = try await restored.questions(); XCTFail("unbacked state") } catch {}
     }
+    func testFreshValidPreviewCannotSwapRegisteredQuestionBasis() async throws {
+        let (s, claim, quote) = try await fixture.fixture(contentKind: .question), q = try await firstQuestion(s)
+        let fresh = try await s.prepareQuestionSeed(claimID: claim, expectedReviewVersion: 0, original: .init(reference: quote.reference, quote: "哪些反例可以限制猜想？"))
+        let input = try await s.prepareQuestionTransition(seed: fresh, expectedVersion: 1, from: .open, to: .closed, reason: "另一个有效引文也不能换掉原身份")
+        do { _ = try await s.transitionQuestion(questionID: q.id, input: input); XCTFail("basis changed") } catch {}
+        let after = try await firstQuestion(s); XCTAssertEqual(after.version, 1)
+        let history = try await s.questionHistory(questionID: q.id); XCTAssertTrue(history.isEmpty)
+    }
     func testSchema23UpgradeDoesNotBackfillLegacyQuestionIdentity() async throws {
         let file = fixture.root.appendingPathComponent("legacy23.sqlite")
         try FileManager.default.createDirectory(at: fixture.root, withIntermediateDirectories: true)

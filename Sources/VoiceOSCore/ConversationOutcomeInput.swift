@@ -34,12 +34,13 @@ public struct OutcomeReplyEvidence:Codable,Sendable {
 /// A proposal, not a committed candidate or a grant. Both kinds of evidence keep their identity.
 public struct ConversationOutcomeProposal:Codable,Sendable {
     public let statement:String
+    public let contentKind:CognitiveContentKind?
     public let ownership:CandidateOwnership
     public let sourceEvidence:[OutcomeSourceEvidence]
     public let replyEvidence:[OutcomeReplyEvidence]
     public let action:ExtractedAction?
-    public init(statement:String,ownership:CandidateOwnership,sourceEvidence:[OutcomeSourceEvidence],replyEvidence:[OutcomeReplyEvidence]=[],action:ExtractedAction?=nil) {
-        self.statement=statement;self.ownership=ownership;self.sourceEvidence=sourceEvidence;self.replyEvidence=replyEvidence;self.action=action
+    public init(statement:String,ownership:CandidateOwnership,sourceEvidence:[OutcomeSourceEvidence],replyEvidence:[OutcomeReplyEvidence]=[],action:ExtractedAction?=nil,contentKind:CognitiveContentKind?=nil) {
+        self.statement=statement;self.ownership=ownership;self.sourceEvidence=sourceEvidence;self.replyEvidence=replyEvidence;self.action=action;self.contentKind=contentKind
     }
 }
 extension VoiceOSStore {
@@ -95,6 +96,7 @@ extension VoiceOSStore {
     public static func validateConversationOutcomeProposals(_ proposals:[ConversationOutcomeProposal],snapshot:ConversationOutcomeSnapshot) throws {
         guard proposals.count <= 32,proposals.filter({ $0.action?.autoSend == true }).count <= 3 else { throw VoiceOSError("讨论成果数量超限") }
         for proposal in proposals {
+            guard proposal.contentKind != .question || proposal.action == nil else { throw VoiceOSError("讨论问题不能同时作为行动承诺") }
             guard !proposal.statement.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,proposal.statement.unicodeScalars.count <= 2000,
                   proposal.sourceEvidence.count+proposal.replyEvidence.count > 0,proposal.sourceEvidence.count+proposal.replyEvidence.count <= 32 else { throw VoiceOSError("讨论成果缺少内容或出处") }
             var seen:Set<String>=[],personalQuotes:[String]=[]

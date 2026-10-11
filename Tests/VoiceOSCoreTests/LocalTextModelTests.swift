@@ -15,7 +15,7 @@ final class LocalTextModelTests: XCTestCase {
         let outcome=try LocalTextModel.loadOutcome(from:file)
         XCTAssertEqual(outcome.configuration.provider,port.configuration.provider)
         XCTAssertEqual(outcome.configuration.model,"gpt-6.1-sol")
-        XCTAssertEqual(outcome.configuration.promptVersion,"discussion-outcomes-reuse-v1")
+        XCTAssertEqual(outcome.configuration.promptVersion,"discussion-outcomes-reuse-v2")
         let english=try LocalTextModel.loadEnglish(from:file)
         XCTAssertEqual(english.configuration.provider,port.configuration.provider)
         XCTAssertEqual(english.configuration.promptVersion,"english-practice-v1")

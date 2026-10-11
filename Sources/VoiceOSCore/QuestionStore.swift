@@ -33,7 +33,7 @@ extension VoiceOSStore {
     /// Benign endorsement does not replace identity; provenance/content/ownership changes freeze it.
     func validateCurrentQuestionSeed(_ seed: QuestionSeedSnapshot) throws {
         guard let claim = try candidateClaims().first(where: { $0.id == seed.claimID }) else { throw VoiceOSError("问题候选已拒绝或依据冻结") }
-        let fresh = try prepareQuestionSeed(claimID: claim.id, expectedReviewVersion: claim.reviewVersion, original: seed.original)
+        let fresh = try prepareQuestionSeed(claimID: claim.id, expectedReviewVersion: claim.reviewVersion, original: seed.original, scalarBudget: seed.context.scalarBudget)
         guard fresh.statement == seed.statement, fresh.ownership == seed.ownership, fresh.contentKind == seed.contentKind,
               try Self.relevanceJSON(fresh.context) == Self.relevanceJSON(seed.context), fresh.policyVersions == seed.policyVersions else { throw VoiceOSError("问题内容、归属或出处已变化") }
     }
@@ -69,7 +69,7 @@ extension VoiceOSStore {
     public func prepareStoredQuestionTransition(questionID: String, expectedVersion: Int, to: QuestionStatus, reason: String, resolution: OutcomeSourceEvidence? = nil) throws -> QuestionTransitionSnapshot {
         guard let question = try questions().first(where: { $0.id == questionID }), (question.validity == "current" || (question.canReopen && to == .open)), question.version == expectedVersion,
               let claim = try candidateClaims().first(where: { $0.id == question.seed.claimID }) else { throw VoiceOSError("问题版本或依据已变化") }
-        let fresh = try prepareQuestionSeed(claimID: claim.id, expectedReviewVersion: claim.reviewVersion, original: question.seed.original)
+        let fresh = try prepareQuestionSeed(claimID: claim.id, expectedReviewVersion: claim.reviewVersion, original: question.seed.original, scalarBudget: question.seed.context.scalarBudget)
         return try prepareQuestionTransition(seed: fresh, expectedVersion: expectedVersion, from: question.status, to: to, reason: reason, resolution: resolution)
     }
     @discardableResult
@@ -82,6 +82,10 @@ extension VoiceOSStore {
         }
         guard let question = try questions().first(where: { $0.id == questionID }), (question.validity == "current" || (question.canReopen && input.to == .open)),
               question.seed.claimID == input.seed.claimID, question.version == input.expectedVersion, question.status == input.from else { throw VoiceOSError("问题已更新或依据冻结，请重新读取") }
+        guard input.seed.statement == question.seed.statement, input.seed.ownership == question.seed.ownership,
+              input.seed.contentKind == question.seed.contentKind,
+              try Self.relevanceJSON(input.seed.original) == Self.relevanceJSON(question.seed.original),
+              try Self.relevanceJSON(input.seed.context) == Self.relevanceJSON(question.seed.context), input.seed.policyVersions == question.seed.policyVersions else { throw VoiceOSError("问题状态不能更换已登记的身份或原文依据") }
         try validateQuestionTransition(input)
         let next = input.expectedVersion + 1
         try db.transaction {
@@ -139,7 +143,7 @@ extension VoiceOSStore {
         try validateQuestionEvidence(seed.original, context: seed.context, personal: seed.ownership == "user_tentative")
     }
     private static func validateStoredQuestionContext(_ db: Database, context: LocalTranscriptContext, policies: [String: Int]) throws {
-        guard context.scalarBudget > 0, context.sources.reduce(0, { $0 + $1.text.unicodeScalars.count }) <= context.scalarBudget,
+        guard (1...12000).contains(context.scalarBudget), context.sources.reduce(0, { $0 + $1.text.unicodeScalars.count }) <= context.scalarBudget,
               context.contentDigest == (try relevanceHash(Data(relevanceJSON(context.sources).utf8))),
               !context.sources.isEmpty, Set(context.sources.map(\.sourceID)).count == context.sources.count, Set(policies.keys) == Set(context.sources.map(\.sourceID)) else { throw VoiceOSError("问题上下文身份无效") }
         for source in context.sources {
