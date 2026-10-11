@@ -2,7 +2,7 @@ import Foundation
 import VoiceOSCore
 
 /// Offline presentation seed. No classification inference, API configuration or external operations.
-func runTypedCognitionFixture(_ store: VoiceOSStore) async throws {
+func seedTypedCognitionFixture(_ store: VoiceOSStore) async throws -> String {
     let source = try await store.recordUserExpression("合成个人疑问：哪些反例可以限制猜想？", commandID: "typed-cognition-fixture")
     if try await store.modelAttempts(sourceID: source).isEmpty {
         let context = try await store.prepareLocalTranscriptContext(sourceIDs: [source])
@@ -11,6 +11,10 @@ func runTypedCognitionFixture(_ store: VoiceOSStore) async throws {
         let ref = context.sources[0]
         _ = try await store.commitLocalClaims(attemptID: attempt, proposals: [.init(statement: "哪些反例可以限制猜想？", ownership: .userTentative, references: [.init(sourceID: source, transcriptVersionID: ref.transcriptVersionID, spanID: ref.spans[0].id)], contentKind: .question)])
     }
+    return source
+}
+func runTypedCognitionFixture(_ store: VoiceOSStore) async throws {
+    _ = try await seedTypedCognitionFixture(store)
     let claims = try await store.candidateClaims(includeFrozen: true), actions = try await store.actions()
     let output: [String: Any] = ["synthetic_only": true, "question_candidates": claims.filter { $0.contentKind == .question }.count, "questions": try await store.questions().count, "actions": actions.count, "network_calls": 0, "microphone_calls": 0, "external_task_writes": 0, "integrity": try await store.integrityCheck()]
     print(String(decoding: try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]), as: UTF8.self))

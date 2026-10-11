@@ -43,3 +43,14 @@ func runAssociationIgnoreFixture(_ store: VoiceOSStore) async throws {
     try await store.ignoreExpressionAssociation(attemptID: record.id, candidateID: proposal.candidateID, relation: proposal.relation, commandID: "association-fixture-ignore")
     print("{\"feedback_count\":\(try await store.expressionAssociationFeedback().count),\"integrity\":\(try await store.integrityCheck())}")
 }
+
+func runQuestionAssociationFixture(_ store: VoiceOSStore) async throws {
+    let old = try await seedTypedCognitionFixture(store)
+    let current = try await store.recordUserExpression("合成新表达：我再次比较反例与猜想的限制。", commandID: "question-association-current")
+    let hits = try await store.retrieve("反例", using: AssociationFixtureRetrieval()).hits.filter { $0.document.sourceID == old }
+    let snapshot = try await store.prepareExpressionAssociation(currentSourceID: current, candidates: hits), port = AssociationFixturePort()
+    _ = try await store.performExpressionAssociation(snapshot, using: port)
+    let items = try await store.expressionAssociationFeedback(currentSourceID: current)
+    let output: [String: Any] = ["synthetic_only": true, "associations": items.count, "historical_questions": items.first?.historicalQuestions.count ?? 0, "question_status": items.first?.historicalQuestions.first?.status.rawValue ?? "none", "question_version": items.first?.historicalQuestions.first?.version ?? 0, "port_calls": await port.calls, "actions": try await store.actions().count, "network_calls": 0, "microphone_calls": 0, "external_task_writes": 0, "integrity": try await store.integrityCheck()]
+    print(String(decoding: try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]), as: UTF8.self))
+}

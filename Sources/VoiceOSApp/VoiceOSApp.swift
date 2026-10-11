@@ -54,7 +54,7 @@ final class ControlCenter: ObservableObject {
             quietFeedback = quietAssociationSourceID == nil ? try await store.cognitiveFeedback() : []
             associationFeedback = try await store.expressionAssociationFeedback(currentSourceID: quietAssociationSourceID)
             await refreshAssociationSelection()
-            quietStatus = "关联属于AI提案；支持、修正、观点认可和问题解决状态仍待核对，不产生回复任务。"
+            quietStatus = "关联属于AI提案；问题状态来自单独登记的历史，不因关联判断而改变，无需回应。"
         } catch { quietFeedback = []; associationFeedback = []; quietStatus = error.localizedDescription }
     }
     func refreshAssociationSelection() async {
@@ -841,6 +841,7 @@ struct CenterView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("与这次表达有关 · AI关系提案").font(.headline)
                                 ForEach(model.selectedAssociationFeedback) { item in
+                                    AssociationQuestionsView(item: item, model: model)
                                     Text(item.proposal.reason).textSelection(.enabled)
                                     Text("这次原话：" + item.proposal.current.quote).font(.callout).textSelection(.enabled)
                                     Text("历史原话：" + item.proposal.historicalQuote).font(.callout).textSelection(.enabled)
@@ -1407,6 +1408,7 @@ struct CognitiveFeedbackView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("与这次表达有关 · AI关系提案").font(.headline)
                             Text(item.proposal.relation.displayName).font(.caption).foregroundStyle(.secondary)
+                            AssociationQuestionsView(item: item, model: model)
                             Text("为何现在相关：" + item.proposal.reason).textSelection(.enabled)
                             Text("这次原话：" + item.proposal.current.quote).textSelection(.enabled)
                             Text("历史原话：" + item.proposal.historicalQuote).textSelection(.enabled)
@@ -1673,7 +1675,7 @@ private extension ExpressionRelation {
         case .continuation: "可能延续旧想法"
         case .qualification: "可能补充限定条件"
         case .possibleCorrection: "可能修正，尚未确认"
-        case .sameQuestion: "可能讨论同一问题，解决状态待核对"
+        case .sameQuestion: "可能讨论同一问题 · AI 关系提案"
         }
     }
 }

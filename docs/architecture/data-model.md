@@ -137,3 +137,5 @@ Schema14/迁移v13保留21表，但新增`microphone-v1:<sourceID>`个人口述�
 ## 2026-10-11 会话基础实施边界
 
 W17新增conversations和conversation_user_turns，格式v14/schema15；每个个人回合引用受管来源及持久上下文，不复制原件。会话版本仅计用户回合与显式结束；当前尚无AI回合，后续AI历史/调用必须补充独立契约，不能用本表冒充已实现。原子冻结、上下文预算、恢复限制与证据见[实施记录](../engineering/m4-conversation-foundation.md)和[ADR-014](../adr/014-local-conversation-history.md)。
+
+2026-10-12 问题实际存储：schema24/v23包中claims.content_kind为nullable版本化类型，旧nil保留旧摘要；questions独立固定ID连接claim，保存原始seed及摘要、当前状态/版本，question_revisions保存用户命令、前后状态和版本、有界原话/答案上下文及权限epoch。同事务新建typed问题与claim；不回填旧未分类。迁移保留修订并冻结操作；出处关联卡片投影问题当前记录，AI相似提案不成为问题等价或解决依据。细节见[生命周期契约](../engineering/m4-question-lifecycle-contract.md)。

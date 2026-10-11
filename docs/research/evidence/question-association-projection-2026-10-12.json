@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-12",
+  "synthetic_only": true,
+  "tests": 325,
+  "cloud_calls": 0,
+  "microphone_calls": 0,
+  "external_task_writes": 0,
+  "schema": 24,
+  "package": 23,
+  "new_tables": 0,
+  "ui_observed": [
+    "AI relationship proposal separate from registered citation questions",
+    "unendorsed user question remains unverified",
+    "explicit close from nested state dialog refreshes v2 closed immediately",
+    "actual rendered card inspected"
+  ],
+  "replay_port_calls": 0,
+  "question_identity_equivalence_inferred": false,
+  "natural_quality_accepted": false,
+  "logs": [
+    "runtime/question-association-tests-2-20261012.log",
+    "runtime/question-association-signed-build-20261012.log",
+    "runtime/question-association-creation-crashes-20261012.log"
+  ]
+}

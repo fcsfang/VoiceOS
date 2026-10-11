@@ -7,6 +7,8 @@ public struct ExpressionAssociationFeedback: Identifiable, Sendable {
     public let currentSourceID: String
     public let proposal: ExpressionAssociationProposal
     public let historical: RetrievalHit
+    /// Questions recorded at this historical citation, not an inferred identity match.
+    public let historicalQuestions: [QuestionRecord]
 }
 extension VoiceOSStore {
     public func expressionAssociationFeedback(currentSourceID: String? = nil, limit: Int = 20) throws -> [ExpressionAssociationFeedback] {
@@ -14,6 +16,7 @@ extension VoiceOSStore {
         try Self.validateStoredExpressionAssociationIgnores(db)
         let mode = try cognitiveFeedbackPreference().mode
         if mode == .paused { return [] }
+        let registeredQuestions = try questions()
         let ignored = Set(try db.query("SELECT fingerprint FROM expression_association_ignores").compactMap { $0["fingerprint"] })
         let target = mode == .reduced ? 1 : limit
         var items: [ExpressionAssociationFeedback] = [], seen = Set<String>()
@@ -23,7 +26,11 @@ extension VoiceOSStore {
                 let fingerprint = try Self.associationFeedbackFingerprint(snapshot: record.snapshot, proposal: proposal)
                 guard !ignored.contains(fingerprint), seen.insert(fingerprint).inserted,
                       let hit = record.snapshot.candidates.first(where: { $0.id == proposal.candidateID }) else { continue }
-                items.append(.init(id: fingerprint, attemptID: record.id, currentSourceID: record.currentSourceID, proposal: proposal, historical: hit))
+                items.append(.init(id: fingerprint, attemptID: record.id, currentSourceID: record.currentSourceID, proposal: proposal, historical: hit, historicalQuestions: registeredQuestions.filter { question in
+                    question.seed.original.reference.sourceID == hit.document.sourceID &&
+                    question.seed.original.reference.transcriptVersionID == hit.document.transcriptVersionID &&
+                    question.seed.original.reference.spanID == hit.document.spanID
+                }))
                 if items.count == target { return items }
             }
         }

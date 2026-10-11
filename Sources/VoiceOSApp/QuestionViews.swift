@@ -105,3 +105,25 @@ struct QuestionTransitionView: View {
         .onAppear { target = allowed[0] }
     }
 }
+
+/// Citation context only. AI relation proposals never become question lifecycle commands.
+struct AssociationQuestionsView: View {
+    let item: ExpressionAssociationFeedback
+    @ObservedObject var model: ControlCenter
+    var body: some View {
+        if !item.historicalQuestions.isEmpty {
+            DisclosureGroup("此历史出处登记的问题（\(item.historicalQuestions.count)）") {
+                Text("这是出处中的问题记录；AI关联提案不确认两次表达是同一问题，也不改变解决状态。").font(.caption).foregroundStyle(.secondary)
+                ForEach(item.historicalQuestions) { saved in
+                    // Prefer the current local projection after an explicit state operation.
+                    let question = model.questionRecords.first(where: { $0.id == saved.id }) ?? saved
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(question.seed.statement).textSelection(.enabled)
+                        Text(question.seed.ownership == "user_tentative" ? "我的暂定问题 · 未验证" : question.seed.ownership == "ai_candidate" ? "AI 候选问题 · 未验证" : "来源问题 · 归属保持").font(.caption).foregroundStyle(.secondary)
+                        QuestionStateView(question: question, model: model)
+                    }.padding(.vertical, 5)
+                }
+            }
+        }
+    }
+}
