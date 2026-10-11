@@ -18,7 +18,7 @@
 
 ## 当前交接更新（2026-10-12 04:19）
 
-不要把上面的历史基线当作当前状态。当前 HEAD 为 `5367de8 docs: refresh migration checkpoint index`；`docs/planning/overnight-progress.md` 是最新进度记录。schema25、`processing_intents` 持久队列、单项串行执行器、迁移包 v24、取消/迟到结果保护、真实 SIGKILL 恢复探针、保存入口和处理记录菜单均已实现并提交。
+不要把上面的历史基线当作当前状态。当前代码基线为 `f6e7afd test: freeze queued intent during migration`，之后的提交主要是验证和交接记录；`docs/planning/overnight-progress.md` 是最新进度记录。schema25、`processing_intents` 持久队列、单项串行执行器、迁移包 v24、取消/迟到结果保护、真实 SIGKILL 恢复探针、保存入口和处理记录菜单均已实现并提交。
 
 最近的工程加固包括：无文本模型时 queued 意图不再空转，模型配置成功后才唤醒队列；冻结的既有认知不会继续进入关联；入队后模型配置漂移在任何模型调用前进入 blocked；queued 意图迁移后冻结且不派发。当前 `swift test` 为 353 项通过，恢复探针、隔离队列夹具、签名构建和 codesign 验证均通过。
 
