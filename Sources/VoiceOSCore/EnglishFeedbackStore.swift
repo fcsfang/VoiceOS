@@ -60,13 +60,14 @@ extension VoiceOSStore {
     /// becomes a terminal unknown attempt; callers must explicitly prepare a new
     /// snapshot before trying again.
     public func performEnglishFeedback(_ snapshot: EnglishPracticeSnapshot, using port: any EnglishPracticeModelPort) async throws -> EnglishFeedbackAttemptRecord {
+        try Task.checkCancellation()
         let attemptID = try reserveEnglishFeedback(snapshot, configuration: port.configuration)
         if let existing = try englishFeedbackAttempts().first(where: { $0.id == attemptID }), existing.state != "reserved" { return existing }
         guard activeEnglishAttempts.insert(attemptID).inserted else { throw VoiceOSError("英文反馈请求已在进行；不会重复发送") }
         defer { activeEnglishAttempts.remove(attemptID) }
+        let response: EnglishPracticeResponse
         do {
-            let response = try await port.generate(EnglishPracticeRequest(attemptID: attemptID, snapshot: snapshot, configuration: port.configuration))
-            try completeEnglishFeedback(attemptID: attemptID, response: response)
+            response = try await port.generate(EnglishPracticeRequest(attemptID: attemptID, snapshot: snapshot, configuration: port.configuration))
         } catch let failure as ModelPortFailure {
             switch failure {
             case .rejected(let reason, let input, let output):
@@ -75,6 +76,13 @@ extension VoiceOSStore {
             throw failure
         } catch {
             try markEnglishFeedbackUnknown(attemptID: attemptID, reason: "英文反馈请求失败；不自动重发")
+            throw error
+        }
+        do {
+            try Task.checkCancellation()
+            try completeEnglishFeedback(attemptID: attemptID, response: response)
+        } catch {
+            try markEnglishFeedbackUnknown(attemptID: attemptID, reason: "英文反馈结果未接纳；请核对版本、授权或取消状态，不自动重发", inputTokens: response.inputTokens, outputTokens: response.outputTokens)
             throw error
         }
         guard let record = try englishFeedbackAttempts().first(where: { $0.id == attemptID }) else { throw VoiceOSError("英文反馈完成记录缺失") }

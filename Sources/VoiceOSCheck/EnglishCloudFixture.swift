@@ -12,7 +12,8 @@ func runEnglishCloudFixture(_ args: [String]) async throws {
     for id in [old, current] { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false, commandID: "english-cloud-grant-" + id) }
     let snapshot = try await store.prepareEnglishPractice(currentSourceID: current, priorSourceIDs: [old], destination: .cloud)
     let port = try LocalTextModel.loadEnglish(from: URL(fileURLWithPath: args[2]))
-    let result = try await port.generate(EnglishPracticeRequest(attemptID: UUID().uuidString, snapshot: snapshot, configuration: port.configuration))
+    let attempt = try await store.performEnglishFeedback(snapshot, using: port)
+    guard let result = attempt.result else { throw VoiceOSError("English fixture has no accepted feedback; attempt remains durable") }
     let output: [String: Any] = ["synthetic_only": true, "audio_uploaded": false, "microphone_calls": 0, "suggestions": result.suggestions.count, "comparisons": result.comparisons.count, "input_tokens": result.inputTokens as Any, "output_tokens": result.outputTokens as Any, "provider": port.configuration.provider, "prompt_version": port.configuration.promptVersion]
     print(String(decoding: try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]), as: UTF8.self))
 }

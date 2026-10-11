@@ -287,7 +287,9 @@ final class ControlCenter: ObservableObject {
         } catch { status = error.localizedDescription }
     }
     func prepareEnglishPractice(current: SourceRecord, priorIDs: [String]) async {
-        guard let store else { return }
+        guard let store, !englishBusy else { return }
+        englishBusy = true
+        defer { englishBusy = false }
         do {
             englishSnapshot = try await store.prepareEnglishPractice(currentSourceID: current.id, priorSourceIDs: priorIDs, destination: .cloud)
             englishStatus = "已准备 \(priorIDs.count) 份旧练习；发送前仍会再次核对文字版本和授权。"
@@ -553,11 +555,33 @@ final class ControlCenter: ObservableObject {
     }
 }
 
+struct EnglishInputPreview: View {
+    let snapshot: EnglishPracticeSnapshot
+    let dismiss: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("待发送的英文练习文字").font(.title2)
+            Text("以下是完整选定文字；关闭此窗口不会发送。发送时会再次核对版本与授权，原始音频不上传。").font(.callout).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    ForEach(Array(snapshot.context.sources.enumerated()), id: \.element.sourceID) { index, source in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(index == 0 ? "本次练习" : "旧练习 \(index)").font(.headline)
+                            Text(source.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            }
+            HStack { Spacer(); Button("返回", action: dismiss).keyboardShortcut(.cancelAction) }
+        }.padding(24).frame(width: 640, height: 480)
+    }
+}
 struct EnglishPracticeView: View {
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
     @State private var currentID = ""
     @State private var priorIDs: Set<String> = []
+    @State private var showingInput = false
     private var sources: [SourceRecord] {
         model.records.filter { $0.origin == "user" && $0.speaker == "user" && !($0.transcript ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ["saved", "reference_only"].contains($0.state) }
     }
@@ -571,29 +595,31 @@ struct EnglishPracticeView: View {
             Picker("本次练习", selection: $currentID) {
                 Text("选择一份我的英文原话").tag("")
                 ForEach(sources) { source in
-                    Text(source.name).tag(source.id)
+                    Text(String((source.transcript ?? source.name).prefix(90))).tag(source.id)
                 }
             }
-            .onChange(of: currentID) { _, _ in priorIDs = priorIDs.filter { $0 != currentID }; model.englishSnapshot = nil }
+            .disabled(model.englishBusy)
+            .onChange(of: currentID) { _, _ in priorIDs = priorIDs.filter { $0 != currentID }; model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。" }
             Text("可选旧练习（最多 2 份）").font(.headline)
             ScrollView {
                 ForEach(priorCandidates) { source in
                     Toggle(isOn: Binding(get: { priorIDs.contains(source.id) }, set: { value in
                         if value { if priorIDs.count < 2 { priorIDs.insert(source.id) } }
                         else { priorIDs.remove(source.id) }
-                        model.englishSnapshot = nil
+                        model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
                     })) {
                         VStack(alignment: .leading) { Text(source.name); Text(source.transcript ?? "").lineLimit(2).font(.caption).foregroundStyle(.secondary) }
-                    }.disabled(!priorIDs.contains(source.id) && priorIDs.count >= 2)
+                    }.disabled(model.englishBusy || (!priorIDs.contains(source.id) && priorIDs.count >= 2))
                 }
-            }.frame(maxHeight: 210)
+            }.frame(maxHeight: model.englishAttempts.isEmpty ? 210 : 110)
             Text(model.englishStatus).font(.caption).foregroundStyle(.secondary)
             HStack {
-                Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)) } } }
+                Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)); showingInput = model.englishSnapshot != nil } } }
                     .disabled(current == nil || model.englishBusy)
                 Button(model.englishBusy ? "正在发送…" : "发送文本反馈") { Task { await model.performEnglishPractice() } }
                     .disabled(model.englishSnapshot == nil || model.englishBusy || !model.modelConfigured)
                 if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
+                if model.englishSnapshot != nil { Button("查看待发送文字…") { showingInput = true } }
                 Spacer(); Button("完成", action: dismiss).keyboardShortcut(.cancelAction)
             }
             if !model.englishAttempts.isEmpty {
@@ -602,6 +628,8 @@ struct EnglishPracticeView: View {
                 ForEach(model.englishAttempts) { attempt in
                     VStack(alignment: .leading, spacing: 6) {
                         Text("\(attempt.state == "completed" ? "已保存" : attempt.state == "reserved" ? "等待结果" : "未完成 · 不自动重发") · \(attempt.createdAt)").font(.caption)
+                        if let reason = attempt.error { Text(reason).font(.caption).foregroundStyle(.secondary) }
+                        Text("用量：\(attempt.inputTokens.map(String.init) ?? "未知") / \(attempt.outputTokens.map(String.init) ?? "未知") tokens · 费用未知").font(.caption).foregroundStyle(.secondary)
                         if attempt.validity == "frozen" { Text("历史反馈 · 依据或授权已变化，暂停当前使用").font(.caption).foregroundStyle(.orange) }
                         if let result = attempt.result {
                             ForEach(Array(result.suggestions.enumerated()), id: \.offset) { index, suggestion in
@@ -627,6 +655,9 @@ struct EnglishPracticeView: View {
                 }
             }
         }.padding(24).frame(width: 700, height: 600)
+        .sheet(isPresented: $showingInput) {
+            if let snapshot = model.englishSnapshot { EnglishInputPreview(snapshot: snapshot) { showingInput = false } }
+        }
         .task { if currentID.isEmpty { currentID = sources.first?.id ?? "" } }
     }
 }

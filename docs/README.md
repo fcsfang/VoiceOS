@@ -126,3 +126,7 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [英文反馈首轮云端探针](research/evidence/english-feedback-cloud-2026-10-11.json)：合成文本单请求在 TLS 阶段失败，未重试、未保存反馈，质量验收未开始。
 
 - [近期开发质量复查](engineering/quality-review-2026-10-11.md)：并发、授权版本、恢复和英文反馈校验修复；纠正启动证据与完成范围。
+
+- [英文历史界面与模型边界补齐](engineering/m4-english-history-completeness.md)：实际长历史/冻结/完整文字预览验证，晚到拒收保留用量，275 项回归；自然英语质量未验收。
+
+- [新表达静默关联实施契约](engineering/m4-expression-association-contract.md)：当前原话锚点、双引文/理由、权限与去重、预算及旧问题状态；下一切片待实现。

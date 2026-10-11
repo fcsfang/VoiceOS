@@ -43,6 +43,7 @@ final class EnglishFeedbackStoreTests: XCTestCase {
         let replay = try await s.reserveEnglishFeedback(snapshot, configuration: config()); XCTAssertEqual(id, replay)
         try await s.completeEnglishFeedback(attemptID: id, response: response(snapshot))
         let rows = try await s.englishFeedbackAttempts(); XCTAssertEqual(rows.count, 1); XCTAssertEqual(rows[0].state, "completed"); XCTAssertEqual(rows[0].result?.suggestions.count, 1)
+        let models = try await s.modelAttempts(); XCTAssertEqual(models.first?.billingState, "unknown")
         let claims = try await s.candidateClaims(), actions = try await s.actions(); XCTAssertTrue(claims.isEmpty); XCTAssertTrue(actions.isEmpty)
     }
     func testUnknownIsTerminalAndDoesNotReserveAgain() async throws {
@@ -129,6 +130,32 @@ final class EnglishFeedbackStoreTests: XCTestCase {
         do { try await s.completeEnglishFeedback(attemptID: id, response: response(snapshot)); XCTFail("stale permission epoch must reject") } catch {}
         try await s.markEnglishFeedbackUnknown(attemptID: id)
         let rows = try await s.englishFeedbackAttempts(); XCTAssertNil(rows[0].result)
+    }
+
+    func testLatePermissionFailurePreservesKnownUsageWithoutFeedback() async throws {
+        let s = try await store(), snapshot = try await setup(s), baseResponse = response(snapshot)
+        let result = EnglishPracticeResponse(suggestions: baseResponse.suggestions, comparisons: [], inputTokens: 19, outputTokens: 29)
+        let port = EnglishCountingPort(configuration: config(), response: result) {
+            _ = try await s.setSourceLocalOnly(sourceID: snapshot.currentSourceID, expectedVersion: 2, localOnly: true)
+        }
+        do { _ = try await s.performEnglishFeedback(snapshot, using: port); XCTFail("late revoked result must reject") } catch {}
+        let rows = try await s.englishFeedbackAttempts(), models = try await s.modelAttempts()
+        XCTAssertEqual(rows[0].state, "unknown"); XCTAssertNil(rows[0].result)
+        XCTAssertEqual(rows[0].inputTokens, 19); XCTAssertEqual(rows[0].outputTokens, 29)
+        XCTAssertEqual(models[0].usage?["input_tokens"], 19); XCTAssertEqual(models[0].billingState, "unknown")
+    }
+    func testCancellationAfterResponseDoesNotSaveFeedbackOrLoseUsage() async throws {
+        let s = try await store(), snapshot = try await setup(s), baseResponse = response(snapshot)
+        let result = EnglishPracticeResponse(suggestions: baseResponse.suggestions, comparisons: [], inputTokens: 31, outputTokens: 41)
+        let port = EnglishCountingPort(configuration: config(), response: result) {
+            withUnsafeCurrentTask { $0?.cancel() }
+        }
+        let work = Task { try await s.performEnglishFeedback(snapshot, using: port) }
+        do { _ = try await work.value; XCTFail("cancelled response must not persist feedback") } catch {}
+        let rows = try await s.englishFeedbackAttempts()
+        XCTAssertEqual(rows[0].state, "unknown"); XCTAssertNil(rows[0].result)
+        XCTAssertEqual(rows[0].inputTokens, 31); XCTAssertEqual(rows[0].outputTokens, 41)
+        let calls = await port.calls; XCTAssertEqual(calls, 1)
     }
 
 }
