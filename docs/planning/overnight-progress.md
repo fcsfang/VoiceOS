@@ -1,12 +1,12 @@
 # VoiceOS 夜间开发进度
 
-更新时间：2026-10-12 04:07（Asia/Shanghai）
+更新时间：2026-10-12 04:10（Asia/Shanghai）
 
 ## 当前目标
 
 完成明确个人文字的持久处理意图、可恢复执行器、迁移兼容和“保存并处理本次文字”入口，保持认知—行动—反馈边界与既有授权契约。
 
-最新提交：`5d759b8 fix: stop processing frozen cognition`；当前工作区已清理。若服务切换或上下文压缩，先核对该提交、`git status` 和本文件，再继续。
+最新提交：`cc5944b docs: record model config check`；当前工作区已清理。若服务切换或上下文压缩，先核对该提交、`git status` 和本文件，再继续。
 
 ## 接手核验
 
