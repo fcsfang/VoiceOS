@@ -66,7 +66,7 @@ extension VoiceOSStore {
     }
     public func generateClaims(contextID: String, using port: any ModelPort) async throws -> [String] {
         let config = port.configuration
-        guard !config.provider.isEmpty, !["local_fixture","discussion_derivation"].contains(config.provider), !config.model.isEmpty,
+        guard !config.provider.isEmpty, !["local_fixture","discussion_derivation"].contains(config.provider), !config.provider.hasPrefix("discussion_outcome:"), !config.model.isEmpty,
               !config.promptVersion.isEmpty, !config.schemaVersion.isEmpty else { throw VoiceOSError("模型端口配置缺少身份或版本") }
         guard try db.query("SELECT destination FROM contexts WHERE id=?", [contextID]).first?["destination"] == config.destination.rawValue else { throw VoiceOSError("模型目的地与上下文不一致") }
         let context = try localContext(id: contextID)
@@ -137,6 +137,11 @@ extension VoiceOSStore {
 extension VoiceOSStore {
     public func understandSource(sourceID: String, using port: any ModelPort) async throws -> [String] {
         let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID])
+        guard try db.query("""
+        SELECT o.id FROM conversation_outcome_attempts o JOIN conversation_user_turns t ON t.conversation_id=o.conversation_id
+        JOIN context_inputs i ON i.context_id=t.context_id
+        WHERE t.source_id=? AND i.transcript_version_id=? LIMIT 1
+        """,[sourceID,context.sources[0].transcriptVersionID]).isEmpty else { throw VoiceOSError("这轮原话已有讨论成果理解记录；请查看原成果，不会跨入口重复发送。独立重整与共享身份待后续接入") }
         let policy = try sourcePolicy(sourceID: sourceID)
         let config = port.configuration
         let identity = ["understand-v1", sourceID, context.contentDigest, String(policy.version), config.provider, config.model, config.promptVersion, config.schemaVersion, config.destination.rawValue]

@@ -18,6 +18,7 @@ extension VoiceOSStore {
         }
         var row=try db.query("SELECT * FROM discussion_claim_derivations WHERE discussion_attempt_id=? AND part_index=?",[attemptID,String(partIndex)]).first
         if let row,row["state"] == "completed",let claimID=row["claim_id"] { return claimID }
+        if let existing=try existingOutcomeParagraphClaim(attemptID:attemptID,partIndex:partIndex) { return existing }
         guard let parent=try db.query("SELECT * FROM discussion_attempts WHERE id=?",[attemptID]).first,parent["state"] == "completed",parent["validity"] == "current",
               try conversation(id:parent["conversation_id"]!).validity == "current" else { throw VoiceOSError("讨论回复尚未接纳或已冻结，不能新增AI候选") }
         let snapshot=try JSONDecoder().decode(DiscussionSnapshot.self,from:Data(parent["snapshot_json"]!.utf8))
@@ -58,6 +59,17 @@ extension VoiceOSStore {
         try db.query("SELECT d.*,a.conversation_id FROM discussion_claim_derivations d JOIN discussion_attempts a ON a.id=d.discussion_attempt_id ORDER BY d.created_at,d.id").map {
             DiscussionClaimDerivation(id:$0["id"]!,conversationID:$0["conversation_id"]!,discussionAttemptID:$0["discussion_attempt_id"]!,partIndex:Int($0["part_index"]!)!,claimID:$0["claim_id"],state:$0["state"]!,referenceKind:$0["reference_kind"]!)
         }
+    }
+    func existingOutcomeParagraphClaim(attemptID:String,partIndex:Int) throws -> String? {
+        guard let parent=try db.query("SELECT * FROM discussion_attempts WHERE id=? AND state='completed'",[attemptID]).first else { return nil }
+        let parts=try Self.discussionParts(parent)
+        guard parts.indices.contains(partIndex),parts[partIndex].kind == .aiSuggestion else { return nil }
+        for row in try db.query("SELECT o.result_json,c.id,c.ordinal,c.statement FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id JOIN claims c ON c.attempt_id=o.id WHERE o.conversation_id=? AND m.state='completed' AND c.ownership='ai_candidate'",[parent["conversation_id"]]) {
+            let proposals=try JSONDecoder().decode([ConversationOutcomeProposal].self,from:Data(row["result_json"]!.utf8))
+            guard let index=row["ordinal"].flatMap(Int.init),proposals.indices.contains(index) else { throw VoiceOSError("成果候选位置不符") }
+            if row["statement"] == parts[partIndex].text,proposals[index].replyEvidence.contains(where: { $0.attemptID == attemptID && $0.partIndex == partIndex && $0.quote == parts[partIndex].text }) { return row["id"] }
+        }
+        return nil
     }
     static func discussionDerivedProposal(snapshot:DiscussionSnapshot,part:DiscussionPart) throws -> (ClaimProposal,String) {
         guard part.kind == .aiSuggestion else { throw VoiceOSError("原话引用不是AI候选") }

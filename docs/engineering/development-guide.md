@@ -116,3 +116,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 讨论AI分析的“保留为AI候选”只做本地复制，待核对/未验证，不认可或创建行动；候选可返回原讨论。没有模型引用时，触发原文不作为结论证据。当前205项测试、包v16/schema17；见[候选回流](m4-discussion-candidates.md)。
 
 混合讨论成果尚未开放；完整角色输入与双重出处提案校验已验证，当前213项测试，包仍v16/schema17。实际调用、原子成果与界面是下一切片；见[输入契约](m4-discussion-outcome-input.md)。
+
+结束讨论成果的持久端口与历史界面已验证，当前226项测试，包v17/schema18共26表。没有面向用户的提取按钮或生产驱动；已有个人整理/独立AI候选暂阻断整段新提取，后续完善共享身份。可在全新隔离目录运行`python3 scripts/app/validate_discussion_outcomes.py --root <目录>`，无云端/录音/外部写。见[实施记录](m4-durable-discussion-outcomes.md)。

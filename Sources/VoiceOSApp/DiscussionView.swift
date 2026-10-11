@@ -52,7 +52,7 @@ struct DiscussionView: View {
                                                 Text(part.text).textSelection(.enabled)
                                                 if part.kind == .aiSuggestion {
                                                     let kept=model.discussionDerivations.first { $0.discussionAttemptID == reply.id && $0.partIndex == index }
-                                                    if let claimID=kept?.claimID,let claim=model.claims.first(where: { $0.id == claimID }) {
+                                                    if let claimID=kept?.claimID ?? outcomeParagraphClaim(reply,index:index,part:part),let claim=model.claims.first(where: { $0.id == claimID }) {
                                                         Button("已保留 · 查看 AI 候选") { model.selected=claim.references.first?.sourceID;dismiss() }
                                                     } else {
                                                         Button("保留为 AI 候选") { Task { if await model.retainDiscussionCandidate(reply,index:index) { dismiss() } } }
@@ -70,6 +70,30 @@ struct DiscussionView: View {
                                 }
                                 Divider()
                             }
+                        }
+                        ForEach(model.discussionOutcomes) { outcome in
+                            Divider()
+                            Text(outcome.state == "completed" ? "讨论成果 · 待核对" : (outcome.state == "unknown" ? "成果提取结果未知 · 不自动重发" : "成果未接纳 · 不自动重发")).font(.headline)
+                            if outcome.validity == "frozen" { Text("历史成果已冻结，身份与出处保留。").font(.caption).foregroundStyle(.secondary) }
+                            ForEach(Array(outcome.proposals.enumerated()),id:\.offset) { index,proposal in
+                                VStack(alignment:.leading,spacing:6) {
+                                    Text(proposal.ownership == .aiCandidate ? "AI 候选" : (proposal.ownership == .userTentative ? "我的暂定表达" : "归属待核对")).font(.caption)
+                                    Text(proposal.statement).textSelection(.enabled)
+                                    if outcome.claimIDs.indices.contains(index),let claim=model.claims.first(where: { $0.id == outcome.claimIDs[index] }) {
+                                        Button("查看成果候选与行动") { model.selected=claim.references.first?.sourceID;dismiss() }
+                                    }
+                                    if let action=proposal.action,proposal.ownership == .aiCandidate { Text("AI 行动建议（未创建个人任务）："+action.title).font(.caption).foregroundStyle(.secondary) }
+                                    ForEach(Array(proposal.sourceEvidence.enumerated()),id:\.offset) { _,evidence in
+                                        Text("来源原话："+evidence.quote).textSelection(.enabled)
+                                        Button("查看当时来源版本") { inspectReference(evidence.reference) }
+                                    }
+                                    ForEach(Array(proposal.replyEvidence.enumerated()),id:\.offset) { _,evidence in
+                                        Text("当时 AI 原话："+evidence.quote).textSelection(.enabled)
+                                        Button("查看原 AI 段落") { inspectReplyEvidence(evidence) }
+                                    }
+                                }.padding(.vertical,8)
+                            }
+                            Text("输入 \(outcome.usage?["input_tokens"].map(String.init) ?? "未知") / 输出 \(outcome.usage?["output_tokens"].map(String.init) ?? "未知") tokens · 实际费用未知").font(.caption).foregroundStyle(.secondary)
                         }
                     }.frame(maxWidth:.infinity,alignment:.leading).padding(.vertical,6)
                 }.frame(minHeight:180)
@@ -134,6 +158,18 @@ struct DiscussionView: View {
             text=turn.text
         } else { text="此引用没有对应的历史原文；请核对资料，不以当前版本替代。" }
         referencePreview=ReferencePreview(text:text,version:"来源 "+ref.sourceID+" · 逐字稿版本 "+ref.transcriptVersionID)
+    }
+    private func outcomeParagraphClaim(_ reply:DiscussionAttemptRecord,index:Int,part:DiscussionPart)->String? {
+        for outcome in model.discussionOutcomes where outcome.state == "completed" {
+            for (ordinal,proposal) in outcome.proposals.enumerated() where outcome.claimIDs.indices.contains(ordinal) {
+                if proposal.ownership == .aiCandidate,proposal.statement == part.text,proposal.replyEvidence.contains(where: { $0.attemptID == reply.id && $0.partIndex == index && $0.quote == part.text }) { return outcome.claimIDs[ordinal] }
+            }
+        }
+        return nil
+    }
+    private func inspectReplyEvidence(_ evidence:OutcomeReplyEvidence) {
+        guard let reply=model.discussionReplies.first(where: { $0.id == evidence.attemptID }),reply.parts.indices.contains(evidence.partIndex) else { return }
+        referencePreview=ReferencePreview(text:reply.parts[evidence.partIndex].text,version:"AI 调用 "+evidence.attemptID+" · 段落 "+String(evidence.partIndex+1))
     }
     private func replyLabel(_ reply:DiscussionAttemptRecord)->String {
         let state=reply.state == "completed" ? "AI回复" : (reply.state == "unknown" ? "调用结果未知 · 不自动重发" : (reply.state == "reserved" ? "正在等待结果" : "结果未接纳 · 不自动重发"))

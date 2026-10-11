@@ -232,6 +232,7 @@ extension VoiceOSStore {
         try db.execute("UPDATE conversations SET validity='frozen' WHERE entry_context_id=? OR id IN (SELECT conversation_id FROM conversation_user_turns WHERE context_id=?)",[id,id])
         try db.execute("UPDATE discussion_attempts SET validity='frozen' WHERE context_id=? OR conversation_id IN (SELECT id FROM conversations WHERE validity='frozen')",[id])
         try freezeDiscussionDerivations()
+        try freezeConversationOutcomes()
         try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT id FROM claims WHERE attempt_id IN (SELECT id FROM model_attempts WHERE context_id=?))", [id])
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT id FROM model_attempts WHERE context_id=?)", [id])
     }

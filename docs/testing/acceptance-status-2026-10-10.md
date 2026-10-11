@@ -45,10 +45,12 @@
 
 ## 2026-10-11 工程增量核对
 
-本节更新上表的实施证据，未把单元测试数作为顶层验收。当前213项测试通过，原始愿景未修改。
+本节更新上表的实施证据，未把单元测试数作为顶层验收。当前226项测试通过，原始愿景未修改。
 
 - AC-01由not_run更新为partial：实际麦克风封存/10秒设备自动停止、空转写、重启与媒体迁移已验证；环境音不是自然语音质量，权限拒绝/睡眠等变体仍缺。[设备证据](../engineering/m1-microphone-device-test.md)。
-- AC-11由not_run更新为partial：逐轮语音＋文字、持久回复、全输入屏障、个人表达认知/行动/本地结果回流、AI候选回流已实现；混合成果仅输入契约，完整案例B未通过。[AI候选](../engineering/m4-discussion-candidates.md)、[混合输入](../engineering/m4-discussion-outcome-input.md)。
+- AC-11由not_run更新为partial：逐轮语音＋文字、持久回复、全输入屏障、个人表达认知/行动/本地结果回流、AI候选回流已实现；混合成果持久端口与原子回流已用合成夹具验证；真实驱动、跨入口共享身份与完整案例B未通过。[AI候选](../engineering/m4-discussion-candidates.md)、[混合输入](../engineering/m4-discussion-outcome-input.md)。
 - AC-12、17、20仍partial：原生语义候选、相关性判断、静默已接纳原文与来源/权限冻结有证据；新表达自动关联、关联理由和未解决问题仍缺。[原生召回](../engineering/m4-native-semantic-recall.md)、[静默反馈](../engineering/m4-quiet-feedback.md)。
-- AC-21仍partial：当前包v16/schema17共25表，新类型与实际旧v1–v15恢复/重开已验证；删除和完整产品恢复验收仍缺。
+- AC-21仍partial：当前包v17/schema18共26表，新类型与实际旧v1–v16恢复/重开已验证；删除和完整产品恢复验收仍缺。
 - AC-19仍not_run，完整三案例与自然长期闭环仍未通过。继续按真实证据补齐，不把合成个人表达当作实际用户承诺或自然闭环。
+
+混合成果阶段证据见[持久提取记录](../engineering/m4-durable-discussion-outcomes.md)：三处实际强退、12次回归、四个新包往返及原生历史/双重出处通过。任务完成与反馈不验证观点；0新云端/录音/外部写，全部新样本为合成，AC-11/14/16/17/21/22仍partial。

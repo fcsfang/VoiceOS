@@ -33,17 +33,29 @@ struct Check {
                 }
             })
             try await store.recover()
-            if ["conversation-entry-fixture","conversation-turn-fixture","conversation-end-fixture","discussion-fixture","discussion-candidate-fixture","discussion-anchor-fixture"].contains(args[0]) {
+            if ["conversation-entry-fixture","conversation-turn-fixture","conversation-end-fixture","discussion-fixture","discussion-candidate-fixture","discussion-anchor-fixture","outcome-fixture","outcome-feedback-fixture"].contains(args[0]) {
                 let source = try await store.recordUserExpression("合成旧观点：需要检验条件，尚未形成结论。",commandID:"synthetic-dialogue-history")
                 let id = try await store.beginConversation(sourceIDs:[source],commandID:"synthetic-dialogue-entry")
                 if args[0] != "conversation-entry-fixture" {
-                    let turnSource = try await store.recordUserExpression("合成追问：哪些反例能够限制这个猜想？",commandID:"synthetic-dialogue-user-source")
+                    let turnSource = try await store.recordUserExpression(["outcome-fixture","outcome-feedback-fixture"].contains(args[0]) ? "合成个人：我会整理开发验证素材。我现在不打算阅读论文。" : "合成追问：哪些反例能够限制这个猜想？",commandID:"synthetic-dialogue-user-source")
                     _ = try await store.appendConversationUserSource(conversationID:id,sourceID:turnSource,expectedVersion:1,commandID:"synthetic-dialogue-turn")
                 }
                 if args[0] == "conversation-end-fixture" { try await store.endConversation(id:id,expectedVersion:2,commandID:"synthetic-dialogue-end") }
-                if ["discussion-fixture","discussion-candidate-fixture","discussion-anchor-fixture"].contains(args[0]), try await store.discussionAttempts(conversationID:id).isEmpty {
+                if ["discussion-fixture","discussion-candidate-fixture","discussion-anchor-fixture","outcome-fixture","outcome-feedback-fixture"].contains(args[0]), try await store.discussionAttempts(conversationID:id).isEmpty {
                     let input = try await store.prepareConversationInput(id:id,expectedVersion:2,destination:.local)
                     _ = try await store.performConversationReply(input,using:LocalDiscussionFixture(cited:args[0] != "discussion-anchor-fixture"))
+                }
+                if ["outcome-fixture","outcome-feedback-fixture"].contains(args[0]) {
+                    try await store.endConversation(id:id,expectedVersion:2,commandID:"synthetic-outcome-end")
+                    if try await store.conversationOutcomes(conversationID:id).isEmpty {
+                        let input=try await store.prepareConversationOutcome(id:id,expectedVersion:3,destination:.local,commandID:"synthetic-outcome-input")
+                        _=try await store.performConversationOutcome(input,using:LocalOutcomeFixture())
+                    }
+                }
+                if args[0] == "outcome-feedback-fixture" {
+                    guard let action=try await store.actions(includeHistory:true).first(where: { $0.kind == "task" }) else { throw VoiceOSError("missing synthetic outcome task") }
+                    _=try await store.setActionState(actionID:action.id,expectedVersion:1,state:.completed,commandID:"synthetic-outcome-completed")
+                    _=try await store.recordActionFeedback(actionID:action.id,expectedVersion:2,kind:.outcome,text:"合成结果验证：素材已整理，只验证流程，并未证明技术猜想。",commandID:"synthetic-outcome-feedback")
                 }
                 if args[0] == "discussion-candidate-fixture" {
                     guard let reply=try await store.discussionAttempts(conversationID:id).first else { throw VoiceOSError("missing synthetic reply") }
@@ -55,6 +67,11 @@ struct Check {
                 let input=try await store.prepareConversationOutcome(id:session.id,expectedVersion:session.version,destination:.local,commandID:"synthetic-outcome-input")
                 try await store.validateConversationOutcome(input)
                 let output:[String:Any]=["integrity":try await store.integrityCheck(),"session_state":input.sessionState,"source_count":input.context.sources.count,"personal_turn_count":input.input.userTurns.count,"reply_count":input.replies.count,"accepted_ai_parts":input.replies.reduce(0) { $0+$1.parts.filter { $0.kind == .aiSuggestion }.count }]
+                print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self));return
+            } else if args[0] == "outcome-read" {
+                guard args.count == 3 else { throw VoiceOSError("outcome-read requires conversation ID") }
+                let rows=try await store.conversationOutcomes(conversationID:args[2])
+                let output:[String:Any]=["integrity":try await store.integrityCheck(),"outcomes":rows.map { ["id":$0.id,"state":$0.state,"validity":$0.validity,"claim_ids":$0.claimIDs,"proposals":$0.proposals.count,"usage":$0.usage ?? [:]] as [String:Any] }]
                 print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self));return
             } else if args[0] == "discussion-read" {
                 guard args.count == 3 else { throw VoiceOSError("discussion-read requires conversation ID") }
@@ -177,5 +194,15 @@ private struct SyntheticDiscussionSpeech: SpeechPort {
     let backendIdentity="synthetic-discussion-speech-fixture-v1"
     func transcribe(_ url:URL,locale:String) async throws -> SpeechText {
         SpeechText(text:"合成语音链路夹具：条件尚未验证，暂不执行任务。")
+    }
+}
+
+private struct LocalOutcomeFixture:ConversationOutcomePort {
+    let configuration=ModelConfiguration(provider:"synthetic",model:"outcome",promptVersion:"v1",schemaVersion:"v1",destination:.local)
+    func extract(_ request:ConversationOutcomeRequest) async throws -> ConversationOutcomeResponse {
+        let turn=request.snapshot.input.userTurns.last!,source=request.snapshot.context.sources.first { $0.sourceID == turn.sourceID }!,ref=ClaimReference(sourceID:source.sourceID,transcriptVersionID:source.transcriptVersionID,spanID:source.spans[0].id),reply=request.snapshot.replies.last!
+        return ConversationOutcomeResponse(status:.completed,proposals:[
+            .init(statement:"我会整理开发验证素材",ownership:.userTentative,sourceEvidence:[.init(reference:ref,quote:"我会整理开发验证素材")],action:.init(title:"整理开发验证素材",kind:.task,quote:"我会整理开发验证素材",autoSend:true)),
+            .init(statement:reply.parts[1].text,ownership:.aiCandidate,sourceEvidence:[],replyEvidence:[.init(attemptID:reply.attemptID,partIndex:1,quote:reply.parts[1].text)],action:.init(title:"比较反例",kind:.aiSuggestion,quote:"比较反例"))],inputTokens:12,outputTokens:6)
     }
 }

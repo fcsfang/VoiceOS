@@ -69,6 +69,8 @@ public actor VoiceOSStore {
         try Self.validateStoredDiscussionAttempts(db)
         try freezeDiscussionDerivations()
         try Self.validateStoredDiscussionDerivations(db)
+        try freezeConversationOutcomes()
+        try Self.validateStoredConversationOutcomes(db)
         ready = true
     }
     @discardableResult

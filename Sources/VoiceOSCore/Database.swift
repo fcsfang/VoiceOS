@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -385,6 +385,20 @@ final class Database {
                 )
                 """)
                 try execute("PRAGMA user_version=17")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "17" {
+            try transaction {
+                try execute("""
+                CREATE TABLE conversation_outcome_attempts (
+                  id TEXT PRIMARY KEY REFERENCES model_attempts(id),
+                  conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id),
+                  conversation_version INTEGER NOT NULL CHECK(conversation_version>1),
+                  snapshot_json TEXT NOT NULL, snapshot_digest TEXT NOT NULL,
+                  result_json TEXT, result_digest TEXT, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("PRAGMA user_version=18")
             }
         }
 

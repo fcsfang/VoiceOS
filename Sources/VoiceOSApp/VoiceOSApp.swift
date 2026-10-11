@@ -15,6 +15,8 @@ final class ControlCenter: ObservableObject {
     @Published var discussionReplies:[DiscussionAttemptRecord] = []
     @Published var discussionDerivations:[DiscussionClaimDerivation] = []
     @Published var claimOrigins:[DiscussionClaimDerivation] = []
+    @Published var outcomeOrigins:[ConversationOutcomeOrigin] = []
+    @Published var discussionOutcomes:[ConversationOutcomeRecord] = []
     @Published var discussionHistory:[ContextTranscript] = []
     @Published var discussionRecordingID:String?
     @Published var discussionSaving=false
@@ -233,6 +235,7 @@ final class ControlCenter: ObservableObject {
         do {
             claims = try await store?.candidateClaims(includeFrozen: true) ?? []
             claimOrigins = try await store?.discussionClaimOrigins() ?? []
+            outcomeOrigins = try await store?.conversationOutcomeOrigins() ?? []
             actionRecords = try await store?.actions(includeHistory: true) ?? []
             reminderLinks = try await store?.reminderLinks() ?? []
             reminderAccess = try await store?.reminderAccess()
@@ -603,7 +606,7 @@ struct CenterView: View {
                                     ForEach(attempts) { attempt in
                                         VStack(alignment: .leading, spacing: 4) {
                                             Text(attemptLabel(attempt)).font(.callout)
-                                            if attempt.executionKind != "discussion_derivation" { Text("\(attempt.model) · \(attempt.provider.replacingOccurrences(of: "responses:", with: ""))").font(.caption).foregroundStyle(.secondary) }
+                                            if attempt.executionKind != "discussion_derivation" { Text("\(attempt.model) · \(attempt.provider.replacingOccurrences(of: "discussion_outcome:", with: "").replacingOccurrences(of: "responses:", with: ""))").font(.caption).foregroundStyle(.secondary) }
                                             if attempt.executionKind == "discussion_derivation" {
                                                 Text("本地保留讨论 AI 段落 · 没有新增模型调用或费用").font(.caption).foregroundStyle(.secondary)
                                             } else { Text("输入 \(attempt.usage?["input_tokens"].map(String.init) ?? "未知") / 输出 \(attempt.usage?["output_tokens"].map(String.init) ?? "未知") tokens · 实际费用未知").font(.caption).foregroundStyle(.secondary) }
@@ -649,10 +652,14 @@ struct CenterView: View {
                                 ForEach(related) { claim in
                                     VStack(alignment: .leading, spacing: 8) {
                                         Text(claim.statement).textSelection(.enabled)
-                                        Text("\(claim.ownership == "ai_candidate" ? "AI 候选" : (claim.ownership == "external" ? "外部主张" : "归属待核对")) · 未验证 · \(claim.validity == "frozen" ? "依据或授权已变化，暂停使用" : (claim.reviewState == "rejected" ? "已停止当前使用" : "出处可回溯"))").font(.caption).foregroundStyle(.secondary)
+                                        Text("\(claim.ownership == "ai_candidate" ? "AI 候选" : (claim.ownership == "external" ? "外部主张" : (claim.ownership == "user_tentative" ? "我的暂定表达" : "归属待核对"))) · 未验证 · \(claim.validity == "frozen" ? "依据或授权已变化，暂停使用" : (claim.reviewState == "rejected" ? "已停止当前使用" : "出处可回溯"))").font(.caption).foregroundStyle(.secondary)
                                         if let origin=model.claimOrigins.first(where: { $0.claimID == claim.id }) {
                                             Text(origin.referenceKind == "context_anchor" ? "来自讨论 AI 分析；下方原文只定位讨论触发点，不是结论证据。" : "来自讨论 AI 分析；模型引用保留，引用不代表结论已经验证。").font(.caption).foregroundStyle(.secondary)
                                             Button("查看原讨论 AI 段落") { Task { await model.openDiscussion(origin.conversationID);showingDiscussion=true } }
+                                        }
+                                        if let origin=model.outcomeOrigins.first(where: { $0.claimID == claim.id }) {
+                                            Text(origin.referenceKind == "context_anchor" ? "来自讨论成果；下方只定位讨论触发点，不是 AI 结论证据。" : "来自讨论成果；个人原话和 AI 引文分开保留，仍未验证。").font(.caption).foregroundStyle(.secondary)
+                                            Button("查看讨论成果与完整出处") { Task { await model.openDiscussion(origin.conversationID);showingDiscussion=true } }
                                         }
                                         Text(claim.reviewState == "endorsed" ? "明确认可 · 不等于已验证或已经理解" : (claim.reviewState == "rejected" ? "已拒绝 · 保留历史，不用于当前认知" : "尚未认可")).font(.caption).foregroundStyle(.secondary)
                                         HStack {
@@ -667,7 +674,7 @@ struct CenterView: View {
                                         ForEach(Array(claim.references.enumerated()), id: \.offset) { _, ref in
                                             if ref.sourceID == record.id, ref.transcriptVersionID == record.transcriptVersionID,
                                                let span = record.spans.first(where: { $0.id == ref.spanID }), let text = record.transcript {
-                                                Text((model.claimOrigins.first(where: { $0.claimID == claim.id })?.referenceKind == "context_anchor" ? "讨论触发原文（不证明 AI 猜想）：" : "引用原文：") + quote(span, text: text)).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                                                Text(((model.claimOrigins.first(where: { $0.claimID == claim.id })?.referenceKind == "context_anchor" || model.outcomeOrigins.first(where: { $0.claimID == claim.id })?.referenceKind == "context_anchor") ? "讨论触发原文（不证明 AI 猜想）：" : "引用原文：") + quote(span, text: text)).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
                                             } else if ref.sourceID == record.id {
                                                 Button("查看历史逐字稿依据") { Task { await model.historyFor(record); showHistory = true } }
                                             }
@@ -1279,9 +1286,9 @@ extension ControlCenter {
             guard let id=discussionSession?.id else { return }
             let session=try await store.conversation(id:id),turns=try await store.conversationUserTurns(conversationID:id)
             let replies=try await store.discussionAttempts(conversationID:id),history=try await store.conversationHistorySources(conversationID:id)
-            let derivations=try await store.discussionClaimDerivations(conversationID:id)
+            let derivations=try await store.discussionClaimDerivations(conversationID:id),outcomes=try await store.conversationOutcomes(conversationID:id)
             guard discussionSession?.id == id else { return }
-            discussionSession=session;discussionTurns=turns;discussionReplies=replies;discussionHistory=history;discussionDerivations=derivations
+            discussionSession=session;discussionTurns=turns;discussionReplies=replies;discussionHistory=history;discussionDerivations=derivations;discussionOutcomes=outcomes
         } catch { discussionStatus=error.localizedDescription }
     }
     func openDiscussion(_ id:String) async {
