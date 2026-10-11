@@ -38,6 +38,11 @@ struct Check {
             })
             try await store.recover()
             if args[0] == "association-fixture" { try await runAssociationFixture(store); return }
+            if args[0] == "association-driver-fixture" {
+                guard args.count == 2 || args.count == 3 else { throw VoiceOSError("association-driver-fixture requires isolated root and optional reviewed semantic model") }
+                try await runAssociationFixture(store, automatic: true, semanticRoot: args.count == 3 ? URL(fileURLWithPath: args[2]) : nil)
+                return
+            }
             if args[0] == "association-ignore-fixture" { try await runAssociationIgnoreFixture(store); return }
             if args[0] == "outcome-ui-seed" {
                 guard try await store.sources().isEmpty else { throw VoiceOSError("synthetic UI seed requires an empty root") }

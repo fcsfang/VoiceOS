@@ -1,5 +1,6 @@
 import Foundation
 import VoiceOSCore
+import VoiceOSPlatform
 
 private struct AssociationFixtureRetrieval: LocalRetrievalPort {
     func rank(query: String, documents: [RetrievalDocument], semantic: Bool) async throws -> [RetrievalMatch] {
@@ -16,13 +17,24 @@ private actor AssociationFixturePort: ExpressionAssociationPort {
         return .init(proposals: [.init(candidateID: hit.id, current: evidence, historicalQuote: hit.document.text, relation: .sameQuestion, reason: "合成关联：当前和旧表达讨论相同的限制条件。")], inputTokens: 17, outputTokens: 23)
     }
 }
-func runAssociationFixture(_ store: VoiceOSStore) async throws {
+func runAssociationFixture(_ store: VoiceOSStore, automatic: Bool = false, semanticRoot: URL? = nil) async throws {
     _ = try await store.recordUserExpression("合成旧表达：什么条件可以限制猜想？", commandID: "association-fixture-old")
     let current = try await store.recordUserExpression("合成新表达：我想重新核对猜想的限制条件。", commandID: "association-fixture-current")
-    let candidates = try await store.retrieve("限制条件", using: AssociationFixtureRetrieval()).hits.filter { $0.document.sourceID != current }
-    let snapshot = try await store.prepareExpressionAssociation(currentSourceID: current, candidates: candidates)
-    let port = AssociationFixturePort(), record = try await store.performExpressionAssociation(snapshot, using: port)
-    let output: [String: Any] = ["synthetic_only": true, "state": record.state, "validity": record.validity, "proposals": record.proposals.count, "port_calls": await port.calls, "usage": record.usage ?? [:], "claims": try await store.candidateClaims().count, "actions": try await store.actions().count, "integrity": try await store.integrityCheck(), "network_calls": 0]
+    let port = AssociationFixturePort()
+    let record: ExpressionAssociationAttempt?
+    var processing = "not_run"
+    if automatic {
+        let retrieval: any LocalRetrievalPort
+        if let semanticRoot { retrieval = CoreMLRetrieval(root: semanticRoot) }
+        else { retrieval = AssociationFixtureRetrieval() }
+        let result = try await store.processExpressionAssociation(sourceID: current, retrieval: retrieval, semantic: semanticRoot != nil, model: port)
+        processing = result.state.rawValue; record = result.attempt
+    } else {
+        let candidates = try await store.retrieve("限制条件", using: AssociationFixtureRetrieval()).hits.filter { $0.document.sourceID != current }
+        let snapshot = try await store.prepareExpressionAssociation(currentSourceID: current, candidates: candidates)
+        record = try await store.performExpressionAssociation(snapshot, using: port)
+    }
+    let output: [String: Any] = ["synthetic_only": true, "processing": processing, "real_local_semantic": semanticRoot != nil, "state": record?.state ?? processing, "validity": record?.validity ?? "not_applicable", "proposals": record?.proposals.count ?? 0, "port_calls": await port.calls, "usage": record?.usage ?? [:], "claims": try await store.candidateClaims().count, "actions": try await store.actions().count, "integrity": try await store.integrityCheck(), "network_calls": 0]
     print(String(decoding: try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]), as: UTF8.self))
 }
 func runAssociationIgnoreFixture(_ store: VoiceOSStore) async throws {

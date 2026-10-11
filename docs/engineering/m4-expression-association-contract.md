@@ -79,3 +79,9 @@ ResponsesExpressionAssociationPort 复用既有受限HTTPS传输和 ResponsesEnv
 304项全套测试通过，新增五项端口协议和五项处理驱动回归覆盖完整全文召回、私有历史提前过滤、晚到撤权、无模型/暂停/预算和单次未知终态；均为离线合成。日志 runtime/association-driver-tests.log，签名构建 runtime/association-driver-build.log。冻结记录和17/23 tokens已在实际来源页观察；真实生产关联请求与自然质量本轮未运行，不扩大AC-12/20验收声明。正式问题状态、主题级减少、保存即完整闭环及长期自然案例仍开放。
 
 来源附着/按来源核对/切换排除及最新文案布局也已通过原生CUA观察。证据：[处理驱动与来源页](../research/evidence/expression-association-driver-2026-10-11.json)。生产理解钩子只编译验证，本轮没有真实云端调用。
+
+## 完整驱动的离线故障集成
+
+`voiceos-check association-driver-fixture <新隔离库> [已审查本机语义模型目录]` 运行召回→预留→合成判断→接纳；省略资源时使用合成召回，提供资源时运行真实CoreML/BGE本机召回，判断端口始终是明确的内存合成端口，不加载凭据。`python3 scripts/app/validate_expression_association.py --driver --root <新目录>` 已通过完整驱动的五处真实SIGKILL和五次包恢复，重放调用为0、忽略只保存一次。
+
+两份合成表达的真实BGE召回返回一个local_semantic候选（0.778055，排序分数不是置信度或关系证明）；合成判断正常保存，第二次驱动读取原记录、端口调用0。证据：[完整驱动故障与本机召回](../research/evidence/expression-association-full-driver-2026-10-11.json)。这验证了本机资源接线及持久执行，不证明自然相关性、AI理由准确或生产API成功；0云端/麦克风/外部任务写入。
