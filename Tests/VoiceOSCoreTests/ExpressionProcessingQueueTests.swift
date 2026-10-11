@@ -156,6 +156,39 @@ final class ExpressionProcessingQueueTests: XCTestCase {
         XCTAssertEqual(attempts.count, 1); XCTAssertEqual(attempts[0].state, "completed"); XCTAssertEqual(attempts[0].validity, "frozen")
     }
 
+    func testSnapshotDriftBlocksBeforeAnyModelCall() async throws {
+        let store = try VoiceOSStore(root: root, inspector: QueueInspector()); try await store.recover()
+        let source = try await store.recordUserExpression("入队后被更正的表达")
+        _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: 1, localOnly: false)
+        let configuration = config()
+        let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: source, cognition: configuration, association: configuration)
+        let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "snapshot-drift", cognition: configuration, association: configuration)
+        let sourceRecords = try await store.sources()
+        let current = try XCTUnwrap(sourceRecords.first(where: { $0.id == source }))
+        let currentVersion = try XCTUnwrap(current.transcriptVersionID)
+        _ = try await store.correctTranscript(sourceID: source, expectedVersionID: currentVersion, text: "更正后的表达")
+        let model = QueueModel(configuration), association = QueueAssociation(configuration)
+        let result = try await store.runExpressionProcessingIntent(id: intent.id, retrieval: QueueRetrieval(), cognitionPort: model, associationPort: association)
+        XCTAssertEqual(result.state, .blocked)
+        let modelCalls = await model.callCount(), associationCalls = await association.callCount()
+        XCTAssertEqual(modelCalls, 0); XCTAssertEqual(associationCalls, 0)
+    }
+
+    func testPolicyDriftBlocksBeforeAnyModelCall() async throws {
+        let store = try VoiceOSStore(root: root, inspector: QueueInspector()); try await store.recover()
+        let source = try await store.recordUserExpression("入队后撤回云端授权的表达")
+        _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: 1, localOnly: false)
+        let configuration = config()
+        let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: source, cognition: configuration, association: configuration)
+        let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "policy-drift", cognition: configuration, association: configuration)
+        _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: 2, localOnly: true)
+        let model = QueueModel(configuration), association = QueueAssociation(configuration)
+        let result = try await store.runExpressionProcessingIntent(id: intent.id, retrieval: QueueRetrieval(), cognitionPort: model, associationPort: association)
+        XCTAssertEqual(result.state, .blocked)
+        let modelCalls = await model.callCount(), associationCalls = await association.callCount()
+        XCTAssertEqual(modelCalls, 0); XCTAssertEqual(associationCalls, 0)
+    }
+
     func testRestoreRejectsTamperedProcessingIntentEvenWhenManifestChecksumIsUpdated() async throws {
         let store = try VoiceOSStore(root: root, inspector: QueueInspector()); try await store.recover()
         let source = try await store.recordUserExpression("迁移包篡改测试表达")
