@@ -139,7 +139,13 @@ final class ConversationOutcomeReuseTests:XCTestCase {
         var m=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:manifest)) as? [String:Any]),files=m["files"] as! [[String:Any]]
         let index=try XCTUnwrap(files.firstIndex { $0["path"] as? String == "model_attempts.jsonl" }),hash=try DurableFiles.hash(file)
         files[index]["bytes"]=hash.0;files[index]["sha256"]=hash.1;m["files"]=files
-        if mode == "legacy" { m["version"]=17;m["databaseSchema"]=18 }
+        if mode == "legacy" {
+            m["version"]=17;m["databaseSchema"]=18
+            var counts = m["counts"] as! [String: Any]; counts.removeValue(forKey: "english_feedback_attempts"); m["counts"] = counts
+            files.removeAll { ($0["path"] as? String) == "english_feedback_attempts.jsonl" }
+            try? FileManager.default.removeItem(at: package.appendingPathComponent("english_feedback_attempts.jsonl"))
+            m["files"] = files
+        }
         try JSONSerialization.data(withJSONObject:m).write(to:manifest)
     }
     func testLegacyPackageBuildsRetrospectiveBaselineWithoutChangingModelIdentity() async throws {

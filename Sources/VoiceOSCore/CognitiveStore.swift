@@ -198,7 +198,7 @@ extension VoiceOSStore {
                 try validateProposals([ClaimProposal(statement: claim["statement"]!, ownership: owner, references: refs, action: try claim["action_json"].map { try JSONDecoder().decode(ExtractedAction.self, from: Data($0.utf8)) })], context: context)
             }
         }
-        for attempt in try db.query("SELECT * FROM model_attempts WHERE state='completed'") {
+        for attempt in try db.query("SELECT * FROM model_attempts WHERE state='completed' AND provider NOT LIKE 'english_feedback:%'") {
             var proposals: [ClaimProposal] = []
             for (index, claim) in try db.query("SELECT * FROM claims WHERE attempt_id=? ORDER BY ordinal", [attempt["id"]]).enumerated() {
                 guard claim["ordinal"] == String(index), let owner = CandidateOwnership(rawValue: claim["ownership"]!) else { throw VoiceOSError("迁移候选顺序不一致") }

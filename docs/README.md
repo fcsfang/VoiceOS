@@ -111,7 +111,7 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 
 - [M4 跨入口成果复用准备](engineering/m4-discussion-outcome-reuse.md)：233项测试，已有身份与可新增个人目标分离，完整输入不删减；持久复用执行尚待接入。
 
-- [成果生产者持久顺序](adr/019-model-producer-sequence.md)：237项测试，v18/schema19、实际旧v1–v17与schema18升级；跨入口持久复用仍待接入。
+- [成果生产者持久顺序](adr/019-model-producer-sequence.md)：237项测试，现已扩展至 v19/schema20；旧 v1–v18 包继续按版本表恢复。
 
 - [持久成果复用更新](engineering/m4-discussion-outcome-reuse.md)：244项测试，原审阅/完成任务保持、只新增未整理回合任务，三个强退/三个迁移往返及原生UI通过；生产驱动待接入。
 
@@ -122,5 +122,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 讨论任务提醒闭环](engineering/m4-discussion-outcome-reminders.md)：专用清单自动创建、外部完成v4回流、原v2反思保留及迁移不携带连接。
 - [M4 英文表达反馈契约](engineering/m4-english-feedback-contract.md)：个人英文原句、出处建议、跨练习比较与纠错/权限屏障；尚未接入真实模型或界面。
 - [英文表达文本模型端口](engineering/m4-english-feedback-contract.md)：Responses 严格结构化输出、原句/历史引文校验和文本授权屏障；尚未接入持久行动或英文 UI。
-- [ADR-020 英文反馈记录](adr/020-english-feedback-records.md)：英文反馈的持久身份、纠错冻结与迁移边界提案。
+- [ADR-020 英文反馈记录](adr/020-english-feedback-records.md)：独立英文反馈表、schema 19→20 迁移、v19 包恢复与未知终态边界。
 - [英文反馈首轮云端探针](research/evidence/english-feedback-cloud-2026-10-11.json)：合成文本单请求在 TLS 阶段失败，未重试、未保存反馈，质量验收未开始。
