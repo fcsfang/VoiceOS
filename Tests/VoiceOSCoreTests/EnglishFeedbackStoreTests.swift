@@ -2,6 +2,11 @@ import XCTest
 @testable import VoiceOSCore
 
 private struct EnglishStoreInspector: MediaInspector { func inspect(_ url: URL) async throws -> MediaInfo { throw VoiceOSError("text fixture") } }
+private struct EnglishFakePort: EnglishPracticeModelPort {
+    let configuration: ModelConfiguration
+    let result: Result<EnglishPracticeResponse, ModelPortFailure>
+    func generate(_ request: EnglishPracticeRequest) async throws -> EnglishPracticeResponse { try result.get() }
+}
 final class EnglishFeedbackStoreTests: XCTestCase {
     var base: URL!
     override func setUpWithError() throws { base = FileManager.default.temporaryDirectory.appendingPathComponent("english-store-" + UUID().uuidString) }
@@ -30,6 +35,14 @@ final class EnglishFeedbackStoreTests: XCTestCase {
         let s = try await store(), snapshot = try await setup(s), id = try await s.reserveEnglishFeedback(snapshot, configuration: config())
         try await s.markEnglishFeedbackUnknown(attemptID: id); let rows = try await s.englishFeedbackAttempts(); XCTAssertEqual(rows[0].state, "unknown")
         let replay = try await s.reserveEnglishFeedback(snapshot, configuration: config()), all = try await s.englishFeedbackAttempts(); XCTAssertEqual(id, replay); XCTAssertEqual(all.count, 1)
+    }
+    func testPerformMarksTransportFailureUnknownWithUsageAndNeverResends() async throws {
+        let s = try await store(), snapshot = try await setup(s)
+        let port = EnglishFakePort(configuration: config(), result: .failure(.rejected("TLS failed", inputTokens: 7, outputTokens: 0)))
+        do { _ = try await s.performEnglishFeedback(snapshot, using: port); XCTFail("expected failure") } catch {}
+        let rows = try await s.englishFeedbackAttempts(); XCTAssertEqual(rows.count, 1); XCTAssertEqual(rows[0].state, "unknown"); XCTAssertEqual(rows[0].inputTokens, 7); XCTAssertEqual(rows[0].outputTokens, 0)
+        let replay = try await s.performEnglishFeedback(snapshot, using: port); XCTAssertEqual(replay.state, "unknown")
+        let finalRows = try await s.englishFeedbackAttempts(); XCTAssertEqual(finalRows.count, 1)
     }
     func testPackageRoundTripPreservesFeedbackButNotLiveAuthorization() async throws {
         let s = try await store(), snapshot = try await setup(s), id = try await s.reserveEnglishFeedback(snapshot, configuration: config()); try await s.completeEnglishFeedback(attemptID: id, response: response(snapshot))

@@ -8,6 +8,10 @@ public struct EnglishPracticeRequest: Sendable {
         self.attemptID = attemptID; self.snapshot = snapshot; self.configuration = configuration
     }
 }
+public protocol EnglishPracticeModelPort: Sendable {
+    var configuration: ModelConfiguration { get }
+    func generate(_ request: EnglishPracticeRequest) async throws -> EnglishPracticeResponse
+}
 public struct EnglishPracticeResponse: Sendable {
     public let suggestions: [EnglishSuggestionProposal]
     public let comparisons: [EnglishComparisonProposal]
@@ -17,7 +21,7 @@ public struct EnglishPracticeResponse: Sendable {
         self.suggestions = suggestions; self.comparisons = comparisons; self.inputTokens = inputTokens; self.outputTokens = outputTokens
     }
 }
-public struct ResponsesEnglishPracticePort: Sendable {
+public struct ResponsesEnglishPracticePort: EnglishPracticeModelPort {
     public let configuration: ModelConfiguration
     private let endpoint: URL
     private let apiKey: String

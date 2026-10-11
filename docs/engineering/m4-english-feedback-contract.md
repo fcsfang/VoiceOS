@@ -14,7 +14,7 @@ Core准备/重验会查实际当前来源与逐字稿；云端目的地逐份检
 
 ## 文本模型端口增量
 
-`ResponsesEnglishPracticePort` 已接入 Core：单次 Responses POST、`store=false`、无音频/工具/重试，严格 JSON Schema 与用量保留；返回后再次执行原句、版本、角色、比较索引和重复项校验。独立记录已持久化并纳入迁移，264 项全套测试通过；尚未执行成功的真实英文云端调用，因此不宣称英语质量或 AC-19 完成。
+`ResponsesEnglishPracticePort` 已接入 Core：单次 Responses POST、`store=false`、无音频/工具/重试，严格 JSON Schema 与用量保留；返回后再次执行原句、版本、角色、比较索引和重复项校验。独立记录已持久化并纳入迁移，265 项全套测试通过；尚未执行成功的真实英文云端调用，因此不宣称英语质量或 AC-19 完成。
 
 英文端口现在纳入 `LocalTextModel.Suite`，配置文件只读取一次，五个文本端口全部成功校验后才对应用发布；也可单独通过 `loadEnglish` 做配置检查。配置测试与 261 项全套测试通过。
 

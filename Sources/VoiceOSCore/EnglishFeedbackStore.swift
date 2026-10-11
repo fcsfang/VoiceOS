@@ -43,11 +43,34 @@ extension VoiceOSStore {
             try db.execute("UPDATE model_attempts SET state='completed',result_digest=?,usage_json=? WHERE id=? AND state='reserved'", [digest, usage, attemptID])
         }
     }
-    public func markEnglishFeedbackUnknown(attemptID: String, reason: String = "英文反馈结果未知；不自动重发") throws {
+    public func markEnglishFeedbackUnknown(attemptID: String, reason: String = "英文反馈结果未知；不自动重发", inputTokens: Int? = nil, outputTokens: Int? = nil) throws {
+        let usage = String(decoding: try JSONEncoder().encode(["input_tokens": inputTokens, "output_tokens": outputTokens].compactMapValues { $0 }), as: UTF8.self)
         try db.transaction {
-            try db.execute("UPDATE english_feedback_attempts SET state='unknown',error=? WHERE id=? AND state='reserved'", [reason, attemptID])
-            try db.execute("UPDATE model_attempts SET state='unknown',error=? WHERE id=? AND state='reserved'", [reason, attemptID])
+            try db.execute("UPDATE english_feedback_attempts SET state='unknown',error=?,usage_json=? WHERE id=? AND state='reserved'", [reason, usage, attemptID])
+            try db.execute("UPDATE model_attempts SET state='unknown',error=?,usage_json=? WHERE id=? AND state='reserved'", [reason, usage, attemptID])
         }
+    }
+    /// Executes exactly one reserved request. Any transport or validation failure
+    /// becomes a terminal unknown attempt; callers must explicitly prepare a new
+    /// snapshot before trying again.
+    public func performEnglishFeedback(_ snapshot: EnglishPracticeSnapshot, using port: any EnglishPracticeModelPort) async throws -> EnglishFeedbackAttemptRecord {
+        let attemptID = try reserveEnglishFeedback(snapshot, configuration: port.configuration)
+        if let existing = try englishFeedbackAttempts().first(where: { $0.id == attemptID }), existing.state != "reserved" { return existing }
+        do {
+            let response = try await port.generate(EnglishPracticeRequest(attemptID: attemptID, snapshot: snapshot, configuration: port.configuration))
+            try completeEnglishFeedback(attemptID: attemptID, response: response)
+        } catch let failure as ModelPortFailure {
+            switch failure {
+            case .rejected(let reason, let input, let output):
+                try markEnglishFeedbackUnknown(attemptID: attemptID, reason: reason, inputTokens: input, outputTokens: output)
+            }
+            throw failure
+        } catch {
+            try markEnglishFeedbackUnknown(attemptID: attemptID, reason: "英文反馈请求失败；不自动重发")
+            throw error
+        }
+        guard let record = try englishFeedbackAttempts().first(where: { $0.id == attemptID }) else { throw VoiceOSError("英文反馈完成记录缺失") }
+        return record
     }
     public func englishFeedbackAttempts() throws -> [EnglishFeedbackAttemptRecord] {
         try db.query("SELECT * FROM english_feedback_attempts ORDER BY created_at,id").map { row in
