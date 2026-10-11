@@ -108,3 +108,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 混合成果输入契约](engineering/m4-discussion-outcome-input.md)：213项测试，最后AI回应/未知状态/原文与AI双重引文、跨轮任务负例；实际提取和界面尚未实施。
 
 - [M4 持久混合讨论成果](engineering/m4-durable-discussion-outcomes.md)：226项测试、三处强退、12次回归、四个新包往返和实际旧v1–v16恢复；原生出处历史通过，真实提取驱动与跨入口共享身份仍开放。
+
+- [M4 跨入口成果复用准备](engineering/m4-discussion-outcome-reuse.md)：233项测试，已有身份与可新增个人目标分离，完整输入不删减；持久复用执行尚待接入。
