@@ -17,3 +17,7 @@ Core准备/重验会查实际当前来源与逐字稿；云端目的地逐份检
 `ResponsesEnglishPracticePort` 已接入 Core：单次 Responses POST、`store=false`、无音频/工具/重试，严格 JSON Schema 与用量保留；返回后再次执行原句、版本、角色、比较索引和重复项校验。261 项全套测试通过，尚未执行真实英文云端调用，也未创建新的数据库实体，因此不宣称英语质量或 AC-19 完成。
 
 英文端口现在纳入 `LocalTextModel.Suite`，配置文件只读取一次，五个文本端口全部成功校验后才对应用发布；也可单独通过 `loadEnglish` 做配置检查。配置测试与 261 项全套测试通过。
+
+## 首轮真实文本质量探针
+
+已准备 `english-cloud-fixture <隔离库> <本地配置>`：只生成两份合成个人英文练习，显式授予文本云端处理，计划单次请求，原始音频不参与。2026-10-11 实测在建立 HTTP 响应前发生 TLS secure connection failure；未重试、未保存反馈、用量和费用未知。因此当前只有请求契约与解析测试证据，不能把英文语义质量或 AC-19 标为通过。[脱敏证据](../research/evidence/english-feedback-cloud-2026-10-11.json)
