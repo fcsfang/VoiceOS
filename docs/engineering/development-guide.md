@@ -108,3 +108,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 讨论数据基础与持久回复已实现，当前184项测试、包v15/schema16；控制中心讨论入口尚未接入。合成强退验证见[持久讨论回复](m4-durable-discussion-replies.md)。
 
 逐轮讨论的实际文本驱动已验证两轮合成请求；当前190项测试，使用同一本地配置，界面尚待接入。见[驱动记录](m4-discussion-driver.md)。
+
+控制中心“继续讨论”与“讨论记录”已接入：每轮主动口述/文字、保存后明确发送、查看当时引用、明确结束；当前191项测试。文字许可按轮登记，音频保留本机。空/仅标点录音不会关联或发送；详情与实际边界见[逐轮讨论记录](m4-discussion-control-center.md)。

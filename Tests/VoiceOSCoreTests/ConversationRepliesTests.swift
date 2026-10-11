@@ -101,6 +101,8 @@ final class ConversationRepliesTests:XCTestCase {
         do { _=try await s.performConversationReply(input,using:port);XCTFail() } catch {}
         let session=try await s.conversation(id:input.conversationID),rows=try await s.discussionAttempts(conversationID:input.conversationID)
         XCTAssertEqual(session.validity,"frozen");XCTAssertEqual(rows[0].state,"rejected");XCTAssertEqual(rows[0].validity,"frozen")
+        let original=try await s.conversationHistorySources(conversationID:input.conversationID),sessions=try await s.conversations()
+        XCTAssertTrue(original[0].text.contains("合成旧观点"));XCTAssertEqual(sessions.first?.validity,"frozen")
     }
     func testSourceRestrictionAndDestinationMismatchDoNotCallPort() async throws {
         let s=try await store(),input=try await input(s),port=DiscussionFixture(destination:.cloud)

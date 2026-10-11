@@ -14,8 +14,10 @@ public protocol MediaInspector: Sendable {
     func inspect(_ url: URL) async throws -> MediaInfo
 }
 public protocol SpeechPort: Sendable {
+    var backendIdentity: String { get }
     func transcribe(_ url: URL, locale: String) async throws -> SpeechText
 }
+public extension SpeechPort { var backendIdentity: String { "unspecified-speech-port" } }
 public struct SourceRecord: Identifiable, Sendable {
     public let id: String
     public let assetID: String

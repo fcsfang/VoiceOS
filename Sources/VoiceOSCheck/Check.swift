@@ -55,13 +55,14 @@ struct Check {
                 let session = try await store.conversation(id:args[2]), turns = try await store.conversationUserTurns(conversationID:args[2])
                 let output:[String:Any] = ["id":session.id,"state":session.state,"version":session.version,"validity":session.validity,"user_turns":turns.count,"integrity":try await store.integrityCheck()]
                 print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)); return
-            } else if args[0] == "dictation-fixture" {
+            } else if ["dictation-fixture","discussion-voice-fixture"].contains(args[0]) {
                 let intent = try await store.beginDictation(commandID:"synthetic-dictation")
                 let format = AVAudioFormat(standardFormatWithSampleRate:24000,channels:1)!
                 let buffer = AVAudioPCMBuffer(pcmFormat:format,frameCapacity:12000)!; buffer.frameLength = 12000
                 for i in 0..<12000 { buffer.floatChannelData![0][i] = 0.01 * sin(Float(i)*0.1) }
                 do { let file = try AVAudioFile(forWriting:intent.stagingURL,settings:format.settings); try file.write(from:buffer) }
                 try await store.sealDictation(sourceID:intent.sourceID)
+                if args[0] == "discussion-voice-fixture" { try await store.processTranscriptions(using:SyntheticDiscussionSpeech()) }
             } else if args[0] == "quiet-feedback-read" {
                 let items = try await store.cognitiveFeedback(), pref = try await store.cognitiveFeedbackPreference()
                 let output:[String:Any] = ["mode":pref.mode.rawValue,"version":pref.version,"items":items.map { ["id":$0.id,"attempt_id":$0.attemptID,"candidate_id":$0.hit.id] }]
@@ -157,5 +158,12 @@ private struct LocalDiscussionFixture: DiscussionModelPort {
         let source=request.snapshot.context.sources[0]
         let ref=ClaimReference(sourceID:source.sourceID,transcriptVersionID:source.transcriptVersionID,spanID:source.spans[0].id)
         return DiscussionModelResponse(status:.completed,parts:[DiscussionPart(kind:.quotation,text:source.text,references:[ref]),DiscussionPart(kind:.aiSuggestion,text:"合成AI建议：比较反例，尚未形成用户结论。",references:[ref])],inputTokens:11,outputTokens:5)
+    }
+}
+
+private struct SyntheticDiscussionSpeech: SpeechPort {
+    let backendIdentity="synthetic-discussion-speech-fixture-v1"
+    func transcribe(_ url:URL,locale:String) async throws -> SpeechText {
+        SpeechText(text:"合成语音链路夹具：条件尚未验证，暂不执行任务。")
     }
 }

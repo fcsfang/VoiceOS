@@ -139,6 +139,8 @@ public actor VoiceOSStore {
     }
     public func processTranscriptions(using speech: any SpeechPort) async throws {
         guard ready, !processing else { return }
+        let backend = speech.backendIdentity
+        guard !backend.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty, backend.utf8.count <= 160, !backend.contains("\n"), !backend.contains("\r") else { throw VoiceOSError("转写端口身份无效") }
         processing = true
         defer { processing = false }
         while let row = try db.query("""
@@ -163,8 +165,8 @@ public actor VoiceOSStore {
                     let transcriptID = UUID().uuidString
                     try db.execute("""
                     INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at)
-                    VALUES(?,?,?,?,?,'verbatim',?,'zh_CN','Apple SpeechAnalyzer',?)
-                    """, [transcriptID,source,row["asset_id"],row["input_version_id"],job,text,Self.now()])
+                    VALUES(?,?,?,?,?,'verbatim',?,'zh_CN',?,?)
+                    """, [transcriptID,source,row["asset_id"],row["input_version_id"],job,text,backend,Self.now()])
                     let versionID = UUID().uuidString
                     let spans = String(decoding: try JSONEncoder().encode(result.spans), as: UTF8.self)
                     try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?, 'original','system',?)", [versionID,transcriptID,text,spans,Self.now()])

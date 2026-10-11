@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-/// Input-independent local discussion history. This slice does not generate AI replies.
+/// Input-independent local discussion history; AI replies retain a separate identity.
 public struct ConversationRecord: Identifiable, Sendable {
     public let id: String
     public let version: Int
@@ -33,6 +33,15 @@ public struct PreparedConversationInput: Codable, Sendable {
 }
 
 extension VoiceOSStore {
+    public func conversations(limit:Int = 100) throws -> [ConversationRecord] {
+        guard ready,(1...500).contains(limit) else { throw VoiceOSError("讨论历史范围无效") }
+        return try db.query("SELECT id FROM conversations ORDER BY created_at DESC,id DESC LIMIT ?",[String(limit)]).map { try conversation(id:$0["id"]!) }
+    }
+    /// Immutable entry text for historical display; never grants processing permission.
+    public func conversationHistorySources(conversationID:String) throws -> [ContextTranscript] {
+        let session=try conversation(id:conversationID)
+        return try storedConversationContext(session.entryContextID).sources
+    }
     /// Only an explicit entry command creates a session. Entry never processes or endorses text.
     public func beginConversation(sourceIDs: [String], commandID: String = UUID().uuidString) throws -> String {
         guard ready, !commandID.isEmpty, !sourceIDs.isEmpty, Set(sourceIDs).count == sourceIDs.count else {

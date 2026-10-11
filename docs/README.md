@@ -98,3 +98,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 持久讨论回复](engineering/m4-durable-discussion-replies.md)：184项测试、三次强退、实际v1–v14恢复；AI回复保持独立身份，实际讨论模型与界面待接入。
 
 - [M4 文本讨论驱动](engineering/m4-discussion-driver.md)：190项测试、两次真实合成调用、迁移冻结；控制中心讨论界面待接入。
+
+- [M4 逐轮讨论控制中心](engineering/m4-discussion-control-center.md)：191项测试、实际文字回复与结束屏障、两次本地环境音测试和口述关联；成果回流/自然语音质量未完成。
