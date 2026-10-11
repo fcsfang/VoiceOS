@@ -136,3 +136,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [表达关联文本驱动与来源结果页](engineering/m4-expression-association-contract.md)：304项测试，六端口统一配置；显式个人文字理解后自动关联授权历史，完整原话/双方出处/持久状态可核对。生产质量、正式问题状态和保存即自动闭环仍开放。
 
 - [完整关联驱动故障集成](research/evidence/expression-association-full-driver-2026-10-11.json)：召回至接纳的五处强退/五次恢复，以及真实本机BGE召回→合成判断→单次重放；生产模型与自然质量不在本轮证据范围内。
+
+- [问题生命周期输入契约](engineering/m4-question-lifecycle-contract.md)：问题/答案连续原话、认知归属和审阅/授权版本；四项新增回归，308项全套通过。持久对象、分类和界面尚待接入。

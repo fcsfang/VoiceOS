@@ -41,3 +41,5 @@
 - [ADR-020 英文反馈记录](020-english-feedback-records.md)：独立保存原句、建议与练习比较，避免污染认知候选和行动。
 
 - [021 表达关联持久身份](021-durable-expression-association.md)：独立快照与尝试、当前表达派发去重、未知不重发；新增schema22/v21的持久忽略及安全卡片投影。
+
+- [022 问题生命周期边界](022-question-lifecycle-boundary.md)：独立状态与认知认可/证据分离；已采用纯输入校验，持久执行仍开放。
