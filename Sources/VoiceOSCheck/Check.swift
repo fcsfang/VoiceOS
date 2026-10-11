@@ -37,6 +37,8 @@ struct Check {
                 }
             })
             try await store.recover()
+            if args[0] == "question-active-answer-fixture" { try await runQuestionActiveAnswerFixture(store); return }
+            if args[0] == "question-reopen-fixture" { try await runQuestionReopenFixture(store); return }
             if args[0] == "question-association-fixture" { try await runQuestionAssociationFixture(store); return }
             if args[0] == "question-close-fixture" { try await runQuestionCloseFixture(store); return }
             if args[0] == "typed-cognition-fixture" { try await runTypedCognitionFixture(store); return }

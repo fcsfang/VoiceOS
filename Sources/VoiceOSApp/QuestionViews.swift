@@ -21,7 +21,8 @@ struct QuestionStateView: View {
             Text("问题第 \(question.version) 版 · \(question.status.displayLabel)").font(.callout)
             if question.seed.ownership == "ai_candidate" { Text("AI 提出的问题 · 不代表我的疑问").font(.caption).foregroundStyle(.secondary) }
             if question.validity == "frozen" { Text("历史状态 · 原话、归属或答案依据已变化，暂停当前使用").font(.caption).foregroundStyle(.orange) }
-            Button("登记问题状态…") { changing = true }.disabled(question.validity != "current" || model.savingQuestion)
+            if question.canReopen { Text("当前答案依据已变化；可明确重开，旧答案仍保留在历史中。").font(.caption).foregroundStyle(.secondary) }
+            Button(question.canReopen ? "重新打开并保留历史…" : "登记问题状态…") { changing = true }.disabled((question.validity != "current" && !question.canReopen) || model.savingQuestion)
             if let revisions = model.questionRevisions[question.id], !revisions.isEmpty {
                 DisclosureGroup("问题状态历史（\(revisions.count)）") {
                     ForEach(revisions) { revision in

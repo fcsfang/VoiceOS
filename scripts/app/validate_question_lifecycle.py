@@ -10,6 +10,7 @@ import subprocess
 parser = argparse.ArgumentParser()
 parser.add_argument('--root', required=True, type=Path)
 parser.add_argument('--binary', type=Path, default=Path('.build/debug/voiceos-check'))
+parser.add_argument('--repair', action='store_true', help='also kill explicit reopen after active answer correction')
 args = parser.parse_args()
 if args.root.exists():
     parser.error('Use a fresh isolated root')
@@ -58,4 +59,22 @@ for checkpoint in ['claimsUncommitted', 'claimsCommitted', 'questionUncommitted'
     with sqlite3.connect(restored / 'voiceos.sqlite') as db:
         assert db.execute("SELECT COUNT(*) FROM questions WHERE validity!='frozen'").fetchone()[0] == 0
     checks.append({'checkpoint': checkpoint, 'recovered_counts': counts(root), 'restored_counts': counts(restored), 'restored_history_frozen': True})
+if args.repair:
+    for checkpoint in ['questionUncommitted', 'questionCommitted']:
+        root = args.root / ('repair-' + checkpoint)
+        frozen = run('question-active-answer-fixture', root)
+        assert frozen['status'] == 'resolved' and frozen['version'] == 2 and frozen['validity'] == 'frozen' and frozen['can_reopen']
+        run('question-reopen-fixture', root, crash=checkpoint)
+        with sqlite3.connect(root / 'voiceos.sqlite') as db:
+            version, status = db.execute('SELECT version,status FROM questions').fetchone()
+            assert (version, status) == ((3, 'open') if checkpoint == 'questionCommitted' else (2, 'resolved'))
+        reopened = run('question-reopen-fixture', root)
+        assert reopened == run('question-reopen-fixture', root)
+        assert reopened['version'] == 3 and reopened['status'] == 'open' and reopened['validity'] == 'current' and reopened['revisions'] == 2
+        package, restored = args.root / ('repair-' + checkpoint + '-package'), args.root / ('repair-' + checkpoint + '-restored')
+        run('export', root, package); run('restore', restored, package); run('read', restored)
+        assert counts(root) == counts(restored)
+        with sqlite3.connect(restored / 'voiceos.sqlite') as db:
+            assert db.execute('SELECT status,validity FROM questions').fetchone() == ('open', 'frozen')
+        checks.append({'checkpoint': 'repair-' + checkpoint, 'after_kill_version': version, 'reopened_version': 3, 'history_revisions': 2, 'restored_history_frozen': True})
 print(json.dumps({'synthetic_only': True, 'process_kills': len(checks), 'portable_round_trips': len(checks), 'checks': checks, 'cloud_calls': 0, 'microphone_calls': 0, 'external_task_writes': 0}, indent=2))

@@ -6,6 +6,8 @@ public struct QuestionRecord: Identifiable, Sendable {
     public let version: Int
     public let status: QuestionStatus
     public let validity: String
+    /// Only a changed active answer can be repaired by explicit reopen; migration/seed freezes cannot.
+    public let canReopen: Bool
 }
 public struct QuestionRevision: Identifiable, Sendable {
     public let id: String
@@ -40,19 +42,23 @@ extension VoiceOSStore {
         try Self.validateStoredQuestions(db)
         return try db.query("SELECT * FROM questions ORDER BY created_at,id").filter { claimID == nil || $0["claim_id"] == claimID }.map { row in
             let seed = try JSONDecoder().decode(QuestionSeedSnapshot.self, from: Data(row["seed_json"]!.utf8))
-            var validity = row["validity"]!
+            var validity = row["validity"]!, canReopen = false
             if validity == "current" {
                 do {
                     try validateCurrentQuestionSeed(seed)
-                    for revision in try questionHistory(questionID: row["id"]!) {
-                        if let context = revision.input.resolutionContext { try validateLocalTranscriptContext(context) }
-                        if let version = revision.input.resolutionPolicyVersion, let evidence = revision.input.resolution {
-                            guard try sourcePolicy(sourceID: evidence.reference.sourceID).version == version else { throw VoiceOSError("答案权限已变化") }
-                        }
+                    // Earlier answers are history. Only the current resolved state depends on its answer.
+                    if row["status"] == QuestionStatus.resolved.rawValue {
+                        guard let active = try questionHistory(questionID: row["id"]!).last,
+                              active.input.to == .resolved, let evidence = active.input.resolution,
+                              let context = active.input.resolutionContext, let policy = active.input.resolutionPolicyVersion else { throw VoiceOSError("当前解决状态缺少答案") }
+                        do {
+                            try validateLocalTranscriptContext(context)
+                            guard try sourcePolicy(sourceID: evidence.reference.sourceID).version == policy else { throw VoiceOSError("答案权限已变化") }
+                        } catch { validity = "frozen"; canReopen = true }
                     }
                 } catch { validity = "frozen" }
             }
-            return .init(id: row["id"]!, seed: seed, version: Int(row["version"]!)!, status: QuestionStatus(rawValue: row["status"]!)!, validity: validity)
+            return .init(id: row["id"]!, seed: seed, version: Int(row["version"]!)!, status: QuestionStatus(rawValue: row["status"]!)!, validity: validity, canReopen: canReopen)
         }
     }
     public func questionHistory(questionID: String) throws -> [QuestionRevision] {
@@ -61,7 +67,7 @@ extension VoiceOSStore {
         }
     }
     public func prepareStoredQuestionTransition(questionID: String, expectedVersion: Int, to: QuestionStatus, reason: String, resolution: OutcomeSourceEvidence? = nil) throws -> QuestionTransitionSnapshot {
-        guard let question = try questions().first(where: { $0.id == questionID }), question.validity == "current", question.version == expectedVersion,
+        guard let question = try questions().first(where: { $0.id == questionID }), (question.validity == "current" || (question.canReopen && to == .open)), question.version == expectedVersion,
               let claim = try candidateClaims().first(where: { $0.id == question.seed.claimID }) else { throw VoiceOSError("问题版本或依据已变化") }
         let fresh = try prepareQuestionSeed(claimID: claim.id, expectedReviewVersion: claim.reviewVersion, original: question.seed.original)
         return try prepareQuestionTransition(seed: fresh, expectedVersion: expectedVersion, from: question.status, to: to, reason: reason, resolution: resolution)
@@ -74,7 +80,7 @@ extension VoiceOSStore {
             guard old["question_id"] == questionID, old["input_digest"] == fingerprint else { throw VoiceOSError("同一问题命令不能更换内容") }
             return Int(old["to_version"]!)!
         }
-        guard let question = try questions().first(where: { $0.id == questionID }), question.validity == "current",
+        guard let question = try questions().first(where: { $0.id == questionID }), (question.validity == "current" || (question.canReopen && input.to == .open)),
               question.seed.claimID == input.seed.claimID, question.version == input.expectedVersion, question.status == input.from else { throw VoiceOSError("问题已更新或依据冻结，请重新读取") }
         try validateQuestionTransition(input)
         let next = input.expectedVersion + 1

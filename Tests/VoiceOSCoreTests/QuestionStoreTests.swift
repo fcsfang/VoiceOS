@@ -24,7 +24,7 @@ final class QuestionStoreTests: XCTestCase {
         let claimNow = try await s.candidateClaims().first
         XCTAssertEqual(claimNow?.reviewState, "endorsed"); XCTAssertEqual(claimNow?.evidenceState, "unverified")
     }
-    func testResolveReplayConflictReopenAndAnswerCorrectionFreeze() async throws {
+    func testResolveReplayConflictAndCorrectionPreservesExplicitReopenedState() async throws {
         let (s, _, _) = try await fixture.fixture(contentKind: .question)
         let question = try await firstQuestion(s)
         let answer = try await fixture.evidence(s, text: "我找到反例，已登记答案；这不代表客观验证。")
@@ -39,7 +39,39 @@ final class QuestionStoreTests: XCTestCase {
         _ = try await s.transitionQuestion(questionID: question.id, input: reopen)
         let histories = try await s.questionHistory(questionID: question.id); XCTAssertEqual(histories.count, 2)
         _ = try await s.correctTranscript(sourceID: answer.reference.sourceID, expectedVersionID: answer.reference.transcriptVersionID, text: "更正：此前反例错误。")
-        let frozen = try await s.questions().first; XCTAssertEqual(frozen?.validity, "frozen"); XCTAssertEqual(frozen?.status, .open)
+        let frozen = try await s.questions().first; XCTAssertEqual(frozen?.validity, "current"); XCTAssertEqual(frozen?.status, .open)
+    }
+    func testChangedActiveAnswerCanOnlyBeExplicitlyReopenedAndReanswered() async throws {
+        let (s, _, _) = try await fixture.fixture(contentKind: .question), q = try await firstQuestion(s)
+        let answer = try await fixture.evidence(s, text: "合成答案一：我登记解决，答案仍未验证。")
+        let resolved = try await s.prepareStoredQuestionTransition(questionID: q.id, expectedVersion: 1, to: .resolved, reason: "答案一", resolution: answer)
+        _ = try await s.transitionQuestion(questionID: q.id, input: resolved)
+        _ = try await s.correctTranscript(sourceID: answer.reference.sourceID, expectedVersionID: answer.reference.transcriptVersionID, text: "更正：答案一错误。")
+        let frozen = try await firstQuestion(s); XCTAssertEqual(frozen.validity, "frozen"); XCTAssertTrue(frozen.canReopen)
+        do { _ = try await s.prepareStoredQuestionTransition(questionID: q.id, expectedVersion: 2, to: .closed, reason: "直接跳过重开"); XCTFail("not a reopen") } catch {}
+        let reopen = try await s.prepareStoredQuestionTransition(questionID: q.id, expectedVersion: 2, to: .open, reason: "我明确重新研究，旧答案失效")
+        _ = try await s.transitionQuestion(questionID: q.id, input: reopen, commandID: "repair-reopen")
+        let opened = try await firstQuestion(s); XCTAssertEqual(opened.validity, "current"); XCTAssertEqual(opened.version, 3); XCTAssertFalse(opened.canReopen)
+        let newAnswer = try await fixture.evidence(s, text: "合成答案二：新的依据，答案仍待验证。")
+        let next = try await s.prepareStoredQuestionTransition(questionID: q.id, expectedVersion: 3, to: .resolved, reason: "登记新答案", resolution: newAnswer)
+        _ = try await s.transitionQuestion(questionID: q.id, input: next)
+        let after = try await firstQuestion(s); XCTAssertEqual(after.status, .resolved); XCTAssertEqual(after.validity, "current"); XCTAssertEqual(after.version, 4)
+        let history = try await s.questionHistory(questionID: q.id); XCTAssertEqual(history.count, 3); XCTAssertEqual(history[0].input.resolution?.quote, answer.quote)
+    }
+    func testSeedFreezeAndMigratedHistoryCannotUseAnswerRepairShortcut() async throws {
+        let (s, claim, _) = try await fixture.fixture(contentKind: .question), q = try await firstQuestion(s)
+        let answer = try await fixture.evidence(s, text: "合成答案")
+        let resolved = try await s.prepareStoredQuestionTransition(questionID: q.id, expectedVersion: 1, to: .resolved, reason: "已登记", resolution: answer)
+        _ = try await s.transitionQuestion(questionID: q.id, input: resolved)
+        let package = fixture.root.appendingPathComponent("repair-package"), restoredRoot = fixture.root.appendingPathComponent("repair-restored")
+        try await s.exportPackage(to: package)
+        try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: QuestionInspectorForStore())
+        let restored = try VoiceOSStore(root: restoredRoot, inspector: QuestionInspectorForStore()); try await restored.recover()
+        let migrated = try await firstQuestion(restored); XCTAssertEqual(migrated.validity, "frozen"); XCTAssertFalse(migrated.canReopen)
+        do { _ = try await restored.prepareStoredQuestionTransition(questionID: q.id, expectedVersion: 2, to: .open, reason: "迁移不能恢复授权"); XCTFail("migration repaired") } catch {}
+        _ = try await s.reviewClaim(claimID: claim, expectedVersion: 0, action: .correct, statement: "已更正成其他陈述", note: "问题原身份不再适用")
+        let frozen = try await firstQuestion(s); XCTAssertEqual(frozen.validity, "frozen"); XCTAssertFalse(frozen.canReopen)
+        do { _ = try await s.prepareStoredQuestionTransition(questionID: q.id, expectedVersion: 2, to: .open, reason: "原认知更正不能借答案修复"); XCTFail("seed repaired") } catch {}
     }
     func testLegacyNotClassifiedAndAIIdentityPreserved() async throws {
         let (s, claim, quote) = try await fixture.fixture()
