@@ -150,3 +150,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 2026-10-12 增量：讨论成果v2已接入显式内容类型与个人/AI问题状态入口，旧结果不重提取；334项回归、签名构建、三处成果与六处状态强退/恢复及原生讨论页核对通过。见[问题契约](engineering/m4-question-lifecycle-contract.md)与[脱敏证据](research/evidence/discussion-question-types-2026-10-12.json)。自然质量与完整MVP仍未通过。
 
 2026-10-12 续接修复：单份表达与讨论回合显式整理可沿用成功理解后继续尚未预留的关联，未知/拒绝/失效不重发；跨模型配置关联去重。339项全套、六处真实强退/六次迁移及签名构建通过；本切片0云端/麦克风/外部写。见[契约](engineering/m4-expression-association-contract.md)与[证据](research/evidence/source-understanding-continuation-2026-10-12.json)。保存即自动处理及自然质量仍开放。
+
+2026-10-12 自动衔接基础：单份个人文字处理意图的只读快照已实现，固定全文、版本、权限epoch及两个端口，不授予云端权限、不发请求。343项全套通过；[执行契约](engineering/m4-expression-processing-intent.md)与[ADR-023](adr/023-expression-processing-intent.md)明确下一步持久队列和保存入口；尚不能称保存即自动闭环。
