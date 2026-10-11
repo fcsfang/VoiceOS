@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -401,8 +401,26 @@ final class Database {
                 try execute("PRAGMA user_version=18")
             }
         }
-
-
+        if try query("PRAGMA user_version").first?["user_version"] == "18" {
+            try transaction {
+                try execute("ALTER TABLE model_attempts ADD COLUMN producer_sequence INTEGER CHECK(producer_sequence IS NULL OR (typeof(producer_sequence)='integer' AND producer_sequence>0))")
+                try backfillModelProducerSequence()
+                try execute("CREATE UNIQUE INDEX model_producer_sequence ON model_attempts(producer_sequence)")
+                try execute("PRAGMA user_version=19")
+            }
+        }
+    }
+    /// Only called for pre-sequence schemas/packages. Retrospective order is a baseline,
+    /// not evidence of the original wall-clock order; all new producers follow it.
+    func backfillModelProducerSequence() throws {
+        try execute("UPDATE model_attempts SET producer_sequence=NULL")
+        for (index,row) in try query("SELECT id FROM model_attempts ORDER BY created_at,id").enumerated() {
+            try execute("UPDATE model_attempts SET producer_sequence=? WHERE id=?",[String(index+1),row["id"]])
+        }
+    }
+    func nextModelProducerSequence() throws -> String {
+        guard let value=try query("SELECT COALESCE(MAX(producer_sequence),0) AS value FROM model_attempts").first?["value"].flatMap(Int64.init),value < Int64.max else { throw VoiceOSError("成果生产者顺序已超出范围") }
+        return String(value+1)
     }
     deinit { sqlite3_close(handle) }
     func execute(_ sql: String, _ arguments: [String?] = []) throws { _ = try query(sql, arguments) }

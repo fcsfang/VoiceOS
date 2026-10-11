@@ -110,3 +110,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 持久混合讨论成果](engineering/m4-durable-discussion-outcomes.md)：226项测试、三处强退、12次回归、四个新包往返和实际旧v1–v16恢复；原生出处历史通过，真实提取驱动与跨入口共享身份仍开放。
 
 - [M4 跨入口成果复用准备](engineering/m4-discussion-outcome-reuse.md)：233项测试，已有身份与可新增个人目标分离，完整输入不删减；持久复用执行尚待接入。
+
+- [成果生产者持久顺序](adr/019-model-producer-sequence.md)：237项测试，v18/schema19、实际旧v1–v17与schema18升级；跨入口持久复用仍待接入。

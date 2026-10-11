@@ -32,7 +32,7 @@ extension VoiceOSStore {
             let id=UUID().uuidString,modelID=UUID().uuidString
             let contextID=try persistLocalContext(current,commandID:"discussion-derivation:"+id,destination:.local)
             try db.transaction {
-                try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,execution_kind) VALUES(?,?,'discussion_derivation','discussion-part-copy-v1','not_applicable','ai-candidate-v1','reserved',?,'discussion_derivation')",[modelID,contextID,Self.now()])
+                try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,execution_kind,producer_sequence) VALUES(?,?,'discussion_derivation','discussion-part-copy-v1','not_applicable','ai-candidate-v1','reserved',?,'discussion_derivation',?)",[modelID,contextID,Self.now(),try db.nextModelProducerSequence()])
                 try db.execute("INSERT INTO discussion_claim_derivations(id,command_id,discussion_attempt_id,part_index,part_digest,reference_kind,model_attempt_id,state,created_at) VALUES(?,?,?,?,?,?,?,'pending',?)",[id,commandID,attemptID,String(partIndex),partDigest,referenceKind,modelID,Self.now()])
             }
             try checkpoint(.discussionCandidateReserved)

@@ -37,5 +37,5 @@ for media in [False,True]:
     after=state(target);assert after[0]==original[0]
     assert [r[:3] for r in after[1]]==[r[:3] for r in original[1]] and all(r[3]=='frozen' for r in after[1])
     assert after[2][0][:-1]==original[2][0][:-1] and after[2][0][-1]=='frozen'
-report={'date':'2026-10-11','schema':18,'package_version':17,'synthetic_only':True,'process_crashes':checks,'portable_round_trips':2,'cloud_calls':0,'microphone_calls':0,'external_task_writes':0}
+report={'date':'2026-10-11','schema':19,'package_version':18,'synthetic_only':True,'process_crashes':checks,'portable_round_trips':2,'cloud_calls':0,'microphone_calls':0,'external_task_writes':0}
 (a.root/'report.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2))

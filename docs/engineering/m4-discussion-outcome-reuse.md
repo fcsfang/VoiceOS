@@ -11,3 +11,5 @@
 新增7项测试覆盖只读/完整输入、个人原身份与完成/拒绝保留、空/未知/拒绝消费、AI原段落复用/新分析、准备后的竞态、在途与权限变化、恢复冻结。233项全套通过。实际CLI两次跨进程规划保持相同结果，生产者/候选/行动数量不变，原AI候选及未整理个人目标同时保留。23份原始愿景hash未改。本切片0云端、0录音、0外写；未进行新增原生界面验收。
 
 复现：在新的隔离库生成`discussion-candidate-fixture`，用`outcome-reuse-plan <资料库> <会话ID>`输出脱敏身份目录。准备命令会保存来源Context，目录读取与验证本身只读。[证据](../research/evidence/discussion-outcome-reuse-plan-2026-10-11.json)，[持久成果前置](m4-durable-discussion-outcomes.md)。
+
+2026-10-11 顺序基础增量：四种model_attempts生产入口随预留登记唯一持久顺序，复用目录支持按边界读取；237项测试、实际旧v1–v17恢复/重开、旧schema18副本升级、三处强退及两次新包往返通过。当前v18/schema19共26表。旧记录建立回溯基线，不伪称真实旧时间顺序。持久复用执行仍未接入。见[ADR-019](../adr/019-model-producer-sequence.md)。

@@ -43,7 +43,7 @@ extension VoiceOSStore {
         try validateOutcomeDerivationIsolation(input.conversationID)
         let id=UUID().uuidString,json=try Self.relevanceJSON(snapshot)
         try db.transaction {
-            try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at) VALUES(?,?,?,?,?,?,'reserved',?)",[id,input.contextID,"discussion_outcome:"+config.provider,config.model,config.promptVersion,config.schemaVersion,Self.now()])
+            try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)",[id,input.contextID,"discussion_outcome:"+config.provider,config.model,config.promptVersion,config.schemaVersion,Self.now(),try db.nextModelProducerSequence()])
             try db.execute("INSERT INTO conversation_outcome_attempts(id,conversation_id,conversation_version,snapshot_json,snapshot_digest,created_at) VALUES(?,?,?,?,?,?)",[id,input.conversationID,String(input.conversationVersion),json,Self.relevanceHash(Data(json.utf8)),Self.now()])
         }
         try checkpoint(.outcomeReserved)

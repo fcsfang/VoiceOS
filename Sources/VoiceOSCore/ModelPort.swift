@@ -72,7 +72,7 @@ extension VoiceOSStore {
         let context = try localContext(id: contextID)
         if config.destination == .cloud, context.sources.contains(where: \.localOnly) { throw VoiceOSError("仅本地来源禁止云端发送") }
         let attempt = UUID().uuidString
-        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at) VALUES(?,?,?,?,?,?,'reserved',?)", [attempt,contextID,config.provider,config.model,config.promptVersion,config.schemaVersion,ISO8601DateFormatter().string(from: Date())])
+        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)", [attempt,contextID,config.provider,config.model,config.promptVersion,config.schemaVersion,ISO8601DateFormatter().string(from: Date()),try db.nextModelProducerSequence()])
         try checkpoint(.modelReserved)
         let response: ModelResponse
         do { response = try await port.generate(ModelRequest(attemptID: attempt, context: context, configuration: config)) }
@@ -111,6 +111,7 @@ extension VoiceOSStore {
 }
 
 public struct ModelAttemptRecord: Identifiable, Sendable {
+    public let producerSequence:Int64
     public let executionKind: String
     public let id: String
     public let state: String
@@ -127,7 +128,7 @@ extension VoiceOSStore {
             rows = try db.query("SELECT a.*,c.state AS context_state FROM model_attempts a JOIN contexts c ON c.id=a.context_id WHERE a.context_id IN (SELECT context_id FROM context_inputs WHERE source_id=?) ORDER BY a.created_at,a.id", [sourceID])
         } else { rows = try db.query("SELECT a.*,c.state AS context_state FROM model_attempts a JOIN contexts c ON c.id=a.context_id ORDER BY a.created_at,a.id") }
         return try rows.map { row in
-            ModelAttemptRecord(executionKind:row["execution_kind"]!,id: row["id"]!, state: row["state"]!, provider: row["provider"]!, model: row["model"]!, usage: try row["usage_json"].map { try JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) }, billingState:row["execution_kind"] == "discussion_derivation" ? "not_applicable" : "unknown", contextState: row["context_state"]!)
+            ModelAttemptRecord(producerSequence:Int64(row["producer_sequence"]!)!,executionKind:row["execution_kind"]!,id: row["id"]!, state: row["state"]!, provider: row["provider"]!, model: row["model"]!, usage: try row["usage_json"].map { try JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) }, billingState:row["execution_kind"] == "discussion_derivation" ? "not_applicable" : "unknown", contextState: row["context_state"]!)
         }
     }
 }

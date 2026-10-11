@@ -120,3 +120,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 结束讨论成果的持久端口与历史界面已验证，当前226项测试，包v17/schema18共26表。没有面向用户的提取按钮或生产驱动；已有个人整理/独立AI候选暂阻断整段新提取，后续完善共享身份。可在全新隔离目录运行`python3 scripts/app/validate_discussion_outcomes.py --root <目录>`，无云端/录音/外部写。见[实施记录](m4-durable-discussion-outcomes.md)。
 
 跨入口只读复用目录与新增目标提案校验已实现，当前233项测试；`outcome-reuse-plan <隔离库> <会话ID>`仅准备Context和读取目录，不提取或复制候选。持久提取的旧入口隔离仍保留，见[准备契约](m4-discussion-outcome-reuse.md)。
+
+当前237项测试、包v18/schema19共26表；认知请求和AI本地复制保存持久生产顺序，失败/未知/空结果不丢位置。旧包v1–v17恢复通过。跨入口成果执行仍受旧隔离保护，见[顺序决策](../adr/019-model-producer-sequence.md)。

@@ -79,7 +79,7 @@ final class ActionFeedbackTests: XCTestCase {
         let (s,_) = try await fixture(); let package = base.appendingPathComponent("preview")
         try await s.exportPackage(to:package)
         let summary = try VoiceOSStore.packageSummary(at:package)
-        XCTAssertEqual(summary.version,17); XCTAssertEqual(summary.sourceCount,1)
+        XCTAssertEqual(summary.version,18); XCTAssertEqual(summary.sourceCount,1)
         XCTAssertEqual(summary.omittedAssetCount,1); XCTAssertFalse(summary.mediaIncluded)
         XCTAssertFalse(FileManager.default.fileExists(atPath:package.appendingPathComponent("voiceos.sqlite").path))
     }

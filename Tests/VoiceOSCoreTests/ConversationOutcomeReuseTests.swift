@@ -102,4 +102,67 @@ final class ConversationOutcomeReuseTests:XCTestCase {
         do { try await r.validateConversationOutcomeReusePlan(plan,snapshot:snapshot);XCTFail() } catch {}
         let models=try await r.modelAttempts();XCTAssertEqual(models.count,1)
     }
+    func testProducerOrderSurvivesRestoreAndNewWorkFollowsHistoricalIdentities() async throws {
+        let (s,snapshot)=try await setup()
+        _=try await s.understandSource(sourceID:snapshot.input.userTurns[0].sourceID,using:ReusePersonal(mode:"empty"))
+        let ai=try await s.retainDiscussionAICandidate(attemptID:snapshot.replies[0].attemptID,partIndex:0)
+        _=try await s.understandSource(sourceID:snapshot.input.userTurns[1].sourceID,using:ReusePersonal(mode:"empty"))
+        let before=try await s.modelAttempts(),plan=try await s.conversationOutcomeReusePlan(for:snapshot)
+        XCTAssertEqual(Set(before.map(\.producerSequence)),[1,2,3]);XCTAssertEqual(plan.priorResults.first(where: { $0.claimIDs == [ai] })?.producerSequence,2)
+        _=try await s.retainDiscussionAICandidate(attemptID:snapshot.replies[0].attemptID,partIndex:0)
+        let package=root.appendingPathComponent("ordered-package"),restored=root.appendingPathComponent("ordered-restored")
+        try await s.exportPackage(to:package);try await VoiceOSStore.restorePackage(from:package,to:restored,inspector:ReuseInspector())
+        let r=try VoiceOSStore(root:restored,inspector:ReuseInspector());try await r.recover()
+        let after=try await r.modelAttempts()
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues:before.map { ($0.id,$0.producerSequence) }),Dictionary(uniqueKeysWithValues:after.map { ($0.id,$0.producerSequence) }))
+        let fresh=try await r.recordUserExpression("合成新表达：需要检验恢复后顺序。")
+        _=try await r.understandSource(sourceID:fresh,using:ReusePersonal(mode:"empty"))
+        let records=try await r.modelAttempts();XCTAssertEqual(Set(records.map(\.producerSequence)),[1,2,3,4])
+    }
+    func testUnknownProducerKeepsItsPositionAndDoesNotReuseItForNewRequest() async throws {
+        let (s,snapshot)=try await setup()
+        do { _=try await s.understandSource(sourceID:snapshot.input.userTurns[0].sourceID,using:ReusePersonal(mode:"unknown"));XCTFail() } catch {}
+        _=try await s.understandSource(sourceID:snapshot.input.userTurns[1].sourceID,using:ReusePersonal(mode:"empty"))
+        let records=try await s.modelAttempts()
+        XCTAssertEqual(records.first(where: { $0.state == "unknown" })?.producerSequence,1)
+        XCTAssertEqual(records.first(where: { $0.state == "completed" })?.producerSequence,2)
+    }
+    func rewriteSequencePackage(_ package:URL,mode:String) throws {
+        let file=package.appendingPathComponent("model_attempts.jsonl")
+        var rows=try String(contentsOf:file,encoding:.utf8).split(separator:"\n").map { try XCTUnwrap(JSONSerialization.jsonObject(with:Data($0.utf8)) as? [String:Any]) }
+        if mode == "legacy" || mode == "missing" { for i in rows.indices { rows[i].removeValue(forKey:"producer_sequence") } }
+        if mode == "duplicate" { for i in rows.indices { rows[i]["producer_sequence"]=1 } }
+        if mode == "negative" { rows[0]["producer_sequence"] = -1 }
+        if mode == "text" { rows[0]["producer_sequence"] = "invalid-order" }
+        var data=Data();for row in rows { data.append(try JSONSerialization.data(withJSONObject:row));data.append(10) };try data.write(to:file)
+        let manifest=package.appendingPathComponent("manifest.json")
+        var m=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:manifest)) as? [String:Any]),files=m["files"] as! [[String:Any]]
+        let index=try XCTUnwrap(files.firstIndex { $0["path"] as? String == "model_attempts.jsonl" }),hash=try DurableFiles.hash(file)
+        files[index]["bytes"]=hash.0;files[index]["sha256"]=hash.1;m["files"]=files
+        if mode == "legacy" { m["version"]=17;m["databaseSchema"]=18 }
+        try JSONSerialization.data(withJSONObject:m).write(to:manifest)
+    }
+    func testLegacyPackageBuildsRetrospectiveBaselineWithoutChangingModelIdentity() async throws {
+        let (s,snapshot)=try await setup()
+        _=try await s.understandSource(sourceID:snapshot.input.userTurns[0].sourceID,using:ReusePersonal(mode:"empty"))
+        _=try await s.retainDiscussionAICandidate(attemptID:snapshot.replies[0].attemptID,partIndex:0)
+        let before=try await s.modelAttempts(),package=root.appendingPathComponent("legacy"),restored=root.appendingPathComponent("legacy-restored")
+        try await s.exportPackage(to:package);try rewriteSequencePackage(package,mode:"legacy")
+        try await VoiceOSStore.restorePackage(from:package,to:restored,inspector:ReuseInspector())
+        let r=try VoiceOSStore(root:restored,inspector:ReuseInspector());try await r.recover()
+        let after=try await r.modelAttempts()
+        XCTAssertEqual(Set(after.map(\.id)),Set(before.map(\.id)));XCTAssertEqual(Set(after.map(\.producerSequence)),[1,2])
+    }
+    func testNewPackageCannotRepairMissingDuplicateNegativeOrTextOrderAfterRehash() async throws {
+        let (s,snapshot)=try await setup()
+        _=try await s.understandSource(sourceID:snapshot.input.userTurns[0].sourceID,using:ReusePersonal(mode:"empty"))
+        _=try await s.retainDiscussionAICandidate(attemptID:snapshot.replies[0].attemptID,partIndex:0)
+        for mode in ["missing","duplicate","negative","text"] {
+            let package=root.appendingPathComponent(mode),target=root.appendingPathComponent(mode+"-restored")
+            try await s.exportPackage(to:package);try rewriteSequencePackage(package,mode:mode)
+            do { try await VoiceOSStore.restorePackage(from:package,to:target,inspector:ReuseInspector());XCTFail(mode) } catch {}
+            XCTAssertFalse(FileManager.default.fileExists(atPath:target.path))
+        }
+    }
+
 }

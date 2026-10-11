@@ -48,7 +48,7 @@ private enum PackageLayout {
         default: return tables
         }
     }
-    static let integerFields: Set<String> = ["part_index", "conversation_version", "auto_send", "sequence", "action_version", "completed", "marker_valid", "claim_review_version", "review_version", "policy_version", "from_version", "to_version", "from_local_only", "to_local_only", "ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
+    static let integerFields: Set<String> = ["producer_sequence", "part_index", "conversation_version", "auto_send", "sequence", "action_version", "completed", "marker_valid", "claim_review_version", "review_version", "policy_version", "from_version", "to_version", "from_local_only", "to_local_only", "ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
     static func json(_ row: [String: String]) -> [String: Any] {
         row.reduce(into: [String: Any]()) { out, pair in
             if integerFields.contains(pair.key), let number = Int64(pair.value) { out[pair.key] = number }
@@ -81,7 +81,7 @@ extension VoiceOSStore {
         let file = try PackageLayout.safeFile(package, "manifest.json")
         guard let size = try file.resourceValues(forKeys:[.fileSizeKey]).fileSize, size > 0, size <= 1048576 else { throw VoiceOSError("迁移清单过大或为空") }
         let manifest = try JSONDecoder().decode(PackageManifest.self,from:Data(contentsOf:file))
-        guard manifest.format == "VoiceOS-local-package", (1...17).contains(manifest.version), manifest.databaseSchema == manifest.version + 1,
+        guard manifest.format == "VoiceOS-local-package", (1...18).contains(manifest.version), manifest.databaseSchema == manifest.version + 1,
               let count = manifest.counts["sources"], count >= 0, manifest.counts.values.allSatisfy({ $0 >= 0 && $0 <= 1000000 }) else { throw VoiceOSError("不支持此迁移包格式或记录数量") }
         return PackageSummary(version:manifest.version,createdAt:manifest.createdAt,sourceCount:count,omittedAssetCount:manifest.omittedAssetIDs.count,mediaIncluded:manifest.mediaIncluded)
     }
@@ -130,7 +130,7 @@ extension VoiceOSStore {
                 files.append(verified)
             }
             if includeMedia { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 17, databaseSchema: 18, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 18, databaseSchema: 19, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)
@@ -147,7 +147,7 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("恢复目标必须是新的空目录；现有资料库不会被覆盖") }
         let manifestURL = try PackageLayout.safeFile(package, "manifest.json")
         let manifest = try JSONDecoder().decode(PackageManifest.self, from: Data(contentsOf: manifestURL))
-        guard manifest.format == "VoiceOS-local-package", (1...17).contains(manifest.version), manifest.databaseSchema == manifest.version + 1 else { throw VoiceOSError("不支持此迁移包格式") }
+        guard manifest.format == "VoiceOS-local-package", (1...18).contains(manifest.version), manifest.databaseSchema == manifest.version + 1 else { throw VoiceOSError("不支持此迁移包格式") }
         let tables = PackageLayout.tables(for: manifest.version)
         guard Set(manifest.files.map(\.path)).count == manifest.files.count,
               Set(manifest.counts.keys) == Set(tables),
@@ -222,14 +222,14 @@ extension VoiceOSStore {
                 guard copied.0 == actual.0, copied.1 == actual.1 else { throw VoiceOSError("恢复副本完整性校验失败") }
             }
             guard Set(verifiedFiles.keys) == expectedPaths else { throw VoiceOSError("迁移清单包含不受支持的文件") }
-            try populateRestore(temporary, rows: rows, omittedSources: omittedSources, tables: tables)
+            try populateRestore(temporary, rows: rows, omittedSources: omittedSources, tables: tables, packageVersion: manifest.version)
             try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets"))
             try DurableFiles.syncDirectory(temporary)
             try FileManager.default.moveItem(at: temporary, to: destination)
             try DurableFiles.syncDirectory(destination.deletingLastPathComponent())
         } catch { try? FileManager.default.removeItem(at: temporary); throw error }
     }
-    private static func populateRestore(_ directory: URL, rows: [String: [[String: String]]], omittedSources: Set<String>, tables: [String]) throws {
+    private static func populateRestore(_ directory: URL, rows: [String: [[String: String]]], omittedSources: Set<String>, tables: [String], packageVersion:Int) throws {
         let database = try Database(directory.appendingPathComponent("voiceos.sqlite"))
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: directory.appendingPathComponent("voiceos.sqlite").path)
         try database.transaction {
@@ -257,6 +257,7 @@ extension VoiceOSStore {
                 }
             }
             if tables == PackageLayout.legacyTables { try database.backfillTranscriptVersions() }
+            if packageVersion < 18 { try database.backfillModelProducerSequence() }
             try database.execute("UPDATE contexts SET state='stale' WHERE id IN (SELECT context_id FROM model_attempts WHERE execution_kind='discussion_derivation')")
             try database.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT id FROM model_attempts WHERE execution_kind='discussion_derivation')")
             try database.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT id FROM claims WHERE attempt_id IN (SELECT id FROM model_attempts WHERE execution_kind='discussion_derivation'))")

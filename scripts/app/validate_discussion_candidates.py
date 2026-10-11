@@ -35,5 +35,5 @@ for media in [False,True]:
     run('export',source,package,*(['media'] if media else []));run('restore',target,package);run('read',target)
     restored=state(target);assert restored[0]==original[0] and restored[1]==original[1]
     assert restored[2][0][:3]==original[2][0][:3] and restored[2][0][3]=='frozen'
-report={'date':'2026-10-11','schema':18,'package_version':17,'synthetic_only':True,'process_crashes':checks,'portable_round_trips':2,'cloud_calls':0,'microphone_calls':0,'external_task_writes':0}
+report={'date':'2026-10-11','schema':19,'package_version':18,'synthetic_only':True,'process_crashes':checks,'portable_round_trips':2,'cloud_calls':0,'microphone_calls':0,'external_task_writes':0}
 (a.root/'report.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2))

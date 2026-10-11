@@ -75,7 +75,7 @@ extension VoiceOSStore {
         _ = try localContext(id: contextID)
         guard !model.isEmpty, !promptVersion.isEmpty, !schemaVersion.isEmpty else { throw VoiceOSError("模型调用配置缺少版本") }
         let id = UUID().uuidString
-        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at) VALUES(?,?,'local_fixture',?,?,?,'reserved',?)", [id,contextID,model,promptVersion,schemaVersion,timestamp()])
+        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,'local_fixture',?,?,?,'reserved',?,?)", [id,contextID,model,promptVersion,schemaVersion,timestamp(),try db.nextModelProducerSequence()])
         try checkpoint(.modelReserved)
         return id
     }
@@ -152,6 +152,7 @@ extension VoiceOSStore {
         }
     }
     static func validateStoredCognition(_ db: Database) throws {
+        guard try db.query("SELECT id FROM model_attempts WHERE producer_sequence IS NULL OR typeof(producer_sequence)!='integer' OR producer_sequence<=0").isEmpty else { throw VoiceOSError("成果生产者缺少有效持久顺序") }
         for source in try db.query("SELECT id,local_only,policy_version FROM sources") {
             guard let version = Int(source["policy_version"]!), version >= 1, ["0","1"].contains(source["local_only"]!) else { throw VoiceOSError("迁移来源授权格式错误") }
             let history = try db.query("SELECT * FROM source_policy_revisions WHERE source_id=? ORDER BY to_version", [source["id"]])
