@@ -1,0 +1,88 @@
+{
+  "date": "2026-10-11",
+  "synthetic": true,
+  "automated_tests": 154,
+  "failures": 0,
+  "skipped": 0,
+  "crashes": [
+    {
+      "checkpoint": "intent",
+      "exit_code": -9,
+      "state": "interrupted",
+      "assets": 0,
+      "speech_jobs": 0,
+      "integrity": "ok",
+      "microphone_used": false
+    },
+    {
+      "checkpoint": "copyComplete",
+      "exit_code": -9,
+      "state": "interrupted",
+      "assets": 0,
+      "speech_jobs": 0,
+      "integrity": "ok",
+      "microphone_used": false
+    },
+    {
+      "checkpoint": "sealed",
+      "exit_code": -9,
+      "state": "saved",
+      "assets": 1,
+      "speech_jobs": 1,
+      "integrity": "ok",
+      "microphone_used": false
+    },
+    {
+      "checkpoint": "renamed",
+      "exit_code": -9,
+      "state": "saved",
+      "assets": 1,
+      "speech_jobs": 1,
+      "integrity": "ok",
+      "microphone_used": false
+    },
+    {
+      "checkpoint": "savedUncommitted",
+      "exit_code": -9,
+      "state": "saved",
+      "assets": 1,
+      "speech_jobs": 1,
+      "integrity": "ok",
+      "microphone_used": false
+    },
+    {
+      "checkpoint": "savedCommitted",
+      "exit_code": -9,
+      "state": "saved",
+      "assets": 1,
+      "speech_jobs": 1,
+      "integrity": "ok",
+      "microphone_used": false
+    }
+  ],
+  "exports_restores": 11,
+  "unsealed_media_export_rejected": 1,
+  "legacy_package_versions": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ],
+  "package_version": 13,
+  "schema": 14,
+  "tables": 21,
+  "microphone_used": false,
+  "new_model_calls": 0,
+  "actual_microphone_acceptance": false,
+  "sleep_tested": false,
+  "native_ui_entry_observed": true,
+  "microphone_start_clicked": false
+}

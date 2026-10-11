@@ -2,6 +2,7 @@ import Foundation
 import Darwin
 import VoiceOSCore
 import VoiceOSPlatform
+import AVFoundation
 
 @main
 struct Check {
@@ -27,7 +28,14 @@ struct Check {
                 if point.rawValue == crash { kill(getpid(), SIGKILL) }
             })
             try await store.recover()
-            if args[0] == "quiet-feedback-read" {
+            if args[0] == "dictation-fixture" {
+                let intent = try await store.beginDictation(commandID:"synthetic-dictation")
+                let format = AVAudioFormat(standardFormatWithSampleRate:24000,channels:1)!
+                let buffer = AVAudioPCMBuffer(pcmFormat:format,frameCapacity:12000)!; buffer.frameLength = 12000
+                for i in 0..<12000 { buffer.floatChannelData![0][i] = 0.01 * sin(Float(i)*0.1) }
+                do { let file = try AVAudioFile(forWriting:intent.stagingURL,settings:format.settings); try file.write(from:buffer) }
+                try await store.sealDictation(sourceID:intent.sourceID)
+            } else if args[0] == "quiet-feedback-read" {
                 let items = try await store.cognitiveFeedback(), pref = try await store.cognitiveFeedbackPreference()
                 let output:[String:Any] = ["mode":pref.mode.rawValue,"version":pref.version,"items":items.map { ["id":$0.id,"attempt_id":$0.attemptID,"candidate_id":$0.hit.id] }]
                 print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)); return

@@ -86,3 +86,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 原生本地语义召回](engineering/m4-native-semantic-recall.md)：固定 BGE/CoreML 资源、完整窗口出处、136 项测试与实际界面/链路验证。
 
 - [M4 静默相关原文](engineering/m4-quiet-feedback.md)：持久忽略/减少/暂停、完整输入屏障、146项测试、四次强退及旧v1–v11恢复；非完整主动反馈。
+
+- [M1 个人口述增量](engineering/m1-personal-dictation.md)：显式开始/停止、持久捕获身份、片段核对、154项测试及六次强退；实际设备权限与睡眠仍待验证。

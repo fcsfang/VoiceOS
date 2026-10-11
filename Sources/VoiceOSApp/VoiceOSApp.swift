@@ -137,6 +137,52 @@ final class ControlCenter: ObservableObject {
     var libraryTitle: String { rootOverride == nil ? "VoiceOS" : "独立资料库 · " + rootOverride!.lastPathComponent }
     init(root: URL? = nil) { rootOverride = root }
     private var store: VoiceOSStore?
+    @Published var dictationBusy = false
+    @Published var dictationActive = false
+    private var dictationSource: String?
+    private var dictationInterrupted = false
+    private let dictation = NativeDictation()
+    private var dictationObservers: [NSObjectProtocol] = []
+    func startDictation() async {
+        guard let store, !dictationBusy, !dictationActive else { return }
+        dictationBusy = true; defer { dictationBusy = false }
+        guard await dictation.requestPermission() else { status = "麦克风未获授权，未开始录制；仍可导入文件"; return }
+        do {
+            let intent = try await store.beginDictation()
+            dictationSource = intent.sourceID; dictationInterrupted = false
+            try dictation.start(at:intent.stagingURL) { [weak self] success in Task { await self?.finishDictation(success:success) } }
+            dictationActive = true; selected = intent.sourceID
+            status = "正在录制我的口述 · 仅本地；停止后才核对并封存原件"
+            await refresh()
+        } catch {
+            if let id = dictationSource { try? await store.interruptDictation(sourceID:id) }
+            dictationSource = nil; dictationActive = false; status = error.localizedDescription; await refresh()
+        }
+    }
+    func stopDictation(interrupted:Bool = false) {
+        guard dictationActive, !dictationBusy else { return }
+        dictationInterrupted = interrupted; dictationBusy = true
+        status = interrupted ? "录制因系统中断结束，保留片段待核对" : "正在停止录制并核对原件…"
+        dictation.stop()
+    }
+    private func finishDictation(success:Bool) async {
+        guard let store, let id = dictationSource else { return }
+        dictationSource = nil; dictationActive = false
+        defer { dictationBusy = false }
+        if success && !dictationInterrupted {
+            do { try await store.sealDictation(sourceID:id); status = "口述原件已保存 · 本地转写随后处理" }
+            catch { try? await store.interruptDictation(sourceID:id); status = "录制封存未完成，请重开或核对片段；未报告保存成功" }
+        } else {
+            try? await store.interruptDictation(sourceID:id); status = "录制未正常结束，片段保留待核对；未报告保存成功"
+        }
+        await refresh(); scheduleProcessing()
+    }
+    func recoverDictation(_ record:SourceRecord) async {
+        guard let store, !dictationBusy, !dictationActive else { return }
+        dictationBusy = true; defer { dictationBusy = false }
+        do { try await store.sealDictation(sourceID:record.id); status = "可解码片段已保存；它是中断片段，不代表完整表达"; await refresh(); scheduleProcessing() }
+        catch { status = "片段尚不能完整解码，保留待核对"; await refresh() }
+    }
     private var worker: Task<Void, Never>?
     func start() async {
         guard store == nil else { return }
@@ -155,6 +201,9 @@ final class ControlCenter: ObservableObject {
             await refresh()
             scheduleProcessing()
             installReminderRefresh()
+            dictationObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.willSleepNotification,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.stopDictation(interrupted:true) } })
+            dictationObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didWakeNotification,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.stopDictation(interrupted:true) } })
+            dictationObservers.append(NotificationCenter.default.addObserver(forName:NSApplication.willTerminateNotification,object:nil,queue:.main) { [weak self] _ in MainActor.assumeIsolated { self?.stopDictation(interrupted:true) } })
             requestReminderRefresh()
         } catch { status = error.localizedDescription }
     }
@@ -482,7 +531,7 @@ struct CenterView: View {
             }
             .navigationTitle("资料库")
             .searchable(text: $model.query, prompt: "搜索文件名或逐字稿")
-            .overlay { if model.records.isEmpty { ContentUnavailableView("从一段表达开始", systemImage: "waveform", description: Text("导入音频或视频，保存原件并生成本地逐字稿。")) } }
+            .overlay { if model.records.isEmpty { ContentUnavailableView("从一段表达开始", systemImage: "waveform", description: Text("开始口述或导入音视频，保存原件并生成本地逐字稿。")) } }
         } detail: {
             if let record = model.records.first(where: { $0.id == model.selected }) {
                 ScrollView {
@@ -490,6 +539,10 @@ struct CenterView: View {
                         Text(record.name).font(.title2).textSelection(.enabled)
                         HStack { Label(label(record), systemImage: record.state == "saved" ? "checkmark.circle" : "exclamationmark.circle"); Spacer(); Text(record.kind == "user_text" ? "文字" : (record.kind == "video" ? "视频" : "音频")) }
                         Text("\(record.origin == "user" ? "我的直接表达" : "外部资料 · 说话人待核对") · \(record.localOnly ? "仅本机处理" : "文本可用于云端")").font(.callout).foregroundStyle(.secondary)
+                        if record.kind == "audio", record.origin == "user", record.state == "interrupted" {
+                            Text("这次口述未正常封存。可尝试保存能完整解码的片段，不能视为整次表达完整。").font(.callout)
+                            Button("核对并保存录制片段") { Task { await model.recoverDictation(record) } }.disabled(model.dictationBusy || model.dictationActive)
+                        }
                         if let actionID = record.feedbackActionID, let action = model.actionRecords.first(where: { $0.id == actionID }) {
                             Text("\(record.feedbackKind == "outcome" ? "结果记录" : "反思记录") · 关联行动第 \(record.feedbackActionVersion ?? 1) 版").font(.caption)
                             Button("查看关联行动") { Task { await model.actionHistory(action); showActionHistory = true } }
@@ -623,6 +676,11 @@ struct CenterView: View {
             } else { ContentUnavailableView("选择一份资料", systemImage: "doc.text.magnifyingglass", description: Text("原件和逐字稿保存在 VoiceOS 自己的资料库中。")) }
         }
         .toolbar {
+            if model.dictationActive {
+                Button("停止并保存口述",systemImage:"stop.circle.fill") { model.stopDictation() }.disabled(model.dictationBusy)
+            } else {
+                Button("开始我的口述",systemImage:"mic") { Task { await model.startDictation() } }.disabled(!model.initialized || model.dictationBusy).help("录制你自己的表达；第三方节目请使用导入，以保留外部来源身份。")
+            }
             Button("静默回顾", systemImage:"text.bubble") { showingQuietFeedback = true }.disabled(!model.initialized)
             Button("查找历史文字", systemImage: "text.magnifyingglass") { searching = true }.disabled(!model.initialized)
             Button("连接提醒事项…") { Task { await model.connectReminders() } }.disabled(!model.initialized || model.remindersBusy)
@@ -635,7 +693,7 @@ struct CenterView: View {
                 Divider()
                 Button("导出结构化资料…") { model.export(includeMedia: false) }
                 Button("导出资料与原件…") { model.export(includeMedia: true) }
-            } label: { Label("导出资料", systemImage: "square.and.arrow.up") }.disabled(!model.initialized || model.importing)
+            } label: { Label("导出资料", systemImage: "square.and.arrow.up") }.disabled(!model.initialized || model.importing || model.dictationBusy || model.dictationActive)
         }
         .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
         .focusedSceneValue(\.voiceOSController, model)
@@ -769,6 +827,7 @@ struct CenterView: View {
     }
     private func timeLabel(_ ms: Int) -> String { String(format: "%02d:%02d", ms / 60000, (ms / 1000) % 60) }
     private func label(_ record: SourceRecord) -> String {
+        if record.state == "receiving", record.origin == "user", record.kind == "audio" { return "录制待封存" }
         switch record.state {
         case "saved": return "原件已保存"
         case "quarantined": return "原件需要检查"

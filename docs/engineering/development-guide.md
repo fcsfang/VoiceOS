@@ -6,7 +6,7 @@
 
 在项目根目录执行 `python3 scripts/app/build.py`，生成 `dist/VoiceOS.app`，可在访达中双击打开。构建使用本机 Xcode SDK，不改变全局开发环境；开发预览采用本地临时签名，bundle ID 为 `local.voiceos.app`。测试机器最低部署目标暂设 macOS 26，不代表已验证所有 macOS 26 设备或确定了正式支持列表。
 
-应用点击“导入文件”，选择音频或视频。完整复制与音轨解码验证通过后显示“原件已保存”，再由已安装的 Apple 中文模型本地转写。首次不请求麦克风或提醒事项权限、不下载模型、不读取 .env、不上传文本或音频。原件只有点击“打开保存的原件”才交给默认播放器，不自动播放。
+应用点击“导入文件”，选择音频或视频。完整复制与音轨解码验证通过后显示“原件已保存”，再由已安装的 Apple 中文模型本地转写。默认打开不请求麦克风或提醒事项权限、不下载模型、不上传文本或音频。开发启动脚本可加载既有本地模型配置，读取配置不触发发送。原件只有点击“打开保存的原件”才交给默认播放器，不自动播放。
 
 有效扩展名候选：m4a、mp3、wav、aiff/aif、caf、aac、flac、mp4、mov、m4v；实际支持还取决于系统能否完整解码音轨。当前真实样本验证仅覆盖 M4A 与含音轨 MP4。没有可处理音轨的视频会返回原因，不能将扩展名清单当成所有编码的支持承诺。模型不可用时保留原件和失败原因；已安装模型查询通过后才启动转写，无云端回退。
 
@@ -30,7 +30,7 @@ VOICEOS_DATA_DIR="$PWD/runtime/my-local-test" dist/VoiceOS.app/Contents/MacOS/Vo
 
 ## 导出与空库恢复
 
-工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v12，存储 schema 13，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews/actions/action_revisions/reminder_links/reminder_observations/action_feedback/relevance_attempts/relevance_inputs/cognitive_feedback_ignores/cognitive_feedback_preferences 二十一类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 、v4/schema 5 、v5/schema 6 、v6/schema 7 、v7/schema 8 、v8/schema 9 、v9/schema 10 、v10/schema 11 与 v11/schema 12 包。它仅覆盖当前已实现的实体，未来新增实体时必须升级格式。包含外部身份映射和回读历史，不包含凭据或系统权限；恢复不携带本机持续连接授权。
+工具栏提供默认结构化导出和可选原件打包。当前包格式 `VoiceOS-local-package` v13，存储 schema 14，含 manifest 与 sources/assets/jobs/transcripts/transcript_versions/transcript_revisions/contexts/context_inputs/model_attempts/claims/source_policy_revisions/claim_reviews/actions/action_revisions/reminder_links/reminder_observations/action_feedback/relevance_attempts/relevance_inputs/cognitive_feedback_ignores/cognitive_feedback_preferences 二十一类 UTF-8 JSONL；仍可恢复旧 v1/schema 2 、v2/schema 3 、v3/schema 4 、v4/schema 5 、v5/schema 6 、v6/schema 7 、v7/schema 8 、v8/schema 9 、v9/schema 10 、v10/schema 11 、v11/schema 12 与 v12/schema 13 包。它仅覆盖当前已实现的实体，未来新增实体时必须升级格式。包含外部身份映射和回读历史，不包含凭据或系统权限；恢复不携带本机持续连接授权。
 
 导出记录文件数量、长度、SHA-256 与未打包原件 ID；原件包先核验原件，再逐字节复制核验。包先在临时目录生成，完成后改名到新目标；不覆盖现有目录。当前同步 actor 快照依靠单写者和原件不可变契约，尚未实现删除，因此不存在资产删除竞态；加入删除/异步导出前必须实现 pin 与取消屏障，不能照搬当前边界。
 
@@ -100,3 +100,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 独立相关性调用、输入历史和恢复屏障已实现，实际文本驱动可复用同一本地配置。详情见[相关性驱动](m4-relevance-driver.md)。控制中心“查找历史文字”现支持从关键词结果选定原文、准备并执行文本模型相关性判断，再查看出处；见[界面实施记录](m4-relevance-control-center.md)。含模型构建现提供本机跨措辞候选召回；`build.py --semantic-model <已验证模型目录>` 显式加入资源。普通构建不包含模型，详见[原生召回](m4-native-semantic-recall.md)。
 
 工具栏“静默回顾”展示已接纳且仍有效的相关原文；忽略、减少为每次一条及暂停持久保存，关闭不表示认可。见[当前实施与边界](m4-quiet-feedback.md)。
+
+点击“开始我的口述”才请求麦克风并录制本人表达；“停止并保存”通过原件核对后进入本地转写。中断片段保留待核对，录制中不导出；带原件导出遇未封存片段明确拒绝，结构化迁移不包含暂存音频。真实设备/权限/睡眠仍待验证，见[口述增量](m1-personal-dictation.md)。

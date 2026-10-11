@@ -26,3 +26,5 @@
 - [011 原生本地语义召回](011-native-semantic-recall.md)：CoreML float32、显式模型资源、可重建投影与排序候选，开发切片 accepted。
 
 - [012 静默反馈](012-quiet-relevance-feedback.md)：回执投影、跨查询去重、偏好版本与迁移，采用范围限W18初始切片。
+
+- [013 个人口述](013-durable-personal-dictation.md)：AVAudioRecorder、持久身份与原件封存，部分采用；设备/权限/睡眠待测。

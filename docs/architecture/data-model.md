@@ -129,3 +129,7 @@ Core 持有这些身份/版本契约；未来完整应用、思源或不同任�
 ## 静默反馈实施增量（2026-10-11）
 
 Schema13/迁移v12新增`cognitive_feedback_ignores`（原调用、候选及查询/原文稳定指纹）和`cognitive_feedback_preferences`（顺序版本、normal/reduced/paused与命令身份）。卡片内容从有效相关性回执投影，不复制原文、不改变观点/证据/行动；读取与打开均复核全部输入。忽略不代表放弃兴趣，关闭不代表认可。恢复保留偏好及忽略、冻结回执；详见[ADR-012](../adr/012-quiet-relevance-feedback.md)。
+
+## 口述来源语义增量（2026-10-11）
+
+Schema14/迁移v13保留21表，但新增`microphone-v1:<sourceID>`个人口述身份语义。用户声明本人表达，origin/speaker为user，第三方材料继续external导入。bytes0/零摘要仅允许未封存receiving/interrupted，无资产/任务；封存后按同一来源、原件及输入版本持久保存。元数据迁移提示暂存片段未包含，带媒体导出阻止遗漏未封存片段。旧读者拒绝此版本；详见[ADR-013](../adr/013-durable-personal-dictation.md)。
