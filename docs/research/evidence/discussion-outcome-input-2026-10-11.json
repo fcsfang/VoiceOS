@@ -1,0 +1,21 @@
+{
+  "date": "2026-10-11",
+  "tests_passed": 213,
+  "schema": 17,
+  "package_version": 16,
+  "input": {
+    "accepted_ai_parts": 1,
+    "integrity": true,
+    "personal_turn_count": 1,
+    "reply_count": 1,
+    "session_state": "active",
+    "source_count": 2
+  },
+  "repeat_local_preparation_stable": true,
+  "restored_frozen_preparation_rejected": true,
+  "cloud_calls": 0,
+  "microphone_calls": 0,
+  "external_task_writes": 0,
+  "claims_created": 0,
+  "actions_created": 0
+}

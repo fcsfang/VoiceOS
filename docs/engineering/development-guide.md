@@ -114,3 +114,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 讨论中的“整理我的这轮表达”只发送选定个人原话；候选与明确行动沿用原有流程，结束后可显式整理，已有记录不重发。原文“查看关联讨论”可回溯，当前196项测试；见[个人成果回流](m4-discussion-user-return.md)。
 
 讨论AI分析的“保留为AI候选”只做本地复制，待核对/未验证，不认可或创建行动；候选可返回原讨论。没有模型引用时，触发原文不作为结论证据。当前205项测试、包v16/schema17；见[候选回流](m4-discussion-candidates.md)。
+
+混合讨论成果尚未开放；完整角色输入与双重出处提案校验已验证，当前213项测试，包仍v16/schema17。实际调用、原子成果与界面是下一切片；见[输入契约](m4-discussion-outcome-input.md)。

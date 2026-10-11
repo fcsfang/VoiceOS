@@ -104,3 +104,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 个人发言回流](engineering/m4-discussion-user-return.md)：196项测试、一次实际个人原话整理、条件/否定、任务结果反馈及来源返回讨论；AI讨论候选回流仍待实现。
 
 - [M4 讨论AI候选回流](engineering/m4-discussion-candidates.md)：205项测试、三次强退、四个新包往返及旧v1–v15恢复；显式保留AI身份，引用/触发点分开，完整混合成果仍开放。
+
+- [M4 混合成果输入契约](engineering/m4-discussion-outcome-input.md)：213项测试，最后AI回应/未知状态/原文与AI双重引文、跨轮任务负例；实际提取和界面尚未实施。

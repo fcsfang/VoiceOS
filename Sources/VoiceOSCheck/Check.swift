@@ -49,6 +49,13 @@ struct Check {
                     guard let reply=try await store.discussionAttempts(conversationID:id).first else { throw VoiceOSError("missing synthetic reply") }
                     _=try await store.retainDiscussionAICandidate(attemptID:reply.id,partIndex:1,commandID:"synthetic-ai-candidate")
                 }
+            } else if args[0] == "discussion-outcome-prepare" {
+                guard args.count == 3 else { throw VoiceOSError("discussion-outcome-prepare requires conversation ID") }
+                let session=try await store.conversation(id:args[2])
+                let input=try await store.prepareConversationOutcome(id:session.id,expectedVersion:session.version,destination:.local,commandID:"synthetic-outcome-input")
+                try await store.validateConversationOutcome(input)
+                let output:[String:Any]=["integrity":try await store.integrityCheck(),"session_state":input.sessionState,"source_count":input.context.sources.count,"personal_turn_count":input.input.userTurns.count,"reply_count":input.replies.count,"accepted_ai_parts":input.replies.reduce(0) { $0+$1.parts.filter { $0.kind == .aiSuggestion }.count }]
+                print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self));return
             } else if args[0] == "discussion-read" {
                 guard args.count == 3 else { throw VoiceOSError("discussion-read requires conversation ID") }
                 let attempts = try await store.discussionAttempts(conversationID:args[2])
