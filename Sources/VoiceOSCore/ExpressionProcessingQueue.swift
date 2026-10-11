@@ -195,8 +195,13 @@ extension VoiceOSStore {
                 return try processingRecord(row)
             }
             if let cognitionAttempt { try updateProcessing(id, state: .running, phase: .cognition, cognitionAttemptID: cognitionAttempt) }
-            guard cognition.state == "completed" || cognition.state == "frozen" || cognition.state == "discussion_completed" else {
-                let terminal: ExpressionProcessingIntentState = cognition.state.contains("rejected") ? .rejected : .unknown
+            guard cognition.state == "completed" || cognition.state == "discussion_completed" else {
+                let terminal: ExpressionProcessingIntentState
+                if cognition.state == "frozen" {
+                    terminal = .frozen
+                } else {
+                    terminal = cognition.state.contains("rejected") ? .rejected : .unknown
+                }
                 try updateProcessing(id, state: terminal, phase: .cognition, error: "理解阶段状态为 \(cognition.state)，不会自动重发")
                 return try processingIntent(id: id)
             }

@@ -97,6 +97,22 @@ final class ExpressionProcessingQueueTests: XCTestCase {
         XCTAssertEqual(history.count, 1); XCTAssertEqual(history[0].state, .frozen)
     }
 
+    func testFrozenCognitionStopsQueueBeforeAssociation() async throws {
+        let store = try VoiceOSStore(root: root, inspector: QueueInspector()); try await store.recover()
+        let source = try await store.recordUserExpression("已有理解但当前已冻结的表达")
+        _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: 1, localOnly: false)
+        let configuration = config(), firstModel = QueueModel(configuration)
+        _ = try await store.understandSource(sourceID: source, using: firstModel)
+        try await store.invalidateCognition(sourceID: source)
+        let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: source, cognition: configuration, association: configuration)
+        let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "frozen-cognition", cognition: configuration, association: configuration)
+        let model = QueueModel(configuration), association = QueueAssociation(configuration)
+        let result = try await store.runExpressionProcessingIntent(id: intent.id, retrieval: QueueRetrieval(), cognitionPort: model, associationPort: association)
+        XCTAssertEqual(result.state, .frozen)
+        let modelCalls = await model.callCount(), associationCalls = await association.callCount()
+        XCTAssertEqual(modelCalls, 0); XCTAssertEqual(associationCalls, 0)
+    }
+
     func testQueueCancellationIsDurableAndDoesNotDispatch() async throws {
         let store = try VoiceOSStore(root: root, inspector: QueueInspector()); try await store.recover()
         let source = try await store.recordUserExpression("明确取消的表达")
