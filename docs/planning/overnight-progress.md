@@ -10,10 +10,10 @@
 
 ## 接手核验
 
-- 工作区：`main`，相对 `origin/main` ahead 69；接手时工作区干净。
-- 最近基线提交：`99a01e6`；本轮持久队列切片已提交（当前 HEAD）。
+- 工作区：`main`；当前工作区干净。交接时相对 `origin/main` ahead 69，之后新增提交已留在本地分支。
+- 交接历史基线为 `99a01e6`；当前队列、恢复、取消、迁移和 UI 状态切片已提交，最新提交见本文件顶部。
 - 接手时没有 VoiceOS、Swift 测试或构建进程运行。
-- schema 当前为 24，PortablePackage 当前为 v23；持久 `processing_intents` 尚未存在。
+- 交接时历史 schema 为 24、PortablePackage v23，尚无持久 `processing_intents`；当前已升至 schema25 / PortablePackage v24。
 
 ## 当前切片
 
