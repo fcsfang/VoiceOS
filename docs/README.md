@@ -132,3 +132,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [新表达静默关联实施契约](engineering/m4-expression-association-contract.md)：当前原话锚点、双引文/理由、权限版本和预算基础已实现；290项回归、三处真实强退和三次包恢复；持久执行已接入，自动触发与卡片仍待接入。
 
 - [表达关联静默卡片](engineering/m4-expression-association-contract.md)：294项测试、五处强退、持久忽略和原生双引文/出处/暂停恢复验证；schema22/v21包，自动触发与自然质量仍开放。
+
+- [表达关联文本驱动与来源结果页](engineering/m4-expression-association-contract.md)：304项测试，六端口统一配置；显式个人文字理解后自动关联授权历史，完整原话/双方出处/持久状态可核对。生产质量、正式问题状态和保存即自动闭环仍开放。

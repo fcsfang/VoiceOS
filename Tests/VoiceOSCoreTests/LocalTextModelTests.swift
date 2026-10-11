@@ -20,7 +20,7 @@ final class LocalTextModelTests: XCTestCase {
         XCTAssertEqual(english.configuration.provider,port.configuration.provider)
         XCTAssertEqual(english.configuration.promptVersion,"english-practice-v1")
         let suite=try LocalTextModel.loadSuite(from:file)
-        XCTAssertEqual(Set([suite.cognition.configuration.provider,suite.discussion.configuration.provider,suite.relevance.configuration.provider,suite.outcome.configuration.provider,suite.english.configuration.provider]),[port.configuration.provider])
+        XCTAssertEqual(Set([suite.cognition.configuration.provider,suite.discussion.configuration.provider,suite.relevance.configuration.provider,suite.outcome.configuration.provider,suite.english.configuration.provider,suite.association.configuration.provider]),[port.configuration.provider])
     }
     func testMalformedDuplicateAndOversizedConfigurationFailWithoutEchoingContents() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -39,5 +39,6 @@ final class LocalTextModelTests: XCTestCase {
         let suite = try LocalTextModel.loadSuite(from: file)
         XCTAssertEqual(suite.english.configuration.provider, "responses:api.chiyi.cc")
         XCTAssertEqual(suite.english.configuration.promptVersion, "english-practice-v1")
+        XCTAssertEqual(suite.association.configuration.promptVersion, "expression-association-v1")
     }
 }

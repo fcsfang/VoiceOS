@@ -16,9 +16,9 @@ private actor AssociationStorePort: ExpressionAssociationPort {
     let fail: Bool
     let all: Bool
     let callback: (@Sendable (ExpressionAssociationRequest) async throws -> Void)?
-    init(empty: Bool = false, fail: Bool = false, all: Bool = false, model: String = "synthetic", callback: (@Sendable (ExpressionAssociationRequest) async throws -> Void)? = nil) {
+    init(empty: Bool = false, fail: Bool = false, all: Bool = false, model: String = "synthetic", destination: ModelDestination = .local, callback: (@Sendable (ExpressionAssociationRequest) async throws -> Void)? = nil) {
         self.empty = empty; self.fail = fail; self.all = all; self.callback = callback
-        configuration = .init(provider: "in_memory_association", model: model, promptVersion: "p1", schemaVersion: "s1", destination: .local)
+        configuration = .init(provider: "in_memory_association", model: model, promptVersion: "p1", schemaVersion: "s1", destination: destination)
     }
     func associate(_ request: ExpressionAssociationRequest) async throws -> ExpressionAssociationResponse {
         calls += 1; try await callback?(request)
@@ -26,6 +26,17 @@ private actor AssociationStorePort: ExpressionAssociationPort {
         let source = request.snapshot.current.sources[0]
         let evidence = OutcomeSourceEvidence(reference: .init(sourceID: source.sourceID, transcriptVersionID: source.transcriptVersionID, spanID: source.spans[0].id), quote: source.text)
         return ExpressionAssociationResponse(proposals: empty ? [] : request.snapshot.candidates.prefix(all ? 2 : 1).map { hit in .init(candidateID: hit.id, current: evidence, historicalQuote: hit.document.text, relation: .sameQuestion, reason: "合成关联：两次原话讨论同一个限制条件。") }, inputTokens: 17, outputTokens: 23)
+    }
+}
+private actor AssociationDriverRetrieval: LocalRetrievalPort {
+    var queries: [String] = []
+    var seenSources: Set<String> = []
+    let empty: Bool
+    let callback: (@Sendable () async throws -> Void)?
+    init(empty: Bool = false, callback: (@Sendable () async throws -> Void)? = nil) { self.empty = empty; self.callback = callback }
+    func rank(query: String, documents: [RetrievalDocument], semantic: Bool) async throws -> [RetrievalMatch] {
+        queries.append(query); seenSources.formUnion(documents.map(\.sourceID)); try await callback?()
+        return empty ? [] : documents.map { .init(documentID: $0.id, score: 1, method: "exact") }
     }
 }
 final class ExpressionAssociationStoreTests: XCTestCase {
@@ -41,6 +52,65 @@ final class ExpressionAssociationStoreTests: XCTestCase {
         let current = try await s.recordUserExpression("新表达：我还在研究猜想的限制条件。")
         let hits = try await s.retrieve("表达", using: AssociationStoreRetrieval()).hits.filter { $0.document.sourceID != current }
         return try await s.prepareExpressionAssociation(currentSourceID: current, candidates: hits)
+    }
+    func testAutomaticDriverNoModelPrivatePausedAndBudgetNeverDispatch() async throws {
+        let s = try await store(), snapshot = try await fixture(s), id = snapshot.current.sources[0].sourceID, retrieval = AssociationDriverRetrieval(), port = AssociationStorePort(destination: .cloud)
+        let missing = try await s.processExpressionAssociation(sourceID: id, retrieval: retrieval, model: nil)
+        XCTAssertEqual(missing.state, .modelUnavailable)
+        let privateSource = try await s.processExpressionAssociation(sourceID: id, retrieval: retrieval, model: port)
+        XCTAssertEqual(privateSource.state, .localOnly)
+        try await s.setCognitiveFeedbackMode(.paused, expectedVersion: 0)
+        let paused = try await s.processExpressionAssociation(sourceID: id, retrieval: retrieval, model: port)
+        XCTAssertEqual(paused.state, .paused)
+        try await s.setCognitiveFeedbackMode(.normal, expectedVersion: 1)
+        _ = try await s.correctTranscript(sourceID: id, expectedVersionID: snapshot.current.sources[0].transcriptVersionID, text: String(repeating: "字", count: 8001))
+        let budget = try await s.processExpressionAssociation(sourceID: id, retrieval: retrieval, model: AssociationStorePort())
+        XCTAssertEqual(budget.state, .budgetExceeded)
+        let calls = await port.calls, queries = await retrieval.queries
+        XCTAssertEqual(calls, 0); XCTAssertTrue(queries.isEmpty)
+        let history = try await s.expressionAssociationAttempts(); XCTAssertTrue(history.isEmpty)
+    }
+    func testAutomaticDriverFullExpressionRecallAndReplayOnce() async throws {
+        let s = try await store(), snapshot = try await fixture(s), id = snapshot.current.sources[0].sourceID
+        let text = String(repeating: "完整个人表达，", count: 100)
+        _ = try await s.correctTranscript(sourceID: id, expectedVersionID: snapshot.current.sources[0].transcriptVersionID, text: text)
+        let retrieval = AssociationDriverRetrieval(), port = AssociationStorePort()
+        let result = try await s.processExpressionAssociation(sourceID: id, retrieval: retrieval, model: port)
+        XCTAssertEqual(result.state, .completed); XCTAssertEqual(result.attempt?.snapshot.current.sources[0].text, text)
+        let queries = await retrieval.queries; XCTAssertEqual(queries.joined(), text); XCTAssertEqual(queries.count, 2)
+        _ = try await s.processExpressionAssociation(sourceID: id, retrieval: retrieval, model: port)
+        let calls = await port.calls, replayQueries = await retrieval.queries
+        XCTAssertEqual(calls, 1); XCTAssertEqual(replayQueries.count, 2)
+    }
+    func testAutomaticDriverFiltersPrivateHistoryBeforeRanking() async throws {
+        let s = try await store(), snapshot = try await fixture(s), current = snapshot.current.sources[0].sourceID, authorized = snapshot.candidates[0].document.sourceID
+        for id in [current, authorized] { _ = try await s.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false) }
+        let retrieval = AssociationDriverRetrieval(), port = AssociationStorePort(destination: .cloud)
+        let result = try await s.processExpressionAssociation(sourceID: current, retrieval: retrieval, model: port)
+        XCTAssertEqual(result.state, .completed); XCTAssertEqual(result.attempt?.snapshot.candidates.count, 1)
+        let seen = await retrieval.seenSources; XCTAssertEqual(seen, [authorized])
+    }
+    func testAutomaticDriverLateRevocationBeforeModelNeverDispatches() async throws {
+        let s = try await store(), snapshot = try await fixture(s), current = snapshot.current.sources[0].sourceID
+        _ = try await s.setSourceLocalOnly(sourceID: current, expectedVersion: 1, localOnly: false)
+        _ = try await s.setSourceLocalOnly(sourceID: snapshot.candidates[0].document.sourceID, expectedVersion: 1, localOnly: false)
+        let retrieval = AssociationDriverRetrieval {
+            _ = try await s.setSourceLocalOnly(sourceID: current, expectedVersion: 2, localOnly: true)
+        }, port = AssociationStorePort(destination: .cloud)
+        do { _ = try await s.processExpressionAssociation(sourceID: current, retrieval: retrieval, model: port); XCTFail("revoked") } catch {}
+        let calls = await port.calls; XCTAssertEqual(calls, 0)
+        let history = try await s.expressionAssociationAttempts(); XCTAssertTrue(history.isEmpty)
+    }
+    func testAutomaticDriverNoCandidatesAndUnknownAreDistinct() async throws {
+        let s = try await store(), snapshot = try await fixture(s), current = snapshot.current.sources[0].sourceID, port = AssociationStorePort(fail: true)
+        let none = try await s.processExpressionAssociation(sourceID: current, retrieval: AssociationDriverRetrieval(empty: true), model: port)
+        XCTAssertEqual(none.state, .noCandidates)
+        let retrieval = AssociationDriverRetrieval()
+        let unknown = try await s.processExpressionAssociation(sourceID: current, retrieval: retrieval, model: port)
+        XCTAssertEqual(unknown.state, .unknown); XCTAssertEqual(unknown.attempt?.usage?["input_tokens"], 13)
+        _ = try await s.processExpressionAssociation(sourceID: current, retrieval: retrieval, model: port)
+        let calls = await port.calls, queries = await retrieval.queries
+        XCTAssertEqual(calls, 1); XCTAssertEqual(queries.count, 1)
     }
     func testFeedbackIgnoreSurvivesReopenAndMigrationWithoutCalls() async throws {
         var s: VoiceOSStore? = try await store()
