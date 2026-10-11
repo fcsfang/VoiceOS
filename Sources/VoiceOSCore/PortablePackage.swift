@@ -246,6 +246,7 @@ extension VoiceOSStore {
                         row["error"] = "未封存录制；暂存片段未随包迁移，请保留原资料库核对"
                     }
                     if table == "model_attempts", row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前结果未登记；不会自动重发" }
+                    if table == "english_feedback_attempts", row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前英文反馈未登记；不自动重发" }
                     if table == "relevance_attempts" {
                         row["validity"] = "frozen"
                         if row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前相关性结果未登记；不会自动重发" }
@@ -309,6 +310,7 @@ extension VoiceOSStore {
             try VoiceOSStore.validateStoredDiscussionAttempts(database)
             try VoiceOSStore.validateStoredDiscussionDerivations(database)
             try VoiceOSStore.validateStoredConversationOutcomes(database)
+            try VoiceOSStore.validateStoredEnglishFeedback(database)
             guard try database.query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("恢复记录存在悬空引用") }
             guard try database.query("""
             SELECT j.id FROM jobs j JOIN sources s ON s.id=j.source_id WHERE j.input_version_id!=s.version_id

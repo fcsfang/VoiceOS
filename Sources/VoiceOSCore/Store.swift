@@ -11,6 +11,7 @@ public actor VoiceOSStore {
     func inspectRecording(_ file:URL) async throws -> MediaInfo { try await inspector.inspect(file) }
     private var processing = false
     var activeReminderLinks: Set<String> = []
+    var activeEnglishAttempts: Set<String> = []
     let checkpoint: @Sendable (SaveCheckpoint) throws -> Void
 
     public init(root: URL, inspector: any MediaInspector,
@@ -32,6 +33,7 @@ public actor VoiceOSStore {
         try db.execute("UPDATE model_attempts SET state='unknown',error='进程退出前结果未登记；不会自动重发' WHERE state='reserved'")
         try db.execute("UPDATE relevance_attempts SET state='unknown',error='进程退出前相关性结果未登记；不会自动重发' WHERE state='reserved'")
         try db.execute("UPDATE discussion_attempts SET state='unknown',error='进程退出前讨论结果未登记；不自动重发' WHERE state='reserved'")
+        try db.execute("UPDATE english_feedback_attempts SET state='unknown',error='进程退出前英文反馈未登记；不自动重发' WHERE state='reserved'")
         for row in try db.query("SELECT * FROM sources ORDER BY created_at") {
             let id = row["id"]!
             if row["input_fingerprint"] == "microphone-v1:"+id, row["expected_bytes"] == "0" {
@@ -71,6 +73,7 @@ public actor VoiceOSStore {
         try Self.validateStoredDiscussionDerivations(db)
         try freezeConversationOutcomes()
         try Self.validateStoredConversationOutcomes(db)
+        try Self.validateStoredEnglishFeedback(db)
         ready = true
     }
     @discardableResult

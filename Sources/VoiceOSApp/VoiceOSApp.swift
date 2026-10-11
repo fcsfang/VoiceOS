@@ -290,7 +290,7 @@ final class ControlCenter: ObservableObject {
         guard let store else { return }
         do {
             englishSnapshot = try await store.prepareEnglishPractice(currentSourceID: current.id, priorSourceIDs: priorIDs, destination: .cloud)
-            englishStatus = "已准备 (priorIDs.count) 份旧练习；发送前仍会再次核对文字版本和授权。"
+            englishStatus = "已准备 \(priorIDs.count) 份旧练习；发送前仍会再次核对文字版本和授权。"
         } catch { englishSnapshot = nil; englishStatus = error.localizedDescription }
     }
     func performEnglishPractice() async {
@@ -598,13 +598,15 @@ struct EnglishPracticeView: View {
             }
             if !model.englishAttempts.isEmpty {
                 Divider(); Text("反馈历史（\(model.englishAttempts.count)）").font(.headline)
+                ScrollView {
                 ForEach(model.englishAttempts) { attempt in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("\(attempt.state == "completed" ? "已保存" : "结果未知") · \(attempt.createdAt)").font(.caption)
+                        Text("\(attempt.state == "completed" ? "已保存" : attempt.state == "reserved" ? "等待结果" : "未完成 · 不自动重发") · \(attempt.createdAt)").font(.caption)
+                        if attempt.validity == "frozen" { Text("历史反馈 · 依据或授权已变化，暂停当前使用").font(.caption).foregroundStyle(.orange) }
                         if let result = attempt.result {
                             ForEach(Array(result.suggestions.enumerated()), id: \.offset) { index, suggestion in
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text("建议 (index + 1) · \(suggestion.kind.rawValue)").font(.callout.bold())
+                                    Text("建议 \(index + 1) · \(suggestion.kind.rawValue)").font(.callout.bold())
                                     Text("原句：\(suggestion.original.quote)").textSelection(.enabled)
                                     Text("建议：\(suggestion.suggestedText)").textSelection(.enabled)
                                     Text(suggestion.explanation).font(.caption).foregroundStyle(.secondary)
@@ -612,15 +614,20 @@ struct EnglishPracticeView: View {
                                 }.padding(8).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
                             }
                             ForEach(Array(result.comparisons.enumerated()), id: \.offset) { _, comparison in
-                                Text("比较：\(comparison.explanation)").font(.caption).foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("本次：\(comparison.current.quote)").textSelection(.enabled)
+                                    Text("旧练习：\(comparison.prior.quote)").textSelection(.enabled)
+                                    Text("比较：\(comparison.explanation)").font(.caption).foregroundStyle(.secondary)
+                                }
                             }
                             Text("文字建议不代表发音、熟练度或学习效果判断。").font(.caption).foregroundStyle(.secondary)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
             }
         }.padding(24).frame(width: 700, height: 600)
-        .task { if currentID.isEmpty { currentID = sources.first?.id ?? "" }; try? await Task.sleep(for: .milliseconds(1)); _ = model.englishAttempts }
+        .task { if currentID.isEmpty { currentID = sources.first?.id ?? "" } }
     }
 }
 struct CenterView: View {

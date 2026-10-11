@@ -5,6 +5,7 @@ public struct EnglishFeedbackAttemptRecord: Identifiable, Sendable {
     public let currentSourceID: String
     public let priorSourceIDs: [String]
     public let state: String
+    public let validity: String
     public let result: EnglishPracticeResponse?
     public let inputTokens: Int?
     public let outputTokens: Int?
@@ -34,6 +35,11 @@ extension VoiceOSStore {
         guard let row = try db.query("SELECT * FROM english_feedback_attempts WHERE id=? AND state='reserved'", [attemptID]).first,
               let json = row["snapshot_json"] else { throw VoiceOSError("英文反馈预留记录缺失或摘要不符") }
         let snapshot = try JSONDecoder().decode(EnglishPracticeSnapshot.self, from: Data(json.utf8)); try validateEnglishPractice(snapshot)
+        guard let model = try db.query("SELECT context_id FROM model_attempts WHERE id=? AND state='reserved'", [attemptID]).first,
+              let contextID = model["context_id"] else { throw VoiceOSError("英文反馈模型预留缺失") }
+        _ = try localContext(id: contextID)
+        guard row["snapshot_digest"] == snapshot.contentDigest else { throw VoiceOSError("英文反馈快照摘要不符") }
+        guard [response.inputTokens, response.outputTokens].compactMap({ $0 }).allSatisfy({ $0 >= 0 }) else { throw VoiceOSError("英文反馈用量无效") }
         let result = StoredEnglishFeedback(suggestions: response.suggestions, comparisons: response.comparisons)
         try Self.validateEnglishProposals(suggestions: result.suggestions, comparisons: result.comparisons, snapshot: snapshot)
         let resultJSON = String(decoding: try JSONEncoder().encode(result), as: UTF8.self), digest = Self.relevanceHash(Data(resultJSON.utf8))
@@ -44,7 +50,7 @@ extension VoiceOSStore {
         }
     }
     public func markEnglishFeedbackUnknown(attemptID: String, reason: String = "英文反馈结果未知；不自动重发", inputTokens: Int? = nil, outputTokens: Int? = nil) throws {
-        let usage = String(decoding: try JSONEncoder().encode(["input_tokens": inputTokens, "output_tokens": outputTokens].compactMapValues { $0 }), as: UTF8.self)
+        let usage = String(decoding: try JSONEncoder().encode(["input_tokens": inputTokens, "output_tokens": outputTokens].compactMapValues { value in value.flatMap { $0 >= 0 ? $0 : nil } }), as: UTF8.self)
         try db.transaction {
             try db.execute("UPDATE english_feedback_attempts SET state='unknown',error=?,usage_json=? WHERE id=? AND state='reserved'", [reason, usage, attemptID])
             try db.execute("UPDATE model_attempts SET state='unknown',error=?,usage_json=? WHERE id=? AND state='reserved'", [reason, usage, attemptID])
@@ -56,6 +62,8 @@ extension VoiceOSStore {
     public func performEnglishFeedback(_ snapshot: EnglishPracticeSnapshot, using port: any EnglishPracticeModelPort) async throws -> EnglishFeedbackAttemptRecord {
         let attemptID = try reserveEnglishFeedback(snapshot, configuration: port.configuration)
         if let existing = try englishFeedbackAttempts().first(where: { $0.id == attemptID }), existing.state != "reserved" { return existing }
+        guard activeEnglishAttempts.insert(attemptID).inserted else { throw VoiceOSError("英文反馈请求已在进行；不会重复发送") }
+        defer { activeEnglishAttempts.remove(attemptID) }
         do {
             let response = try await port.generate(EnglishPracticeRequest(attemptID: attemptID, snapshot: snapshot, configuration: port.configuration))
             try completeEnglishFeedback(attemptID: attemptID, response: response)
@@ -73,10 +81,48 @@ extension VoiceOSStore {
         return record
     }
     public func englishFeedbackAttempts() throws -> [EnglishFeedbackAttemptRecord] {
-        try db.query("SELECT * FROM english_feedback_attempts ORDER BY created_at,id").map { row in
+        try Self.validateStoredEnglishFeedback(db)
+        return try db.query("SELECT * FROM english_feedback_attempts ORDER BY created_at,id").map { row in
+            let snapshot = try JSONDecoder().decode(EnglishPracticeSnapshot.self, from: Data(row["snapshot_json"]!.utf8))
+            let context = try db.query("SELECT x.state FROM contexts x JOIN model_attempts m ON m.context_id=x.id WHERE m.id=?", [row["id"]]).first
+            var validity = "frozen"
+            if context?["state"] != "stale" {
+                do { try validateEnglishPractice(snapshot); validity = "current" } catch { }
+            }
             let input = row["result_json"].flatMap { try? JSONDecoder().decode(StoredEnglishFeedback.self, from: Data($0.utf8)) }
             let usage = row["usage_json"].flatMap { try? JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) }
-            return EnglishFeedbackAttemptRecord(id: row["id"]!, currentSourceID: row["current_source_id"]!, priorSourceIDs: (try? JSONDecoder().decode([String].self, from: Data(row["prior_source_ids_json"]!.utf8))) ?? [], state: row["state"]!, result: input.map { EnglishPracticeResponse(suggestions: $0.suggestions, comparisons: $0.comparisons, inputTokens: usage?["input_tokens"], outputTokens: usage?["output_tokens"]) }, inputTokens: usage?["input_tokens"], outputTokens: usage?["output_tokens"], error: row["error"], createdAt: row["created_at"]!)
+            return EnglishFeedbackAttemptRecord(id: row["id"]!, currentSourceID: row["current_source_id"]!, priorSourceIDs: snapshot.priorSourceIDs, state: row["state"]!, validity: validity, result: input.map { EnglishPracticeResponse(suggestions: $0.suggestions, comparisons: $0.comparisons, inputTokens: usage?["input_tokens"], outputTokens: usage?["output_tokens"]) }, inputTokens: usage?["input_tokens"], outputTokens: usage?["output_tokens"], error: row["error"], createdAt: row["created_at"]!)
         }
+    }
+    static func validateStoredEnglishFeedback(_ database: Database) throws {
+        for row in try database.query("SELECT * FROM english_feedback_attempts") {
+            guard let json = row["snapshot_json"], let model = try database.query("SELECT * FROM model_attempts WHERE id=?", [row["id"]]).first else { throw VoiceOSError("英文反馈尝试身份缺失") }
+            let snapshot = try JSONDecoder().decode(EnglishPracticeSnapshot.self, from: Data(json.utf8))
+            guard row["snapshot_digest"] == snapshot.contentDigest,
+                  snapshot.contentDigest == (try englishPracticeDigest(snapshot.currentSourceID, snapshot.priorSourceIDs, snapshot.destination, snapshot.context)),
+                  row["current_source_id"] == snapshot.currentSourceID,
+                  try JSONDecoder().decode([String].self, from: Data(row["prior_source_ids_json"]!.utf8)) == snapshot.priorSourceIDs,
+                  model["state"] == row["state"], model["provider"]?.hasPrefix("english_feedback:") == true,
+                  model["execution_kind"] == "discussion_derivation" else { throw VoiceOSError("英文反馈历史身份、快照或状态不一致") }
+            guard model["usage_json"] == row["usage_json"],
+                  let context = try database.query("SELECT * FROM contexts WHERE id=?", [model["context_id"]]).first,
+                  context["destination"] == snapshot.destination.rawValue,
+                  context["digest"] == snapshot.context.contentDigest,
+                  let contextJSON = context["snapshot_json"] else { throw VoiceOSError("英文反馈上下文或用量绑定不一致") }
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            guard try encoder.encode(JSONDecoder().decode(LocalTranscriptContext.self, from: Data(contextJSON.utf8))) == encoder.encode(snapshot.context) else { throw VoiceOSError("英文反馈上下文内容不一致") }
+            if let usage = row["usage_json"] {
+                let values = try JSONDecoder().decode([String: Int].self, from: Data(usage.utf8))
+                guard Set(values.keys).isSubset(of: ["input_tokens", "output_tokens"]), values.values.allSatisfy({ $0 >= 0 }), model["usage_json"] == usage else { throw VoiceOSError("英文反馈用量记录不一致") }
+            }
+            if row["state"] == "completed" {
+                guard let resultJSON = row["result_json"], row["result_digest"] == relevanceHash(Data(resultJSON.utf8)), model["result_digest"] == row["result_digest"] else { throw VoiceOSError("英文反馈结果摘要不一致") }
+                let result = try JSONDecoder().decode(StoredEnglishFeedback.self, from: Data(resultJSON.utf8))
+                try validateEnglishProposals(suggestions: result.suggestions, comparisons: result.comparisons, snapshot: snapshot)
+            } else {
+                guard row["result_json"] == nil, row["result_digest"] == nil else { throw VoiceOSError("未完成英文反馈不能携带结果") }
+            }
+        }
+        guard try database.query("SELECT m.id FROM model_attempts m LEFT JOIN english_feedback_attempts e ON e.id=m.id WHERE m.provider LIKE 'english_feedback:%' AND e.id IS NULL").isEmpty else { throw VoiceOSError("英文模型尝试缺少独立反馈记录") }
     }
 }
