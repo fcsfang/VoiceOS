@@ -46,6 +46,17 @@ public enum LocalTextModel {
         do {
             let bytes = try Data(contentsOf: file)
             guard bytes.count <= 16384, let text = String(data: bytes, encoding: .utf8) else { throw VoiceOSError("invalid config") }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("{") {
+                guard let root = try JSONSerialization.jsonObject(with: Data(trimmed.utf8)) as? [String: Any],
+                      let providers = root["provider"] as? [String: Any],
+                      let openAI = providers["openai"] as? [String: Any],
+                      let options = openAI["options"] as? [String: Any],
+                      let rawAddress = options["baseURL"] as? String,
+                      let key = options["apiKey"] as? String,
+                      let address = URL(string: rawAddress), !key.isEmpty, key != "REPLACE_LOCALLY" else { throw VoiceOSError("missing config") }
+                return (address, key)
+            }
             var settings: [String: String] = [:]
             for raw in text.split(separator: "\n") {
                 let line = raw.trimmingCharacters(in: .whitespaces)

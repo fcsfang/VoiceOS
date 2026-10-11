@@ -4,7 +4,7 @@
 
 ## 使用与边界
 
-先运行 `python3 scripts/app/build.py`，再用 `python3 scripts/app/run.py` 启动。启动器仅把项目 `.env` 的文件位置传入应用，不把密钥放到命令参数或应用包；不会自动发送文字。若直接双击应用，点击“配置文本模型…”选择已有 `.env`。共享 LocalTextModel 读取器供应用与开发工具使用，不执行配置文件内容，读取/解析失败只显示固定说明。
+先运行 `python3 scripts/app/build.py`，再用 `python3 scripts/app/run.py` 启动。启动器仅把项目 `.env` 的文件位置传入应用，不把密钥放到命令参数或应用包；不会自动发送文字。若直接双击应用，点击“配置文本模型…”选择已有 `.env` 或 OpenCode 风格 JSON 配置。共享 LocalTextModel 读取器供应用与开发工具使用，不执行配置文件内容，读取/解析失败只显示固定说明。
 
 当前配置仍是开发文件，模型固定采用已经验证的 `gpt-6.1-sol`，服务地址来自现有配置；界面显示实际主机。文件路径与密钥不保存进资料库或导出包，不复制配置文件，不记住上次选择。正式钥匙串与完整配置管理仍待实现。应用默认打开自己的正常资料库；隔离验证可用 `python3 scripts/app/run.py --data-dir runtime/a-test-root`。
 

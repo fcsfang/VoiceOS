@@ -31,4 +31,13 @@ final class LocalTextModelTests: XCTestCase {
             catch { XCTAssertFalse(error.localizedDescription.contains("secret")) }
         }
     }
+    func testOpenCodeStyleJSONConfigurationLoadsWithoutExposingCredential() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let json: [String: Any] = ["provider": ["openai": ["options": ["baseURL": "https://api.chiyi.cc/v1", "apiKey": "json-secret"]]]]
+        try JSONSerialization.data(withJSONObject: json).write(to: file)
+        let suite = try LocalTextModel.loadSuite(from: file)
+        XCTAssertEqual(suite.english.configuration.provider, "responses:api.chiyi.cc")
+        XCTAssertEqual(suite.english.configuration.promptVersion, "english-practice-v1")
+    }
 }

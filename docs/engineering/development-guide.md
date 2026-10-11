@@ -73,7 +73,7 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 
 来源详情可允许文本用于云端或限制为仅本地。授权按钮只更新权限，不触发网络发送。配置文本模型后，点击“理解这份文字”才发送选中资料的文字；原始音视频权限独立，保持本机处理。
 
-使用现有模型配置启动开发预览：`python3 scripts/app/run.py`。也可直接打开应用并通过“配置文本模型…”选择项目 `.env`。这不会自动发送内容。配置暂为开发文件，正式钥匙串待实现；同一文字/权限/模型身份的已完成、失败或未知调用不会重复发送，详见[控制中心理解记录](m2-control-center-understanding.md)与[候选审阅记录](m2-claim-review.md)及[提醒事项反馈](m3-reminders-feedback.md)。
+使用现有模型配置启动开发预览：`python3 scripts/app/run.py`。也可直接打开应用并通过“配置文本模型…”选择项目 `.env` 或 `docs/模型api 配置.md` 这类 OpenCode 风格 JSON。这不会自动发送内容。配置暂为开发文件，正式钥匙串待实现；同一文字/权限/模型身份的已完成、失败或未知调用不会重复发送，详见[控制中心理解记录](m2-control-center-understanding.md)与[候选审阅记录](m2-claim-review.md)及[提醒事项反馈](m3-reminders-feedback.md)。
 
 候选可明确认可、拒绝或更正，认可保持证据状态独立，更正后重新待核对；审阅历史与原始模型结果随包保留。冻结候选只可回溯，详见[候选审阅记录](m2-claim-review.md)。
 
