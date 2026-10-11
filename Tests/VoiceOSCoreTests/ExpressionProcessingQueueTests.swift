@@ -113,6 +113,27 @@ final class ExpressionProcessingQueueTests: XCTestCase {
         XCTAssertEqual(modelCalls, 0); XCTAssertEqual(associationCalls, 0)
     }
 
+    func testQueuedIntentMigrationFreezesWithoutDispatch() async throws {
+        let store = try VoiceOSStore(root: root, inspector: QueueInspector()); try await store.recover()
+        let source = try await store.recordUserExpression("迁移前尚未执行的表达")
+        _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: 1, localOnly: false)
+        let configuration = config()
+        let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: source, cognition: configuration, association: configuration)
+        let queued = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "queued-migration", cognition: configuration, association: configuration)
+        let package = root.appendingPathComponent("queued-migration-package")
+        try await store.exportPackage(to: package)
+        let restoredRoot = root.appendingPathComponent("queued-migration-restored")
+        try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: QueueInspector())
+        let restored = try VoiceOSStore(root: restoredRoot, inspector: QueueInspector()); try await restored.recover()
+        let history = try await restored.processingIntents()
+        XCTAssertEqual(history.count, 1); XCTAssertEqual(history[0].id, queued.id); XCTAssertEqual(history[0].state, .frozen)
+        let model = QueueModel(configuration), association = QueueAssociation(configuration)
+        let replay = try await restored.runExpressionProcessingIntent(id: queued.id, retrieval: QueueRetrieval(), cognitionPort: model, associationPort: association)
+        XCTAssertEqual(replay.state, .frozen)
+        let modelCalls = await model.callCount(), associationCalls = await association.callCount()
+        XCTAssertEqual(modelCalls, 0); XCTAssertEqual(associationCalls, 0)
+    }
+
     func testQueueCancellationIsDurableAndDoesNotDispatch() async throws {
         let store = try VoiceOSStore(root: root, inspector: QueueInspector()); try await store.recover()
         let source = try await store.recordUserExpression("明确取消的表达")
