@@ -27,7 +27,16 @@ struct Check {
                 if point.rawValue == crash { kill(getpid(), SIGKILL) }
             })
             try await store.recover()
-            if args[0] == "import" {
+            if args[0] == "quiet-feedback-read" {
+                let items = try await store.cognitiveFeedback(), pref = try await store.cognitiveFeedbackPreference()
+                let output:[String:Any] = ["mode":pref.mode.rawValue,"version":pref.version,"items":items.map { ["id":$0.id,"attempt_id":$0.attemptID,"candidate_id":$0.hit.id] }]
+                print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)); return
+            } else if args[0] == "quiet-pause-fixture" {
+                try await store.setCognitiveFeedbackMode(.paused,expectedVersion:0,commandID:"synthetic-quiet-pause")
+            } else if args[0] == "quiet-ignore-fixture" {
+                guard let item = try await store.cognitiveFeedback().first else { throw VoiceOSError("fixture requires an accepted current relevance receipt") }
+                try await store.ignoreCognitiveFeedback(attemptID:item.attemptID,candidateID:item.hit.id,commandID:"synthetic-quiet-ignore")
+            } else if args[0] == "import" {
                 guard args.count >= 3 else { throw VoiceOSError("missing file") }
                 _ = try await store.importFile(URL(fileURLWithPath: args[2]), commandID: args.count > 3 ? args[3] : UUID().uuidString)
             } else if args[0] == "expression-fixture" {

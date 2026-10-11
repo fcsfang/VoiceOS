@@ -24,3 +24,5 @@
 - [010 相关性持久调用](010-durable-relevance-attempts.md)：独立调用与完整输入历史，未知不重发，迁移冻结执行；该切片 accepted。
 
 - [011 原生本地语义召回](011-native-semantic-recall.md)：CoreML float32、显式模型资源、可重建投影与排序候选，开发切片 accepted。
+
+- [012 静默反馈](012-quiet-relevance-feedback.md)：回执投影、跨查询去重、偏好版本与迁移，采用范围限W18初始切片。

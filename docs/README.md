@@ -84,3 +84,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 控制中心相关性判断](engineering/m4-relevance-control-center.md)：关键词候选选择、显式发送、出处返回与取消/旧结果屏障；128 项测试及实际界面合成验证通过。
 
 - [M4 原生本地语义召回](engineering/m4-native-semantic-recall.md)：固定 BGE/CoreML 资源、完整窗口出处、136 项测试与实际界面/链路验证。
+
+- [M4 静默相关原文](engineering/m4-quiet-feedback.md)：持久忽略/减少/暂停、完整输入屏障、146项测试、四次强退及旧v1–v11恢复；非完整主动反馈。

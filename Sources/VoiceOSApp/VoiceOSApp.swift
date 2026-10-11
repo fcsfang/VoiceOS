@@ -18,6 +18,36 @@ final class ControlCenter: ObservableObject {
     private var retrievalWorker: Task<Void,Never>?
     private var retrievalGeneration = UUID()
     let relevance = RelevanceQueryCoordinator()
+    @Published var quietFeedback: [CognitiveFeedbackItem] = []
+    @Published var quietMode: CognitiveFeedbackMode = .normal
+    @Published var quietStatus = ""
+    private var quietVersion = 0
+    func refreshQuietFeedback() async {
+        guard let store else { return }
+        do {
+            let preference = try await store.cognitiveFeedbackPreference()
+            quietMode = preference.mode; quietVersion = preference.version
+            quietFeedback = try await store.cognitiveFeedback()
+            quietStatus = "只展示已接纳的相关原文；未确认支持、修正或观点认可，不产生回复任务。"
+        } catch { quietFeedback = []; quietStatus = error.localizedDescription }
+    }
+    func changeQuietMode(_ mode: CognitiveFeedbackMode) async {
+        guard let store else { return }
+        do { try await store.setCognitiveFeedbackMode(mode,expectedVersion:quietVersion); await refreshQuietFeedback() }
+        catch { await refreshQuietFeedback(); quietStatus = error.localizedDescription }
+    }
+    func ignoreQuietFeedback(_ item: CognitiveFeedbackItem) async {
+        guard let store else { return }
+        do { try await store.ignoreCognitiveFeedback(attemptID:item.attemptID,candidateID:item.hit.id); await refreshQuietFeedback() }
+        catch { await refreshQuietFeedback(); quietStatus = error.localizedDescription }
+    }
+    func openQuietFeedback(_ item: CognitiveFeedbackItem) async -> Bool {
+        guard let store else { return false }
+        do {
+            let hit = try await store.cognitiveFeedbackHit(attemptID:item.attemptID,candidateID:item.hit.id)
+            selected = hit.document.sourceID; await refresh(); return true
+        } catch { await refreshQuietFeedback(); quietStatus = error.localizedDescription; return false }
+    }
     private var relevanceModel: ResponsesRelevancePort?
     func prepareRelevance(query: String, candidates: [RetrievalHit]) async {
         guard let store else { return }
@@ -143,6 +173,7 @@ final class ControlCenter: ObservableObject {
 
             if let store {
                 await relevance.validate(store:store)
+                await refreshQuietFeedback()
                 var loaded: [String: [ModelAttemptRecord]] = [:]
                 for record in records { loaded[record.id] = try await store.modelAttempts(sourceID: record.id) }
                 attempts = loaded
@@ -429,6 +460,7 @@ struct CenterView: View {
     @State private var feedbackAction: ActionRecord?
     @State private var showingRestore = false
     @State private var searching = false
+    @State private var showingQuietFeedback = false
     @Environment(\.openWindow) private var openWindow
     private func chooseLibrary() {
         let panel = NSOpenPanel(); panel.title = "打开已有 VoiceOS 资料库"; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
@@ -591,6 +623,7 @@ struct CenterView: View {
             } else { ContentUnavailableView("选择一份资料", systemImage: "doc.text.magnifyingglass", description: Text("原件和逐字稿保存在 VoiceOS 自己的资料库中。")) }
         }
         .toolbar {
+            Button("静默回顾", systemImage:"text.bubble") { showingQuietFeedback = true }.disabled(!model.initialized)
             Button("查找历史文字", systemImage: "text.magnifyingglass") { searching = true }.disabled(!model.initialized)
             Button("连接提醒事项…") { Task { await model.connectReminders() } }.disabled(!model.initialized || model.remindersBusy)
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
@@ -608,6 +641,7 @@ struct CenterView: View {
         .focusedSceneValue(\.voiceOSController, model)
         .navigationTitle(model.libraryTitle)
         .sheet(isPresented: $searching) { HistorySearchView(model:model) { searching = false } }
+        .sheet(isPresented: $showingQuietFeedback) { CognitiveFeedbackView(model:model) { showingQuietFeedback = false } }
         .sheet(isPresented: $showingRestore) { PackageRestoreView { showingRestore = false } }
         .sheet(item: $feedbackAction) { action in ActionFeedbackView(action: action, model: model) { feedbackAction = nil } }
         .sheet(isPresented: $writingExpression) { UserExpressionView(model: model) { writingExpression = false } }
@@ -991,6 +1025,43 @@ extension FocusedValues {
     var voiceOSController: ControlCenter? {
         get { self[VoiceOSControllerKey.self] }
         set { self[VoiceOSControllerKey.self] = newValue }
+    }
+}
+
+struct CognitiveFeedbackView: View {
+    @ObservedObject var model: ControlCenter
+    let dismiss: () -> Void
+    var body: some View {
+        VStack(alignment:.leading,spacing:14) {
+            Text("静默回顾").font(.title2)
+            Text("可以直接关闭，不要求回应。当前显示你主动查找后接纳的相关原文；新表达的自动关联仍在开发。").font(.callout).foregroundStyle(.secondary)
+            Picker("显示方式",selection:Binding(get:{ model.quietMode },set:{ mode in Task { await model.changeQuietMode(mode) } })) {
+                Text("正常显示").tag(CognitiveFeedbackMode.normal)
+                Text("减少显示 · 一次一条").tag(CognitiveFeedbackMode.reduced)
+                Text("暂停显示").tag(CognitiveFeedbackMode.paused)
+            }.pickerStyle(.segmented)
+            Text(model.quietStatus).font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment:.leading,spacing:16) {
+                    if model.quietFeedback.isEmpty {
+                        Text(model.quietMode == .paused ? "已暂停静默回顾，原文与历史保留。" : "暂无可显示的相关原文。无需回复或补做任务。")
+                    }
+                    ForEach(model.quietFeedback) { item in
+                        VStack(alignment:.leading,spacing:8) {
+                            Text("你查找的是：\(item.query)").font(.headline).textSelection(.enabled)
+                            Text("模型选中的相关原文 · \(item.hit.document.origin == "user" ? "用户表达" : "外部资料")").font(.caption).foregroundStyle(.secondary)
+                            Text(item.hit.document.text).textSelection(.enabled)
+                            Text(item.hit.document.name + " · " + item.hit.document.createdAt).font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                Button("查看原文与出处") { Task { if await model.openQuietFeedback(item) { dismiss() } } }
+                                Button("忽略这条") { Task { await model.ignoreQuietFeedback(item) } }
+                            }
+                        }.padding(12).frame(maxWidth:.infinity,alignment:.leading).background(.quaternary.opacity(0.35),in:RoundedRectangle(cornerRadius:8))
+                    }
+                }.frame(maxWidth:.infinity,alignment:.leading)
+            }
+            HStack { Spacer(); Button("完成",action:dismiss).keyboardShortcut(.cancelAction) }
+        }.padding(24).frame(width:720,height:560).task { await model.refreshQuietFeedback() }
     }
 }
 

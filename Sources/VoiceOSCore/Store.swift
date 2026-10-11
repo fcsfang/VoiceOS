@@ -57,6 +57,7 @@ public actor VoiceOSStore {
         }
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT a.id FROM model_attempts a JOIN contexts x ON x.id=a.context_id WHERE x.state='stale')")
         try Self.validateStoredRelevance(db)
+        try Self.validateStoredCognitiveFeedback(db)
         ready = true
     }
     @discardableResult

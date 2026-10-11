@@ -125,3 +125,7 @@ Core 持有这些身份/版本契约；未来完整应用、思源或不同任�
 存储 schema 12 / 迁移包 v11 新增 `relevance_attempts` 与 `relevance_inputs`，独立于生成观点的模型调用。前者保存查询、完整有界快照、模型/提示/结构版本、调用状态、输入有效性、最多三个候选 ID、用量与摘要；后者按 ordinal 引用每个来源、文字版本及权限版本。
 
 调用结果状态 reserved/completed/rejected/unknown 与输入有效性 current/frozen 分离。来源更正、权限变化及隔离冻结完整输入；恢复包时所有记录 frozen，未完成调用 unknown。历史权限按策略修订链核验，历史文字按不可变版本核验，不能用当前文字替换旧出处。完整性摘要不代替来源和引用校验。该切片不产生 Relation/Claim/Action，实际云端相关性适配器仍待实现；见[ADR-010](../adr/010-durable-relevance-attempts.md)。
+
+## 静默反馈实施增量（2026-10-11）
+
+Schema13/迁移v12新增`cognitive_feedback_ignores`（原调用、候选及查询/原文稳定指纹）和`cognitive_feedback_preferences`（顺序版本、normal/reduced/paused与命令身份）。卡片内容从有效相关性回执投影，不复制原文、不改变观点/证据/行动；读取与打开均复核全部输入。忽略不代表放弃兴趣，关闭不代表认可。恢复保留偏好及忽略、冻结回执；详见[ADR-012](../adr/012-quiet-relevance-feedback.md)。
