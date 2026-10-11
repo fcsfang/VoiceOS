@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -331,6 +331,29 @@ final class Database {
         }
         // Same columns, new microphone reservation/source semantics require a newer reader.
         if try query("PRAGMA user_version").first?["user_version"] == "13" { try execute("PRAGMA user_version=14") }
+        if try query("PRAGMA user_version").first?["user_version"] == "14" {
+            try transaction {
+                try execute("""
+                CREATE TABLE conversations (
+                  id TEXT PRIMARY KEY, entry_command_id TEXT NOT NULL UNIQUE,
+                  entry_context_id TEXT NOT NULL REFERENCES contexts(id), version INTEGER NOT NULL CHECK(version>=1),
+                  state TEXT NOT NULL CHECK(state IN ('active','ended')),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),
+                  end_command_id TEXT UNIQUE, created_at TEXT NOT NULL, ended_at TEXT
+                )
+                """)
+                try execute("""
+                CREATE TABLE conversation_user_turns (
+                  id TEXT PRIMARY KEY, command_id TEXT NOT NULL UNIQUE,
+                  conversation_id TEXT NOT NULL REFERENCES conversations(id), ordinal INTEGER NOT NULL CHECK(ordinal>=1),
+                  source_id TEXT NOT NULL REFERENCES sources(id), context_id TEXT NOT NULL REFERENCES contexts(id),
+                  speaker TEXT NOT NULL CHECK(speaker='user'), created_at TEXT NOT NULL,
+                  UNIQUE(conversation_id,ordinal), UNIQUE(conversation_id,source_id)
+                )
+                """)
+                try execute("PRAGMA user_version=15")
+            }
+        }
     }
     deinit { sqlite3_close(handle) }
     func execute(_ sql: String, _ arguments: [String?] = []) throws { _ = try query(sql, arguments) }

@@ -90,3 +90,7 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M1 个人口述增量](engineering/m1-personal-dictation.md)：显式开始/停止、持久捕获身份、片段核对、154项测试及六次强退；实际设备权限与睡眠仍待验证。
 
 - [首次真实麦克风测试](engineering/m1-microphone-device-test.md)：原件封存、本地空转写、重启及音频迁移通过；实际12.1204秒，手动停止超时已披露，设备限时修复未再次采集。
+
+- [M4 本地会话基础](engineering/m4-conversation-foundation.md)：170项测试、六次强退、两次新格式迁移与实际v1–v13恢复；尚未接入AI回复/界面。
+- [模式B实施契约](engineering/m4-dialogue-contract.md)：P07已确认逐轮语音＋文字，回合、引用、权限与回流验收。
+- [GPT-Live与订阅接入](research/gpt-live-subscription-access-2026-10-11.md)：官方宿主语音、Live项目API与订阅文本接口的区别，账户权限未验证。

@@ -28,7 +28,20 @@ struct Check {
                 if point.rawValue == crash { kill(getpid(), SIGKILL) }
             })
             try await store.recover()
-            if args[0] == "dictation-fixture" {
+            if ["conversation-entry-fixture","conversation-turn-fixture","conversation-end-fixture"].contains(args[0]) {
+                let source = try await store.recordUserExpression("合成旧观点：需要检验条件，尚未形成结论。",commandID:"synthetic-dialogue-history")
+                let id = try await store.beginConversation(sourceIDs:[source],commandID:"synthetic-dialogue-entry")
+                if args[0] != "conversation-entry-fixture" {
+                    let turnSource = try await store.recordUserExpression("合成追问：哪些反例能够限制这个猜想？",commandID:"synthetic-dialogue-user-source")
+                    _ = try await store.appendConversationUserSource(conversationID:id,sourceID:turnSource,expectedVersion:1,commandID:"synthetic-dialogue-turn")
+                }
+                if args[0] == "conversation-end-fixture" { try await store.endConversation(id:id,expectedVersion:2,commandID:"synthetic-dialogue-end") }
+            } else if args[0] == "conversation-read" {
+                guard args.count == 3 else { throw VoiceOSError("conversation-read requires conversation ID") }
+                let session = try await store.conversation(id:args[2]), turns = try await store.conversationUserTurns(conversationID:args[2])
+                let output:[String:Any] = ["id":session.id,"state":session.state,"version":session.version,"validity":session.validity,"user_turns":turns.count,"integrity":try await store.integrityCheck()]
+                print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)); return
+            } else if args[0] == "dictation-fixture" {
                 let intent = try await store.beginDictation(commandID:"synthetic-dictation")
                 let format = AVAudioFormat(standardFormatWithSampleRate:24000,channels:1)!
                 let buffer = AVAudioPCMBuffer(pcmFormat:format,frameCapacity:12000)!; buffer.frameLength = 12000

@@ -45,6 +45,8 @@ public enum SaveCheckpoint: String, Sendable {
     case modelReserved, claimsUncommitted, claimsCommitted, correctionUncommitted, correctionCommitted
     case relevanceReserved, relevanceUncommitted, relevanceCommitted
     case quietPreferenceUncommitted, quietPreferenceCommitted, quietIgnoreUncommitted, quietIgnoreCommitted
+    case conversationUncommitted, conversationCommitted, conversationTurnUncommitted, conversationTurnCommitted
+    case conversationEndUncommitted, conversationEndCommitted
     case policyUncommitted, policyCommitted
     case reviewUncommitted, reviewCommitted
     case reminderReserved, reminderSaved, reminderFeedbackUncommitted, reminderFeedbackCommitted

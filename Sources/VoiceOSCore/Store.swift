@@ -64,6 +64,7 @@ public actor VoiceOSStore {
         try Self.validateStoredRelevance(db)
         try Self.validateStoredCognitiveFeedback(db)
         try Self.validateStoredRecordings(db)
+        try Self.validateStoredConversations(db)
         ready = true
     }
     @discardableResult

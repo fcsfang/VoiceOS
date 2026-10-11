@@ -133,3 +133,7 @@ Schema13/迁移v12新增`cognitive_feedback_ignores`（原调用、候选及查�
 ## 口述来源语义增量（2026-10-11）
 
 Schema14/迁移v13保留21表，但新增`microphone-v1:<sourceID>`个人口述身份语义。用户声明本人表达，origin/speaker为user，第三方材料继续external导入。bytes0/零摘要仅允许未封存receiving/interrupted，无资产/任务；封存后按同一来源、原件及输入版本持久保存。元数据迁移提示暂存片段未包含，带媒体导出阻止遗漏未封存片段。旧读者拒绝此版本；详见[ADR-013](../adr/013-durable-personal-dictation.md)。
+
+## 2026-10-11 会话基础实施边界
+
+W17新增conversations和conversation_user_turns，格式v14/schema15；每个个人回合引用受管来源及持久上下文，不复制原件。会话版本仅计用户回合与显式结束；当前尚无AI回合，后续AI历史/调用必须补充独立契约，不能用本表冒充已实现。原子冻结、上下文预算、恢复限制与证据见[实施记录](../engineering/m4-conversation-foundation.md)和[ADR-014](../adr/014-local-conversation-history.md)。

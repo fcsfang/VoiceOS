@@ -28,3 +28,5 @@
 - [012 静默反馈](012-quiet-relevance-feedback.md)：回执投影、跨查询去重、偏好版本与迁移，采用范围限W18初始切片。
 
 - [013 个人口述](013-durable-personal-dictation.md)：AVAudioRecorder、持久身份与原件封存，部分采用；设备/权限/睡眠待测。
+
+- [014 本地会话历史](014-local-conversation-history.md)：共用来源/上下文、个人回合、结束、原子冻结与迁移；W17基础部分采用，AI与界面待实现。

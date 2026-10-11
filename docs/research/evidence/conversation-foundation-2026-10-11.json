@@ -1,0 +1,97 @@
+{
+  "date": "2026-10-11",
+  "synthetic_only": true,
+  "process_crashes": [
+    {
+      "checkpoint": "conversationUncommitted",
+      "recovered_and_replayed_once": true
+    },
+    {
+      "checkpoint": "conversationCommitted",
+      "recovered_and_replayed_once": true
+    },
+    {
+      "checkpoint": "conversationTurnUncommitted",
+      "recovered_and_replayed_once": true
+    },
+    {
+      "checkpoint": "conversationTurnCommitted",
+      "recovered_and_replayed_once": true
+    },
+    {
+      "checkpoint": "conversationEndUncommitted",
+      "recovered_and_replayed_once": true
+    },
+    {
+      "checkpoint": "conversationEndCommitted",
+      "recovered_and_replayed_once": true
+    }
+  ],
+  "portable_round_trips": 2,
+  "schema": 15,
+  "package_version": 14,
+  "microphone_calls": 0,
+  "cloud_calls": 0,
+  "external_task_writes": 0,
+  "automated_tests": 170,
+  "automated_failures": 0,
+  "automated_skipped": 0,
+  "signed_app_build": "passed",
+  "legacy_restores": [
+    {
+      "package_version": 1,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 2,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 3,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 4,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 5,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 6,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 7,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 8,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 9,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 10,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 11,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 12,
+      "restored_and_reopened": true
+    },
+    {
+      "package_version": 13,
+      "restored_and_reopened": true
+    }
+  ],
+  "conversation_tests": 15,
+  "ai_replies_implemented": false,
+  "dialogue_UI_implemented": false
+}

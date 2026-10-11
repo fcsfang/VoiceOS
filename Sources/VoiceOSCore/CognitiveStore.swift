@@ -228,6 +228,7 @@ extension VoiceOSStore {
     }
     private func freezeContext(_ id: String) throws {
         try db.execute("UPDATE contexts SET state='stale' WHERE id=?", [id])
+        try db.execute("UPDATE conversations SET validity='frozen' WHERE entry_context_id=? OR id IN (SELECT conversation_id FROM conversation_user_turns WHERE context_id=?)",[id,id])
         try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT id FROM claims WHERE attempt_id IN (SELECT id FROM model_attempts WHERE context_id=?))", [id])
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT id FROM model_attempts WHERE context_id=?)", [id])
     }
