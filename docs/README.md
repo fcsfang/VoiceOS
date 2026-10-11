@@ -130,3 +130,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [英文历史界面与模型边界补齐](engineering/m4-english-history-completeness.md)：实际长历史/冻结/完整文字预览验证，晚到拒收保留用量，275 项回归；自然英语质量未验收。
 
 - [新表达静默关联实施契约](engineering/m4-expression-association-contract.md)：当前原话锚点、双引文/理由、权限版本和预算基础已实现；290项回归、三处真实强退和三次包恢复；持久执行已接入，自动触发与卡片仍待接入。
+
+- [表达关联静默卡片](engineering/m4-expression-association-contract.md)：294项测试、五处强退、持久忽略和原生双引文/出处/暂停恢复验证；schema22/v21包，自动触发与自然质量仍开放。

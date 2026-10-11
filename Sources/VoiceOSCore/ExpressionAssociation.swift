@@ -66,6 +66,15 @@ extension VoiceOSStore {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         return relevanceHash(try encoder.encode(Payload(current: snapshot.current, policyVersion: snapshot.policyVersion, destination: snapshot.destination, candidates: snapshot.candidates, preferenceVersion: snapshot.preferenceVersion, preferenceMode: snapshot.preferenceMode, scalarBudget: snapshot.scalarBudget)))
     }
+    /// Completed receipts survive presentation preference changes; provenance must remain current.
+    func validateExpressionAssociationSources(_ snapshot: ExpressionAssociationSnapshot) throws {
+        try Self.validateExpressionAssociationProposals([], snapshot: snapshot)
+        let source = snapshot.current.sources[0]
+        let actual = try prepareLocalTranscriptContext(sourceIDs: [source.sourceID], scalarBudget: snapshot.scalarBudget)
+        guard actual.contentDigest == snapshot.current.contentDigest,
+              try sourcePolicy(sourceID: source.sourceID).version == snapshot.policyVersion else { throw VoiceOSError("关联原话或授权已变化") }
+        for hit in snapshot.candidates { try validateRetrievalHit(hit) }
+    }
     /// Only validates provenance/structure, never whether the relation is semantically true.
     public static func validateExpressionAssociationProposals(_ proposals: [ExpressionAssociationProposal], snapshot: ExpressionAssociationSnapshot) throws {
         guard snapshot.current.sources.count == 1, snapshot.preferenceMode != .paused,

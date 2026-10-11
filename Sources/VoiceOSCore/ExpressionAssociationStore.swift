@@ -104,7 +104,11 @@ extension VoiceOSStore {
             let snapshot = try JSONDecoder().decode(ExpressionAssociationSnapshot.self, from: Data(row["snapshot_json"]!.utf8))
             var validity = row["validity"]!
             if validity == "current" {
-                do { try validateExpressionAssociation(snapshot); _ = try localContext(id: row["context_id"]!) }
+                do {
+                    if row["state"] == "completed" { try validateExpressionAssociationSources(snapshot) }
+                    else { try validateExpressionAssociation(snapshot) }
+                    _ = try localContext(id: row["context_id"]!)
+                }
                 catch { validity = "frozen"; try db.execute("UPDATE expression_association_attempts SET validity='frozen' WHERE id=?", [row["id"]]) }
             }
             return ExpressionAssociationAttempt(id: row["id"]!, currentSourceID: row["current_source_id"]!, snapshot: snapshot, state: row["state"]!, validity: validity,

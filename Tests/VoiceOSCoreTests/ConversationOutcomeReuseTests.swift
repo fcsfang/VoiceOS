@@ -141,10 +141,11 @@ final class ConversationOutcomeReuseTests:XCTestCase {
         files[index]["bytes"]=hash.0;files[index]["sha256"]=hash.1;m["files"]=files
         if mode == "legacy" {
             m["version"]=17;m["databaseSchema"]=18
-            var counts = m["counts"] as! [String: Any]; counts.removeValue(forKey: "english_feedback_attempts"); counts.removeValue(forKey: "expression_association_attempts"); m["counts"] = counts
-            files.removeAll { ["english_feedback_attempts.jsonl", "expression_association_attempts.jsonl"].contains($0["path"] as? String ?? "") }
+            var counts = m["counts"] as! [String: Any]; counts.removeValue(forKey: "english_feedback_attempts"); counts.removeValue(forKey: "expression_association_attempts"); counts.removeValue(forKey: "expression_association_ignores"); m["counts"] = counts
+            files.removeAll { ["english_feedback_attempts.jsonl", "expression_association_attempts.jsonl", "expression_association_ignores.jsonl"].contains($0["path"] as? String ?? "") }
             try? FileManager.default.removeItem(at: package.appendingPathComponent("english_feedback_attempts.jsonl"))
             try? FileManager.default.removeItem(at: package.appendingPathComponent("expression_association_attempts.jsonl"))
+            try? FileManager.default.removeItem(at: package.appendingPathComponent("expression_association_ignores.jsonl"))
             m["files"] = files
         }
         try JSONSerialization.data(withJSONObject:m).write(to:manifest)

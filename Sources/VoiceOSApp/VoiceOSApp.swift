@@ -37,6 +37,7 @@ final class ControlCenter: ObservableObject {
     private var retrievalGeneration = UUID()
     let relevance = RelevanceQueryCoordinator()
     @Published var quietFeedback: [CognitiveFeedbackItem] = []
+    @Published var associationFeedback: [ExpressionAssociationFeedback] = []
     @Published var quietMode: CognitiveFeedbackMode = .normal
     @Published var quietStatus = ""
     private var quietVersion = 0
@@ -46,8 +47,9 @@ final class ControlCenter: ObservableObject {
             let preference = try await store.cognitiveFeedbackPreference()
             quietMode = preference.mode; quietVersion = preference.version
             quietFeedback = try await store.cognitiveFeedback()
-            quietStatus = "只展示已接纳的相关原文；未确认支持、修正或观点认可，不产生回复任务。"
-        } catch { quietFeedback = []; quietStatus = error.localizedDescription }
+            associationFeedback = try await store.expressionAssociationFeedback()
+            quietStatus = "关联属于AI提案；支持、修正、观点认可和问题解决状态仍待核对，不产生回复任务。"
+        } catch { quietFeedback = []; associationFeedback = []; quietStatus = error.localizedDescription }
     }
     func changeQuietMode(_ mode: CognitiveFeedbackMode) async {
         guard let store else { return }
@@ -58,6 +60,19 @@ final class ControlCenter: ObservableObject {
         guard let store else { return }
         do { try await store.ignoreCognitiveFeedback(attemptID:item.attemptID,candidateID:item.hit.id); await refreshQuietFeedback() }
         catch { await refreshQuietFeedback(); quietStatus = error.localizedDescription }
+    }
+    func ignoreAssociation(_ item: ExpressionAssociationFeedback) async {
+        guard let store else { return }
+        do { try await store.ignoreExpressionAssociation(attemptID: item.attemptID, candidateID: item.proposal.candidateID, relation: item.proposal.relation); await refreshQuietFeedback() }
+        catch { await refreshQuietFeedback(); quietStatus = error.localizedDescription }
+    }
+    func openAssociation(_ item: ExpressionAssociationFeedback, historical: Bool) async -> Bool {
+        guard let store else { return false }
+        do {
+            guard try await store.expressionAssociationFeedback().contains(where: { $0.id == item.id }) else { throw VoiceOSError("关联已失效或已忽略，请刷新") }
+            selected = historical ? item.historical.document.sourceID : item.currentSourceID
+            await refresh(); return true
+        } catch { await refreshQuietFeedback(); quietStatus = error.localizedDescription; return false }
     }
     func openQuietFeedback(_ item: CognitiveFeedbackItem) async -> Bool {
         guard let store else { return false }
@@ -1287,7 +1302,7 @@ struct CognitiveFeedbackView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
             Text("静默回顾").font(.title2)
-            Text("可以直接关闭，不要求回应。当前显示你主动查找后接纳的相关原文；新表达的自动关联仍在开发。").font(.callout).foregroundStyle(.secondary)
+            Text("可以直接关闭，不要求回应。这里显示已接纳的关联提案和主动查找的相关原文。").font(.callout).foregroundStyle(.secondary)
             Picker("显示方式",selection:Binding(get:{ model.quietMode },set:{ mode in Task { await model.changeQuietMode(mode) } })) {
                 Text("正常显示").tag(CognitiveFeedbackMode.normal)
                 Text("减少显示 · 一次一条").tag(CognitiveFeedbackMode.reduced)
@@ -1296,8 +1311,23 @@ struct CognitiveFeedbackView: View {
             Text(model.quietStatus).font(.caption).foregroundStyle(.secondary)
             ScrollView {
                 VStack(alignment:.leading,spacing:16) {
-                    if model.quietFeedback.isEmpty {
+                    if model.quietFeedback.isEmpty && model.associationFeedback.isEmpty {
                         Text(model.quietMode == .paused ? "已暂停静默回顾，原文与历史保留。" : "暂无可显示的相关原文。无需回复或补做任务。")
+                    }
+                    ForEach(model.associationFeedback) { item in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("与这次表达有关 · AI关系提案").font(.headline)
+                            Text(item.proposal.relation.displayName).font(.caption).foregroundStyle(.secondary)
+                            Text("为何现在相关：" + item.proposal.reason).textSelection(.enabled)
+                            Text("这次原话：" + item.proposal.current.quote).textSelection(.enabled)
+                            Text("历史原话：" + item.proposal.historicalQuote).textSelection(.enabled)
+                            Text(item.historical.document.name + " · " + item.historical.document.createdAt).font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                Button("查看这次原话") { Task { if await model.openAssociation(item, historical: false) { dismiss() } } }
+                                Button("查看历史出处") { Task { if await model.openAssociation(item, historical: true) { dismiss() } } }
+                                Button("忽略关联") { Task { await model.ignoreAssociation(item) } }
+                            }
+                        }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
                     }
                     ForEach(model.quietFeedback) { item in
                         VStack(alignment:.leading,spacing:8) {
@@ -1543,5 +1573,16 @@ extension ControlCenter {
         do { try await store.endConversation(id:session.id,expectedVersion:session.version);discussionStatus="讨论已结束，历史保留；不表示认可AI内容。" }
         catch { discussionStatus=error.localizedDescription }
         await refreshDiscussion()
+    }
+}
+
+private extension ExpressionRelation {
+    var displayName: String {
+        switch self {
+        case .continuation: "可能延续旧想法"
+        case .qualification: "可能补充限定条件"
+        case .possibleCorrection: "可能修正，尚未确认"
+        case .sameQuestion: "可能讨论同一问题，解决状态待核对"
+        }
     }
 }

@@ -39,3 +39,5 @@
 
 - [019 成果生产者顺序](019-model-producer-sequence.md)：无await唯一预留顺序、迁移严格保留，旧包确定回溯基线；共享成果执行已接入；完整 AC-11 尚待验证。
 - [ADR-020 英文反馈记录](020-english-feedback-records.md)：独立保存原句、建议与练习比较，避免污染认知候选和行动。
+
+- [021 表达关联持久身份](021-durable-expression-association.md)：独立快照与尝试、当前表达派发去重、未知不重发；新增schema22/v21的持久忽略及安全卡片投影。

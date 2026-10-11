@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import subprocess
+import sqlite3
 from pathlib import Path
 
 parser = argparse.ArgumentParser()
@@ -41,7 +42,7 @@ for checkpoint in ['associationReserved', 'associationUncommitted', 'association
     package, target = args.root / (checkpoint + '-package'), args.root / (checkpoint + '-restored')
     run('export', root, package)
     manifest = json.loads((package / 'manifest.json').read_text())
-    assert manifest['version'] == 20 and manifest['databaseSchema'] == 21
+    assert manifest['version'] == 21 and manifest['databaseSchema'] == 22
     assert (package / 'expression_association_attempts.jsonl').exists()
     run('restore', target, package)
     restored = run('association-fixture', target)
@@ -49,8 +50,25 @@ for checkpoint in ['associationReserved', 'associationUncommitted', 'association
     checks.append({'checkpoint': checkpoint, 'state': recovered['state'],
                    'replay_port_calls': 0, 'restored_validity': 'frozen',
                    'partial_claims_or_actions': False, 'usage': recovered['usage']})
-report = {'date': '2026-10-11', 'schema': 21, 'package_version': 20,
-          'synthetic_only': True, 'process_crashes': checks, 'portable_round_trips': 3,
+ignore_checks = []
+for checkpoint in ['associationIgnoreUncommitted', 'associationIgnoreCommitted']:
+    root = args.root / checkpoint
+    run('association-fixture', root)
+    run('association-ignore-fixture', root, crash=checkpoint)
+    with sqlite3.connect(f'file:{root / "voiceos.sqlite"}?mode=ro', uri=True) as db:
+        count = db.execute('SELECT count(*) FROM expression_association_ignores').fetchone()[0]
+    assert count == (1 if checkpoint.endswith('Committed') else 0)
+    assert run('association-ignore-fixture', root) == {'feedback_count': 0, 'integrity': True}
+    assert run('association-ignore-fixture', root) == {'feedback_count': 0, 'integrity': True}
+    package, target = args.root / (checkpoint + '-package'), args.root / (checkpoint + '-restored')
+    run('export', root, package); run('restore', target, package)
+    assert run('association-ignore-fixture', target) == {'feedback_count': 0, 'integrity': True}
+    with sqlite3.connect(f'file:{target / "voiceos.sqlite"}?mode=ro', uri=True) as db:
+        assert db.execute('SELECT count(*) FROM expression_association_ignores').fetchone()[0] == 1
+    ignore_checks.append({'checkpoint': checkpoint, 'immediately_after_crash': count,
+                          'replayed_ignore_count': 1, 'restored_feedback_count': 0})
+report = {'date': '2026-10-11', 'schema': 22, 'package_version': 21,
+          'synthetic_only': True, 'process_crashes': checks, 'ignore_crashes': ignore_checks, 'portable_round_trips': 5,
           'cloud_calls': 0, 'microphone_calls': 0, 'external_task_writes': 0}
 (args.root / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
 print(json.dumps(report, indent=2))

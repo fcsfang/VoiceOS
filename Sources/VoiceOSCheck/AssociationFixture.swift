@@ -25,3 +25,9 @@ func runAssociationFixture(_ store: VoiceOSStore) async throws {
     let output: [String: Any] = ["synthetic_only": true, "state": record.state, "validity": record.validity, "proposals": record.proposals.count, "port_calls": await port.calls, "usage": record.usage ?? [:], "claims": try await store.candidateClaims().count, "actions": try await store.actions().count, "integrity": try await store.integrityCheck(), "network_calls": 0]
     print(String(decoding: try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]), as: UTF8.self))
 }
+func runAssociationIgnoreFixture(_ store: VoiceOSStore) async throws {
+    guard let record = try await store.expressionAssociationAttempts().first(where: { $0.state == "completed" }),
+          let proposal = record.proposals.first else { throw VoiceOSError("缺少合成已完成关联") }
+    try await store.ignoreExpressionAssociation(attemptID: record.id, candidateID: proposal.candidateID, relation: proposal.relation, commandID: "association-fixture-ignore")
+    print("{\"feedback_count\":\(try await store.expressionAssociationFeedback().count),\"integrity\":\(try await store.integrityCheck())}")
+}
