@@ -18,9 +18,9 @@
 
 ## 当前交接更新（2026-10-12 04:19）
 
-不要把上面的历史基线当作当前状态。当前 HEAD 为 `74a579e docs: record configuration drift regression`；`docs/planning/overnight-progress.md` 是最新进度记录。schema25、`processing_intents` 持久队列、单项串行执行器、迁移包 v24、取消/迟到结果保护、真实 SIGKILL 恢复探针、保存入口和处理记录菜单均已实现并提交。
+不要把上面的历史基线当作当前状态。当前 HEAD 为 `f6e7afd test: freeze queued intent during migration`；`docs/planning/overnight-progress.md` 是最新进度记录。schema25、`processing_intents` 持久队列、单项串行执行器、迁移包 v24、取消/迟到结果保护、真实 SIGKILL 恢复探针、保存入口和处理记录菜单均已实现并提交。
 
-最近的工程加固包括：无文本模型时 queued 意图不再空转，模型配置成功后才唤醒队列；冻结的既有认知不会继续进入关联；入队后模型配置漂移在任何模型调用前进入 blocked。当前 `swift test` 为 352 项通过，恢复探针、隔离队列夹具、签名构建和 codesign 验证均通过。
+最近的工程加固包括：无文本模型时 queued 意图不再空转，模型配置成功后才唤醒队列；冻结的既有认知不会继续进入关联；入队后模型配置漂移在任何模型调用前进入 blocked；queued 意图迁移后冻结且不派发。当前 `swift test` 为 353 项通过，恢复探针、隔离队列夹具、签名构建和 codesign 验证均通过。
 
 当前唯一明确未验证项是 macOS 原生 UI 的实际运行时路径（保存按钮启用/禁用、处理记录状态、取消、重启后的 unknown，以及普通保存不触发模型）。CUA 最近检查均因 Mac 锁定而无法读取窗口；解锁后优先完成这些核对。不要重复实现已经提交的队列，也不要把构建、静态阅读或合成夹具当作 UI 运行时证据。
 
