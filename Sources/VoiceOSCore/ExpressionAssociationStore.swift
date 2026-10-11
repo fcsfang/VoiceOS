@@ -33,13 +33,21 @@ extension VoiceOSStore {
         let source = snapshot.current.sources[0]
         return relevanceHash(try relevanceJSON(["association-request-v1", source.sourceID, source.sourceVersionID, source.transcriptVersionID, String(snapshot.policyVersion), config.provider, config.model, config.promptVersion, config.schemaVersion, config.destination.rawValue]).data(using: .utf8)!)
     }
+    func existingExpressionAssociation(_ snapshot: ExpressionAssociationSnapshot) throws -> ExpressionAssociationAttempt? {
+        let source = snapshot.current.sources[0]
+        return try expressionAssociationAttempts().first {
+            $0.currentSourceID == source.sourceID && $0.snapshot.policyVersion == snapshot.policyVersion &&
+            $0.snapshot.current.sources[0].transcriptVersionID == source.transcriptVersionID &&
+            $0.snapshot.current.sources[0].sourceVersionID == source.sourceVersionID
+        }
+    }
     public func reserveExpressionAssociation(_ snapshot: ExpressionAssociationSnapshot, configuration: ModelConfiguration) throws -> String {
         try validateExpressionAssociation(snapshot)
         guard configuration.destination == snapshot.destination, !configuration.provider.isEmpty,
               !configuration.model.isEmpty, !configuration.promptVersion.isEmpty, !configuration.schemaVersion.isEmpty,
               !snapshot.candidates.isEmpty else { throw VoiceOSError("关联没有候选或端口身份/目的地不符；无需发送") }
         let key = try Self.expressionAssociationKey(snapshot, configuration)
-        if let existing = try db.query("SELECT id FROM expression_association_attempts WHERE request_key=?", [key]).first { return existing["id"]! }
+        if let existing = try existingExpressionAssociation(snapshot) { return existing.id }
         let snapshotJSON = try Self.relevanceJSON(snapshot)
         guard snapshotJSON.utf8.count <= 160000 else { throw VoiceOSError("关联快照超过字节预算；不发送") }
         let contextID = try persistLocalContext(snapshot.current, commandID: "expression-association:" + key, destination: snapshot.destination)
@@ -54,11 +62,9 @@ extension VoiceOSStore {
     public func performExpressionAssociation(_ snapshot: ExpressionAssociationSnapshot, using port: any ExpressionAssociationPort) async throws -> ExpressionAssociationAttempt {
         try Task.checkCancellation()
         try validateExpressionAssociation(snapshot)
-        let key = try Self.expressionAssociationKey(snapshot, port.configuration)
-        if let existing = try db.query("SELECT id,state FROM expression_association_attempts WHERE request_key=?", [key]).first {
-            guard existing["state"] != "reserved" else { throw VoiceOSError("关联请求已有预留；不重复发送") }
-            guard let record = try expressionAssociationAttempts().first(where: { $0.id == existing["id"] }) else { throw VoiceOSError("关联记录缺失") }
-            return record
+        if let existing = try existingExpressionAssociation(snapshot) {
+            guard existing.state != "reserved" else { throw VoiceOSError("关联请求已有预留；不重复发送") }
+            return existing
         }
         let id = try reserveExpressionAssociation(snapshot, configuration: port.configuration)
         let response: ExpressionAssociationResponse

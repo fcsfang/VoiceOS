@@ -23,6 +23,12 @@ extension VoiceOSStore {
         guard current.origin == "user", current.speaker == "user" else { throw VoiceOSError("自动关联只处理明确的个人表达") }
         let baseline = try prepareExpressionAssociation(currentSourceID: sourceID, candidates: [], destination: model.configuration.destination)
         let key = try Self.expressionAssociationKey(baseline, model.configuration)
+        // Configuration upgrades are not authorization to regenerate a previous judgment.
+        // Preserve the old request key for portable validation, but reuse by expression/policy epoch.
+        if let prior = try existingExpressionAssociation(baseline) {
+            if prior.state == "reserved" { return .init(state: .inFlight, attempt: nil) }
+            return .init(state: prior.state == "completed" ? .completed : .unknown, attempt: prior)
+        }
         if let row = try db.query("SELECT id,state FROM expression_association_attempts WHERE request_key=?", [key]).first {
             if row["state"] == "reserved" { return .init(state: .inFlight, attempt: nil) }
             guard let record = try expressionAssociationAttempts().first(where: { $0.id == row["id"] }) else { throw VoiceOSError("关联历史缺失") }

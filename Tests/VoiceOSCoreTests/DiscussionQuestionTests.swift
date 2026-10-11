@@ -30,6 +30,14 @@ private actor TypedQuestionOutcome: ConversationOutcomePort {
         ], inputTokens: 10, outputTokens: 20)
     }
 }
+private actor OutcomeContinuationPort: ModelPort {
+    let configuration = ModelConfiguration(provider: "continuation_fixture", model: "fixture", promptVersion: "v1", schemaVersion: "v1", destination: .local)
+    var calls = 0
+    func generate(_ request: ModelRequest) async throws -> ModelResponse {
+        calls += 1
+        return .init(status: .completed, claims: [])
+    }
+}
 final class DiscussionQuestionTests: XCTestCase {
     var root: URL!
     override func setUpWithError() throws { root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString) }
@@ -78,6 +86,22 @@ final class DiscussionQuestionTests: XCTestCase {
         let questions = try await s.questions(), claims = try await s.candidateClaims(), actions = try await s.actions(), receipts = try await s.conversationOutcomes(conversationID: snapshot.input.conversationID)
         XCTAssertTrue(questions.isEmpty); XCTAssertTrue(claims.isEmpty); XCTAssertTrue(actions.isEmpty)
         XCTAssertEqual(receipts.first?.state, "rejected"); XCTAssertEqual(receipts.first?.usage?["input_tokens"], 10)
+    }
+    func testContinuationSharesCompletedAndRejectedOutcomeBarrierWithoutReunderstandingTurn() async throws {
+        let initialRoot = root!
+        defer { try? FileManager.default.removeItem(at: initialRoot) }
+        for rejected in [false, true] {
+            let (s, snapshot) = try await setup(), port = OutcomeContinuationPort()
+            do { _ = try await s.performConversationOutcome(snapshot, using: TypedQuestionOutcome(badAction: rejected)) } catch { XCTAssertTrue(rejected) }
+            let result = try await s.continueSourceUnderstanding(sourceID: snapshot.input.userTurns[0].sourceID, using: port)
+            XCTAssertTrue(result.reused); XCTAssertEqual(result.state, rejected ? "discussion_rejected" : "discussion_completed")
+            let turn = try await s.conversationUserTurns(conversationID: snapshot.input.conversationID)[0]
+            let discussion = try await s.continueConversationUserUnderstanding(conversationID: snapshot.input.conversationID, turnID: turn.id, using: port)
+            XCTAssertEqual(discussion.state, result.state)
+            let calls = await port.calls; XCTAssertEqual(calls, 0)
+            // Each setup needs its own store lock and isolated root.
+            root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        }
     }
     func testLongSelectedDiscussionReferencesUseTheirPinnedBoundedBudget() async throws {
         let (s, snapshot) = try await setup(long: true)

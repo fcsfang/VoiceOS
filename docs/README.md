@@ -148,3 +148,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [问题答案依赖与重开修复](engineering/m4-question-lifecycle-contract.md)：327项回归，当前答案与历史答案分开依赖，显式重开后可重新研究/登记新答案；六处强退与恢复通过，原问题和迁移冻结不能借此解除。
 
 2026-10-12 增量：讨论成果v2已接入显式内容类型与个人/AI问题状态入口，旧结果不重提取；334项回归、签名构建、三处成果与六处状态强退/恢复及原生讨论页核对通过。见[问题契约](engineering/m4-question-lifecycle-contract.md)与[脱敏证据](research/evidence/discussion-question-types-2026-10-12.json)。自然质量与完整MVP仍未通过。
+
+2026-10-12 续接修复：单份表达与讨论回合显式整理可沿用成功理解后继续尚未预留的关联，未知/拒绝/失效不重发；跨模型配置关联去重。339项全套、六处真实强退/六次迁移及签名构建通过；本切片0云端/麦克风/外部写。见[契约](engineering/m4-expression-association-contract.md)与[证据](research/evidence/source-understanding-continuation-2026-10-12.json)。保存即自动处理及自然质量仍开放。

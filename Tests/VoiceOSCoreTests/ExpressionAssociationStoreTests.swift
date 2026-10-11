@@ -40,6 +40,29 @@ private actor AssociationDriverRetrieval: LocalRetrievalPort {
     }
 }
 final class ExpressionAssociationStoreTests: XCTestCase {
+    func testModelUpgradeReusesCompletedAndUnknownJudgmentWithoutRetrievalOrDispatch() async throws {
+        for fail in [false, true] {
+            let s = try await store(fail ? "unknown-upgrade" : "completed-upgrade"), snapshot = try await fixture(s)
+            let old = AssociationStorePort(fail: fail), upgraded = AssociationStorePort(model: "upgraded"), retrieval = AssociationDriverRetrieval()
+            do { _ = try await s.performExpressionAssociation(snapshot, using: old) } catch { XCTAssertTrue(fail) }
+            let result = try await s.processExpressionAssociation(sourceID: snapshot.current.sources[0].sourceID, retrieval: retrieval, model: upgraded)
+            XCTAssertEqual(result.state, fail ? .unknown : .completed)
+            let direct = try await s.performExpressionAssociation(snapshot, using: upgraded)
+            XCTAssertEqual(direct.id, result.attempt?.id)
+            let calls = await upgraded.calls, queries = await retrieval.queries
+            XCTAssertEqual(calls, 0); XCTAssertTrue(queries.isEmpty)
+            let attempts = try await s.expressionAssociationAttempts(); XCTAssertEqual(attempts.count, 1)
+        }
+    }
+    func testConcurrentUpgradeCannotDispatchSecondJudgmentWhileFirstIsInFlight() async throws {
+        let s = try await store(), snapshot = try await fixture(s), upgraded = AssociationStorePort(model: "upgraded")
+        let old = AssociationStorePort(callback: { request in
+            do { _ = try await s.performExpressionAssociation(request.snapshot, using: upgraded); XCTFail("in-flight duplicate") } catch {}
+        })
+        _ = try await s.performExpressionAssociation(snapshot, using: old)
+        let calls = await upgraded.calls; XCTAssertEqual(calls, 0)
+        let attempts = try await s.expressionAssociationAttempts(); XCTAssertEqual(attempts.count, 1)
+    }
     var base: URL!
     override func setUpWithError() throws { base = FileManager.default.temporaryDirectory.appendingPathComponent("association-store-" + UUID().uuidString) }
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: base) }

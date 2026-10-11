@@ -17,6 +17,32 @@ private actor AssociationFixturePort: ExpressionAssociationPort {
         return .init(proposals: [.init(candidateID: hit.id, current: evidence, historicalQuote: hit.document.text, relation: .sameQuestion, reason: "合成关联：当前和旧表达讨论相同的限制条件。")], inputTokens: 17, outputTokens: 23)
     }
 }
+private actor ContinuationFixtureCognition: ModelPort {
+    let configuration = ModelConfiguration(provider: "continuation_offline_fixture", model: "synthetic", promptVersion: "p1", schemaVersion: "s1", destination: .local)
+    var calls = 0
+    func generate(_ request: ModelRequest) async throws -> ModelResponse {
+        calls += 1
+        let source = request.context.sources[0]
+        return .init(status: .completed, claims: [.init(statement: "哪些反例可以限制猜想？", ownership: .userTentative,
+            references: [.init(sourceID: source.sourceID, transcriptVersionID: source.transcriptVersionID, spanID: source.spans[0].id)], contentKind: .question)], inputTokens: 11, outputTokens: 13)
+    }
+}
+func runSourceContinuationFixture(_ store: VoiceOSStore) async throws {
+    _ = try await store.recordUserExpression("合成旧表达：反例与猜想的限制条件。", commandID: "continuation-history")
+    let source = try await store.recordUserExpression("合成个人疑问：哪些反例可以限制猜想？", commandID: "continuation-source")
+    let cognition = ContinuationFixtureCognition(), association = AssociationFixturePort()
+    let result = try await store.continueSourceUnderstanding(sourceID: source, using: cognition)
+    var associationState = "not_run"
+    if result.state == "completed" {
+        associationState = try await store.processExpressionAssociation(sourceID: source, retrieval: AssociationFixtureRetrieval(), model: association).state.rawValue
+    }
+    let output: [String: Any] = ["synthetic_only": true, "understanding_state": result.state, "association_state": associationState,
+        "cognition_calls": await cognition.calls, "association_calls": await association.calls,
+        "claims": try await store.candidateClaims(includeFrozen: true).count, "questions": try await store.questions().count,
+        "actions": try await store.actions().count, "integrity": try await store.integrityCheck(),
+        "cloud_calls": 0, "microphone_calls": 0, "external_task_writes": 0]
+    print(String(decoding: try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]), as: UTF8.self))
+}
 func runAssociationFixture(_ store: VoiceOSStore, automatic: Bool = false, semanticRoot: URL? = nil) async throws {
     _ = try await store.recordUserExpression("合成旧表达：什么条件可以限制猜想？", commandID: "association-fixture-old")
     let current = try await store.recordUserExpression("合成新表达：我想重新核对猜想的限制条件。", commandID: "association-fixture-current")

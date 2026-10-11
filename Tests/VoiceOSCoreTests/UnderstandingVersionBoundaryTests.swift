@@ -16,6 +16,34 @@ private actor VersionBoundaryPort: ModelPort {
     }
 }
 final class UnderstandingVersionBoundaryTests: XCTestCase {
+    func testExplicitContinuationReadsCompletedAndUnknownAcrossUpgradeWithoutReplay() async throws {
+        for fail in [false, true] {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: root) }
+            let s = try VoiceOSStore(root: root, inspector: VersionBoundaryInspector()); try await s.recover()
+            let source = try await s.recordUserExpression("合成原话：重复入口只继续已成功的后续处理。")
+            let old = VersionBoundaryPort("v2", fail: fail), upgraded = VersionBoundaryPort("v3")
+            do { _ = try await s.understandSource(sourceID: source, using: old) } catch { XCTAssertTrue(fail) }
+            let result = try await s.continueSourceUnderstanding(sourceID: source, using: upgraded)
+            XCTAssertTrue(result.reused); XCTAssertEqual(result.state, fail ? "unknown" : "completed")
+            let calls = await upgraded.calls; XCTAssertEqual(calls, 0)
+        }
+    }
+    func testContinuationDoesNotUseFrozenCurrentUnderstandingAsSuccessful() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let s = try VoiceOSStore(root: root, inspector: VersionBoundaryInspector()); try await s.recover()
+        let source = try await s.recordUserExpression("合成原话：恢复包不恢复自动执行。"), port = VersionBoundaryPort("v2")
+        _ = try await s.understandSource(sourceID: source, using: port)
+        try await s.invalidateCognition(sourceID: source)
+        let package = root.appendingPathComponent("package"), restoredRoot = root.appendingPathComponent("restored")
+        try await s.exportPackage(to: package)
+        try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: VersionBoundaryInspector())
+        let restored = try VoiceOSStore(root: restoredRoot, inspector: VersionBoundaryInspector()); try await restored.recover()
+        let upgraded = VersionBoundaryPort("v3"), result = try await restored.continueSourceUnderstanding(sourceID: source, using: upgraded)
+        XCTAssertTrue(result.reused); XCTAssertEqual(result.state, "frozen")
+        let calls = await upgraded.calls; XCTAssertEqual(calls, 0)
+    }
     func testModelAndSchemaUpgradeCannotReplayCompletedOrUnknownExpression() async throws {
         for fail in [false, true] {
             let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

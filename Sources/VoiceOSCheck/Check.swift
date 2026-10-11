@@ -43,6 +43,7 @@ struct Check {
             if args[0] == "question-close-fixture" { try await runQuestionCloseFixture(store); return }
             if args[0] == "typed-cognition-fixture" { try await runTypedCognitionFixture(store); return }
             if args[0] == "discussion-question-fixture" { try await runDiscussionQuestionFixture(store); return }
+            if args[0] == "source-continuation-fixture" { try await runSourceContinuationFixture(store); return }
             if args[0] == "association-fixture" { try await runAssociationFixture(store); return }
             if args[0] == "association-driver-fixture" {
                 guard args.count == 2 || args.count == 3 else { throw VoiceOSError("association-driver-fixture requires isolated root and optional reviewed semantic model") }

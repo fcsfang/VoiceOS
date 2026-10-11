@@ -370,13 +370,27 @@ final class ControlCenter: ObservableObject {
         // Application-owned: changing selection or closing the window does not resend/cancel.
         understandingWorker = Task {
             do {
-                let ids = try await store.understandSource(sourceID: record.id, using: port)
-                status = ids.isEmpty ? "理解完成 · 没有提取到陈述" : "理解完成 · \(ids.count) 条陈述待核对"
-                await refresh(); requestReminderRefresh()
-                await associateUnderstoodExpression(record.id)
+                let result = try await store.continueSourceUnderstanding(sourceID: record.id, using: port)
+                await applyUnderstandingContinuation(result, sourceID: record.id)
             } catch { status = error.localizedDescription }
             await refresh(); requestReminderRefresh()
             understandingSource = nil; understandingWorker = nil
+        }
+    }
+    private func applyUnderstandingContinuation(_ result: SourceUnderstandingContinuation, sourceID: String) async {
+        if result.state == "completed" || result.state == "discussion_completed" {
+            status = result.reused ? "沿用已有理解 · 核对关联处理，不重复生成候选或任务" : "理解完成 · \(result.claimIDs.count) 条候选待核对"
+            await refresh(); requestReminderRefresh()
+            await associateUnderstoodExpression(sourceID)
+        } else {
+            let label: String
+            switch result.state {
+            case "unknown", "discussion_unknown": label = "结果未知"
+            case "reserved", "discussion_reserved": label = "正在处理"
+            case "rejected", "discussion_rejected": label = "结果未接纳"
+            default: label = "依据已失效"
+            }
+            status = "已有理解记录 · \(label)；未重发，也未启动后续关联"
         }
     }
     func saveExpression(_ text: String, commandID: String) async -> Bool {
@@ -1644,7 +1658,7 @@ extension ControlCenter {
         } catch { discussionStatus=error.localizedDescription;return false }
     }
     func canUnderstandDiscussionTurn(_ turn:ConversationUserTurn)->Bool {
-        modelConfigured && discussionSession?.validity == "current" && understandingWorker == nil && !discussionSending && !discussionSaving && !discussionExtracting && !dictationActive && records.contains(where: { $0.id == turn.sourceID && $0.transcriptVersionID == turn.transcriptVersionID && !$0.localOnly && $0.origin == "user" && $0.speaker == "user" }) && !(attempts[turn.sourceID] ?? []).contains(where: { $0.executionKind == "model_request" })
+        modelConfigured && discussionSession?.validity == "current" && understandingWorker == nil && !discussionSending && !discussionSaving && !discussionExtracting && !dictationActive && records.contains(where: { $0.id == turn.sourceID && $0.transcriptVersionID == turn.transcriptVersionID && !$0.localOnly && $0.origin == "user" && $0.speaker == "user" })
     }
     func understandDiscussionTurn(_ turn:ConversationUserTurn) {
         guard let store,let session=discussionSession,let port=textModel,canUnderstandDiscussionTurn(turn) else { return }
@@ -1652,10 +1666,8 @@ extension ControlCenter {
         status="正在整理所选个人发言的观点与明确行动…"
         understandingWorker=Task {
             do {
-                let ids=try await store.understandConversationUserTurn(conversationID:session.id,turnID:turn.id,using:port)
-                status=ids.isEmpty ? "本轮原话已整理，没有提取到陈述" : "本轮原话已整理，\(ids.count)条陈述待核对；明确行动遵循已有清单授权"
-                await refresh(); requestReminderRefresh()
-                await associateUnderstoodExpression(turn.sourceID)
+                let result=try await store.continueConversationUserUnderstanding(conversationID:session.id,turnID:turn.id,using:port)
+                await applyUnderstandingContinuation(result, sourceID: turn.sourceID)
             } catch { status=error.localizedDescription }
             await refresh();requestReminderRefresh()
             understandingSource=nil;understandingWorker=nil
