@@ -17,13 +17,13 @@ public struct ConversationUserTurn: Identifiable, Sendable {
     public let text: String
     public let contextID: String
 }
-public struct ConversationTurnReference: Equatable, Sendable {
+public struct ConversationTurnReference: Equatable, Codable, Sendable {
     public let turnID: String
     public let sourceID: String
     public let transcriptVersionID: String
 }
 /// The exact text-only input to a future discussion call, before any model invocation.
-public struct PreparedConversationInput: Sendable {
+public struct PreparedConversationInput: Codable, Sendable {
     public let conversationID: String
     public let conversationVersion: Int
     public let contextID: String

@@ -94,3 +94,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [M4 本地会话基础](engineering/m4-conversation-foundation.md)：170项测试、六次强退、两次新格式迁移与实际v1–v13恢复；尚未接入AI回复/界面。
 - [模式B实施契约](engineering/m4-dialogue-contract.md)：P07已确认逐轮语音＋文字，回合、引用、权限与回流验收。
 - [GPT-Live与订阅接入](research/gpt-live-subscription-access-2026-10-11.md)：官方宿主语音、Live项目API与订阅文本接口的区别，账户权限未验证。
+
+- [M4 持久讨论回复](engineering/m4-durable-discussion-replies.md)：184项测试、三次强退、实际v1–v14恢复；AI回复保持独立身份，实际讨论模型与界面待接入。

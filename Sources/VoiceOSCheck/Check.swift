@@ -25,10 +25,14 @@ struct Check {
             }
             let crash = ProcessInfo.processInfo.environment["VOICEOS_TEST_CRASH_AT"]
             let store = try VoiceOSStore(root: URL(fileURLWithPath: args[1]), inspector: NativeMediaInspector(), checkpoint: { point in
-                if point.rawValue == crash { kill(getpid(), SIGKILL) }
+                if point.rawValue == crash {
+                    kill(getpid(), SIGKILL)
+                    // Signal delivery can lag on another thread; never cross the commit boundary.
+                    while true { pause() }
+                }
             })
             try await store.recover()
-            if ["conversation-entry-fixture","conversation-turn-fixture","conversation-end-fixture"].contains(args[0]) {
+            if ["conversation-entry-fixture","conversation-turn-fixture","conversation-end-fixture","discussion-fixture"].contains(args[0]) {
                 let source = try await store.recordUserExpression("合成旧观点：需要检验条件，尚未形成结论。",commandID:"synthetic-dialogue-history")
                 let id = try await store.beginConversation(sourceIDs:[source],commandID:"synthetic-dialogue-entry")
                 if args[0] != "conversation-entry-fixture" {
@@ -36,6 +40,15 @@ struct Check {
                     _ = try await store.appendConversationUserSource(conversationID:id,sourceID:turnSource,expectedVersion:1,commandID:"synthetic-dialogue-turn")
                 }
                 if args[0] == "conversation-end-fixture" { try await store.endConversation(id:id,expectedVersion:2,commandID:"synthetic-dialogue-end") }
+                if args[0] == "discussion-fixture", try await store.discussionAttempts(conversationID:id).isEmpty {
+                    let input = try await store.prepareConversationInput(id:id,expectedVersion:2,destination:.local)
+                    _ = try await store.performConversationReply(input,using:LocalDiscussionFixture())
+                }
+            } else if args[0] == "discussion-read" {
+                guard args.count == 3 else { throw VoiceOSError("discussion-read requires conversation ID") }
+                let attempts = try await store.discussionAttempts(conversationID:args[2])
+                let output:[String:Any] = ["integrity":try await store.integrityCheck(),"attempts":attempts.map { ["id":$0.id,"state":$0.state,"validity":$0.validity,"parts":$0.parts.count,"usage":$0.usage ?? [:]] as [String:Any] }]
+                print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self));return
             } else if args[0] == "conversation-read" {
                 guard args.count == 3 else { throw VoiceOSError("conversation-read requires conversation ID") }
                 let session = try await store.conversation(id:args[2]), turns = try await store.conversationUserTurns(conversationID:args[2])
@@ -134,5 +147,14 @@ private actor FileRemindersFixture: RemindersPort {
         let fd = open(file.deletingLastPathComponent().path, O_RDONLY)
         guard fd >= 0 else { throw VoiceOSError("fixture directory unavailable") }
         defer { close(fd) }; guard fsync(fd) == 0 else { throw VoiceOSError("fixture directory sync failed") }
+    }
+}
+
+private struct LocalDiscussionFixture: DiscussionModelPort {
+    let configuration = ModelConfiguration(provider:"fixture",model:"discussion",promptVersion:"v1",schemaVersion:"v1",destination:.local)
+    func reply(_ request:DiscussionModelRequest) async throws -> DiscussionModelResponse {
+        let source=request.snapshot.context.sources[0]
+        let ref=ClaimReference(sourceID:source.sourceID,transcriptVersionID:source.transcriptVersionID,spanID:source.spans[0].id)
+        return DiscussionModelResponse(status:.completed,parts:[DiscussionPart(kind:.quotation,text:source.text,references:[ref]),DiscussionPart(kind:.aiSuggestion,text:"合成AI建议：比较反例，尚未形成用户结论。",references:[ref])],inputTokens:11,outputTokens:5)
     }
 }

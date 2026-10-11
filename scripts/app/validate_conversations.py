@@ -67,7 +67,7 @@ for media in [False, True]:
     assert result['validity'] == 'frozen' and result['state'] == 'ended' and result['user_turns'] == 1 and result['integrity']
 
 report = {'date': '2026-10-11', 'synthetic_only': True, 'process_crashes': checks,
-          'portable_round_trips': 2, 'schema': 15, 'package_version': 14,
+          'portable_round_trips': 2, 'schema': 16, 'package_version': 15,
           'microphone_calls': 0, 'cloud_calls': 0, 'external_task_writes': 0}
 (args.root / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
 print(json.dumps(report, indent=2))

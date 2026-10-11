@@ -31,6 +31,7 @@ public actor VoiceOSStore {
         try db.execute("UPDATE jobs SET state='queued', lease_token=NULL WHERE state='running'")
         try db.execute("UPDATE model_attempts SET state='unknown',error='进程退出前结果未登记；不会自动重发' WHERE state='reserved'")
         try db.execute("UPDATE relevance_attempts SET state='unknown',error='进程退出前相关性结果未登记；不会自动重发' WHERE state='reserved'")
+        try db.execute("UPDATE discussion_attempts SET state='unknown',error='进程退出前讨论结果未登记；不自动重发' WHERE state='reserved'")
         for row in try db.query("SELECT * FROM sources ORDER BY created_at") {
             let id = row["id"]!
             if row["input_fingerprint"] == "microphone-v1:"+id, row["expected_bytes"] == "0" {
@@ -65,6 +66,7 @@ public actor VoiceOSStore {
         try Self.validateStoredCognitiveFeedback(db)
         try Self.validateStoredRecordings(db)
         try Self.validateStoredConversations(db)
+        try Self.validateStoredDiscussionAttempts(db)
         ready = true
     }
     @discardableResult

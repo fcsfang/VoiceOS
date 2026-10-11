@@ -30,3 +30,5 @@
 - [013 个人口述](013-durable-personal-dictation.md)：AVAudioRecorder、持久身份与原件封存，部分采用；设备/权限/睡眠待测。
 
 - [014 本地会话历史](014-local-conversation-history.md)：共用来源/上下文、个人回合、结束、原子冻结与迁移；W17基础部分采用，AI与界面待实现。
+
+- [015 持久讨论回复](015-durable-discussion-replies.md)：完整本地快照、同轮防重发、AI角色与晚到屏障；限回复基础切片。
