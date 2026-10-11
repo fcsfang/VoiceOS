@@ -205,6 +205,21 @@ final class ExpressionProcessingQueueTests: XCTestCase {
         XCTAssertEqual(modelCalls, 0); XCTAssertEqual(associationCalls, 0)
     }
 
+    func testConfigurationDriftBlocksBeforeAnyModelCall() async throws {
+        let store = try VoiceOSStore(root: root, inspector: QueueInspector()); try await store.recover()
+        let source = try await store.recordUserExpression("入队后模型身份发生变化的表达")
+        _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: 1, localOnly: false)
+        let original = config()
+        let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: source, cognition: original, association: original)
+        let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "configuration-drift", cognition: original, association: original)
+        let changed = ModelConfiguration(provider: "queue-fixture-upgraded", model: "synthetic-v2", promptVersion: "v2", schemaVersion: "v2", destination: .cloud)
+        let model = QueueModel(changed), association = QueueAssociation(changed)
+        let result = try await store.runExpressionProcessingIntent(id: intent.id, retrieval: QueueRetrieval(), cognitionPort: model, associationPort: association)
+        XCTAssertEqual(result.state, .blocked)
+        let modelCalls = await model.callCount(), associationCalls = await association.callCount()
+        XCTAssertEqual(modelCalls, 0); XCTAssertEqual(associationCalls, 0)
+    }
+
     func testRestoreRejectsTamperedProcessingIntentEvenWhenManifestChecksumIsUpdated() async throws {
         let store = try VoiceOSStore(root: root, inspector: QueueInspector()); try await store.recover()
         let source = try await store.recordUserExpression("迁移包篡改测试表达")
