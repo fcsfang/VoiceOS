@@ -9,6 +9,7 @@ import VoiceOSPlatform
 final class ControlCenter: ObservableObject {
     @Published var records: [SourceRecord] = []
     @Published var discussionList:[ConversationRecord] = []
+    @Published var sourceDiscussions:[ConversationRecord] = []
     @Published var discussionSession:ConversationRecord?
     @Published var discussionTurns:[ConversationUserTurn] = []
     @Published var discussionReplies:[DiscussionAttemptRecord] = []
@@ -243,6 +244,7 @@ final class ControlCenter: ObservableObject {
                 await relevance.validate(store:store)
                 await refreshQuietFeedback()
                 await refreshDiscussion()
+                await refreshSourceDiscussions()
                 var loaded: [String: [ModelAttemptRecord]] = [:]
                 for record in records { loaded[record.id] = try await store.modelAttempts(sourceID: record.id) }
                 attempts = loaded
@@ -572,6 +574,15 @@ struct CenterView: View {
                         }
                         Button(record.localOnly ? "允许这份资料的文本用于云端" : "将这份资料限制为仅本地") { Task { await model.changeTextPolicy(record) } }.disabled(model.changingPolicy)
                         Text("此选项仅授权文本；执行文字理解或相关性判断时才发送选中的文字，原始音频和视频仍仅本机。").font(.caption).foregroundStyle(.secondary)
+                        if !model.sourceDiscussions.isEmpty {
+                            Menu("查看关联讨论") {
+                                ForEach(model.sourceDiscussions) { session in
+                                    Button(String(session.id.prefix(8))+" · "+(session.state == "ended" ? "已结束" : "进行中")) {
+                                        Task { await model.openDiscussion(session.id);showingDiscussion=true }
+                                    }
+                                }
+                            }.disabled(model.discussionSending || model.discussionSaving || model.dictationActive)
+                        }
                         Button("继续讨论",systemImage:"bubble.left.and.bubble.right") {
                             Task { if await model.beginDiscussion(record) { showingDiscussion = true } }
                         }.disabled((record.transcript ?? "").isEmpty || !["saved","reference_only"].contains(record.state) || model.discussionSaving || model.discussionSending || model.dictationActive)
@@ -814,7 +825,7 @@ struct CenterView: View {
                 HStack { Spacer(); Button("完成") { showClaimHistory = false }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 660, height: 440)
         }
-        .onChange(of: model.selected) { _, _ in model.player?.pause(); model.player = nil }
+        .onChange(of: model.selected) { _, _ in model.player?.pause(); model.player = nil; model.sourceDiscussions=[];Task { await model.refreshSourceDiscussions() } }
         .frame(minWidth: 840, minHeight: 540)
         .task { await model.start() }
     }
@@ -1316,6 +1327,29 @@ extension ControlCenter {
             discussionStatus="AI回复已保存；分析不表示你已认可或决定行动。"
         } catch { discussionStatus=error.localizedDescription }
         await refreshDiscussion()
+    }
+    func refreshSourceDiscussions() async {
+        guard let store,let source=selected else { sourceDiscussions=[];return }
+        do {
+            let linked=try await store.conversationsForSource(sourceID:source)
+            if selected == source { sourceDiscussions=linked }
+        } catch { if selected == source { sourceDiscussions=[];status=error.localizedDescription } }
+    }
+    func canUnderstandDiscussionTurn(_ turn:ConversationUserTurn)->Bool {
+        modelConfigured && discussionSession?.validity == "current" && understandingWorker == nil && !discussionSending && !discussionSaving && !dictationActive && records.contains(where: { $0.id == turn.sourceID && $0.transcriptVersionID == turn.transcriptVersionID && !$0.localOnly && $0.origin == "user" && $0.speaker == "user" }) && (attempts[turn.sourceID] ?? []).isEmpty
+    }
+    func understandDiscussionTurn(_ turn:ConversationUserTurn) {
+        guard let store,let session=discussionSession,let port=textModel,canUnderstandDiscussionTurn(turn) else { return }
+        selected=turn.sourceID;understandingSource=turn.sourceID
+        status="正在整理所选个人发言的观点与明确行动…"
+        understandingWorker=Task {
+            do {
+                let ids=try await store.understandConversationUserTurn(conversationID:session.id,turnID:turn.id,using:port)
+                status=ids.isEmpty ? "本轮原话已整理，没有提取到陈述" : "本轮原话已整理，\(ids.count)条陈述待核对；明确行动遵循已有清单授权"
+            } catch { status=error.localizedDescription }
+            await refresh();requestReminderRefresh()
+            understandingSource=nil;understandingWorker=nil
+        }
     }
     func endDiscussion() async {
         guard let store,let session=discussionSession,session.state == "active",!discussionSaving,!dictationActive else { return }

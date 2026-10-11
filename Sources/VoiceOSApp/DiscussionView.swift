@@ -38,7 +38,11 @@ struct DiscussionView: View {
                             VStack(alignment:.leading,spacing:8) {
                                 Text("我 · 第\(turn.ordinal)轮").font(.headline)
                                 Text(turn.text).textSelection(.enabled)
-                                Button("查看个人原文") { model.selected=turn.sourceID;dismiss() }
+                                HStack {
+                                    Button("查看个人原文") { model.selected=turn.sourceID;dismiss() }
+                                    Button("整理我的这轮表达") { model.understandDiscussionTurn(turn);dismiss() }.disabled(!model.canUnderstandDiscussionTurn(turn))
+                                }
+                                Text("整理会发送本轮个人原话，提取待核对观点与明确行动；行动遵循已保存的提醒清单授权。").font(.caption).foregroundStyle(.secondary)
                                 ForEach(model.discussionReplies.filter { $0.replyToTurnID == turn.id }) { reply in
                                     VStack(alignment:.leading,spacing:8) {
                                         Text(replyLabel(reply)).font(.headline)

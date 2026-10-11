@@ -37,6 +37,10 @@ extension VoiceOSStore {
         guard ready,(1...500).contains(limit) else { throw VoiceOSError("讨论历史范围无效") }
         return try db.query("SELECT id FROM conversations ORDER BY created_at DESC,id DESC LIMIT ?",[String(limit)]).map { try conversation(id:$0["id"]!) }
     }
+    public func conversationsForSource(sourceID:String) throws -> [ConversationRecord] {
+        guard ready else { throw VoiceOSError("资料库尚未恢复") }
+        return try db.query("SELECT DISTINCT c.id,c.created_at FROM conversations c LEFT JOIN conversation_user_turns t ON t.conversation_id=c.id LEFT JOIN context_inputs i ON i.context_id=c.entry_context_id WHERE t.source_id=? OR i.source_id=? ORDER BY c.created_at DESC,c.id DESC LIMIT 100",[sourceID,sourceID]).map { try conversation(id:$0["id"]!) }
+    }
     /// Immutable entry text for historical display; never grants processing permission.
     public func conversationHistorySources(conversationID:String) throws -> [ContextTranscript] {
         let session=try conversation(id:conversationID)
