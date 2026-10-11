@@ -37,6 +37,7 @@ struct Check {
                 }
             })
             try await store.recover()
+            if args[0] == "association-fixture" { try await runAssociationFixture(store); return }
             if args[0] == "outcome-ui-seed" {
                 guard try await store.sources().isEmpty else { throw VoiceOSError("synthetic UI seed requires an empty root") }
                 let first=try await seedOutcomeConversation(store,index:0,secondText:"合成个人：我会整理开发验证素材。如果条件不满足，我暂不调整实验；我现在不打算阅读论文。")
