@@ -10,6 +10,7 @@ public actor VoiceOSStore {
     var activeCaptures: Set<String> = []
     func inspectRecording(_ file:URL) async throws -> MediaInfo { try await inspector.inspect(file) }
     private var processing = false
+    var activeProcessingIntents: Set<String> = []
     var activeReminderLinks: Set<String> = []
     var activeEnglishAttempts: Set<String> = []
     let checkpoint: @Sendable (SaveCheckpoint) throws -> Void
@@ -35,6 +36,7 @@ public actor VoiceOSStore {
         try db.execute("UPDATE discussion_attempts SET state='unknown',error='进程退出前讨论结果未登记；不自动重发' WHERE state='reserved'")
         try db.execute("UPDATE english_feedback_attempts SET state='unknown',error='进程退出前英文反馈未登记；不自动重发' WHERE state='reserved'")
         try db.execute("UPDATE expression_association_attempts SET state='unknown',error='进程退出前关联结果未登记；不自动重发' WHERE state='reserved'")
+        try db.execute("UPDATE processing_intents SET state='unknown',error='进程退出前处理结果未登记；不会自动重发',updated_at=? WHERE state='running'", [ISO8601DateFormatter().string(from: Date())])
         for row in try db.query("SELECT * FROM sources ORDER BY created_at") {
             let id = row["id"]!
             if row["input_fingerprint"] == "microphone-v1:"+id, row["expected_bytes"] == "0" {
@@ -78,6 +80,7 @@ public actor VoiceOSStore {
         try Self.validateStoredExpressionAssociations(db)
         try Self.validateStoredExpressionAssociationIgnores(db)
         try Self.validateStoredQuestions(db)
+        try Self.validateStoredProcessingIntents(db)
         ready = true
     }
     @discardableResult

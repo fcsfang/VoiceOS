@@ -168,6 +168,7 @@ final class ControlCenter: ObservableObject {
     @Published var modelConfigured = false
     @Published var modelSummary = "尚未配置文本模型"
     @Published var attempts: [String: [ModelAttemptRecord]] = [:]
+    @Published var processingIntents: [ExpressionProcessingIntentRecord] = []
     private var textModel: ResponsesModelPort?
     private var englishModel: ResponsesEnglishPracticePort?
     @Published var englishSnapshot: EnglishPracticeSnapshot?
@@ -320,6 +321,7 @@ final class ControlCenter: ObservableObject {
                 for record in records { loaded[record.id] = try await store.modelAttempts(sourceID: record.id) }
                 attempts = loaded
                 englishAttempts = try await store.englishFeedbackAttempts()
+                processingIntents = try await store.processingIntents()
             }
         }
         catch { status = error.localizedDescription }
@@ -401,6 +403,20 @@ final class ControlCenter: ObservableObject {
             return true
         } catch { status = error.localizedDescription; await refresh(); return false }
     }
+    func saveAndProcessExpression(_ text: String, commandID: String) async -> Bool {
+        guard let store, let cognition = textModel, let association = associationModel else {
+            status = "文本模型或关联模型尚未配置；原文仍可先本地保存"; return false
+        }
+        do {
+            let source = try await store.recordUserExpression(text, commandID: commandID)
+            guard let current = try await store.sources().first(where: { $0.id == source }) else { throw VoiceOSError("表达保存后找不到来源") }
+            if current.localOnly { _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: current.policyVersion, localOnly: false) }
+            let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: source, cognition: cognition.configuration, association: association.configuration)
+            let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "process:" + commandID, cognition: cognition.configuration, association: association.configuration)
+            status = "已保存并排队处理 · 文本已明确允许云端；原始音频仍不上传 · \(intent.state.rawValue)"
+            await refresh(); scheduleProcessing(); return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
+    }
     func export(includeMedia: Bool) {
         let panel = NSSavePanel()
         panel.title = includeMedia ? "导出资料与原件" : "导出结构化资料"
@@ -448,8 +464,10 @@ final class ControlCenter: ObservableObject {
         worker = Task {
             await process()
             worker = nil
-            if let store, let pending = try? await store.sources(), pending.contains(where: { $0.jobState == "queued" }) {
-                scheduleProcessing()
+            if let store {
+                let pendingTranscription = (try? await store.sources())?.contains(where: { $0.jobState == "queued" }) == true
+                let pendingIntent = (try? await store.processingIntents())?.contains(where: { $0.state == .queued }) == true
+                if pendingTranscription || pendingIntent { scheduleProcessing() }
             }
         }
     }
@@ -465,7 +483,20 @@ final class ControlCenter: ObservableObject {
         defer { refreshTask.cancel() }
         do { try await store.processTranscriptions(using: NativeSpeechPort()) }
         catch { status = error.localizedDescription }
+        await processExpressionQueue(store)
         await refresh()
+    }
+    private func processExpressionQueue(_ store: VoiceOSStore) async {
+        guard let cognition = textModel else { return }
+        let association = associationModel
+        let local: any LocalRetrievalPort = semanticRetrieval ?? retrieval
+        while let intent = try? await store.processingIntents().first(where: { $0.state == .queued }) {
+            do {
+                let result = try await store.runExpressionProcessingIntent(id: intent.id, retrieval: local, cognitionPort: cognition, associationPort: association, semantic: semanticRetrieval != nil)
+                status = result.state == .completed ? "表达处理完成 · 认知、关联和历史回执已保存" : "表达处理状态：\(result.state.rawValue)"
+                requestReminderRefresh()
+            } catch { status = error.localizedDescription; break }
+        }
     }
     func playSpan(_ record: SourceRecord, milliseconds: Int) async {
         do {
@@ -1287,6 +1318,10 @@ struct UserExpressionView: View {
                     saving = true
                     Task { if await model.saveExpression(text, commandID: commandID) { dismiss() }; saving = false }
                 }.keyboardShortcut(.defaultAction).disabled(saving || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
+                Button(saving ? "正在排队…" : "保存并处理本次文字") {
+                    saving = true
+                    Task { if await model.saveAndProcessExpression(text, commandID: commandID) { dismiss() }; saving = false }
+                }.disabled(saving || !model.modelConfigured || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
             }
         }.padding(24).frame(width: 620)
     }

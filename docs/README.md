@@ -152,3 +152,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 2026-10-12 续接修复：单份表达与讨论回合显式整理可沿用成功理解后继续尚未预留的关联，未知/拒绝/失效不重发；跨模型配置关联去重。339项全套、六处真实强退/六次迁移及签名构建通过；本切片0云端/麦克风/外部写。见[契约](engineering/m4-expression-association-contract.md)与[证据](research/evidence/source-understanding-continuation-2026-10-12.json)。保存即自动处理及自然质量仍开放。
 
 2026-10-12 自动衔接基础：单份个人文字处理意图的只读快照已实现，固定全文、版本、权限epoch及两个端口，不授予云端权限、不发请求。343项全套通过；[执行契约](engineering/m4-expression-processing-intent.md)与[ADR-023](adr/023-expression-processing-intent.md)明确下一步持久队列和保存入口；尚不能称保存即自动闭环。
+
+2026-10-12 持久处理意图切片：schema25 / PortablePackage v24 新增 `processing_intents`，实现入队、取消、单项串行执行、认知/关联阶段回执、恢复 unknown、迁移冻结及原生“保存并处理本次文字”入口。新增队列回归覆盖一次执行、终态不重发、取消和包往返；完整强退矩阵、真实原生 UI 检查和完整回归仍在本轮后续验证。
