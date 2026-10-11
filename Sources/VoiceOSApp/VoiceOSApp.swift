@@ -498,6 +498,14 @@ final class ControlCenter: ObservableObject {
             } catch { status = error.localizedDescription; break }
         }
     }
+    func cancelProcessingIntent(_ intent: ExpressionProcessingIntentRecord) async {
+        guard let store, [.queued, .running].contains(intent.state) else { return }
+        do {
+            _ = try await store.cancelExpressionProcessingIntent(id: intent.id, reason: "用户从处理记录取消")
+            status = "已取消表达处理 · 已发出的模型请求保留历史，不自动重发"
+            await refresh()
+        } catch { status = error.localizedDescription; await refresh() }
+    }
     func playSpan(_ record: SourceRecord, milliseconds: Int) async {
         do {
             guard let url = try await store?.playableURL(sourceID: record.id) else { return }
@@ -797,6 +805,24 @@ struct CenterView: View {
     @State private var showingDiscussion = false
     @State private var showingEnglishPractice = false
     @Environment(\.openWindow) private var openWindow
+    private var activeProcessingCount: Int {
+        model.processingIntents.filter { [.queued, .running].contains($0.state) }.count
+    }
+    private func processingState(_ intent: ExpressionProcessingIntentRecord) -> String {
+        switch intent.state {
+        case .queued: return "等待处理"
+        case .running: return intent.phase == .cognition ? "正在理解" : "正在关联"
+        case .completed: return "已完成"
+        case .unknown: return "结果未知 · 不自动重发"
+        case .blocked: return "已阻塞 · 需核对"
+        case .cancelled: return "已取消"
+        case .frozen: return "冻结历史"
+        case .rejected: return "未接纳"
+        }
+    }
+    private func processingSourceName(_ intent: ExpressionProcessingIntentRecord) -> String {
+        model.records.first(where: { $0.id == intent.sourceID })?.name ?? String(intent.sourceID.prefix(8))
+    }
     private func chooseLibrary() {
         let panel = NSOpenPanel(); panel.title = "打开已有 VoiceOS 资料库"; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
         let completion: (NSApplication.ModalResponse) -> Void = { response in
@@ -1014,6 +1040,22 @@ struct CenterView: View {
             } else { ContentUnavailableView("选择一份资料", systemImage: "doc.text.magnifyingglass", description: Text("原件和逐字稿保存在 VoiceOS 自己的资料库中。")) }
         }
         .toolbar {
+            Menu {
+                if model.processingIntents.isEmpty {
+                    Text("暂无表达处理记录")
+                } else {
+                    ForEach(model.processingIntents) { intent in
+                        Text("\(processingState(intent)) · \(processingSourceName(intent))")
+                        if let error = intent.error, !error.isEmpty { Text(error) }
+                        if [.queued, .running].contains(intent.state) {
+                            Button("取消这次处理") { Task { await model.cancelProcessingIntent(intent) } }
+                        }
+                        Divider()
+                    }
+                }
+            } label: {
+                Label(activeProcessingCount == 0 ? "处理记录" : "处理 \(activeProcessingCount)", systemImage: activeProcessingCount == 0 ? "clock.arrow.circlepath" : "hourglass")
+            }.disabled(!model.initialized)
             if model.dictationActive {
                 Button("停止并保存口述",systemImage:"stop.circle.fill") { model.stopDictation() }.disabled(model.dictationBusy)
             } else {
