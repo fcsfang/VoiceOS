@@ -1,6 +1,6 @@
 # VoiceOS 夜间开发进度
 
-更新时间：2026-10-12 04:10（Asia/Shanghai）
+更新时间：2026-10-12 04:12（Asia/Shanghai）
 
 ## 当前目标
 
@@ -38,6 +38,7 @@ schema 25 与 `processing_intents` 持久身份/状态、串行执行器、迁�
 - 旧包/旧 schema 迁移回归及现有全套恢复测试：通过。
 - 原生 UI：已启动签名应用，但 CUA 报告 macOS 当前锁定，未能读取窗口；需要解锁后再做用户可见按钮和状态的实际核对。
 - 本轮 CUA 再次确认同一锁定状态；没有伪造 UI 证据，也没有重复启动应用。
+- 04:12 等待后再次核对，macOS 仍锁定；UI 证据保持未验证，未重复启动或终止现有应用进程。
 - 静态审查发现无文本模型时 queued 意图会触发空转重排队；已在 `0aa8b9a` 修复：无模型时保持 queued 且不循环，成功选择模型后由配置入口唤醒一次；编译、350 项测试、恢复探针和签名验证均通过。
 - 新隔离库 `runtime/queue-fixture-20261012-0401` 实跑 `voiceos-check expression-queue-fixture` 与 `expression-queue-read`：integrity=true，认知和关联各一次，读回保留两阶段 attempt 身份。
 - 静态审查又发现冻结的既有认知被执行器当成成功并继续关联；`5d759b8` 已改为在 cognition 阶段落盘 `frozen` 终态并跳过关联，新增回归证明认知/关联调用均为 0。完整回归现为 351 项通过；恢复探针、签名构建和 codesign 验证继续通过。
