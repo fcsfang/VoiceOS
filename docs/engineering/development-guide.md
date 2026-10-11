@@ -124,3 +124,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 当前237项测试、包v18/schema19共26表；认知请求和AI本地复制保存持久生产顺序，失败/未知/空结果不丢位置。旧包v1–v17恢复通过。跨入口成果执行仍受旧隔离保护，见[顺序决策](../adr/019-model-producer-sequence.md)。
 
 显式复用准备端口现可持久执行，已有结果沿用原ID，新提案只覆盖未整理个人版本；244项测试、包v18/schema19共26表。`outcome-reuse-fixture <新库>`和`validate_discussion_outcome_reuse.py --root <新目录>`仅做合成本地验证，无云端/录音/外写；真实提取按钮未开放。见[实施更新](m4-discussion-outcome-reuse.md)。
+
+混合成果驱动可用现有本地配置；`outcome-cloud-fixture <新隔离目录> <本地配置>`最多两次合成提取，不重试。253项测试与实际条件/否定/指代及迁移验证通过，账单金额未知；仍无用户提取按钮。见[驱动记录](m4-discussion-outcome-driver.md)。

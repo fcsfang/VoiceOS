@@ -18,6 +18,11 @@ public enum LocalTextModel {
         do { return try ResponsesDiscussionPort(baseURL: address, apiKey: key, model: "gpt-6.1-sol") }
         catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
+    public static func loadOutcome(from file:URL) throws -> ResponsesOutcomePort {
+        let (address,key)=try settings(from:file)
+        do { return try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol") }
+        catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
+    }
     private static func settings(from file: URL) throws -> (URL, String) {
         do {
             let bytes = try Data(contentsOf: file)

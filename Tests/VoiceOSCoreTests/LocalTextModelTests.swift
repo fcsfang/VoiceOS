@@ -12,6 +12,10 @@ final class LocalTextModelTests: XCTestCase {
         let relevance = try LocalTextModel.loadRelevance(from:file)
         XCTAssertEqual(relevance.configuration.provider,port.configuration.provider)
         XCTAssertEqual(relevance.configuration.promptVersion,"relevance-single-v1")
+        let outcome=try LocalTextModel.loadOutcome(from:file)
+        XCTAssertEqual(outcome.configuration.provider,port.configuration.provider)
+        XCTAssertEqual(outcome.configuration.model,"gpt-6.1-sol")
+        XCTAssertEqual(outcome.configuration.promptVersion,"discussion-outcomes-reuse-v1")
     }
     func testMalformedDuplicateAndOversizedConfigurationFailWithoutEchoingContents() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

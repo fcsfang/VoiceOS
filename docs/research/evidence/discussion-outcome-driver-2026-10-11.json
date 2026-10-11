@@ -1,0 +1,91 @@
+{
+  "date": "2026-10-11",
+  "tests_passed": 253,
+  "schema": 19,
+  "package_version": 18,
+  "synthetic_only": true,
+  "actual_cloud_attempts": 2,
+  "model": "gpt-6.1-sol",
+  "prompt_version": "discussion-outcomes-reuse-v1",
+  "cases": [
+    {
+      "all_unverified": true,
+      "audio_uploads": 0,
+      "automatic_tasks": 1,
+      "billing_state": "unknown",
+      "case": 1,
+      "cloud_attempts": 1,
+      "conversation_id": "EEF4E141-2541-4AFF-9F8F-EF9918B09349",
+      "external_task_writes": 0,
+      "integrity": true,
+      "local_actions": 1,
+      "microphone_calls": 0,
+      "model": "gpt-6.1-sol",
+      "new_claims": 3,
+      "opportunities": 0,
+      "prior_ai_rejection_preserved": true,
+      "prior_claims": 2,
+      "prompt_version": "discussion-outcomes-reuse-v1",
+      "state": "completed",
+      "synthetic_only": true,
+      "usage": {
+        "input_tokens": 1782,
+        "output_tokens": 416
+      }
+    },
+    {
+      "all_unverified": true,
+      "audio_uploads": 0,
+      "automatic_tasks": 0,
+      "billing_state": "unknown",
+      "case": 2,
+      "cloud_attempts": 1,
+      "conversation_id": "4FD10BB3-577A-41E6-A4A6-136969EE2275",
+      "external_task_writes": 0,
+      "integrity": true,
+      "local_actions": 1,
+      "microphone_calls": 0,
+      "model": "gpt-6.1-sol",
+      "new_claims": 1,
+      "opportunities": 1,
+      "prior_ai_rejection_preserved": true,
+      "prior_claims": 2,
+      "prompt_version": "discussion-outcomes-reuse-v1",
+      "state": "completed",
+      "synthetic_only": true,
+      "usage": {
+        "input_tokens": 1814,
+        "output_tokens": 342
+      }
+    }
+  ],
+  "manual_semantic_review": {
+    "explicit_task_only": true,
+    "negation_and_condition_preserved": true,
+    "ai_suggestion_not_personal_task": true,
+    "conditional_second_option_opportunity_only": true,
+    "referenced_material_instruction_not_executed": true,
+    "prior_ai_rejection_preserved": true
+  },
+  "portable_checks": [
+    {
+      "case": 1,
+      "identity_and_usage_equal": true,
+      "outcome_frozen": true,
+      "cannot_reprepare_restored_history": true
+    },
+    {
+      "case": 2,
+      "identity_and_usage_equal": true,
+      "outcome_frozen": true,
+      "cannot_reprepare_restored_history": true
+    }
+  ],
+  "billing_state": "unknown",
+  "audio_uploads": 0,
+  "microphone_calls": 0,
+  "external_task_writes": 0,
+  "vision_files_unchanged": 23,
+  "production_ui_connected": false,
+  "signed_build_with_semantic_resources": true
+}
