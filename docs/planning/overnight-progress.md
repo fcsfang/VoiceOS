@@ -31,7 +31,7 @@ schema 25 与 `processing_intents` 持久身份/状态、串行执行器、迁�
 - 最终恢复探针输出：`processingIntentUncommitted` 无残留、`processingIntentCommitted` 为 `queued`，其余三个阶段均为 `unknown`；无云端调用或提醒事项写入。
 - 新增队列夹具：一次认知/一次关联、终态不重发、取消不派发、PortablePackage v24 往返并冻结：通过。
 - `scripts/probes/expression-processing-recovery.py`：五个实际 SIGKILL 检查点覆盖入队未提交（无意图）、入队已提交（queued）、意图 running、认知 reserved、关联 reserved；恢复状态符合预期，第二次恢复稳定；证据见 `docs/research/evidence/expression-processing-recovery-2026-10-12.json`。
-- 本轮 04:18 重新运行 `swift test`：352 项通过，0 failures；配置漂移回归确认模型和关联调用均为 0。
+- 本轮 04:24 重新运行 `swift test`：353 项通过，0 failures；配置漂移和 queued 迁移冻结回归均确认模型和关联调用为 0。
 - 取消竞态回归：认知或关联在途时取消，迟到的已接收结果保留用量和历史，但认知上下文/候选及关联回执冻结，不进入下一阶段；关联和模型调用各执行一次。
 - 快照漂移回归：入队后更正文字或撤回云端授权均在模型调用前进入 blocked，认知与关联端口调用次数为 0。
 - 控制中心新增“处理记录”菜单：显示 queued/running/completed/unknown/blocked/cancelled/frozen/rejected 与阶段/错误，queued/running 可明确取消；`swift build` 编译通过，原生运行时仍待解锁核对。
@@ -43,7 +43,7 @@ schema 25 与 `processing_intents` 持久身份/状态、串行执行器、迁�
 - 新隔离库 `runtime/queue-fixture-20261012-0401` 实跑 `voiceos-check expression-queue-fixture` 与 `expression-queue-read`：integrity=true，认知和关联各一次，读回保留两阶段 attempt 身份。
 - 静态审查又发现冻结的既有认知被执行器当成成功并继续关联；`5d759b8` 已改为在 cognition 阶段落盘 `frozen` 终态并跳过关联，新增回归证明认知/关联调用均为 0。完整回归现为 351 项通过；恢复探针、签名构建和 codesign 验证继续通过。
 - `.build/debug/voiceos-check config-check 'docs/模型api 配置.md'` 脱敏检查通过：配置可加载，模型为 `gpt-6.1-sol`，识别六个端口；未发送请求且未输出密钥。
-- 已刷新原始夜间交接提示词，明确当前队列已完成、352 项回归通过以及 UI 锁定阻塞，避免后续服务切换重复实现队列。
+- 已刷新原始夜间交接提示词，明确当前队列已完成、353 项回归通过以及 UI 锁定阻塞，避免后续服务切换重复实现队列。
 - 新增 queued 意图迁移回归：恢复后状态为 frozen，尝试执行不调用认知或关联端口；本轮完整回归为 353 项通过。
 - 04:29 CUA 再次确认 macOS 仍锁定；原生 UI 证据保持未验证，未重复启动或终止 VoiceOS 进程。
 
