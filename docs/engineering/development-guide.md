@@ -106,3 +106,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 设备限时测试可使用`python3 scripts/app/run.py --data-dir <独立测试目录> --capture-limit-seconds 10`；它不会自动启动麦克风，点击开始后由设备到时停止。用户已授权后续本地开发采集，无需逐次确认；音频上传仍单独选择。首次实测与时长偏差见[设备测试记录](m1-microphone-device-test.md)。
 
 讨论数据基础与持久回复已实现，当前184项测试、包v15/schema16；控制中心讨论入口尚未接入。合成强退验证见[持久讨论回复](m4-durable-discussion-replies.md)。
+
+逐轮讨论的实际文本驱动已验证两轮合成请求；当前190项测试，使用同一本地配置，界面尚待接入。见[驱动记录](m4-discussion-driver.md)。

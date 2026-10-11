@@ -96,3 +96,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [GPT-Live与订阅接入](research/gpt-live-subscription-access-2026-10-11.md)：官方宿主语音、Live项目API与订阅文本接口的区别，账户权限未验证。
 
 - [M4 持久讨论回复](engineering/m4-durable-discussion-replies.md)：184项测试、三次强退、实际v1–v14恢复；AI回复保持独立身份，实际讨论模型与界面待接入。
+
+- [M4 文本讨论驱动](engineering/m4-discussion-driver.md)：190项测试、两次真实合成调用、迁移冻结；控制中心讨论界面待接入。
