@@ -1,12 +1,12 @@
 # VoiceOS 夜间开发进度
 
-更新时间：2026-10-12 04:27（Asia/Shanghai）
+更新时间：2026-10-12 04:29（Asia/Shanghai）
 
 ## 当前目标
 
 完成明确个人文字的持久处理意图、可恢复执行器、迁移兼容和“保存并处理本次文字”入口，保持认知—行动—反馈边界与既有授权契约。
 
-最新提交：`62a8ba9 docs: include migration freeze checkpoint`；当前工作区已清理。若服务切换或上下文压缩，先核对该提交、`git status` 和本文件，再继续。
+最新提交：`5367de8 docs: refresh migration checkpoint index`；当前工作区已清理。若服务切换或上下文压缩，先核对该提交、`git status` 和本文件，再继续。
 
 ## 接手核验
 
@@ -45,6 +45,7 @@ schema 25 与 `processing_intents` 持久身份/状态、串行执行器、迁�
 - `.build/debug/voiceos-check config-check 'docs/模型api 配置.md'` 脱敏检查通过：配置可加载，模型为 `gpt-6.1-sol`，识别六个端口；未发送请求且未输出密钥。
 - 已刷新原始夜间交接提示词，明确当前队列已完成、352 项回归通过以及 UI 锁定阻塞，避免后续服务切换重复实现队列。
 - 新增 queued 意图迁移回归：恢复后状态为 frozen，尝试执行不调用认知或关联端口；本轮完整回归为 353 项通过。
+- 04:29 CUA 再次确认 macOS 仍锁定；原生 UI 证据保持未验证，未重复启动或终止 VoiceOS 进程。
 
 ## 未完成与下一步
 
