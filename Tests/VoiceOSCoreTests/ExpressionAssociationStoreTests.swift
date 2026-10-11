@@ -177,9 +177,9 @@ final class ExpressionAssociationStoreTests: XCTestCase {
         do { try await VoiceOSStore.restorePackage(from: package, to: target, inspector: AssociationStoreInspector()); XCTFail("ignore tampering") } catch {}
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
         let dbURL = base.appendingPathComponent("schema21.sqlite")
-        do { let db = try Database(dbURL); try db.execute("DROP TABLE expression_association_ignores"); try db.execute("PRAGMA user_version=21") }
+        do { let db = try Database(dbURL); try db.execute("DROP TABLE expression_association_ignores"); try db.execute("ALTER TABLE claims DROP COLUMN content_kind"); try db.execute("PRAGMA user_version=21") }
         let upgraded = try Database(dbURL)
-        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "22")
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "23")
         XCTAssertTrue(try upgraded.query("SELECT * FROM expression_association_ignores").isEmpty)
     }
     func testConcurrentDuplicateAndTerminalReplaySendOnceWithoutClaimsOrActions() async throws {
@@ -270,7 +270,7 @@ final class ExpressionAssociationStoreTests: XCTestCase {
         let package = base.appendingPathComponent("legacy19"); try await s.exportPackage(to: package)
         let manifest = package.appendingPathComponent("manifest.json")
         var data = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any])
-        XCTAssertEqual(data["version"] as? Int, 21); XCTAssertEqual(data["databaseSchema"] as? Int, 22)
+        XCTAssertEqual(data["version"] as? Int, 22); XCTAssertEqual(data["databaseSchema"] as? Int, 23)
         var counts = data["counts"] as! [String: Any], files = data["files"] as! [[String: Any]]
         counts.removeValue(forKey: "expression_association_attempts"); counts.removeValue(forKey: "expression_association_ignores")
         files.removeAll { ["expression_association_attempts.jsonl", "expression_association_ignores.jsonl"].contains($0["path"] as? String ?? "") }
@@ -285,10 +285,10 @@ final class ExpressionAssociationStoreTests: XCTestCase {
         let dbURL = base.appendingPathComponent("upgrade.sqlite")
         do {
             let db = try Database(dbURL)
-            try db.execute("DROP TABLE expression_association_ignores"); try db.execute("DROP TABLE expression_association_attempts"); try db.execute("PRAGMA user_version=20")
+            try db.execute("DROP TABLE expression_association_ignores"); try db.execute("DROP TABLE expression_association_attempts"); try db.execute("ALTER TABLE claims DROP COLUMN content_kind"); try db.execute("PRAGMA user_version=20")
         }
         let upgraded = try Database(dbURL)
-        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "22")
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "23")
         XCTAssertTrue(try upgraded.query("SELECT * FROM expression_association_attempts").isEmpty)
         XCTAssertTrue(try upgraded.query("PRAGMA foreign_key_check").isEmpty)
         XCTAssertFalse(snapshot.candidates.isEmpty)

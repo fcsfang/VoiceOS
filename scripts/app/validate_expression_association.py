@@ -44,7 +44,7 @@ for checkpoint in ['associationReserved', 'associationUncommitted', 'association
     package, target = args.root / (checkpoint + '-package'), args.root / (checkpoint + '-restored')
     run('export', root, package)
     manifest = json.loads((package / 'manifest.json').read_text())
-    assert manifest['version'] == 21 and manifest['databaseSchema'] == 22
+    assert manifest['version'] == 22 and manifest['databaseSchema'] == 23
     assert (package / 'expression_association_attempts.jsonl').exists()
     run('restore', target, package)
     restored = run(fixture, target)
@@ -69,7 +69,7 @@ for checkpoint in ['associationIgnoreUncommitted', 'associationIgnoreCommitted']
         assert db.execute('SELECT count(*) FROM expression_association_ignores').fetchone()[0] == 1
     ignore_checks.append({'checkpoint': checkpoint, 'immediately_after_crash': count,
                           'replayed_ignore_count': 1, 'restored_feedback_count': 0})
-report = {'date': '2026-10-11', 'schema': 22, 'package_version': 21,
+report = {'date': '2026-10-11', 'schema': 23, 'package_version': 22,
           'complete_driver': args.driver,
           'synthetic_only': True, 'process_crashes': checks, 'ignore_crashes': ignore_checks, 'portable_round_trips': 5,
           'cloud_calls': 0, 'microphone_calls': 0, 'external_task_writes': 0}

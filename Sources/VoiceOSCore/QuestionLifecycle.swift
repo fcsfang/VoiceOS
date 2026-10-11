@@ -8,6 +8,7 @@ public struct QuestionSeedSnapshot: Codable, Sendable {
     public let claimReviewVersion: Int
     public let statement: String
     public let ownership: String
+    public let contentKind: CognitiveContentKind?
     public let original: OutcomeSourceEvidence
     public let context: LocalTranscriptContext
     public let policyVersions: [String: Int]
@@ -34,8 +35,8 @@ extension VoiceOSStore {
         try Self.validateQuestionEvidence(original, context: context, personal: claim.ownership == CandidateOwnership.userTentative.rawValue)
         var policies: [String: Int] = [:]
         for id in ids { policies[id] = try sourcePolicy(sourceID: id).version }
-        let seed = QuestionSeedSnapshot(id: UUID().uuidString, claimID: claimID, claimReviewVersion: expectedReviewVersion, statement: claim.statement, ownership: claim.ownership, original: original, context: context, policyVersions: policies, contentDigest: "")
-        return .init(id: seed.id, claimID: seed.claimID, claimReviewVersion: seed.claimReviewVersion, statement: seed.statement, ownership: seed.ownership, original: seed.original, context: seed.context, policyVersions: seed.policyVersions, contentDigest: try Self.questionSeedDigest(seed))
+        let seed = QuestionSeedSnapshot(id: UUID().uuidString, claimID: claimID, claimReviewVersion: expectedReviewVersion, statement: claim.statement, ownership: claim.ownership, contentKind: claim.contentKind, original: original, context: context, policyVersions: policies, contentDigest: "")
+        return .init(id: seed.id, claimID: seed.claimID, claimReviewVersion: seed.claimReviewVersion, statement: seed.statement, ownership: seed.ownership, contentKind: seed.contentKind, original: seed.original, context: seed.context, policyVersions: seed.policyVersions, contentDigest: try Self.questionSeedDigest(seed))
     }
     public func validateQuestionSeed(_ seed: QuestionSeedSnapshot) throws {
         guard UUID(uuidString: seed.id) != nil else { throw VoiceOSError("问题候选身份无效") }
@@ -65,10 +66,10 @@ extension VoiceOSStore {
     }
     static func questionSeedDigest(_ seed: QuestionSeedSnapshot) throws -> String {
         struct Payload: Encodable {
-            let claimID: String; let claimReviewVersion: Int; let statement: String; let ownership: String
+            let claimID: String; let claimReviewVersion: Int; let statement: String; let ownership: String; let contentKind: CognitiveContentKind?
             let original: OutcomeSourceEvidence; let context: LocalTranscriptContext; let policyVersions: [String: Int]
         }
-        return relevanceHash(Data(try relevanceJSON(Payload(claimID: seed.claimID, claimReviewVersion: seed.claimReviewVersion, statement: seed.statement, ownership: seed.ownership, original: seed.original, context: seed.context, policyVersions: seed.policyVersions)).utf8))
+        return relevanceHash(Data(try relevanceJSON(Payload(claimID: seed.claimID, claimReviewVersion: seed.claimReviewVersion, statement: seed.statement, ownership: seed.ownership, contentKind: seed.contentKind, original: seed.original, context: seed.context, policyVersions: seed.policyVersions)).utf8))
     }
     private static func validateQuestionEvidence(_ evidence: OutcomeSourceEvidence, context: LocalTranscriptContext, personal: Bool) throws {
         let ref = evidence.reference

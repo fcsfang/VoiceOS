@@ -125,7 +125,7 @@ final class DurableRelevanceTests: XCTestCase {
         let s = try await store(), snap = try await snapshot(s)
         _ = try await s.performRelevanceSelection(snap,using:DurableSelector())
         let package = base.appendingPathComponent("package"); try await s.exportPackage(to:package)
-        let summary = try VoiceOSStore.packageSummary(at:package); XCTAssertEqual(summary.version,21)
+        let summary = try VoiceOSStore.packageSummary(at:package); XCTAssertEqual(summary.version,22)
         let target = base.appendingPathComponent("restored"); try await VoiceOSStore.restorePackage(from:package,to:target,inspector:DurableInspector())
         let restored = try VoiceOSStore(root:target,inspector:DurableInspector()); try await restored.recover()
         let rows = try await restored.relevanceAttempts(); XCTAssertEqual(rows[0].state,"completed"); XCTAssertEqual(rows[0].validity,"frozen")

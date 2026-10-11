@@ -138,3 +138,5 @@ PRD 负责用户行为和验收，架构负责模块与运行机制，数据模�
 - [完整关联驱动故障集成](research/evidence/expression-association-full-driver-2026-10-11.json)：召回至接纳的五处强退/五次恢复，以及真实本机BGE召回→合成判断→单次重放；生产模型与自然质量不在本轮证据范围内。
 
 - [问题生命周期输入契约](engineering/m4-question-lifecycle-contract.md)：问题/答案连续原话、认知归属和审阅/授权版本；四项新增回归，308项全套通过。持久对象、分类和界面尚待接入。
+
+- [认知类型与问题输入](engineering/m4-question-lifecycle-contract.md)：313项回归，schema23/v22包，旧包恢复及原生类型显示；跨提示升级不重发，正式问题状态仍开放。

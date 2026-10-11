@@ -19,16 +19,19 @@ public struct ExtractedAction: Codable, Sendable {
         self.title = title; self.kind = kind; self.quote = quote; self.autoSend = autoSend
     }
 }
+public enum CognitiveContentKind: String, Codable, Sendable { case statement, question, hypothesis, reflection, unclassified }
 public struct ClaimProposal: Codable, Sendable {
     public let statement: String
     public let ownership: CandidateOwnership
     public let references: [ClaimReference]
     public let action: ExtractedAction?
-    public init(statement: String, ownership: CandidateOwnership, references: [ClaimReference], action: ExtractedAction? = nil) {
-        self.statement = statement; self.ownership = ownership; self.references = references; self.action = action
+    public let contentKind: CognitiveContentKind?
+    public init(statement: String, ownership: CandidateOwnership, references: [ClaimReference], action: ExtractedAction? = nil, contentKind: CognitiveContentKind? = nil) {
+        self.statement = statement; self.ownership = ownership; self.references = references; self.action = action; self.contentKind = contentKind
     }
 }
 public struct CandidateClaim: Identifiable, Sendable {
+    public let contentKind: CognitiveContentKind?
     public let id: String
     public let statement: String
     public let ownership: String
@@ -103,7 +106,7 @@ extension VoiceOSStore {
         try db.transaction {
             for (ordinal, proposal) in proposals.enumerated() {
                 let id = UUID().uuidString; ids.append(id)
-                try db.execute("INSERT INTO claims(id,attempt_id,ordinal,statement,ownership,evidence_state,validity,refs_json,created_at,action_json) VALUES(?,?,?,?,?,'unverified','current',?,?,?)", [id,attemptID,String(ordinal),proposal.statement,proposal.ownership.rawValue,try json(proposal.references),timestamp(),try proposal.action.map { try json($0) }])
+                try db.execute("INSERT INTO claims(id,attempt_id,ordinal,statement,ownership,evidence_state,validity,refs_json,created_at,action_json,content_kind) VALUES(?,?,?,?,?,'unverified','current',?,?,?,?)", [id,attemptID,String(ordinal),proposal.statement,proposal.ownership.rawValue,try json(proposal.references),timestamp(),try proposal.action.map { try json($0) },proposal.contentKind?.rawValue])
                 if let action = proposal.action {
                     let actor = action.kind == .aiSuggestion ? "ai" : "user"
                     let command = "extracted:" + attemptID + ":" + String(ordinal)
@@ -125,12 +128,13 @@ extension VoiceOSStore {
         }
         let whereClause = includeFrozen ? "" : "WHERE c.validity='current' AND x.state='current' AND COALESCE(r.decision,'pending')!='rejected'"
         return try db.query("SELECT c.*,r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision AS review_state FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version \(whereClause) ORDER BY c.created_at,c.id").map {
-            CandidateClaim(id: $0["id"]!, statement: $0["reviewed_statement"] ?? $0["statement"]!, ownership: $0["reviewed_ownership"] ?? $0["ownership"]!, evidenceState: $0["evidence_state"]!, validity: $0["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data($0["refs_json"]!.utf8)), reviewVersion: Int($0["review_version"]!)!, reviewState: $0["review_state"] ?? "pending")
+            CandidateClaim(contentKind: $0["reviewed_statement"] != nil && $0["reviewed_statement"] != $0["statement"] ? nil : $0["content_kind"].flatMap(CognitiveContentKind.init(rawValue:)), id: $0["id"]!, statement: $0["reviewed_statement"] ?? $0["statement"]!, ownership: $0["reviewed_ownership"] ?? $0["ownership"]!, evidenceState: $0["evidence_state"]!, validity: $0["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data($0["refs_json"]!.utf8)), reviewVersion: Int($0["review_version"]!)!, reviewState: $0["review_state"] ?? "pending")
         }
     }
     static func validateProposals(_ proposals: [ClaimProposal], context: LocalTranscriptContext) throws {
         guard proposals.count <= 32, proposals.filter({ $0.action?.autoSend == true }).count <= 3 else { throw VoiceOSError("行动提取超过单次范围") }
         for proposal in proposals {
+            guard proposal.contentKind != .question || proposal.action == nil else { throw VoiceOSError("问题不能同时作为行动承诺；需分开提取") }
             guard !proposal.statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !proposal.references.isEmpty, proposal.references.count <= 32, proposal.statement.unicodeScalars.count <= 2000 else { throw VoiceOSError("认知候选缺少内容或出处") }
             for ref in proposal.references {
                 guard context.sources.contains(where: { $0.sourceID == ref.sourceID && $0.transcriptVersionID == ref.transcriptVersionID && $0.spans.contains(where: { $0.id == ref.spanID }) && (proposal.ownership != .external || $0.origin == "external") && (proposal.ownership != .userTentative || ($0.origin == "user" && $0.speaker == "user")) }) else { throw VoiceOSError("认知候选引用了未选入或错误版本的来源片段") }
@@ -195,14 +199,14 @@ extension VoiceOSStore {
                 guard claim["attempt_state"] == "completed", let owner = CandidateOwnership(rawValue: claim["ownership"]!),
                       claim["validity"] != "current" || row["state"] == "current" else { throw VoiceOSError("迁移认知候选状态不一致") }
                 let refs = try JSONDecoder().decode([ClaimReference].self, from: Data(claim["refs_json"]!.utf8))
-                try validateProposals([ClaimProposal(statement: claim["statement"]!, ownership: owner, references: refs, action: try claim["action_json"].map { try JSONDecoder().decode(ExtractedAction.self, from: Data($0.utf8)) })], context: context)
+                try validateProposals([ClaimProposal(statement: claim["statement"]!, ownership: owner, references: refs, action: try claim["action_json"].map { try JSONDecoder().decode(ExtractedAction.self, from: Data($0.utf8)) }, contentKind: claim["content_kind"].flatMap(CognitiveContentKind.init(rawValue:)))], context: context)
             }
         }
         for attempt in try db.query("SELECT * FROM model_attempts WHERE state='completed' AND provider NOT LIKE 'english_feedback:%'") {
             var proposals: [ClaimProposal] = []
             for (index, claim) in try db.query("SELECT * FROM claims WHERE attempt_id=? ORDER BY ordinal", [attempt["id"]]).enumerated() {
                 guard claim["ordinal"] == String(index), let owner = CandidateOwnership(rawValue: claim["ownership"]!) else { throw VoiceOSError("迁移候选顺序不一致") }
-                proposals.append(ClaimProposal(statement: claim["statement"]!, ownership: owner, references: try JSONDecoder().decode([ClaimReference].self, from: Data(claim["refs_json"]!.utf8)), action: try claim["action_json"].map { try JSONDecoder().decode(ExtractedAction.self, from: Data($0.utf8)) }))
+                proposals.append(ClaimProposal(statement: claim["statement"]!, ownership: owner, references: try JSONDecoder().decode([ClaimReference].self, from: Data(claim["refs_json"]!.utf8)), action: try claim["action_json"].map { try JSONDecoder().decode(ExtractedAction.self, from: Data($0.utf8)) }, contentKind: claim["content_kind"].flatMap(CognitiveContentKind.init(rawValue:))))
             }
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
             let digest = SHA256.hash(data: try encoder.encode(proposals)).map { String(format: "%02x", $0) }.joined()

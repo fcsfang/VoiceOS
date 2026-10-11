@@ -100,7 +100,7 @@ final class CognitiveFeedbackTests: XCTestCase {
         try await s.setCognitiveFeedbackMode(.reduced,expectedVersion:0)
         let package = base.appendingPathComponent("package"), target = base.appendingPathComponent("restored")
         try await s.exportPackage(to:package)
-        XCTAssertEqual(try VoiceOSStore.packageSummary(at:package).version,21)
+        XCTAssertEqual(try VoiceOSStore.packageSummary(at:package).version,22)
         try await VoiceOSStore.restorePackage(from:package,to:target,inspector:QuietInspector())
         let r = try await store("restored"), items = try await r.cognitiveFeedback(), pref = try await r.cognitiveFeedbackPreference()
         XCTAssertTrue(items.isEmpty); XCTAssertEqual(pref.mode,.reduced)

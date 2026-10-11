@@ -861,6 +861,7 @@ struct CenterView: View {
                             DisclosureGroup("认知候选与历史（\(related.count)）") {
                                 ForEach(related) { claim in
                                     VStack(alignment: .leading, spacing: 8) {
+                                        Text(claim.contentKind?.displayName ?? "内容类型未分类").font(.caption).foregroundStyle(.secondary)
                                         Text(claim.statement).textSelection(.enabled)
                                         Text("\(claim.ownership == "ai_candidate" ? "AI 候选" : (claim.ownership == "external" ? "外部主张" : (claim.ownership == "user_tentative" ? "我的暂定表达" : "归属待核对"))) · 未验证 · \(claim.validity == "frozen" ? "依据或授权已变化，暂停使用" : (claim.reviewState == "rejected" ? "已停止当前使用" : "出处可回溯"))").font(.caption).foregroundStyle(.secondary)
                                         if let origin=model.claimOrigins.first(where: { $0.claimID == claim.id }) {
@@ -1645,6 +1646,18 @@ private extension ExpressionRelation {
         case .qualification: "可能补充限定条件"
         case .possibleCorrection: "可能修正，尚未确认"
         case .sameQuestion: "可能讨论同一问题，解决状态待核对"
+        }
+    }
+}
+
+private extension CognitiveContentKind {
+    var displayName: String {
+        switch self {
+        case .statement: "陈述候选"
+        case .question: "问题候选 · 解决状态尚未登记"
+        case .hypothesis: "猜想候选"
+        case .reflection: "反思候选"
+        case .unclassified: "内容类型未分类"
         }
     }
 }
