@@ -49,3 +49,5 @@ VoiceOS 是语音优先的多模态个人智能系统：让自然表达形成可
 个人口述开始/停止与持久封存入口已实现；当前154项测试通过，真实麦克风/权限/睡眠仍待验证，见[实施记录](docs/engineering/m1-personal-dictation.md)。
 
 2026-10-11 当前：讨论结束后的持久混合成果、原子认知/行动回流及完整出处历史已通过226项测试，包v17/schema18；真实提取驱动未接入，跨入口共享身份仍待完善。详见[实施记录](docs/engineering/m4-durable-discussion-outcomes.md)。完整MVP验收仍未完成。
+
+讨论成果现支持沿用已整理个人候选与AI段落原身份，仅新增未整理回合的个人任务；244项测试、实际强退/迁移和原生历史界面通过。当前v18/schema19共26表，真实提取驱动尚未接入，见[复用实施](docs/engineering/m4-discussion-outcome-reuse.md)。

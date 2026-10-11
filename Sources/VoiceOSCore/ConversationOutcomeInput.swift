@@ -15,6 +15,10 @@ public struct ConversationOutcomeSnapshot:Codable,Sendable {
     public let sessionState:String
     public let context:LocalTranscriptContext
     public let replies:[ConversationOutcomeReply]
+    public let reusePlan:ConversationOutcomeReusePlan?
+    init(input:PreparedConversationInput,sessionState:String,context:LocalTranscriptContext,replies:[ConversationOutcomeReply],reusePlan:ConversationOutcomeReusePlan?=nil) {
+        self.input=input;self.sessionState=sessionState;self.context=context;self.replies=replies;self.reusePlan=reusePlan
+    }
 }
 public struct OutcomeSourceEvidence:Codable,Sendable {
     public let reference:ClaimReference

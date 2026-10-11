@@ -75,6 +75,16 @@ struct DiscussionView: View {
                             Divider()
                             Text(outcome.state == "completed" ? "讨论成果 · 待核对" : (outcome.state == "unknown" ? "成果提取结果未知 · 不自动重发" : "成果未接纳 · 不自动重发")).font(.headline)
                             if outcome.validity == "frozen" { Text("历史成果已冻结，身份与出处保留。").font(.caption).foregroundStyle(.secondary) }
+                            if !outcome.priorClaimIDs.isEmpty {
+                                Text("沿用已有成果，保留原审阅与行动记录").font(.subheadline)
+                                ForEach(outcome.priorClaimIDs,id:\.self) { id in
+                                    if let claim=model.claims.first(where: { $0.id == id }) {
+                                        Text(claim.statement).textSelection(.enabled)
+                                        Text((claim.ownership == "ai_candidate" ? "已有 AI 候选" : "已有个人/来源候选")+" · "+(claim.reviewState == "rejected" ? "已拒绝" : (claim.reviewState == "endorsed" ? "已认可" : "待核对"))).font(.caption).foregroundStyle(.secondary)
+                                        Button("查看原候选与行动") { model.selected=claim.references.first?.sourceID;dismiss() }
+                                    }
+                                }
+                            }
                             ForEach(Array(outcome.proposals.enumerated()),id:\.offset) { index,proposal in
                                 VStack(alignment:.leading,spacing:6) {
                                     Text(proposal.ownership == .aiCandidate ? "AI 候选" : (proposal.ownership == .userTentative ? "我的暂定表达" : "归属待核对")).font(.caption)

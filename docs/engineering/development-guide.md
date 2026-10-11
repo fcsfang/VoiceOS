@@ -122,3 +122,5 @@ python3 scripts/app/validate_cognition.py --package "$PWD/runtime/authorized-pac
 跨入口只读复用目录与新增目标提案校验已实现，当前233项测试；`outcome-reuse-plan <隔离库> <会话ID>`仅准备Context和读取目录，不提取或复制候选。持久提取的旧入口隔离仍保留，见[准备契约](m4-discussion-outcome-reuse.md)。
 
 当前237项测试、包v18/schema19共26表；认知请求和AI本地复制保存持久生产顺序，失败/未知/空结果不丢位置。旧包v1–v17恢复通过。跨入口成果执行仍受旧隔离保护，见[顺序决策](../adr/019-model-producer-sequence.md)。
+
+显式复用准备端口现可持久执行，已有结果沿用原ID，新提案只覆盖未整理个人版本；244项测试、包v18/schema19共26表。`outcome-reuse-fixture <新库>`和`validate_discussion_outcome_reuse.py --root <新目录>`仅做合成本地验证，无云端/录音/外写；真实提取按钮未开放。见[实施更新](m4-discussion-outcome-reuse.md)。

@@ -257,7 +257,13 @@ extension VoiceOSStore {
                 }
             }
             if tables == PackageLayout.legacyTables { try database.backfillTranscriptVersions() }
-            if packageVersion < 18 { try database.backfillModelProducerSequence() }
+            if packageVersion < 18 {
+                for row in try database.query("SELECT snapshot_json FROM conversation_outcome_attempts") {
+                    let snapshot=try JSONDecoder().decode(ConversationOutcomeSnapshot.self,from:Data(row["snapshot_json"]!.utf8))
+                    guard snapshot.reusePlan == nil else { throw VoiceOSError("旧格式不能携带需要持久生产顺序的成果复用目录") }
+                }
+                try database.backfillModelProducerSequence()
+            }
             try database.execute("UPDATE contexts SET state='stale' WHERE id IN (SELECT context_id FROM model_attempts WHERE execution_kind='discussion_derivation')")
             try database.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT id FROM model_attempts WHERE execution_kind='discussion_derivation')")
             try database.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT id FROM claims WHERE attempt_id IN (SELECT id FROM model_attempts WHERE execution_kind='discussion_derivation'))")

@@ -33,6 +33,10 @@ struct Check {
                 }
             })
             try await store.recover()
+            if args[0] == "outcome-reuse-fixture" {
+                try await runOutcomeReuseFixture(store)
+                print("{\"integrity\":\(try await store.integrityCheck())}");return
+            }
             if ["conversation-entry-fixture","conversation-turn-fixture","conversation-end-fixture","discussion-fixture","discussion-candidate-fixture","discussion-anchor-fixture","outcome-fixture","outcome-feedback-fixture"].contains(args[0]) {
                 let source = try await store.recordUserExpression("合成旧观点：需要检验条件，尚未形成结论。",commandID:"synthetic-dialogue-history")
                 let id = try await store.beginConversation(sourceIDs:[source],commandID:"synthetic-dialogue-entry")
@@ -77,7 +81,7 @@ struct Check {
             } else if args[0] == "outcome-read" {
                 guard args.count == 3 else { throw VoiceOSError("outcome-read requires conversation ID") }
                 let rows=try await store.conversationOutcomes(conversationID:args[2])
-                let output:[String:Any]=["integrity":try await store.integrityCheck(),"outcomes":rows.map { ["id":$0.id,"state":$0.state,"validity":$0.validity,"claim_ids":$0.claimIDs,"proposals":$0.proposals.count,"usage":$0.usage ?? [:]] as [String:Any] }]
+                let output:[String:Any]=["integrity":try await store.integrityCheck(),"outcomes":rows.map { ["id":$0.id,"state":$0.state,"validity":$0.validity,"claim_ids":$0.claimIDs,"prior_claim_ids":$0.priorClaimIDs,"proposals":$0.proposals.count,"usage":$0.usage ?? [:]] as [String:Any] }]
                 print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self));return
             } else if args[0] == "discussion-read" {
                 guard args.count == 3 else { throw VoiceOSError("discussion-read requires conversation ID") }

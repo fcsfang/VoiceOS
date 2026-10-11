@@ -165,4 +165,136 @@ final class ConversationOutcomeReuseTests:XCTestCase {
         }
     }
 
+    func reusable(_ s:VoiceOSStore,_ snapshot:ConversationOutcomeSnapshot) async throws -> ConversationOutcomeSnapshot {
+        try await s.prepareReusableConversationOutcome(id:snapshot.input.conversationID,expectedVersion:4,destination:.local)
+    }
+    func testDurableReuseKeepsPriorReviewAndCompletedTaskAndCreatesOnlyFreshPersonalTask() async throws {
+        let (s,original)=try await setup()
+        let first=try await s.understandSource(sourceID:original.input.userTurns[0].sourceID,using:ReusePersonal(mode:"normal")),action=try await s.actions()[0]
+        _=try await s.setActionState(actionID:action.id,expectedVersion:1,state:.completed)
+        let ai=try await s.retainDiscussionAICandidate(attemptID:original.replies[0].attemptID,partIndex:0)
+        _=try await s.reviewClaim(claimID:ai,expectedVersion:0,action:.reject)
+        let snapshot=try await reusable(s,original),port=ReusableOutcomePort(),ids=try await s.performConversationOutcome(snapshot,using:port)
+        let records=try await s.conversationOutcomes(conversationID:original.input.conversationID),claims=try await s.candidateClaims(includeFrozen:true),actions=try await s.actions(includeHistory:true)
+        XCTAssertEqual(Set(records[0].priorClaimIDs),Set(first+[ai]));XCTAssertEqual(records[0].claimIDs,ids);XCTAssertEqual(ids.count,2);XCTAssertEqual(claims.count,4)
+        XCTAssertEqual(claims.first(where: { $0.id == ai })?.reviewState,"rejected");XCTAssertEqual(actions.count,2)
+        XCTAssertEqual(actions.first(where: { $0.id == action.id })?.version,2);XCTAssertEqual(actions.first(where: { $0.id == action.id })?.state,"completed")
+        XCTAssertEqual(actions.filter { $0.title == "校验迁移资料" }.count,1)
+        let package=root.appendingPathComponent("reuse-package"),restored=root.appendingPathComponent("reuse-restored")
+        try await s.exportPackage(to:package);try await VoiceOSStore.restorePackage(from:package,to:restored,inspector:ReuseInspector())
+        let r=try VoiceOSStore(root:restored,inspector:ReuseInspector());try await r.recover()
+        let after=try await r.conversationOutcomes(conversationID:original.input.conversationID)[0]
+        XCTAssertEqual(after.id,records[0].id);XCTAssertEqual(after.priorClaimIDs,records[0].priorClaimIDs);XCTAssertEqual(after.claimIDs,ids);XCTAssertEqual(after.validity,"frozen")
+        do { _=try await s.performConversationOutcome(snapshot,using:port);XCTFail() } catch {}
+        let calls=await port.calls;XCTAssertEqual(calls,1)
+    }
+    func testAllConsumedPersonalVersionsStillAllowFreshAIAnalysisWithoutNewPersonalTasks() async throws {
+        let (s,original)=try await setup()
+        for turn in original.input.userTurns { _=try await s.understandSource(sourceID:turn.sourceID,using:ReusePersonal(mode:"empty")) }
+        let snapshot=try await reusable(s,original);XCTAssertTrue(try XCTUnwrap(snapshot.reusePlan).personalTargets.isEmpty)
+        _=try await s.performConversationOutcome(snapshot,using:ReusableOutcomePort())
+        let claims=try await s.candidateClaims(),actions=try await s.actions(),rows=try await s.conversationOutcomes(conversationID:original.input.conversationID)
+        XCTAssertEqual(claims.count,1);XCTAssertEqual(claims[0].ownership,"ai_candidate");XCTAssertTrue(actions.isEmpty);XCTAssertTrue(rows[0].priorClaimIDs.isEmpty)
+    }
+    func testPlanChangesBeforeSendAndDuringAwaitRejectRatherThanDuplicate() async throws {
+        let (s,original)=try await setup("before-reuse"),snapshot=try await reusable(s,original),port=ReusableOutcomePort()
+        _=try await s.retainDiscussionAICandidate(attemptID:original.replies[0].attemptID,partIndex:0)
+        do { _=try await s.performConversationOutcome(snapshot,using:port);XCTFail() } catch {}
+        let calls=await port.calls;XCTAssertEqual(calls,0)
+        let (r,other)=try await setup("during-reuse"),input=try await reusable(r,other)
+        let waiting=ReusableOutcomePort(callback:{ request in _=try await r.retainDiscussionAICandidate(attemptID:request.snapshot.replies[0].attemptID,partIndex:0) })
+        do { _=try await r.performConversationOutcome(input,using:waiting);XCTFail() } catch {}
+        let claims=try await r.candidateClaims(),actions=try await r.actions(),rows=try await r.conversationOutcomes(conversationID:other.input.conversationID)
+        XCTAssertEqual(claims.count,1);XCTAssertTrue(actions.isEmpty);XCTAssertEqual(rows[0].state,"rejected");XCTAssertEqual(rows[0].usage,["input_tokens":10,"output_tokens":5])
+        try await r.exportPackage(to:root.appendingPathComponent("late-package"))
+        try await VoiceOSStore.restorePackage(from:root.appendingPathComponent("late-package"),to:root.appendingPathComponent("late-restored"),inspector:ReuseInspector())
+    }
+    func testDuplicateConsumedUserAndExactAIParagraphAreRejectedWithNoNewTask() async throws {
+        for mode in ["duplicate-user","duplicate-ai"] {
+            let (s,original)=try await setup(mode)
+            _=try await s.understandSource(sourceID:original.input.userTurns[0].sourceID,using:ReusePersonal(mode:"normal"))
+            _=try await s.retainDiscussionAICandidate(attemptID:original.replies[0].attemptID,partIndex:0)
+            let input=try await reusable(s,original)
+            do { _=try await s.performConversationOutcome(input,using:ReusableOutcomePort(mode:mode));XCTFail() } catch {}
+            let claims=try await s.candidateClaims(),actions=try await s.actions();XCTAssertEqual(claims.count,2);XCTAssertEqual(actions.count,1)
+        }
+    }
+    func testRehashedReuseDirectoryCannotOmitPriorProducerOrReenableConsumedTarget() async throws {
+        let (s,original)=try await setup();_=try await s.understandSource(sourceID:original.input.userTurns[0].sourceID,using:ReusePersonal(mode:"normal"))
+        let input=try await reusable(s,original);_=try await s.performConversationOutcome(input,using:ReusableOutcomePort())
+        for mode in ["omit-prior","reenable-target","downgrade"] {
+            let package=root.appendingPathComponent(mode),target=root.appendingPathComponent(mode+"-restored")
+            try await s.exportPackage(to:package)
+            let file=package.appendingPathComponent("conversation_outcome_attempts.jsonl")
+            var row=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:file)) as? [String:Any])
+            var snapshot=try XCTUnwrap(JSONSerialization.jsonObject(with:Data((row["snapshot_json"] as! String).utf8)) as? [String:Any]),plan=snapshot["reusePlan"] as! [String:Any]
+            if mode == "omit-prior" { plan["priorResults"]=[] }
+            else if mode == "reenable-target" { plan["personalTargets"]=(snapshot["input"] as! [String:Any])["userTurns"] }
+            snapshot["reusePlan"]=plan
+            let data=try JSONSerialization.data(withJSONObject:snapshot,options:[.sortedKeys]);row["snapshot_json"]=String(decoding:data,as:UTF8.self);row["snapshot_digest"]=VoiceOSStore.relevanceHash(data)
+            var encoded=try JSONSerialization.data(withJSONObject:row);encoded.append(10);try encoded.write(to:file)
+            let manifest=package.appendingPathComponent("manifest.json")
+            var m=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:manifest)) as? [String:Any]),files=m["files"] as! [[String:Any]]
+            let index=try XCTUnwrap(files.firstIndex { $0["path"] as? String == "conversation_outcome_attempts.jsonl" }),hash=try DurableFiles.hash(file)
+            files[index]["bytes"]=hash.0;files[index]["sha256"]=hash.1;m["files"]=files
+            if mode == "downgrade" { m["version"]=17;m["databaseSchema"]=18 }
+            try JSONSerialization.data(withJSONObject:m).write(to:manifest)
+            do { try await VoiceOSStore.restorePackage(from:package,to:target,inspector:ReuseInspector());XCTFail(mode) } catch {}
+            XCTAssertFalse(FileManager.default.fileExists(atPath:target.path))
+        }
+    }
+    func testLaterProducerDoesNotRetroactivelyChangeTheReservedHistoricalDirectory() async throws {
+        let (s,original)=try await setup();_=try await s.understandSource(sourceID:original.input.userTurns[0].sourceID,using:ReusePersonal(mode:"empty"))
+        let input=try await reusable(s,original);_=try await s.performConversationOutcome(input,using:ReusableOutcomePort())
+        let context=try await s.prepareLocalTranscriptContext(sourceIDs:[original.input.userTurns[0].sourceID]),id=try await s.persistLocalContext(context)
+        _=try await s.generateClaims(contextID:id,using:ReusePersonal(mode:"empty"))
+        let package=root.appendingPathComponent("later-package"),target=root.appendingPathComponent("later-restored")
+        try await s.exportPackage(to:package);try await VoiceOSStore.restorePackage(from:package,to:target,inspector:ReuseInspector())
+        let r=try VoiceOSStore(root:target,inspector:ReuseInspector());try await r.recover()
+        let rows=try await r.conversationOutcomes(conversationID:original.input.conversationID)
+        XCTAssertEqual(rows[0].state,"completed");XCTAssertEqual(rows[0].claimIDs.count,2)
+    }
+    func testExtraPriorDependencyFreezesSharedOutcomeEvenWhenConversationEntryStaysCurrent() async throws {
+        let (s,original)=try await setup(),extra=try await s.recordUserExpression("合成其他依据：有待验证。")
+        let context=try await s.prepareLocalTranscriptContext(sourceIDs:[original.input.userTurns[0].sourceID,extra]),id=try await s.persistLocalContext(context)
+        _=try await s.generateClaims(contextID:id,using:ReusePersonal(mode:"normal"))
+        let input=try await reusable(s,original);_=try await s.performConversationOutcome(input,using:ReusableOutcomePort())
+        let reusedSource=original.input.userTurns[0].sourceID
+        let next=try await s.beginConversation(sourceIDs:[reusedSource])
+        _=try await s.appendConversationUserSource(conversationID:next,sourceID:reusedSource,expectedVersion:1)
+        let nextInput=try await s.prepareConversationInput(id:next,expectedVersion:2,destination:.local)
+        _=try await s.performConversationReply(nextInput,using:ReuseDiscussion());try await s.endConversation(id:next,expectedVersion:2)
+        let shared=try await s.prepareReusableConversationOutcome(id:next,expectedVersion:3,destination:.local)
+        _=try await s.performConversationOutcome(shared,using:ReusableOutcomePort())
+        let sources=try await s.sources(),version=try XCTUnwrap(sources.first(where: { $0.id == extra })?.transcriptVersionID)
+        _=try await s.correctTranscript(sourceID:extra,expectedVersionID:version,text:"合成其他依据已更正。")
+        let session=try await s.conversation(id:original.input.conversationID),rows=try await s.conversationOutcomes(conversationID:session.id),claims=try await s.candidateClaims(includeFrozen:true)
+        XCTAssertEqual(session.validity,"current");XCTAssertEqual(rows[0].validity,"frozen")
+        let nextRows=try await s.conversationOutcomes(conversationID:next)
+        XCTAssertEqual(nextRows[0].validity,"frozen")
+        XCTAssertTrue(nextRows[0].claimIDs.allSatisfy { id in claims.first(where: { $0.id == id })?.validity == "frozen" })
+        XCTAssertTrue(rows[0].claimIDs.allSatisfy { id in claims.first(where: { $0.id == id })?.validity == "frozen" })
+        let package=root.appendingPathComponent("dependency-package"),target=root.appendingPathComponent("dependency-restored")
+        try await s.exportPackage(to:package);try await VoiceOSStore.restorePackage(from:package,to:target,inspector:ReuseInspector())
+    }
+
+}
+
+private actor ReusableOutcomePort:ConversationOutcomePort {
+    let configuration=ModelConfiguration(provider:"synthetic_reuse",model:"outcome",promptVersion:"v1",schemaVersion:"v1",destination:.local)
+    let mode:String
+    let callback:(@Sendable (ConversationOutcomeRequest) async throws -> Void)?
+    var calls=0
+    init(mode:String="normal",callback:(@Sendable (ConversationOutcomeRequest) async throws -> Void)?=nil) { self.mode=mode;self.callback=callback }
+    func extract(_ request:ConversationOutcomeRequest) async throws -> ConversationOutcomeResponse {
+        calls += 1;if let callback { try await callback(request) }
+        let plan=try XCTUnwrap(request.snapshot.reusePlan),reply=request.snapshot.replies[0]
+        var proposals:[ConversationOutcomeProposal]=[]
+        if let turn=mode == "duplicate-user" ? request.snapshot.input.userTurns.first : plan.personalTargets.first {
+            let source=try XCTUnwrap(request.snapshot.context.sources.first { $0.sourceID == turn.sourceID })
+            proposals.append(.init(statement:source.text,ownership:.userTentative,sourceEvidence:[.init(reference:.init(sourceID:source.sourceID,transcriptVersionID:source.transcriptVersionID,spanID:source.spans[0].id),quote:source.text)],action:.init(title:mode == "duplicate-user" ? "整理开发验证素材":"校验迁移资料",kind:.task,quote:source.text,autoSend:true)))
+        }
+        proposals.append(.init(statement:mode == "duplicate-ai" ? reply.parts[0].text:"合成AI新成果：迁移仍需测试反例。",ownership:.aiCandidate,sourceEvidence:[],replyEvidence:[.init(attemptID:reply.attemptID,partIndex:0,quote:reply.parts[0].text)]))
+        return .init(status:.completed,proposals:proposals,inputTokens:10,outputTokens:5)
+    }
 }

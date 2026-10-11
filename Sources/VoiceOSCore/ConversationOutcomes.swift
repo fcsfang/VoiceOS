@@ -25,6 +25,7 @@ public struct ConversationOutcomeRecord:Identifiable,Sendable {
     public let validity:String
     public let proposals:[ConversationOutcomeProposal]
     public let claimIDs:[String]
+    public let priorClaimIDs:[String]
     public let usage:[String:Int]?
 }
 public struct ConversationOutcomeOrigin:Sendable {
@@ -40,7 +41,7 @@ extension VoiceOSStore {
         guard snapshot.sessionState == "ended",config.destination == input.destination,!config.provider.isEmpty,!config.provider.hasPrefix("discussion_outcome:"),
               !["local_fixture","discussion_derivation"].contains(config.provider),!config.model.isEmpty,!config.promptVersion.isEmpty,!config.schemaVersion.isEmpty else { throw VoiceOSError("请明确结束讨论后整理；成果端口身份或目的地无效") }
         guard try db.query("SELECT id FROM conversation_outcome_attempts WHERE conversation_id=?",[input.conversationID]).isEmpty else { throw VoiceOSError("本段讨论已有成果提取记录；请查看结果，不会重发") }
-        try validateOutcomeDerivationIsolation(input.conversationID)
+        if let plan=snapshot.reusePlan { try validateOutcomeReuseState(plan,snapshot:snapshot) } else { try validateOutcomeDerivationIsolation(input.conversationID) }
         let id=UUID().uuidString,json=try Self.relevanceJSON(snapshot)
         try db.transaction {
             try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)",[id,input.contextID,"discussion_outcome:"+config.provider,config.model,config.promptVersion,config.schemaVersion,Self.now(),try db.nextModelProducerSequence()])
@@ -61,9 +62,9 @@ extension VoiceOSStore {
         do {
             try recordOutcomeUsage(id,response.inputTokens,response.outputTokens)
             try Task.checkCancellation();try validateConversationOutcome(snapshot)
-            try validateOutcomeDerivationIsolation(input.conversationID,excludingAttemptID:id)
+            if let plan=snapshot.reusePlan { try validateOutcomeReuseState(plan,snapshot:snapshot,excludingAttemptID:id) } else { try validateOutcomeDerivationIsolation(input.conversationID,excludingAttemptID:id) }
             guard response.status == .completed else { throw VoiceOSError("成果响应未完成") }
-            try Self.validateConversationOutcomeProposals(response.proposals,snapshot:snapshot)
+            if let plan=snapshot.reusePlan { try Self.validateReusableConversationOutcomeProposals(response.proposals,snapshot:snapshot,plan:plan) } else { try Self.validateConversationOutcomeProposals(response.proposals,snapshot:snapshot) }
             let mapped=try Self.outcomeClaimProposals(response.proposals,snapshot:snapshot),result=try Self.relevanceJSON(response.proposals)
             _=try commitClaims(attemptID:id,proposals:mapped,additionalCommit:{ _ in
                 try db.execute("UPDATE conversation_outcome_attempts SET result_json=?,result_digest=? WHERE id=?",[result,Self.relevanceHash(Data(result.utf8)),id])
@@ -85,6 +86,7 @@ extension VoiceOSStore {
             ConversationOutcomeRecord(id:row["id"]!,state:row["state"]!,validity:row["context_state"] == "current" ? "current":"frozen",
                 proposals:try row["result_json"].map { try JSONDecoder().decode([ConversationOutcomeProposal].self,from:Data($0.utf8)) } ?? [],
                 claimIDs:try db.query("SELECT id FROM claims WHERE attempt_id=? ORDER BY ordinal",[row["id"]]).map { $0["id"]! },
+                priorClaimIDs:try JSONDecoder().decode(ConversationOutcomeSnapshot.self,from:Data(row["snapshot_json"]!.utf8)).reusePlan?.priorResults.flatMap(\.claimIDs) ?? [],
                 usage:try row["usage_json"].map { try JSONDecoder().decode([String:Int].self,from:Data($0.utf8)) })
         }
     }
@@ -145,6 +147,14 @@ extension VoiceOSStore {
         }
     }
     func freezeConversationOutcomes() throws {
+        for row in try db.query("SELECT o.snapshot_json,m.context_id FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id ORDER BY m.producer_sequence") {
+            let snapshot=try JSONDecoder().decode(ConversationOutcomeSnapshot.self,from:Data(row["snapshot_json"]!.utf8))
+            if let plan=snapshot.reusePlan {
+                for prior in plan.priorResults where try db.query("SELECT state FROM contexts WHERE id=?",[prior.contextID]).first?["state"] != "current" {
+                    try db.execute("UPDATE contexts SET state='stale' WHERE id=?",[row["context_id"]])
+                }
+            }
+        }
         try db.execute("UPDATE contexts SET state='stale' WHERE id IN (SELECT m.context_id FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id JOIN conversations c ON c.id=o.conversation_id WHERE c.validity='frozen')")
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT o.id FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id JOIN contexts c ON c.id=m.context_id WHERE c.state='stale')")
         try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT c.id FROM claims c JOIN conversation_outcome_attempts o ON o.id=c.attempt_id WHERE c.validity='frozen')")
@@ -195,11 +205,18 @@ extension VoiceOSStore {
                       try relevanceJSON(saved.parts) == relevanceJSON(discussionParts(reply)) else { throw VoiceOSError("成果AI目录、段落或调用状态不符") }
             }
             try validateOutcomeBudget(snapshot.context,snapshot.replies)
+            if let plan=snapshot.reusePlan {
+                guard let sequence=model["producer_sequence"].flatMap(Int64.init),
+                      try relevanceJSON(buildOutcomeReusePlan(db,snapshot:snapshot,beforeSequence:sequence)) == relevanceJSON(plan) else { throw VoiceOSError("成果提取前的原身份目录或可新增目标不符") }
+                for prior in plan.priorResults {
+                    if try db.query("SELECT state FROM contexts WHERE id=?",[prior.contextID]).first?["state"] != "current",context["state"] != "stale" { throw VoiceOSError("原成果已冻结，共享成果不能继续执行") }
+                }
+            }
             let claims=try db.query("SELECT * FROM claims WHERE attempt_id=? ORDER BY ordinal",[model["id"]])
             if model["state"] == "completed" {
                 guard let result=row["result_json"],row["result_digest"] == relevanceHash(Data(result.utf8)) else { throw VoiceOSError("成果结果缺少完整出处") }
                 let proposals=try JSONDecoder().decode([ConversationOutcomeProposal].self,from:Data(result.utf8))
-                try validateConversationOutcomeProposals(proposals,snapshot:snapshot)
+                if let plan=snapshot.reusePlan { try validateReusableConversationOutcomeProposals(proposals,snapshot:snapshot,plan:plan) } else { try validateConversationOutcomeProposals(proposals,snapshot:snapshot) }
                 let mapped=try outcomeClaimProposals(proposals,snapshot:snapshot)
                 guard claims.count == mapped.count,model["result_digest"] == relevanceHash(Data(try relevanceJSON(mapped).utf8)) else { throw VoiceOSError("成果候选与原子提交不符") }
                 for (index,claim) in claims.enumerated() {

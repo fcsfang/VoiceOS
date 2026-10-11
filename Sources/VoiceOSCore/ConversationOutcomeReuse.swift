@@ -21,6 +21,18 @@ public struct ConversationOutcomeReusePlan:Codable,Sendable {
     public let priorResults:[OutcomePriorResult]
 }
 extension VoiceOSStore {
+    /// Explicit preparation for the reusable durable path. Full evidence stays unchanged.
+    public func prepareReusableConversationOutcome(id:String,expectedVersion:Int,destination:ModelDestination,scalarBudget:Int=8000,commandID:String=UUID().uuidString) throws -> ConversationOutcomeSnapshot {
+        let snapshot=try prepareConversationOutcome(id:id,expectedVersion:expectedVersion,destination:destination,scalarBudget:scalarBudget,commandID:commandID)
+        let plan=try conversationOutcomeReusePlan(for:snapshot)
+        try validateOutcomeReuseState(plan,snapshot:snapshot)
+        return ConversationOutcomeSnapshot(input:snapshot.input,sessionState:snapshot.sessionState,context:snapshot.context,replies:snapshot.replies,reusePlan:plan)
+    }
+    func validateOutcomeReuseState(_ plan:ConversationOutcomeReusePlan,snapshot:ConversationOutcomeSnapshot,excludingAttemptID:String?=nil) throws {
+        let current=try Self.buildOutcomeReusePlan(db,snapshot:snapshot,excludingAttemptID:excludingAttemptID)
+        guard try Self.relevanceJSON(current) == Self.relevanceJSON(plan) else { throw VoiceOSError("既有成果或新增目标已变化，不接纳旧复用计划") }
+        for prior in plan.priorResults { _=try localContext(id:prior.contextID) }
+    }
     /// Read-only output planning. Every source and AI reply remains in the full input snapshot.
     /// This is not an executable extraction grant; the durable shared-result journal is separate.
     public func conversationOutcomeReusePlan(for snapshot:ConversationOutcomeSnapshot) throws -> ConversationOutcomeReusePlan {
@@ -34,7 +46,7 @@ extension VoiceOSStore {
         let current=try conversationOutcomeReusePlan(for:snapshot)
         guard try Self.relevanceJSON(current) == Self.relevanceJSON(plan) else { throw VoiceOSError("讨论已有成果身份或新增目标已变化，请重新读取；不接纳旧计划") }
     }
-    static func buildOutcomeReusePlan(_ db:Database,snapshot:ConversationOutcomeSnapshot,beforeSequence:Int64?=nil) throws -> ConversationOutcomeReusePlan {
+    static func buildOutcomeReusePlan(_ db:Database,snapshot:ConversationOutcomeSnapshot,beforeSequence:Int64?=nil,excludingAttemptID:String?=nil) throws -> ConversationOutcomeReusePlan {
         var prior:[OutcomePriorResult]=[],covered:Set<String>=[]
         // Conservative coverage matches the existing cross-entry barrier: any actual cognition
         // request using this exact personal version consumes it, even if its result is empty.
@@ -43,8 +55,8 @@ extension VoiceOSStore {
         JOIN context_inputs original ON original.context_id=t.context_id
         JOIN context_inputs i ON i.source_id=t.source_id AND i.transcript_version_id=original.transcript_version_id
         JOIN model_attempts m ON m.context_id=i.context_id
-        WHERE t.conversation_id=? AND m.execution_kind='model_request' AND (? IS NULL OR m.producer_sequence<?) ORDER BY m.producer_sequence
-        """,[snapshot.input.conversationID,beforeSequence.map(String.init),beforeSequence.map(String.init)])
+        WHERE t.conversation_id=? AND m.execution_kind='model_request' AND (? IS NULL OR m.producer_sequence<?) AND (? IS NULL OR m.id!=?) ORDER BY m.producer_sequence
+        """,[snapshot.input.conversationID,beforeSequence.map(String.init),beforeSequence.map(String.init),excludingAttemptID,excludingAttemptID])
         for row in rows {
             guard ["completed","unknown","rejected"].contains(row["state"] ?? "") else { throw VoiceOSError("仍有个人理解在途，不准备跨入口成果") }
             let inputs=try db.query("SELECT source_id,transcript_version_id FROM context_inputs WHERE context_id=?",[row["context_id"]])
@@ -56,8 +68,8 @@ extension VoiceOSStore {
         for row in try db.query("""
         SELECT d.*,m.id AS prior_attempt_id,m.producer_sequence,m.state AS model_state,m.context_id,m.result_digest AS model_digest
         FROM discussion_claim_derivations d JOIN discussion_attempts a ON a.id=d.discussion_attempt_id
-        JOIN model_attempts m ON m.id=d.model_attempt_id WHERE a.conversation_id=? AND (? IS NULL OR m.producer_sequence<?) ORDER BY m.producer_sequence
-        """,[snapshot.input.conversationID,beforeSequence.map(String.init),beforeSequence.map(String.init)]) {
+        JOIN model_attempts m ON m.id=d.model_attempt_id WHERE a.conversation_id=? AND (? IS NULL OR m.producer_sequence<?) AND (? IS NULL OR m.id!=?) ORDER BY m.producer_sequence
+        """,[snapshot.input.conversationID,beforeSequence.map(String.init),beforeSequence.map(String.init),excludingAttemptID,excludingAttemptID]) {
             guard row["state"] == "completed",row["model_state"] == "completed",let claim=row["claim_id"],let index=row["part_index"].flatMap(Int.init) else { throw VoiceOSError("AI段落保留尚未完成，请先核对原复制回执") }
             prior.append(OutcomePriorResult(attemptID:row["prior_attempt_id"]!,producerSequence:Int64(row["producer_sequence"]!)!,kind:"ai_paragraph",state:"completed",contextID:row["context_id"]!,resultDigest:row["model_digest"],coveredTurnIDs:[],claimIDs:[claim],replyAttemptID:row["discussion_attempt_id"],replyPartIndex:index))
         }
