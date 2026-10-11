@@ -1,0 +1,20 @@
+{
+  "date": "2026-10-11",
+  "scope": "isolated signed app startup",
+  "command": "python3 scripts/app/run.py --data-dir runtime/english-ui-validation-20261011",
+  "cloud_request": false,
+  "microphone_request": false,
+  "reminder_write": false,
+  "observed": {
+    "process_started": true,
+    "isolated_database_created": true,
+    "database_user_version": 20,
+    "english_feedback_attempts_table_present": true,
+    "english_feedback_attempt_count": 0,
+    "process_stopped_after_interrupt": true
+  },
+  "limitations": [
+    "This probe verifies application initialization and schema creation only.",
+    "It does not prove visual rendering, model quality, or a successful cloud request."
+  ]
+}
