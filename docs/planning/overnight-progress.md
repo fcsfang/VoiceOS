@@ -1,12 +1,12 @@
 # VoiceOS 夜间开发进度
 
-更新时间：2026-10-12 04:00（Asia/Shanghai）
+更新时间：2026-10-12 04:02（Asia/Shanghai）
 
 ## 当前目标
 
 完成明确个人文字的持久处理意图、可恢复执行器、迁移兼容和“保存并处理本次文字”入口，保持认知—行动—反馈边界与既有授权契约。
 
-最新提交：`0aa8b9a fix: avoid retry loop without text model`；当前工作区已清理。若服务切换或上下文压缩，先核对该提交、`git status` 和本文件，再继续。
+最新提交：`cc22be7 docs: record model configuration queue fix`；当前工作区已清理。若服务切换或上下文压缩，先核对该提交、`git status` 和本文件，再继续。
 
 ## 接手核验
 
@@ -39,6 +39,7 @@ schema 25 与 `processing_intents` 持久身份/状态、串行执行器、迁�
 - 原生 UI：已启动签名应用，但 CUA 报告 macOS 当前锁定，未能读取窗口；需要解锁后再做用户可见按钮和状态的实际核对。
 - 本轮 CUA 再次确认同一锁定状态；没有伪造 UI 证据，也没有重复启动应用。
 - 静态审查发现无文本模型时 queued 意图会触发空转重排队；已在 `0aa8b9a` 修复：无模型时保持 queued 且不循环，成功选择模型后由配置入口唤醒一次；编译、350 项测试、恢复探针和签名验证均通过。
+- 新隔离库 `runtime/queue-fixture-20261012-0401` 实跑 `voiceos-check expression-queue-fixture` 与 `expression-queue-read`：integrity=true，认知和关联各一次，读回保留两阶段 attempt 身份。
 
 ## 未完成与下一步
 
