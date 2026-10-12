@@ -155,6 +155,31 @@ final class UserExpressionTests: XCTestCase {
         let port = TextReminderPort(); try await s.activateExtractedTasks(expectedAccessVersion:1,using:port)
         let count = await port.creates; XCTAssertEqual(count,4)
     }
+    func testReminderActivationIgnoresUnlinkedHistoricalBatch() async throws {
+        let s = try await store()
+        let text = "我会整理开发验证素材。"
+        let id = try await s.recordUserExpression(text)
+        _ = try await s.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+        let context = try await s.prepareLocalTranscriptContext(sourceIDs: [id]), input = context.sources[0]
+        let ref = ClaimReference(sourceID: id, transcriptVersionID: input.transcriptVersionID, spanID: input.spans[0].id)
+        func commitTask(_ title: String) async throws {
+            let persisted = try await s.persistLocalContext(context)
+            let attempt = try await s.reserveLocalModelAttempt(contextID: persisted, model: "fixture", promptVersion: "v2", schemaVersion: "v2")
+            _ = try await s.commitLocalClaims(attemptID: attempt, proposals: [
+                .init(statement: "明确任务：\(title)", ownership: .userTentative, references: [ref], action: .init(title: title, kind: .task, quote: text))
+            ])
+        }
+        try await commitTask("旧批次任务")
+        try await commitTask("最新批次任务")
+        _ = try await s.setReminderAccess(calendarID: "fixture", title: "fixture", enabled: true, expectedVersion: 0)
+        let port = TextReminderPort()
+        try await s.activateExtractedTasks(expectedAccessVersion: 1, using: port)
+        let creates = await port.creates
+        XCTAssertEqual(creates, 1)
+        let links = try await s.reminderLinks()
+        XCTAssertEqual(links.count, 1)
+        XCTAssertEqual(links[0].remoteTitle, "最新批次任务")
+    }
     func testMigrationRejectsMissingExtractedActionEvenWithNewFileDigest() async throws {
         let s = try await store(); let id = try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。")
         let (attempt,p) = try await proposals(s,id); _ = try await s.commitLocalClaims(attemptID:attempt,proposals:p)
