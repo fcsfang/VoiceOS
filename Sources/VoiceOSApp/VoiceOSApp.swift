@@ -242,6 +242,8 @@ final class ControlCenter: ObservableObject {
     @Published var reviewingClaim = false
     @Published var actionRecords: [ActionRecord] = []
     @Published var scheduleIntents: [ActionScheduleIntent] = []
+    @Published var scheduleOperations: [ReminderScheduleOperation] = []
+    @Published var schedulePreviews: [String: ReminderScheduleDecision] = [:]
     @Published var savingAction = false
     @Published var actionVersions: [ActionRevision] = []
     @Published var feedbackRecords: [ActionFeedbackRecord] = []
@@ -370,8 +372,15 @@ final class ControlCenter: ObservableObject {
             outcomeOrigins = try await store?.conversationOutcomeOrigins() ?? []
             actionRecords = try await store?.actions(includeHistory: true) ?? []
             scheduleIntents = try await store?.actionScheduleIntents() ?? []
+            scheduleOperations = try await store?.reminderScheduleOperations() ?? []
             reminderLinks = try await store?.reminderLinks() ?? []
             reminderAccess = try await store?.reminderAccess()
+            schedulePreviews = [:]
+            if let store, let access = reminderAccess, access.enabled {
+                for intent in scheduleIntents {
+                    schedulePreviews[intent.id] = try? await store.previewReminderSchedule(intentID: intent.id, expectedAccessVersion: access.version)
+                }
+            }
             reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
             if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
             records = try await store?.sources() ?? []
@@ -877,6 +886,26 @@ final class ControlCenter: ObservableObject {
         } catch { status = error.localizedDescription }
         await refresh()
     }
+    func executeSchedule(_ intent: ActionScheduleIntent, link: ReminderLink) async {
+        guard let store, let access = reminderAccess, access.enabled, !remindersBusy,
+              access.calendarID == link.calendarID, let observationID = link.lastObservationID else { return }
+        remindersBusy = true; defer { remindersBusy = false }
+        do {
+            _ = try await store.executeReminderSchedule(intentID: intent.id, expectedObservationID: observationID,
+                                                        expectedAccessVersion: access.version, using: reminders)
+            status = "排期尝试已登记，请查看保存与回读状态"
+        } catch { status = error.localizedDescription }
+        await refresh()
+    }
+    func reconcileSchedule(_ operation: ReminderScheduleOperation) async {
+        guard let store, let access = reminderAccess, access.enabled, !remindersBusy else { return }
+        remindersBusy = true; defer { remindersBusy = false }
+        do {
+            try await store.reconcileReminderSchedule(operationID: operation.id, expectedAccessVersion: access.version, using: reminders)
+            status = "已只读核对排期结果，没有重新派发"
+        } catch { status = error.localizedDescription }
+        await refresh()
+    }
     func saveFeedback(_ action: ActionRecord, kind: ActionFeedbackKind, text: String, commandID: String) async -> Bool {
         guard let store, !savingFeedback else { return false }
         savingFeedback = true; defer { savingFeedback = false }
@@ -1299,7 +1328,26 @@ struct CenterView: View {
                                         Text("认知依据：第 \(action.claimReviewVersion) 版").font(.caption).foregroundStyle(.secondary)
                                         if let schedule = model.scheduleIntents.first(where: { $0.actionID == action.id }) {
                                             Text((schedule.authority == .userCommitment ? "用户明确期限：" : "AI 弹性安排：") + schedule.due.summary).font(.caption)
-                                            Text(schedule.eligibleForPlanning ? "本地排期意图，尚未执行外部改期。" : "排期保留为历史，当前暂停执行。").font(.caption).foregroundStyle(.secondary)
+                                            if let operation = model.scheduleOperations.first(where: { $0.intentID == schedule.id }) {
+                                                Text("排期操作：" + operation.state.summary).font(.caption)
+                                                Text(operation.reason).font(.caption).foregroundStyle(.secondary)
+                                                if operation.validity == "frozen" {
+                                                    Text("迁移历史已冻结，不恢复外部操作。").font(.caption).foregroundStyle(.secondary)
+                                                } else if operation.attempted, operation.state == .unknown || operation.state == .conflict {
+                                                    Button("只读核对改期结果") { Task { await model.reconcileSchedule(operation) } }
+                                                        .disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
+                                                }
+                                            } else {
+                                                Text(schedule.eligibleForPlanning ? "本地排期意图，尚未执行外部改期。" : "排期保留为历史，当前暂停执行。").font(.caption).foregroundStyle(.secondary)
+                                                if let preview = model.schedulePreviews[schedule.id] {
+                                                    Text("基于上次回读：" + preview.reason).font(.caption).foregroundStyle(.secondary)
+                                                }
+                                                if model.schedulePreviews[schedule.id]?.disposition == .writeFlexible,
+                                                   let target = model.reminderLinks.first(where: { $0.actionID == action.id }), target.state == "linked" {
+                                                    Button("执行普通弹性安排") { Task { await model.executeSchedule(schedule, link: target) } }
+                                                        .disabled(model.remindersBusy || model.reminderAccess?.enabled != true || model.reminderCalendarID != target.calendarID)
+                                                }
+                                            }
                                             DisclosureGroup("排期依据") {
                                                 Text(schedule.rawExpression).font(.caption)
                                                 Text("表达时刻：" + schedule.anchorSummary).font(.caption).foregroundStyle(.secondary)

@@ -1,5 +1,16 @@
 # VoiceOS 夜间开发进度
 
+## 当前接续：W14 普通弹性排期安全执行（2026-10-13 06:54）
+
+- 从 `6ff47b3` 接续，已完成持久 `reminder_schedule_operations`、写前新鲜回读、派发前 unknown、Native 条件保存、应答与唯一回读及只读恢复。当前 schema35/含操作包 v35；仅意图仍 v34，旧格式兼容。
+- 同一 intent 最多一次尝试，重复命令/新命令都不重发；reserved 退出后 blocked，unknown 只读。confirmed 表示保存应答＋匹配观测，observed 只表示目标期限被观察到，不冒充 AI 作者。
+- Core 与连接器 await 后均重验持续清单授权、最新意图/行动版本、来源/认知批次及取消；仅改 due，标题等人工字段保留。EventKit 不支持远端原子 CAS，不能承诺消除人工/iCloud 竞态。
+- 修正回读身份屏障：已识别 external ID 不会因另一个任务复制标记而被替换，该替代项完成也不能回流原行动。
+- 控制中心显示当前排期尝试/原因，提供普通弹性执行和只读恢复入口。尚无语音期限提取或日期编辑入口；重要期限、人工字段、不明归属仍停写。已有确认操作不自动授予后续自由改期权，字段所有权下一切片处理。
+- 完整 Swift 回归 **514 项、0 failures**（约22.7秒）；其中 **17 项改期专项通过**。含 BGE 稳定开发签名构建、严格 codesign、差异空白检查通过；未重启用户应用，原生运行时/真实改期尚未验收。
+- 日志 `/tmp/voiceos-schedule-operations-regression.log`、`/tmp/voiceos-schedule-operations-atomic.log`、`/tmp/voiceos-schedule-operations-signing.log`。本轮零云端、零录音、零真实提醒事项改动，无压力/SIGKILL/网络中断测试。详见 [ADR036](../adr/036-safe-reminder-schedule-operations.md)与[证据](../research/evidence/m3-w14-schedule-operations-2026-10-13.json)。
+- 仍沿 M2→M3；**M3/AC-15/自然案例 A 仍 partial**。下一步 W14 的具体效果确认、字段所有权与后续重排，再推进 W16 补偿。自然结果/后续表达不能代用户填写；无产品决策阻塞，保留现有真实素材与九条未完成任务。
+
 ## 当前接续：W14 持久排期意图与三方预览（2026-10-13）
 
 - 从 `af39317` 接续，完成独立 `action_schedule_intents` 版本链；当前 schema34，含排期包 v34。排期不改变行动状态版本，不干扰完成回流，不创建/改期外部任务或认可观点。

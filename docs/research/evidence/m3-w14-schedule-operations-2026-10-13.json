@@ -1,0 +1,75 @@
+{
+  "recorded_at": "2026-10-12T22:50:34.454594+00:00",
+  "baseline_commit": "6ff47b3",
+  "work_package": "W14",
+  "schema": 35,
+  "package_version_with_operations": 35,
+  "status": "ordinary_flexible_schedule_execution_implemented_m3_still_partial",
+  "delivered": [
+    "durable_unique_operation_per_schedule_intent",
+    "fresh_preflight_and_final_connector_authorization_barrier",
+    "native_due_only_conditional_save_and_readback",
+    "unknown_read_only_recovery_and_no_write_replay",
+    "acknowledged_effect_distinguished_from_unattributed_observed_effect",
+    "pinned_external_identity_prevents_copied_marker_completion",
+    "core_roundtrip_writeability_gate",
+    "control_center_operation_status_and_explicit_execution_recovery",
+    "version35_package_validation_and_frozen_restore",
+    "atomic_observation_mapping_action_feedback_and_operation_receipt"
+  ],
+  "checks": {
+    "full_swift_regression": {
+      "passed": true,
+      "count": 514,
+      "failures": 0,
+      "log": "/tmp/voiceos-schedule-operations-regression.log"
+    },
+    "signed_bge_build": {
+      "passed": true,
+      "log": "/tmp/voiceos-schedule-operations-signing.log"
+    },
+    "strict_codesign": {
+      "passed": true,
+      "command": "codesign --verify --deep --strict dist/VoiceOS.app"
+    },
+    "diff_whitespace": {
+      "passed": true
+    },
+    "operation_suite_in_final_full_regression": {
+      "passed": true,
+      "count": 17,
+      "failures": 0,
+      "log": "/tmp/voiceos-schedule-operations-regression.log"
+    },
+    "atomic_operation_and_status_targeted": {
+      "passed": true,
+      "count": 27,
+      "failures": 0,
+      "log": "/tmp/voiceos-schedule-operations-atomic.log",
+      "boundary": "before_final_additional_automatic_recovery_test"
+    }
+  },
+  "external_activity": {
+    "cloud_requests": 0,
+    "microphone_recordings": 0,
+    "real_reminder_mutations": 0,
+    "user_app_restarted": false
+  },
+  "evidence_limits": [
+    "local_mock_and_isolated_store_validation_not_real_eventkit_schedule_acceptance",
+    "runtime_ui_not_checked",
+    "eventkit_has_no_remote_atomic_cas",
+    "confirmed_receipt_does_not_prove_absence_of_manual_edit",
+    "existing_dates_still_conservatively_manual_owned",
+    "natural_user_outcome_and_followup_expression_not_fabricated"
+  ],
+  "next": [
+    "effect_bound_important_change_confirmation",
+    "schedule_field_ownership",
+    "W16_compensation"
+  ],
+  "no_product_direction_change": true,
+  "m3_status": "partial",
+  "ac15_status": "partial",
+  "natural_case_a_status": "partial"
+}

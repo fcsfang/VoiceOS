@@ -154,4 +154,6 @@ schema33 `reminder_time_observations(id,due_json)` 引用不可变外部观测�
 
 ## W14 本地排期实施增量（2026-10-13）
 
-schema34 `action_schedule_intents` 追加独立排期链：固定 action_version/schedule_version、due、用户承诺/AI 弹性归属、actor、表达/规划文本、固定 anchor_event_time/anchor_time_zone、可选 base_observation_id 与重推的 base_authority、历史 access_version、validity 与命令摘要。与行动状态版本分开，来源/状态变化阻止旧意图执行。含排期包 v34 校验连续历史、承诺保护、观测依据与基线归属，恢复全部 frozen，不恢复实时连接。它是实际本地 desired，不是已执行 Operation 或完整 PlanRevision；外部效果仍待实现。见 [ADR035](../adr/035-durable-action-schedule-intents.md)。
+schema34 `action_schedule_intents` 追加独立排期链：固定 action_version/schedule_version、due、用户承诺/AI 弹性归属、actor、表达/规划文本、固定 anchor_event_time/anchor_time_zone、可选 base_observation_id 与重推的 base_authority、历史 access_version、validity 与命令摘要。与行动状态版本分开，来源/状态变化阻止旧意图执行。含排期包 v34 校验连续历史、承诺保护、观测依据与基线归属，恢复全部 frozen，不恢复实时连接。它是实际本地 desired，区别于已执行 Operation 或完整 PlanRevision。见 [ADR035](../adr/035-durable-action-schedule-intents.md)。
+
+schema35 `reminder_schedule_operations` 绑定唯一 intent、link、expected observation、历史 access version、before/desired、命令摘要；保存 reserved/unknown/confirmed/observed/conflict/blocked、attempted、save acknowledgement、可选结果 observation、validity 和核对时刻。派发前持久 unknown，已尝试意图不可重发；观察到目标日期不自动证明 AI 作者。含操作包 v35 核验意图/基线/尝试边界/结果引用，恢复 frozen，不恢复授权；不修改行动状态版本。普通弹性排期已接条件保存与回读，重要效果确认和字段所有权仍待实现。见 [ADR036](../adr/036-safe-reminder-schedule-operations.md)。

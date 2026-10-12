@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -675,6 +675,24 @@ final class Database {
                 )
                 """)
                 try execute("PRAGMA user_version=34")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "34" {
+            try transaction {
+                try execute("""
+                CREATE TABLE reminder_schedule_operations (
+                  id TEXT PRIMARY KEY, intent_id TEXT NOT NULL UNIQUE REFERENCES action_schedule_intents(id),
+                  link_id TEXT NOT NULL REFERENCES reminder_links(id),
+                  expected_observation_id TEXT NOT NULL REFERENCES reminder_observations(id),
+                  access_version INTEGER NOT NULL CHECK(access_version>=1), before_json TEXT NOT NULL, desired_json TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','unknown','confirmed','observed','conflict','blocked')),
+                  attempted INTEGER NOT NULL CHECK(attempted IN (0,1)), save_acknowledged INTEGER NOT NULL CHECK(save_acknowledged IN (0,1)),
+                  result_observation_id TEXT REFERENCES reminder_observations(id), validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),
+                  reason TEXT NOT NULL, command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL,
+                  created_at TEXT NOT NULL, checked_at TEXT
+                )
+                """)
+                try execute("PRAGMA user_version=35")
             }
         }
     }

@@ -8,7 +8,7 @@ public struct ReminderCalendar: Identifiable, Sendable {
 }
 /// All EventKit objects stay on MainActor and are reacquired for each operation.
 @MainActor
-public final class NativeReminders: RemindersPort {
+public final class NativeReminders: RemindersSchedulingPort {
     private let store = EKEventStore()
     private var reading = false
     private let readTimeout: Duration = .seconds(8)
@@ -64,6 +64,33 @@ public final class NativeReminders: RemindersPort {
         // No guessed deadline, alarm, priority, or changes to other items.
         do { try store.save(item, commit: true) }
         catch { throw VoiceOSError("提醒事项写入结果未知") }
+    }
+
+    public func updateDue(calendarID: String, expected: ReminderSnapshot, desired: ReminderDueDate,
+                          authorize: @escaping @Sendable () async throws -> Void) async throws {
+        let components = try desired.writableComponents()
+        guard !expected.completed, expected.dueDate != nil else { throw VoiceOSError("不能改期已完成或期限未知的任务") }
+        let matches = try await find(calendarID: calendarID, externalID: expected.id, marker: expected.marker)
+        guard matches.count == 1, matches[0] == expected else { throw VoiceOSError("保存前提醒事项身份或字段已变化") }
+        // This await may allow local cancellation, revocation, correction or a
+        // newer cognition batch. Revalidate it before touching EventKit.
+        try await authorize()
+        try Task.checkCancellation()
+        guard !reading else { throw VoiceOSError("提醒事项读取正在进行") }
+        store.reset()
+        _ = try calendar(calendarID)
+        guard let item = store.calendarItem(withIdentifier: expected.id) as? EKReminder,
+              item.calendar.calendarIdentifier == calendarID,
+              ReminderSnapshot(id: item.calendarItemIdentifier, title: item.title ?? "", completed: item.isCompleted,
+                               marker: item.notes ?? "", dueDate: ReminderDueDate.reading(item.dueDateComponents)) == expected else {
+            throw VoiceOSError("最终保存前身份或字段已变化；没有修改")
+        }
+        // EventKit has no remote atomic compare-and-swap. The synchronous final
+        // check narrows the race but cannot eliminate concurrent iCloud edits.
+        // Preserve title, notes, completion, priority, alarms and other fields.
+        item.dueDateComponents = components
+        do { try store.save(item, commit: true) }
+        catch { throw VoiceOSError("提醒事项改期结果未知；只能回读，不重发") }
     }
 
     /// Development verification only: mark the one explicitly identified item

@@ -81,6 +81,8 @@ stateDiagram-v2
 
 外部系统不能接收 Core 的租约 fencing token。过期内部租约不代表旧外部请求已停止；接管 sending 一律核对，不能让新 worker 再发同一创建。仅凭租约和内部唯一键不能承诺外部 exactly-once。
 
+当前 W14 普通弹性排期采用上述契约的有界子集：schema35 独立操作 `reserved`（新鲜写前核对）→ `unknown`（派发边界已持久）→ `confirmed`（保存应答＋匹配回读）或 `observed`（只有目标值回读，来源未确认）；不匹配保留 conflict。reserved 退出后 blocked，已尝试意图不可重发。Observation、mapping、可能的真实完成回流与排期结果回执同事务保存；普通定时回读复用同一事务只读恢复 unknown。重要效果 awaiting_grant/字段所有权和补偿尚未接入，已有日期保守停写。见 [ADR036](../adr/036-safe-reminder-schedule-operations.md)。
+
 核对使用已知外部 ID、操作标记、scope 和预期字段；标题只作字段比较。零匹配可能是延迟、删除或标记变更；多匹配是歧义。若无法证明是否创建，保留 unknown 与可见原因，提供重新读取和具体处理入口；不让 AI 根据猜测自动重复创建。
 
 ## 5. 提醒事项三方比较

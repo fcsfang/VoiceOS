@@ -66,6 +66,8 @@ public enum SaveCheckpoint: String, Sendable {
     case reminderResolutionUncommitted, reminderResolutionCommitted
     case actionUncommitted, actionCommitted, actionStateUncommitted, actionStateCommitted
     case actionScheduleUncommitted, actionScheduleCommitted
+    case scheduleOperationReserved, scheduleOperationAttempted, scheduleOperationSaved
+    case scheduleOperationUncommitted, scheduleOperationCommitted
 }
 
 public struct TranscriptSpan: Codable, Sendable, Identifiable {

@@ -47,3 +47,5 @@ schema33 新增 `reminder_time_observations(id,due_json)`；id 是已有不可�
 本轮完成时间回读、存储、展示与策略基础，没有实现自然语言期限提取、本地 ScheduleRevision、Operation/outbox、绑定重要变更的确认、EventKit 条件更新或写后核对，也没有修改真实提醒事项。策略的 writeFlexible 不代表已外写。EventKit 无远程原子 CAS，执行器仍须在真正保存前检查作用域/身份/字段并在保存后回读；人工竞态不能靠纯比较算法消除。
 
 W14/AC-15 仍 partial，W16 外部补偿仍待实现。自然案例 A 仍需真实用户行动和后续表达，不能由开发命令生成替代。
+
+后续接续：普通弹性排期的持久操作、条件保存和只读恢复已在 [ADR036](036-safe-reminder-schedule-operations.md) 实现；本文保留该基础切片的原时点边界。重要效果确认、字段所有权、模型期限入口与 W16 补偿仍待接续。

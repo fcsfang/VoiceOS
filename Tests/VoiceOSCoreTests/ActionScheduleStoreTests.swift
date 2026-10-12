@@ -194,11 +194,11 @@ final class ActionScheduleStoreTests: XCTestCase {
         _ = try await link(store)
         let root = await store.root
         let db = try Database(root.appendingPathComponent("voiceos.sqlite"))
-        let tables = try db.query("SELECT name FROM sqlite_master WHERE type='table' AND name!='action_schedule_intents'").compactMap { $0["name"] }
+        let tables = try db.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('action_schedule_intents','reminder_schedule_operations')").compactMap { $0["name"] }
         let before = try Dictionary(uniqueKeysWithValues: tables.map { ($0, try db.query("SELECT * FROM \($0) ORDER BY id")) })
-        try db.execute("DROP TABLE action_schedule_intents"); try db.execute("PRAGMA user_version=33")
+        try db.execute("DROP TABLE reminder_schedule_operations"); try db.execute("DROP TABLE action_schedule_intents"); try db.execute("PRAGMA user_version=33")
         let upgraded = try Database(root.appendingPathComponent("voiceos.sqlite"))
-        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "34")
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "35")
         for table in tables { XCTAssertEqual(try upgraded.query("SELECT * FROM \(table) ORDER BY id"), before[table]) }
     }
 }

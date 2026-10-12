@@ -23,7 +23,7 @@
 
 具体最新执行证据见[进度记录](overnight-progress.md)；详细契约见[录制长文字路由](../engineering/m4-recording-segment-routing.md)。工程文档既有 m4 文件名是历史命名，不代表 M3 已验收。
 
-近期增量：长表达默认 SSE；两段正式素材的长聚合与认知提交已完成。W13–W15 隔离发送失败与既有回读，并阻止取消或认知批次更新后的新外写；正式任务创建后保持未完成。开发脚本生成的完成/反馈不计作自然行动结果，详见[最新 M3 证据矩阵](../testing/m3-evidence-status-2026-10-13.md)。不据这些增量标记整个 M2/M3 完成。 W14 新增本地状态冲突恢复、时间持久回读与纯三方策略；进一步已完成独立版本的本地排期意图与三方预览，实际排期执行/补偿仍缺，见 [ADR033](../adr/033-reminder-status-resolution.md)、[ADR034](../adr/034-reminder-time-observation-and-merge.md)、[ADR035](../adr/035-durable-action-schedule-intents.md)。
+近期增量：长表达默认 SSE；两段正式素材的长聚合与认知提交已完成。W13–W15 隔离发送失败与既有回读，并阻止取消或认知批次更新后的新外写；正式任务创建后保持未完成。开发脚本生成的完成/反馈不计作自然行动结果，详见[最新 M3 证据矩阵](../testing/m3-evidence-status-2026-10-13.md)。不据这些增量标记整个 M2/M3 完成。W14 已完成本地状态恢复、时间回读、独立排期意图与普通弹性排期持久操作/条件保存/只读恢复；schema35，514 项回归通过。重要效果确认、字段所有权与补偿仍缺，模型期限提取/编辑入口及真实 EventKit 改期尚未验收。接续见 [ADR036](../adr/036-safe-reminder-schedule-operations.md)，基础见 [ADR033](../adr/033-reminder-status-resolution.md)、[ADR034](../adr/034-reminder-time-observation-and-merge.md)、[ADR035](../adr/035-durable-action-schedule-intents.md)。
 
 ## 1. 推进方法与当前基线
 

@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-public struct ReminderSnapshot: Sendable, Codable {
+public struct ReminderSnapshot: Sendable, Codable, Equatable {
     public let id: String
     public let title: String
     public let completed: Bool
@@ -116,22 +116,30 @@ extension VoiceOSStore {
             throw VoiceOSError("提醒事项回读失败，结果未知；没有修改或重建外部任务")
         }
     }
-    func applyReminder(_ matches: [ReminderSnapshot], linkID: String) throws {
+    func applyReminder(_ matches: [ReminderSnapshot], linkID: String, includingScheduleOperation: String? = nil) throws {
         guard let link = try db.query("SELECT * FROM reminder_links WHERE id=?", [linkID]).first else { throw VoiceOSError("提醒事项关联缺失") }
         guard matches.count == 1, let remote = matches.first else {
-            try db.execute("UPDATE reminder_links SET state=?,last_checked_at=? WHERE id=?", [matches.isEmpty ? "missing" : "conflict",ISO8601DateFormatter().string(from: Date()),linkID]); return
+            try db.transaction {
+                try db.execute("UPDATE reminder_links SET state=?,last_checked_at=? WHERE id=?", [matches.isEmpty ? "missing" : "conflict",ISO8601DateFormatter().string(from: Date()),linkID])
+                _ = try observePendingScheduleOperations(matches, linkID: linkID, including: includingScheduleOperation)
+            }
+            return
         }
         guard !remote.id.isEmpty, remote.id.utf8.count <= 4096, remote.title.unicodeScalars.count <= 10000, remote.marker.utf8.count <= 4096 else { throw VoiceOSError("提醒事项字段无效或过长") }
         try remote.dueDate?.validate()
         let action = try actions(includeHistory: true).first { $0.id == link["action_id"] }
         let validMarker = remote.marker == link["marker"]
+        // Once identified, a copied marker on a replacement is a conflict,
+        // not permission to transfer identity or complete the original task.
+        let stableIdentity = link["external_id"] == nil || link["external_id"] == remote.id
         let observationID = UUID().uuidString
         let sequence = Int(try db.query("SELECT COUNT(*) AS n FROM reminder_observations WHERE link_id=?", [linkID]).first!["n"]!)! + 1
         var feedbackID: String?
-        var conflict = !validMarker
+        var conflict = !validMarker || !stableIdentity
         let baseline = try reminderStatusBaseline(link)
+        var confirmedScheduleOperations: [String] = []
         try db.transaction {
-            if validMarker, let action, action.validity == "current" {
+            if validMarker, stableIdentity, let action, action.validity == "current" {
                 if remote.completed && action.state == "open" && action.version == baseline {
                     let revisionID = UUID().uuidString
                     let next = action.version + 1
@@ -157,10 +165,12 @@ extension VoiceOSStore {
                     try db.execute("INSERT INTO reminder_time_observations(id,due_json) VALUES(?,?)", [observationID,json])
                 }
             }
-            try db.execute("UPDATE reminder_links SET state=?,external_id=?,last_checked_at=? WHERE id=?", [conflict ? "conflict" : "linked",remote.id,ISO8601DateFormatter().string(from: Date()),linkID])
+            try db.execute("UPDATE reminder_links SET state=?,external_id=?,last_checked_at=? WHERE id=?", [conflict ? "conflict" : "linked",link["external_id"] ?? remote.id,ISO8601DateFormatter().string(from: Date()),linkID])
+            confirmedScheduleOperations = try observePendingScheduleOperations(matches, linkID: linkID, including: includingScheduleOperation)
             try checkpoint(.reminderFeedbackUncommitted)
         }
         try checkpoint(.reminderFeedbackCommitted)
+        for _ in confirmedScheduleOperations { try checkpoint(.scheduleOperationCommitted) }
     }
     static func validateStoredReminders(_ db: Database) throws {
         for link in try db.query("SELECT l.*,a.kind,a.title,a.version AS latest_version FROM reminder_links l JOIN actions a ON a.id=l.action_id") {

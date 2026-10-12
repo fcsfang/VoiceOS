@@ -63,6 +63,25 @@ public enum ReminderDueDate: Equatable, Sendable, Codable {
               let last = calendar.nextDate(after: before, matching: match, matchingPolicy: .strict, repeatedTimePolicy: .last), first == last else { return nil }
         return .instant(utc: instantFormatter.string(from: first), timeZone: zone.identifier)
     }
+    /// Only write values that the same connector can read back losslessly.
+    public func writableComponents() throws -> DateComponents? {
+        try validate()
+        switch self {
+        case .none: return nil
+        case let .dateOnly(text, zone):
+            var result = Self.calendarDate(text)!
+            result.calendar = Calendar(identifier: .gregorian)
+            result.timeZone = zone.flatMap(TimeZone.init(identifier:))
+            guard Self.reading(result) == self else { throw VoiceOSError("期限不能无损写入提醒事项") }
+            return result
+        case let .instant(utc, zone):
+            var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: zone)!
+            var result = calendar.dateComponents([.year,.month,.day,.hour,.minute,.second], from: Self.instantFormatter.date(from: utc)!)
+            result.calendar = calendar; result.timeZone = calendar.timeZone
+            guard Self.reading(result) == self else { throw VoiceOSError("重复墙上时刻或亚秒期限不能无损核对，停止写入") }
+            return result
+        }
+    }
     public var summary: String {
         switch self {
         case .none: return "未设置期限"

@@ -125,10 +125,10 @@ final class QuestionStoreTests: XCTestCase {
         try FileManager.default.createDirectory(at: fixture.root, withIntermediateDirectories: true)
         do {
             let db = try Database(file)
-            try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("DROP TABLE action_schedule_intents"); try db.execute("DROP TABLE reminder_time_observations"); try db.execute("DROP TABLE reminder_status_resolutions"); try db.execute("PRAGMA user_version=23")
+            try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("DROP TABLE reminder_schedule_operations"); try db.execute("DROP TABLE action_schedule_intents"); try db.execute("DROP TABLE reminder_time_observations"); try db.execute("DROP TABLE reminder_status_resolutions"); try db.execute("PRAGMA user_version=23")
         }
         let db = try Database(file)
-            XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], "34")
+            XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], "35")
         XCTAssertTrue(try db.query("SELECT * FROM questions").isEmpty)
         XCTAssertTrue(try db.query("PRAGMA foreign_key_check").isEmpty)
     }
