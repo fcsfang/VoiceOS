@@ -14,10 +14,10 @@ public enum LocalTextModel {
         public let segmentAggregation:ResponsesSegmentAggregationPort
     }
     /// Read credentials once; publish all ports only after the complete suite validates.
-    public static func loadSuite(from file:URL) throws -> Suite {
+    public static func loadSuite(from file:URL, compactSegmentExtraction: Bool = false, compactSegmentAggregation: Bool = false) throws -> Suite {
         let (address,key)=try settings(from:file)
         do {
-            return Suite(cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),english:try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),association:try ResponsesExpressionAssociationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),segmentExtraction:try ResponsesSegmentExtractionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),segmentAggregation:try ResponsesSegmentAggregationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"))
+            return Suite(cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),english:try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),association:try ResponsesExpressionAssociationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),segmentExtraction:try ResponsesSegmentExtractionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol",compactInput:compactSegmentExtraction),segmentAggregation:try ResponsesSegmentAggregationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol",compactInput:compactSegmentAggregation))
         } catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
     public static func load(from file: URL) throws -> ResponsesModelPort {

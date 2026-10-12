@@ -17,9 +17,9 @@ private actor SegmentHTTPFixture: ModelHTTPTransport {
         let format=(root["text"] as! [String:Any])["format"] as! [String:Any]
         let result: [String:Any]
         if format["name"] as? String == "voiceos_segment_extract" {
-            let segment=fields["segment"] as! [String:Any], text=segment["text"] as! String, start=segment["textStart"] as! Int
+            let segment=(fields["segment"] as? [String:Any]) ?? fields, text=segment["text"] as! String, start=(segment["textStart"] as? Int) ?? 0
             let quote=String(text.prefix(8)),end=start+quote.unicodeScalars.count
-            let refs=segment["references"] as! [[String:Any]]
+            let refs=(segment["references"] as? [[String:Any]]) ?? []
             let proposal: [String:Any]=quoteOnly ? ["kind":"statement","statement":"合成陈述","quote":text]:["kind":"statement","statement":"合成陈述","quote":quote,"textStart":start,"textEnd":end,
                 "spanIDs":refs.filter { ($0["textStart"] as! Int)<end }.map { $0["spanID"] as! String }]
             result=bad ? ["proposals":[proposal],"tool":"unexpected"]:["proposals":[proposal]]
@@ -36,6 +36,47 @@ private actor SegmentHTTPFixture: ModelHTTPTransport {
     func payloads() -> [Data] { requests.map { try! JSONSerialization.data(withJSONObject:$0) } }
 }
 final class ResponsesSegmentPortsTests: XCTestCase {
+    func testCompactExtractionKeepsDurableReferencesWithoutSendingMetadata() async throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString);defer { try? FileManager.default.removeItem(at:root) }
+        let store=try VoiceOSStore(root:root,inspector:SegmentHTTPInspector());try await store.recover()
+        let source=try await store.recordUserExpression("第一段保留原话。第二段明确否定。")
+        _=try await store.setSourceLocalOnly(sourceID:source,expectedVersion:1,localOnly:false)
+        let transport=SegmentHTTPFixture(quoteOnly:true),base=URL(string:"https://api.openai.com/v1")!
+        let x=try ResponsesSegmentExtractionPort(baseURL:base,apiKey:"test-placeholder",model:"fixture",transport:transport,compactInput:true)
+        let a=try ResponsesSegmentAggregationPort(baseURL:base,apiKey:"test-placeholder",model:"fixture",transport:transport,compactInput:true)
+        let scope=try await store.prepareSegmentedExpressionProcessingScope(sourceID:source,extraction:x.configuration,aggregation:a.configuration,segmentScalarBudget:10)
+        XCTAssertEqual(scope.evidenceScalarBudget,32000)
+        let batch=try await store.enqueueSegmentedProcessingBatch(scope,extraction:x.configuration,aggregation:a.configuration)
+        let result=try await store.processSegmentedCognition(batchID:batch.id,extraction:x,aggregation:a)
+        XCTAssertEqual(result.claimIDs?.count,scope.plan.segments.count)
+        let payloads=await transport.payloads()
+        for payload in payloads.dropLast() {
+            let body=try JSONSerialization.jsonObject(with:payload) as! [String:Any]
+            let input=(body["input"] as! [[String:Any]])[0]["content"] as! String
+            let fields=try JSONSerialization.jsonObject(with:Data(input.utf8)) as! [String:Any]
+            XCTAssertEqual(Set(fields.keys),["origin","speaker","text"])
+            XCTAssertFalse(input.contains(source))
+        }
+        let receipts=try await store.segmentExtractionAttempts(batchID:batch.id)
+        XCTAssertEqual(receipts.count,scope.plan.segments.count)
+        XCTAssertTrue(receipts.allSatisfy { $0.state == .completed })
+        let aggregatePayload=try JSONSerialization.jsonObject(with:try XCTUnwrap(payloads.last)) as! [String:Any]
+        let aggregateInput=(aggregatePayload["input"] as! [[String:Any]])[0]["content"] as! String
+        let compact=try JSONSerialization.jsonObject(with:Data(aggregateInput.utf8)) as! [String:Any]
+        XCTAssertEqual(Set(compact.keys),["batchID","ledger"])
+        let compactLedger=compact["ledger"] as! [String:Any]
+        let compactEvidence=compactLedger["evidence"] as! [[String:Any]]
+        XCTAssertEqual(compactEvidence.count,scope.plan.segments.count)
+        XCTAssertEqual(compactEvidence.map { $0["quote"] as! String },scope.plan.segments.map(\.text))
+        for item in compactEvidence { XCTAssertEqual(Set(item.keys),["id","segmentID","ordinal","kind","statement","quote"]) }
+        XCTAssertFalse(aggregateInput.contains("payloadJSON"));XCTAssertFalse(aggregateInput.contains("containingSpanStartMS"))
+        let legacy=try ResponsesSegmentExtractionPort(baseURL:base,apiKey:"test-placeholder",model:"fixture",transport:transport)
+        do { try await store.validateSegmentedExpressionProcessingScope(scope,extraction:legacy.configuration,aggregation:a.configuration); XCTFail("Fixed v3 scope must reject v2 port") } catch {}
+        let legacyAggregation=try ResponsesSegmentAggregationPort(baseURL:base,apiKey:"test-placeholder",model:"fixture",transport:transport)
+        do { try await store.validateSegmentedExpressionProcessingScope(scope,extraction:x.configuration,aggregation:legacyAggregation.configuration);XCTFail("Fixed aggregation identity must not drift") } catch {}
+        _=try await store.processSegmentedCognition(batchID:batch.id,extraction:x,aggregation:a)
+        let calls=await transport.count();XCTAssertEqual(calls,scope.plan.segments.count+1)
+    }
     func testQuoteGroundingCountsScalarsAndKeepsEveryIntersectingSpan() throws {
         let a=UUID().uuidString,b=UUID().uuidString
         let segment=TranscriptSegment(id:UUID().uuidString,ordinal:2,textStart:4000,textEnd:4010,text:"前😀e\u{301}后不要购买。",references:[.init(spanID:a,textStart:4000,textEnd:4005,containingSpanStartMS:nil,containingSpanEndMS:nil),.init(spanID:b,textStart:4005,textEnd:4010,containingSpanStartMS:nil,containingSpanEndMS:nil)])

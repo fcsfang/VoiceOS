@@ -57,3 +57,5 @@
 - [ADR028：整篇认知本地派生](028-segmented-cognitive-projection.md) — schema30复用认知实体事务，付费回执与派生身份分开；真实接口及完整长关联待验收。
 
 - [ADR029：稳定开发签名](029-stable-development-signing.md) — 使用既有Apple Development身份；一次代码更新/重启后原清单回读通过，正式分发另行审查。
+
+- [ADR-032 精简片段与聚合请求](032-compact-segment-extraction.md)：独立v3候选，持久完整身份、云端只发送本段归属与原文；旧请求不升级。

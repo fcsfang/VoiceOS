@@ -816,7 +816,7 @@ final class ControlCenter: ObservableObject {
             try Task.checkCancellation()
             if reminderAccess?.version == access.version { reminderSyncStatus = "已自动核对「\(access.title)」的关联任务" }
         } catch {
-            if reminderAccess?.version == access.version { reminderSyncStatus = "自动回读未完成 · 保留历史，不自动重建" }
+            if reminderAccess?.version == access.version { reminderSyncStatus = "自动同步未全部完成 · 已保存各任务状态，不自动重建" }
         }
         await refresh()
     }
