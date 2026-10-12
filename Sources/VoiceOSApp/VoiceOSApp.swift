@@ -655,7 +655,16 @@ final class ControlCenter: ObservableObject {
         while let intent = try? await store.processingIntents().first(where: { $0.state == .queued }) {
             do {
                 let result = try await store.runExpressionProcessingIntent(id: intent.id, retrieval: local, cognitionPort: cognition, associationPort: association, semantic: semanticRetrieval != nil)
-                status = result.state == .completed ? "表达处理完成 · 认知、关联和历史回执已保存" : "表达处理状态：\(result.state.rawValue)"
+                if result.state == .completed {
+                    if result.associationAttemptID == nil {
+                        status = "理解已完成 · 本机未召回可用关联候选，本次未发送关联判断"
+                    } else {
+                        let receipt = try await store.expressionAssociationAttempts().first { $0.id == result.associationAttemptID }
+                        status = receipt?.proposals.isEmpty == true
+                            ? "理解与关联判断已完成 · 没有直接相关提案"
+                            : "理解与关联判断已完成 · 关系提案已保存，未改变观点或行动"
+                    }
+                } else { status = "表达处理状态：\(result.state.rawValue)" }
                 requestReminderRefresh()
             } catch { status = error.localizedDescription; break }
         }
@@ -1008,7 +1017,7 @@ struct CenterView: View {
             case "completed": label="历史关联已保存"
             case "unknown": label="关联结果未知，不自动重发"
             case "frozen": label="历史关联冻结"
-            case "noCandidates": label="没有可关联的授权历史"
+            case "noCandidates": label="本机未召回可用的授权历史候选"
             case "budgetExceeded": label="历史关联超过处理预算，未发送"
             case "paused": label="历史关联已暂停"
             case "localOnly": label="历史关联仅本机"
@@ -1042,7 +1051,7 @@ struct CenterView: View {
         switch intent.state {
         case .queued: return "等待处理"
         case .running: return intent.phase == .cognition ? "正在理解" : "正在关联"
-        case .completed: return "已完成"
+        case .completed: return intent.associationAttemptID == nil ? "理解已完成 · 本次未发送关联判断" : "理解与关联判断已完成"
         case .unknown: return "结果未知 · 不自动重发"
         case .blocked: return "已阻塞 · 需核对"
         case .cancelled: return "已取消"

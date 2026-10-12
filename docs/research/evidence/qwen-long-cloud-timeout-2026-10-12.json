@@ -1,0 +1,55 @@
+{
+  "aggregation_state": "not_reserved",
+  "aggregation_usage": {},
+  "audio_uploaded": false,
+  "batch_id": "34B2B85C-E36F-496E-AFC1-C63DF2E9AD22",
+  "billing_state": "unknown",
+  "claim_count": 0,
+  "cognition_saved": false,
+  "elapsed_seconds": 120.54596400260925,
+  "external_task_writes": 0,
+  "fragment_errors": [
+    "片段等待服务响应超时；服务端结果与费用未知，不自动重发"
+  ],
+  "fragment_states": [
+    "unknown"
+  ],
+  "fragment_usage": [
+    {}
+  ],
+  "integrity": true,
+  "microphone_calls": 0,
+  "natural_semantic_quality_reviewed": false,
+  "parent_error": "片段等待服务响应超时；服务端结果与费用未知，不自动重发",
+  "parent_state": "unknown",
+  "policy_version": 2,
+  "segments": 2,
+  "source_id": "1555EE70-EBFA-4077-A000-17D5F75DF8F5",
+  "source_scalars": 5277,
+  "extraction_identity": {
+    "destination": "cloud",
+    "model": "gpt-6.1-sol",
+    "promptVersion": "segment-extraction-v2",
+    "provider": "responses:api.chiyi.cc",
+    "schemaVersion": "segment-extraction-v2"
+  },
+  "aggregation_identity": {
+    "destination": "cloud",
+    "model": "gpt-6.1-sol",
+    "promptVersion": "segment-aggregation-v2",
+    "provider": "responses:api.chiyi.cc",
+    "schemaVersion": "segment-aggregation-v2"
+  },
+  "evidence_scalar_budget": 32000,
+  "segment_scalar_counts": [
+    3972,
+    1305
+  ],
+  "transcription_backend": "Qwen3-ASR-1.7B-8bit@a8379a2 MLXAudio0.5.8 chunk30-v1",
+  "original_video_own_track": 2,
+  "offset_seconds": 2400,
+  "duration_seconds": 2400,
+  "new_nonoverlapping_input": true,
+  "unknown_request_replayed": false,
+  "full_natural_case_A_complete": false
+}

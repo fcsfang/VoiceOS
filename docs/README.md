@@ -1,5 +1,7 @@
 # VoiceOS 文档索引
 
+**2026-10-12 当前覆盖：** Qwen已由用户确认，成为默认待配置的本地转写方案，选择快照持久保存并在重启前恢复；Apple仅明确备选，无静默回退。原生本人音轨导入保存376字符、无文本调用；两段新本人音轨完成真实文字理解，后续BGE召回1份历史后判断无直接关联，未外写任务。以下Apple启动默认/选择不持久为早前记录。详见[最新证据](research/evidence/qwen-native-cognition-2026-10-12.json)与[当前进度](planning/overnight-progress.md)。完整自然案例A仍未验收。
+
 更新日期：2026-10-12。
 
 当前新增工作为[本地转写模型替换](research/local-asr-comparison-2026-10-12.md)：以本人轨2对比 Apple、Whisper large-v3 与 Qwen3-ASR，Qwen可选端口已接入且本次应用运行启用，原生选择/展示与独立库持久保存通过；启动默认仍Apple，无音频上传。116项选中检查与稳定签名通过，精确对齐/长录音未验收。真实长文字数字引用失败另以[ADR030](adr/030-local-quote-grounding.md)修复，相关21项检查通过；旧拒绝/未知批次不重发，完整自然闭环仍待验收。
@@ -13,6 +15,8 @@
 真实40分钟本人音轨的5280字符可无损分成2段；本轮采用固定空提案的本地夹具验证暂存及迁移冻结，没有评分自然语义质量。先读[当前接续状态](planning/overnight-progress.md)，再按需要查看[分段总契约](engineering/m4-segmented-expression-processing-contract.md)、[本地证据账本](engineering/m4-segmented-evidence.md)、[录制处理请求](engineering/m4-recording-processing-request.md)和[个人录音归属](engineering/m4-personal-audio-processing.md)。
 
 [审核修复记录](engineering/m4-expression-processing-reliability.md)及[原审核](engineering/quality-review-2026-10-12.md)保留问题与复现证据。下列历史文档记录各自切片的证据，旧版本号、测试数量及待实现项不作为当前统一状态。
+
+最新收口说明：[确认Qwen后的产品链](research/qwen-confirmed-integration-2026-10-12.md)，含独立关联续作、状态修复和长文字超时边界。
 
 ## 当前文档
 

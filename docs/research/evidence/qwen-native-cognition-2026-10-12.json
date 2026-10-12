@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-12",
+  "roadmap": "W09-W11/W15; M2 to M3",
+  "native_import": {
+    "completed_transcripts": 1,
+    "scalars": 376,
+    "model_attempts": 0,
+    "own_voice": true,
+    "local_only": true,
+    "ui_confirmed": true
+  },
+  "restart": {
+    "qwen_restored": true,
+    "daily_original_retained": true,
+    "existing_reminders_auto_readback": true
+  },
+  "natural_sources": [
+    {
+      "source_id": "7DE0B30D-C906-438E-8A41-D6301B0940AF",
+      "transcript_version_id": "13BE6709-CD63-4986-BEDF-EEDAE8791F35",
+      "scalars": 376,
+      "backend": "Qwen3-ASR-1.7B-8bit@a8379a2 MLXAudio0.5.8 chunk30-v1",
+      "claims": 8,
+      "actions": 2,
+      "auto_send_candidates": 0
+    },
+    {
+      "source_id": "454309A6-54C1-41BB-A738-03AAE9864A80",
+      "transcript_version_id": "B9A07F07-3B6E-492A-AB57-6F76532F996C",
+      "scalars": 368,
+      "backend": "Qwen3-ASR-1.7B-8bit@a8379a2 MLXAudio0.5.8 chunk30-v1",
+      "claims": 5,
+      "actions": 2,
+      "auto_send_candidates": 1
+    }
+  ],
+  "association": {
+    "state": "completed",
+    "local_retrieval": "fixed BGE CoreML",
+    "candidate_sources": 1,
+    "proposals": 0,
+    "usage": {
+      "input_tokens": 1056,
+      "output_tokens": 16
+    },
+    "prior_lexical_queue_had_no_attempt": true,
+    "cognition_not_replayed": true,
+    "repeat_command_reused_without_new_attempt": true
+  },
+  "audio_uploaded": false,
+  "external_task_writes": 0,
+  "reference_transcription_available": false,
+  "full_natural_case_A_complete": false,
+  "limitations": [
+    "No independent human audio reference or CER/WER.",
+    "Empty association is a valid judgment, not a positive relation acceptance.",
+    "Task candidates from retrospective speech have not been sent.",
+    "Long Qwen transcription and v2 segmented cognition are being investigated separately."
+  ]
+}

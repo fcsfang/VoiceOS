@@ -40,6 +40,13 @@ func runPersonalSegmentCloudProbe(_ args: [String]) async throws {
     let fragments=try await store.segmentExtractionAttempts(batchID:batch.id)
     let aggregate=try await store.segmentAggregationAttempt(batchID:batch.id)
     let report:[String:Any]=["source_id":source.id,"batch_id":batch.id,"policy_version":current.policyVersion,
+        "transcription_backend":source.transcriptionBackend ?? "unknown",
+        "extraction_prompt_version":batch.scope.extraction.promptVersion,
+        "extraction_schema_version":batch.scope.extraction.schemaVersion,
+        "aggregation_prompt_version":batch.scope.aggregation.promptVersion,
+        "aggregation_schema_version":batch.scope.aggregation.schemaVersion,
+        "planned_segment_scalars":batch.scope.plan.segments.map { $0.text.unicodeScalars.count },
+        "evidence_scalar_budget":batch.scope.evidenceScalarBudget,
         "source_scalars":text.unicodeScalars.count,"segments":batch.scope.plan.segments.count,"cognition_saved":accepted,
         "parent_state":final.state.rawValue,"elapsed_seconds":Date().timeIntervalSince(start),
         "fragment_states":fragments.map{$0.state.rawValue},"fragment_errors":fragments.map{$0.error ?? ""},
