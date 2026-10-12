@@ -22,4 +22,4 @@
 
 真实40分钟本人音轨既有5280字符逐字稿在独立资料库走通本地空提案聚合/认知提交，integrity=true，network_calls=0。该夹具刻意不识别内容，claim/action均为0；它只证明真实来源身份的机制衔接，不证明理解质量。原视频和日常资料库未改变。
 
-日志：runtime/queue-fixes-20261012/recording-segment-targeted.log、segmented-association-cancel.log、recording-segment-final-targeted.log、personal40min-cognition.json。真实HTTP、最新签名应用/原生操作、自然语义与完整行动反馈仍待阶段验收；完整回归422项为历史结果。
+日志：runtime/queue-fixes-20261012/recording-segment-targeted.log、segmented-association-cancel.log、recording-segment-final-targeted.log、personal40min-cognition.json。阶段签名构建/严格codesign与独立库CUA检查已完成：无配置时录制处理和文字处理禁用、普通保存仅本地、分段待处理和取消终态可见，0模型/关联尝试。日常窗口已恢复，系统提醒事项权限不可用。真实HTTP、配置后运行、认知后在途取消、自然语义与完整行动反馈仍待验收；完整回归422项为历史结果。
