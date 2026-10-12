@@ -5,7 +5,7 @@ import VoiceOSPlatform
 /// Explicit development probe for an already transcribed personal source.
 /// No microphone, media upload, reminders connector or automatic retry.
 func runPersonalSegmentCloudProbe(_ args: [String]) async throws {
-    guard [5,6,8].contains(args.count), args[4] == "--authorize-this-source-text", args.count==5 || ["--compact-extraction","--compact-segments","--stream-segments","--compact-stream-segments","--stream-extended"].contains(args[5]),
+    guard [5,6,8].contains(args.count), args[4] == "--authorize-this-source-text", args.count==5 || ["--compact-extraction","--compact-segments","--stream-segments","--compact-stream-segments","--stream-extended","--stream-extended-v2","--stream-extended-1800","--compact-stream-1800","--compact-stream-1800-v2","--compact-stream-1800-v3","--compact-stream-2400","--compact-stream-2400-v2"].contains(args[5]),
           args.count != 8 || args[6]=="--segment-budget" else {
         throw VoiceOSError("personal-segment-cloud requires isolated root, source ID, config and explicit text authorization")
     }
@@ -16,8 +16,8 @@ func runPersonalSegmentCloudProbe(_ args: [String]) async throws {
     }
     let budget=args.count==8 ? Int(args[7]) ?? 0 : 4000
     guard (1...4000).contains(budget) else { throw VoiceOSError("片段预算必须为1–4000") }
-    let compact=args.count>=6 && ["--compact-extraction","--compact-segments","--compact-stream-segments"].contains(args[5])
-    let streaming=args.count>=6 && ["--stream-segments","--compact-stream-segments","--stream-extended"].contains(args[5])
+    let compact=args.count>=6 && ["--compact-extraction","--compact-segments","--compact-stream-segments","--compact-stream-1800","--compact-stream-1800-v2","--compact-stream-1800-v3","--compact-stream-2400","--compact-stream-2400-v2"].contains(args[5])
+    let streaming=args.count>=6 && ["--stream-segments","--compact-stream-segments","--stream-extended","--stream-extended-v2","--stream-extended-1800","--compact-stream-1800","--compact-stream-1800-v2","--compact-stream-1800-v3","--compact-stream-2400","--compact-stream-2400-v2"].contains(args[5])
     let suite=try LocalTextModel.loadSuite(from:URL(fileURLWithPath:args[3]),compactSegmentExtraction:compact,compactSegmentAggregation:compact,segmentRequestTimeout:streaming ? 600:120,segmentStreaming:streaming)
     let store=try VoiceOSStore(root:root,inspector:NativeMediaInspector());try await store.recover()
     guard let source=try await store.sources().first(where:{$0.id == args[2]}),source.origin == "user",source.speaker == "user",source.kind == "audio",
@@ -39,7 +39,7 @@ func runPersonalSegmentCloudProbe(_ args: [String]) async throws {
         batch=prior
     }
     else {
-        let scope=try await store.prepareSegmentedExpressionProcessingScope(sourceID:source.id,extraction:suite.segmentExtraction.configuration,aggregation:suite.segmentAggregation.configuration,segmentScalarBudget:budget)
+        let scope=try await store.prepareSegmentedExpressionProcessingScope(sourceID:source.id,extraction:suite.segmentExtraction.configuration,aggregation:suite.segmentAggregation.configuration,segmentScalarBudget:args.count>=6 && ["--stream-extended-1800","--compact-stream-1800","--compact-stream-1800-v2","--compact-stream-1800-v3"].contains(args[5]) ? 1800 : args.count>=6 && ["--compact-stream-2400","--compact-stream-2400-v2"].contains(args[5]) ? 2400:budget)
         batch=try await store.enqueueSegmentedProcessingBatch(scope,commandID:command,extraction:suite.segmentExtraction.configuration,aggregation:suite.segmentAggregation.configuration)
     }
     let start=Date();var accepted=false
