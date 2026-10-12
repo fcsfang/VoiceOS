@@ -3,6 +3,26 @@ import VoiceOSCore
 import VoiceOSPlatform
 
 final class LocalQwenSpeechPortTests: XCTestCase {
+    func testRestartRestoresQwenSnapshotWithoutReadingOriginalConfigFile() throws {
+        let runner=root.appendingPathComponent("runner.py")
+        try Data().write(to:runner)
+        let config=try JSONSerialization.data(withJSONObject:["format":"voiceos-local-qwen-v1","python":"/bin/sh","runner":runner.path,"model":root.path])
+        let original=root.appendingPathComponent("selected-config.json")
+        try config.write(to:original)
+        let saved=try JSONEncoder().encode(LocalSpeechSelection(configuration:config))
+        try FileManager.default.removeItem(at:original)
+        let restored=try JSONDecoder().decode(LocalSpeechSelection.self,from:saved)
+        XCTAssertEqual(restored.backend,.qwen)
+        XCTAssertTrue(try restored.port().backendIdentity.hasPrefix("Qwen3-ASR"))
+        try FileManager.default.removeItem(at:root.appendingPathComponent("model.safetensors"))
+        XCTAssertThrowsError(try restored.port())
+        XCTAssertEqual(restored.backend,.qwen)
+    }
+    func testDefaultQwenRequiresConfigurationAndAppleNeedsExplicitSelection() throws {
+        XCTAssertThrowsError(try LocalSpeechSelection().port())
+        XCTAssertEqual(try LocalSpeechSelection(backend:.apple).port().backendIdentity,"Apple SpeechAnalyzer")
+        XCTAssertThrowsError(try LocalSpeechSelection(backend:.apple,configuration:Data()).port())
+    }
     var root: URL!
     override func setUpWithError() throws {
         root=FileManager.default.temporaryDirectory.appendingPathComponent("qwen-port-test-"+UUID().uuidString)

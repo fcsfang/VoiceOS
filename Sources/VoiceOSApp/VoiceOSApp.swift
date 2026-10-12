@@ -169,22 +169,47 @@ final class ControlCenter: ObservableObject {
     @Published var understandingSource: String?
     @Published var modelConfigured = false
     @Published var modelSummary = "尚未配置文本模型"
-    @Published var speechSummary = "Apple 本地转写"
-    private var speechPort: any SpeechPort = NativeSpeechPort()
+    @Published var speechSummary = "Qwen 本地转写 · 尚未配置"
+    private var speechPort: (any SpeechPort)?
+    private let speechPreferenceKey="voiceos.localSpeechSelection.v1"
+    private func installSpeechSelection(_ selection: LocalSpeechSelection, persist: Bool) throws {
+        let port=try selection.port()
+        let encoded=try JSONEncoder().encode(selection)
+        if persist { UserDefaults.standard.set(encoded,forKey:speechPreferenceKey) }
+        speechPort=port
+        speechSummary=selection.backend == .qwen ? "Qwen 本地转写 · 最多30秒定位范围" : "Apple 本地转写 · 明确选择的备选"
+    }
+    private func restoreSpeechSelection() {
+        guard let data=UserDefaults.standard.data(forKey:speechPreferenceKey) else {
+            status="原件可保存；请配置已选定的本地 Qwen 转写模型"
+            return
+        }
+        do {
+            guard data.count<=32_768 else { throw VoiceOSError("转写选择配置过大") }
+            let selection=try JSONDecoder().decode(LocalSpeechSelection.self,from:data)
+            try installSpeechSelection(selection,persist:false)
+        } catch {
+            speechPort=nil;speechSummary="已保存的本地转写配置不可用"
+            status="保留原件和待转写任务；请修复本地转写配置，不会自动切换模型"
+        }
+    }
     func chooseLocalSpeech() {
         guard worker == nil,!dictationActive else { status="请等待当前处理结束后切换转写器";return }
         let panel=NSOpenPanel();panel.title="选择本地 Qwen 转写配置";panel.allowsMultipleSelection=false;panel.canChooseDirectories=false
         guard panel.runModal() == .OK,let url=panel.url else { return }
         do {
-            let port=try LocalQwenSpeechPort.load(from:url)
-            speechPort=port;speechSummary="Qwen 本地转写 · 最多30秒定位范围"
-            status="后续待转写音频使用本地 Qwen；已有逐字稿保持原版本"
+            try installSpeechSelection(.init(configuration:Data(contentsOf:url)),persist:true)
+            status="Qwen 转写选择已保存，重启后继续使用；已有逐字稿保持原版本"
+            scheduleProcessing()
         } catch { status="无法启用本地 Qwen，请核对配置与模型；保留当前转写器" }
     }
     func useAppleSpeech() {
         guard worker == nil,!dictationActive else { status="请等待当前处理结束后切换转写器";return }
-        speechPort=NativeSpeechPort();speechSummary="Apple 本地转写"
-        status="后续待转写音频使用 Apple 本地转写"
+        do {
+            try installSpeechSelection(.init(backend:.apple),persist:true)
+            status="已保存 Apple 本地转写备选；已有逐字稿保持原版本"
+            scheduleProcessing()
+        } catch { status="无法保存本地转写选择" }
     }
     @Published var attempts: [String: [ModelAttemptRecord]] = [:]
     @Published var processingIntents: [ExpressionProcessingIntentRecord] = []
@@ -317,6 +342,7 @@ final class ControlCenter: ObservableObject {
             self.store = store
             try await store.recover()
             initialized = true; status = "准备就绪 · 媒体只在本机处理"
+            restoreSpeechSelection()
             if let path = ProcessInfo.processInfo.environment["VOICEOS_MODEL_CONFIG_FILE"] {
                 configureTextModel(URL(fileURLWithPath: path))
             }
@@ -574,7 +600,8 @@ final class ControlCenter: ObservableObject {
             await process()
             worker = nil
             if let store {
-                let pendingTranscription = (try? await store.sources())?.contains(where: { $0.jobState == "queued" }) == true
+                let queuedTranscription = (try? await store.sources())?.contains(where: { $0.jobState == "queued" }) == true
+                let pendingTranscription = speechPort != nil && queuedTranscription
                 // A queued expression intent is intentionally left durable while
                 // no text model is configured. It must not cause a tight retry
                 // loop; configureTextModel() wakes it after a real identity is
@@ -599,9 +626,10 @@ final class ControlCenter: ObservableObject {
             }
         }
         defer { refreshTask.cancel() }
-        let selectedSpeech = speechPort
-        do { try await store.processTranscriptions(using: selectedSpeech) }
-        catch { status = error.localizedDescription }
+        if let selectedSpeech = speechPort {
+            do { try await store.processTranscriptions(using: selectedSpeech) }
+            catch { status = error.localizedDescription }
+        }
         if let cognition = textModel, let association = associationModel {
             do { try await store.reconcileRecordingProcessingRequests(cognition: cognition.configuration, association: association.configuration,segmentExtraction:segmentExtractionModel?.configuration,segmentAggregation:segmentAggregationModel?.configuration) }
             catch { status = error.localizedDescription }

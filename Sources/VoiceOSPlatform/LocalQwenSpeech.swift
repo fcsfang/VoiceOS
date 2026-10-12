@@ -8,8 +8,10 @@ public struct LocalQwenSpeechPort: SpeechPort {
     private let runner: URL
     private let model: URL
     public static func load(from file: URL) throws -> LocalQwenSpeechPort {
+        try load(configurationData:Data(contentsOf:file))
+    }
+    public static func load(configurationData data: Data) throws -> LocalQwenSpeechPort {
         struct Configuration: Decodable { let format: String; let python: String; let runner: String; let model: String }
-        let data=try Data(contentsOf:file)
         guard data.count<=16_384 else { throw VoiceOSError("本地转写配置过大") }
         let config=try JSONDecoder().decode(Configuration.self,from:data)
         guard config.format=="voiceos-local-qwen-v1",[config.python,config.runner,config.model].allSatisfy({ $0.hasPrefix("/") }) else {
@@ -48,6 +50,27 @@ public struct LocalQwenSpeechPort: SpeechPort {
         let speech=SpeechText(text:result.text,spans:result.spans)
         try speech.validate(duration:media.duration)
         return speech
+    }
+}
+
+/// Machine-local setup, deliberately separate from portable product records.
+/// Restoring a missing Qwen installation must never quietly select Apple.
+public struct LocalSpeechSelection: Codable, Sendable {
+    public enum Backend: String, Codable, Sendable { case qwen, apple }
+    public let backend: Backend
+    public let configuration: Data?
+    public init(backend: Backend = .qwen, configuration: Data? = nil) {
+        self.backend=backend; self.configuration=configuration
+    }
+    public func port() throws -> any SpeechPort {
+        switch backend {
+        case .apple:
+            guard configuration==nil else { throw VoiceOSError("Apple 转写选择不能附带 Qwen 配置") }
+            return NativeSpeechPort()
+        case .qwen:
+            guard let configuration else { throw VoiceOSError("请先配置已选定的本地 Qwen 转写模型") }
+            return try LocalQwenSpeechPort.load(configurationData:configuration)
+        }
     }
 }
 

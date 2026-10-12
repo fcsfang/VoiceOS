@@ -186,7 +186,7 @@ public actor VoiceOSStore {
         WHERE j.state='queued' AND s.state='saved' AND j.input_version_id=s.version_id ORDER BY s.created_at LIMIT 1
         """).first {
             let job = row["id"]!; let source = row["source_id"]!; let lease = UUID().uuidString
-            try db.execute("UPDATE jobs SET state='running',lease_token=?,attempts=attempts+1 WHERE id=?", [lease,job])
+            try db.execute("UPDATE jobs SET state='running',config=?,lease_token=?,attempts=attempts+1 WHERE id=?", [backend,lease,job])
             do {
                 try checkpoint(.jobClaimed)
                 let url = try playableURL(sourceID: source)
@@ -227,7 +227,7 @@ public actor VoiceOSStore {
             try db.execute("UPDATE sources SET state='saved',duration=?,kind=?,error=NULL WHERE id=?", [String(info.duration),info.kind,row["id"]])
             if info.kind == "user_text" { try commitUserText(row) }
             else {
-            try db.execute("INSERT OR IGNORE INTO jobs(id,source_id,input_version_id,stage,config,state) VALUES(?,?,?,'transcription','apple-local-zh_CN-v1','queued')", [UUID().uuidString,row["id"],row["version_id"]])
+            try db.execute("INSERT OR IGNORE INTO jobs(id,source_id,input_version_id,stage,config,state) VALUES(?,?,?,'transcription','pending-local-speech-v1','queued')", [UUID().uuidString,row["id"],row["version_id"]])
             }
             try checkpoint(.savedUncommitted)
         }
