@@ -81,7 +81,7 @@ stateDiagram-v2
 
 外部系统不能接收 Core 的租约 fencing token。过期内部租约不代表旧外部请求已停止；接管 sending 一律核对，不能让新 worker 再发同一创建。仅凭租约和内部唯一键不能承诺外部 exactly-once。
 
-当前 W14 普通弹性排期采用上述契约的有界子集：schema35 独立操作 `reserved`（新鲜写前核对）→ `unknown`（派发边界已持久）→ `confirmed`（保存应答＋匹配回读）或 `observed`（只有目标值回读，来源未确认）；不匹配保留 conflict。reserved 退出后 blocked，已尝试意图不可重发。Observation、mapping、可能的真实完成回流与排期结果回执同事务保存；普通定时回读复用同一事务只读恢复 unknown。重要效果 awaiting_grant/字段所有权和补偿尚未接入，已有日期保守停写。见 [ADR036](../adr/036-safe-reminder-schedule-operations.md)。
+当前 W14 普通弹性排期采用上述契约的有界子集：schema35 独立操作 `reserved`（新鲜写前核对）→ `unknown`（派发边界已持久）→ `confirmed`（保存应答＋匹配回读）或 `observed`（只有目标值回读，来源未确认）；不匹配保留 conflict。reserved 退出后 blocked，已尝试意图不可重发。Observation、mapping、可能的真实完成回流与排期结果回执同事务保存；普通定时回读复用同一事务只读恢复 unknown。具体效果许可随后已按ADR037接入；字段所有权和补偿仍缺，已有日期不能推断为AI所有。见 [ADR036](../adr/036-safe-reminder-schedule-operations.md)。
 
 核对使用已知外部 ID、操作标记、scope 和预期字段；标题只作字段比较。零匹配可能是延迟、删除或标记变更；多匹配是歧义。若无法证明是否创建，保留 unknown 与可见原因，提供重新读取和具体处理入口；不让 AI 根据猜测自动重复创建。
 
@@ -125,3 +125,8 @@ Task 候选状态：planned、active、completed、cancelled、deferred；Opport
 | 唤醒且仍离线/无权限 | 条件状态 + 最后观测 | 保留等待，不显示最新完成 | AC-13/15/16 |
 
 此表是实现/故障验证契约，软件案例均未执行。合成探针的成功不替代真实录制、应用签名、权限、服务和并发验证。
+
+
+## W14 具体效果确认与撤回（2026-10-13）
+
+重要差异：只读prepare→用户确认不可变grant→复用reserved/unknown/confirmed/observed/conflict/blocked操作链。AI不可确认；所有异步前后及Native保存屏障重验grant。效果/版本/授权变化停止旧写；撤回独立记录且不可复活，重新规划须新intent。保存后撤回保留unknown，核对只读，不称为外部撤销。迁移grant/operation frozen，重连不恢复许可。本地期限编辑先保存desired，再由用户主动查看差异确认，不自动外写或弹窗。见[ADR037](../adr/037-effect-bound-schedule-confirmation.md)。

@@ -243,6 +243,8 @@ final class ControlCenter: ObservableObject {
     @Published var actionRecords: [ActionRecord] = []
     @Published var scheduleIntents: [ActionScheduleIntent] = []
     @Published var scheduleOperations: [ReminderScheduleOperation] = []
+    @Published var scheduleGrants: [ReminderScheduleGrant] = []
+    @Published var pendingScheduleEffect: ReminderScheduleEffect?
     @Published var schedulePreviews: [String: ReminderScheduleDecision] = [:]
     @Published var savingAction = false
     @Published var actionVersions: [ActionRevision] = []
@@ -373,6 +375,7 @@ final class ControlCenter: ObservableObject {
             actionRecords = try await store?.actions(includeHistory: true) ?? []
             scheduleIntents = try await store?.actionScheduleIntents() ?? []
             scheduleOperations = try await store?.reminderScheduleOperations() ?? []
+            scheduleGrants = try await store?.reminderScheduleGrants() ?? []
             reminderLinks = try await store?.reminderLinks() ?? []
             reminderAccess = try await store?.reminderAccess()
             schedulePreviews = [:]
@@ -886,16 +889,64 @@ final class ControlCenter: ObservableObject {
         } catch { status = error.localizedDescription }
         await refresh()
     }
-    func executeSchedule(_ intent: ActionScheduleIntent, link: ReminderLink) async {
+    func executeSchedule(_ intent: ActionScheduleIntent, link: ReminderLink, grantID: String? = nil) async {
         guard let store, let access = reminderAccess, access.enabled, !remindersBusy,
               access.calendarID == link.calendarID, let observationID = link.lastObservationID else { return }
         remindersBusy = true; defer { remindersBusy = false }
         do {
             _ = try await store.executeReminderSchedule(intentID: intent.id, expectedObservationID: observationID,
-                                                        expectedAccessVersion: access.version, using: reminders)
+                                                        expectedAccessVersion: access.version, grantID: grantID, using: reminders)
             status = "排期尝试已登记，请查看保存与回读状态"
         } catch { status = error.localizedDescription }
         await refresh()
+    }
+    func prepareScheduleEffect(_ intent: ActionScheduleIntent, link: ReminderLink) async {
+        guard let store, let access = reminderAccess, access.enabled, !remindersBusy,
+              access.calendarID == link.calendarID, let observation = link.lastObservationID else { return }
+        do {
+            pendingScheduleEffect = try await store.prepareReminderScheduleEffect(intentID: intent.id, expectedObservationID: observation, expectedAccessVersion: access.version)
+        } catch { status = error.localizedDescription }
+    }
+    func confirmScheduleEffect(_ effect: ReminderScheduleEffect, commandID: String) async -> Bool {
+        guard let store, !remindersBusy else { return false }
+        remindersBusy = true; defer { remindersBusy = false }
+        var approved = false
+        do {
+            let grant = try await store.confirmReminderSchedule(intentID: effect.intentID, expectedObservationID: effect.observationID,
+                                                                 expectedAccessVersion: effect.accessVersion, displayedEffectDigest: effect.digest,
+                                                                 actor: .user, commandID: commandID)
+            approved = true
+            _ = try await store.executeReminderSchedule(intentID: effect.intentID, expectedObservationID: effect.observationID,
+                                                        expectedAccessVersion: effect.accessVersion, grantID: grant, using: reminders,
+                                                        commandID: "schedule-effect:" + commandID)
+            status = "本次改期已确认并登记尝试，请查看保存与回读状态"
+        } catch { status = error.localizedDescription }
+        await refresh()
+        return approved
+    }
+    func revokeScheduleGrant(_ grant: ReminderScheduleGrant) async {
+        do {
+            _ = try await store?.revokeReminderScheduleGrant(grantID: grant.id, reason: "用户在控制中心撤回本次改期确认", actor: .user)
+            status = "本次确认已撤回；已派发的效果保留核对记录，不自动撤销"
+        } catch { status = error.localizedDescription }
+        await refresh()
+    }
+    func saveUserSchedule(_ action: ActionRecord, due: ReminderDueDate, scheduleVersion: Int,
+                          anchorTime: Date, timeZone: String, commandID: String) async -> Bool {
+        guard let store, !savingAction else { return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            _ = try due.writableComponents()
+            let link = reminderLinks.first { $0.actionID == action.id && $0.state == "linked" && $0.remoteMarkerValid == true && $0.remoteCompleted == false && $0.remoteDueDate != nil }
+            let access = reminderAccess.flatMap { $0.enabled && $0.calendarID == link?.calendarID ? $0 : nil }
+            _ = try await store.recordActionSchedule(actionID: action.id, expectedActionVersion: action.version, expectedScheduleVersion: scheduleVersion,
+                                                     proposal: .init(due: due, authority: .userCommitment,
+                                                                     rawExpression: "用户在控制中心设置期限选择：" + due.summary, anchorEventTime: anchorTime),
+                                                     actor: .user, anchorTimeZone: timeZone, baseObservationID: access == nil ? nil : link?.lastObservationID,
+                                                     expectedAccessVersion: access?.version, commandID: commandID)
+            status = "期限选择已本地保存；外部差异须查看具体效果后确认"
+            await refresh(); return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
     }
     func reconcileSchedule(_ operation: ReminderScheduleOperation) async {
         guard let store, let access = reminderAccess, access.enabled, !remindersBusy else { return }
@@ -1055,6 +1106,7 @@ struct CenterView: View {
     @State private var showActionHistory = false
     @State private var writingExpression = false
     @State private var feedbackAction: ActionRecord?
+    @State private var scheduleAction: ActionRecord?
     @State private var showingRestore = false
     @State private var searching = false
     @State private var showingQuietFeedback = false
@@ -1326,6 +1378,10 @@ struct CenterView: View {
                                         Text("\(action.kind == "task" ? "明确任务" : (action.kind == "opportunity" ? "探索意图" : "AI 建议")) · \(action.state == "completed" ? "已完成" : (action.state == "dismissed" ? "暂不跟进" : "待跟进")) · 第 \(action.version) 版").font(.caption)
                                         Text(action.validity == "frozen" ? "认知或授权已变化，暂停使用；历史保留" : "本地意图记录 · 外部同步状态见下方").font(.caption).foregroundStyle(.secondary)
                                         Text("认知依据：第 \(action.claimReviewVersion) 版").font(.caption).foregroundStyle(.secondary)
+                                        if action.kind == "task" {
+                                            Button("设置本地期限选择") { scheduleAction = action }
+                                                .disabled(model.savingAction || model.remindersBusy || action.validity != "current" || action.state != "open")
+                                        }
                                         if let schedule = model.scheduleIntents.first(where: { $0.actionID == action.id }) {
                                             Text((schedule.authority == .userCommitment ? "用户明确期限：" : "AI 弹性安排：") + schedule.due.summary).font(.caption)
                                             if let operation = model.scheduleOperations.first(where: { $0.intentID == schedule.id }) {
@@ -1347,6 +1403,19 @@ struct CenterView: View {
                                                     Button("执行普通弹性安排") { Task { await model.executeSchedule(schedule, link: target) } }
                                                         .disabled(model.remindersBusy || model.reminderAccess?.enabled != true || model.reminderCalendarID != target.calendarID)
                                                 }
+                                            }
+                                            if let grant = model.scheduleGrants.first(where: { $0.intentID == schedule.id }) {
+                                                Text(grant.revoked ? "本次改期确认已撤回" : (grant.validity == "frozen" ? "迁移确认仅作历史保留" : "已确认本次具体改期")).font(.caption).foregroundStyle(.secondary)
+                                                if grant.eligibleForExecution, let target = model.reminderLinks.first(where: { $0.actionID == action.id }) {
+                                                    Button("执行已确认改期") { Task { await model.executeSchedule(schedule, link: target, grantID: grant.id) } }.disabled(model.remindersBusy)
+                                                }
+                                                if !grant.revoked, grant.validity == "current" {
+                                                    Button("撤回本次改期确认") { Task { await model.revokeScheduleGrant(grant) } }
+                                                }
+                                            } else if model.schedulePreviews[schedule.id]?.disposition == .requiresConfirmation,
+                                                      let target = model.reminderLinks.first(where: { $0.actionID == action.id }),
+                                                      !model.scheduleOperations.contains(where: { $0.intentID == schedule.id }) {
+                                                Button("查看具体改期并确认") { Task { await model.prepareScheduleEffect(schedule, link: target) } }.disabled(model.remindersBusy)
                                             }
                                             DisclosureGroup("排期依据") {
                                                 Text(schedule.rawExpression).font(.caption)
@@ -1474,6 +1543,8 @@ struct CenterView: View {
         .sheet(isPresented: $showingEnglishPractice) { EnglishPracticeView(model: model) { showingEnglishPractice = false } }
         .sheet(isPresented: $showingRestore) { PackageRestoreView { showingRestore = false } }
         .sheet(item: $feedbackAction) { action in ActionFeedbackView(action: action, model: model) { feedbackAction = nil } }
+        .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
+        .sheet(item: $model.pendingScheduleEffect) { effect in ReminderScheduleConfirmationView(effect: effect, model: model) { model.pendingScheduleEffect = nil } }
         .sheet(isPresented: $writingExpression) { UserExpressionView(model: model) { writingExpression = false } }
         .sheet(item: $editing) { record in
             TranscriptCorrectionView(record: record, model: model) { editing = nil }

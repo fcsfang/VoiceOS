@@ -108,6 +108,215 @@ final class ReminderScheduleOperationTests: XCTestCase {
     private func execute(_ store: VoiceOSStore, _ port: OperationPort, _ intent: String, _ link: ReminderLink, command: String = "execute") async throws -> String {
         try await store.executeReminderSchedule(intentID: intent, expectedObservationID: link.lastObservationID!, expectedAccessVersion: 1, using: port, commandID: command)
     }
+    private func effect(_ store: VoiceOSStore, _ intent: String, _ link: ReminderLink) async throws -> ReminderScheduleEffect {
+        try await store.prepareReminderScheduleEffect(intentID: intent, expectedObservationID: link.lastObservationID!, expectedAccessVersion: 1)
+    }
+    private func approve(_ store: VoiceOSStore, _ effect: ReminderScheduleEffect, command: String = "approve") async throws -> String {
+        try await store.confirmReminderSchedule(intentID: effect.intentID, expectedObservationID: effect.observationID,
+                                               expectedAccessVersion: effect.accessVersion, displayedEffectDigest: effect.digest,
+                                               actor: .user, commandID: command)
+    }
+    private func executeApproved(_ store: VoiceOSStore, _ port: OperationPort, _ effect: ReminderScheduleEffect, _ grant: String) async throws -> String {
+        try await store.executeReminderSchedule(intentID: effect.intentID, expectedObservationID: effect.observationID,
+                                               expectedAccessVersion: effect.accessVersion, grantID: grant, using: port, commandID: "approved-execute")
+    }
+    func testConcreteUserApprovalIsRequiredAndDoesNotItselfWrite() async throws {
+        let (store, port, action, _, link) = try await fixture()
+        let plan = try await intent(store, action, link, authority: .userCommitment)
+        let displayed = try await effect(store, plan, link)
+        XCTAssertEqual(displayed.before.dueDate, .some(.none)); XCTAssertEqual(displayed.desired, desired)
+        do { _ = try await store.confirmReminderSchedule(intentID: plan, expectedObservationID: displayed.observationID,
+                                                         expectedAccessVersion: 1, displayedEffectDigest: displayed.digest, actor: .ai); XCTFail("AI approval") } catch {}
+        do { _ = try await execute(store, port, plan, link); XCTFail("no grant") } catch {}
+        let grant = try await approve(store, displayed)
+        let writesBefore = await port.writes; XCTAssertEqual(writesBefore, 0)
+        let receipt = try await approve(store, displayed); XCTAssertEqual(receipt, grant)
+        let op = try await executeApproved(store, port, displayed, grant)
+        let replay = try await executeApproved(store, port, displayed, grant); XCTAssertEqual(replay, op)
+        let records = try await store.reminderScheduleOperations(); XCTAssertEqual(records[0].state, .confirmed)
+        let writes = await port.writes; XCTAssertEqual(writes, 1)
+        let feedback = try await store.actionFeedback(actionID: action); XCTAssertTrue(feedback.isEmpty)
+        let valid = try await store.integrityCheck(); XCTAssertTrue(valid)
+    }
+    func testStaleDisplayedEffectDigestCannotBeApproved() async throws {
+        let (store, port, action, _, link) = try await fixture()
+        let plan = try await intent(store, action, link, authority: .userCommitment)
+        let displayed = try await effect(store, plan, link)
+        await port.edit(title: "人工更改标题")
+        try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: port, expectedAccessVersion: 1)
+        let latest = try await store.reminderLinks()[0]
+        do { _ = try await approve(store, displayed); XCTFail("stale observation") } catch {}
+        let newEffect = try await effect(store, plan, latest)
+        XCTAssertNotEqual(newEffect.digest, displayed.digest)
+        do { _ = try await store.confirmReminderSchedule(intentID: plan, expectedObservationID: newEffect.observationID,
+                                                         expectedAccessVersion: 1, displayedEffectDigest: displayed.digest, actor: .user); XCTFail("old digest new observation") } catch {}
+        let grants = try await store.reminderScheduleGrants(); XCTAssertTrue(grants.isEmpty)
+    }
+    func testGrantCannotAuthorizeAnotherIntentOrScope() async throws {
+        let (store, port, action, _, link) = try await fixture()
+        let first = try await intent(store, action, link, authority: .userCommitment)
+        let displayed = try await effect(store, first, link)
+        let grant = try await approve(store, displayed)
+        let new = try await intent(store, action, link, authority: .userCommitment, due: .dateOnly(localDate: "2026-10-18", timeZone: "Asia/Shanghai"), version: 1)
+        do { _ = try await store.executeReminderSchedule(intentID: new, expectedObservationID: displayed.observationID, expectedAccessVersion: 1, grantID: grant, using: port); XCTFail("grant reused") } catch {}
+        _ = try await store.setReminderAccess(calendarID: "another", title: "another", enabled: true, expectedVersion: 1)
+        do { _ = try await executeApproved(store, port, displayed, grant); XCTFail("scope changed") } catch {}
+        let writes = await port.writes; XCTAssertEqual(writes, 0)
+    }
+    func testExplicitApprovalCanRemoveManualDeadlineWithoutChangingTitle() async throws {
+        let (store, port, action, _, initial) = try await fixture()
+        await port.edit(due: desired, title: "用户自己的标题")
+        try await store.readReminder(linkID: initial.id, calendarID: initial.calendarID, using: port, expectedAccessVersion: 1)
+        let link = try await store.reminderLinks()[0]
+        let plan = try await intent(store, action, link, due: ReminderDueDate.none)
+        let displayed = try await effect(store, plan, link)
+        let grant = try await approve(store, displayed)
+        _ = try await executeApproved(store, port, displayed, grant)
+        let remote = await port.item; XCTAssertEqual(remote?.dueDate, .some(.none)); XCTAssertEqual(remote?.title, "用户自己的标题")
+        let valid = try await store.integrityCheck(); XCTAssertTrue(valid)
+    }
+    func testGrantRevocationCannotBeUndoneByCommandReplayOrDifferentCommand() async throws {
+        let (store, port, action, _, link) = try await fixture()
+        let plan = try await intent(store, action, link, authority: .userCommitment)
+        let displayed = try await effect(store, plan, link), grant = try await approve(store, displayed)
+        let revoke = try await store.revokeReminderScheduleGrant(grantID: grant, reason: "改变主意", actor: .user, commandID: "revoke")
+        let repeated = try await store.revokeReminderScheduleGrant(grantID: grant, reason: "改变主意", actor: .user, commandID: "revoke")
+        XCTAssertEqual(repeated, revoke)
+        let replay = try await approve(store, displayed); XCTAssertEqual(replay, grant)
+        do { _ = try await approve(store, displayed, command: "new-approval"); XCTFail("revoked reapproval") } catch {}
+        do { _ = try await executeApproved(store, port, displayed, grant); XCTFail("revoked effect") } catch {}
+        let grants = try await store.reminderScheduleGrants(); XCTAssertTrue(grants[0].revoked); XCTAssertFalse(grants[0].eligibleForExecution)
+        let updates = await port.updates; XCTAssertEqual(updates, 0)
+    }
+    func testAwaitedGrantRevocationAndSourceFreezeStopBeforeExternalSave() async throws {
+        for mode in ["preflight","connector","source"] {
+            let (store, port, action, source, link) = try await fixture()
+            let plan = try await intent(store, action, link, authority: .userCommitment)
+            let displayed = try await effect(store, plan, link), grant = try await approve(store, displayed)
+            let hook: @Sendable () async throws -> Void = {
+                if mode == "source" { _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: 2, localOnly: true) }
+                else { _ = try await store.revokeReminderScheduleGrant(grantID: grant, reason: "写前撤回", actor: .user) }
+            }
+            if mode == "preflight" { await port.configure(find: hook) }
+            else { await port.configure(update: hook) }
+            do { _ = try await executeApproved(store, port, displayed, grant); XCTFail("invalidated") } catch {}
+            let writes = await port.writes; XCTAssertEqual(writes, 0)
+            let op = try await store.reminderScheduleOperations()[0]
+            XCTAssertEqual(op.state, mode == "preflight" ? .blocked : .unknown)
+        }
+    }
+    func testGrantRevokedAfterSaveOnlyRecoversObservedEffect() async throws {
+        let (store, port, action, _, link) = try await fixture()
+        let plan = try await intent(store, action, link, authority: .userCommitment)
+        let displayed = try await effect(store, plan, link), grant = try await approve(store, displayed)
+        await port.configure(saved: { _ = try await store.revokeReminderScheduleGrant(grantID: grant, reason: "派发后撤回", actor: .user) })
+        do { _ = try await executeApproved(store, port, displayed, grant); XCTFail("revoked after save") } catch {}
+        let unknown = try await store.reminderScheduleOperations()[0]; XCTAssertEqual(unknown.state, .unknown)
+        try await store.reconcileReminderSchedule(operationID: unknown.id, expectedAccessVersion: 1, using: port)
+        let recovered = try await store.reminderScheduleOperations()[0]; XCTAssertEqual(recovered.state, .confirmed)
+        let writes = await port.writes; XCTAssertEqual(writes, 1)
+        let valid = try await store.integrityCheck(); XCTAssertTrue(valid)
+    }
+    func testFreshExternalDriftInvalidatesApprovedEffectWithoutWriting() async throws {
+        let (store, port, action, _, link) = try await fixture()
+        let plan = try await intent(store, action, link, authority: .userCommitment)
+        let displayed = try await effect(store, plan, link), grant = try await approve(store, displayed)
+        let manual = ReminderDueDate.dateOnly(localDate: "2026-10-19", timeZone: "Asia/Shanghai")
+        await port.edit(due: manual)
+        _ = try await executeApproved(store, port, displayed, grant)
+        let writes = await port.writes; XCTAssertEqual(writes, 0)
+        let ops = try await store.reminderScheduleOperations(); XCTAssertEqual(ops[0].state, .conflict)
+        let remote = await port.item; XCTAssertEqual(remote?.dueDate, manual)
+    }
+    func testGrantAndRevocationPersistenceWindowsAreAtomicAndReplayable() async throws {
+        for point in [SaveCheckpoint.scheduleGrantUncommitted, .scheduleGrantCommitted, .scheduleGrantRevocationUncommitted, .scheduleGrantRevocationCommitted] {
+            let fault = OperationFault(point)
+            let (store, _, action, _, link) = try await fixture { try fault.hit($0) }
+            let plan = try await intent(store, action, link, authority: .userCommitment)
+            let displayed = try await effect(store, plan, link)
+            if point == .scheduleGrantUncommitted || point == .scheduleGrantCommitted {
+                do { _ = try await approve(store, displayed); XCTFail("window") } catch {}
+                let rows = try await store.reminderScheduleGrants(); XCTAssertEqual(rows.count, point == .scheduleGrantCommitted ? 1 : 0)
+                _ = try await approve(store, displayed)
+            } else {
+                let grant = try await approve(store, displayed)
+                do { _ = try await store.revokeReminderScheduleGrant(grantID: grant, reason: "撤回", actor: .user, commandID: "revoke"); XCTFail("revoke window") } catch {}
+                let rows = try await store.reminderScheduleGrants(); XCTAssertEqual(rows[0].revoked, point == .scheduleGrantRevocationCommitted)
+                _ = try await store.revokeReminderScheduleGrant(grantID: grant, reason: "撤回", actor: .user, commandID: "revoke")
+            }
+            let valid = try await store.integrityCheck(); XCTAssertTrue(valid)
+        }
+    }
+    func testGrantPackagePreservesRevokedReceiptAndNeverRestoresPermission() async throws {
+        let (store, port, action, _, link) = try await fixture()
+        let plan = try await intent(store, action, link, authority: .userCommitment)
+        let displayed = try await effect(store, plan, link), grant = try await approve(store, displayed)
+        _ = try await executeApproved(store, port, displayed, grant)
+        _ = try await store.revokeReminderScheduleGrant(grantID: grant, reason: "停止后续使用", actor: .user)
+        let package = base.appendingPathComponent("grant-package")
+        try await store.exportPackage(to: package, includeMedia: true)
+        XCTAssertEqual(try VoiceOSStore.packageSummary(at: package).version, 36)
+        let root = base.appendingPathComponent("grant-restored")
+        try await VoiceOSStore.restorePackage(from: package, to: root, inspector: OperationInspector())
+        let restored = try VoiceOSStore(root: root, inspector: OperationInspector()); try await restored.recover()
+        let grants = try await restored.reminderScheduleGrants(); XCTAssertEqual(grants[0].id, grant)
+        XCTAssertTrue(grants[0].revoked); XCTAssertEqual(grants[0].validity, "frozen"); XCTAssertFalse(grants[0].eligibleForExecution)
+        let ops = try await restored.reminderScheduleOperations(); XCTAssertEqual(ops[0].state, .confirmed); XCTAssertEqual(ops[0].validity, "frozen")
+        let access = try await restored.reminderAccess(); XCTAssertNil(access)
+        let valid = try await restored.integrityCheck(); XCTAssertTrue(valid)
+    }
+    func testUnusedGrantRestoresFrozenEvenWithNewConnectionPermission() async throws {
+        let (store, port, action, _, link) = try await fixture()
+        let plan = try await intent(store, action, link, authority: .userCommitment)
+        let displayed = try await effect(store, plan, link), grant = try await approve(store, displayed)
+        let package = base.appendingPathComponent("unused-grant")
+        try await store.exportPackage(to: package, includeMedia: true)
+        XCTAssertEqual(try VoiceOSStore.packageSummary(at: package).version, 36)
+        let root = base.appendingPathComponent("unused-restored")
+        try await VoiceOSStore.restorePackage(from: package, to: root, inspector: OperationInspector())
+        let restored = try VoiceOSStore(root: root, inspector: OperationInspector()); try await restored.recover()
+        _ = try await restored.setReminderAccess(calendarID: "fixture", title: "fixture", enabled: true, expectedVersion: 0)
+        do { _ = try await executeApproved(restored, port, displayed, grant); XCTFail("frozen grant") } catch {}
+        let writes = await port.writes; XCTAssertEqual(writes, 0)
+    }
+    func testRehashedImportantOperationCannotStripItsGrant() async throws {
+        let (store, port, action, _, link) = try await fixture()
+        let plan = try await intent(store, action, link, authority: .userCommitment)
+        let displayed = try await effect(store, plan, link), grant = try await approve(store, displayed)
+        _ = try await executeApproved(store, port, displayed, grant)
+        let package = base.appendingPathComponent("stripped-grant")
+        try await store.exportPackage(to: package, includeMedia: true)
+        let file = package.appendingPathComponent("reminder_schedule_operations.jsonl")
+        var row = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String:Any]
+        row.removeValue(forKey: "grant_id")
+        row["input_fingerprint"] = try VoiceOSStore.scheduleOperationHash(intentID: plan, observationID: displayed.observationID, accessVersion: 1, grantID: nil)
+        var data = try JSONSerialization.data(withJSONObject: row, options: [.sortedKeys]); data.append(10); try data.write(to: file)
+        let manifestFile = package.appendingPathComponent("manifest.json")
+        var manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestFile)) as! [String:Any]
+        var files = manifest["files"] as! [[String:Any]]
+        let index = try XCTUnwrap(files.firstIndex { $0["path"] as? String == file.lastPathComponent })
+        files[index]["bytes"] = data.count; files[index]["sha256"] = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        manifest["files"] = files; try JSONSerialization.data(withJSONObject: manifest).write(to: manifestFile)
+        let root = base.appendingPathComponent("stripped-restored")
+        do { try await VoiceOSStore.restorePackage(from: package, to: root, inspector: OperationInspector()); XCTFail("important operation without grant") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("确认")) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
+    }
+    func testSchema35UpgradePreservesExistingOperationHistory() async throws {
+        let (store, port, action, _, link) = try await fixture()
+        let plan = try await intent(store, action, link)
+        _ = try await execute(store, port, plan, link)
+        let root = await store.root, db = try Database(root.appendingPathComponent("voiceos.sqlite"))
+        try db.execute("ALTER TABLE reminder_schedule_operations DROP COLUMN grant_id")
+        try db.execute("DROP TABLE reminder_schedule_grant_revocations"); try db.execute("DROP TABLE reminder_schedule_grants")
+        let tables = try db.query("SELECT name FROM sqlite_master WHERE type='table'").compactMap { $0["name"] }
+        let before = try Dictionary(uniqueKeysWithValues: tables.map { ($0, try db.query("SELECT * FROM \($0) ORDER BY id")) })
+        try db.execute("PRAGMA user_version=35")
+        let upgraded = try Database(root.appendingPathComponent("voiceos.sqlite"))
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "36")
+        for table in tables { XCTAssertEqual(try upgraded.query("SELECT * FROM \(table) ORDER BY id"), before[table]) }
+        let valid = try await store.integrityCheck(); XCTAssertTrue(valid)
+    }
     func testSuccessfulWritePreservesManualTitleAndHasIndependentHistory() async throws {
         let (store, port, actionID, _, initial) = try await fixture()
         await port.edit(title: "用户改过的标题")
@@ -395,9 +604,9 @@ final class ReminderScheduleOperationTests: XCTestCase {
         let db = try Database(root.appendingPathComponent("voiceos.sqlite"))
         let tables = try db.query("SELECT name FROM sqlite_master WHERE type='table' AND name!='reminder_schedule_operations'").compactMap { $0["name"] }
         let before = try Dictionary(uniqueKeysWithValues: tables.map { ($0, try db.query("SELECT * FROM \($0) ORDER BY id")) })
-        try db.execute("DROP TABLE reminder_schedule_operations"); try db.execute("PRAGMA user_version=34")
+        try db.execute("DROP TABLE reminder_schedule_operations"); try db.execute("DROP TABLE reminder_schedule_grant_revocations"); try db.execute("DROP TABLE reminder_schedule_grants"); try db.execute("PRAGMA user_version=34")
         let upgraded = try Database(root.appendingPathComponent("voiceos.sqlite"))
-        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "35")
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "36")
         for table in tables { XCTAssertEqual(try upgraded.query("SELECT * FROM \(table) ORDER BY id"), before[table]) }
     }
 }

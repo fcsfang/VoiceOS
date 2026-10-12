@@ -42,3 +42,6 @@ schema35 新增 `reminder_schedule_operations`。每个 intent 至多一个操�
 ## 接续
 
 继续 W14 的具体效果确认与字段所有权，再推进 W16 的依赖冻结、外部补偿计划和重要效果边界。不扩展 M4，不引入“认知路线”产品实体，不代用户生成真实完成结果。M3/AC-15/自然案例 A 均仍 partial。
+
+
+后续：重要期限的一次具体效果许可、撤回与本地编辑已由[ADR037](037-effect-bound-schedule-confirmation.md)接续；本ADR的schema35/普通执行边界保留为原时点记录。字段所有权仍待推进。
