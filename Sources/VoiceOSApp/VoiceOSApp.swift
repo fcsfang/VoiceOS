@@ -709,12 +709,17 @@ final class ControlCenter: ObservableObject {
     func connectReminders() async {
         guard !remindersBusy else { return }
         remindersBusy = true; defer { remindersBusy = false }
+        reminderSyncStatus = "正在核对系统提醒事项权限"
         do {
             reminderCalendars = try await reminders.authorize()
             proposedReminderCalendarID = reminderCalendarID
             choosingReminderCalendar = true
             status = "请选择明确授权的清单 · 本次尚未更改连接"
-        } catch { status = error.localizedDescription }
+            reminderSyncStatus = "系统权限可用 · 清单授权范围保持原设置"
+        } catch {
+            status = error.localizedDescription
+            reminderSyncStatus = "系统权限核对未完成 · 保留既有连接"
+        }
     }
     func saveReminderConnection() async {
         guard let store, let calendar = reminderCalendars.first(where: { $0.id == proposedReminderCalendarID }) else { return }
