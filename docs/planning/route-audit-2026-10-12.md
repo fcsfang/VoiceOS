@@ -21,7 +21,7 @@
 
 - 最新工作区干净；最近提交把长文字默认传输切换为 Responses SSE `stream:true`，客户端等待窗口为 600 秒。
 - 非流式长请求约 300 秒收到 HTTP 504；同类流式提取与聚合可收到完整结束事件。这解决了传输方式的已知边界，不等于上游服务、费用或长文本结构化质量已经生产就绪。
-- 两段个人视频的 Track 2 已作为用户本人音轨；原始音频保持本地，不上传。Qwen3-ASR 1.7B 8bit 作为本地转写方案并已持久化选择。
+- 两段个人视频的 Track 2 已作为用户本人音轨；原始音频保持本地，不上传。第一段使用 Qwen3-ASR 1.7B 8bit，第二段沿用已保存的 Apple SpeechAnalyzer 逐字稿；正式素材的结构化认知与四项提醒事项完成回读见[正式素材流程](../research/evidence/full-materials-processing-2026-10-12.json)。
 - 最近 `swift test`：454 项通过，0 failures。该结果验证代码契约和回归屏障，不替代真实自然案例验收。
 - 已知的 unknown/rejected 批次保持历史状态，不自动重发；新的真实验证必须使用新的版本化批次并保留旧证据。两段正式素材的新成功批次与认知提交见[正式素材流程](../research/evidence/full-materials-processing-2026-10-12.json)。
 

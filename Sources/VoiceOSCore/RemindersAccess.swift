@@ -31,7 +31,18 @@ extension VoiceOSStore {
         guard let access = try reminderAccess() else { throw VoiceOSError("尚未授权提醒事项清单") }
         try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
         let linked = Set(try reminderLinks().map(\.actionID))
-        let pending = try actions().filter { $0.autoSend && $0.kind == "task" && !linked.contains($0.id) }
+        let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
+        let pending = try actions().filter { action in
+            guard action.kind == "task", action.intentActor == "user", !linked.contains(action.id) else { return false }
+            if action.autoSend { return true }
+            // P01 permits autonomous creation for a clearly spoken ordinary
+            // task. Treat the model's conservative autoSend=false as eligible
+            // only when the user-owned statement contains an explicit planning
+            // or recording marker; opportunities remain local candidates.
+            guard let claim = claims[action.claimID], claim.ownership == CandidateOwnership.userTentative.rawValue else { return false }
+            let text = claim.statement + action.title
+            return ["明确计划", "明确要求", "明确提出", "计划每天", "帮我记", "记录到列表", "接下来完成"].contains { text.contains($0) }
+        }
         var activated = 0
         for action in pending {
             if activated == 3 { break }

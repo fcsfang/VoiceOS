@@ -17,7 +17,13 @@
       "extraction": {"segments": 2, "states": ["completed", "completed"]},
       "aggregation": {"state": "completed", "input_tokens": 7909, "output_tokens": 10023},
       "cognition": {"saved": true, "claim_count": 27, "action_count": 9},
-      "reminder_sync": {"eligible_auto_send": 0, "created": 0},
+      "reminder_sync": {
+        "eligible_auto_send": 2,
+        "created": 2,
+        "completion_observed": true,
+        "external_task_writes": 2,
+        "feedback_sources": ["F3DFDD74-9690-4C18-AA4A-DFE0450B4991", "35A33702-95A3-44C6-AC5E-F98E83066E11"]
+      },
       "integrity": true
     },
     {
@@ -31,7 +37,13 @@
       "extraction": {"segments": 2, "states": ["completed", "completed"]},
       "aggregation": {"state": "completed", "input_tokens": 8773, "output_tokens": 8204},
       "cognition": {"saved": true, "claim_count": 19, "action_count": 3},
-      "reminder_sync": {"eligible_auto_send": 0, "created": 0},
+      "reminder_sync": {
+        "eligible_auto_send": 2,
+        "created": 2,
+        "completion_observed": true,
+        "external_task_writes": 2,
+        "feedback_sources": ["A67B1DB3-611D-42B6-85B3-D40CCCCBC22F", "3462808B-3CBE-4563-AC7F-407627360E5F"]
+      },
       "integrity": true
     }
   ],
@@ -39,7 +51,7 @@
     "旧批次的 blocked/rejected/unknown 回执全部保留，未自动重发。",
     "长文本流程已完成结构化认知提交；自然语义质量仍需人工抽样审阅。",
     "第二段逐字稿 backend 为旧 Apple SpeechAnalyzer，尚未重新用 Qwen 生成；音频未上传。",
-    "外部提醒事项写入未发生，因为当前两份正式素材的任务均由模型标记为 autoSend=false；模糊 opportunity 保留为本地候选。",
+    "明确普通任务按 P01 本地规则升级为可自动发送：两份素材各创建并完成回读 2 项；模糊 opportunity 保留为本地候选。",
     "M3 故障变体、离线/睡眠与冲突补偿仍按路线图单独验收。"
   ]
 }

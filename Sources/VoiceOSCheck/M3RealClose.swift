@@ -23,31 +23,32 @@ func runM3RealClose(_ args: [String]) async throws {
     let port = await MainActor.run { NativeReminders() }
     let currentAccess = try await store.reminderAccess()
     let access = try await store.setReminderAccess(calendarID: args[2], title: "VoiceOS M3 真实闭环", enabled: true, expectedVersion: currentAccess?.version ?? 0)
+    let beforeLinks = Set(try await store.reminderLinks().map(\.id))
     try await store.activateExtractedTasks(expectedAccessVersion: access.version, using: port)
-    guard let link = try await store.reminderLinks().last,
-          let action = try await store.actions(includeHistory: true).first(where: { $0.id == link.actionID }) else {
+    let createdLinks = try await store.reminderLinks().filter { !beforeLinks.contains($0.id) }
+    guard !createdLinks.isEmpty else {
         throw VoiceOSError("真实认知没有产生可自主发送的普通任务")
     }
-    try await store.readReminder(linkID: link.id, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
-    guard let linked = try await store.reminderLinks().first(where: { $0.id == link.id }), let externalID = linked.externalID else {
-        throw VoiceOSError("提醒事项创建后没有得到唯一外部身份")
+    var completed: [[String: Any]] = []
+    for link in createdLinks {
+        try await store.readReminder(linkID: link.id, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
+        guard let linked = try await store.reminderLinks().first(where: { $0.id == link.id }), let externalID = linked.externalID else {
+            throw VoiceOSError("提醒事项创建后没有得到唯一外部身份")
+        }
+        try await port.markCompleted(calendarID: access.calendarID, externalID: externalID)
+        try await store.readReminder(linkID: link.id, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
+        guard let action = try await store.actions(includeHistory: true).first(where: { $0.id == link.actionID }) else {
+            throw VoiceOSError("完成回读后行动历史缺失")
+        }
+        let feedbackText = "我已经完成这项任务：\(action.title)。这是对原任务的结果反馈，不代表原认知已被验证。"
+        let feedbackSource = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: .outcome, text: feedbackText, commandID: "m3-real-outcome-" + action.id)
+        completed.append(["action_id": action.id, "action_title": action.title, "link_id": link.id, "external_id_observed": externalID, "feedback_source_id": feedbackSource, "reminder_state": (try await store.reminderLinks()).first(where: { $0.id == link.id })?.state ?? "missing"])
     }
-    try await port.markCompleted(calendarID: access.calendarID, externalID: externalID)
-    try await store.readReminder(linkID: link.id, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
-    guard let completedAction = try await store.actions(includeHistory: true).first(where: { $0.id == action.id }) else {
-        throw VoiceOSError("完成回读后行动历史缺失")
-    }
-    let feedbackText = "我已经完成这项任务：\(completedAction.title)。这是对原任务的结果反馈，不代表原认知已被验证。"
-    let feedbackSource = try await store.recordActionFeedback(actionID: completedAction.id, expectedVersion: completedAction.version, kind: .outcome, text: feedbackText, commandID: "m3-real-outcome-" + action.id)
     let output: [String: Any] = [
         "integrity": try await store.integrityCheck(),
-        "source_id": link.actionID,
-        "action_id": action.id,
-        "action_title": completedAction.title,
-        "reminder_state": (try await store.reminderLinks()).first(where: { $0.id == link.id })?.state ?? "missing",
-        "external_id_observed": externalID,
-        "feedback_source_id": feedbackSource,
-        "external_task_writes": 1,
+        "source_id": createdLinks.first!.actionID,
+        "completed_tasks": completed,
+        "external_task_writes": createdLinks.count,
         "completion_observed": true,
         "audio_uploaded": false,
         "full_natural_case_A_complete": false
