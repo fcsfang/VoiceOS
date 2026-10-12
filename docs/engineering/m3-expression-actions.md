@@ -18,7 +18,7 @@
 
 ModelPort 保持一次请求、无隐式重试。Responses 提示/结构版本为 expression-actions-v2/claims-actions-v2，复用原模型与配置；不增加独立 Agent 或第二次行动模型调用。每个提案可带 nullable action：title、kind、quote、autoSend；模型无清单字段或外部工具。参考 OpenAI 的[结构化输出文档](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses)，采用严格 schema；本地仍验证字段、布尔类型、出处版本和原文连续引用。结构合法不能保证语义真实。
 
-Core 仅允许用户身份来源产生 user_tentative；task/opportunity 要有这一归属，AI 行动仅 ai_suggestion。原话必须在引用片段内，单次最多 32 条认知、三项自动任务。认知 action_json、行动、调用结果摘要在一个无 await 事务提交；失效/权限更改/认知审阅仍原子冻结派生行动。动作 actor=user 表示原话行动来源，actor=ai 表示 AI 建议；UI 不把它们全部叫“明确本地操作”。
+Core 仅允许用户身份来源产生 user_tentative；task/opportunity 要有这一归属，AI 行动仅 ai_suggestion。原话必须在引用片段内，单次最多 32 条结构化认知；普通明确任务按用户授权逐项处理，不以固定数量截断，也不把不同交付物合并。认知 action_json、行动、调用结果摘要在一个无 await 事务提交；失效/权限更改/认知审阅仍原子冻结派生行动。动作 actor=user 表示原话行动来源，actor=ai 表示 AI 建议；UI 不把它们全部叫“明确本地操作”。
 
 后台首先筛选 auto_send=1 的当前普通任务，在本机授权与来源外发检查后每轮有限激活，再回读已有映射。保留一次外部尝试、未知不重建的规则。源更正后的新结果不自动绕过旧意图，当前是保守的来源级保护，尚不是完善语义意图合并算法。
 
