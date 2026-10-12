@@ -247,7 +247,7 @@ final class ControlCenter: ObservableObject {
         do {
             let intent: RecordingIntent
             if let configs = processingConfigurations {
-                intent = try await store.beginProcessingDictation(cognition: configs.0, association: configs.1)
+                intent = try await store.beginProcessingDictation(cognition: configs.0, association: configs.1, segmentExtraction:segmentExtractionModel?.configuration,segmentAggregation:segmentAggregationModel?.configuration)
             } else { intent = try await store.beginDictation() }
             dictationSource = intent.sourceID; dictationInterrupted = false
             try dictation.start(at:intent.stagingURL,maximumDuration:duration) { [weak self] success in Task { await self?.finishDictation(success:success) } }
@@ -352,6 +352,9 @@ final class ControlCenter: ObservableObject {
                 var associations: [String:String]=[:]
                 for batch in segmentedBatches {
                     if let attempt=try await store.committedSegmentedAssociationAttempt(batchID:batch.id) { associations[batch.id]=attempt.validity == "current" ? attempt.state : "frozen" }
+                }
+                for request in recordingRequests {
+                    if let batchID=request.segmentedBatchID,let state=request.segmentedAssociationState,associations[batchID] == nil { associations[batchID]=state }
                 }
                 segmentedAssociationStates=associations
             }
@@ -582,10 +585,21 @@ final class ControlCenter: ObservableObject {
         do { try await store.processTranscriptions(using: NativeSpeechPort()) }
         catch { status = error.localizedDescription }
         if let cognition = textModel, let association = associationModel {
-            do { try await store.reconcileRecordingProcessingRequests(cognition: cognition.configuration, association: association.configuration) }
+            do { try await store.reconcileRecordingProcessingRequests(cognition: cognition.configuration, association: association.configuration,segmentExtraction:segmentExtractionModel?.configuration,segmentAggregation:segmentAggregationModel?.configuration) }
             catch { status = error.localizedDescription }
         }
         await processExpressionQueue(store)
+        if let extraction=segmentExtractionModel,let aggregation=segmentAggregationModel {
+            do {
+                let requests=try await store.recordingProcessingRequests().filter { $0.state == "enqueued" && $0.segmentedBatchID != nil && $0.segmentedAssociationState == nil }
+                for request in requests {
+                    guard let batchID=request.segmentedBatchID,try await store.segmentedProcessingBatch(id:batchID).state == .queued else { continue }
+                    await refresh() // Publish the durable batch before the first model await.
+                    try await store.processRecordingSegmentPlan(requestID:request.id,extraction:extraction,aggregation:aggregation,retrieval:semanticRetrieval ?? retrieval,semantic:semanticRetrieval != nil,association:associationModel)
+                    requestReminderRefresh()
+                }
+            } catch { status=error.localizedDescription }
+        }
         await refresh()
     }
     private func processExpressionQueue(_ store: VoiceOSStore) async {
@@ -929,13 +943,30 @@ struct CenterView: View {
     @State private var showingEnglishPractice = false
     @Environment(\.openWindow) private var openWindow
     private var activeProcessingCount: Int {
-        model.processingIntents.filter { [.queued, .running].contains($0.state) }.count + model.recordingRequests.filter { $0.state == "waiting" }.count + model.segmentedBatches.filter { $0.state == .queued && model.segmentedCognitiveCounts[$0.id] == nil }.count
+        model.processingIntents.filter { [.queued, .running].contains($0.state) }.count + model.recordingRequests.filter { $0.state == "waiting" }.count + model.segmentedBatches.filter { canStopSegmented($0) }.count
+    }
+    private func canStopSegmented(_ batch: SegmentedProcessingBatch) -> Bool {
+        guard batch.state == .queued else { return false }
+        return model.segmentedCognitiveCounts[batch.id] == nil || model.segmentedAssociationStates[batch.id] == nil || model.segmentedAssociationStates[batch.id] == "reserved" || model.segmentedAssociationStates[batch.id] == "inFlight"
     }
     private func segmentedState(_ batch: SegmentedProcessingBatch) -> String {
         if let count=model.segmentedCognitiveCounts[batch.id] {
             let association=model.segmentedAssociationStates[batch.id]
-            let label=association == "completed" ? "历史关联已保存" : association == "unknown" ? "关联结果未知" : association == "frozen" ? "历史关联冻结" : "关联待核对"
-            return "认知记录已保存（\(count)条） · \(label) · \(batch.state == .frozen ? "迁移冻结" : batch.state == .blocked ? "来源已变化" : "保留原处理身份")"
+            let label: String
+            switch association {
+            case "completed": label="历史关联已保存"
+            case "unknown": label="关联结果未知，不自动重发"
+            case "frozen": label="历史关联冻结"
+            case "noCandidates": label="没有可关联的授权历史"
+            case "budgetExceeded": label="历史关联超过处理预算，未发送"
+            case "paused": label="历史关联已暂停"
+            case "localOnly": label="历史关联仅本机"
+            case "modelUnavailable": label="历史关联模型未配置"
+            case "cancelled": label="已停止后续关联"
+            case "reserved", "inFlight": label="历史关联处理中"
+            default: label="关联待核对"
+            }
+            return "认知记录已保存（\(count)条） · \(label) · \(batch.state == .frozen ? "迁移冻结" : batch.state == .blocked ? "来源已变化" : batch.state == .cancelled ? "已停止后续处理" : "保留原处理身份")"
         }
         switch batch.state {
         case .queued: return model.understandingSource == batch.scope.plan.source.sourceID ? "正在分段处理" : "等待继续分段处理"
@@ -1036,7 +1067,7 @@ struct CenterView: View {
                             ForEach(model.segmentedBatches.filter { $0.scope.plan.source.sourceID == record.id }) { batch in
                                 HStack {
                                     Text("\(segmentedState(batch)) · \(batch.scope.plan.segments.count) 段").font(.caption)
-                                    if batch.state == .queued && model.segmentedCognitiveCounts[batch.id] == nil { Button("停止后续处理") { model.cancelSegmented(batch.id) }.font(.caption) }
+                                    if canStopSegmented(batch) { Button("停止后续处理") { model.cancelSegmented(batch.id) }.font(.caption) }
                                 }
                                 if let error=batch.error { Text(error).font(.caption).foregroundStyle(.secondary) }
                             }
@@ -1222,7 +1253,7 @@ struct CenterView: View {
                     ForEach(model.segmentedBatches) { batch in
                         Text("\(segmentedState(batch)) · \(model.records.first(where: { $0.id == batch.scope.plan.source.sourceID })?.name ?? batch.scope.plan.source.sourceID)")
                         if let error=batch.error { Text(error) }
-                        if batch.state == .queued && model.segmentedCognitiveCounts[batch.id] == nil {
+                        if canStopSegmented(batch) {
                             Button("停止这次分段处理") { model.cancelSegmented(batch.id) }
                         }
                         Divider()

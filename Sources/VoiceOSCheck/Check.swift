@@ -45,6 +45,7 @@ struct Check {
             if args[0] == "discussion-question-fixture" { try await runDiscussionQuestionFixture(store); return }
             if args[0] == "source-continuation-fixture" { try await runSourceContinuationFixture(store); return }
             if ["record-request-fixture", "record-request-resume-fixture"].contains(args[0]) { try await runRecordingRequestFixture(store, seed:args[0] == "record-request-fixture"); return }
+            if args[0] == "segment-cognition-personal-fixture" { try await runPersonalSegmentCognition(store,args:args); return }
             if ["segment-extraction-fixture", "segment-extraction-personal-fixture", "segment-extraction-read"].contains(args[0]) {
                 try await runSegmentExtractionFixture(store,args:args); return
             }
@@ -398,5 +399,25 @@ private func runSegmentExtractionFixture(_ store: VoiceOSStore,args: [String]) a
             "attempts":receipts.map { ["id":$0.id,"state":$0.state.rawValue,"validity":$0.validity,"sequence":$0.producerSequence,"segment_id":$0.request.segment.id] }])
     }
     let output:[String:Any] = ["integrity":try await store.integrityCheck(),"batches":summaries,"old_model_count":try await store.modelAttempts().count,"action_count":try await store.actions().count,"claim_count":try await store.candidateClaims().count]
+    print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self))
+}
+
+private struct EmptyPersonalAggregation: SegmentAggregationPort {
+    let configuration: ModelConfiguration
+    func aggregate(_ request: SegmentAggregationRequest) async throws -> SegmentAggregationResponse {
+        guard request.ledger.evidence.isEmpty else { throw VoiceOSError("empty personal fixture cannot judge actual proposals") }
+        return .init(review:.init(batchID:request.batchID,ledgerDigest:request.ledger.contentDigest,reviewedEvidenceIDs:[],actionDecisions:[]),finalClaims:[])
+    }
+}
+private func runPersonalSegmentCognition(_ store: VoiceOSStore,args: [String]) async throws {
+    guard args.count == 3 else { throw VoiceOSError("personal cognition fixture requires explicit batch ID") }
+    let batch=try await store.segmentedProcessingBatch(id:args[2]),e=batch.scope.extraction,a=batch.scope.aggregation
+    guard [e,a].allSatisfy({ $0.destination == .local && $0.provider == "local_batch_inspection" && $0.model == "no-dispatch" }) else { throw VoiceOSError("fixture must keep explicit non-network identities") }
+    let config: (ProcessingModelIdentity)->ModelConfiguration = { .init(provider:$0.provider,model:$0.model,promptVersion:$0.promptVersion,schemaVersion:$0.schemaVersion,destination:$0.destination) }
+    let result=try await store.processSegmentedCognition(batchID:batch.id,extraction:LocalSegmentFixture(configuration:config(e),empty:true),aggregation:EmptyPersonalAggregation(configuration:config(a)))
+    let attempt=try await store.segmentAggregationAttempt(batchID:batch.id)
+    let output: [String:Any]=["batch_id":batch.id,"parent_state":result.state.rawValue,"cognition_saved":result.claimIDs != nil,"claim_count":result.claimIDs?.count ?? 0,
+        "aggregation_id":attempt?.id ?? "","aggregation_state":attempt?.state.rawValue ?? "","aggregation_validity":attempt?.validity ?? "",
+        "action_count":try await store.actions().count,"integrity":try await store.integrityCheck(),"semantic_quality_tested":false,"network_calls":0]
     print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self))
 }

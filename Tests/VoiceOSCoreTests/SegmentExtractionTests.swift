@@ -441,3 +441,50 @@ extension SegmentExtractionTests {
         let after=await model.calls; XCTAssertEqual(after,0)
     }
 }
+
+private actor WaitingSegmentedHistory: ExpressionAssociationPort {
+    nonisolated let configuration: ModelConfiguration
+    var began=false
+    var start: CheckedContinuation<Void,Never>?
+    var completion: CheckedContinuation<ExpressionAssociationResponse,Never>?
+    init(_ config: ModelConfiguration) { configuration=config }
+    func waitForStart() async { if !began { await withCheckedContinuation { start=$0 } } }
+    func associate(_ request: ExpressionAssociationRequest) async throws -> ExpressionAssociationResponse {
+        began=true;start?.resume();start=nil
+        return await withCheckedContinuation { completion=$0 }
+    }
+    func finish() { completion?.resume(returning:.init(proposals:[],inputTokens:12,outputTokens:4)); completion=nil }
+}
+private struct CancellingSegmentedRetrieval: LocalRetrievalPort {
+    let store: VoiceOSStore
+    let batchID: String
+    func rank(query: String,documents: [RetrievalDocument],semantic: Bool) async throws -> [RetrievalMatch] {
+        _ = try await store.cancelSegmentedProcessingBatch(id:batchID)
+        return documents.map { .init(documentID:$0.id,score:1,method:"exact") }
+    }
+}
+extension SegmentExtractionTests {
+    func testCancellationDuringLongAssociationFreezesLateReceiptAndKeepsUsage() async throws {
+        let s=try await store(),b=try await seedFinal(s)
+        _ = try await s.recordUserExpression("可用的历史合成文字。")
+        _ = try await s.runSegmentAggregation(batchID:b.id,using:FinalAggregationFixture(config()))
+        _ = try await s.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config())
+        let port=WaitingSegmentedHistory(config())
+        let task=Task { try await s.processCommittedSegmentedAssociation(batchID:b.id,retrieval:SegmentedHistoryRetrieval(),model:port) }
+        await port.waitForStart()
+        _ = try await s.cancelSegmentedProcessingBatch(id:b.id)
+        await port.finish()
+        let result=try await task.value
+        XCTAssertEqual(result.state,.unknown); XCTAssertEqual(result.attempt?.validity,"frozen"); XCTAssertEqual(result.attempt?.usage?["input_tokens"],12)
+        let claims=try await s.candidateClaims(); XCTAssertEqual(claims.count,1) // Already delivered cognition is not retracted.
+    }
+    func testCancellationDuringRecallPreventsAnyLongAssociationDispatch() async throws {
+        let s=try await store(),b=try await seedFinal(s)
+        _ = try await s.recordUserExpression("历史合成文字用于召回。")
+        _ = try await s.runSegmentAggregation(batchID:b.id,using:FinalAggregationFixture(config()))
+        _ = try await s.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config())
+        let port=SegmentedHistoryPort(config())
+        do { _ = try await s.processCommittedSegmentedAssociation(batchID:b.id,retrieval:CancellingSegmentedRetrieval(store:s,batchID:b.id),model:port); XCTFail() } catch {}
+        let calls=await port.calls; XCTAssertEqual(calls,0)
+    }
+}

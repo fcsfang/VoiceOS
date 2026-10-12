@@ -6,17 +6,23 @@ public struct RecordingProcessingRequest: Identifiable, Sendable {
     public let sourceID: String
     public let state: String
     public let processingIntentID: String?
+    public let segmentedBatchID: String?
+    public let segmentedAssociationState: String?
     public let error: String?
 }
 extension VoiceOSStore {
     /// Explicit record-and-process choice. Source, text-only consent and request commit
     /// together before the caller opens the device. Ordinary beginDictation stays local.
-    public func beginProcessingDictation(commandID: String = UUID().uuidString, cognition: ModelConfiguration, association: ModelConfiguration) throws -> RecordingIntent {
+    public func beginProcessingDictation(commandID: String = UUID().uuidString, cognition: ModelConfiguration, association: ModelConfiguration, segmentExtraction: ModelConfiguration? = nil, segmentAggregation: ModelConfiguration? = nil) throws -> RecordingIntent {
         let c = ProcessingModelIdentity(cognition), a = ProcessingModelIdentity(association)
         guard c.isValid, a.isValid, c.destination == a.destination else { throw VoiceOSError("录制处理端口身份无效") }
         let cj = try Self.relevanceJSON(c), aj = try Self.relevanceJSON(a)
+        let segmentConfig=try Self.recordingSegmentIdentities(cognition:c,extraction:segmentExtraction,aggregation:segmentAggregation)
+
         if let old = try db.query("SELECT * FROM recording_processing_requests WHERE command_id=?", [commandID]).first {
             guard old["cognition_json"] == cj, old["association_json"] == aj, old["state"] == "waiting" else { throw VoiceOSError("录制处理命令已使用或端口改变") }
+            let plan=try db.query("SELECT * FROM recording_segment_plans WHERE id=?",[old["id"]]).first
+            guard plan?["extraction_json"] == segmentConfig?.0,plan?["aggregation_json"] == segmentConfig?.1 else { throw VoiceOSError("同一录制命令不能改变分段处理范围") }
             return try beginDictation(commandID: commandID)
         }
         guard try db.query("SELECT id FROM sources WHERE command_id=?", [commandID]).isEmpty else { throw VoiceOSError("普通录制不能升级为自动处理请求") }
@@ -33,7 +39,11 @@ extension VoiceOSStore {
             }
             let version = try db.query("SELECT version_id FROM sources WHERE id=?", [intent.sourceID]).first!["version_id"]!
             let now = Self.processingNow()
-            try db.execute("INSERT INTO recording_processing_requests(id,command_id,source_id,source_version_id,policy_version,cognition_json,association_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'waiting',?,?)", [UUID().uuidString,commandID,intent.sourceID,version,String(policyVersion),cj,aj,now,now])
+            let requestID=UUID().uuidString
+            try db.execute("INSERT INTO recording_processing_requests(id,command_id,source_id,source_version_id,policy_version,cognition_json,association_json,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'waiting',?,?)", [requestID,commandID,intent.sourceID,version,String(policyVersion),cj,aj,now,now])
+            if let segmentConfig {
+                try db.execute("INSERT INTO recording_segment_plans(id,extraction_json,aggregation_json,created_at) VALUES(?,?,?,?)",[requestID,segmentConfig.0,segmentConfig.1,now])
+            }
             try checkpoint(.recordingRequestUncommitted)
             return intent
         }
@@ -41,17 +51,31 @@ extension VoiceOSStore {
         return intent
     }
     public func recordingProcessingRequests() throws -> [RecordingProcessingRequest] {
-        try db.query("SELECT * FROM recording_processing_requests ORDER BY created_at,id").map {
-            .init(id:$0["id"]!,sourceID:$0["source_id"]!,state:$0["state"]!,processingIntentID:$0["processing_intent_id"],error:$0["error"])
+        try db.query("SELECT r.*,p.batch_id AS segmented_batch_id,p.association_state AS segmented_association_state FROM recording_processing_requests r LEFT JOIN recording_segment_plans p ON p.id=r.id ORDER BY r.created_at,r.id").map {
+            .init(id:$0["id"]!,sourceID:$0["source_id"]!,state:$0["state"]!,processingIntentID:$0["processing_intent_id"],segmentedBatchID:$0["segmented_batch_id"],segmentedAssociationState:$0["segmented_association_state"],error:$0["error"])
         }
     }
-    private func setRecordingRequest(_ id: String, state: String, error: String? = nil, queueID: String? = nil) throws {
+    func setRecordingRequest(_ id: String, state: String, error: String? = nil, queueID: String? = nil) throws {
         try db.execute("UPDATE recording_processing_requests SET state=?,error=?,processing_intent_id=COALESCE(?,processing_intent_id),updated_at=? WHERE id=?", [state,error,queueID,Self.processingNow(),id])
     }
     @discardableResult
     public func cancelRecordingProcessingRequest(id: String) throws -> Bool {
         guard let row = try db.query("SELECT * FROM recording_processing_requests WHERE id=?", [id]).first else { throw VoiceOSError("录音处理请求不存在") }
         guard ["waiting","enqueued"].contains(row["state"] ?? "") else { return false }
+        if let batchID=try db.query("SELECT batch_id FROM recording_segment_plans WHERE id=?",[id]).first?["batch_id"] ?? db.query("SELECT id FROM segmented_processing_batches WHERE command_id=?",["record-segment:"+id]).first?["id"] {
+            let batch=try segmentedProcessingBatch(id:batchID)
+            guard batch.state == .queued,try db.query("SELECT association_state FROM recording_segment_plans WHERE id=?",[id]).first?["association_state"] == nil else { return false }
+            // Record cancellation and fragment freeze together; no nested transactions.
+            return try db.transaction {
+                try segmentTerminalParent(batchID,state:.cancelled,error:"用户取消录制的长文字处理")
+                try freezeReservedSegmentedAssociation(batch)
+                try db.execute("UPDATE recording_segment_plans SET batch_id=?,association_state='cancelled' WHERE id=?",[batchID,id])
+                try db.execute("UPDATE segmented_extraction_attempts SET validity='frozen' WHERE batch_id=?",[batchID])
+                try db.execute("UPDATE segmented_aggregation_attempts SET validity='frozen' WHERE batch_id=?",[batchID])
+                try setRecordingRequest(id,state:"cancelled",error:"用户取消；录音和逐字稿保留")
+                return true
+            }
+        }
         return try db.transaction {
             let queue = try row["processing_intent_id"] ?? db.query("SELECT id FROM processing_intents WHERE command_id=?", ["record-process:"+id]).first?["id"]
             if let queue {
@@ -68,7 +92,7 @@ extension VoiceOSStore {
     }
     /// No await or model dispatch here. A failed local transcript remains waiting for
     /// explicit transcription retry; interrupted recordings require explicit sealing.
-    public func reconcileRecordingProcessingRequests(cognition: ModelConfiguration, association: ModelConfiguration) throws {
+    public func reconcileRecordingProcessingRequests(cognition: ModelConfiguration, association: ModelConfiguration, segmentExtraction: ModelConfiguration? = nil, segmentAggregation: ModelConfiguration? = nil) throws {
         for row in try db.query("SELECT * FROM recording_processing_requests WHERE state='waiting' ORDER BY created_at,id") {
             let id = row["id"]!, source = row["source_id"]!
             if let queue = try db.query("SELECT * FROM processing_intents WHERE command_id=?", ["record-process:"+id]).first {
@@ -96,6 +120,10 @@ extension VoiceOSStore {
                 guard !(current.transcript ?? "").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw VoiceOSError("逐字稿为空") }
                 // Only the original local transcription may satisfy the automatic request.
                 guard try db.query("SELECT version_no FROM transcript_versions WHERE id=?", [current.transcriptVersionID]).first?["version_no"] == "1" else { throw VoiceOSError("逐字稿已更正；需重新明确处理") }
+                if (current.transcript ?? "").unicodeScalars.count>4000 {
+                    try reconcileLongRecordingRequest(row,current:current,extraction:segmentExtraction,aggregation:segmentAggregation)
+                    continue
+                }
                 let snapshot = try prepareExpressionProcessingIntent(sourceID:source,cognition:cognition,association:association)
                 let queue = try enqueueExpressionProcessingIntent(snapshot,commandID:"record-process:"+id,cognition:cognition,association:association)
                 try checkpoint(.recordingRequestQueueCommitted)
@@ -103,7 +131,8 @@ extension VoiceOSStore {
             } catch {
                 // If the queue committed, retain waiting for idempotent reconciliation;
                 // never mark a committed queue as absent or dispatch another request.
-                if try db.query("SELECT id FROM processing_intents WHERE command_id=?", ["record-process:"+id]).isEmpty {
+                if try db.query("SELECT id FROM processing_intents WHERE command_id=?", ["record-process:"+id]).isEmpty,
+                   try db.query("SELECT id FROM segmented_processing_batches WHERE command_id=?",["record-segment:"+id]).isEmpty {
                     try setRecordingRequest(id,state:"blocked",error:error.localizedDescription)
                 } else { throw error }
             }
@@ -127,7 +156,7 @@ extension VoiceOSStore {
                 guard let queue = try db.query("SELECT * FROM processing_intents WHERE id=?", [queueID]).first,
                       queue["source_id"] == row["source_id"], queue["command_id"] == "record-process:"+row["id"]!, queue["policy_version"] == row["policy_version"],
                       let snapshot = try? JSONDecoder().decode(ExpressionProcessingIntentSnapshot.self, from:Data(queue["snapshot_json"]!.utf8)), snapshot.cognition == c, snapshot.association == a else { throw VoiceOSError("录音请求与持久队列不一致") }
-            } else if row["state"] == "enqueued" { throw VoiceOSError("已入队录音请求缺少回执") }
+            } else if row["state"] == "enqueued", try db.query("SELECT batch_id FROM recording_segment_plans WHERE id=?",[row["id"]]).first?["batch_id"] == nil { throw VoiceOSError("已入队录音请求缺少回执") }
         }
     }
 }

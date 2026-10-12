@@ -138,3 +138,61 @@ final class RecordingProcessingRequestTests: XCTestCase {
         XCTAssertEqual(requests[0].state,"blocked"); XCTAssertTrue(queues.isEmpty); XCTAssertEqual(rows[0].transcript?.count,4001)
     }
 }
+
+private struct RequestSegmentExtraction: SegmentExtractionPort {
+    let configuration: ModelConfiguration
+    func extract(_ request: SegmentExtractionRequest) async throws -> SegmentExtractionResponse { .init(proposals:[]) }
+}
+private struct RequestSegmentAggregation: SegmentAggregationPort {
+    let configuration: ModelConfiguration
+    func aggregate(_ request: SegmentAggregationRequest) async throws -> SegmentAggregationResponse {
+        .init(review:.init(batchID:request.batchID,ledgerDigest:request.ledger.contentDigest,reviewedEvidenceIDs:[],actionDecisions:[]),finalClaims:[])
+    }
+}
+extension RecordingProcessingRequestTests {
+    func beginLong(_ store: VoiceOSStore) async throws -> RecordingIntent {
+        try await store.beginProcessingDictation(commandID:"long",cognition:configuration(),association:configuration(),segmentExtraction:configuration(),segmentAggregation:configuration())
+    }
+    func reconcileLong(_ store: VoiceOSStore) async throws {
+        try await store.reconcileRecordingProcessingRequests(cognition:configuration(),association:configuration(),segmentExtraction:configuration(),segmentAggregation:configuration())
+    }
+    func transcribeLong(_ store: VoiceOSStore,_ intent: RecordingIntent) async throws {
+        try await seal(store,intent)
+        try await store.processTranscriptions(using:RequestSpeech(text:String(repeating:"合成录音文字。",count:700)))
+    }
+    func testRecordingLongPlanQueuesOneBatchAndStopsAfterAssociationCheck() async throws {
+        let s=try await store(), intent=try await beginLong(s)
+        try await transcribeLong(s,intent); try await reconcileLong(s)
+        let request=try await s.recordingProcessingRequests()[0], batchID=try XCTUnwrap(request.segmentedBatchID)
+        XCTAssertEqual(request.state,"enqueued"); XCTAssertNil(request.processingIntentID)
+        try await s.processRecordingSegmentPlan(requestID:request.id,extraction:RequestSegmentExtraction(configuration:configuration()),aggregation:RequestSegmentAggregation(configuration:configuration()),retrieval:RequestRetrieval(),association:RequestAssociation(configuration:configuration()))
+        let ids=try await s.segmentedCognitiveClaimIDs(batchID:batchID); XCTAssertEqual(ids,[])
+        let after=try await s.recordingProcessingRequests()[0]; XCTAssertEqual(after.segmentedAssociationState,"noCandidates")
+        let before=try await s.segmentExtractionAttempts(batchID:batchID).map(\.id)
+        _ = try await s.recordUserExpression("后来新增的历史；不能靠新录音自动重扫旧请求。")
+        try await s.processRecordingSegmentPlan(requestID:request.id,extraction:RequestSegmentExtraction(configuration:configuration()),aggregation:RequestSegmentAggregation(configuration:configuration()),retrieval:RequestRetrieval(),association:RequestAssociation(configuration:configuration()))
+        let repeated=try await s.segmentExtractionAttempts(batchID:batchID).map(\.id); XCTAssertEqual(before,repeated)
+        let package=base.appendingPathComponent("long-record-package"), restoredRoot=base.appendingPathComponent("long-record-restored")
+        try await s.exportPackage(to:package)
+        XCTAssertEqual(try VoiceOSStore.packageSummary(at:package).version,31)
+        try await VoiceOSStore.restorePackage(from:package,to:restoredRoot,inspector:NativeMediaInspector())
+        let restored=try VoiceOSStore(root:restoredRoot,inspector:NativeMediaInspector()); try await restored.recover()
+        let frozen=try await restored.recordingProcessingRequests()[0]; XCTAssertEqual(frozen.state,"frozen"); XCTAssertEqual(frozen.segmentedBatchID,batchID)
+    }
+    func testLegacyLongRecordingDoesNotAcquireUnrecordedSegmentPorts() async throws {
+        let s=try await store(), old=try await begin(s)
+        try await transcribeLong(s,old); try await reconcileLong(s)
+        let request=try await s.recordingProcessingRequests()[0]; XCTAssertEqual(request.state,"blocked"); XCTAssertNil(request.segmentedBatchID)
+        let batches=try await s.segmentedProcessingBatches(); XCTAssertTrue(batches.isEmpty)
+    }
+    func testLongRecordingCancelAfterBatchCommitBeforeLinkCancelsActualBatch() async throws {
+        let s=try await store(checkpoint:{ if $0 == .recordingRequestQueueCommitted { throw VoiceOSError("synthetic link boundary") } }), intent=try await beginLong(s)
+        try await transcribeLong(s,intent)
+        do { try await reconcileLong(s); XCTFail() } catch {}
+        let request=try await s.recordingProcessingRequests()[0]; XCTAssertEqual(request.state,"waiting")
+        let batches=try await s.segmentedProcessingBatches(); XCTAssertEqual(batches.count,1)
+        let cancelled=try await s.cancelRecordingProcessingRequest(id:request.id); XCTAssertTrue(cancelled)
+        let batch=try await s.segmentedProcessingBatch(id:batches[0].id); XCTAssertEqual(batch.state,.cancelled)
+        let linked=try await s.recordingProcessingRequests()[0]; XCTAssertEqual(linked.segmentedBatchID,batch.id); XCTAssertEqual(linked.state,"cancelled")
+    }
+}
