@@ -2,9 +2,8 @@ import Foundation
 import VoiceOSCore
 import VoiceOSPlatform
 
-/// Closes the product-level M3 path for an already completed real personal
-/// cognition: activate one eligible task, observe it, complete that exact item,
-/// observe completion, and persist a linked user outcome expression.
+/// Closes the product-level M3 path for a real personal cognition: activate
+/// eligible tasks, observe each exact item, and leave it open for the user.
 func runM3ListReminderCalendars() async throws {
     let port = await MainActor.run { NativeReminders() }
     let calendars = try await port.authorize()
@@ -29,32 +28,65 @@ func runM3RealClose(_ args: [String]) async throws {
     guard !createdLinks.isEmpty else {
         throw VoiceOSError("真实认知没有产生可自主发送的普通任务")
     }
-    var completed: [[String: Any]] = []
+    var created: [[String: Any]] = []
     for link in createdLinks {
         try await store.readReminder(linkID: link.id, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
         guard let linked = try await store.reminderLinks().first(where: { $0.id == link.id }), let externalID = linked.externalID else {
             throw VoiceOSError("提醒事项创建后没有得到唯一外部身份")
         }
-        try await port.markCompleted(calendarID: access.calendarID, externalID: externalID)
-        try await store.readReminder(linkID: link.id, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
-        guard let action = try await store.actions(includeHistory: true).first(where: { $0.id == link.actionID }) else {
-            throw VoiceOSError("完成回读后行动历史缺失")
-        }
-        let feedbackText = "我已经完成这项任务：\(action.title)。这是对原任务的结果反馈，不代表原认知已被验证。"
-        let feedbackSource = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: .outcome, text: feedbackText, commandID: "m3-real-outcome-" + action.id)
-        completed.append(["action_id": action.id, "action_title": action.title, "link_id": link.id, "external_id_observed": externalID, "feedback_source_id": feedbackSource, "reminder_state": (try await store.reminderLinks()).first(where: { $0.id == link.id })?.state ?? "missing"])
+        let current = try await store.reminderLinks().first(where: { $0.id == link.id })
+        created.append(["action_id": link.actionID, "link_id": link.id, "external_id_observed": externalID,
+                        "reminder_state": current?.state ?? "missing",
+                        "completed": current?.remoteCompleted ?? false])
     }
+    let actions = try await store.actions(includeHistory: true)
+    let claims = try await store.candidateClaims(includeFrozen: true)
+    let sourceIDs = Set(createdLinks.flatMap { link -> [String] in
+        guard let action = actions.first(where: { $0.id == link.actionID }),
+              let claim = claims.first(where: { $0.id == action.claimID }) else { return [] }
+        return claim.references.map(\.sourceID)
+    }).sorted()
     let output: [String: Any] = [
         "integrity": try await store.integrityCheck(),
-        "source_id": createdLinks.first!.actionID,
-        "completed_tasks": completed,
+        "source_ids": sourceIDs,
+        "created_tasks": created,
         "external_task_writes": createdLinks.count,
-        "completion_observed": true,
+        "completion_observed": false,
         "audio_uploaded": false,
         "full_natural_case_A_complete": false
     ]
     let data = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
     try data.write(to: root.appendingPathComponent("m3-real-close-summary.json"), options: .atomic)
+    print(String(decoding: data, as: UTF8.self))
+}
+
+/// Restores only explicitly identified development-test reminders to the
+/// normal open state. This command is separate from formal material handling.
+func runM3RestoreOpen(_ args: [String]) async throws {
+    guard args.count >= 4 else { throw VoiceOSError("m3-restore-open requires runtime root, calendar ID and one or more external IDs") }
+    let root = URL(fileURLWithPath: args[1]).standardizedFileURL.resolvingSymlinksInPath()
+    let allowed = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("runtime").standardizedFileURL.resolvingSymlinksInPath()
+    guard root.path.hasPrefix(allowed.path + "/") else { throw VoiceOSError("只接受 runtime 内独立资料库") }
+    let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector()); try await store.recover()
+    let port = await MainActor.run { NativeReminders() }
+    guard let access = try await store.reminderAccess(), access.enabled, access.calendarID == args[2] else { throw VoiceOSError("资料库的提醒事项清单授权与参数不一致") }
+    var restored: [[String: Any]] = []
+    for externalID in args.dropFirst(3) {
+        guard let link = try await store.reminderLinks().first(where: { $0.externalID == externalID && $0.calendarID == access.calendarID }) else { throw VoiceOSError("外部身份不属于该资料库") }
+        try await port.markIncomplete(calendarID: access.calendarID, externalID: externalID)
+        if let action = try await store.actions(includeHistory: true).first(where: { $0.id == link.actionID }), action.state == "completed" {
+            _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: .open,
+                                               note: "撤销开发验证中的完成状态；正式任务默认保持未完成",
+                                               commandID: "m3-restore-open-" + action.id)
+        }
+        try await store.readReminder(linkID: link.id, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
+        let current = try await store.reminderLinks().first(where: { $0.id == link.id })
+        restored.append(["action_id": link.actionID, "link_id": link.id, "external_id": externalID,
+                         "reminder_state": current?.state ?? "missing", "completed": current?.remoteCompleted ?? true])
+    }
+    let output: [String: Any] = ["restored": restored, "integrity": try await store.integrityCheck(), "completion_history_retained": true]
+    let data = try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys])
+    try data.write(to: root.appendingPathComponent("m3-restore-open-summary.json"), options: .atomic)
     print(String(decoding: data, as: UTF8.self))
 }
 

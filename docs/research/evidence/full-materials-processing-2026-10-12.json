@@ -3,8 +3,8 @@
   "purpose": "两段正式视频 Track 2（用户本人音轨）的长文本认知流程证据",
   "route": "M2→M3；segment extraction → SSE aggregation → local cognition commit",
   "audio_uploaded": false,
-  "external_task_writes": 0,
-  "reminder_links_created": 0,
+  "external_task_writes": 9,
+  "reminder_links_created": 9,
   "materials": [
     {
       "source_id": "68CCAE2A-FA26-4AC1-BC18-88A5A9F0FDE9",
@@ -12,17 +12,35 @@
       "track": 2,
       "transcription_backend": "Qwen3-ASR-1.7B-8bit@a8379a2 MLXAudio0.5.8 chunk30-v1",
       "transcript_scalars": 7073,
-      "latest_batch_id": "F6762E26-9341-4795-964D-3B93AE9B9BDD",
+      "latest_batch_id": "9B0C9868-1511-498D-8A93-0A38CE0C07DB",
       "latest_batch_state": "queued",
-      "extraction": {"segments": 2, "states": ["completed", "completed"]},
-      "aggregation": {"state": "completed", "input_tokens": 7909, "output_tokens": 10023},
-      "cognition": {"saved": true, "claim_count": 27, "action_count": 9},
+      "extraction": {
+        "segments": 2,
+        "states": [
+          "completed",
+          "completed"
+        ]
+      },
+      "aggregation": {
+        "state": "completed",
+        "input_tokens": 8954,
+        "output_tokens": 11581
+      },
+      "cognition": {
+        "saved": true,
+        "claim_count": 30,
+        "action_count": 16,
+        "task_count": 6,
+        "opportunity_count": 10
+      },
       "reminder_sync": {
-        "eligible_auto_send": 2,
-        "created": 2,
-        "completion_observed": true,
-        "external_task_writes": 2,
-        "feedback_sources": ["F3DFDD74-9690-4C18-AA4A-DFE0450B4991", "35A33702-95A3-44C6-AC5E-F98E83066E11"]
+        "eligible_auto_send": 6,
+        "created": 6,
+        "completion_observed": false,
+        "current_open_count": 8,
+        "historical_completion_observations": 2,
+        "external_task_writes": 6,
+        "feedback_sources": []
       },
       "integrity": true
     },
@@ -32,26 +50,44 @@
       "track": 2,
       "transcription_backend": "Apple SpeechAnalyzer",
       "transcript_scalars": 5280,
-      "latest_batch_id": "1F05507B-0148-4497-ADEE-23F536F46CCE",
+      "latest_batch_id": "03E046D5-9F3D-4E83-A795-AE48691A506E",
       "latest_batch_state": "queued",
-      "extraction": {"segments": 2, "states": ["completed", "completed"]},
-      "aggregation": {"state": "completed", "input_tokens": 8773, "output_tokens": 8204},
-      "cognition": {"saved": true, "claim_count": 19, "action_count": 3},
+      "extraction": {
+        "segments": 2,
+        "states": [
+          "completed",
+          "completed"
+        ]
+      },
+      "aggregation": {
+        "state": "completed",
+        "input_tokens": 8351,
+        "output_tokens": 7672
+      },
+      "cognition": {
+        "saved": true,
+        "claim_count": 19,
+        "action_count": 3,
+        "task_count": 3,
+        "opportunity_count": 0
+      },
       "reminder_sync": {
-        "eligible_auto_send": 2,
-        "created": 2,
-        "completion_observed": true,
-        "external_task_writes": 2,
-        "feedback_sources": ["A67B1DB3-611D-42B6-85B3-D40CCCCBC22F", "3462808B-3CBE-4563-AC7F-407627360E5F"]
+        "eligible_auto_send": 3,
+        "created": 3,
+        "completion_observed": false,
+        "current_open_count": 5,
+        "historical_completion_observations": 2,
+        "external_task_writes": 3,
+        "feedback_sources": []
       },
       "integrity": true
     }
   ],
   "known_boundaries": [
-    "旧批次的 blocked/rejected/unknown 回执全部保留，未自动重发。",
-    "长文本流程已完成结构化认知提交；自然语义质量仍需人工抽样审阅。",
-    "第二段逐字稿 backend 为旧 Apple SpeechAnalyzer，尚未重新用 Qwen 生成；音频未上传。",
-    "明确普通任务按 P01 本地规则升级为可自动发送：两份素材各创建并完成回读 2 项；模糊 opportunity 保留为本地候选。",
-    "M3 故障变体、离线/睡眠与冲突补偿仍按路线图单独验收。"
+    "旧批次的 blocked/rejected/unknown 回执全部保留；本次补充处理使用新的版本化批次，不重发旧未知请求。",
+    "两段正式素材均已完成结构化认知提交；第一段最新批次识别 6 个明确任务，第二段识别 3 个明确任务；认知语义仍需人工抽样审阅。",
+    "第一段最新批次使用 Qwen3-ASR-1.7B 本地转写，第二段逐字稿 backend 为 Apple SpeechAnalyzer；音频未上传。",
+    "提醒事项创建后只回读并保持未完成；此前开发闭环错误产生的 4 条完成观察仍保留在审计历史中，当前关联任务已恢复为 open。",
+    "P01 允许用户来源的 task 自动创建；模糊 opportunity 保留为本地候选。首版不存在每个资料库最多 3 个任务的产品限制；单次结构化结果仍有 32 项完整性上限。"
   ]
 }

@@ -17,6 +17,7 @@ struct Check {
             if args[0] == "personal-segment-cloud-probe" { try await runPersonalSegmentCloudProbe(args); return }
             if args[0] == "m3-list-reminder-calendars" { try await runM3ListReminderCalendars(); return }
             if args[0] == "m3-real-close" { try await runM3RealClose(args); return }
+            if args[0] == "m3-restore-open" { try await runM3RestoreOpen(args); return }
             if args[0] == "m3-associate-feedback" { try await runM3AssociateFeedback(args); return }
             if args[0] == "config-check" { try runConfigCheck(URL(fileURLWithPath: args[1])); return }
             if args[0] == "outcome-cloud-fixture" { try await runOutcomeCloudFixture(args); return }

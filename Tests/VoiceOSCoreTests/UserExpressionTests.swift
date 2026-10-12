@@ -103,7 +103,7 @@ final class UserExpressionTests: XCTestCase {
             do { _ = try await s.commitLocalClaims(attemptID:attempt,proposals:[originals[0],bad]); XCTFail() } catch {}
         }
         let (attempt, _) = try await proposals(s,id)
-        do { _ = try await s.commitLocalClaims(attemptID:attempt,proposals:Array(repeating: originals[0],count:4)); XCTFail() } catch {}
+        do { _ = try await s.commitLocalClaims(attemptID:attempt,proposals:Array(repeating: originals[0],count:33)); XCTFail() } catch {}
         let claims = try await s.candidateClaims(); let actions = try await s.actions(); XCTAssertTrue(claims.isEmpty); XCTAssertTrue(actions.isEmpty)
         let snapshot = try await s.prepareLocalTranscriptContext(sourceIDs:[id]); let input = snapshot.sources[0]
         let external = ContextTranscript(sourceID: id, sourceVersionID:input.sourceVersionID,transcriptVersionID:input.transcriptVersionID,origin:"external",speaker:"unknown",localOnly:true,text:input.text,spans:input.spans)
@@ -137,6 +137,23 @@ final class UserExpressionTests: XCTestCase {
         _ = try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)
         let port = TextReminderPort(); try await s.activateExtractedTasks(expectedAccessVersion:1,using:port)
         let creates = await port.creates; XCTAssertEqual(creates,1)
+    }
+    func testMoreThanThreeUserTasksActivateWithoutDevelopmentCap() async throws {
+        let s = try await store()
+        let text = "我会整理开发验证素材。"
+        let id = try await s.recordUserExpression(text)
+        _ = try await s.setSourceLocalOnly(sourceID:id,expectedVersion:1,localOnly:false)
+        let context = try await s.prepareLocalTranscriptContext(sourceIDs:[id]), input = context.sources[0]
+        let persisted = try await s.persistLocalContext(context)
+        let attempt = try await s.reserveLocalModelAttempt(contextID:persisted,model:"fixture",promptVersion:"v2",schemaVersion:"v2")
+        let ref = ClaimReference(sourceID:id,transcriptVersionID:input.transcriptVersionID,spanID:input.spans[0].id)
+        let proposals = ["整理", "开发", "验证", "素材"].map { title in
+            ClaimProposal(statement:"明确任务：\(title)",ownership:.userTentative,references:[ref],action:.init(title:title,kind:.task,quote:text,autoSend:false))
+        }
+        _ = try await s.commitLocalClaims(attemptID:attempt,proposals:proposals)
+        _ = try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)
+        let port = TextReminderPort(); try await s.activateExtractedTasks(expectedAccessVersion:1,using:port)
+        let count = await port.creates; XCTAssertEqual(count,4)
     }
     func testMigrationRejectsMissingExtractedActionEvenWithNewFileDigest() async throws {
         let s = try await store(); let id = try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。")

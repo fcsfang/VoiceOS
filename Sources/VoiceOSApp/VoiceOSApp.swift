@@ -232,6 +232,9 @@ final class ControlCenter: ObservableObject {
     @Published var player: AVPlayer?
     @Published var history: [TranscriptVersion] = []
     @Published var claims: [CandidateClaim] = []
+    /// Source-facing claims use only the newest completed producer for that
+    /// source.  `claims` remains the full audit view for history and review.
+    @Published var currentClaimsBySource: [String: [CandidateClaim]] = [:]
     @Published var questionRecords: [QuestionRecord] = []
     @Published var questionRevisions: [String: [QuestionRevision]] = [:]
     @Published var savingQuestion = false
@@ -370,6 +373,15 @@ final class ControlCenter: ObservableObject {
             reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
             if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
             records = try await store?.sources() ?? []
+            if let store {
+                var current: [String: [CandidateClaim]] = [:]
+                for record in records {
+                    current[record.id] = try await store.latestCandidateClaims(for: record.id, includeFrozen: true)
+                }
+                currentClaimsBySource = current
+            } else {
+                currentClaimsBySource = [:]
+            }
             if let plan = segmentationPlan, !records.contains(where: { $0.id == plan.source.sourceID && $0.transcriptVersionID == plan.source.transcriptVersionID && $0.policyVersion == plan.policyVersion && ["saved","reference_only"].contains($0.state) }) {
                 segmentationPlan = nil; segmentationStatus = "原话或授权已变化，请重新查看分段"
             }
@@ -1216,7 +1228,7 @@ struct CenterView: View {
                             if let player = model.player { VideoPlayer(player: player).frame(height: record.kind == "video" ? 260 : 80) }
                         } else { Text(transcriptStatus(record)).foregroundStyle(.secondary) }
                         if let error = record.error { Text(error).foregroundStyle(.orange) }
-                        let related = model.claims.filter { $0.references.contains(where: { $0.sourceID == record.id }) }
+                        let related = model.currentClaimsBySource[record.id] ?? []
                         if !related.isEmpty {
                             Divider()
                             DisclosureGroup("认知候选与历史（\(related.count)）") {

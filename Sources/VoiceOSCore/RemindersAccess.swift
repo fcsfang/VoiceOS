@@ -32,35 +32,30 @@ extension VoiceOSStore {
         try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
         let linked = Set(try reminderLinks().map(\.actionID))
         let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
-        let pending = try actions().filter { action in
-            guard action.kind == "task", action.intentActor == "user", !linked.contains(action.id) else { return false }
-            if action.autoSend { return true }
-            // P01 permits autonomous creation for a clearly spoken ordinary
-            // task. Treat the model's conservative autoSend=false as eligible
-            // only when the user-owned statement contains an explicit planning
-            // or recording marker; opportunities remain local candidates.
-            guard let claim = claims[action.claimID], claim.ownership == CandidateOwnership.userTentative.rawValue else { return false }
-            let text = claim.statement + action.title
-            return ["明确计划", "明确要求", "明确提出", "计划每天", "帮我记", "记录到列表", "接下来完成"].contains { text.contains($0) }
+        // A fresh understanding of the same source may add distinct task
+        // identities. Keep a title barrier only within that source; identical
+        // titles in separate recordings remain independent user tasks.
+        var linkedTitleSources = Set<String>()
+        for row in try db.query("SELECT l.desired_title,c.refs_json FROM reminder_links l JOIN actions a ON a.id=l.action_id JOIN claims c ON c.id=a.claim_id WHERE l.calendar_id=?", [access.calendarID]) {
+            let title = row["desired_title"] ?? ""
+            let refs = try JSONDecoder().decode([ClaimReference].self, from: Data((row["refs_json"] ?? "[]").utf8))
+            for ref in refs { linkedTitleSources.insert(title + "|" + ref.sourceID) }
         }
-        var activated = 0
+        let pending = try actions().filter { action in
+            guard action.kind == "task", action.intentActor == "user", !linked.contains(action.id), let claim = claims[action.claimID] else { return false }
+            guard !claim.references.contains(where: { linkedTitleSources.contains(action.title + "|" + $0.sourceID) }) else { return false }
+            // P01 grants the assistant autonomy for user-owned task actions.
+            // The model may conservatively set autoSend=false; that flag is
+            // advisory here. Ambiguous material remains an opportunity and is
+            // therefore excluded by kind before reaching this path.
+            return claims[action.claimID]?.ownership == CandidateOwnership.userTentative.rawValue
+        }
         for action in pending {
-            if activated == 3 { break }
             try Task.checkCancellation()
             try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
             // Do not let a local-only source block unrelated authorized tasks.
             let claim = try candidateClaims().first { $0.id == action.claimID }
             guard let claim, try claim.references.allSatisfy({ try sourcePolicy(sourceID: $0.sourceID).localOnly == false }) else { continue }
-            // Reinterpreting a previously sent source is not fresh user intent.
-            // Keep new proposals local until the user explicitly sends them.
-            let attempt = try db.query("SELECT attempt_id FROM claims WHERE id=?", [claim.id]).first?["attempt_id"]
-            var oldIntent = false
-            for row in try db.query("SELECT c.attempt_id,c.refs_json FROM reminder_links l JOIN actions a ON a.id=l.action_id JOIN claims c ON c.id=a.claim_id WHERE c.attempt_id!=?", [attempt]) {
-                let refs = try JSONDecoder().decode([ClaimReference].self, from: Data(row["refs_json"]!.utf8))
-                if !Set(refs.map(\.sourceID)).isDisjoint(with: Set(claim.references.map(\.sourceID))) { oldIntent = true; break }
-            }
-            if oldIntent { continue }
-            activated += 1
             try await sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
         }
     }

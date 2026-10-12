@@ -147,8 +147,34 @@ extension VoiceOSStore {
             CandidateClaim(contentKind: $0["reviewed_statement"] != nil && $0["reviewed_statement"] != $0["statement"] ? nil : $0["content_kind"].flatMap(CognitiveContentKind.init(rawValue:)), id: $0["id"]!, statement: $0["reviewed_statement"] ?? $0["statement"]!, ownership: $0["reviewed_ownership"] ?? $0["ownership"]!, evidenceState: $0["evidence_state"]!, validity: $0["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data($0["refs_json"]!.utf8)), reviewVersion: Int($0["review_version"]!)!, reviewState: $0["review_state"] ?? "pending")
         }
     }
+
+    /// Returns the latest completed cognition producer that used a source.
+    ///
+    /// Reprocessing a source creates a new immutable model attempt so that the
+    /// old result remains auditable.  The control center needs a current view,
+    /// however, rather than rendering every historical attempt as if it were a
+    /// second set of thoughts.  This helper deliberately keeps the historical
+    /// `candidateClaims` API unchanged and narrows only the source-facing view.
+    public func latestCandidateClaims(for sourceID: String, includeFrozen: Bool = false) throws -> [CandidateClaim] {
+        guard let attempt = try db.query("""
+            SELECT a.id
+            FROM model_attempts a
+            JOIN context_inputs i ON i.context_id=a.context_id
+            WHERE i.source_id=? AND a.state='completed'
+            -- created_at is intentionally human-readable and may have only
+            -- second-level precision.  producer_sequence is the durable
+            -- ordering authority for model results, including rapid retries.
+            ORDER BY a.producer_sequence DESC, a.created_at DESC, a.id DESC
+            LIMIT 1
+            """, [sourceID]).first,
+              let attemptID = attempt["id"] else { return [] }
+        let ids = Set(try db.query("SELECT id FROM claims WHERE attempt_id=?", [attemptID]).compactMap { $0["id"] })
+        return try candidateClaims(includeFrozen: includeFrozen).filter { claim in
+            ids.contains(claim.id) && claim.references.contains { $0.sourceID == sourceID }
+        }
+    }
     static func validateProposals(_ proposals: [ClaimProposal], context: LocalTranscriptContext) throws {
-        guard proposals.count <= 32, proposals.filter({ $0.action?.autoSend == true }).count <= 3 else { throw VoiceOSError("行动提取超过单次范围") }
+        guard proposals.count <= 32 else { throw VoiceOSError("行动提取超过单次范围") }
         for proposal in proposals {
             guard proposal.contentKind != .question || proposal.action == nil else { throw VoiceOSError("问题不能同时作为行动承诺；需分开提取") }
             guard !proposal.statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !proposal.references.isEmpty, proposal.references.count <= 32, proposal.statement.unicodeScalars.count <= 2000 else { throw VoiceOSError("认知候选缺少内容或出处") }
