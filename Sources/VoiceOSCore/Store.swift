@@ -11,6 +11,7 @@ public actor VoiceOSStore {
     func inspectRecording(_ file:URL) async throws -> MediaInfo { try await inspector.inspect(file) }
     private var processing = false
     var activeProcessingIntents: Set<String> = []
+    var segmentExtractionActive = false
     var activeReminderLinks: Set<String> = []
     var activeEnglishAttempts: Set<String> = []
     let checkpoint: @Sendable (SaveCheckpoint) throws -> Void
@@ -82,6 +83,7 @@ public actor VoiceOSStore {
         try Self.validateStoredProcessingIntents(db)
         try Self.validateStoredRecordingProcessingRequests(db)
         try Self.validateStoredSegmentedProcessingBatches(db)
+        try recoverSegmentExtractionAttempts()
         try recoverSegmentedProcessingBatches()
         try recoverExpressionProcessingIntents()
         ready = true

@@ -56,6 +56,39 @@ extension VoiceOSStore {
             throw VoiceOSError("整篇证据、覆盖范围或摘要已变化")
         }
     }
+    static func validatedSegmentEvidence(scope: SegmentedExpressionProcessingScope, segment: TranscriptSegment,
+        proposals: [SegmentEvidenceProposal]) throws -> [ValidatedSegmentEvidence] {
+        let plan = scope.plan, scalars = Array(scope.plan.source.text.unicodeScalars)
+        var boundaries: Set<Int> = [0], offset = 0
+        for character in plan.source.text { offset += String(character).unicodeScalars.count; boundaries.insert(offset) }
+        var evidence: [ValidatedSegmentEvidence] = []
+        for (ordinal, proposal) in proposals.enumerated() {
+            guard !proposal.statement.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
+                  proposal.statement.unicodeScalars.count <= 1000, !proposal.quote.isEmpty,
+                  proposal.textStart >= segment.textStart, proposal.textEnd <= segment.textEnd,
+                  proposal.textStart < proposal.textEnd,
+                  String(String.UnicodeScalarView(scalars[proposal.textStart..<proposal.textEnd])) == proposal.quote else {
+                throw VoiceOSError("片段证据必须逐字引用本段原文，不能越界或截断说明")
+            }
+            // Exact scalar matches are insufficient if a quote splits a grapheme.
+            guard boundaries.contains(proposal.textStart), boundaries.contains(proposal.textEnd) else {
+                throw VoiceOSError("片段引用不能拆开完整字符")
+            }
+            let refs = segment.references.compactMap { ref -> TranscriptSegmentReference? in
+                let start = max(ref.textStart,proposal.textStart), end = min(ref.textEnd,proposal.textEnd)
+                guard start < end else { return nil }
+                return .init(spanID:ref.spanID,textStart:start,textEnd:end,
+                    containingSpanStartMS:ref.containingSpanStartMS,containingSpanEndMS:ref.containingSpanEndMS)
+            }
+            guard !refs.isEmpty, proposal.spanIDs == refs.map(\.spanID),
+                  refs.first?.textStart == proposal.textStart, refs.last?.textEnd == proposal.textEnd else {
+                throw VoiceOSError("片段证据的原片段引用不完整或被替换")
+            }
+            let id = relevanceHash(Data("\(scope.contentDigest):\(segment.id):\(ordinal):\(try relevanceJSON(proposal))".utf8))
+            evidence.append(.init(id:id,segmentID:segment.id,ordinal:ordinal,proposal:proposal,references:refs))
+        }
+        return evidence
+    }
     static func segmentedEvidenceLedger(batchID: String, scope: SegmentedExpressionProcessingScope,
         inputs: [SegmentEvidenceInput]) throws -> SegmentedEvidenceLedger {
         let plan = scope.plan
@@ -63,36 +96,9 @@ extension VoiceOSStore {
         guard inputs.count == expected.count, Set(inputs.map(\.segmentID)).count == inputs.count,
               Set(inputs.map(\.segmentID)) == Set(expected) else { throw VoiceOSError("整篇证据需要每段恰好一份输入，不能缺段或重复") }
         let byID = Dictionary(uniqueKeysWithValues:inputs.map { ($0.segmentID,$0) })
-        let scalars = Array(plan.source.text.unicodeScalars)
-        var boundaries: Set<Int> = [0], offset = 0
-        for character in plan.source.text { offset += String(character).unicodeScalars.count; boundaries.insert(offset) }
         var evidence: [ValidatedSegmentEvidence] = []
         for segment in plan.segments {
-            for (ordinal, proposal) in byID[segment.id]!.proposals.enumerated() {
-                guard !proposal.statement.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
-                      proposal.statement.unicodeScalars.count <= 1000, !proposal.quote.isEmpty,
-                      proposal.textStart >= segment.textStart, proposal.textEnd <= segment.textEnd,
-                      proposal.textStart < proposal.textEnd,
-                      String(String.UnicodeScalarView(scalars[proposal.textStart..<proposal.textEnd])) == proposal.quote else {
-                    throw VoiceOSError("片段证据必须逐字引用本段原文，不能越界或截断说明")
-                }
-                // Exact scalar matches are insufficient if a quote splits a grapheme.
-                guard boundaries.contains(proposal.textStart), boundaries.contains(proposal.textEnd) else {
-                    throw VoiceOSError("片段引用不能拆开完整字符")
-                }
-                let refs = segment.references.compactMap { ref -> TranscriptSegmentReference? in
-                    let start = max(ref.textStart,proposal.textStart), end = min(ref.textEnd,proposal.textEnd)
-                    guard start < end else { return nil }
-                    return .init(spanID:ref.spanID,textStart:start,textEnd:end,
-                        containingSpanStartMS:ref.containingSpanStartMS,containingSpanEndMS:ref.containingSpanEndMS)
-                }
-                guard !refs.isEmpty, proposal.spanIDs == refs.map(\.spanID),
-                      refs.first?.textStart == proposal.textStart, refs.last?.textEnd == proposal.textEnd else {
-                    throw VoiceOSError("片段证据的原片段引用不完整或被替换")
-                }
-                let id = relevanceHash(Data("\(scope.contentDigest):\(segment.id):\(ordinal):\(try relevanceJSON(proposal))".utf8))
-                evidence.append(.init(id:id,segmentID:segment.id,ordinal:ordinal,proposal:proposal,references:refs))
-            }
+            evidence += try validatedSegmentEvidence(scope:scope,segment:segment,proposals:byID[segment.id]!.proposals)
         }
         struct Payload: Codable {
             let batchID: String

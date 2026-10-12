@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -548,6 +548,30 @@ final class Database {
                 try execute("PRAGMA user_version=27")
             }
         }
+        if try query("PRAGMA user_version").first?["user_version"] == "27" {
+            try transaction {
+                guard let original = try query("SELECT sql FROM sqlite_master WHERE name='segmented_processing_batches'").first?["sql"] else { throw VoiceOSError("缺少分段批次表") }
+                let revised = original.replacingOccurrences(of:"segmented_processing_batches",with:"segmented_batches_next")
+                    .replacingOccurrences(of:"'frozen'",with:"'frozen','unknown','rejected'")
+                try execute(revised)
+                try execute("INSERT INTO segmented_batches_next SELECT * FROM segmented_processing_batches")
+                try execute("DROP TABLE segmented_processing_batches")
+                try execute("ALTER TABLE segmented_batches_next RENAME TO segmented_processing_batches")
+                try execute("CREATE INDEX segmented_batches_source ON segmented_processing_batches(source_id,created_at,id)")
+                try execute("""
+                CREATE TABLE IF NOT EXISTS segmented_extraction_attempts (
+                  id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES segmented_processing_batches(id), segment_id TEXT NOT NULL,
+                  producer_sequence INTEGER NOT NULL UNIQUE CHECK(typeof(producer_sequence)='integer' AND producer_sequence>0),
+                  input_json TEXT NOT NULL, input_digest TEXT NOT NULL,
+                  result_json TEXT, result_digest TEXT, usage_json TEXT,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','completed','unknown','rejected')),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')), error TEXT,
+                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(batch_id,segment_id)
+                )
+                """)
+                try execute("PRAGMA user_version=28")
+            }
+        }
     }
     /// Only called for pre-sequence schemas/packages. Retrospective order is a baseline,
     /// not evidence of the original wall-clock order; all new producers follow it.
@@ -558,7 +582,7 @@ final class Database {
         }
     }
     func nextModelProducerSequence() throws -> String {
-        guard let value=try query("SELECT COALESCE(MAX(producer_sequence),0) AS value FROM model_attempts").first?["value"].flatMap(Int64.init),value < Int64.max else { throw VoiceOSError("成果生产者顺序已超出范围") }
+        guard let value=try query("SELECT COALESCE(MAX(producer_sequence),0) AS value FROM (SELECT producer_sequence FROM model_attempts UNION ALL SELECT producer_sequence FROM segmented_extraction_attempts)").first?["value"].flatMap(Int64.init),value < Int64.max else { throw VoiceOSError("成果生产者顺序已超出范围") }
         return String(value+1)
     }
     deinit { sqlite3_close(handle) }

@@ -45,6 +45,9 @@ struct Check {
             if args[0] == "discussion-question-fixture" { try await runDiscussionQuestionFixture(store); return }
             if args[0] == "source-continuation-fixture" { try await runSourceContinuationFixture(store); return }
             if ["record-request-fixture", "record-request-resume-fixture"].contains(args[0]) { try await runRecordingRequestFixture(store, seed:args[0] == "record-request-fixture"); return }
+            if ["segment-extraction-fixture", "segment-extraction-personal-fixture", "segment-extraction-read"].contains(args[0]) {
+                try await runSegmentExtractionFixture(store,args:args); return
+            }
             if args[0] == "segmented-batch-enqueue-local" {
                 guard args.count >= 3 else { throw VoiceOSError("local batch enqueue requires explicit source ID") }
                 let config = ModelConfiguration(provider:"local_batch_inspection",model:"no-dispatch",promptVersion:"v1",schemaVersion:"v1",destination:.local)
@@ -61,7 +64,9 @@ struct Check {
             }
             if ["segmented-batch-read", "segmented-batch-fixture", "segmented-batch-cancel-fixture", "segmented-batch-enqueue-local"].contains(args[0]) {
                 let batches = try await store.segmentedProcessingBatches()
-                let output:[String:Any] = ["integrity":try await store.integrityCheck(),"batches":batches.map { ["id":$0.id,"state":$0.state.rawValue,"segment_count":$0.scope.plan.segments.count] },"model_count":try await store.modelAttempts().count,"queue_count":try await store.processingIntents().count,"action_count":try await store.actions().count]
+                var segmentCount = 0
+                for batch in batches { segmentCount += try await store.segmentExtractionAttempts(batchID:batch.id).count }
+                let output:[String:Any] = ["segment_attempt_count":segmentCount,"integrity":try await store.integrityCheck(),"batches":batches.map { ["id":$0.id,"state":$0.state.rawValue,"segment_count":$0.scope.plan.segments.count] },"model_count":try await store.modelAttempts().count,"queue_count":try await store.processingIntents().count,"action_count":try await store.actions().count]
                 print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)); return
             }
             if args[0] == "segmented-scope-read" {
@@ -346,5 +351,52 @@ private func runRecordingRequestFixture(_ store: VoiceOSStore, seed: Bool) async
     }
     let requests = try await store.recordingProcessingRequests()
     let output:[String:Any] = ["integrity":try await store.integrityCheck(),"requests":requests.map { ["id":$0.id,"state":$0.state,"queue_id":$0.processingIntentID ?? ""] },"queue_states":try await store.processingIntents().map { $0.state.rawValue },"queue_count":try await store.processingIntents().count,"model_count":try await store.modelAttempts().count,"association_count":try await store.expressionAssociationAttempts().count]
+    print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self))
+}
+
+private struct LocalSegmentFixture: SegmentExtractionPort {
+    let configuration: ModelConfiguration
+    let empty: Bool
+    func extract(_ request: SegmentExtractionRequest) async throws -> SegmentExtractionResponse {
+        if empty { return .init(proposals:[]) }
+        let s = request.segment
+        return .init(proposals:[.init(kind:s.ordinal == 1 ? .possibleAction:.negation,statement:"合成片段证据，尚未聚合",quote:s.text,
+            textStart:s.textStart,textEnd:s.textEnd,spanIDs:s.references.map(\.spanID))],inputTokens:10,outputTokens:3)
+    }
+}
+private func runSegmentExtractionFixture(_ store: VoiceOSStore,args: [String]) async throws {
+    var selected: String?
+    if args[0] == "segment-extraction-fixture" {
+        let c = ModelConfiguration(provider:"local_segment_fixture",model:"synthetic",promptVersion:"v1",schemaVersion:"v1",destination:.local)
+        let source = try await store.recordUserExpression(String(repeating:"合成原话。",count:20),commandID:"segment-extraction-source")
+        let scope = try await store.prepareSegmentedExpressionProcessingScope(sourceID:source,extraction:c,aggregation:c,segmentScalarBudget:20)
+        let batch = try await store.enqueueSegmentedProcessingBatch(scope,commandID:"segment-extraction-command",extraction:c,aggregation:c)
+        selected = batch.id
+    } else if args[0] == "segment-extraction-personal-fixture" {
+        guard args.count == 3 else { throw VoiceOSError("personal fixture requires explicit existing batch ID") }
+        selected = args[2]
+    }
+    if let selected {
+        let batch = try await store.segmentedProcessingBatch(id:selected), identity = batch.scope.extraction
+        guard identity.destination == .local, ["local_segment_fixture","local_batch_inspection"].contains(identity.provider), ["synthetic","no-dispatch"].contains(identity.model) else { throw VoiceOSError("fixture requires explicit local fixture identity") }
+        let c = ModelConfiguration(provider:identity.provider,model:identity.model,promptVersion:identity.promptVersion,schemaVersion:identity.schemaVersion,destination:identity.destination)
+        let port = LocalSegmentFixture(configuration:c,empty:args[0] == "segment-extraction-personal-fixture")
+        for _ in batch.scope.plan.segments { guard try await store.runNextSegmentExtraction(batchID:selected,using:port) != nil else { break } }
+    }
+    var summaries: [[String:Any]] = []
+    for batch in try await store.segmentedProcessingBatches() {
+        let receipts = try await store.segmentExtractionAttempts(batchID:batch.id)
+        var ready = false, digest: String?
+        if batch.state == .queued, receipts.count == batch.scope.plan.segments.count, receipts.allSatisfy({ $0.state == .completed && $0.validity == "current" }) {
+            let e = batch.scope.extraction, a = batch.scope.aggregation
+            let ledger = try await store.preparePersistedSegmentedEvidenceLedger(batchID:batch.id,
+                extraction:.init(provider:e.provider,model:e.model,promptVersion:e.promptVersion,schemaVersion:e.schemaVersion,destination:e.destination),
+                aggregation:.init(provider:a.provider,model:a.model,promptVersion:a.promptVersion,schemaVersion:a.schemaVersion,destination:a.destination))
+            ready = !ledger.requiresBoundaryResolution; digest = ledger.contentDigest
+        }
+        summaries.append(["id":batch.id,"state":batch.state.rawValue,"segment_count":batch.scope.plan.segments.count,"evidence_ready":ready,"ledger_digest":digest ?? "",
+            "attempts":receipts.map { ["id":$0.id,"state":$0.state.rawValue,"validity":$0.validity,"sequence":$0.producerSequence,"segment_id":$0.request.segment.id] }])
+    }
+    let output:[String:Any] = ["integrity":try await store.integrityCheck(),"batches":summaries,"old_model_count":try await store.modelAttempts().count,"action_count":try await store.actions().count,"claim_count":try await store.candidateClaims().count]
     print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self))
 }

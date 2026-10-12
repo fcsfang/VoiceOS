@@ -2,20 +2,12 @@
 
 更新日期：2026-10-12。
 
-当前质量与进展先读[2026-10-12 修复记录](engineering/m4-expression-processing-reliability.md)：审核发现的四项问题已修复，362 项回归、七个实际强退窗口及部分最新界面核对通过，两段真实播客短片段已完成本地导入/转写。项目仍为开发预览，完整 MVP 未验收。[原审核](engineering/quality-review-2026-10-12.md)保留复现过程；下列历史文档保留其当时证据，不代表当前统一状态。
+最新切片见[分段提取持久记录](engineering/m4-segment-extraction.md)：415项回归、三个实际强退窗口和签名构建通过；schema28，含片段尝试的迁移包v28。已支持单段预留、结果暂存、未知不重发、取消/更正后的迟到结果冻结；整篇聚合、真实云端驱动及原生分段执行入口尚未接入，完整MVP未验收。
 
-当前个人录音切片见[个人录音持久处理记录](engineering/m4-personal-audio-processing.md)：用户确认的第二音轨已用于真实本地转写，个人音频复用持久队列，新增明确归属导入入口和 v25 包兼容。自然语义质量与完整闭环仍待验收。
+真实40分钟本人音轨的5280字符可无损分成2段；本轮采用固定空提案的本地夹具验证暂存及迁移冻结，没有评分自然语义质量。先读[当前接续状态](planning/overnight-progress.md)，再按需要查看[分段总契约](engineering/m4-segmented-expression-processing-contract.md)、[本地证据账本](engineering/m4-segmented-evidence.md)、[录制处理请求](engineering/m4-recording-processing-request.md)和[个人录音归属](engineering/m4-personal-audio-processing.md)。
 
-上一切片见[录制并处理的持久请求](engineering/m4-recording-processing-request.md)：转写前的选择可恢复，376项回归和七个实际强退窗口通过；schema26，含请求的迁移包v26。真实设备处理与完整自然闭环仍待验收。
+[审核修复记录](engineering/m4-expression-processing-reliability.md)及[原审核](engineering/quality-review-2026-10-12.md)保留问题与复现证据。下列历史文档记录各自切片的证据，旧版本号、测试数量及待实现项不作为当前统一状态。
 
-
-最新切片见[长逐字稿本地分段](engineering/m4-transcript-segmentation.md)：383项回归通过，真实40分钟本人轨5280字符可无损分成2段并查看原片段引用。分段模型执行尚未接入，不能据此宣布长录音认知闭环完成。
-
-分段执行的[范围校验与下一实施契约](engineering/m4-segmented-expression-processing-contract.md)已补齐：388项回归通过，范围固定原话/权限/端口并拒绝漂移。持久批次和模型聚合仍待实现。
-
-最新进展见[分段持久父批次](engineering/m4-segmented-processing-batch.md)：397项回归、四个实际强退窗口及真实长来源v27恢复通过；只接入批次基础，不代表分段模型已执行。
-
-[分段证据账本](engineering/m4-segmented-evidence.md)已完成本地校验，404项回归通过。否定/条件证据、完整段覆盖和实际序列化预算均受约束；持久片段模型尝试与聚合尚未接入。
 ## 当前文档
 
 | 文档 | 状态 | 用途 |

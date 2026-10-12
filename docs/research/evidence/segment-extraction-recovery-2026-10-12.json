@@ -1,0 +1,24 @@
+{
+  "cases": {
+    "segmentExtractionCommitted": {
+      "no_product_entities": true,
+      "recovered_attempt": "completed",
+      "resumed_attempt_count": 5,
+      "stable_replay": true
+    },
+    "segmentExtractionReserved": {
+      "no_product_entities": true,
+      "recovered_attempt": "unknown",
+      "resumed_attempt_count": 1,
+      "stable_replay": true
+    },
+    "segmentExtractionUncommitted": {
+      "no_product_entities": true,
+      "recovered_attempt": "unknown",
+      "resumed_attempt_count": 1,
+      "stable_replay": true
+    }
+  },
+  "probe": "segment-extraction-recovery-v1",
+  "scope": "local synthetic port; no cloud calls, uploads, or reminder writes"
+}

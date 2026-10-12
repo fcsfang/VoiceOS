@@ -1,8 +1,8 @@
 import Foundation
 
-/// Initial durable batch lifecycle. No model executor is attached in this slice.
+/// Parent lifecycle. Fragment calls remain staged until full aggregation exists.
 public enum SegmentedProcessingBatchState: String, Codable, Sendable {
-    case queued, blocked, cancelled, frozen
+    case queued, blocked, cancelled, frozen, unknown, rejected
 }
 public struct SegmentedProcessingBatch: Identifiable, Sendable {
     public let id: String
@@ -71,6 +71,7 @@ extension VoiceOSStore {
         guard old.state == .queued else { return old }
         try db.transaction {
             try db.execute("UPDATE segmented_processing_batches SET state='cancelled',error='用户取消；原件与逐字稿保留',updated_at=? WHERE id=? AND state='queued'",[Self.processingNow(),id])
+            try db.execute("UPDATE segmented_extraction_attempts SET validity='frozen' WHERE batch_id=?",[id])
             try checkpoint(.segmentedBatchCancelUncommitted)
         }
         try checkpoint(.segmentedBatchCancelCommitted)
@@ -82,7 +83,12 @@ extension VoiceOSStore {
         let batch = try segmentedProcessingBatch(id:id)
         guard batch.state == .queued else { return batch }
         do { try validateSegmentedExpressionProcessingScope(batch.scope,extraction:extraction,aggregation:aggregation) }
-        catch { try db.execute("UPDATE segmented_processing_batches SET state='blocked',error=?,updated_at=? WHERE id=? AND state='queued'",[error.localizedDescription,Self.processingNow(),id]) }
+        catch {
+            try db.transaction {
+                try db.execute("UPDATE segmented_processing_batches SET state='blocked',error=?,updated_at=? WHERE id=? AND state='queued'",[error.localizedDescription,Self.processingNow(),id])
+                try db.execute("UPDATE segmented_extraction_attempts SET validity='frozen' WHERE batch_id=?",[id])
+            }
+        }
         return try segmentedProcessingBatch(id:id)
     }
     func recoverSegmentedProcessingBatches() throws {

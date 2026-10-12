@@ -240,6 +240,8 @@ extension VoiceOSStore {
     }
     // Call inside the same transaction as a correction/quarantine.
     func invalidateCognition(sourceID: String) throws {
+        try db.execute("UPDATE segmented_processing_batches SET state='blocked',error='来源文字、授权或原件已变化',updated_at=? WHERE source_id=? AND state='queued'",[Self.processingNow(),sourceID])
+        try db.execute("UPDATE segmented_extraction_attempts SET validity='frozen' WHERE batch_id IN (SELECT id FROM segmented_processing_batches WHERE source_id=?)",[sourceID])
         try db.execute("UPDATE relevance_attempts SET validity='frozen' WHERE id IN (SELECT attempt_id FROM relevance_inputs WHERE source_id=?)", [sourceID])
         for row in try db.query("SELECT context_id FROM context_inputs WHERE source_id=?", [sourceID]) { try freezeContext(row["context_id"]!) }
     }

@@ -60,7 +60,7 @@ final class QuestionLifecycleTests: XCTestCase {
         let dbURL = root.appendingPathComponent("old22.sqlite")
         do { let db = try Database(dbURL); try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("ALTER TABLE claims DROP COLUMN content_kind"); try db.execute("PRAGMA user_version=22") }
         let upgraded = try Database(dbURL)
-        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "27")
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "28")
         XCTAssertTrue(try upgraded.query("PRAGMA table_info(claims)").contains(where: { $0["name"] == "content_kind" }))
     }
     func testAIQuestionCandidateStaysAIAndFakeQuoteFails() async throws {

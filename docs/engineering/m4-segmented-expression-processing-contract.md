@@ -1,6 +1,6 @@
 # 长录音分段执行契约（实施草案）
 
-日期：2026-10-12。状态：执行契约仍为工程草案；范围准备及[持久父批次基础](m4-segmented-processing-batch.md)已实现；[本地证据账本校验](m4-segmented-evidence.md)也已实现；模型端口、持久片段attempt和聚合提交未实现。基线为本地无损分段切片6ed452e。本文是下一实施切片的验收依据，不表示当前已支持分段云端处理。
+日期：2026-10-12。状态：执行契约仍为工程草案；范围准备及[持久父批次基础](m4-segmented-processing-batch.md)已实现；[本地证据账本校验](m4-segmented-evidence.md)也已实现；[通用片段端口及持久attempt暂存](m4-segment-extraction.md)已实现；真实云端驱动和聚合提交未实现。基线为本地无损分段切片6ed452e。本文是下一实施切片的验收依据，不表示当前已支持分段云端处理。
 
 ## 已实现的范围准备
 
@@ -88,11 +88,11 @@
 
 ## 存储、迁移及不变量
 
-已采用schema27的`segmented_processing_batches`基础；`segmented_processing_attempts`仍待实现。本文下列attempt/聚合字段和完整状态属于后续草案，并非当前数据库能力。batch记录固定计划/端口/命令指纹、阶段、聚合/关联回执；attempt记录父ID、类型segment/aggregation、segmentID（聚合为空）、输入/结果JSON与摘要、usage、producer sequence和状态/validity。唯一约束防止同一批次同段被并发预留；不使用来源ID单独去重片段。
+已采用schema28的`segmented_processing_batches`与独立`segmented_extraction_attempts`；具体片段字段/状态见[已实现契约](m4-segment-extraction.md)。本文下列聚合字段、完整父状态与阶段仍属于后续草案，并非当前数据库能力。batch记录固定计划/端口/命令指纹、阶段、聚合/关联回执；attempt记录父ID、类型segment/aggregation、segmentID（聚合为空）、输入/结果JSON与摘要、usage、producer sequence和状态/validity。唯一约束防止同一批次同段被并发预留；不使用来源ID单独去重片段。
 
 父历史快照验证应从历史逐字稿版本重建计划，当前可执行校验才比较当前版本/权限。否则来源更正后合法历史会被误判为数据库损坏。不能从当前来源权限倒推当时授权。
 
-恢复包要覆盖新表、父子外键、连续段范围、规范计划、quote和关联回执身份；同步篡改manifest的包仍须拒绝。迁移所有批次/暂存结果冻结，不自动派发，原件选择打包仍遵守现有规则。完整批次的行动沿现有迁移冻结规则处理。只有新增数据范围才增加包版本，旧包持续兼容；本草案不分配已实现版本号。
+恢复包要覆盖新表、父子外键、连续段范围、规范计划、quote和关联回执身份；同步篡改manifest的包仍须拒绝。迁移所有批次/暂存结果冻结，不自动派发，原件选择打包仍遵守现有规则。完整批次的行动沿现有迁移冻结规则处理。只有新增数据范围才增加包版本，旧包持续兼容；当前有片段尝试的包为v28，只有父批次的包为v27；其余新增聚合范围尚未分配版本号。
 
 ## 下一实现顺序与验收
 
