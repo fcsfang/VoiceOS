@@ -45,6 +45,25 @@ struct Check {
             if args[0] == "discussion-question-fixture" { try await runDiscussionQuestionFixture(store); return }
             if args[0] == "source-continuation-fixture" { try await runSourceContinuationFixture(store); return }
             if ["record-request-fixture", "record-request-resume-fixture"].contains(args[0]) { try await runRecordingRequestFixture(store, seed:args[0] == "record-request-fixture"); return }
+            if args[0] == "segmented-batch-enqueue-local" {
+                guard args.count >= 3 else { throw VoiceOSError("local batch enqueue requires explicit source ID") }
+                let config = ModelConfiguration(provider:"local_batch_inspection",model:"no-dispatch",promptVersion:"v1",schemaVersion:"v1",destination:.local)
+                let scope = try await store.prepareSegmentedExpressionProcessingScope(sourceID:args[2],extraction:config,aggregation:config)
+                _ = try await store.enqueueSegmentedProcessingBatch(scope,commandID:args.count > 3 ? args[3] : UUID().uuidString,extraction:config,aggregation:config)
+            }
+            if ["segmented-batch-fixture", "segmented-batch-cancel-fixture"].contains(args[0]) {
+                let config = ModelConfiguration(provider:"local_batch_fixture",model:"no-dispatch",promptVersion:"v1",schemaVersion:"v1",destination:.local)
+                let source = try await store.recordUserExpression(String(repeating:"合成原话。",count:20),commandID:"segmented-fixture-source")
+                let scope = try await store.prepareSegmentedExpressionProcessingScope(sourceID:source,extraction:config,aggregation:config,segmentScalarBudget:20)
+                let batch = try await store.enqueueSegmentedProcessingBatch(scope,commandID:"segmented-fixture-command",extraction:config,aggregation:config)
+                if args[0] == "segmented-batch-cancel-fixture" { _ = try await store.cancelSegmentedProcessingBatch(id:batch.id) }
+                else { _ = try await store.checkSegmentedProcessingBatch(id:batch.id,extraction:config,aggregation:config) }
+            }
+            if ["segmented-batch-read", "segmented-batch-fixture", "segmented-batch-cancel-fixture", "segmented-batch-enqueue-local"].contains(args[0]) {
+                let batches = try await store.segmentedProcessingBatches()
+                let output:[String:Any] = ["integrity":try await store.integrityCheck(),"batches":batches.map { ["id":$0.id,"state":$0.state.rawValue,"segment_count":$0.scope.plan.segments.count] },"model_count":try await store.modelAttempts().count,"queue_count":try await store.processingIntents().count,"action_count":try await store.actions().count]
+                print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)); return
+            }
             if args[0] == "segmented-scope-read" {
                 guard let source = try await store.sources().first(where: { args.count > 2 ? $0.id == args[2] : $0.transcript != nil }) else { throw VoiceOSError("scope requires current personal transcript") }
                 let config = ModelConfiguration(provider:"local_scope_inspection",model:"no-dispatch",promptVersion:"scope-v1",schemaVersion:"scope-v1",destination:.local)

@@ -1,6 +1,6 @@
 # 长录音分段执行契约（实施草案）
 
-日期：2026-10-12。状态：执行契约仍为工程草案；只读范围准备/校验已实现，队列、模型端口、数据表和新迁移版本未实现。基线为本地无损分段切片6ed452e。本文是下一实施切片的验收依据，不表示当前已支持分段云端处理。
+日期：2026-10-12。状态：执行契约仍为工程草案；范围准备及[持久父批次基础](m4-segmented-processing-batch.md)已实现；模型端口、片段attempt和聚合提交未实现。基线为本地无损分段切片6ed452e。本文是下一实施切片的验收依据，不表示当前已支持分段云端处理。
 
 ## 已实现的范围准备
 
@@ -88,7 +88,7 @@
 
 ## 存储、迁移及不变量
 
-建议新增`segmented_processing_batches`和`segmented_processing_attempts`，最终采用前需写schema迁移和恢复校验。batch记录固定计划/端口/命令指纹、阶段、聚合/关联回执；attempt记录父ID、类型segment/aggregation、segmentID（聚合为空）、输入/结果JSON与摘要、usage、producer sequence和状态/validity。唯一约束防止同一批次同段被并发预留；不使用来源ID单独去重片段。
+已采用schema27的`segmented_processing_batches`基础；`segmented_processing_attempts`仍待实现。本文下列attempt/聚合字段和完整状态属于后续草案，并非当前数据库能力。batch记录固定计划/端口/命令指纹、阶段、聚合/关联回执；attempt记录父ID、类型segment/aggregation、segmentID（聚合为空）、输入/结果JSON与摘要、usage、producer sequence和状态/validity。唯一约束防止同一批次同段被并发预留；不使用来源ID单独去重片段。
 
 父历史快照验证应从历史逐字稿版本重建计划，当前可执行校验才比较当前版本/权限。否则来源更正后合法历史会被误判为数据库损坏。不能从当前来源权限倒推当时授权。
 

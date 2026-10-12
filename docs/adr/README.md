@@ -49,3 +49,5 @@
 - [ADR024：转写前录音处理请求](024-recording-processing-request.md) — 已实现，复用原模型队列，明确录制选择可恢复、迁移冻结。
 
 - [ADR025：长逐字稿无损计划](025-transcript-segmentation.md) — 本地来源计划及原生预览已采用；父批次/片段模型执行仍待验证。
+
+- [ADR026：分段持久父批次](026-segmented-processing-batch.md) — schema27/包v27、入队取消和历史恢复已采用；模型执行仍待实施。

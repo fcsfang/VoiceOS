@@ -12,6 +12,8 @@
 最新切片见[长逐字稿本地分段](engineering/m4-transcript-segmentation.md)：383项回归通过，真实40分钟本人轨5280字符可无损分成2段并查看原片段引用。分段模型执行尚未接入，不能据此宣布长录音认知闭环完成。
 
 分段执行的[范围校验与下一实施契约](engineering/m4-segmented-expression-processing-contract.md)已补齐：388项回归通过，范围固定原话/权限/端口并拒绝漂移。持久批次和模型聚合仍待实现。
+
+最新进展见[分段持久父批次](engineering/m4-segmented-processing-batch.md)：397项回归、四个实际强退窗口及真实长来源v27恢复通过；只接入批次基础，不代表分段模型已执行。
 ## 当前文档
 
 | 文档 | 状态 | 用途 |
