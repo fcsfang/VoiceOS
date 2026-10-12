@@ -32,6 +32,7 @@ public struct SourceRecord: Identifiable, Sendable {
     public let error: String?
     public let relativePath: String
     public let transcriptVersionID: String?
+    public let transcriptionBackend: String?
     public let spans: [TranscriptSpan]
     public let localOnly: Bool
     public let policyVersion: Int

@@ -246,6 +246,10 @@ struct Check {
             } else if args[0] == "correction-fixture" {
                 guard let source = try await store.sources().first(where: { $0.transcript != nil }), let version = source.transcriptVersionID else { throw VoiceOSError("test fixture requires a transcript") }
                 _ = try await store.correctTranscript(sourceID: source.id, expectedVersionID: version, text: source.transcript! + "（开发故障验证注记）", commandID: "fixture-correction")
+            } else if args[0] == "transcribe-qwen" {
+                guard args.count==5 else { throw VoiceOSError("transcribe-qwen requires root, Python, runner, local model directory") }
+                let port=try LocalQwenSpeechPort(python:URL(fileURLWithPath:args[2]),runner:URL(fileURLWithPath:args[3]),model:URL(fileURLWithPath:args[4]))
+                try await store.processTranscriptions(using:port)
             } else if args[0] == "transcribe" { try await store.processTranscriptions(using: NativeSpeechPort()) }
             else if args[0] != "read" { throw VoiceOSError("unknown command") }
             let records = try await store.sources()

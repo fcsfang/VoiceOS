@@ -2,7 +2,7 @@
 
 更新日期：2026-10-12。
 
-当前新增工作为[本地转写模型替换评估](research/local-asr-comparison-2026-10-12.md)：以本人轨2对比 Apple、Whisper large-v3 与 Qwen3-ASR，不上传音频，候选尚未替换产品默认。真实长文字数字引用失败另以[ADR030](adr/030-local-quote-grounding.md)修复，相关21项检查通过；旧拒绝/未知批次不重发，完整自然闭环仍待验收。
+当前新增工作为[本地转写模型替换](research/local-asr-comparison-2026-10-12.md)：以本人轨2对比 Apple、Whisper large-v3 与 Qwen3-ASR，Qwen可选端口已接入且本次应用运行启用，原生选择/展示与独立库持久保存通过；启动默认仍Apple，无音频上传。116项选中检查与稳定签名通过，精确对齐/长录音未验收。真实长文字数字引用失败另以[ADR030](adr/030-local-quote-grounding.md)修复，相关21项检查通过；旧拒绝/未知批次不重发，完整自然闭环仍待验收。
 
 当前工作按[路线当前基线](planning/implementation-roadmap.md)收口M2→M3个人录音闭环。最新[录制长文字路由](engineering/m4-recording-segment-routing.md)为schema31/v31：录制前固定分段计划，长文字自动衔接认知与关联，取消/恢复与迁移保留身份；35项相关检查、2项关联取消及末次14项录制检查通过，原生独立库的处理禁用/本地保存/取消终态已核对。稳定开发签名与一次代码更新/重启后既有提醒事项回读通过，见[ADR029](adr/029-stable-development-signing.md)。自然语义、配置后真实长处理及完整案例A仍未验收，完整回归留阶段末。
 

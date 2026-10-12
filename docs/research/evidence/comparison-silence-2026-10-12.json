@@ -1,0 +1,51 @@
+{
+  "audio_sha256": "4e5af2ac8f092893d0e2256ea2db333e0085e7d8488f0d977caa6565cefb5459",
+  "audio_duration_seconds": 5.0,
+  "results": [
+    {
+      "backend": "Apple SpeechAnalyzer",
+      "elapsed_seconds": 0.28387606143951416,
+      "real_time_factor": 0.05677521228790283,
+      "text_scalars": 1,
+      "text_sha256": "b70bb4acc0484cf040de4c07c60f9db722283da2c4a672c39291de621e92c33f",
+      "has_alphanumeric_text": true,
+      "span_count": 1,
+      "all_time_ranges_in_audio": true,
+      "timestamp_precision": "recognizer segments",
+      "token_budget_exhausted": false,
+      "peak_process_rss_bytes": null,
+      "audio_uploaded": false
+    },
+    {
+      "backend": "mlx-audio/Qwen3-ASR-1.7B-8bit",
+      "elapsed_seconds": 2.3842959169996902,
+      "real_time_factor": 0.47685918339993805,
+      "text_scalars": 2,
+      "text_sha256": "5c7a9f97adb5bed9d4c6aca666dffd0e37fda970ebcfc2c8c0060523a483e295",
+      "has_alphanumeric_text": true,
+      "span_count": 1,
+      "all_time_ranges_in_audio": true,
+      "timestamp_precision": "audio chunk boundaries, not word alignment",
+      "token_budget_exhausted": false,
+      "peak_process_rss_bytes": 2698444800,
+      "audio_uploaded": false
+    },
+    {
+      "backend": "mlx-whisper",
+      "elapsed_seconds": 3.442374749982264,
+      "real_time_factor": 0.6884749499964528,
+      "text_scalars": 23,
+      "text_sha256": "f8aea53f45f5ee2d5be723939c20b25e7fc30b8cfca87933b4130a9a7933cac3",
+      "has_alphanumeric_text": true,
+      "span_count": 1,
+      "all_time_ranges_in_audio": false,
+      "timestamp_precision": "recognizer segments",
+      "token_budget_exhausted": false,
+      "peak_process_rss_bytes": 2894823424,
+      "audio_uploaded": false
+    }
+  ],
+  "human_reference_available": false,
+  "accuracy_scored": false,
+  "limitation": "Latency and valid time ranges do not establish verbatim fidelity."
+}

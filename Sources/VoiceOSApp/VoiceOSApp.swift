@@ -169,6 +169,23 @@ final class ControlCenter: ObservableObject {
     @Published var understandingSource: String?
     @Published var modelConfigured = false
     @Published var modelSummary = "尚未配置文本模型"
+    @Published var speechSummary = "Apple 本地转写"
+    private var speechPort: any SpeechPort = NativeSpeechPort()
+    func chooseLocalSpeech() {
+        guard worker == nil,!dictationActive else { status="请等待当前处理结束后切换转写器";return }
+        let panel=NSOpenPanel();panel.title="选择本地 Qwen 转写配置";panel.allowsMultipleSelection=false;panel.canChooseDirectories=false
+        guard panel.runModal() == .OK,let url=panel.url else { return }
+        do {
+            let port=try LocalQwenSpeechPort.load(from:url)
+            speechPort=port;speechSummary="Qwen 本地转写 · 最多30秒定位范围"
+            status="后续待转写音频使用本地 Qwen；已有逐字稿保持原版本"
+        } catch { status="无法启用本地 Qwen，请核对配置与模型；保留当前转写器" }
+    }
+    func useAppleSpeech() {
+        guard worker == nil,!dictationActive else { status="请等待当前处理结束后切换转写器";return }
+        speechPort=NativeSpeechPort();speechSummary="Apple 本地转写"
+        status="后续待转写音频使用 Apple 本地转写"
+    }
     @Published var attempts: [String: [ModelAttemptRecord]] = [:]
     @Published var processingIntents: [ExpressionProcessingIntentRecord] = []
     @Published var recordingRequests: [RecordingProcessingRequest] = []
@@ -582,7 +599,8 @@ final class ControlCenter: ObservableObject {
             }
         }
         defer { refreshTask.cancel() }
-        do { try await store.processTranscriptions(using: NativeSpeechPort()) }
+        let selectedSpeech = speechPort
+        do { try await store.processTranscriptions(using: selectedSpeech) }
         catch { status = error.localizedDescription }
         if let cognition = textModel, let association = associationModel {
             do { try await store.reconcileRecordingProcessingRequests(cognition: cognition.configuration, association: association.configuration,segmentExtraction:segmentExtractionModel?.configuration,segmentAggregation:segmentAggregationModel?.configuration) }
@@ -1068,6 +1086,13 @@ struct CenterView: View {
                                 if model.understandingSource == record.id { ProgressView().controlSize(.small) }
                                 Button("配置文本模型…") { model.chooseTextModel() }.disabled(model.understandingSource != nil || model.discussionExtracting)
                             }
+                            HStack {
+                                Menu("本地转写器") {
+                                    Button("启用本地 Qwen…") { model.chooseLocalSpeech() }
+                                    Button("使用 Apple 本地转写") { model.useAppleSpeech() }
+                                }
+                                Text(model.speechSummary).font(.caption).foregroundStyle(.secondary)
+                            }
                             Text(model.modelSummary).font(.caption).foregroundStyle(.secondary)
                             ForEach(model.segmentedBatches.filter { $0.scope.plan.source.sourceID == record.id }) { batch in
                                 HStack {
@@ -1136,7 +1161,7 @@ struct CenterView: View {
                             else if transcript.unicodeScalars.count > 4000 {
                                 DisclosureGroup("完整逐字稿（\(transcript.unicodeScalars.count) 字符）") { Text(transcript).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
                             } else { Text(transcript).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
-                            Text(record.kind == "user_text" ? "用户原文 · 无媒体时间定位" : record.spans.contains(where: { $0.startMS != nil }) ? "Apple 本地转写 · 中文 · 识别时间定位待核对" : "中文逐字稿 · 时间定位未确认").font(.caption).foregroundStyle(.secondary)
+                            Text(record.kind == "user_text" ? "用户原文 · 无媒体时间定位" : record.transcriptionBackend?.hasPrefix("Qwen3-ASR") == true ? "Qwen 本地转写 · 最多30秒音频范围，非词级定位" : record.spans.contains(where: { $0.startMS != nil }) ? "Apple 本地转写 · 中文 · 识别时间定位待核对" : "中文逐字稿 · 时间定位未确认").font(.caption).foregroundStyle(.secondary)
                             if !record.spans.isEmpty {
                                 DisclosureGroup("来源片段") {
                                     ForEach(record.spans) { span in

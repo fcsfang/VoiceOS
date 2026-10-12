@@ -154,12 +154,12 @@ public actor VoiceOSStore {
     }
     public func sources() throws -> [SourceRecord] {
         try db.query("""
-        SELECT s.*,j.state AS job_state,j.error AS job_error,v.text AS transcript,t.current_version_id AS transcript_version_id,v.spans_json
+        SELECT s.*,j.state AS job_state,j.error AS job_error,v.text AS transcript,t.current_version_id AS transcript_version_id,t.backend AS transcription_backend,v.spans_json
         FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
         LEFT JOIN transcripts t ON t.job_id=j.id LEFT JOIN transcript_versions v ON v.id=t.current_version_id ORDER BY s.created_at DESC,s.id
         """).map { row in
             let feedback = try Self.feedbackIntent(row["feedback_json"])
-            return SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!, transcriptVersionID: row["transcript_version_id"], spans: try row["spans_json"].map { try JSONDecoder().decode([TranscriptSpan].self, from: Data($0.utf8)) } ?? [], localOnly: row["local_only"] != "0", policyVersion: Int(row["policy_version"]!)!, origin: row["origin"]!, speaker: row["speaker"]!, feedbackActionID: feedback?.actionID, feedbackActionVersion: feedback?.actionVersion, feedbackKind: feedback?.kind.rawValue)
+            return SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!, transcriptVersionID: row["transcript_version_id"], transcriptionBackend: row["transcription_backend"], spans: try row["spans_json"].map { try JSONDecoder().decode([TranscriptSpan].self, from: Data($0.utf8)) } ?? [], localOnly: row["local_only"] != "0", policyVersion: Int(row["policy_version"]!)!, origin: row["origin"]!, speaker: row["speaker"]!, feedbackActionID: feedback?.actionID, feedbackActionVersion: feedback?.actionVersion, feedbackKind: feedback?.kind.rawValue)
         }
     }
     public func playableURL(sourceID: String) throws -> URL {

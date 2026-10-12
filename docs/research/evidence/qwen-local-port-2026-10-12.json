@@ -1,0 +1,25 @@
+{
+  "candidate": "Qwen3-ASR-1.7B-8bit",
+  "model_revision": "a8379a2e2f9e313c9292cdf1af4055ab56d50d55",
+  "model_weights_sha256": "bf304b009cc7eca79283056f787b44c952d24ac22cec787b39732bba3c23c13c",
+  "runtime": "mlx-audio 0.5.8",
+  "policy": "chunk30-v1, exact digital silence skipped, no hotwords",
+  "schema": 31,
+  "audio_uploaded": false,
+  "cloud_text_calls": 0,
+  "external_task_writes": 0,
+  "native_config_selection_verified": true,
+  "native_new_input_execution_verified": false,
+  "daily_library_restored": true,
+  "daily_existing_transcript_overwritten": false,
+  "application_current_session_backend": "Qwen candidate",
+  "selection_persisted_across_restart": false,
+  "precision": "actual audio chunks up to 30 seconds, not aligned words",
+  "full_case_A_complete": false,
+  "isolated_library_integrity": "ok",
+  "isolated_transcript_scalars": [
+    199,
+    0
+  ],
+  "cognition_attempts": 0
+}
