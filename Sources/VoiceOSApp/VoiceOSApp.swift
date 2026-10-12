@@ -414,7 +414,10 @@ final class ControlCenter: ObservableObject {
     }
     private func configureTextModel(_ file: URL) {
         do {
-            let suite=try LocalTextModel.loadSuite(from:file),port=suite.cognition
+            // Long segmented cognition uses the explicitly validated SSE
+            // transport and 600-second window. Its versioned identity prevents
+            // queued non-streaming attempts from being silently replayed.
+            let suite=try LocalTextModel.loadSuite(from:file,segmentRequestTimeout:600,segmentStreaming:true),port=suite.cognition
             discussionModel=suite.discussion;outcomeModel=suite.outcome
             englishModel=suite.english;associationModel=suite.association
             relevance.cancel();relevanceModel=suite.relevance
