@@ -310,3 +310,87 @@ extension SegmentExtractionTests {
         }
     }
 }
+
+private struct FinalExtractionFixture: SegmentExtractionPort {
+    let configuration: ModelConfiguration
+    func extract(_ r: SegmentExtractionRequest) async throws -> SegmentExtractionResponse {
+        guard r.segment.ordinal == 1 else { return .init(proposals:[]) }
+        let quote=String(r.segment.text.prefix(8)), end=r.segment.textStart+quote.unicodeScalars.count
+        return .init(proposals:[.init(kind:.possibleAction,statement:"合成潜在行动",quote:quote,textStart:r.segment.textStart,textEnd:end,spanIDs:r.segment.references.filter { $0.textStart<end }.map(\.spanID))])
+    }
+}
+private struct FinalAggregationFixture: SegmentAggregationPort {
+    let configuration: ModelConfiguration
+    let invalid: Bool
+    init(_ c: ModelConfiguration, invalid: Bool = false) { configuration=c; self.invalid=invalid }
+    func aggregate(_ r: SegmentAggregationRequest) async throws -> SegmentAggregationResponse {
+        let e=r.ledger.evidence.first!, action=ExtractedAction(title:"合成任务",kind:.task,quote:e.proposal.quote)
+        let review=SegmentAggregationReview(batchID:r.batchID,ledgerDigest:r.ledger.contentDigest,reviewedEvidenceIDs:r.ledger.evidence.map(\.id),
+            actionDecisions:[.init(evidenceID:e.id,disposition:invalid ? .reject:.accept,supportingEvidenceIDs:[e.id],explanation:"合成整篇判断")])
+        return .init(review:review,finalClaims:[.init(statement:"合成认知",evidenceIDs:[e.id],actionEvidenceID:e.id,action:action)],inputTokens:20,outputTokens:5)
+    }
+}
+extension SegmentExtractionTests {
+    func seedFinal(_ s: VoiceOSStore) async throws -> SegmentedProcessingBatch {
+        let id=try await s.recordUserExpression("合成原话内容。")
+        let original=try await s.transcriptHistory(sourceID:id)[0].id
+        _ = try await s.correctTranscript(sourceID:id,expectedVersionID:original,text:String(repeating:"合成原话内容。",count:700)) // >4000, synthetic corrected transcript
+        let scope=try await s.prepareSegmentedExpressionProcessingScope(sourceID:id,extraction:config(),aggregation:config(),segmentScalarBudget:2000)
+        let batch=try await s.enqueueSegmentedProcessingBatch(scope,extraction:config(),aggregation:config())
+        for _ in scope.plan.segments { _ = try await s.runNextSegmentExtraction(batchID:batch.id,using:FinalExtractionFixture(configuration:config())) }
+        return batch
+    }
+    func testFinalCognitionCommitsLongSourceOnceAndFreezesMigration() async throws {
+        let s=try await store(), b=try await seedFinal(s)
+        do { _ = try await s.prepareLocalTranscriptContext(sourceIDs:[b.scope.plan.source.sourceID]); XCTFail("旧4000字入口应仍拒绝") } catch {}
+        _ = try await s.runSegmentAggregation(batchID:b.id,using:FinalAggregationFixture(config()))
+        let ids=try await s.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config())
+        let again=try await s.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config()); XCTAssertEqual(ids,again)
+        let claims=try await s.candidateClaims(), actions=try await s.actions(), models=try await s.modelAttempts()
+        XCTAssertEqual(claims.count,1); XCTAssertEqual(actions.count,1); XCTAssertEqual(models.count,1)
+        XCTAssertEqual(models[0].executionKind,"segmented_derivation"); XCTAssertEqual(models[0].billingState,"not_applicable")
+        XCTAssertEqual(claims[0].references[0].transcriptVersionID,b.scope.plan.source.transcriptVersionID)
+        let package=base.appendingPathComponent("final-package"), restoredRoot=base.appendingPathComponent("final-restored")
+        try await s.exportPackage(to:package)
+        let summary=try VoiceOSStore.packageSummary(at:package); XCTAssertEqual(summary.version,30)
+        try await VoiceOSStore.restorePackage(from:package,to:restoredRoot,inspector:ExtractionInspector())
+        let restored=try VoiceOSStore(root:restoredRoot,inspector:ExtractionInspector()); try await restored.recover()
+        let frozenClaims=try await restored.candidateClaims(includeFrozen:true), current=try await restored.candidateClaims()
+        XCTAssertEqual(frozenClaims.count,1); XCTAssertTrue(current.isEmpty)
+        let replay=try await restored.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config()); XCTAssertEqual(replay,ids)
+        let stillFrozen=try await restored.candidateClaims(); XCTAssertTrue(stillFrozen.isEmpty)
+    }
+    func testRejectedActionCannotBecomeFinalTaskAndCancelledResultCannotCommit() async throws {
+        let s=try await store(), b=try await seedFinal(s)
+        let rejected=try await s.runSegmentAggregation(batchID:b.id,using:FinalAggregationFixture(config(),invalid:true)); XCTAssertEqual(rejected?.state,.rejected)
+        do { _ = try await s.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config()); XCTFail() } catch {}
+        let actions=try await s.actions(); XCTAssertTrue(actions.isEmpty)
+        let s2=try await store("cancelled-final"), b2=try await seedFinal(s2)
+        _ = try await s2.runSegmentAggregation(batchID:b2.id,using:FinalAggregationFixture(config()))
+        _ = try await s2.cancelSegmentedProcessingBatch(id:b2.id)
+        do { _ = try await s2.commitSegmentedCognition(batchID:b2.id,extraction:config(),aggregation:config()); XCTFail() } catch {}
+        let claims=try await s2.candidateClaims(); XCTAssertTrue(claims.isEmpty)
+    }
+    func testFinalCommitRollbackCanResumeWithoutAnotherModelRequest() async throws {
+        var batchID="", aggregateID=""
+        do {
+            let s=try await store(checkpoint:{ if $0 == .claimsUncommitted { throw VoiceOSError("synthetic crash before complete transaction") } }), b=try await seedFinal(s)
+            batchID=b.id
+            let a=try await s.runSegmentAggregation(batchID:b.id,using:FinalAggregationFixture(config())); aggregateID=a!.id
+            do { _ = try await s.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config()); XCTFail() } catch {}
+            let claims=try await s.candidateClaims(), models=try await s.modelAttempts(); XCTAssertTrue(claims.isEmpty); XCTAssertTrue(models.isEmpty)
+        }
+        let reopened=try await store()
+        let ids=try await reopened.commitSegmentedCognition(batchID:batchID,extraction:config(),aggregation:config()); XCTAssertEqual(ids.count,1)
+        let a=try await reopened.segmentAggregationAttempt(batchID:batchID); XCTAssertEqual(a?.id,aggregateID)
+    }
+    func testSourceCorrectionFreezesCommittedLongSourceWithoutRegeneration() async throws {
+        let s=try await store(), b=try await seedFinal(s)
+        _ = try await s.runSegmentAggregation(batchID:b.id,using:FinalAggregationFixture(config()))
+        let ids=try await s.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config())
+        _ = try await s.correctTranscript(sourceID:b.scope.plan.source.sourceID,expectedVersionID:b.scope.plan.source.transcriptVersionID,text:"改稿，不再保留旧行动。")
+        let current=try await s.candidateClaims(); XCTAssertTrue(current.isEmpty)
+        let again=try await s.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config()); XCTAssertEqual(again,ids)
+        let actions=try await s.actions(); XCTAssertTrue(actions.isEmpty)
+    }
+}

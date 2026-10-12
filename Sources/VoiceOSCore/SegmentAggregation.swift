@@ -17,10 +17,11 @@ public struct SegmentAggregationRequest: Codable, Sendable {
 public struct SegmentAggregationResponse: Codable, Sendable {
     public let status: SegmentExtractionResponse.Status
     public let review: SegmentAggregationReview
+    public let finalClaims: [SegmentFinalClaim]?
     public let inputTokens: Int?
     public let outputTokens: Int?
-    public init(status: SegmentExtractionResponse.Status = .completed, review: SegmentAggregationReview, inputTokens: Int? = nil, outputTokens: Int? = nil) {
-        self.status = status; self.review = review; self.inputTokens = inputTokens; self.outputTokens = outputTokens
+    public init(status: SegmentExtractionResponse.Status = .completed, review: SegmentAggregationReview, finalClaims: [SegmentFinalClaim]? = nil, inputTokens: Int? = nil, outputTokens: Int? = nil) {
+        self.status = status; self.review = review; self.finalClaims = finalClaims; self.inputTokens = inputTokens; self.outputTokens = outputTokens
     }
 }
 /// Exactly one text-only aggregation request. No implicit retry or action tools.
@@ -96,6 +97,7 @@ extension VoiceOSStore {
             do {
                 guard response.status == .completed, (response.inputTokens ?? 0)>=0, (response.outputTokens ?? 0)>=0 else { throw VoiceOSError("聚合响应不完整、拒绝或用量无效") }
                 _ = try Self.validateSegmentAggregationReview(response.review,ledger:request.ledger)
+                if response.finalClaims != nil { _ = try Self.segmentFinalProposals(response,batch:batch,ledger:request.ledger) }
             } catch { state = .rejected; reason=error.localizedDescription }
             let current=try segmentedProcessingBatch(id:batchID)
             if current.state != .queued { validity="frozen" }
@@ -155,6 +157,7 @@ extension VoiceOSStore {
                 if a.state == .completed {
                     guard response.status == .completed,(response.inputTokens ?? 0)>=0,(response.outputTokens ?? 0)>=0 else { throw VoiceOSError("聚合完成状态无效") }
                     _ = try validateSegmentAggregationReview(response.review,ledger:a.request.ledger)
+                    if response.finalClaims != nil { _ = try segmentFinalProposals(response,batch:segmentedBatchRecord(parent),ledger:a.request.ledger) }
                 }
             } else { guard a.state != .completed,row["result_digest"] == nil else { throw VoiceOSError("聚合缺少完整结果") } }
         }

@@ -172,6 +172,10 @@ final class ControlCenter: ObservableObject {
     @Published var recordingRequests: [RecordingProcessingRequest] = []
     @Published var segmentationPlan: TranscriptSegmentationPlan?
     @Published var segmentationStatus = ""
+    @Published var segmentedBatches: [SegmentedProcessingBatch] = []
+    @Published var segmentedCognitiveCounts: [String:Int] = [:]
+    private var segmentExtractionModel: ResponsesSegmentExtractionPort?
+    private var segmentAggregationModel: ResponsesSegmentAggregationPort?
     private var textModel: ResponsesModelPort?
     private var englishModel: ResponsesEnglishPracticePort?
     @Published var englishSnapshot: EnglishPracticeSnapshot?
@@ -338,6 +342,10 @@ final class ControlCenter: ObservableObject {
                 englishAttempts = try await store.englishFeedbackAttempts()
                 processingIntents = try await store.processingIntents()
                 recordingRequests = try await store.recordingProcessingRequests()
+                segmentedBatches = try await store.segmentedProcessingBatches()
+                var cognitiveCounts: [String:Int]=[:]
+                for batch in segmentedBatches { if let ids=try await store.segmentedCognitiveClaimIDs(batchID:batch.id) { cognitiveCounts[batch.id]=ids.count } }
+                segmentedCognitiveCounts=cognitiveCounts
             }
         }
         catch { status = error.localizedDescription }
@@ -356,6 +364,7 @@ final class ControlCenter: ObservableObject {
             discussionModel=suite.discussion;outcomeModel=suite.outcome
             englishModel=suite.english;associationModel=suite.association
             relevance.cancel();relevanceModel=suite.relevance
+            segmentExtractionModel=suite.segmentExtraction;segmentAggregationModel=suite.segmentAggregation
             textModel = port; modelConfigured = true
             modelSummary = "gpt-6.1-sol · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
             status = "文本模型已就绪 · 只处理你选择并授权的文字"
@@ -406,6 +415,40 @@ final class ControlCenter: ObservableObject {
             } catch { status = error.localizedDescription }
             await refresh(); requestReminderRefresh()
             understandingSource = nil; understandingWorker = nil
+        }
+    }
+    func understandSegmented(_ record: SourceRecord) {
+        guard let store,let extraction=segmentExtractionModel,let aggregation=segmentAggregationModel,
+              understandingWorker == nil,!discussionExtracting,!record.localOnly,
+              record.origin == "user",record.speaker == "user",["audio","user_text"].contains(record.kind),
+              (record.transcript ?? "").unicodeScalars.count>4000 else { return }
+        understandingSource=record.id;status="正在分段理解文字 · 原始音视频仍在本机"
+        understandingWorker=Task {
+            do {
+                // Model reconfiguration alone cannot regenerate this expression.
+                let batches=try await store.segmentedProcessingBatches()
+                let prior=batches.first { $0.scope.plan.source.sourceID == record.id && $0.scope.plan.source.transcriptVersionID == record.transcriptVersionID && $0.scope.plan.policyVersion == record.policyVersion }
+                let batch: SegmentedProcessingBatch
+                if let prior { batch=prior }
+                else {
+                    let scope=try await store.prepareSegmentedExpressionProcessingScope(sourceID:record.id,extraction:extraction.configuration,aggregation:aggregation.configuration)
+                    batch=try await store.enqueueSegmentedProcessingBatch(scope,commandID:"segmented-understand:"+record.id+":"+scope.contentDigest,extraction:extraction.configuration,aggregation:aggregation.configuration)
+                }
+                segmentedBatches=try await store.segmentedProcessingBatches()
+                let result=try await store.processSegmentedCognition(batchID:batch.id,extraction:extraction,aggregation:aggregation)
+                if let ids=result.claimIDs { status="长表达认知已保存 · \(ids.count) 条候选；历史关联尚未接入" }
+                else { status="分段处理记录：\(result.state.rawValue) · 未重复发送未知或已结束的请求" }
+            } catch { status=error.localizedDescription }
+            await refresh();requestReminderRefresh()
+            understandingSource=nil;understandingWorker=nil
+        }
+    }
+    func cancelSegmented(_ id: String) {
+        guard let store else { return }
+        Task {
+            do { _ = try await store.cancelSegmentedProcessingBatch(id:id);status="已停止分段处理 · 原文与处理历史保留" }
+            catch { status=error.localizedDescription }
+            await refresh()
         }
     }
     private func applyUnderstandingContinuation(_ result: SourceUnderstandingContinuation, sourceID: String) async {
@@ -874,7 +917,18 @@ struct CenterView: View {
     @State private var showingEnglishPractice = false
     @Environment(\.openWindow) private var openWindow
     private var activeProcessingCount: Int {
-        model.processingIntents.filter { [.queued, .running].contains($0.state) }.count + model.recordingRequests.filter { $0.state == "waiting" }.count
+        model.processingIntents.filter { [.queued, .running].contains($0.state) }.count + model.recordingRequests.filter { $0.state == "waiting" }.count + model.segmentedBatches.filter { $0.state == .queued && model.segmentedCognitiveCounts[$0.id] == nil }.count
+    }
+    private func segmentedState(_ batch: SegmentedProcessingBatch) -> String {
+        if let count=model.segmentedCognitiveCounts[batch.id] { return "认知记录已保存（\(count)条） · 历史关联待接入 · \(batch.state == .frozen ? "迁移冻结" : batch.state == .blocked ? "来源已变化" : "保留原处理身份")" }
+        switch batch.state {
+        case .queued: return model.understandingSource == batch.scope.plan.source.sourceID ? "正在分段处理" : "等待继续分段处理"
+        case .blocked: return "处理已阻塞"
+        case .cancelled: return "已停止后续处理"
+        case .frozen: return "迁移后冻结"
+        case .unknown: return "请求结果未知，不自动重发"
+        case .rejected: return "响应未接纳"
+        }
     }
     private func recordingRequestState(_ state: String) -> String {
         switch state {
@@ -955,10 +1009,22 @@ struct CenterView: View {
                             HStack {
                                 Button(model.understandingSource == record.id ? "正在理解…" : record.origin == "user" ? "理解并关联历史" : "理解这份文字", systemImage: "sparkles") { model.understand(record) }
                                     .disabled(!model.modelConfigured || record.localOnly || (record.transcript ?? "").isEmpty || (record.transcript ?? "").unicodeScalars.count > 4000 || model.understandingSource != nil || model.discussionExtracting)
+                                if (record.transcript ?? "").unicodeScalars.count>4000,record.origin == "user",record.speaker == "user",["audio","user_text"].contains(record.kind) {
+                                    Button("分段理解长表达",systemImage:"sparkles") { model.understandSegmented(record) }
+                                        .disabled(!model.modelConfigured || record.localOnly || model.understandingSource != nil || model.discussionExtracting)
+                                }
                                 if model.understandingSource == record.id { ProgressView().controlSize(.small) }
                                 Button("配置文本模型…") { model.chooseTextModel() }.disabled(model.understandingSource != nil || model.discussionExtracting)
                             }
                             Text(model.modelSummary).font(.caption).foregroundStyle(.secondary)
+                            ForEach(model.segmentedBatches.filter { $0.scope.plan.source.sourceID == record.id }) { batch in
+                                HStack {
+                                    Text("\(segmentedState(batch)) · \(batch.scope.plan.segments.count) 段").font(.caption)
+                                    if batch.state == .queued && model.segmentedCognitiveCounts[batch.id] == nil { Button("停止后续处理") { model.cancelSegmented(batch.id) }.font(.caption) }
+                                }
+                                if let error=batch.error { Text(error).font(.caption).foregroundStyle(.secondary) }
+                            }
+
                             if record.localOnly { Text("允许这份资料的文本用于云端后，可以理解文字。").font(.caption).foregroundStyle(.secondary) }
                             if let attempts = model.attempts[record.id], !attempts.isEmpty {
                                 DisclosureGroup("理解与候选整理记录（\(attempts.count)）") {
@@ -1012,7 +1078,7 @@ struct CenterView: View {
                         }
                         if let transcript = record.transcript {
                             Text("本次文字 \(transcript.unicodeScalars.count) 字符 · 单次处理上限 4000 字符").font(.caption).foregroundStyle(.secondary)
-                            if transcript.unicodeScalars.count > 4000 { Text("超出单次处理范围；原话完整保留，可先查看本地分段。分段模型执行尚未接入。").font(.caption).foregroundStyle(.orange) }
+                            if transcript.unicodeScalars.count > 4000 { Text("超出单次处理范围；原话完整保留。本人录音可使用分段理解，历史关联尚未接入。").font(.caption).foregroundStyle(.orange) }
                             if !model.segmentationStatus.isEmpty { Text(model.segmentationStatus).font(.caption).foregroundStyle(.orange) }
                             if transcript.isEmpty { Text("本次转写没有返回文字。可以播放原件核对；这不代表音轨没有人声。").foregroundStyle(.secondary) }
                             else if transcript.unicodeScalars.count > 4000 {
@@ -1125,7 +1191,7 @@ struct CenterView: View {
         }
         .toolbar {
             Menu {
-                if model.processingIntents.isEmpty && model.recordingRequests.isEmpty {
+                if model.processingIntents.isEmpty && model.recordingRequests.isEmpty && model.segmentedBatches.isEmpty {
                     Text("暂无表达处理记录")
                 } else {
                     ForEach(model.recordingRequests) { request in
@@ -1134,6 +1200,14 @@ struct CenterView: View {
                         if request.state == "waiting" {
                             Text("等待封存和本地转写；未发起模型请求")
                             Button("取消文字处理（保留录音）") { Task { await model.cancelRecordingRequest(request) } }
+                        }
+                        Divider()
+                    }
+                    ForEach(model.segmentedBatches) { batch in
+                        Text("\(segmentedState(batch)) · \(model.records.first(where: { $0.id == batch.scope.plan.source.sourceID })?.name ?? batch.scope.plan.source.sourceID)")
+                        if let error=batch.error { Text(error) }
+                        if batch.state == .queued && model.segmentedCognitiveCounts[batch.id] == nil {
+                            Button("停止这次分段处理") { model.cancelSegmented(batch.id) }
                         }
                         Divider()
                     }

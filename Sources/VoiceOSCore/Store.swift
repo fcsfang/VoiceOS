@@ -86,6 +86,7 @@ public actor VoiceOSStore {
         try Self.validateStoredSegmentedProcessingBatches(db)
         try recoverSegmentExtractionAttempts()
         try recoverSegmentAggregationAttempts()
+        try Self.validateStoredSegmentCognitiveCommits(db)
         try recoverSegmentedProcessingBatches()
         try recoverExpressionProcessingIntents()
         ready = true

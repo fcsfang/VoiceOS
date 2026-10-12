@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -587,6 +587,34 @@ final class Database {
                 """)
                 try execute("PRAGMA user_version=29")
             }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "29" {
+            guard let original=try query("SELECT sql FROM sqlite_master WHERE name='model_attempts'").first?["sql"] else { throw VoiceOSError("缺少模型记录表") }
+            let revised=original.replacingOccurrences(of:"^CREATE TABLE (?:\"model_attempts\"|model_attempts)",with:"CREATE TABLE model_attempts_next",options:.regularExpression)
+                .replacingOccurrences(of:"'model_request','discussion_derivation')",with:"'model_request','discussion_derivation','segmented_derivation')")
+            let indexes=try query("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='model_attempts' AND sql IS NOT NULL").compactMap { $0["sql"] }
+            try execute("PRAGMA foreign_keys=OFF")
+            do {
+                try transaction {
+                    try execute(revised)
+                    try execute("INSERT INTO model_attempts_next SELECT * FROM model_attempts")
+                    try execute("DROP TABLE model_attempts")
+                    try execute("ALTER TABLE model_attempts_next RENAME TO model_attempts")
+                    for sql in indexes { try execute(sql) }
+                    try execute("""
+                    CREATE TABLE IF NOT EXISTS segmented_cognitive_commits (
+                      id TEXT PRIMARY KEY REFERENCES segmented_aggregation_attempts(id),
+                      batch_id TEXT NOT NULL UNIQUE REFERENCES segmented_processing_batches(id),
+                      model_attempt_id TEXT NOT NULL UNIQUE REFERENCES model_attempts(id),
+                      proposals_json TEXT NOT NULL, proposals_digest TEXT NOT NULL, created_at TEXT NOT NULL
+                    )
+                    """)
+                    guard try query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("聚合认知升级引用校验失败") }
+                    try execute("PRAGMA user_version=30")
+                }
+            } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
+            try execute("PRAGMA foreign_keys=ON")
         }
 
     }

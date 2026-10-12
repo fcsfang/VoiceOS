@@ -53,3 +53,5 @@
 - [ADR026：分段持久父批次](026-segmented-processing-batch.md) — schema27/包v27、入队取消和历史恢复已采用；模型执行仍待实施。
 
 - [ADR027：持久片段提取](027-durable-segment-extraction.md) — schema28/包v28、独立预留暂存及全局顺序已采用；真实云端与整篇聚合仍待实施。
+
+- [ADR028：整篇认知本地派生](028-segmented-cognitive-projection.md) — schema30复用认知实体事务，付费回执与派生身份分开；真实接口及完整长关联待验收。
