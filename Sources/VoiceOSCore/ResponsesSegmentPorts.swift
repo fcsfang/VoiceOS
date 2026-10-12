@@ -100,7 +100,7 @@ public struct ResponsesSegmentAggregationPort: SegmentAggregationPort {
         guard !compactInput || expandedEvidenceBudget else { throw VoiceOSError("精简聚合请求需使用完整扩展证据预算") }
         client=try .init(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport,deadline:requestTimeout,streaming:streaming)
         self.compactInput=compactInput
-        evidenceLimit=expandedEvidenceBudget ? 32000:4000
+        evidenceLimit=expandedEvidenceBudget ? (streaming ? 64000:32000):4000
         configuration=client.config(compactInput ? "segment-aggregation-v3" : expandedEvidenceBudget ? "segment-aggregation-v2":"segment-aggregation-v1")
     }
     public func aggregate(_ request: SegmentAggregationRequest) async throws -> SegmentAggregationResponse {
