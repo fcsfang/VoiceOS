@@ -44,6 +44,9 @@ extension VoiceOSStore {
             throw VoiceOSError("只能把有效的明确任务发送到所选清单")
         }
         guard try reminderSourceAllowed(action) else { throw VoiceOSError("行动依据含仅本地资料，不能写入提醒事项") }
+        if expectedAccessVersion != nil {
+            guard try reminderCognitionIsLatest(action) else { throw VoiceOSError("行动认知批次已更新，停止历史任务外写") }
+        }
         let id = UUID().uuidString; let marker = "voiceos-action:" + id
         try db.execute("INSERT INTO reminder_links(id,action_id,action_version,calendar_id,marker,desired_title,state,created_at) VALUES(?,?,?,?,?,?,'reserved',?)", [id,actionID,String(expectedVersion),calendarID,marker,action.title,ISO8601DateFormatter().string(from: Date())])
         activeReminderLinks.insert(id); defer { activeReminderLinks.remove(id) }
@@ -55,6 +58,9 @@ extension VoiceOSStore {
             try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
             guard found.isEmpty else { throw VoiceOSError("操作标记已有匹配，停止新建并请回读") }
             guard let current = try actions().first(where: { $0.id == actionID }), current.version == expectedVersion, try reminderSourceAllowed(current) else { throw VoiceOSError("发送前行动或依据已变化") }
+            if expectedAccessVersion != nil {
+                guard try reminderCognitionIsLatest(current) else { throw VoiceOSError("发送前认知批次已更新，停止历史任务外写") }
+            }
             try await port.create(calendarID: calendarID, title: action.title, marker: marker)
             try checkpoint(.reminderSaved)
             // Save return is not readback evidence. Record ambiguity before the next await.
@@ -79,6 +85,15 @@ extension VoiceOSStore {
         return try claim.references.allSatisfy { ref in
             try db.query("SELECT local_only FROM sources WHERE id=?", [ref.sourceID]).first?["local_only"] == "0"
         }
+    }
+    /// A source may be reprocessed while the connector's preflight is awaiting.
+    /// Only new writes use this barrier; existing links still reconcile history.
+    func reminderCognitionIsLatest(_ action: ActionRecord) throws -> Bool {
+        guard let claim = try candidateClaims().first(where: { $0.id == action.claimID }), !claim.references.isEmpty else { return false }
+        for sourceID in Set(claim.references.map(\.sourceID)) {
+            guard try latestCandidateClaims(for: sourceID).contains(where: { $0.id == claim.id }) else { return false }
+        }
+        return true
     }
     public func readReminder(linkID: String, calendarID: String, using port: any RemindersPort, expectedAccessVersion: Int? = nil) async throws {
         try Task.checkCancellation()
