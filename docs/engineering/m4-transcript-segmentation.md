@@ -40,3 +40,5 @@ codesign --verify --deep --strict --verbose=2 dist/VoiceOS.app
 现有认知回执按整份来源/逐字稿绑定和复用，不能把小段冒充完整ContextTranscript或放宽旧校验。下一切片须定义父批次及片段身份、原全局范围映射、冻结传播和聚合门槛。后段可能否定前段的任务承诺，因此各段理解后不能立即外写任务；先完成整个批次语义合并与去重，再释放行动。任一段unknown不能自动重发，也不能把不完整批次当完整结论执行。
 
 本轮未改变产品愿景、未授予新增云端权限、未执行自然行动反馈验收。技术选择见[ADR025](../adr/025-transcript-segmentation.md)。
+
+下一实施切片的字段、状态机、事务与验收矩阵见[分段执行契约草案](m4-segmented-expression-processing-contract.md)。
