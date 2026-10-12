@@ -18,7 +18,7 @@ ExpressionProcessingIntentSnapshot固定完整当前文字/来源版本/逐字�
 
 持久表 `processing_intents` 使用 schema25 / PortablePackage v24。每项固定 command、来源和逐字稿版本、权限版本、完整快照摘要、两个端口身份、阶段及既有 cognition/association attempt ID。状态为 queued/running/completed/unknown/blocked/cancelled/frozen/rejected；状态和阶段落盘后才向控制中心报告排队。
 
-执行器按固定顺序处理一个意图，进入模型阶段前再次核对文字、配置、权限和取消状态；成功理解立即可见，并独立触发现有提醒核对，然后进行静默关联。认知和关联各自最多一次请求，无隐式重试。noCandidates和paused如实保留阶段结果，不把它们称为已证明没有关联，也不制造通知或未回应债务。单个资料库内的应用 actor 串行锁防止同一意图并发执行，进程恢复把 running 变为 unknown。
+执行器按固定顺序处理一个意图，进入模型阶段前再次核对文字、配置、权限和取消状态；成功理解立即可见，并独立触发现有提醒核对，然后进行静默关联。认知和关联各自最多一次请求，无隐式重试。noCandidates和paused如实保留阶段结果，不把它们称为已证明没有关联，也不制造通知或未回应债务。单个资料库内的应用 actor 串行锁防止同一意图并发执行；进程恢复依照实际阶段回执处理 running，未知请求不重发，尚未预留的阶段可续接。
 
 启动只恢复已明确持久化的queued/running意图。running恢复时先读取两阶段实际回执：认知unknown/rejected阻断后续；认知completed且关联未预留可继续一次关联；关联unknown不重发。完成/终态不能因启动、配置变更或刷新再排队。配置不符、文字版本变化或授权撤回保留blocked供明确查看，且在任何模型调用前拒绝派发，不能隐式换服务。恢复包携带意图历史但冻结，不恢复队列自动派发许可。
 
@@ -37,3 +37,5 @@ ExpressionProcessingIntentSnapshot固定完整当前文字/来源版本/逐字�
 应用调度器在没有文本模型配置时不会循环派发 queued 意图，也不会把它伪装成失败或发起请求；意图保持可见的 queued 历史，直到用户安装/选择真实配置。配置成功后由配置入口显式唤醒一次持久队列，仍由单一 worker 门控并在发送前重新校验快照、授权和端口身份。
 
 PortablePackage v24 携带 `processing_intents.jsonl`；v23 及更早包仍可恢复。导出保留历史，恢复把 queued/running/其他可派发状态冻结，不恢复自动派发许可。首个切片不增加自动状态推断、跨事件问题合并或全局云端授权。这些边界已由既定方向和现有授权确定，无新增用户决策阻塞。
+
+2026-10-12 审核修复：命令指纹排除临时准备 ID，快照摘要仍校验完整对象；兼容早期 schema25/v24 的双字段相同摘要，不改写旧历史。认知续接直接返回真实 attempt ID；取消及失败也保留可取得的阶段身份。迁移除校验引用存在外，还核对来源、原话版本、权限 epoch 和历史上下文。七个实际强退窗口包含结果已提交但队列尚未登记，验证恢复和再次执行都不增加终态调用记录。详见[修复与证据](m4-expression-processing-reliability.md)。

@@ -167,6 +167,7 @@ final class ExpressionProcessingQueueTests: XCTestCase {
         XCTAssertEqual(modelCalls, 1); XCTAssertEqual(associationCalls, 0)
         let attempts = try await store.modelAttempts(sourceID: source)
         XCTAssertEqual(attempts.count, 1); XCTAssertEqual(attempts[0].state, "completed"); XCTAssertEqual(attempts[0].contextState, "stale")
+        XCTAssertEqual(result.cognitionAttemptID, attempts[0].id)
         let currentClaims = try await store.candidateClaims(), allClaims = try await store.candidateClaims(includeFrozen: true)
         XCTAssertTrue(currentClaims.isEmpty)
         XCTAssertEqual(allClaims.count, 1)
@@ -191,6 +192,7 @@ final class ExpressionProcessingQueueTests: XCTestCase {
         let associationCalls = await association.callCount(); XCTAssertEqual(associationCalls, 1)
         let attempts = try await store.expressionAssociationAttempts()
         XCTAssertEqual(attempts.count, 1); XCTAssertEqual(attempts[0].state, "completed"); XCTAssertEqual(attempts[0].validity, "frozen")
+        XCTAssertEqual(result.associationAttemptID, attempts[0].id)
     }
 
     func testSnapshotDriftBlocksBeforeAnyModelCall() async throws {

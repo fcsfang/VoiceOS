@@ -412,15 +412,20 @@ final class ControlCenter: ObservableObject {
         guard let store, let cognition = textModel, let association = associationModel else {
             status = "文本模型或关联模型尚未配置；原文仍可先本地保存"; return false
         }
+        var savedSourceID: String?
         do {
             let source = try await store.recordUserExpression(text, commandID: commandID)
+            savedSourceID = source; selected = source
             guard let current = try await store.sources().first(where: { $0.id == source }) else { throw VoiceOSError("表达保存后找不到来源") }
             if current.localOnly { _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: current.policyVersion, localOnly: false) }
             let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: source, cognition: cognition.configuration, association: association.configuration)
             let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "process:" + commandID, cognition: cognition.configuration, association: association.configuration)
-            status = "已保存并排队处理 · 文本已明确允许云端；原始音频仍不上传 · \(intent.state.rawValue)"
+            status = intent.state == .queued ? "原文已保存并排队处理 · 本次文字已允许云端" : "原文已保存 · 原处理回执：\(intent.state.rawValue)；未重复排队"
             await refresh(); scheduleProcessing(); return true
-        } catch { status = error.localizedDescription; await refresh(); return false }
+        } catch {
+            status = (savedSourceID == nil ? "原文未保存：" : "原文已保存，处理未排队：") + error.localizedDescription
+            await refresh(); return false
+        }
     }
     func export(includeMedia: Bool) {
         let panel = NSSavePanel()
@@ -1364,7 +1369,8 @@ struct UserExpressionView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("记录我的表达").font(.title2)
             Text("在这里写下你自己的想法或行动。引用他人时请明确说明；音视频导入仍按外部资料保存。").foregroundStyle(.secondary)
-            TextEditor(text: $text).frame(minHeight: 200).border(.secondary.opacity(0.2))
+            TextEditor(text: $text).frame(minHeight: 200).border(.secondary.opacity(0.2)).disabled(saving)
+            Text(model.status).font(.caption).foregroundStyle(.secondary)
             Text("原文先仅本地保存。允许文字用于云端并发起理解后，普通明确任务会按已保存的提醒事项清单授权自动发送；愿望与 AI 建议留在本地。").font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("取消", action: dismiss).disabled(saving)

@@ -24,7 +24,7 @@ public struct ExpressionProcessingIntentRecord: Identifiable, Sendable {
     public let updatedAt: String
 }
 
-private extension VoiceOSStore {
+extension VoiceOSStore {
     static func processingIdentity(_ identity: ProcessingModelIdentity) -> ModelConfiguration {
         ModelConfiguration(provider: identity.provider, model: identity.model,
                            promptVersion: identity.promptVersion, schemaVersion: identity.schemaVersion,
@@ -33,9 +33,16 @@ private extension VoiceOSStore {
 
     static func processingNow() -> String { ISO8601DateFormatter().string(from: Date()) }
 
-    static func processingCommandFingerprint(_ snapshot: ExpressionProcessingIntentSnapshot) throws -> String {
+    static func processingSnapshotDigest(_ snapshot: ExpressionProcessingIntentSnapshot) throws -> String {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         return SHA256.hash(data: try encoder.encode(snapshot)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    // The command describes a scope, not the randomly generated preparation ID.
+    static func processingCommandFingerprint(_ snapshot: ExpressionProcessingIntentSnapshot) throws -> String {
+        let canonical = ExpressionProcessingIntentSnapshot(id: "expression-processing-command-v1", context: snapshot.context,
+            policyVersion: snapshot.policyVersion, cognition: snapshot.cognition, association: snapshot.association, contentDigest: snapshot.contentDigest)
+        return try processingSnapshotDigest(canonical)
     }
 
     func processingRecord(_ row: [String: String]) throws -> ExpressionProcessingIntentRecord {
@@ -68,25 +75,13 @@ private extension VoiceOSStore {
     }
 
     func cognitionAttemptID(for snapshot: ExpressionProcessingIntentSnapshot) throws -> String? {
-        try db.query("""
-            SELECT a.id FROM model_attempts a
-            JOIN contexts c ON c.id=a.context_id JOIN context_inputs i ON i.context_id=c.id
-            WHERE i.source_id=? AND i.transcript_version_id=? AND i.policy_version=?
-              AND a.provider=? AND a.model=? AND a.prompt_version=? AND a.schema_version=?
-              AND a.execution_kind='model_request'
-            ORDER BY a.producer_sequence DESC LIMIT 1
-            """, [snapshot.context.sources[0].sourceID, snapshot.context.sources[0].transcriptVersionID,
-                   String(snapshot.policyVersion), snapshot.cognition.provider, snapshot.cognition.model,
-                   snapshot.cognition.promptVersion, snapshot.cognition.schemaVersion]).first?["id"]
+        let source = snapshot.context.sources[0]
+        return try processingCognitionReceipt(sourceID: source.sourceID, sourceVersionID: source.sourceVersionID,
+            transcriptVersionID: source.transcriptVersionID, policyVersion: snapshot.policyVersion)?["id"]
     }
 
     func associationAttemptID(for snapshot: ExpressionProcessingIntentSnapshot) throws -> String? {
-        try db.query("""
-            SELECT id FROM expression_association_attempts
-            WHERE current_source_id=? AND snapshot_digest=? AND provider=? AND model=? AND prompt_version=? AND schema_version=?
-            ORDER BY created_at DESC LIMIT 1
-            """, [snapshot.context.sources[0].sourceID, snapshot.contentDigest, snapshot.association.provider,
-                   snapshot.association.model, snapshot.association.promptVersion, snapshot.association.schemaVersion]).first?["id"]
+        try processingAssociationReceipt(snapshot)?["id"]
     }
 
     /// A late result received after cancellation remains auditable, but cannot
@@ -114,7 +109,8 @@ extension VoiceOSStore {
         try validateExpressionProcessingIntent(snapshot, cognition: cognition, association: association)
         let fingerprint = try Self.processingCommandFingerprint(snapshot)
         if let old = try db.query("SELECT * FROM processing_intents WHERE command_id=?", [commandID]).first {
-            guard old["command_fingerprint"] == fingerprint else { throw VoiceOSError("同一处理命令不能更换内容") }
+            let original = try processingRecord(old)
+            guard try Self.processingCommandFingerprint(original.snapshot) == fingerprint else { throw VoiceOSError("同一处理命令不能更换内容") }
             return try processingRecord(old)
         }
         let source = snapshot.context.sources[0]
@@ -130,7 +126,7 @@ extension VoiceOSStore {
                   state,phase,created_at,updated_at)
                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'queued','queued',?,?)
                 """, [id, commandID, fingerprint, source.sourceID, source.sourceVersionID, source.transcriptVersionID, String(snapshot.policyVersion),
-                       json, fingerprint, snapshot.cognition.provider, snapshot.cognition.model, snapshot.cognition.promptVersion, snapshot.cognition.schemaVersion, snapshot.cognition.destination.rawValue,
+                       json, try Self.processingSnapshotDigest(snapshot), snapshot.cognition.provider, snapshot.cognition.model, snapshot.cognition.promptVersion, snapshot.cognition.schemaVersion, snapshot.cognition.destination.rawValue,
                        snapshot.association.provider, snapshot.association.model, snapshot.association.promptVersion, snapshot.association.schemaVersion, snapshot.association.destination.rawValue, now, now])
             try checkpoint(.processingIntentUncommitted)
         }
@@ -186,13 +182,14 @@ extension VoiceOSStore {
         var associationStarted = false
         do {
             let cognition = try await continueSourceUnderstanding(sourceID: snapshot.context.sources[0].sourceID, using: cognitionPort)
-            let cognitionAttempt = try cognitionAttemptID(for: snapshot)
+            let cognitionAttempt = cognition.attemptID
             cognitionAttemptForIntent = cognitionAttempt
             cognitionWasReused = cognition.reused
             row = try processingRow(id: id)
             if row["state"] == ExpressionProcessingIntentState.cancelled.rawValue {
+                if let cognitionAttempt { try updateProcessing(id, state: .cancelled, cognitionAttemptID: cognitionAttempt) }
                 if !cognition.reused, let cognitionAttempt { try freezeProcessingCognitionAttempt(cognitionAttempt) }
-                return try processingRecord(row)
+                return try processingIntent(id: id)
             }
             if let cognitionAttempt { try updateProcessing(id, state: .running, phase: .cognition, cognitionAttemptID: cognitionAttempt) }
             guard cognition.state == "completed" || cognition.state == "discussion_completed" else {
@@ -221,8 +218,9 @@ extension VoiceOSStore {
             associationAttemptForIntent = associationAttempt
             row = try processingRow(id: id)
             if row["state"] == ExpressionProcessingIntentState.cancelled.rawValue {
+                if let associationAttempt { try updateProcessing(id, state: .cancelled, associationAttemptID: associationAttempt) }
                 if let associationAttempt { try freezeProcessingAssociationAttempt(associationAttempt) }
-                return try processingRecord(row)
+                return try processingIntent(id: id)
             }
             if let associationAttempt {
                 try updateProcessing(id, state: .running, phase: .association, associationAttemptID: associationAttempt)
@@ -239,17 +237,28 @@ extension VoiceOSStore {
             }
         } catch is CancellationError {
             row = try processingRow(id: id)
-            if row["state"] != ExpressionProcessingIntentState.cancelled.rawValue { try updateProcessing(id, state: .unknown, error: "处理被取消，结果未知；不会自动重发") }
+            let cognitionID = try cognitionAttemptID(for: snapshot), associationID = try associationAttemptID(for: snapshot)
+            let cancelled = row["state"] == ExpressionProcessingIntentState.cancelled.rawValue
+            try updateProcessing(id, state: cancelled ? .cancelled : .unknown,
+                error: cancelled ? nil : "处理被取消，结果未知；不会自动重发", cognitionAttemptID: cognitionID, associationAttemptID: associationID)
+            if cancelled {
+                if !associationStarted, !cognitionWasReused, let cognitionID { try freezeProcessingCognitionAttempt(cognitionID) }
+                if let associationID { try freezeProcessingAssociationAttempt(associationID) }
+            }
         } catch {
             row = try processingRow(id: id)
+            let cognitionID = try cognitionAttemptID(for: snapshot)
+            let associationID = try associationAttemptID(for: snapshot)
             if row["state"] == ExpressionProcessingIntentState.cancelled.rawValue {
-                if !associationStarted, !cognitionWasReused, let cognitionAttemptForIntent { try? freezeProcessingCognitionAttempt(cognitionAttemptForIntent) }
-                if let associationAttemptForIntent { try? freezeProcessingAssociationAttempt(associationAttemptForIntent) }
-                return try processingRecord(row)
+                try updateProcessing(id, state: .cancelled, cognitionAttemptID: cognitionID, associationAttemptID: associationID)
+                if !associationStarted, !cognitionWasReused, let attempt = cognitionAttemptForIntent ?? cognitionID { try freezeProcessingCognitionAttempt(attempt) }
+                if let attempt = associationAttemptForIntent ?? associationID { try freezeProcessingAssociationAttempt(attempt) }
+                return try processingIntent(id: id)
             }
-            let associationUnknown = (try? db.query("SELECT id FROM expression_association_attempts WHERE current_source_id=? AND state='unknown' ORDER BY created_at DESC LIMIT 1", [snapshot.context.sources[0].sourceID]).first) != nil
-            let cognitionUnknown = (try? cognitionAttemptID(for: snapshot).flatMap { try db.query("SELECT state FROM model_attempts WHERE id=?", [$0]).first?["state"] == "unknown" }) ?? false
-            try updateProcessing(id, state: (associationUnknown || cognitionUnknown) ? .unknown : .blocked, error: error.localizedDescription)
+            let associationUnknown = try associationID.flatMap { try db.query("SELECT state FROM expression_association_attempts WHERE id=?", [$0]).first?["state"] } == "unknown"
+            let cognitionUnknown = try cognitionID.flatMap { try db.query("SELECT state FROM model_attempts WHERE id=?", [$0]).first?["state"] } == "unknown"
+            try updateProcessing(id, state: (associationUnknown || cognitionUnknown) ? .unknown : .blocked, error: error.localizedDescription,
+                                 cognitionAttemptID: cognitionID, associationAttemptID: associationID)
         }
         return try processingIntent(id: id)
     }
@@ -262,10 +271,12 @@ extension VoiceOSStore {
                   UUID(uuidString: row["source_version_id"] ?? "") != nil,
                   UUID(uuidString: row["transcript_version_id"] ?? "") != nil,
                   let snapshotJSON = row["snapshot_json"],
-                  row["snapshot_digest"] == (try? Self.processingCommandFingerprint(JSONDecoder().decode(ExpressionProcessingIntentSnapshot.self, from: Data(snapshotJSON.utf8)))),
-                  row["command_fingerprint"] == row["snapshot_digest"],
+                  row["snapshot_digest"] == (try? Self.processingSnapshotDigest(JSONDecoder().decode(ExpressionProcessingIntentSnapshot.self, from: Data(snapshotJSON.utf8)))),
                   row["cognition_destination"] == row["association_destination"] else { throw VoiceOSError("持久处理意图身份或摘要不一致") }
             let snapshot = try JSONDecoder().decode(ExpressionProcessingIntentSnapshot.self, from: Data(snapshotJSON.utf8))
+            // schema25/v24 before this fix used the full snapshot hash as both fields.
+            let semanticFingerprint = try Self.processingCommandFingerprint(snapshot)
+            guard row["command_fingerprint"] == row["snapshot_digest"] || row["command_fingerprint"] == semanticFingerprint else { throw VoiceOSError("处理命令摘要不一致") }
             let contextEncoder = JSONEncoder(); contextEncoder.outputFormatting = [.sortedKeys]
             let contextDigest = Self.relevanceHash(try contextEncoder.encode(snapshot.context.sources))
             guard snapshot.context.sources.count == 1, snapshot.context.contentDigest == contextDigest, snapshot.context.sources[0].sourceID == sourceID,
@@ -275,8 +286,7 @@ extension VoiceOSStore {
                   snapshot.cognition.promptVersion == row["cognition_prompt_version"], snapshot.association.promptVersion == row["association_prompt_version"],
                   snapshot.cognition.schemaVersion == row["cognition_schema_version"], snapshot.association.schemaVersion == row["association_schema_version"],
                   snapshot.cognition.destination.rawValue == row["cognition_destination"], snapshot.association.destination.rawValue == row["association_destination"] else { throw VoiceOSError("持久处理意图快照与目录不一致") }
-            if let attempt = row["cognition_attempt_id"] { guard try db.query("SELECT id FROM model_attempts WHERE id=?", [attempt]).count == 1 else { throw VoiceOSError("处理意图引用不存在的理解调用") } }
-            if let attempt = row["association_attempt_id"] { guard try db.query("SELECT id FROM expression_association_attempts WHERE id=?", [attempt]).count == 1 else { throw VoiceOSError("处理意图引用不存在的关联调用") } }
+            try validateProcessingReceiptBindings(db, row: row, snapshot: snapshot)
         }
     }
 }

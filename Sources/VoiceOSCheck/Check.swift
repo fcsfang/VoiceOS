@@ -47,7 +47,10 @@ struct Check {
             if args[0] == "expression-queue-fixture" { try await runExpressionQueueFixture(store); return }
             if args[0] == "expression-queue-read" {
                 let intents = try await store.processingIntents()
-                let output:[String:Any] = ["integrity":try await store.integrityCheck(),"intents":intents.map { ["id":$0.id,"state":$0.state.rawValue,"phase":$0.phase.rawValue,"cognition_attempt_id":$0.cognitionAttemptID ?? "","association_attempt_id":$0.associationAttemptID ?? ""] as [String:Any] }]
+                let output:[String:Any] = ["integrity":try await store.integrityCheck(),
+                    "cognition_attempt_count":try await store.modelAttempts().count,
+                    "association_attempt_count":try await store.expressionAssociationAttempts().count,
+                    "intents":intents.map { ["id":$0.id,"state":$0.state.rawValue,"phase":$0.phase.rawValue,"cognition_attempt_id":$0.cognitionAttemptID ?? "","association_attempt_id":$0.associationAttemptID ?? ""] as [String:Any] }]
                 print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)); return
             }
             if args[0] == "association-fixture" { try await runAssociationFixture(store); return }
@@ -222,14 +225,8 @@ private actor FileRemindersFixture: RemindersPort {
 }
 
 private func runExpressionQueueFixture(_ store: VoiceOSStore) async throws {
-    let existing = try await store.sources()
-    let current: String
-    if let found = existing.first(where: { $0.origin == "user" && $0.kind == "user_text" }) {
-        current = found.id
-    } else {
-        _ = try await store.recordUserExpression("合成历史表达：需要核对条件。", commandID: "queue-history")
-        current = try await store.recordUserExpression("合成当前表达：请理解并关联这次文字。", commandID: "queue-current")
-    }
+    _ = try await store.recordUserExpression("合成历史表达：需要核对条件。", commandID: "queue-history")
+    let current = try await store.recordUserExpression("合成当前表达：请理解并关联这次文字。", commandID: "queue-current")
     let configuration = ModelConfiguration(provider: "queue-fixture", model: "synthetic", promptVersion: "v1", schemaVersion: "v1", destination: .local)
     let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: current, cognition: configuration, association: configuration)
     let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "queue-processing", cognition: configuration, association: configuration)
