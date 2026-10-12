@@ -24,11 +24,13 @@ public struct ReminderLink: Identifiable, Sendable {
     public let remoteCompleted: Bool?
     public let lastObservedAt: String?
     public let lastCheckedAt: String?
+    public let lastObservationID: String?
+    public let remoteMarkerValid: Bool?
 }
 extension VoiceOSStore {
     public func reminderLinks() throws -> [ReminderLink] {
-        try db.query("SELECT l.*,o.title AS remote_title,o.completed AS remote_completed,o.created_at AS observed_at FROM reminder_links l LEFT JOIN reminder_observations o ON o.id=(SELECT id FROM reminder_observations WHERE link_id=l.id ORDER BY sequence DESC LIMIT 1) ORDER BY l.created_at,l.id").map {
-            ReminderLink(id: $0["id"]!, actionID: $0["action_id"]!, calendarID: $0["calendar_id"]!, state: $0["state"]!, externalID: $0["external_id"], remoteTitle: $0["remote_title"], remoteCompleted: $0["remote_completed"].map { $0 == "1" }, lastObservedAt: $0["observed_at"], lastCheckedAt: $0["last_checked_at"])
+        try db.query("SELECT l.*,o.id AS observation_id,o.marker_valid,o.title AS remote_title,o.completed AS remote_completed,o.created_at AS observed_at FROM reminder_links l LEFT JOIN reminder_observations o ON o.id=(SELECT id FROM reminder_observations WHERE link_id=l.id ORDER BY sequence DESC LIMIT 1) ORDER BY l.created_at,l.id").map {
+            ReminderLink(id: $0["id"]!, actionID: $0["action_id"]!, calendarID: $0["calendar_id"]!, state: $0["state"]!, externalID: $0["external_id"], remoteTitle: $0["remote_title"], remoteCompleted: $0["remote_completed"].map { $0 == "1" }, lastObservedAt: $0["observed_at"], lastCheckedAt: $0["last_checked_at"], lastObservationID: $0["observation_id"], remoteMarkerValid: $0["marker_valid"].map { $0 == "1" })
         }
     }
     /// One create attempt per action identity. Every subsequent invocation only reads.
@@ -112,7 +114,7 @@ extension VoiceOSStore {
             throw VoiceOSError("提醒事项回读失败，结果未知；没有修改或重建外部任务")
         }
     }
-    private func applyReminder(_ matches: [ReminderSnapshot], linkID: String) throws {
+    func applyReminder(_ matches: [ReminderSnapshot], linkID: String) throws {
         guard let link = try db.query("SELECT * FROM reminder_links WHERE id=?", [linkID]).first else { throw VoiceOSError("提醒事项关联缺失") }
         guard matches.count == 1, let remote = matches.first else {
             try db.execute("UPDATE reminder_links SET state=?,last_checked_at=? WHERE id=?", [matches.isEmpty ? "missing" : "conflict",ISO8601DateFormatter().string(from: Date()),linkID]); return
@@ -124,9 +126,10 @@ extension VoiceOSStore {
         let sequence = Int(try db.query("SELECT COUNT(*) AS n FROM reminder_observations WHERE link_id=?", [linkID]).first!["n"]!)! + 1
         var feedbackID: String?
         var conflict = !validMarker
+        let baseline = try reminderStatusBaseline(link)
         try db.transaction {
             if validMarker, let action, action.validity == "current" {
-                if remote.completed && action.state == "open" && action.version == Int(link["action_version"]!) {
+                if remote.completed && action.state == "open" && action.version == baseline {
                     let revisionID = UUID().uuidString
                     let next = action.version + 1
                     let note = "Apple 提醒事项唯一关联项回读为已完成；不代表观点已验证"
@@ -166,11 +169,14 @@ extension VoiceOSStore {
             guard !(observation["external_id"] ?? "").isEmpty, (observation["title"]?.unicodeScalars.count ?? 10001) <= 10000 else { throw VoiceOSError("迁移提醒事项回读字段无效") }
             if let revisionID = observation["feedback_revision_id"] {
                 guard observation["completed"] == "1", observation["marker_valid"] == "1", let revision = try db.query("SELECT * FROM action_revisions WHERE id=?", [revisionID]).first,
-                      revision["actor"] == "external", revision["action_id"] == observation["action_id"], revision["state"] == "completed", revision["from_version"] == observation["action_version"], revision["command_id"] == "reminder-feedback:" + observation["id"]! else { throw VoiceOSError("迁移提醒事项反馈与行动历史不一致") }
+                      revision["actor"] == "external", revision["action_id"] == observation["action_id"], revision["state"] == "completed", revision["command_id"] == "reminder-feedback:" + observation["id"]! else { throw VoiceOSError("迁移提醒事项反馈与行动历史不一致") }
+                let priorResolution = try db.query("SELECT action_version FROM reminder_status_resolutions WHERE link_id=? AND action_version<? ORDER BY action_version DESC LIMIT 1", [observation["link_id"],revision["version"]]).first
+                guard revision["from_version"] == (priorResolution?["action_version"] ?? observation["action_version"]) else { throw VoiceOSError("迁移提醒事项反馈同步基线不一致") }
             }
         }
         for revision in try db.query("SELECT id FROM action_revisions WHERE actor='external'") {
             guard try db.query("SELECT id FROM reminder_observations WHERE feedback_revision_id=?", [revision["id"]]).count == 1 else { throw VoiceOSError("迁移外部完成反馈缺少唯一回读依据") }
         }
+        try validateReminderStatusResolutions(db)
     }
 }

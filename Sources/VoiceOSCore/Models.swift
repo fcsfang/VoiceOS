@@ -63,6 +63,7 @@ public enum SaveCheckpoint: String, Sendable {
     case segmentedBatchUncommitted, segmentedBatchCommitted, segmentedBatchCancelUncommitted, segmentedBatchCancelCommitted
     case processingIntentReserved, processingIntentUncommitted, processingIntentCommitted
     case reminderReserved, reminderSaved, reminderFeedbackUncommitted, reminderFeedbackCommitted
+    case reminderResolutionUncommitted, reminderResolutionCommitted
     case actionUncommitted, actionCommitted, actionStateUncommitted, actionStateCommitted
 }
 

@@ -59,3 +59,5 @@
 - [ADR029：稳定开发签名](029-stable-development-signing.md) — 使用既有Apple Development身份；一次代码更新/重启后原清单回读通过，正式分发另行审查。
 
 - [ADR-032 精简片段与聚合请求](032-compact-segment-extraction.md)：独立v3候选，持久完整身份、云端只发送本段归属与原文；旧请求不升级。
+
+- [ADR033：提醒事项状态冲突恢复](033-reminder-status-resolution.md) — schema32/含记录的包v32；显式采用新鲜外部状态，保留历史基线并恢复后续自动完成回流。

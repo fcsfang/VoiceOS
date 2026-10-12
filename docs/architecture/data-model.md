@@ -143,3 +143,7 @@ W17新增conversations和conversation_user_turns，格式v14/schema15；每个�
 问题状态依赖修订（2026-10-12）：当前resolved引用最新解决修订的答案；明确重开后旧答案仅属历史，不再使open/exploring/closed冻结。canReopen为读取时的能力投影，不保存新权限；仅答案失效且原问题仍有效时可显式重开。所有历史出处和版本仍保留并核对，恢复包不恢复该能力。
 
 2026-10-12 讨论类型增量：成果proposal新增可选contentKind，实时v2响应必填；旧nil编码省略，result摘要和旧身份不变。typed question沿用独立questions登记，AI reply-only context_anchor只定位，实际依据仍在成果replyEvidence。seed固定原scalarBudget（最大12000），旧8000不改；revision提交核对seed的原引文、上下文和权限身份。表及包仍schema24/v23，334项测试与三处成果/六处状态强退恢复通过。
+
+## W14 状态冲突恢复实施增量（2026-10-13）
+
+schema32 新增 `reminder_status_resolutions`，不可变记录 link、observation、action_revision、恢复前同步基线、恢复后行动版本、授权版本及命令摘要。`reminder_links.action_version` 保留创建时值，不改写历史观测校验；最新恢复版本作为后续完成同步基线。恢复只改变本地状态，用户修订、记录及 link 状态同事务。含恢复记录的包 v32 校验历史基线和观测/修订绑定，恢复不带连接权限；其他库按既有内容选择兼容包版本。见 [ADR033](../adr/033-reminder-status-resolution.md)。时间字段与完整三方调和仍待实现。

@@ -861,6 +861,20 @@ final class ControlCenter: ObservableObject {
         }
         catch { status = error.localizedDescription }
     }
+    func acceptReminderStatus(_ link: ReminderLink, action: ActionRecord) async {
+        guard let store, let access = reminderAccess, access.enabled,
+              !remindersBusy, !savingAction, access.calendarID == link.calendarID,
+              let observationID = link.lastObservationID else { return }
+        remindersBusy = true; savingAction = true
+        defer { remindersBusy = false; savingAction = false; requestReminderRefresh() }
+        do {
+            _ = try await store.acceptReminderStatus(linkID: link.id, expectedActionVersion: action.version,
+                                                     expectedObservationID: observationID, expectedAccessVersion: access.version,
+                                                     using: reminders)
+            status = "已采用重新核对的提醒事项状态 · 外部任务未修改，观点仍需独立验证"
+        } catch { status = error.localizedDescription }
+        await refresh()
+    }
     func saveFeedback(_ action: ActionRecord, kind: ActionFeedbackKind, text: String, commandID: String) async -> Bool {
         guard let store, !savingFeedback else { return false }
         savingFeedback = true; defer { savingFeedback = false }
@@ -1300,6 +1314,14 @@ struct CenterView: View {
                                                 Text("保留上次观测，当前状态尚未确认。").font(.caption).foregroundStyle(.secondary)
                                             }
                                             Button("回读提醒事项") { Task { await model.readReminder(link) } }.disabled(model.remindersBusy || model.reminderAccess?.enabled != true || model.reminderCalendarID != link.calendarID)
+                                            if link.state == "conflict", link.remoteMarkerValid == true,
+                                               let completed = link.remoteCompleted,
+                                               action.state != (completed ? "completed" : "open") {
+                                                Button(completed ? "采用提醒事项的已完成状态" : "采用提醒事项的未完成状态") {
+                                                    Task { await model.acceptReminderStatus(link, action: action) }
+                                                }.disabled(model.remindersBusy || model.savingAction || action.validity != "current" || model.reminderAccess?.enabled != true || model.reminderCalendarID != link.calendarID)
+                                                Text("重新核对后只更新本地状态，保留历史。").font(.caption).foregroundStyle(.secondary)
+                                            }
                                         } else if action.kind == "task" {
                                             Text("当前只同步任务标题，不设置期限或提醒时间。").font(.caption).foregroundStyle(.secondary)
                                             Text("目标清单：" + model.reminderCalendarTitle).font(.caption).foregroundStyle(.secondary)

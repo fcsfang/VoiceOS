@@ -1,6 +1,6 @@
 # VoiceOS 文档索引
 
-**当前接续（2026-10-13）：** 按 M2→M3 收口；两段正式素材已提交结构化认知并创建九条未完成提醒事项。历史批次外写、取消传播和异步期间批次变化已修复，466 项回归与签名构建通过。旧“自然案例 A 通过”更正为 partial：开发命令的完成/生成反馈只证明机制，不能替代真实后续表达。先读[夜间进度](planning/overnight-progress.md)和[M3 证据矩阵](testing/m3-evidence-status-2026-10-13.md)，再按[路线图](planning/implementation-roadmap.md)推进；不扩展 M4。
+**当前接续（2026-10-13）：** 按 M2→M3 收口；两段正式素材已提交认知并创建九条未完成提醒事项。W14 状态冲突的本地恢复已实现，schema32/含恢复记录的包 v32；474 项全套与追加 9 项专项、签名构建通过。时间字段三方调和、补偿和运行时 UI 尚未完成。自然案例 A 仍 partial，不用开发生成的反馈代替真实结果。先读[夜间进度](planning/overnight-progress.md)、[M3 矩阵](testing/m3-evidence-status-2026-10-13.md)和[ADR033](adr/033-reminder-status-resolution.md)，再按[路线图](planning/implementation-roadmap.md)推进；不扩展 M4。
 
 ## 历史接续记录
 
