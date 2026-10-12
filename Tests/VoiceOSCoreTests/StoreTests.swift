@@ -43,6 +43,7 @@ private actor TestReminders: RemindersPort {
     var creates = 0
     var loseReceipt = false
     var deny = false
+    var failReads = false
     var suspended = false
     var suspendCreate = false
     var gate: CheckedContinuation<Void, Never>?
@@ -50,7 +51,7 @@ private actor TestReminders: RemindersPort {
     init(loseReceipt: Bool = false, suspended: Bool = false, suspendCreate: Bool = false) { self.loseReceipt = loseReceipt; self.suspended = suspended; self.suspendCreate = suspendCreate }
     func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
         if suspended { suspended = false; await withCheckedContinuation { gate = $0; started?.resume(); started = nil } }
-        if deny { throw VoiceOSError("permission denied") }
+        if deny || failReads { throw VoiceOSError(deny ? "permission denied" : "readback unavailable") }
         return items.filter { $0.marker == marker || $0.id == externalID }
     }
     func create(calendarID: String, title: String, marker: String) async throws {
@@ -66,6 +67,7 @@ private actor TestReminders: RemindersPort {
     func duplicate() { let item = items[0]; items.append(ReminderSnapshot(id: UUID().uuidString, title: item.title, completed: item.completed, marker: item.marker)) }
     func removeAll() { items = [] }
     func setDeny() { deny = true }
+    func failFutureReads(_ value: Bool = true) { failReads = value }
     func suspendRead() { suspended = true }
     func waitStarted() async { if gate == nil { await withCheckedContinuation { started = $0 } } }
     func release() { gate?.resume(); gate = nil }
@@ -337,6 +339,23 @@ final class StoreTests: XCTestCase {
         let link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "linked")
         let creates = await port.creates; XCTAssertEqual(creates, 1)
         do { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "other", using: port); XCTFail("scope change") } catch {}
+    }
+    func testReadbackFailureBecomesUnknownThenRecoversWithoutRecreating() async throws {
+        let store = try await store(); let (_, id) = try await reminderFixture(store); let port = TestReminders()
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        let link = try await store.reminderLinks()[0]
+        await port.failFutureReads()
+        do { try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port); XCTFail("readback must fail") } catch {}
+        let failedLink = try await store.reminderLinks()[0]
+        let failedAction = try await store.actions()[0]
+        XCTAssertEqual(failedLink.state, "unknown")
+        XCTAssertEqual(failedAction.state, "open")
+        await port.failFutureReads(false)
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        let recovered = try await store.reminderLinks()[0]
+        XCTAssertEqual(recovered.state, "linked")
+        let creates = await port.creates
+        XCTAssertEqual(creates, 1)
     }
     func testRemindersExternalRenameCompletionAndRestoreKeepEvidenceSeparate() async throws {
         let store = try await store(); let (_,id) = try await reminderFixture(store); let port = TestReminders()

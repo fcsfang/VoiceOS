@@ -8,6 +8,7 @@
 - `m3-real-close` 已改为创建→回读→保持未完成；只有独立的 `m3-restore-open` 开发命令能恢复明确测试 ID，不会进入正式素材流程。证据见[正式素材流程](../research/evidence/full-materials-processing-2026-10-12.json)。
 - 当前来源认知视图已修复为按持久化 `producer_sequence` 选择最新已完成批次；不再依赖可能同秒的 `created_at`，旧批次仍保留在全局审计视图。针对性回归与完整 457 项 Swift 测试均通过。
 - M3 证据命令的汇总字段已修正为从行动引用反查真实 `source_ids`，不再把行动 ID 写入 `source_id`；`swift build` 与 `git diff --check` 通过。
+- M3 回读故障矩阵补充“已关联任务回读失败→unknown→恢复回读”回归；恢复过程中创建次数保持 1。完整 Swift 测试现为 458 项通过。
 
 更新时间：2026-10-12 长表达流式传输默认已落地（Asia/Shanghai）
 
