@@ -80,6 +80,7 @@ public actor VoiceOSStore {
         try Self.validateStoredExpressionAssociationIgnores(db)
         try Self.validateStoredQuestions(db)
         try Self.validateStoredProcessingIntents(db)
+        try Self.validateStoredRecordingProcessingRequests(db)
         try recoverExpressionProcessingIntents()
         ready = true
     }

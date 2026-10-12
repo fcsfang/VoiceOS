@@ -44,6 +44,12 @@ struct Check {
             if args[0] == "typed-cognition-fixture" { try await runTypedCognitionFixture(store); return }
             if args[0] == "discussion-question-fixture" { try await runDiscussionQuestionFixture(store); return }
             if args[0] == "source-continuation-fixture" { try await runSourceContinuationFixture(store); return }
+            if ["record-request-fixture", "record-request-resume-fixture"].contains(args[0]) { try await runRecordingRequestFixture(store, seed:args[0] == "record-request-fixture"); return }
+            if args[0] == "record-request-read" {
+                let requests = try await store.recordingProcessingRequests()
+                let output:[String:Any] = ["integrity":try await store.integrityCheck(), "requests":requests.map { ["id":$0.id,"source_id":$0.sourceID,"state":$0.state,"queue_id":$0.processingIntentID ?? ""] },"queue_states":try await store.processingIntents().map { $0.state.rawValue },"queue_count":try await store.processingIntents().count,"model_count":try await store.modelAttempts().count,"association_count":try await store.expressionAssociationAttempts().count]
+                print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)); return
+            }
             if ["expression-queue-fixture", "personal-audio-queue-fixture"].contains(args[0]) { try await runExpressionQueueFixture(store, existingAudio: args[0] == "personal-audio-queue-fixture"); return }
             if args[0] == "expression-queue-read" {
                 let intents = try await store.processingIntents()
@@ -285,4 +291,25 @@ private struct LocalOutcomeFixture:ConversationOutcomePort {
             .init(statement:"我会整理开发验证素材",ownership:.userTentative,sourceEvidence:[.init(reference:ref,quote:"我会整理开发验证素材")],action:.init(title:"整理开发验证素材",kind:.task,quote:"我会整理开发验证素材",autoSend:true)),
             .init(statement:reply.parts[1].text,ownership:.aiCandidate,sourceEvidence:[],replyEvidence:[.init(attemptID:reply.attemptID,partIndex:1,quote:reply.parts[1].text)],action:.init(title:"比较反例",kind:.aiSuggestion,quote:"比较反例"))],inputTokens:12,outputTokens:6)
     }
+}
+
+private func runRecordingRequestFixture(_ store: VoiceOSStore, seed: Bool) async throws {
+    let configuration = ModelConfiguration(provider:"queue-fixture",model:"synthetic",promptVersion:"v1",schemaVersion:"v1",destination:.local)
+    if seed {
+        _ = try await store.recordUserExpression("合成历史表达：整理测试资料时核对条件。",commandID:"synthetic-record-history")
+        let intent = try await store.beginProcessingDictation(commandID:"synthetic-record-processing",cognition:configuration,association:configuration)
+        let format = AVAudioFormat(standardFormatWithSampleRate:24000,channels:1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat:format,frameCapacity:12000)!; buffer.frameLength = 12000
+        for i in 0..<12000 { buffer.floatChannelData![0][i] = 0.01 * sin(Float(i)*0.1) }
+        do { let file = try AVAudioFile(forWriting:intent.stagingURL,settings:format.settings); try file.write(from:buffer) }
+        try await store.sealDictation(sourceID:intent.sourceID)
+    }
+    try await store.processTranscriptions(using:SyntheticDiscussionSpeech())
+    try await store.reconcileRecordingProcessingRequests(cognition:configuration,association:configuration)
+    for queue in try await store.processingIntents() where queue.state == .queued {
+        _ = try await store.runExpressionProcessingIntent(id:queue.id,retrieval:QueueFixtureRetrieval(),cognitionPort:QueueFixtureModel(configuration:configuration),associationPort:QueueFixtureAssociation(configuration:configuration))
+    }
+    let requests = try await store.recordingProcessingRequests()
+    let output:[String:Any] = ["integrity":try await store.integrityCheck(),"requests":requests.map { ["id":$0.id,"state":$0.state,"queue_id":$0.processingIntentID ?? ""] },"queue_states":try await store.processingIntents().map { $0.state.rawValue },"queue_count":try await store.processingIntents().count,"model_count":try await store.modelAttempts().count,"association_count":try await store.expressionAssociationAttempts().count]
+    print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self))
 }

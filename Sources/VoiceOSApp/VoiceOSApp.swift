@@ -169,6 +169,7 @@ final class ControlCenter: ObservableObject {
     @Published var modelSummary = "尚未配置文本模型"
     @Published var attempts: [String: [ModelAttemptRecord]] = [:]
     @Published var processingIntents: [ExpressionProcessingIntentRecord] = []
+    @Published var recordingRequests: [RecordingProcessingRequest] = []
     private var textModel: ResponsesModelPort?
     private var englishModel: ResponsesEnglishPracticePort?
     @Published var englishSnapshot: EnglishPracticeSnapshot?
@@ -220,8 +221,13 @@ final class ControlCenter: ObservableObject {
     private var dictationInterrupted = false
     private let dictation = NativeDictation()
     private var dictationObservers: [NSObjectProtocol] = []
-    func startDictation() async {
+    func startDictation(processAfterTranscription: Bool = false) async {
         guard let store, !dictationBusy, !dictationActive else { return }
+        let processingConfigurations: (ModelConfiguration, ModelConfiguration)?
+        if processAfterTranscription {
+            guard let cognition = textModel, let association = associationModel else { status = "请先配置文本模型，再选择录制并处理"; return }
+            processingConfigurations = (cognition.configuration, association.configuration)
+        } else { processingConfigurations = nil }
         dictationBusy = true; defer { dictationBusy = false }
         let duration: TimeInterval?
         if let raw = ProcessInfo.processInfo.environment["VOICEOS_TEST_CAPTURE_SECONDS"] {
@@ -230,11 +236,15 @@ final class ControlCenter: ObservableObject {
         } else { duration = nil }
         guard await dictation.requestPermission() else { status = "麦克风未获授权，未开始录制；仍可导入文件"; return }
         do {
-            let intent = try await store.beginDictation()
+            let intent: RecordingIntent
+            if let configs = processingConfigurations {
+                intent = try await store.beginProcessingDictation(cognition: configs.0, association: configs.1)
+            } else { intent = try await store.beginDictation() }
             dictationSource = intent.sourceID; dictationInterrupted = false
             try dictation.start(at:intent.stagingURL,maximumDuration:duration) { [weak self] success in Task { await self?.finishDictation(success:success) } }
             dictationActive = true; selected = intent.sourceID
             status = duration.map { "正在进行\($0)秒限时采集 · 到时自动停止 · 仅本地" } ?? "正在录制我的口述 · 仅本地；停止后才核对并封存原件"
+            if processingConfigurations != nil { status = "正在录制并处理 · 请求已保存；封存及本地转写后处理文字，原始音频不上传" }
             await refresh()
         } catch {
             if let id = dictationSource { try? await store.interruptDictation(sourceID:id) }
@@ -322,6 +332,7 @@ final class ControlCenter: ObservableObject {
                 attempts = loaded
                 englishAttempts = try await store.englishFeedbackAttempts()
                 processingIntents = try await store.processingIntents()
+                recordingRequests = try await store.recordingProcessingRequests()
             }
         }
         catch { status = error.localizedDescription }
@@ -510,6 +521,10 @@ final class ControlCenter: ObservableObject {
         defer { refreshTask.cancel() }
         do { try await store.processTranscriptions(using: NativeSpeechPort()) }
         catch { status = error.localizedDescription }
+        if let cognition = textModel, let association = associationModel {
+            do { try await store.reconcileRecordingProcessingRequests(cognition: cognition.configuration, association: association.configuration) }
+            catch { status = error.localizedDescription }
+        }
         await processExpressionQueue(store)
         await refresh()
     }
@@ -524,6 +539,11 @@ final class ControlCenter: ObservableObject {
                 requestReminderRefresh()
             } catch { status = error.localizedDescription; break }
         }
+    }
+    func cancelRecordingRequest(_ request: RecordingProcessingRequest) async {
+        guard let store else { return }
+        do { let cancelled = try await store.cancelRecordingProcessingRequest(id: request.id); status = cancelled ? "已取消文字处理 · 录音和本地转写保留" : "处理已结束或冻结，保留原回执"; await refresh() }
+        catch { status = error.localizedDescription }
     }
     func cancelProcessingIntent(_ intent: ExpressionProcessingIntentRecord) async {
         guard let store, [.queued, .running].contains(intent.state) else { return }
@@ -833,7 +853,17 @@ struct CenterView: View {
     @State private var showingEnglishPractice = false
     @Environment(\.openWindow) private var openWindow
     private var activeProcessingCount: Int {
-        model.processingIntents.filter { [.queued, .running].contains($0.state) }.count
+        model.processingIntents.filter { [.queued, .running].contains($0.state) }.count + model.recordingRequests.filter { $0.state == "waiting" }.count
+    }
+    private func recordingRequestState(_ state: String) -> String {
+        switch state {
+        case "waiting": return "等待封存和本地转写"
+        case "enqueued": return "已移交处理队列"
+        case "blocked": return "已阻断 · 需核对"
+        case "cancelled": return "已取消"
+        case "frozen": return "迁移后冻结"
+        default: return "状态待核对"
+        }
     }
     private func processingState(_ intent: ExpressionProcessingIntentRecord) -> String {
         switch intent.state {
@@ -1068,9 +1098,18 @@ struct CenterView: View {
         }
         .toolbar {
             Menu {
-                if model.processingIntents.isEmpty {
+                if model.processingIntents.isEmpty && model.recordingRequests.isEmpty {
                     Text("暂无表达处理记录")
                 } else {
+                    ForEach(model.recordingRequests) { request in
+                        Text("录音处理 · \(recordingRequestState(request.state)) · \(model.records.first(where: { $0.id == request.sourceID })?.name ?? request.sourceID)")
+                        if let error = request.error { Text(error) }
+                        if request.state == "waiting" {
+                            Text("等待封存和本地转写；未发起模型请求")
+                            Button("取消文字处理（保留录音）") { Task { await model.cancelRecordingRequest(request) } }
+                        }
+                        Divider()
+                    }
                     ForEach(model.processingIntents) { intent in
                         Text("\(processingState(intent)) · \(processingSourceName(intent))")
                         if let error = intent.error, !error.isEmpty { Text(error) }
@@ -1086,7 +1125,10 @@ struct CenterView: View {
             if model.dictationActive {
                 Button("停止并保存口述",systemImage:"stop.circle.fill") { model.stopDictation() }.disabled(model.dictationBusy)
             } else {
-                Button("开始我的口述",systemImage:"mic") { Task { await model.startDictation() } }.disabled(!model.initialized || model.dictationBusy).help("录制你自己的表达；第三方节目请使用导入，以保留外部来源身份。")
+                Menu("开始我的口述", systemImage: "mic") {
+                    Button("录制并本地保存") { Task { await model.startDictation() } }
+                    Button("录制并处理文字（原始音频不上传）") { Task { await model.startDictation(processAfterTranscription: true) } }.disabled(!model.modelConfigured)
+                }.disabled(!model.initialized || model.dictationBusy)
             }
             Button("讨论记录",systemImage:"bubble.left.and.bubble.right") { Task { await model.refreshDiscussion(); showingDiscussion = true } }.disabled(!model.initialized)
             Button("静默回顾", systemImage:"text.bubble") { model.quietAssociationSourceID = nil; showingQuietFeedback = true }.disabled(!model.initialized)
