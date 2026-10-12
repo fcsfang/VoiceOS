@@ -331,10 +331,10 @@ private struct FinalAggregationFixture: SegmentAggregationPort {
     }
 }
 extension SegmentExtractionTests {
-    func seedFinal(_ s: VoiceOSStore) async throws -> SegmentedProcessingBatch {
+    func seedFinal(_ s: VoiceOSStore, repeatCount: Int = 700) async throws -> SegmentedProcessingBatch {
         let id=try await s.recordUserExpression("合成原话内容。")
         let original=try await s.transcriptHistory(sourceID:id)[0].id
-        _ = try await s.correctTranscript(sourceID:id,expectedVersionID:original,text:String(repeating:"合成原话内容。",count:700)) // >4000, synthetic corrected transcript
+        _ = try await s.correctTranscript(sourceID:id,expectedVersionID:original,text:String(repeating:"合成原话内容。",count:repeatCount)) // >4000, synthetic corrected transcript
         let scope=try await s.prepareSegmentedExpressionProcessingScope(sourceID:id,extraction:config(),aggregation:config(),segmentScalarBudget:2000)
         let batch=try await s.enqueueSegmentedProcessingBatch(scope,extraction:config(),aggregation:config())
         for _ in scope.plan.segments { _ = try await s.runNextSegmentExtraction(batchID:batch.id,using:FinalExtractionFixture(configuration:config())) }
@@ -392,5 +392,52 @@ extension SegmentExtractionTests {
         let current=try await s.candidateClaims(); XCTAssertTrue(current.isEmpty)
         let again=try await s.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config()); XCTAssertEqual(again,ids)
         let actions=try await s.actions(); XCTAssertTrue(actions.isEmpty)
+    }
+}
+
+private struct SegmentedHistoryRetrieval: LocalRetrievalPort {
+    func rank(query: String, documents: [RetrievalDocument], semantic: Bool) async throws -> [RetrievalMatch] {
+        documents.map { .init(documentID:$0.id,score:1,method:"exact") }
+    }
+}
+private actor SegmentedHistoryPort: ExpressionAssociationPort {
+    nonisolated let configuration: ModelConfiguration
+    let fail: Bool
+    var calls=0
+    init(_ c: ModelConfiguration, fail: Bool = false) { configuration=c; self.fail=fail }
+    func associate(_ request: ExpressionAssociationRequest) async throws -> ExpressionAssociationResponse {
+        calls += 1
+        if fail { throw VoiceOSError("synthetic missing association reply") }
+        return .init(proposals:[],inputTokens:20,outputTokens:3)
+    }
+}
+extension SegmentExtractionTests {
+    func testLongAssociationRequiresCognitiveCommitAndNeverReplaysCompletedOrUnknown() async throws {
+        for fail in [false,true] {
+            let s=try await store("association-\(fail)"), b=try await seedFinal(s)
+            _ = try await s.recordUserExpression("历史合成记录，涉及原话内容。")
+            let model=SegmentedHistoryPort(config(),fail:fail)
+            do { _ = try await s.processCommittedSegmentedAssociation(batchID:b.id,retrieval:SegmentedHistoryRetrieval(),model:model); XCTFail() } catch {}
+            let before=await model.calls; XCTAssertEqual(before,0)
+            _ = try await s.runSegmentAggregation(batchID:b.id,using:FinalAggregationFixture(config()))
+            _ = try await s.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config())
+            let first=try await s.processCommittedSegmentedAssociation(batchID:b.id,retrieval:SegmentedHistoryRetrieval(),model:model)
+            XCTAssertEqual(first.state,fail ? .unknown:.completed)
+            let replay=try await s.processCommittedSegmentedAssociation(batchID:b.id,retrieval:SegmentedHistoryRetrieval(),model:model)
+            XCTAssertEqual(first.attempt?.id,replay.attempt?.id)
+            let count=await model.calls; XCTAssertEqual(count,1)
+            let read=try await s.committedSegmentedAssociationAttempt(batchID:b.id); XCTAssertEqual(read?.id,first.attempt?.id)
+        }
+    }
+    func testOversizedAssociationStopsAtCognitionAndRevokedSourceCannotContinue() async throws {
+        let s=try await store(), b=try await seedFinal(s,repeatCount:1200)
+        _ = try await s.runSegmentAggregation(batchID:b.id,using:FinalAggregationFixture(config()))
+        _ = try await s.commitSegmentedCognition(batchID:b.id,extraction:config(),aggregation:config())
+        let model=SegmentedHistoryPort(config())
+        let result=try await s.processCommittedSegmentedAssociation(batchID:b.id,retrieval:SegmentedHistoryRetrieval(),model:model)
+        XCTAssertEqual(result.state,.budgetExceeded); let calls=await model.calls; XCTAssertEqual(calls,0)
+        _ = try await s.setSourceLocalOnly(sourceID:b.scope.plan.source.sourceID,expectedVersion:1,localOnly:false)
+        do { _ = try await s.processCommittedSegmentedAssociation(batchID:b.id,retrieval:SegmentedHistoryRetrieval(),model:model); XCTFail() } catch {}
+        let after=await model.calls; XCTAssertEqual(after,0)
     }
 }

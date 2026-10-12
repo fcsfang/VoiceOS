@@ -65,14 +65,16 @@ final class ControlCenter: ObservableObject {
             if selected == id { selectedAssociationFeedback = items; selectedAssociationAttempts = attempts }
         } catch { if selected == id { selectedAssociationFeedback = []; selectedAssociationAttempts = [] } }
     }
-    private func associateUnderstoodExpression(_ id: String) async {
+    private func associateUnderstoodExpression(_ id: String, segmentedBatchID: String? = nil) async {
         guard let store else { return }
         do {
             guard let source = try await store.sources().first(where: { $0.id == id }), source.origin == "user", source.speaker == "user" else { return }
             associationStatuses[id] = "正在本机寻找授权历史；关联判断最多发送一次文字请求。"
             let local: any LocalRetrievalPort
             if let semanticRetrieval { local = semanticRetrieval } else { local = retrieval }
-            let result = try await store.processExpressionAssociation(sourceID: id, retrieval: local, semantic: semanticRetrieval != nil, model: associationModel)
+            let result: ExpressionAssociationProcessing
+            if let batchID=segmentedBatchID { result=try await store.processCommittedSegmentedAssociation(batchID:batchID,retrieval:local,semantic:semanticRetrieval != nil,model:associationModel) }
+            else { result=try await store.processExpressionAssociation(sourceID:id,retrieval:local,semantic:semanticRetrieval != nil,model:associationModel) }
             switch result.state {
             case .paused: associationStatuses[id] = "静默关联已暂停；没有发送。"
             case .localOnly: associationStatuses[id] = "表达仅本机处理；没有发送关联判断。"
@@ -174,6 +176,7 @@ final class ControlCenter: ObservableObject {
     @Published var segmentationStatus = ""
     @Published var segmentedBatches: [SegmentedProcessingBatch] = []
     @Published var segmentedCognitiveCounts: [String:Int] = [:]
+    @Published var segmentedAssociationStates: [String:String] = [:]
     private var segmentExtractionModel: ResponsesSegmentExtractionPort?
     private var segmentAggregationModel: ResponsesSegmentAggregationPort?
     private var textModel: ResponsesModelPort?
@@ -346,6 +349,11 @@ final class ControlCenter: ObservableObject {
                 var cognitiveCounts: [String:Int]=[:]
                 for batch in segmentedBatches { if let ids=try await store.segmentedCognitiveClaimIDs(batchID:batch.id) { cognitiveCounts[batch.id]=ids.count } }
                 segmentedCognitiveCounts=cognitiveCounts
+                var associations: [String:String]=[:]
+                for batch in segmentedBatches {
+                    if let attempt=try await store.committedSegmentedAssociationAttempt(batchID:batch.id) { associations[batch.id]=attempt.validity == "current" ? attempt.state : "frozen" }
+                }
+                segmentedAssociationStates=associations
             }
         }
         catch { status = error.localizedDescription }
@@ -436,7 +444,11 @@ final class ControlCenter: ObservableObject {
                 }
                 segmentedBatches=try await store.segmentedProcessingBatches()
                 let result=try await store.processSegmentedCognition(batchID:batch.id,extraction:extraction,aggregation:aggregation)
-                if let ids=result.claimIDs { status="长表达认知已保存 · \(ids.count) 条候选；历史关联尚未接入" }
+                if let ids=result.claimIDs {
+                    status="长表达认知已保存 · \(ids.count) 条候选；正在核对历史关联"
+                    await associateUnderstoodExpression(record.id,segmentedBatchID:batch.id)
+                    status="长表达认知已保存 · \(ids.count) 条候选；"+(associationStatuses[record.id] ?? "关联未完成")
+                }
                 else { status="分段处理记录：\(result.state.rawValue) · 未重复发送未知或已结束的请求" }
             } catch { status=error.localizedDescription }
             await refresh();requestReminderRefresh()
@@ -920,7 +932,11 @@ struct CenterView: View {
         model.processingIntents.filter { [.queued, .running].contains($0.state) }.count + model.recordingRequests.filter { $0.state == "waiting" }.count + model.segmentedBatches.filter { $0.state == .queued && model.segmentedCognitiveCounts[$0.id] == nil }.count
     }
     private func segmentedState(_ batch: SegmentedProcessingBatch) -> String {
-        if let count=model.segmentedCognitiveCounts[batch.id] { return "认知记录已保存（\(count)条） · 历史关联待接入 · \(batch.state == .frozen ? "迁移冻结" : batch.state == .blocked ? "来源已变化" : "保留原处理身份")" }
+        if let count=model.segmentedCognitiveCounts[batch.id] {
+            let association=model.segmentedAssociationStates[batch.id]
+            let label=association == "completed" ? "历史关联已保存" : association == "unknown" ? "关联结果未知" : association == "frozen" ? "历史关联冻结" : "关联待核对"
+            return "认知记录已保存（\(count)条） · \(label) · \(batch.state == .frozen ? "迁移冻结" : batch.state == .blocked ? "来源已变化" : "保留原处理身份")"
+        }
         switch batch.state {
         case .queued: return model.understandingSource == batch.scope.plan.source.sourceID ? "正在分段处理" : "等待继续分段处理"
         case .blocked: return "处理已阻塞"
@@ -1078,7 +1094,7 @@ struct CenterView: View {
                         }
                         if let transcript = record.transcript {
                             Text("本次文字 \(transcript.unicodeScalars.count) 字符 · 单次处理上限 4000 字符").font(.caption).foregroundStyle(.secondary)
-                            if transcript.unicodeScalars.count > 4000 { Text("超出单次处理范围；原话完整保留。本人录音可使用分段理解，历史关联尚未接入。").font(.caption).foregroundStyle(.orange) }
+                            if transcript.unicodeScalars.count > 4000 { Text("超出单次处理范围；原话完整保留。本人录音可使用分段理解；完整文字与历史须满足关联预算。").font(.caption).foregroundStyle(.orange) }
                             if !model.segmentationStatus.isEmpty { Text(model.segmentationStatus).font(.caption).foregroundStyle(.orange) }
                             if transcript.isEmpty { Text("本次转写没有返回文字。可以播放原件核对；这不代表音轨没有人声。").foregroundStyle(.secondary) }
                             else if transcript.unicodeScalars.count > 4000 {
