@@ -1,5 +1,11 @@
 # VoiceOS 文档索引
 
+**当前接续（2026-10-13）：** 按 M2→M3 收口；两段正式素材已提交结构化认知并创建九条未完成提醒事项。历史批次外写、取消传播和异步期间批次变化已修复，466 项回归与签名构建通过。旧“自然案例 A 通过”更正为 partial：开发命令的完成/生成反馈只证明机制，不能替代真实后续表达。先读[夜间进度](planning/overnight-progress.md)和[M3 证据矩阵](testing/m3-evidence-status-2026-10-13.md)，再按[路线图](planning/implementation-roadmap.md)推进；不扩展 M4。
+
+## 历史接续记录
+
+以下保留各原时点的状态；其中待实现项与测试数量不覆盖上方当前接续。
+
 最新诊断：[600秒等待窗口试验](engineering/long-text-wait-window.md)。用户授权仅调大新请求窗口测试；旧未知请求保持，长文字产品范围不缩减。
 
 最新工程增量：[精简长文字请求](adr/032-compact-segment-extraction.md)与[提醒事项反馈隔离](engineering/reminder-refresh-isolation.md)。双v3仍为显式候选，应用默认未切换；真实长文字完整认知尚未成功。
