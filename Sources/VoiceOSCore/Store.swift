@@ -12,6 +12,7 @@ public actor VoiceOSStore {
     private var processing = false
     var activeProcessingIntents: Set<String> = []
     var segmentExtractionActive = false
+    var segmentAggregationActive = false
     var activeReminderLinks: Set<String> = []
     var activeEnglishAttempts: Set<String> = []
     let checkpoint: @Sendable (SaveCheckpoint) throws -> Void
@@ -84,6 +85,7 @@ public actor VoiceOSStore {
         try Self.validateStoredRecordingProcessingRequests(db)
         try Self.validateStoredSegmentedProcessingBatches(db)
         try recoverSegmentExtractionAttempts()
+        try recoverSegmentAggregationAttempts()
         try recoverSegmentedProcessingBatches()
         try recoverExpressionProcessingIntents()
         ready = true

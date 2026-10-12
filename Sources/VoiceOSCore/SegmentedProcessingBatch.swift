@@ -72,6 +72,7 @@ extension VoiceOSStore {
         try db.transaction {
             try db.execute("UPDATE segmented_processing_batches SET state='cancelled',error='用户取消；原件与逐字稿保留',updated_at=? WHERE id=? AND state='queued'",[Self.processingNow(),id])
             try db.execute("UPDATE segmented_extraction_attempts SET validity='frozen' WHERE batch_id=?",[id])
+            try db.execute("UPDATE segmented_aggregation_attempts SET validity='frozen' WHERE batch_id=?",[id])
             try checkpoint(.segmentedBatchCancelUncommitted)
         }
         try checkpoint(.segmentedBatchCancelCommitted)
@@ -87,6 +88,7 @@ extension VoiceOSStore {
             try db.transaction {
                 try db.execute("UPDATE segmented_processing_batches SET state='blocked',error=?,updated_at=? WHERE id=? AND state='queued'",[error.localizedDescription,Self.processingNow(),id])
                 try db.execute("UPDATE segmented_extraction_attempts SET validity='frozen' WHERE batch_id=?",[id])
+            try db.execute("UPDATE segmented_aggregation_attempts SET validity='frozen' WHERE batch_id=?",[id])
             }
         }
         return try segmentedProcessingBatch(id:id)

@@ -214,3 +214,99 @@ final class SegmentExtractionTests: XCTestCase {
         let result = try await restored.runNextSegmentExtraction(batchID:batch.id,using:ExtractionFixture(config())); XCTAssertNil(result)
     }
 }
+
+private actor AggregationFixture: SegmentAggregationPort {
+    nonisolated let configuration: ModelConfiguration
+    let fail: Bool
+    var calls=0
+    init(_ config: ModelConfiguration, fail: Bool = false) { configuration=config; self.fail=fail }
+    func aggregate(_ r: SegmentAggregationRequest) async throws -> SegmentAggregationResponse {
+        calls += 1
+        if fail { throw VoiceOSError("synthetic lost response") }
+        return aggregationFixtureResponse(r)
+    }
+}
+private func aggregationFixtureResponse(_ r: SegmentAggregationRequest) -> SegmentAggregationResponse {
+    .init(review:.init(batchID:r.batchID,ledgerDigest:r.ledger.contentDigest,reviewedEvidenceIDs:r.ledger.evidence.map(\.id),
+        actionDecisions:r.ledger.evidence.filter { $0.proposal.kind == .possibleAction }.map {
+            .init(evidenceID:$0.id,disposition:.reject,supportingEvidenceIDs:r.ledger.evidence.map(\.id),explanation:"后段取消，合成结果")
+        }),inputTokens:30,outputTokens:10)
+}
+private actor WaitingAggregation: SegmentAggregationPort {
+    nonisolated let configuration: ModelConfiguration
+    var request: SegmentAggregationRequest?
+    var started: CheckedContinuation<Void,Never>?
+    var finishContinuation: CheckedContinuation<SegmentAggregationResponse,Never>?
+    init(_ c: ModelConfiguration) { configuration=c }
+    func waitForStart() async { if request == nil { await withCheckedContinuation { started=$0 } } }
+    func aggregate(_ r: SegmentAggregationRequest) async throws -> SegmentAggregationResponse {
+        request=r; started?.resume(); started=nil
+        return await withCheckedContinuation { finishContinuation=$0 }
+    }
+    func finish() { if let request { finishContinuation?.resume(returning:aggregationFixtureResponse(request)); finishContinuation=nil } }
+}
+extension SegmentExtractionTests {
+    func completeSegments(_ store: VoiceOSStore,_ batch: SegmentedProcessingBatch) async throws {
+        let port=ExtractionFixture(config())
+        for _ in batch.scope.plan.segments { _ = try await store.runNextSegmentExtraction(batchID:batch.id,using:port) }
+    }
+    func testAggregationDurableSuccessNoRepeatAndFrozenMigration() async throws {
+        let s=try await store(), batch=try await seed(s), p=AggregationFixture(config())
+        do { _ = try await s.runSegmentAggregation(batchID:batch.id,using:p); XCTFail() } catch {}
+        let zero=await p.calls; XCTAssertEqual(zero,0)
+        try await completeSegments(s,batch)
+        let a=try await s.runSegmentAggregation(batchID:batch.id,using:p)
+        XCTAssertEqual(a?.state,.completed); XCTAssertEqual(a?.usage?["input_tokens"],30)
+        let again=try await s.runSegmentAggregation(batchID:batch.id,using:p)
+        XCTAssertEqual(again?.id,a?.id); let calls=await p.calls; XCTAssertEqual(calls,1)
+        let claims=try await s.candidateClaims(), actions=try await s.actions(); XCTAssertTrue(claims.isEmpty); XCTAssertTrue(actions.isEmpty)
+        let package=base.appendingPathComponent("aggregate-package"), target=base.appendingPathComponent("aggregate-restored")
+        try await s.exportPackage(to:package)
+        let manifest=try String(contentsOf:package.appendingPathComponent("manifest.json"),encoding:.utf8)
+        XCTAssertTrue(manifest.contains("29"))
+        try await VoiceOSStore.restorePackage(from:package,to:target,inspector:ExtractionInspector())
+        let restored=try VoiceOSStore(root:target,inspector:ExtractionInspector()); try await restored.recover()
+        let frozen=try await restored.segmentAggregationAttempt(batchID:batch.id); XCTAssertEqual(frozen?.id,a?.id); XCTAssertEqual(frozen?.validity,"frozen")
+        _ = try await restored.runSegmentAggregation(batchID:batch.id,using:p)
+        let after=await p.calls; XCTAssertEqual(after,1)
+    }
+    func testAggregationUnknownAndReservationRecoveryNeverResend() async throws {
+        let s=try await store(), b=try await seed(s); try await completeSegments(s,b)
+        let port=AggregationFixture(config(),fail:true)
+        let a=try await s.runSegmentAggregation(batchID:b.id,using:port); XCTAssertEqual(a?.state,.unknown)
+        _ = try await s.runSegmentAggregation(batchID:b.id,using:port); let calls=await port.calls; XCTAssertEqual(calls,1)
+        var reservedBatchID=""
+        do {
+            let reserved=try await store("reserved-agg",checkpoint:{ if $0 == .segmentAggregationReserved { throw VoiceOSError("exit before send") } })
+            let rb=try await seed(reserved); reservedBatchID=rb.id; try await completeSegments(reserved,rb)
+            do { _ = try await reserved.runSegmentAggregation(batchID:rb.id,using:port); XCTFail() } catch {}
+        }
+        let reopened=try await store("reserved-agg")
+        let unknown=try await reopened.segmentAggregationAttempt(batchID:reservedBatchID); XCTAssertEqual(unknown?.state,.unknown)
+        _ = try await reopened.runSegmentAggregation(batchID:reservedBatchID,using:port)
+        let after=await port.calls; XCTAssertEqual(after,1)
+    }
+    func testAggregationLateCancellationKeepsUsageFrozenAndNoProducts() async throws {
+        let s=try await store(), b=try await seed(s); try await completeSegments(s,b)
+        let port=WaitingAggregation(config())
+        let task=Task { try await s.runSegmentAggregation(batchID:b.id,using:port) }
+        await port.waitForStart()
+        _ = try await s.cancelSegmentedProcessingBatch(id:b.id)
+        await port.finish()
+        let result=try await task.value
+        XCTAssertEqual(result?.state,.completed); XCTAssertEqual(result?.validity,"frozen"); XCTAssertEqual(result?.usage?["output_tokens"],10)
+        let parent=try await s.segmentedProcessingBatch(id:b.id); XCTAssertEqual(parent.state,.cancelled)
+        let actions=try await s.actions(); XCTAssertTrue(actions.isEmpty)
+    }
+    func testAggregationTransactionFailureRetainsUsageAndCommittedResult() async throws {
+        for checkpoint in [SaveCheckpoint.segmentAggregationUncommitted,.segmentAggregationCommitted] {
+            let s=try await store("agg-\(checkpoint)",checkpoint:{ if $0 == checkpoint { throw VoiceOSError("synthetic transaction boundary") } })
+            let b=try await seed(s); try await completeSegments(s,b); let port=AggregationFixture(config())
+            let a=try await s.runSegmentAggregation(batchID:b.id,using:port)
+            XCTAssertEqual(a?.state,checkpoint == .segmentAggregationUncommitted ? .unknown:.completed)
+            XCTAssertEqual(a?.usage?["input_tokens"],30)
+            _ = try await s.runSegmentAggregation(batchID:b.id,using:port)
+            let calls=await port.calls; XCTAssertEqual(calls,1)
+        }
+    }
+}

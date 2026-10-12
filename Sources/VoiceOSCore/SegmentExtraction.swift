@@ -71,7 +71,10 @@ extension VoiceOSStore {
     func segmentTerminalParent(_ id: String, state: SegmentedProcessingBatchState, error: String) throws {
         try db.execute("UPDATE segmented_processing_batches SET state=?,error=?,updated_at=? WHERE id=? AND state='queued'",
             [state.rawValue,error,Self.processingNow(),id])
-        if state == .blocked { try db.execute("UPDATE segmented_extraction_attempts SET validity='frozen' WHERE batch_id=?",[id]) }
+        if state == .blocked {
+            try db.execute("UPDATE segmented_extraction_attempts SET validity='frozen' WHERE batch_id=?",[id])
+            try db.execute("UPDATE segmented_aggregation_attempts SET validity='frozen' WHERE batch_id=?",[id])
+        }
     }
     /// One serial segment step per library. Success remains staged; it never creates
     /// cognitive claims, questions, actions or outbox writes. Nil means no dispatch.
@@ -167,7 +170,7 @@ extension VoiceOSStore {
         }
     }
     static func validateStoredSegmentExtraction(_ db: Database) throws {
-        guard try db.query("SELECT producer_sequence FROM (SELECT producer_sequence FROM model_attempts UNION ALL SELECT producer_sequence FROM segmented_extraction_attempts) GROUP BY producer_sequence HAVING COUNT(*)>1").isEmpty else { throw VoiceOSError("跨端口成果生产者顺序重复") }
+        guard try db.query("SELECT producer_sequence FROM (SELECT producer_sequence FROM model_attempts UNION ALL SELECT producer_sequence FROM segmented_extraction_attempts UNION ALL SELECT producer_sequence FROM segmented_aggregation_attempts) GROUP BY producer_sequence HAVING COUNT(*)>1").isEmpty else { throw VoiceOSError("跨端口成果生产者顺序重复") }
         for row in try db.query("SELECT * FROM segmented_extraction_attempts") {
             let attempt = try segmentAttempt(row)
             guard let parent = try db.query("SELECT * FROM segmented_processing_batches WHERE id=?",[attempt.batchID]).first else { throw VoiceOSError("片段缺少父批次") }

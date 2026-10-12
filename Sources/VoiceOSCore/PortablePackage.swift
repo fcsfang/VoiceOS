@@ -38,6 +38,7 @@ private enum PackageLayout {
     static let version26Tables = tables + ["recording_processing_requests"]
     static let version27Tables = version26Tables + ["segmented_processing_batches"]
     static let version28Tables = version27Tables + ["segmented_extraction_attempts"]
+    static let version29Tables = version28Tables + ["segmented_aggregation_attempts"]
     static func tables(for version: Int) -> [String] {
         switch version {
         case 1: return legacyTables
@@ -63,6 +64,7 @@ private enum PackageLayout {
         case 26: return version26Tables
         case 27: return version27Tables
         case 28: return version28Tables
+        case 29: return version29Tables
         default: return tables
         }
     }
@@ -99,7 +101,7 @@ extension VoiceOSStore {
         let file = try PackageLayout.safeFile(package, "manifest.json")
         guard let size = try file.resourceValues(forKeys:[.fileSizeKey]).fileSize, size > 0, size <= 1048576 else { throw VoiceOSError("迁移清单过大或为空") }
         let manifest = try JSONDecoder().decode(PackageManifest.self,from:Data(contentsOf:file))
-        guard manifest.format == "VoiceOS-local-package", (1...28).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
+        guard manifest.format == "VoiceOS-local-package", (1...29).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
               let count = manifest.counts["sources"], count >= 0, manifest.counts.values.allSatisfy({ $0 >= 0 && $0 <= 1000000 }) else { throw VoiceOSError("不支持此迁移包格式或记录数量") }
         return PackageSummary(version:manifest.version,createdAt:manifest.createdAt,sourceCount:count,omittedAssetCount:manifest.omittedAssetIDs.count,mediaIncluded:manifest.mediaIncluded)
     }
@@ -110,8 +112,9 @@ extension VoiceOSStore {
         guard try db.query("SELECT id FROM sources WHERE input_fingerprint LIKE 'microphone-v1:%' AND state='receiving' AND expected_bytes=0").isEmpty else { throw VoiceOSError("请先停止并封存录制，再导出资料") }
         let hasRequests = try !db.query("SELECT id FROM recording_processing_requests LIMIT 1").isEmpty
         let hasBatches = try !db.query("SELECT id FROM segmented_processing_batches LIMIT 1").isEmpty
+        let hasAggregation = try !db.query("SELECT id FROM segmented_aggregation_attempts LIMIT 1").isEmpty
         let hasSegments = try !db.query("SELECT id FROM segmented_extraction_attempts LIMIT 1").isEmpty
-        let exportTables = hasSegments ? PackageLayout.version28Tables : hasBatches ? PackageLayout.version27Tables : hasRequests ? PackageLayout.version26Tables : PackageLayout.tables
+        let exportTables = hasAggregation ? PackageLayout.version29Tables : hasSegments ? PackageLayout.version28Tables : hasBatches ? PackageLayout.version27Tables : hasRequests ? PackageLayout.version26Tables : PackageLayout.tables
         var rows: [String: [[String: String]]] = [:]
         try db.transaction {
             for table in exportTables { rows[table] = try db.query("SELECT * FROM \(table) ORDER BY id") }
@@ -152,8 +155,8 @@ extension VoiceOSStore {
                 files.append(verified)
             }
             if includeMedia { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let packageVersion = hasSegments ? 28 : hasBatches ? 27 : hasRequests ? 26 : try db.query("SELECT id FROM sources WHERE input_fingerprint LIKE 'personal-audio-v1:%' LIMIT 1").isEmpty ? 24 : 25
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: packageVersion, databaseSchema: hasSegments ? 28 : hasBatches ? 27 : hasRequests ? 26 : 25, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            let packageVersion = hasAggregation ? 29 : hasSegments ? 28 : hasBatches ? 27 : hasRequests ? 26 : try db.query("SELECT id FROM sources WHERE input_fingerprint LIKE 'personal-audio-v1:%' LIMIT 1").isEmpty ? 24 : 25
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: packageVersion, databaseSchema: hasAggregation ? 29 : hasSegments ? 28 : hasBatches ? 27 : hasRequests ? 26 : 25, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)
@@ -170,10 +173,11 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("恢复目标必须是新的空目录；现有资料库不会被覆盖") }
         let manifestURL = try PackageLayout.safeFile(package, "manifest.json")
         let manifest = try JSONDecoder().decode(PackageManifest.self, from: Data(contentsOf: manifestURL))
-        guard manifest.format == "VoiceOS-local-package", (1...28).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
+        guard manifest.format == "VoiceOS-local-package", (1...29).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
         guard manifest.version >= 26 || !manifest.files.contains(where: { $0.path == "recording_processing_requests.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带录制处理请求") }
         guard manifest.version >= 27 || !manifest.files.contains(where: { $0.path == "segmented_processing_batches.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带分段批次") }
         guard manifest.version >= 28 || !manifest.files.contains(where: { $0.path == "segmented_extraction_attempts.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带片段尝试") }
+        guard manifest.version >= 29 || !manifest.files.contains(where: { $0.path == "segmented_aggregation_attempts.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带聚合尝试") }
         var tables = PackageLayout.tables(for: manifest.version)
         // A newer package can be relabeled as an older compatibility fixture. The
         // additive queue table is safe to carry through that validation path.
@@ -276,10 +280,10 @@ extension VoiceOSStore {
                     if table == "model_attempts", row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前结果未登记；不会自动重发" }
                     if table == "english_feedback_attempts", row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前英文反馈未登记；不自动重发" }
                     if table == "questions" { row["validity"] = "frozen" }
-                    if table == "segmented_extraction_attempts" {
-                        guard SegmentExtractionState(rawValue:row["state"] ?? "") != nil, ["current","frozen"].contains(row["validity"] ?? "") else { throw VoiceOSError("迁移片段状态无效") }
+                    if table == "segmented_extraction_attempts" || table == "segmented_aggregation_attempts" {
+                        guard SegmentExtractionState(rawValue:row["state"] ?? "") != nil, ["current","frozen"].contains(row["validity"] ?? "") else { throw VoiceOSError("迁移分段调用状态无效") }
                         row["validity"] = "frozen"
-                        if row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前片段结果未登记；不自动重发" }
+                        if row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前分段调用结果未登记；不自动重发" }
                     }
                     if table == "segmented_processing_batches" {
                         guard packageVersion >= 28 || !["unknown","rejected"].contains(row["state"] ?? "") else { throw VoiceOSError("旧包不支持片段终态") }
@@ -366,6 +370,7 @@ extension VoiceOSStore {
             try VoiceOSStore.validateStoredRecordingProcessingRequests(database)
             try VoiceOSStore.validateStoredSegmentedProcessingBatches(database)
             try VoiceOSStore.validateStoredSegmentExtraction(database)
+            try VoiceOSStore.validateStoredSegmentAggregation(database)
             guard try database.query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("恢复记录存在悬空引用") }
             guard try database.query("""
             SELECT j.id FROM jobs j JOIN sources s ON s.id=j.source_id WHERE j.input_version_id!=s.version_id
