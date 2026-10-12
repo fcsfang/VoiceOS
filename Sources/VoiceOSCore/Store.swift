@@ -90,6 +90,7 @@ public actor VoiceOSStore {
         try Self.validateStoredSegmentCognitiveCommits(db)
         try recoverSegmentedProcessingBatches()
         try recoverExpressionProcessingIntents()
+        try Self.validateStoredActionSchedules(db)
         ready = true
     }
     @discardableResult

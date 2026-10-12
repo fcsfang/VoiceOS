@@ -103,5 +103,6 @@ extension VoiceOSStore {
             }
             guard state == action["state"] else { throw VoiceOSError("迁移行动当前状态与历史不一致") }
         }
+        try validateStoredActionSchedules(db)
     }
 }

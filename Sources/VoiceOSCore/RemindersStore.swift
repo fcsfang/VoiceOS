@@ -84,7 +84,7 @@ extension VoiceOSStore {
             throw VoiceOSError("提醒事项结果尚未确认；尝试已保留，请回读，不会自动重建")
         }
     }
-    private func reminderSourceAllowed(_ action: ActionRecord) throws -> Bool {
+    func reminderSourceAllowed(_ action: ActionRecord) throws -> Bool {
         guard let claim = try candidateClaims().first(where: { $0.id == action.claimID }), !claim.references.isEmpty else { return false }
         return try claim.references.allSatisfy { ref in
             try db.query("SELECT local_only FROM sources WHERE id=?", [ref.sourceID]).first?["local_only"] == "0"

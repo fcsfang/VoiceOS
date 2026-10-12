@@ -1,6 +1,6 @@
 # VoiceOS 文档索引
 
-**当前接续（2026-10-13）：** 按 M2→M3 收口；两段正式素材已提交认知并创建九条未完成提醒事项。W14 状态恢复、时间持久回读与纯三方策略基础已实现，schema33/含时间的包 v33；487 项回归与签名构建通过。实际排期操作、补偿和运行时 UI 尚未完成；自然案例 A 仍 partial。先读[夜间进度](planning/overnight-progress.md)、[M3 矩阵](testing/m3-evidence-status-2026-10-13.md)和[ADR034](adr/034-reminder-time-observation-and-merge.md)，再按[路线图](planning/implementation-roadmap.md)推进；不扩展 M4。
+**当前接续（2026-10-13）：** 按 M2→M3 收口；真实素材已形成认知与九条未完成提醒事项。W14 状态恢复、时间回读、持久本地排期与三方预览已实现；schema34/含排期包 v34。497 项全套及末次 10 项专项、签名构建通过。实际改期执行、补偿和运行时 UI 尚缺；自然案例 A/M3 仍 partial。先读[夜间进度](planning/overnight-progress.md)、[M3 矩阵](testing/m3-evidence-status-2026-10-13.md)和[ADR035](adr/035-durable-action-schedule-intents.md)，按[路线图](planning/implementation-roadmap.md)接续，不扩展 M4。
 
 ## 历史接续记录
 

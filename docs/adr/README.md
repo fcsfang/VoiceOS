@@ -63,3 +63,5 @@
 - [ADR033：提醒事项状态冲突恢复](033-reminder-status-resolution.md) — schema32/含记录的包v32；显式采用新鲜外部状态，保留历史基线并恢复后续自动完成回流。
 
 - [ADR034：提醒事项时间观测与三方基础](034-reminder-time-observation-and-merge.md) — schema33/含时间的包v33；保留日期/时刻/未知语义，纯策略尚未接实际改期执行。
+
+- [ADR035：持久本地排期意图](035-durable-action-schedule-intents.md) — schema34/含排期包v34；独立版本/锚点/归属与三方预览，实际外部改期仍待实现。

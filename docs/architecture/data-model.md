@@ -151,3 +151,7 @@ schema32 新增 `reminder_status_resolutions`，不可变记录 link、observati
 ## W14 时间回读实施增量（2026-10-13）
 
 schema33 `reminder_time_observations(id,due_json)` 引用不可变外部观测，记录类型化 `none/dateOnly/instant`。没有行表示该观测的期限未知；旧历史不回填。时间单独变化同样生成新观测并与时间行原子保存。含时间行包 v33 保留当地日期与明确时区，验证日期/引用；恢复仍不携带连接授权。`ReminderScheduleProposal` 和 `ReminderScheduleMerge` 为内存提案/纯决策，不是已实现的 ScheduleRevision 或 Operation；安全外写仍待实现。见 [ADR034](../adr/034-reminder-time-observation-and-merge.md)。
+
+## W14 本地排期实施增量（2026-10-13）
+
+schema34 `action_schedule_intents` 追加独立排期链：固定 action_version/schedule_version、due、用户承诺/AI 弹性归属、actor、表达/规划文本、固定 anchor_event_time/anchor_time_zone、可选 base_observation_id 与重推的 base_authority、历史 access_version、validity 与命令摘要。与行动状态版本分开，来源/状态变化阻止旧意图执行。含排期包 v34 校验连续历史、承诺保护、观测依据与基线归属，恢复全部 frozen，不恢复实时连接。它是实际本地 desired，不是已执行 Operation 或完整 PlanRevision；外部效果仍待实现。见 [ADR035](../adr/035-durable-action-schedule-intents.md)。

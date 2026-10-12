@@ -241,6 +241,7 @@ final class ControlCenter: ObservableObject {
     @Published var claimHistory: [ClaimReviewVersion] = []
     @Published var reviewingClaim = false
     @Published var actionRecords: [ActionRecord] = []
+    @Published var scheduleIntents: [ActionScheduleIntent] = []
     @Published var savingAction = false
     @Published var actionVersions: [ActionRevision] = []
     @Published var feedbackRecords: [ActionFeedbackRecord] = []
@@ -368,6 +369,7 @@ final class ControlCenter: ObservableObject {
             claimOrigins = try await store?.discussionClaimOrigins() ?? []
             outcomeOrigins = try await store?.conversationOutcomeOrigins() ?? []
             actionRecords = try await store?.actions(includeHistory: true) ?? []
+            scheduleIntents = try await store?.actionScheduleIntents() ?? []
             reminderLinks = try await store?.reminderLinks() ?? []
             reminderAccess = try await store?.reminderAccess()
             reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
@@ -1295,6 +1297,14 @@ struct CenterView: View {
                                         Text("\(action.kind == "task" ? "明确任务" : (action.kind == "opportunity" ? "探索意图" : "AI 建议")) · \(action.state == "completed" ? "已完成" : (action.state == "dismissed" ? "暂不跟进" : "待跟进")) · 第 \(action.version) 版").font(.caption)
                                         Text(action.validity == "frozen" ? "认知或授权已变化，暂停使用；历史保留" : "本地意图记录 · 外部同步状态见下方").font(.caption).foregroundStyle(.secondary)
                                         Text("认知依据：第 \(action.claimReviewVersion) 版").font(.caption).foregroundStyle(.secondary)
+                                        if let schedule = model.scheduleIntents.first(where: { $0.actionID == action.id }) {
+                                            Text((schedule.authority == .userCommitment ? "用户明确期限：" : "AI 弹性安排：") + schedule.due.summary).font(.caption)
+                                            Text(schedule.eligibleForPlanning ? "本地排期意图，尚未执行外部改期。" : "排期保留为历史，当前暂停执行。").font(.caption).foregroundStyle(.secondary)
+                                            DisclosureGroup("排期依据") {
+                                                Text(schedule.rawExpression).font(.caption)
+                                                Text("表达时刻：" + schedule.anchorSummary).font(.caption).foregroundStyle(.secondary)
+                                            }
+                                        }
                                         if !action.note.isEmpty { Text(action.note) }
                                         HStack {
                                             if action.state == "open" {

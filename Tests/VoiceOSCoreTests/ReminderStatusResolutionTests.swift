@@ -204,11 +204,11 @@ final class ReminderStatusResolutionTests: XCTestCase {
         let (store, _, _, _) = try await fixture()
         let file = await store.root.appendingPathComponent("voiceos.sqlite")
         let original = try Database(file)
-        let tableNames = try original.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('reminder_status_resolutions','reminder_time_observations')").compactMap { $0["name"] }
+        let tableNames = try original.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('reminder_status_resolutions','reminder_time_observations','action_schedule_intents')").compactMap { $0["name"] }
         let before = try Dictionary(uniqueKeysWithValues: tableNames.map { ($0, try original.query("SELECT * FROM \($0) ORDER BY id")) })
-        try original.execute("DROP TABLE reminder_time_observations"); try original.execute("DROP TABLE reminder_status_resolutions"); try original.execute("PRAGMA user_version=31")
+        try original.execute("DROP TABLE action_schedule_intents"); try original.execute("DROP TABLE reminder_time_observations"); try original.execute("DROP TABLE reminder_status_resolutions"); try original.execute("PRAGMA user_version=31")
         let upgraded = try Database(file)
-        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "33")
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "34")
         XCTAssertTrue(try upgraded.query("SELECT * FROM reminder_status_resolutions").isEmpty)
         for table in tableNames { XCTAssertEqual(try upgraded.query("SELECT * FROM \(table) ORDER BY id"), before[table]) }
     }
