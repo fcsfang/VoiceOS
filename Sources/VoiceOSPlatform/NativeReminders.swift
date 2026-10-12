@@ -65,4 +65,29 @@ public final class NativeReminders: RemindersPort {
         do { try store.save(item, commit: true) }
         catch { throw VoiceOSError("提醒事项写入结果未知") }
     }
+
+    /// Development verification only: mark the one explicitly identified item
+    /// complete, then let VoiceOS observe the change through its normal readback.
+    public func markCompleted(calendarID: String, externalID: String) async throws {
+        try Task.checkCancellation()
+        let target = try calendar(calendarID)
+        let predicate = store.predicateForReminders(in: [target])
+        let gate = CallbackWait<[EKReminder]>()
+        let items = try await gate.wait(timeout: readTimeout) { complete in
+            let token = store.fetchReminders(matching: predicate) { reminders in
+                Task { @MainActor in
+                    guard gate.isWaiting else { return }
+                    guard let reminders else { complete(.failure(VoiceOSError("提醒事项完成核对未返回结果"))); return }
+                    complete(.success(reminders))
+                }
+            }
+            return { [store] in store.cancelFetchRequest(token) }
+        }
+        guard let item = items.first(where: { $0.calendar.calendarIdentifier == calendarID && $0.calendarItemIdentifier == externalID }) else {
+            throw VoiceOSError("未找到明确指定的 VoiceOS 任务；不会修改其他提醒事项")
+        }
+        item.isCompleted = true
+        do { try store.save(item, commit: true) }
+        catch { throw VoiceOSError("提醒事项完成写入结果未知") }
+    }
 }

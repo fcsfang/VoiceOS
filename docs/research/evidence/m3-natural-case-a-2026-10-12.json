@@ -1,0 +1,40 @@
+{
+  "evidence_version": "m3-natural-case-a-v1",
+  "source": {
+    "kind": "formal_personal_video_track_2",
+    "transcription_backend": "Qwen3-ASR-1.7B-8bit@a8379a2 MLXAudio0.5.8 chunk30-v1",
+    "text_scalars": 376,
+    "audio_uploaded": false
+  },
+  "cognition": {
+    "provider": "responses:api.chiyi.cc",
+    "model": "gpt-6.1-sol",
+    "state": "completed",
+    "input_tokens": 1040,
+    "output_tokens": 1338,
+    "ordinary_task": "记下 API 是否具有记忆状态的问题",
+    "auto_send": true
+  },
+  "external_feedback": {
+    "calendar": "VoiceOS 验证 2026-10-10",
+    "create_writes": 1,
+    "readback_before_completion": true,
+    "external_completion": true,
+    "readback_after_completion": true,
+    "duplicate_writes": 0,
+    "feedback_kind": "outcome",
+    "feedback_source_saved": true
+  },
+  "historical_recall": {
+    "state": "completed",
+    "candidate_count": 2,
+    "proposal_count": 1,
+    "relation": "continuation",
+    "has_current_quote": true,
+    "has_historical_quote": true,
+    "has_reason": true
+  },
+  "integrity": true,
+  "case_a_status": "passed",
+  "remaining_scope": "M3 failure variants, conflict compensation, sleep/offline and full AC aggregation remain separate acceptance work"
+}

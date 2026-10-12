@@ -9,12 +9,15 @@ struct Check {
     static func main() async {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
-            guard args.count >= 2 else { throw VoiceOSError("usage: voiceos-check <import|read|transcribe> <isolated-root> [file] [command-id]") }
+            guard args.count >= 2 || args.first == "m3-list-reminder-calendars" else { throw VoiceOSError("usage: voiceos-check <import|read|transcribe> <isolated-root> [file] [command-id]") }
             if args[0] == "speech-eval" { try await runLocalSpeechEvaluation(args); return }
             if args[0] == "segment-wait-cloud-fixture" { try await runSegmentWaitCloudFixture(args); return }
             if args[0] == "personal-source-cloud-probe" { try await runPersonalSourceCloudProbe(args); return }
             if args[0] == "personal-short-cloud-probe" { try await runPersonalShortCloudProbe(args); return }
             if args[0] == "personal-segment-cloud-probe" { try await runPersonalSegmentCloudProbe(args); return }
+            if args[0] == "m3-list-reminder-calendars" { try await runM3ListReminderCalendars(); return }
+            if args[0] == "m3-real-close" { try await runM3RealClose(args); return }
+            if args[0] == "m3-associate-feedback" { try await runM3AssociateFeedback(args); return }
             if args[0] == "config-check" { try runConfigCheck(URL(fileURLWithPath: args[1])); return }
             if args[0] == "outcome-cloud-fixture" { try await runOutcomeCloudFixture(args); return }
             if args[0] == "english-ui-seed" { try await runEnglishUISeed(args); return }
