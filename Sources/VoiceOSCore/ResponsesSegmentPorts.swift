@@ -19,7 +19,7 @@ private struct SegmentResponsesTransport: Sendable {
             "text":["format":["type":"json_schema","name":name,"strict":true,"schema":schema]]]
         let data=try JSONSerialization.data(withJSONObject:payload,options:[.sortedKeys])
         guard data.count<=160000 else { throw ModelPortFailure.rejected("分段文本请求超过字节预算") }
-        var http=URLRequest(url:endpoint,timeoutInterval:60); http.httpMethod="POST"; http.httpBody=data
+        var http=URLRequest(url:endpoint,timeoutInterval:120); http.httpMethod="POST"; http.httpBody=data
         http.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization"); http.setValue("application/json",forHTTPHeaderField:"Content-Type")
         let reply=try await transport.send(http)
         guard reply.status==200 else { throw ModelPortFailure.rejected("HTTP \(reply.status)；费用未知，不自动重发") }

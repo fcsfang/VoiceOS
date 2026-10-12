@@ -118,7 +118,7 @@ extension VoiceOSStore {
         } catch ModelPortFailure.rejected(let reason,let input,let output) {
             try failSegmentAggregation(id:id,batchID:batchID,state:.rejected,usage:Self.segmentUsage(input:input,output:output),reason:reason)
         } catch {
-            try failSegmentAggregation(id:id,batchID:batchID,state:.unknown,usage:knownUsage,reason:"聚合结果未登记，不自动重发；未观测用量仍未知")
+            try failSegmentAggregation(id:id,batchID:batchID,state:.unknown,usage:knownUsage,reason:unknownModelResultReason(error,phase:"聚合"))
         }
         return try segmentAggregationAttempt(batchID:batchID)
     }

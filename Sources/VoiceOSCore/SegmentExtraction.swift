@@ -136,7 +136,7 @@ extension VoiceOSStore {
         } catch ModelPortFailure.rejected(let reason,let input,let output) {
             try failSegmentExtraction(id:id,batchID:batchID,state:.rejected,reason:reason,usage:Self.segmentUsage(input:input,output:output))
         } catch {
-            try failSegmentExtraction(id:id,batchID:batchID,state:.unknown,reason:"片段结果未登记；费用未知，不自动重发",usage:receivedUsage)
+            try failSegmentExtraction(id:id,batchID:batchID,state:.unknown,reason:unknownModelResultReason(error,phase:"片段"),usage:receivedUsage)
         }
         guard let row = try db.query("SELECT * FROM segmented_extraction_attempts WHERE id=?",[id]).first else { throw VoiceOSError("片段尝试丢失") }
         return try Self.segmentAttempt(row)

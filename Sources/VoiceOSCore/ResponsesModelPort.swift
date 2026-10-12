@@ -19,7 +19,11 @@ public struct DirectModelHTTPTransport: ModelHTTPTransport {
     public init() {}
     public func send(_ request: URLRequest) async throws -> ModelHTTPReply {
         let settings = URLSessionConfiguration.ephemeral
-        settings.timeoutIntervalForRequest = 60; settings.timeoutIntervalForResource = 60
+        // Honor a bounded driver deadline; a session-wide 60s cap otherwise
+        // silently overrides longer structured long-expression requests.
+        let deadline = request.timeoutInterval
+        guard deadline.isFinite, (1...180).contains(deadline) else { throw VoiceOSError("模型请求时限无效，未发送") }
+        settings.timeoutIntervalForRequest = deadline; settings.timeoutIntervalForResource = deadline
         settings.httpCookieStorage = nil; settings.urlCredentialStorage = nil; settings.urlCache = nil
         let session = URLSession(configuration: settings, delegate: NoModelRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
@@ -128,4 +132,21 @@ public struct ResponsesModelPort: ModelPort {
         } catch ModelPortFailure.rejected(let reason, let input, let output) { throw ModelPortFailure.rejected(reason, inputTokens: input ?? knownInput, outputTokens: output ?? knownOutput) }
         catch { throw ModelPortFailure.rejected("模型响应无法解析", inputTokens: knownInput, outputTokens: knownOutput) }
     }
+}
+
+/// Persist only fixed categories, never NSError descriptions, URLs or headers.
+func unknownModelResultReason(_ error: Error, phase: String) -> String {
+    let category: String
+    if error is CancellationError { category="请求被取消" }
+    else if let failure=error as? URLError {
+        switch failure.code {
+        case .timedOut: category="等待服务响应超时"
+        case .notConnectedToInternet, .networkConnectionLost: category="网络连接不可用或中断"
+        case .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed: category="无法连接模型服务"
+        case .secureConnectionFailed, .serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateHasUnknownRoot: category="安全连接失败"
+        case .cancelled: category="请求被取消"
+        default: category="传输未完成"
+        }
+    } else { category="结果未登记" }
+    return "\(phase)\(category)；服务端结果与费用未知，不自动重发"
 }

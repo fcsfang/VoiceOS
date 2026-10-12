@@ -7,13 +7,14 @@ private struct ExtractionInspector: MediaInspector {
 }
 private actor ExtractionFixture: SegmentExtractionPort {
     nonisolated let configuration: ModelConfiguration
-    enum Mode: Sendable { case valid, empty, fail, forged, refused }
+    enum Mode: Sendable { case valid, empty, fail, timeout, forged, refused }
     let mode: Mode
     var calls = 0
     init(_ config: ModelConfiguration, mode: Mode = .valid) { configuration = config; self.mode = mode }
     func extract(_ request: SegmentExtractionRequest) async throws -> SegmentExtractionResponse {
         calls += 1
         if mode == .empty { return .init(proposals:[],inputTokens:0,outputTokens:0) }
+        if mode == .timeout { throw URLError(.timedOut,userInfo:[NSURLErrorFailingURLStringErrorKey:"https://invalid.example/private-token"]) }
         if mode == .fail { throw VoiceOSError("synthetic missing response") }
         let s = request.segment
         let proposal = SegmentEvidenceProposal(kind:s.ordinal == 1 ? .possibleAction:.negation,statement:"合成证据，尚未聚合",
@@ -88,6 +89,18 @@ final class SegmentExtractionTests: XCTestCase {
         _ = try await s.runNextSegmentExtraction(batchID:batch.id,using:ExtractionFixture(config(),mode:.valid))
         let records = try await s.segmentExtractionAttempts(batchID:batch.id)
         XCTAssertTrue(records.allSatisfy { $0.response?.proposals.isEmpty == true && $0.usage?["input_tokens"] == 0 })
+    }
+    func testTimeoutStaysUnknownWithSanitizedDiagnosticAndNoResend() async throws {
+        let s=try await store("timeout-diagnostic"),batch=try await seed(s),port=ExtractionFixture(config(),mode:.timeout)
+        let result=try await s.runNextSegmentExtraction(batchID:batch.id,using:port)
+        XCTAssertEqual(result?.state,.unknown)
+        XCTAssertTrue(result?.error?.contains("超时") == true)
+        XCTAssertFalse(result?.error?.contains("private-token") == true)
+        XCTAssertFalse(result?.error?.contains("https://") == true)
+        let replay=try await s.runNextSegmentExtraction(batchID:batch.id,using:port)
+        XCTAssertNil(replay)
+        let calls=await port.calls;XCTAssertEqual(calls,1)
+        let claims=try await s.candidateClaims();XCTAssertTrue(claims.isEmpty)
     }
     func testUnknownAndRejectedNeverDispatchAnotherSegment() async throws {
         for mode in [ExtractionFixture.Mode.fail,.forged,.refused] {
