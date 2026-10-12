@@ -47,3 +47,5 @@
 - [023 表达处理意图](023-expression-processing-intent.md)：已采用只读的文字/权限/端口范围快照；持久队列、保存入口与自动执行待实施。
 
 - [ADR024：转写前录音处理请求](024-recording-processing-request.md) — 已实现，复用原模型队列，明确录制选择可恢复、迁移冻结。
+
+- [ADR025：长逐字稿无损计划](025-transcript-segmentation.md) — 本地来源计划及原生预览已采用；父批次/片段模型执行仍待验证。

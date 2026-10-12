@@ -6,8 +6,10 @@
 
 当前个人录音切片见[个人录音持久处理记录](engineering/m4-personal-audio-processing.md)：用户确认的第二音轨已用于真实本地转写，个人音频复用持久队列，新增明确归属导入入口和 v25 包兼容。自然语义质量与完整闭环仍待验收。
 
-最新切片见[录制并处理的持久请求](engineering/m4-recording-processing-request.md)：转写前的选择可恢复，376项回归和七个实际强退窗口通过；schema26，含请求的迁移包v26。真实设备处理与完整自然闭环仍待验收。
+上一切片见[录制并处理的持久请求](engineering/m4-recording-processing-request.md)：转写前的选择可恢复，376项回归和七个实际强退窗口通过；schema26，含请求的迁移包v26。真实设备处理与完整自然闭环仍待验收。
 
+
+最新切片见[长逐字稿本地分段](engineering/m4-transcript-segmentation.md)：383项回归通过，真实40分钟本人轨5280字符可无损分成2段并查看原片段引用。分段模型执行尚未接入，不能据此宣布长录音认知闭环完成。
 ## 当前文档
 
 | 文档 | 状态 | 用途 |

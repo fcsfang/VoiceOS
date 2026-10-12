@@ -170,6 +170,8 @@ final class ControlCenter: ObservableObject {
     @Published var attempts: [String: [ModelAttemptRecord]] = [:]
     @Published var processingIntents: [ExpressionProcessingIntentRecord] = []
     @Published var recordingRequests: [RecordingProcessingRequest] = []
+    @Published var segmentationPlan: TranscriptSegmentationPlan?
+    @Published var segmentationStatus = ""
     private var textModel: ResponsesModelPort?
     private var englishModel: ResponsesEnglishPracticePort?
     @Published var englishSnapshot: EnglishPracticeSnapshot?
@@ -318,6 +320,9 @@ final class ControlCenter: ObservableObject {
             reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
             if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
             records = try await store?.sources() ?? []
+            if let plan = segmentationPlan, !records.contains(where: { $0.id == plan.source.sourceID && $0.transcriptVersionID == plan.source.transcriptVersionID && $0.policyVersion == plan.policyVersion && ["saved","reference_only"].contains($0.state) }) {
+                segmentationPlan = nil; segmentationStatus = "原话或授权已变化，请重新查看分段"
+            }
             if let result = retrievalResult, result.hits.contains(where: { hit in
                 !records.contains { $0.id == hit.document.sourceID && $0.transcriptVersionID == hit.document.transcriptVersionID && $0.policyVersion == hit.document.policyVersion && ["saved","reference_only"].contains($0.state) }
             }) { cancelHistorySearch(); retrievalStatus = "历史资料已变化，请重新查找" }
@@ -539,6 +544,21 @@ final class ControlCenter: ObservableObject {
                 requestReminderRefresh()
             } catch { status = error.localizedDescription; break }
         }
+    }
+    func previewSegmentation(_ record: SourceRecord) async -> Bool {
+        guard let store else { return false }
+        do {
+            segmentationPlan = try await store.prepareTranscriptSegmentation(sourceID:record.id)
+            segmentationStatus = ""; return true
+        } catch { segmentationStatus = error.localizedDescription; return false }
+    }
+    func playSegmentationReference(_ plan: TranscriptSegmentationPlan, reference: TranscriptSegmentReference) async {
+        guard let store else { return }
+        do {
+            try await store.validateTranscriptSegmentation(plan)
+            guard let record = try await store.sources().first(where: { $0.id == plan.source.sourceID }), record.state == "saved", let start = reference.containingSpanStartMS else { throw VoiceOSError("原片段时间未确认") }
+            await playSpan(record,milliseconds:start)
+        } catch { segmentationStatus = error.localizedDescription }
     }
     func cancelRecordingRequest(_ request: RecordingProcessingRequest) async {
         guard let store else { return }
@@ -840,6 +860,7 @@ struct CenterView: View {
     @ObservedObject var model: ControlCenter
     @State private var editing: SourceRecord?
     @State private var showHistory = false
+    @State private var showingSegmentation = false
     @State private var correctingClaim: CandidateClaim?
     @State private var showClaimHistory = false
     @State private var actionClaim: CandidateClaim?
@@ -933,7 +954,7 @@ struct CenterView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Button(model.understandingSource == record.id ? "正在理解…" : record.origin == "user" ? "理解并关联历史" : "理解这份文字", systemImage: "sparkles") { model.understand(record) }
-                                    .disabled(!model.modelConfigured || record.localOnly || (record.transcript ?? "").isEmpty || model.understandingSource != nil || model.discussionExtracting)
+                                    .disabled(!model.modelConfigured || record.localOnly || (record.transcript ?? "").isEmpty || (record.transcript ?? "").unicodeScalars.count > 4000 || model.understandingSource != nil || model.discussionExtracting)
                                 if model.understandingSource == record.id { ProgressView().controlSize(.small) }
                                 Button("配置文本模型…") { model.chooseTextModel() }.disabled(model.understandingSource != nil || model.discussionExtracting)
                             }
@@ -986,11 +1007,17 @@ struct CenterView: View {
                             if record.transcript != nil {
                                 Button("更正文字") { editing = record }
                                 Button("版本历史") { Task { await model.historyFor(record); showHistory = true } }
+                                Button("查看原话分段") { Task { showingSegmentation = await model.previewSegmentation(record) } }
                             }
                         }
                         if let transcript = record.transcript {
+                            Text("本次文字 \(transcript.unicodeScalars.count) 字符 · 单次处理上限 4000 字符").font(.caption).foregroundStyle(.secondary)
+                            if transcript.unicodeScalars.count > 4000 { Text("超出单次处理范围；原话完整保留，可先查看本地分段。分段模型执行尚未接入。").font(.caption).foregroundStyle(.orange) }
+                            if !model.segmentationStatus.isEmpty { Text(model.segmentationStatus).font(.caption).foregroundStyle(.orange) }
                             if transcript.isEmpty { Text("本次转写没有返回文字。可以播放原件核对；这不代表音轨没有人声。").foregroundStyle(.secondary) }
-                            else { Text(transcript).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
+                            else if transcript.unicodeScalars.count > 4000 {
+                                DisclosureGroup("完整逐字稿（\(transcript.unicodeScalars.count) 字符）") { Text(transcript).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
+                            } else { Text(transcript).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
                             Text(record.kind == "user_text" ? "用户原文 · 无媒体时间定位" : record.spans.contains(where: { $0.startMS != nil }) ? "Apple 本地转写 · 中文 · 识别时间定位待核对" : "中文逐字稿 · 时间定位未确认").font(.caption).foregroundStyle(.secondary)
                             if !record.spans.isEmpty {
                                 DisclosureGroup("来源片段") {
@@ -1152,6 +1179,7 @@ struct CenterView: View {
         .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
         .focusedSceneValue(\.voiceOSController, model)
         .navigationTitle(model.libraryTitle)
+        .sheet(isPresented: $showingSegmentation) { TranscriptSegmentationView(model:model) { showingSegmentation = false } }
         .sheet(isPresented: $showingDiscussion) { DiscussionView(model:model) { showingDiscussion = false } }
         .sheet(isPresented: $searching) { HistorySearchView(model:model) { searching = false } }
         .sheet(isPresented: $showingQuietFeedback) { CognitiveFeedbackView(model:model) { showingQuietFeedback = false } }

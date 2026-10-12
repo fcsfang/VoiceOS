@@ -45,6 +45,14 @@ struct Check {
             if args[0] == "discussion-question-fixture" { try await runDiscussionQuestionFixture(store); return }
             if args[0] == "source-continuation-fixture" { try await runSourceContinuationFixture(store); return }
             if ["record-request-fixture", "record-request-resume-fixture"].contains(args[0]) { try await runRecordingRequestFixture(store, seed:args[0] == "record-request-fixture"); return }
+            if args[0] == "transcript-segmentation-read" {
+                let budget = args.count > 2 ? Int(args[2]) : 4000
+                guard let budget, let source = try await store.sources().first(where: { args.count > 3 ? $0.id == args[3] : $0.transcript != nil }) else { throw VoiceOSError("segmentation requires transcript and valid budget") }
+                let plan = try await store.prepareTranscriptSegmentation(sourceID:source.id,scalarBudget:budget)
+                try await store.validateTranscriptSegmentation(plan)
+                let output:[String:Any] = ["source_id":source.id,"transcript_version_id":plan.source.transcriptVersionID,"policy_version":plan.policyVersion,"origin":plan.source.origin,"speaker":plan.source.speaker,"local_only":plan.source.localOnly,"plan_digest":plan.contentDigest,"budget":budget,"text_scalars":plan.source.text.unicodeScalars.count,"segment_count":plan.segments.count,"lossless":plan.segments.map(\.text).joined() == plan.source.text,"segments":plan.segments.map { ["id":$0.id,"ordinal":$0.ordinal,"start":$0.textStart,"end":$0.textEnd,"reference_count":$0.references.count] as [String:Any] },"integrity":try await store.integrityCheck(),"model_calls":try await store.modelAttempts().count,"queue_count":try await store.processingIntents().count]
+                print(String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)); return
+            }
             if args[0] == "record-request-read" {
                 let requests = try await store.recordingProcessingRequests()
                 let output:[String:Any] = ["integrity":try await store.integrityCheck(), "requests":requests.map { ["id":$0.id,"source_id":$0.sourceID,"state":$0.state,"queue_id":$0.processingIntentID ?? ""] },"queue_states":try await store.processingIntents().map { $0.state.rawValue },"queue_count":try await store.processingIntents().count,"model_count":try await store.modelAttempts().count,"association_count":try await store.expressionAssociationAttempts().count]
