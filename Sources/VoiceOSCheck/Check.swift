@@ -10,6 +10,7 @@ struct Check {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
             guard args.count >= 2 else { throw VoiceOSError("usage: voiceos-check <import|read|transcribe> <isolated-root> [file] [command-id]") }
+            if args[0] == "personal-short-cloud-probe" { try await runPersonalShortCloudProbe(args); return }
             if args[0] == "personal-segment-cloud-probe" { try await runPersonalSegmentCloudProbe(args); return }
             if args[0] == "config-check" { try runConfigCheck(URL(fileURLWithPath: args[1])); return }
             if args[0] == "outcome-cloud-fixture" { try await runOutcomeCloudFixture(args); return }
