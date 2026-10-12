@@ -28,3 +28,6 @@ schema36 新增 `reminder_schedule_grants`、`reminder_schedule_grant_revocation
 完整 Swift 回归 **527 项、0 failures**；改期专项30项通过，新增13项覆盖批准归属/幂等、显示漂移、错配、移除期限、撤回、await 中冻结、保存后撤回、写前字段变化、事务窗口、v36冻结、许可剥离与非空schema35升级。含BGE的稳定签名构建、严格codesign及差异检查通过。日志与[脱敏证据](../research/evidence/m3-w14-schedule-grants-2026-10-13.json)对应本增量。
 
 没有云端、录音或真实任务修改，未重启用户应用。编译不替代原生UI和真实EventKit改期验收。EventKit无远端原子CAS，确认不证明不存在人工/iCloud竞态。当前字段所有权仍保守：成功回执不自动给予后续自由改期权；语音期限提取仍缺。继续字段所有权/后续弹性重排和W16补偿；M3/AC-15/自然案例A仍partial，不代用户填写自然结果。
+
+
+后续：字段归属与连续弹性重排由[ADR038](038-reminder-due-provenance.md)接续；本ADR中的schema36/字段待实现边界保留原时点记录。

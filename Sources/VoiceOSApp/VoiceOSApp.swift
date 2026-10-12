@@ -1384,6 +1384,7 @@ struct CenterView: View {
                                         }
                                         if let schedule = model.scheduleIntents.first(where: { $0.actionID == action.id }) {
                                             Text((schedule.authority == .userCommitment ? "用户明确期限：" : "AI 弹性安排：") + schedule.due.summary).font(.caption)
+                                            Text(schedule.baseOperationID != nil ? "外部期限基线：已应答并回读的 AI 弹性安排" : (schedule.baseAuthority == .externalManual ? "外部期限基线：人工或未确认归属，改动需具体确认" : (schedule.baseAuthority == .userCommitment ? "外部期限基线：明确承诺" : "外部期限基线：初始无期限或尚未绑定"))).font(.caption).foregroundStyle(.secondary)
                                             if let operation = model.scheduleOperations.first(where: { $0.intentID == schedule.id }) {
                                                 Text("排期操作：" + operation.state.summary).font(.caption)
                                                 Text(operation.reason).font(.caption).foregroundStyle(.secondary)

@@ -162,3 +162,8 @@ schema35 `reminder_schedule_operations` 绑定唯一 intent、link、expected ob
 ## W14 具体效果许可实施增量（2026-10-13）
 
 schema36新增 `reminder_schedule_grants`（唯一intent、link、observation、access_version、before/desired、effect_digest、user actor、命令指纹与validity）、`reminder_schedule_grant_revocations`（唯一grant、user actor、原因与命令指纹）；操作增加可空 `grant_id`。许可绑定一次实际效果，不改变行动/认知状态；撤回不删除许可或已派发历史。校验按意图→许可→操作，重要操作不能移除grant绕过确认。有许可包v36，恢复全部frozen且不恢复外部授权；旧格式拒绝许可表/非空grant_id。仅普通操作仍v35。本地期限编辑保存user commitment与控制中心来源，外部变更另行具体确认。见[ADR037](../adr/037-effect-bound-schedule-confirmation.md)。字段所有权待接，不根据成功回执直接赋予后续自由改期权。
+
+
+## W14 字段归属实施增量（2026-10-13）
+
+schema37新增 `reminder_schedule_bases`（id、唯一intent_id、authority、可选operation_id），与新意图同事务保存；其归属依据为历史证据，不是独立授权。confirmed/保存应答＋唯一匹配观测及连续未变due支持AI弹性；observed/unknown不支持，明确承诺不降级。初始无期限与人工移除/未知后无期限分开。当前预览再核对归属，变化须新意图。历史保守归属不因迟到核对改写；旧无basis按原规则验证。有basis包v37按v36表后追加basis；恢复仍冻结意图/操作且不恢复授权。见[ADR038](../adr/038-reminder-due-provenance.md)。

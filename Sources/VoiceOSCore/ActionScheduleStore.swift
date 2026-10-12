@@ -14,6 +14,7 @@ public struct ActionScheduleIntent: Identifiable, Sendable {
     public let anchorTimeZone: String
     public let baseObservationID: String?
     public let baseAuthority: ScheduleAuthority
+    public let baseOperationID: String?
     public let validity: String
     public let eligibleForPlanning: Bool
     public var anchorSummary: String {
@@ -55,6 +56,7 @@ extension VoiceOSStore {
             throw VoiceOSError("AI 不得改写或降级用户的明确期限；请保留承诺并另行提出变更")
         }
         var baseAuthority = ScheduleAuthority.unknown
+        var baseOperationID: String?
         if let baseObservationID {
             guard let expectedAccessVersion, let observation = try db.query("""
                 SELECT o.*,l.calendar_id,l.external_id AS link_external_id,l.action_id,l.state AS link_state
@@ -64,13 +66,14 @@ extension VoiceOSStore {
                   observation["completed"] == "0",
                   observation["external_id"] == observation["link_external_id"],
                   try db.query("SELECT id FROM reminder_observations WHERE link_id=? ORDER BY sequence DESC LIMIT 1", [observation["link_id"]]).first?["id"] == baseObservationID,
-                  let baseDue = try storedReminderDue(observationID: baseObservationID) else {
+                  try storedReminderDue(observationID: baseObservationID) != nil else {
                 throw VoiceOSError("排期基线须来自已授权关联的最新明确时间观测")
             }
             try checkReminderAccess(calendarID: observation["calendar_id"]!, expectedVersion: expectedAccessVersion)
-            // No confirmed VoiceOS time writes exist yet. Any existing remote
-            // date is human/unknown-owned, never inferred to be AI flexible.
-            baseAuthority = prior?["authority"] == ScheduleAuthority.userCommitment.rawValue ? .userCommitment : (baseDue == .none ? .aiFlexible : .externalManual)
+            let basis = try Self.reminderScheduleBasis(db,observationID: baseObservationID,actionVersion: expectedActionVersion,
+                                                      scheduleVersion: expectedScheduleVersion+1,
+                                                      priorAuthority: prior?["authority"].flatMap(ScheduleAuthority.init(rawValue:)))
+            baseAuthority = basis.authority; baseOperationID = basis.operationID
         } else {
             guard expectedAccessVersion == nil else { throw VoiceOSError("没有外部时间基线时不得附加连接授权") }
         }
@@ -83,6 +86,10 @@ extension VoiceOSStore {
                 """, [id,actionID,String(expectedActionVersion),String(expectedScheduleVersion+1),dueJSON,proposal.authority.rawValue,
                         actor.rawValue,proposal.rawExpression,anchor,anchorTimeZone,baseObservationID,baseAuthority.rawValue,
                         expectedAccessVersion.map(String.init),commandID,hash,ISO8601DateFormatter().string(from: Date())])
+            if baseObservationID != nil {
+                try db.execute("INSERT INTO reminder_schedule_bases(id,intent_id,authority,operation_id) VALUES(?,?,?,?)",
+                               [UUID().uuidString,id,baseAuthority.rawValue,baseOperationID])
+            }
             try checkpoint(.actionScheduleUncommitted)
         }
         try checkpoint(.actionScheduleCommitted)
@@ -96,7 +103,7 @@ extension VoiceOSStore {
         return try db.query("SELECT * FROM action_schedule_intents \(clause) ORDER BY action_id,schedule_version").map { row in
             let latest = try db.query("SELECT MAX(schedule_version) AS n FROM action_schedule_intents WHERE action_id=?", [row["action_id"]]).first?["n"]
             let action = actions[row["action_id"]!]
-            return try Self.scheduleIntent(row, eligible: row["validity"] == "current" && row["schedule_version"] == latest && action?.state == "open" && action?.validity == "current" && row["action_version"] == action.map { String($0.version) })
+            return try Self.scheduleIntent(row, baseOperationID: db.query("SELECT operation_id FROM reminder_schedule_bases WHERE intent_id=?", [row["id"]]).first?["operation_id"], eligible: row["validity"] == "current" && row["schedule_version"] == latest && action?.state == "open" && action?.validity == "current" && row["action_version"] == action.map { String($0.version) })
         }
     }
 
@@ -110,6 +117,17 @@ extension VoiceOSStore {
         let sourcesAllowed = try action.map { try reminderSourceAllowed($0) && reminderCognitionIsLatest($0) } ?? false
         let proposal = try ReminderScheduleProposal(due: intent.due, authority: intent.authority,
                                                     rawExpression: intent.rawExpression, anchorEventTime: intent.anchorEventTime)
+        if intent.eligibleForPlanning, sourcesAllowed, link.state == "linked", link.remoteMarkerValid == true,
+           link.remoteDueDate != nil, intent.baseAuthority == .aiFlexible, let observationID = link.lastObservationID {
+            let prior = try db.query("SELECT authority FROM action_schedule_intents WHERE action_id=? AND schedule_version=?",
+                                     [intent.actionID,String(intent.version-1)]).first?["authority"].flatMap(ScheduleAuthority.init(rawValue:))
+            let current = try Self.reminderScheduleBasis(db,observationID: observationID,actionVersion: intent.actionVersion,
+                                                         scheduleVersion: intent.version,priorAuthority: prior)
+            if current.authority != .aiFlexible || current.operationID != intent.baseOperationID {
+                return .init(disposition: .replanKeepingRemote, remote: link.remoteDueDate, proposed: intent.due,
+                             reason: "排期后期限归属依据已变化；保留外部值，须建立新排期版本")
+            }
+        }
         return try ReminderScheduleMerge.decide(base: storedReminderDue(observationID: intent.baseObservationID), baseAuthority: intent.baseAuthority,
                                                 remote: link.remoteDueDate, desired: proposal, authorized: true,
                                                 actionCurrent: intent.eligibleForPlanning && sourcesAllowed,
@@ -128,7 +146,7 @@ extension VoiceOSStore {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         return String(decoding: try encoder.encode(due), as: UTF8.self)
     }
-    private static func scheduleIntent(_ row: [String: String], eligible: Bool) throws -> ActionScheduleIntent {
+    private static func scheduleIntent(_ row: [String: String], baseOperationID: String? = nil, eligible: Bool) throws -> ActionScheduleIntent {
         let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         guard let id = row["id"], let actionID = row["action_id"], let actionVersion = row["action_version"].flatMap(Int.init),
               let version = row["schedule_version"].flatMap(Int.init), let json = row["due_json"], json.utf8.count <= 4096,
@@ -145,7 +163,7 @@ extension VoiceOSStore {
         guard try scheduleDueJSON(due) == json, try scheduleTime(anchor) == row["anchor_event_time"] else { throw VoiceOSError("排期时间编码不规范") }
         return .init(id: id, actionID: actionID, actionVersion: actionVersion, version: version, due: due, authority: authority, actor: actor,
                      rawExpression: raw, anchorEventTime: anchor, anchorTimeZone: zone, baseObservationID: row["base_observation_id"],
-                     baseAuthority: baseAuthority, validity: validity, eligibleForPlanning: eligible)
+                     baseAuthority: baseAuthority, baseOperationID: baseOperationID, validity: validity, eligibleForPlanning: eligible)
     }
 
     static func validateStoredActionSchedules(_ db: Database) throws {
@@ -172,7 +190,9 @@ extension VoiceOSStore {
                           let timeRow = try db.query("SELECT due_json FROM reminder_time_observations WHERE id=?", [observationID]).first else { throw VoiceOSError("排期基线缺少有效时间观测") }
                     let due = try JSONDecoder().decode(ReminderDueDate.self, from: Data(timeRow["due_json"]!.utf8)); try due.validate()
                     let expected: ScheduleAuthority = prior?.authority == .userCommitment ? .userCommitment : (due == .none ? .aiFlexible : .externalManual)
-                    guard intent.baseAuthority == expected else { throw VoiceOSError("排期不能降级人工或承诺基线") }
+                    if try db.query("SELECT id FROM reminder_schedule_bases WHERE intent_id=?", [row["id"]]).isEmpty {
+                        guard intent.baseAuthority == expected else { throw VoiceOSError("旧排期不能降级人工或承诺基线") }
+                    }
                     guard try db.query("""
                         SELECT r.id FROM reminder_observations o JOIN action_revisions r ON r.id=o.feedback_revision_id
                         WHERE o.link_id=? AND o.sequence<=? AND r.version>?

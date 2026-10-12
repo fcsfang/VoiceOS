@@ -206,9 +206,9 @@ final class ReminderStatusResolutionTests: XCTestCase {
         let original = try Database(file)
         let tableNames = try original.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('reminder_status_resolutions','reminder_time_observations','action_schedule_intents')").compactMap { $0["name"] }
         let before = try Dictionary(uniqueKeysWithValues: tableNames.map { ($0, try original.query("SELECT * FROM \($0) ORDER BY id")) })
-        try original.execute("DROP TABLE reminder_schedule_operations"); try original.execute("DROP TABLE reminder_schedule_grant_revocations"); try original.execute("DROP TABLE reminder_schedule_grants"); try original.execute("DROP TABLE action_schedule_intents"); try original.execute("DROP TABLE reminder_time_observations"); try original.execute("DROP TABLE reminder_status_resolutions"); try original.execute("PRAGMA user_version=31")
+        try original.execute("DROP TABLE reminder_schedule_bases"); try original.execute("DROP TABLE reminder_schedule_operations"); try original.execute("DROP TABLE reminder_schedule_grant_revocations"); try original.execute("DROP TABLE reminder_schedule_grants"); try original.execute("DROP TABLE action_schedule_intents"); try original.execute("DROP TABLE reminder_time_observations"); try original.execute("DROP TABLE reminder_status_resolutions"); try original.execute("PRAGMA user_version=31")
         let upgraded = try Database(file)
-        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "36")
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "37")
         XCTAssertTrue(try upgraded.query("SELECT * FROM reminder_status_resolutions").isEmpty)
         for table in tableNames { XCTAssertEqual(try upgraded.query("SELECT * FROM \(table) ORDER BY id"), before[table]) }
     }

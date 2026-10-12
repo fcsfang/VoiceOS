@@ -1,0 +1,64 @@
+{
+  "recorded_at": "2026-10-12T23:54:18.758879+00:00",
+  "baseline_commit": "897dcd5",
+  "work_package": "W14",
+  "schema": 37,
+  "package_version_with_bases": 37,
+  "status": "due_provenance_and_continuous_rescheduling_implemented_m3_still_partial",
+  "delivered": [
+    "immutable_intent_basis",
+    "confirmed_flexible_operation_provenance",
+    "continuous_due_observation_check",
+    "manual_removal_and_unknown_interval_protection",
+    "current_provenance_execution_barrier",
+    "frozen_v37_restore"
+  ],
+  "checks": {
+    "full_swift_regression": {
+      "passed": true,
+      "count": 539,
+      "failures": 0,
+      "seconds": 25.846,
+      "log": "/tmp/voiceos-schedule-basis-regression.log"
+    },
+    "schedule_operation_suite": {
+      "passed": true,
+      "count": 42,
+      "new_tests": 12
+    },
+    "schedule_intent_suite": {
+      "passed": true,
+      "count": 10
+    },
+    "signed_bge_build": {
+      "passed": true,
+      "log": "/tmp/voiceos-schedule-basis-signing.log"
+    },
+    "strict_codesign": {
+      "passed": true
+    },
+    "diff_whitespace": {
+      "passed": true
+    }
+  },
+  "external_activity": {
+    "cloud_requests": 0,
+    "microphone_recordings": 0,
+    "real_reminder_mutations": 0,
+    "user_app_restarted": false
+  },
+  "evidence_limits": [
+    "runtime_ui_and_real_eventkit_not_checked",
+    "unobserved_manual_edits_cannot_be_excluded",
+    "no_outcome_or_cognition_validation_implied"
+  ],
+  "next": [
+    "W16_compensation",
+    "concentrated_native_acceptance",
+    "voice_deadline_extraction"
+  ],
+  "no_product_direction_change": true,
+  "m3_status": "partial",
+  "ac15_status": "partial",
+  "natural_case_a_status": "partial"
+}

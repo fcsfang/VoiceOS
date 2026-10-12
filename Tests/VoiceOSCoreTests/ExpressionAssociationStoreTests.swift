@@ -200,9 +200,9 @@ final class ExpressionAssociationStoreTests: XCTestCase {
         do { try await VoiceOSStore.restorePackage(from: package, to: target, inspector: AssociationStoreInspector()); XCTFail("ignore tampering") } catch {}
         XCTAssertFalse(FileManager.default.fileExists(atPath: target.path))
         let dbURL = base.appendingPathComponent("schema21.sqlite")
-        do { let db = try Database(dbURL); try db.execute("DROP TABLE expression_association_ignores"); try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("ALTER TABLE claims DROP COLUMN content_kind"); try db.execute("DROP TABLE reminder_schedule_operations"); try db.execute("DROP TABLE reminder_schedule_grant_revocations"); try db.execute("DROP TABLE reminder_schedule_grants"); try db.execute("DROP TABLE action_schedule_intents"); try db.execute("DROP TABLE reminder_time_observations"); try db.execute("DROP TABLE reminder_status_resolutions"); try db.execute("PRAGMA user_version=21") }
+        do { let db = try Database(dbURL); try db.execute("DROP TABLE expression_association_ignores"); try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("ALTER TABLE claims DROP COLUMN content_kind"); try db.execute("DROP TABLE reminder_schedule_bases"); try db.execute("DROP TABLE reminder_schedule_operations"); try db.execute("DROP TABLE reminder_schedule_grant_revocations"); try db.execute("DROP TABLE reminder_schedule_grants"); try db.execute("DROP TABLE action_schedule_intents"); try db.execute("DROP TABLE reminder_time_observations"); try db.execute("DROP TABLE reminder_status_resolutions"); try db.execute("PRAGMA user_version=21") }
         let upgraded = try Database(dbURL)
-        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "36")
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "37")
         XCTAssertTrue(try upgraded.query("SELECT * FROM expression_association_ignores").isEmpty)
     }
     func testConcurrentDuplicateAndTerminalReplaySendOnceWithoutClaimsOrActions() async throws {
@@ -311,10 +311,10 @@ final class ExpressionAssociationStoreTests: XCTestCase {
         let dbURL = base.appendingPathComponent("upgrade.sqlite")
         do {
             let db = try Database(dbURL)
-            try db.execute("DROP TABLE expression_association_ignores"); try db.execute("DROP TABLE expression_association_attempts"); try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("ALTER TABLE claims DROP COLUMN content_kind"); try db.execute("DROP TABLE reminder_schedule_operations"); try db.execute("DROP TABLE reminder_schedule_grant_revocations"); try db.execute("DROP TABLE reminder_schedule_grants"); try db.execute("DROP TABLE action_schedule_intents"); try db.execute("DROP TABLE reminder_time_observations"); try db.execute("DROP TABLE reminder_status_resolutions"); try db.execute("PRAGMA user_version=20")
+            try db.execute("DROP TABLE expression_association_ignores"); try db.execute("DROP TABLE expression_association_attempts"); try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("ALTER TABLE claims DROP COLUMN content_kind"); try db.execute("DROP TABLE reminder_schedule_bases"); try db.execute("DROP TABLE reminder_schedule_operations"); try db.execute("DROP TABLE reminder_schedule_grant_revocations"); try db.execute("DROP TABLE reminder_schedule_grants"); try db.execute("DROP TABLE action_schedule_intents"); try db.execute("DROP TABLE reminder_time_observations"); try db.execute("DROP TABLE reminder_status_resolutions"); try db.execute("PRAGMA user_version=20")
         }
         let upgraded = try Database(dbURL)
-            XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "36")
+            XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "37")
         XCTAssertTrue(try upgraded.query("SELECT * FROM expression_association_attempts").isEmpty)
         XCTAssertTrue(try upgraded.query("PRAGMA foreign_key_check").isEmpty)
         XCTAssertFalse(snapshot.candidates.isEmpty)

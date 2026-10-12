@@ -92,6 +92,7 @@ public actor VoiceOSStore {
         try recoverSegmentedProcessingBatches()
         try recoverExpressionProcessingIntents()
         try Self.validateStoredActionSchedules(db)
+        try Self.validateReminderScheduleBases(db)
         try Self.validateReminderScheduleGrants(db)
         try Self.validateReminderScheduleOperations(db)
         ready = true
