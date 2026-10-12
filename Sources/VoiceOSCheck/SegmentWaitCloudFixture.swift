@@ -5,13 +5,13 @@ import VoiceOSPlatform
 /// New, clearly synthetic long text; never a resend of personal unknown input.
 func runSegmentWaitCloudFixture(_ args: [String]) async throws {
     guard (args.count==4 || args.count==5), args[3]=="--authorize-synthetic-text",
-          args.count==4 || args[4]=="--compact-segments" else { throw VoiceOSError("segment-wait-cloud-fixture requires new runtime root, config and synthetic text grant") }
-    let compact=args.count==5
+          args.count==4 || ["--compact-segments","--stream-segments"].contains(args[4]) else { throw VoiceOSError("segment-wait-cloud-fixture requires new runtime root, config and synthetic text grant") }
+    let compact=args.count==5 && args[4]=="--compact-segments", streaming=args.count==5 && args[4]=="--stream-segments"
     let root=URL(fileURLWithPath:args[1]).standardizedFileURL.resolvingSymlinksInPath()
     let base=URL(fileURLWithPath:FileManager.default.currentDirectoryPath).appendingPathComponent("runtime").resolvingSymlinksInPath()
     guard root.path.hasPrefix(base.path+"/"),!FileManager.default.fileExists(atPath:root.path) else { throw VoiceOSError("等待窗口试验需要全新runtime资料库，禁止重发已有试验") }
     let diagnostics=ModelHTTPDiagnostics()
-    let suite=try LocalTextModel.loadSuite(from:URL(fileURLWithPath:args[2]),compactSegmentExtraction:compact,compactSegmentAggregation:compact,segmentRequestTimeout:600,segmentTransport:DirectModelHTTPTransport(diagnostics:diagnostics))
+    let suite=try LocalTextModel.loadSuite(from:URL(fileURLWithPath:args[2]),compactSegmentExtraction:compact,compactSegmentAggregation:compact,segmentRequestTimeout:600,segmentTransport:DirectModelHTTPTransport(diagnostics:diagnostics),segmentStreaming:streaming)
     let store=try VoiceOSStore(root:root,inspector:NativeMediaInspector());try await store.recover()
     let topics=["原件保存","逐字稿版本","条件保留","否定识别","引用归属","任务候选","历史检索","关联反馈","外部回读","取消恢复","来源授权","数据迁移","模块边界","测量口径","长文字处理","错误分类"]
     var paragraphs:[String]=[]
@@ -25,7 +25,8 @@ func runSegmentWaitCloudFixture(_ args: [String]) async throws {
     _=try await store.correctTranscript(sourceID:source,expectedVersionID:old,text:text,commandID:"wait600-synthetic-long-text")
     _=try await store.setSourceLocalOnly(sourceID:source,expectedVersion:1,localOnly:false,commandID:"wait600-synthetic-grant")
     let scope=try await store.prepareSegmentedExpressionProcessingScope(sourceID:source,extraction:suite.segmentExtraction.configuration,aggregation:suite.segmentAggregation.configuration)
-    let batch=try await store.enqueueSegmentedProcessingBatch(scope,commandID:compact ? "wait600-synthetic-compact-batch":"wait600-synthetic-batch",extraction:suite.segmentExtraction.configuration,aggregation:suite.segmentAggregation.configuration)
+    let batchCommand=streaming ? "wait600-synthetic-stream-batch" : compact ? "wait600-synthetic-compact-batch":"wait600-synthetic-batch"
+    let batch=try await store.enqueueSegmentedProcessingBatch(scope,commandID:batchCommand,extraction:suite.segmentExtraction.configuration,aggregation:suite.segmentAggregation.configuration)
     let start=Date()
     _=try? await store.processSegmentedCognition(batchID:batch.id,extraction:suite.segmentExtraction,aggregation:suite.segmentAggregation)
     let final=try await store.segmentedProcessingBatch(id:batch.id)
@@ -34,7 +35,7 @@ func runSegmentWaitCloudFixture(_ args: [String]) async throws {
     let timings=try JSONSerialization.jsonObject(with:JSONEncoder().encode(await diagnostics.records()))
     let report:[String:Any]=["synthetic_only":true,"personal_text_sent":false,"audio_uploaded":false,"external_task_writes":0,
         "source_id":source,"batch_id":batch.id,"source_scalars":text.unicodeScalars.count,"segment_scalars":scope.plan.segments.map { $0.text.unicodeScalars.count },
-        "request_deadline_seconds":600,"compact_input":compact,"provider":suite.segmentExtraction.configuration.provider,"model":suite.segmentExtraction.configuration.model,
+        "request_deadline_seconds":600,"compact_input":compact,"streaming":streaming,"provider":suite.segmentExtraction.configuration.provider,"model":suite.segmentExtraction.configuration.model,
         "extraction_version":scope.extraction.promptVersion,"aggregation_version":scope.aggregation.promptVersion,
         "elapsed_seconds":Date().timeIntervalSince(start),"parent_state":final.state.rawValue,"parent_error":final.error ?? "",
         "fragment_states":fragments.map { $0.state.rawValue },"fragment_usage":fragments.map { $0.usage ?? [:] },

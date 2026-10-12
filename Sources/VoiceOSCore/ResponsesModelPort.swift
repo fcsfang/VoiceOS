@@ -50,6 +50,52 @@ public struct DirectModelHTTPTransport: ModelHTTPTransport {
     }
 }
 
+/// Responses SSE transport. It returns the final `response.completed` object as
+/// the same JSON envelope consumed by the non-streaming ports. This is an
+/// explicit candidate transport; callers must opt in and pin a new model
+/// configuration identity.
+public struct DirectStreamingModelHTTPTransport: ModelHTTPTransport {
+    public init() {}
+    public func send(_ request: URLRequest) async throws -> ModelHTTPReply {
+        guard var body = request.httpBody,
+              var payload = try JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+            throw VoiceOSError("流式模型请求格式无效，未发送")
+        }
+        payload["stream"] = true
+        body = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        var streamed = request
+        streamed.httpBody = body
+        streamed.timeoutInterval = min(max(request.timeoutInterval, 1), 600)
+        let settings = URLSessionConfiguration.ephemeral
+        settings.timeoutIntervalForRequest = streamed.timeoutInterval
+        settings.timeoutIntervalForResource = streamed.timeoutInterval
+        settings.httpCookieStorage = nil; settings.urlCredentialStorage = nil; settings.urlCache = nil
+        let session = URLSession(configuration: settings)
+        defer { session.invalidateAndCancel() }
+        let (bytes, response) = try await session.bytes(for: streamed)
+        guard let http = response as? HTTPURLResponse else { throw VoiceOSError("流式模型传输未返回 HTTP 状态") }
+        var line = Data(), completed: Data?
+        for try await byte in bytes {
+            if byte == 10 {
+                if let text = String(data: line, encoding: .utf8), text.hasPrefix("data:") {
+                    let value = text.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                    if value != "[DONE]", let data = value.data(using: .utf8),
+                       let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       event["type"] as? String == "response.completed",
+                       let final = event["response"] as? [String: Any] {
+                        completed = try JSONSerialization.data(withJSONObject: final, options: [.sortedKeys])
+                    }
+                }
+                line.removeAll(keepingCapacity: true)
+            } else { line.append(byte) }
+            guard line.count < 262144 else { throw ModelPortFailure.rejected("流式模型事件超过 256 KiB 限制") }
+        }
+        if http.statusCode != 200 { return .init(status: http.statusCode, body: completed ?? Data()) }
+        guard let completed else { throw VoiceOSError("流式模型未收到 response.completed") }
+        return .init(status: http.statusCode, body: completed)
+    }
+}
+
 /// Text-only Responses-compatible driver. One POST, no fallback, polling, tools or retry.
 public struct ResponsesModelPort: ModelPort {
     public let configuration: ModelConfiguration

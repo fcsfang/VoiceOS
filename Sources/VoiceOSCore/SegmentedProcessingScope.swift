@@ -57,8 +57,8 @@ extension VoiceOSStore {
     }
 
     static func segmentEvidenceBudgetLimit(_ extraction: ProcessingModelIdentity, _ aggregation: ProcessingModelIdentity) -> Int {
-        ["segment-extraction-v2","segment-extraction-v3","segment-extraction-v2-wait600","segment-extraction-v3-wait600"].contains(extraction.promptVersion) && extraction.schemaVersion == extraction.promptVersion
-            && ["segment-aggregation-v2","segment-aggregation-v3","segment-aggregation-v2-wait600","segment-aggregation-v3-wait600"].contains(aggregation.promptVersion) && aggregation.schemaVersion == aggregation.promptVersion ? 32000:4000
+        ["segment-extraction-v2","segment-extraction-v3","segment-extraction-v2-wait600","segment-extraction-v3-wait600","segment-extraction-v2-wait600-stream","segment-extraction-v3-wait600-stream"].contains(extraction.promptVersion) && extraction.schemaVersion == extraction.promptVersion
+            && ["segment-aggregation-v2","segment-aggregation-v3","segment-aggregation-v2-wait600","segment-aggregation-v3-wait600","segment-aggregation-v2-wait600-stream","segment-aggregation-v3-wait600-stream"].contains(aggregation.promptVersion) && aggregation.schemaVersion == aggregation.promptVersion ? 32000:4000
     }
     static func segmentedScopeDigest(plan: TranscriptSegmentationPlan, extraction: ProcessingModelIdentity,
         aggregation: ProcessingModelIdentity, evidenceBudget: Int) throws -> String {

@@ -6,14 +6,16 @@ private struct SegmentResponsesTransport: Sendable {
     let apiKey: String
     let transport: any ModelHTTPTransport
     let deadline: TimeInterval
-    init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, deadline: TimeInterval = 120) throws {
-        guard [120,600].contains(deadline) else { throw VoiceOSError("长文字等待窗口须为120或600秒") }
+    let streaming: Bool
+    init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, deadline: TimeInterval = 120, streaming: Bool = false) throws {
+        guard [120,600].contains(deadline), !streaming || deadline == 600 else { throw VoiceOSError("流式候选须使用600秒长文字窗口") }
         self.deadline=deadline
         base=try ResponsesModelPort(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport)
-        endpoint=baseURL.appendingPathComponent("responses"); self.apiKey=apiKey; self.transport=transport
+        endpoint=baseURL.appendingPathComponent("responses"); self.apiKey=apiKey; self.transport=transport; self.streaming=streaming
     }
     func config(_ version: String) -> ModelConfiguration {
-        let identity=deadline==120 ? version : version+"-wait600"
+        let waitIdentity=deadline==120 ? version : version+"-wait600"
+        let identity=streaming ? waitIdentity+"-stream" : waitIdentity
         return .init(provider:base.configuration.provider,model:base.configuration.model,promptVersion:identity,schemaVersion:identity,destination:.cloud)
     }
     func send(input: String, schema: [String:Any], name: String, instructions: String, tokens: Int) async throws -> ResponsesEnvelope {
@@ -35,9 +37,9 @@ public struct ResponsesSegmentExtractionPort: SegmentExtractionPort {
     private let client: SegmentResponsesTransport
     private let locallyGroundQuotes: Bool
     private let compactInput: Bool
-    public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport(), locallyGroundQuotes: Bool = true, compactInput: Bool = false, requestTimeout: TimeInterval = 120) throws {
+    public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport(), locallyGroundQuotes: Bool = true, compactInput: Bool = false, requestTimeout: TimeInterval = 120, streaming: Bool = false) throws {
         guard !compactInput || locallyGroundQuotes else { throw VoiceOSError("精简请求必须使用本地原话定位") }
-        client=try .init(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport,deadline:requestTimeout)
+        client=try .init(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport,deadline:requestTimeout,streaming:streaming)
         self.locallyGroundQuotes=locallyGroundQuotes
         self.compactInput=compactInput
         configuration=client.config(compactInput ? "segment-extraction-v3" : locallyGroundQuotes ? "segment-extraction-v2":"segment-extraction-v1")
@@ -94,9 +96,9 @@ public struct ResponsesSegmentAggregationPort: SegmentAggregationPort {
     private let client: SegmentResponsesTransport
     private let evidenceLimit: Int
     private let compactInput: Bool
-    public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport(), expandedEvidenceBudget: Bool = true, compactInput: Bool = false, requestTimeout: TimeInterval = 120) throws {
+    public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport(), expandedEvidenceBudget: Bool = true, compactInput: Bool = false, requestTimeout: TimeInterval = 120, streaming: Bool = false) throws {
         guard !compactInput || expandedEvidenceBudget else { throw VoiceOSError("精简聚合请求需使用完整扩展证据预算") }
-        client=try .init(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport,deadline:requestTimeout)
+        client=try .init(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport,deadline:requestTimeout,streaming:streaming)
         self.compactInput=compactInput
         evidenceLimit=expandedEvidenceBudget ? 32000:4000
         configuration=client.config(compactInput ? "segment-aggregation-v3" : expandedEvidenceBudget ? "segment-aggregation-v2":"segment-aggregation-v1")
