@@ -69,4 +69,17 @@ extension VoiceOSStore {
         try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
         if failed { throw VoiceOSError("部分提醒事项未完成回读；保留历史，不自动重建") }
     }
+    /// A failed new create must not prevent completion readback for existing
+    /// links. Cancellation and revoked scope still stop before reconciliation.
+    public func refreshAuthorizedReminders(expectedAccessVersion: Int, using port: any RemindersPort) async throws {
+        var activationFailed=false
+        do { try await activateExtractedTasks(expectedAccessVersion:expectedAccessVersion,using:port) }
+        catch is CancellationError { throw CancellationError() }
+        catch { activationFailed=true }
+        try Task.checkCancellation()
+        guard let access=try reminderAccess() else { throw VoiceOSError("尚未授权提醒事项清单") }
+        try checkReminderAccess(calendarID:access.calendarID,expectedVersion:expectedAccessVersion)
+        try await reconcileReminders(expectedAccessVersion:expectedAccessVersion,using:port)
+        if activationFailed { throw VoiceOSError("新任务发送未完成；已核对既有任务，保留尝试且不自动重建") }
+    }
 }

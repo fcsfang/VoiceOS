@@ -8,12 +8,54 @@ private struct RejectMedia: MediaInspector {
 private actor TextReminderPort: RemindersPort {
     var items: [ReminderSnapshot] = []
     var creates = 0
-    func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] { items.filter { $0.marker == marker || $0.id == externalID } }
+    var failCreates=false
+    var findCalls=0
+    var afterCreate: (@Sendable () async throws -> Void)?
+    func installAfterCreate(_ hook: @escaping @Sendable () async throws -> Void) { afterCreate=hook }
+    func failFutureCreates() { failCreates=true }
+    func completeExisting() { items=items.map { .init(id:$0.id,title:$0.title,completed:true,marker:$0.marker) } }
+    func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] { findCalls += 1;return items.filter { $0.marker == marker || $0.id == externalID } }
     func create(calendarID: String, title: String, marker: String) async throws {
         creates += 1; items.append(ReminderSnapshot(id: UUID().uuidString, title: title, completed: false, marker: marker))
+        try await afterCreate?()
+        if failCreates { throw VoiceOSError("lost create receipt") }
     }
 }
 final class UserExpressionTests: XCTestCase {
+    func testRevokedScopeDuringCreateStopsFurtherReadback() async throws {
+        let s=try await store(),port=TextReminderPort()
+        _=try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)
+        let id=try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。")
+        _=try await s.setSourceLocalOnly(sourceID:id,expectedVersion:1,localOnly:false)
+        let (attempt,p)=try await proposals(s,id);_=try await s.commitLocalClaims(attemptID:attempt,proposals:[p[0]])
+        await port.installAfterCreate { _=try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:false,expectedVersion:1) }
+        do { try await s.refreshAuthorizedReminders(expectedAccessVersion:1,using:port);XCTFail() } catch {}
+        let calls=await port.findCalls;XCTAssertEqual(calls,1) // preflight only
+        let links=try await s.reminderLinks();XCTAssertEqual(links.first?.state,"unknown")
+    }
+    func testFailedNewCreateDoesNotStarveExistingCompletionFeedback() async throws {
+        let s=try await store(),port=TextReminderPort()
+        _=try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)
+        func addTask(_ command: String) async throws {
+            let id=try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。",commandID:command)
+            _=try await s.setSourceLocalOnly(sourceID:id,expectedVersion:1,localOnly:false)
+            let (attempt,p)=try await proposals(s,id)
+            _=try await s.commitLocalClaims(attemptID:attempt,proposals:[p[0]])
+        }
+        try await addTask("first")
+        try await s.refreshAuthorizedReminders(expectedAccessVersion:1,using:port)
+        let links=try await s.reminderLinks(),first=try XCTUnwrap(links.first)
+        await port.completeExisting();await port.failFutureCreates()
+        try await addTask("second")
+        do { try await s.refreshAuthorizedReminders(expectedAccessVersion:1,using:port);XCTFail() } catch {}
+        let actions=try await s.actions(includeHistory:true)
+        XCTAssertEqual(actions.first { $0.id==first.actionID }?.state,"completed")
+        let history=try await s.actionHistory(actionID:first.actionID)
+        XCTAssertEqual(history.last?.actor,"external")
+        try await s.refreshAuthorizedReminders(expectedAccessVersion:1,using:port)
+        let creates=await port.creates;XCTAssertEqual(creates,2)
+        let claims=try await s.candidateClaims();XCTAssertTrue(claims.allSatisfy { $0.evidenceState == "unverified" })
+    }
     private var base: URL!
     override func setUpWithError() throws { base = FileManager.default.temporaryDirectory.appendingPathComponent("expression-tests-" + UUID().uuidString); try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true) }
     override func tearDownWithError() throws { try FileManager.default.removeItem(at: base) }

@@ -812,8 +812,7 @@ final class ControlCenter: ObservableObject {
         remindersBusy = true
         defer { remindersBusy = false }
         do {
-            try await store.activateExtractedTasks(expectedAccessVersion: access.version, using: reminders)
-            try await store.reconcileReminders(expectedAccessVersion: access.version, using: reminders)
+            try await store.refreshAuthorizedReminders(expectedAccessVersion: access.version, using: reminders)
             try Task.checkCancellation()
             if reminderAccess?.version == access.version { reminderSyncStatus = "已自动核对「\(access.title)」的关联任务" }
         } catch {
