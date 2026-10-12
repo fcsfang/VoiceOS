@@ -124,6 +124,20 @@ final class UserExpressionTests: XCTestCase {
         _ = try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:false,expectedVersion:1)
         do { try await s.activateExtractedTasks(expectedAccessVersion:1,using:port); XCTFail() } catch {}
     }
+    func testExplicitSpokenTaskActivatesWhenModelIsConservative() async throws {
+        let s = try await store()
+        let text = "明确计划接下来完成整理开发验证素材。"
+        let id = try await s.recordUserExpression(text)
+        _ = try await s.setSourceLocalOnly(sourceID:id,expectedVersion:1,localOnly:false)
+        let context = try await s.prepareLocalTranscriptContext(sourceIDs:[id]), input = context.sources[0]
+        let persisted = try await s.persistLocalContext(context)
+        let attempt = try await s.reserveLocalModelAttempt(contextID:persisted,model:"fixture",promptVersion:"v2",schemaVersion:"v2")
+        let ref = ClaimReference(sourceID:id,transcriptVersionID:input.transcriptVersionID,spanID:input.spans[0].id)
+        _ = try await s.commitLocalClaims(attemptID:attempt,proposals:[.init(statement:text,ownership:.userTentative,references:[ref],action:.init(title:"完成整理开发验证素材",kind:.task,quote:text,autoSend:false))])
+        _ = try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)
+        let port = TextReminderPort(); try await s.activateExtractedTasks(expectedAccessVersion:1,using:port)
+        let creates = await port.creates; XCTAssertEqual(creates,1)
+    }
     func testMigrationRejectsMissingExtractedActionEvenWithNewFileDigest() async throws {
         let s = try await store(); let id = try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。")
         let (attempt,p) = try await proposals(s,id); _ = try await s.commitLocalClaims(attemptID:attempt,proposals:p)
