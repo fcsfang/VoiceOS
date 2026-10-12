@@ -1,5 +1,7 @@
 # VoiceOS 文档索引
 
+最新诊断：[600秒等待窗口试验](engineering/long-text-wait-window.md)。用户授权仅调大新请求窗口测试；旧未知请求保持，长文字产品范围不缩减。
+
 最新工程增量：[精简长文字请求](adr/032-compact-segment-extraction.md)与[提醒事项反馈隔离](engineering/reminder-refresh-isolation.md)。双v3仍为显式候选，应用默认未切换；真实长文字完整认知尚未成功。
 
 **2026-10-12 当前覆盖：** Qwen已由用户确认，成为默认待配置的本地转写方案，选择快照持久保存并在重启前恢复；Apple仅明确备选，无静默回退。原生本人音轨导入保存376字符、无文本调用；两段新本人音轨完成真实文字理解，后续BGE召回1份历史后判断无直接关联，未外写任务。以下Apple启动默认/选择不持久为早前记录。详见[最新证据](research/evidence/qwen-native-cognition-2026-10-12.json)与[当前进度](planning/overnight-progress.md)。完整自然案例A仍未验收。

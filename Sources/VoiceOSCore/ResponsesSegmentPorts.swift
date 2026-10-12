@@ -5,12 +5,16 @@ private struct SegmentResponsesTransport: Sendable {
     let endpoint: URL
     let apiKey: String
     let transport: any ModelHTTPTransport
-    init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport) throws {
+    let deadline: TimeInterval
+    init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, deadline: TimeInterval = 120) throws {
+        guard [120,600].contains(deadline) else { throw VoiceOSError("长文字等待窗口须为120或600秒") }
+        self.deadline=deadline
         base=try ResponsesModelPort(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport)
         endpoint=baseURL.appendingPathComponent("responses"); self.apiKey=apiKey; self.transport=transport
     }
     func config(_ version: String) -> ModelConfiguration {
-        .init(provider:base.configuration.provider,model:base.configuration.model,promptVersion:version,schemaVersion:version,destination:.cloud)
+        let identity=deadline==120 ? version : version+"-wait600"
+        return .init(provider:base.configuration.provider,model:base.configuration.model,promptVersion:identity,schemaVersion:identity,destination:.cloud)
     }
     func send(input: String, schema: [String:Any], name: String, instructions: String, tokens: Int) async throws -> ResponsesEnvelope {
         try Task.checkCancellation()
@@ -19,7 +23,7 @@ private struct SegmentResponsesTransport: Sendable {
             "text":["format":["type":"json_schema","name":name,"strict":true,"schema":schema]]]
         let data=try JSONSerialization.data(withJSONObject:payload,options:[.sortedKeys])
         guard data.count<=160000 else { throw ModelPortFailure.rejected("分段文本请求超过字节预算") }
-        var http=URLRequest(url:endpoint,timeoutInterval:120); http.httpMethod="POST"; http.httpBody=data
+        var http=URLRequest(url:endpoint,timeoutInterval:deadline); http.httpMethod="POST"; http.httpBody=data
         http.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization"); http.setValue("application/json",forHTTPHeaderField:"Content-Type")
         let reply=try await transport.send(http)
         guard reply.status==200 else { throw ModelPortFailure.rejected("HTTP \(reply.status)；费用未知，不自动重发") }
@@ -31,9 +35,9 @@ public struct ResponsesSegmentExtractionPort: SegmentExtractionPort {
     private let client: SegmentResponsesTransport
     private let locallyGroundQuotes: Bool
     private let compactInput: Bool
-    public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport(), locallyGroundQuotes: Bool = true, compactInput: Bool = false) throws {
+    public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport(), locallyGroundQuotes: Bool = true, compactInput: Bool = false, requestTimeout: TimeInterval = 120) throws {
         guard !compactInput || locallyGroundQuotes else { throw VoiceOSError("精简请求必须使用本地原话定位") }
-        client=try .init(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport)
+        client=try .init(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport,deadline:requestTimeout)
         self.locallyGroundQuotes=locallyGroundQuotes
         self.compactInput=compactInput
         configuration=client.config(compactInput ? "segment-extraction-v3" : locallyGroundQuotes ? "segment-extraction-v2":"segment-extraction-v1")
@@ -90,9 +94,9 @@ public struct ResponsesSegmentAggregationPort: SegmentAggregationPort {
     private let client: SegmentResponsesTransport
     private let evidenceLimit: Int
     private let compactInput: Bool
-    public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport(), expandedEvidenceBudget: Bool = true, compactInput: Bool = false) throws {
+    public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectModelHTTPTransport(), expandedEvidenceBudget: Bool = true, compactInput: Bool = false, requestTimeout: TimeInterval = 120) throws {
         guard !compactInput || expandedEvidenceBudget else { throw VoiceOSError("精简聚合请求需使用完整扩展证据预算") }
-        client=try .init(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport)
+        client=try .init(baseURL:baseURL,apiKey:apiKey,model:model,transport:transport,deadline:requestTimeout)
         self.compactInput=compactInput
         evidenceLimit=expandedEvidenceBudget ? 32000:4000
         configuration=client.config(compactInput ? "segment-aggregation-v3" : expandedEvidenceBudget ? "segment-aggregation-v2":"segment-aggregation-v1")

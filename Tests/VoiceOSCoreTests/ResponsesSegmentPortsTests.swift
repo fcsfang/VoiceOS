@@ -6,12 +6,14 @@ private struct SegmentHTTPInspector: MediaInspector {
 }
 private actor SegmentHTTPFixture: ModelHTTPTransport {
     var requests: [[String:Any]]=[]
+    var deadlines: [Double]=[]
     let bad: Bool
     let quoteOnly: Bool
     init(bad: Bool = false, quoteOnly: Bool = false) { self.bad=bad;self.quoteOnly=quoteOnly }
     func send(_ request: URLRequest) async throws -> ModelHTTPReply {
         let root=try JSONSerialization.jsonObject(with:request.httpBody!) as! [String:Any]
         requests.append(root)
+        deadlines.append(request.timeoutInterval)
         let input=(root["input"] as! [[String:Any]])[0]["content"] as! String
         let fields=try JSONSerialization.jsonObject(with:Data(input.utf8)) as! [String:Any]
         let format=(root["text"] as! [String:Any])["format"] as! [String:Any]
@@ -33,9 +35,28 @@ private actor SegmentHTTPFixture: ModelHTTPTransport {
         return .init(status:200,body:try JSONSerialization.data(withJSONObject:body))
     }
     func count() -> Int { requests.count }
+    func timeouts() -> [Double] { deadlines }
     func payloads() -> [Data] { requests.map { try! JSONSerialization.data(withJSONObject:$0) } }
 }
 final class ResponsesSegmentPortsTests: XCTestCase {
+    func testExtendedWaitIsFixedForBothStagesAndCannotUpgradeExistingScope() async throws {
+        let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString);defer { try? FileManager.default.removeItem(at:root) }
+        let store=try VoiceOSStore(root:root,inspector:SegmentHTTPInspector());try await store.recover()
+        let source=try await store.recordUserExpression("第一段是新样本。第二段也为新样本。")
+        _=try await store.setSourceLocalOnly(sourceID:source,expectedVersion:1,localOnly:false)
+        let transport=SegmentHTTPFixture(quoteOnly:true),base=URL(string:"https://api.openai.com/v1")!
+        let x=try ResponsesSegmentExtractionPort(baseURL:base,apiKey:"test-placeholder",model:"fixture",transport:transport,requestTimeout:600)
+        let a=try ResponsesSegmentAggregationPort(baseURL:base,apiKey:"test-placeholder",model:"fixture",transport:transport,requestTimeout:600)
+        let scope=try await store.prepareSegmentedExpressionProcessingScope(sourceID:source,extraction:x.configuration,aggregation:a.configuration,segmentScalarBudget:10)
+        XCTAssertEqual(scope.evidenceScalarBudget,32000)
+        XCTAssertEqual(x.configuration.promptVersion,"segment-extraction-v2-wait600")
+        let old=try ResponsesSegmentExtractionPort(baseURL:base,apiKey:"test-placeholder",model:"fixture",transport:transport)
+        do { try await store.validateSegmentedExpressionProcessingScope(scope,extraction:old.configuration,aggregation:a.configuration);XCTFail() } catch {}
+        let batch=try await store.enqueueSegmentedProcessingBatch(scope,extraction:x.configuration,aggregation:a.configuration)
+        _=try await store.processSegmentedCognition(batchID:batch.id,extraction:x,aggregation:a)
+        let intervals=await transport.timeouts();XCTAssertEqual(intervals,Array(repeating:600,count:scope.plan.segments.count+1))
+        XCTAssertThrowsError(try ResponsesSegmentExtractionPort(baseURL:base,apiKey:"test-placeholder",model:"fixture",transport:transport,requestTimeout:601))
+    }
     func testCompactExtractionKeepsDurableReferencesWithoutSendingMetadata() async throws {
         let root=FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString);defer { try? FileManager.default.removeItem(at:root) }
         let store=try VoiceOSStore(root:root,inspector:SegmentHTTPInspector());try await store.recover()
