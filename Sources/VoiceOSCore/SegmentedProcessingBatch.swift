@@ -113,7 +113,7 @@ extension VoiceOSStore {
               row["source_id"] == s.sourceID, row["source_version_id"] == s.sourceVersionID,
               row["transcript_version_id"] == s.transcriptVersionID, row["policy_version"] == String(p.policyVersion),
               scope.extraction.isValid, scope.aggregation.isValid, scope.extraction.destination == scope.aggregation.destination,
-              (1...4000).contains(scope.evidenceScalarBudget), p.segments.count > 1, !s.text.isEmpty,
+              (1...segmentEvidenceBudgetLimit(scope.extraction, scope.aggregation)).contains(scope.evidenceScalarBudget), p.segments.count > 1, !s.text.isEmpty,
               scope.contentDigest == (try segmentedScopeDigest(plan:p,extraction:scope.extraction,aggregation:scope.aggregation,evidenceBudget:scope.evidenceScalarBudget)),
               s.origin == "user", s.speaker == "user", scope.extraction.destination != .cloud || !s.localOnly,
               let historical = try db.query("""

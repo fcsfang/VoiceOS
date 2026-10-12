@@ -14,11 +14,13 @@ public struct SegmentedExpressionProcessingScope: Codable, Sendable {
 extension VoiceOSStore {
     public func prepareSegmentedExpressionProcessingScope(sourceID: String, extraction: ModelConfiguration,
         aggregation: ModelConfiguration, segmentScalarBudget: Int = 4000,
-        evidenceScalarBudget: Int = 4000) throws -> SegmentedExpressionProcessingScope {
+        evidenceScalarBudget: Int? = nil) throws -> SegmentedExpressionProcessingScope {
         let extractIdentity = ProcessingModelIdentity(extraction), aggregateIdentity = ProcessingModelIdentity(aggregation)
+        let maxBudget=Self.segmentEvidenceBudgetLimit(extractIdentity, aggregateIdentity)
+        let evidenceScalarBudget=evidenceScalarBudget ?? maxBudget
         guard extractIdentity.isValid, aggregateIdentity.isValid,
               extraction.destination == aggregation.destination,
-              (1...4000).contains(evidenceScalarBudget),
+              (1...maxBudget).contains(evidenceScalarBudget),
               let record = try sources().first(where: { $0.id == sourceID }),
               ["user_text", "audio"].contains(record.kind), record.origin == "user", record.speaker == "user" else {
             throw VoiceOSError("分段处理范围需要明确的个人表达、有效的同目的地端口及证据预算")
@@ -54,6 +56,10 @@ extension VoiceOSStore {
         }
     }
 
+    static func segmentEvidenceBudgetLimit(_ extraction: ProcessingModelIdentity, _ aggregation: ProcessingModelIdentity) -> Int {
+        extraction.promptVersion == "segment-extraction-v2" && extraction.schemaVersion == "segment-extraction-v2"
+            && aggregation.promptVersion == "segment-aggregation-v2" && aggregation.schemaVersion == "segment-aggregation-v2" ? 32000:4000
+    }
     static func segmentedScopeDigest(plan: TranscriptSegmentationPlan, extraction: ProcessingModelIdentity,
         aggregation: ProcessingModelIdentity, evidenceBudget: Int) throws -> String {
         // The random preparation ID is intentionally absent from semantic scope.

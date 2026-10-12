@@ -11,6 +11,19 @@ private struct ScopeSpeech: SpeechPort {
     }
 }
 final class SegmentedProcessingScopeTests: XCTestCase {
+    func testExpandedEvidenceBudgetRequiresBothVersionedPorts() async throws {
+        let s = try await store()
+        let id = try await save(String(repeating:"原话。",count:2000),store:s)
+        let extraction = ModelConfiguration(provider:"test",model:"test",promptVersion:"segment-extraction-v2",schemaVersion:"segment-extraction-v2",destination:.local)
+        let aggregation = ModelConfiguration(provider:"test",model:"test",promptVersion:"segment-aggregation-v2",schemaVersion:"segment-aggregation-v2",destination:.local)
+        let current = try await s.prepareSegmentedExpressionProcessingScope(sourceID:id,extraction:extraction,aggregation:aggregation)
+        XCTAssertEqual(current.evidenceScalarBudget,32000)
+        let mixed = try await s.prepareSegmentedExpressionProcessingScope(sourceID:id,extraction:extraction,aggregation:config())
+        XCTAssertEqual(mixed.evidenceScalarBudget,4000)
+        do { _ = try await s.prepareSegmentedExpressionProcessingScope(sourceID:id,extraction:extraction,aggregation:config(),evidenceScalarBudget:32000); XCTFail() } catch {}
+        let legacyBudget = try await s.prepareSegmentedExpressionProcessingScope(sourceID:id,extraction:extraction,aggregation:aggregation,evidenceScalarBudget:4000)
+        XCTAssertEqual(legacyBudget.evidenceScalarBudget,4000)
+    }
     var root: URL!
     override func setUpWithError() throws { root = FileManager.default.temporaryDirectory.appendingPathComponent("segment-scope-"+UUID().uuidString) }
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at:root) }
