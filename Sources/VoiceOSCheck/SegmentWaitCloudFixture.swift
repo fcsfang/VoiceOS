@@ -17,7 +17,9 @@ func runSegmentWaitCloudFixture(_ args: [String]) async throws {
     var paragraphs:[String]=[]
     for (index,topic) in topics.enumerated() {
         let label=String(format:"场景%02d",index+1)
-        paragraphs.append("\(label)讨论\(topic)。这是一份合成工程资料，用来观察等待窗口，并不是个人实际观点、承诺或操作指令。对于\(topic)，首先应保存输入和处理身份，然后核对输出来自哪一个版本。\(label)中的条件是只有来源有效且相关证据完整时才可以接纳结果；缺少条件不应靠猜测补齐。\(label)提出的问题是如何在不丢失原话的情况下保留限制。这里描述一种可能的工程解释：观察到阶段完成，可能有助于定位问题，但不能直接推导最终质量已经通过。\(label)明确否定了只看流畅总结就认定可靠的做法。假设后续发现新的反例，旧解释仍应作为历史保存，不能修改成从未发生过。对于\(topic)的判断，本段仅要求保留问题、条件、否定和不确定性，没有要求创建真实任务或调用外部工具。\(label)的结论保持暂定；后续测量需要区分结构校验、真实响应和人工语义评估。")
+        let prefix = streaming ? "我在\(label)讨论\(topic)" : "\(label)讨论\(topic)"
+        let identity = streaming ? "这是我的工程记录和操作要求" : "这是一份合成工程资料，用来观察等待窗口，并不是个人实际观点、承诺或操作指令"
+        paragraphs.append("\(prefix)。\(identity)。对于\(topic)，我首先要保存输入和处理身份，然后核对输出来自哪一个版本。\(label)中的条件是只有来源有效且相关证据完整时才可以接纳结果；缺少条件不应靠猜测补齐。\(label)提出的问题是如何在不丢失原话的情况下保留限制。这里描述一种可能的工程解释：观察到阶段完成，可能有助于定位问题，但不能直接推导最终质量已经通过。\(label)明确否定了只看流畅总结就认定可靠的做法。假设后续发现新的反例，旧解释仍应作为历史保存，不能修改成从未发生过。对于\(topic)的判断，本段仅要求保留问题、条件、否定和不确定性，没有要求创建真实任务或调用外部工具。\(label)的结论保持暂定；后续测量需要区分结构校验、真实响应和人工语义评估。")
     }
     let text=paragraphs.joined(separator:"\n")
     let source=try await store.recordUserExpression("合成等待窗口试验资料。",commandID:"wait600-synthetic-source")
