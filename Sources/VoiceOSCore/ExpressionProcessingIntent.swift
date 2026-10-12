@@ -30,8 +30,8 @@ extension VoiceOSStore {
     public func prepareExpressionProcessingIntent(sourceID: String, cognition: ModelConfiguration, association: ModelConfiguration) throws -> ExpressionProcessingIntentSnapshot {
         let cognitionIdentity = ProcessingModelIdentity(cognition), associationIdentity = ProcessingModelIdentity(association)
         guard cognitionIdentity.isValid, associationIdentity.isValid, cognition.destination == association.destination,
-              let record = try sources().first(where: { $0.id == sourceID }), record.kind == "user_text",
-              record.origin == "user", record.speaker == "user" else { throw VoiceOSError("处理意图只覆盖明确的个人文字及有效的同目的地端口") }
+              let record = try sources().first(where: { $0.id == sourceID }), ["user_text", "audio"].contains(record.kind),
+              record.origin == "user", record.speaker == "user" else { throw VoiceOSError("处理意图只覆盖明确的个人文字或个人录音逐字稿及有效的同目的地端口") }
         let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: 4000)
         let policy = try sourcePolicy(sourceID: sourceID)
         guard cognition.destination != .cloud || !policy.localOnly else { throw VoiceOSError("请先明确允许本次文字云端处理；处理意图不能自行授予权限") }

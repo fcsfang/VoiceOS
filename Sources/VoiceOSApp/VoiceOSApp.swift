@@ -377,8 +377,16 @@ final class ControlCenter: ObservableObject {
         // Application-owned: changing selection or closing the window does not resend/cancel.
         understandingWorker = Task {
             do {
-                let result = try await store.continueSourceUnderstanding(sourceID: record.id, using: port)
-                await applyUnderstandingContinuation(result, sourceID: record.id)
+                if record.origin == "user", record.speaker == "user", ["user_text", "audio"].contains(record.kind) {
+                    guard let association = associationModel else { throw VoiceOSError("关联模型尚未配置；个人表达尚未排队") }
+                    let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: record.id, cognition: port.configuration, association: association.configuration)
+                    let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "understand:" + record.id + ":" + snapshot.contentDigest, cognition: port.configuration, association: association.configuration)
+                    status = intent.state == .queued ? "个人表达已排队 · 原始录音仍在本机" : "已有处理回执：\(intent.state.rawValue)；未重复排队"
+                    scheduleProcessing()
+                } else {
+                    let result = try await store.continueSourceUnderstanding(sourceID: record.id, using: port)
+                    await applyUnderstandingContinuation(result, sourceID: record.id)
+                }
             } catch { status = error.localizedDescription }
             await refresh(); requestReminderRefresh()
             understandingSource = nil; understandingWorker = nil
@@ -440,18 +448,18 @@ final class ControlCenter: ObservableObject {
             }
         }
     }
-    func chooseFiles() {
+    func chooseFiles(personalAudio: Bool = false) {
         let panel = NSOpenPanel()
-        panel.title = "导入音频或视频"; panel.prompt = "导入"
-        panel.allowedContentTypes = [.audio, .movie]; panel.allowsMultipleSelection = true
+        panel.title = personalAudio ? "导入仅含我声音的录音 · 不上传原始音频" : "导入音频或视频"; panel.prompt = personalAudio ? "确认为我的录音" : "导入"
+        panel.allowedContentTypes = personalAudio ? [.audio] : [.audio, .movie]; panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.begin { response in
             guard response == .OK else { return }
             let urls = panel.urls
-            Task { await self.importFiles(urls) }
+            Task { await self.importFiles(urls, personalAudio: personalAudio) }
         }
     }
-    private func importFiles(_ urls: [URL]) async {
+    private func importFiles(_ urls: [URL], personalAudio: Bool = false) async {
         guard let store, !importing else { return }
         importing = true
         defer { importing = false }
@@ -459,7 +467,7 @@ final class ControlCenter: ObservableObject {
         for url in urls {
             let access = url.startAccessingSecurityScopedResource()
             status = "正在保存：\(url.lastPathComponent)"
-            do { selected = try await store.importFile(url) }
+            do { selected = personalAudio ? try await store.importPersonalAudio(url) : try await store.importFile(url) }
             catch { failures += 1; status = error.localizedDescription }
             if access { url.stopAccessingSecurityScopedResource() }
             await refresh()
@@ -1087,7 +1095,10 @@ struct CenterView: View {
             Button("连接提醒事项…") { Task { await model.connectReminders() } }.disabled(!model.initialized || model.remindersBusy)
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
             Button("记录我的表达", systemImage: "square.and.pencil") { writingExpression = true }.disabled(!model.initialized)
-            Button("导入文件", systemImage: "square.and.arrow.down") { model.chooseFiles() }.disabled(!model.initialized || model.importing)
+            Menu("导入文件", systemImage: "square.and.arrow.down") {
+                Button("外部音频或视频…") { model.chooseFiles() }
+                Button("仅含我声音的录音…") { model.chooseFiles(personalAudio: true) }
+            }.disabled(!model.initialized || model.importing)
             Menu {
                 Button("打开已有资料库…",action:chooseLibrary)
                 Button("从迁移包恢复…") { showingRestore = true }

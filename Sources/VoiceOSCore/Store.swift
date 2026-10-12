@@ -85,12 +85,26 @@ public actor VoiceOSStore {
     }
     @discardableResult
     public func importFile(_ input: URL, commandID: String = UUID().uuidString) async throws -> String {
-        guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
+        try await importMedia(input, commandID: commandID, personalAudio: false)
+    }
+    /// Caller explicitly asserts this file contains only their own voice. This grants
+    /// attribution, never cloud processing permission, and is not a microphone capture.
+    @discardableResult
+    public func importPersonalAudio(_ input: URL, commandID: String = UUID().uuidString) async throws -> String {
+        try await importMedia(input, commandID: commandID, personalAudio: true)
+    }
+    private func importMedia(_ input: URL, commandID: String, personalAudio: Bool) async throws -> String {
+        guard ready, !commandID.isEmpty else { throw VoiceOSError("资料库尚未完成恢复或导入命令为空") }
         let extensionName = input.pathExtension.lowercased()
+        if personalAudio {
+            guard ["m4a", "mp3", "wav", "aiff", "aif", "caf", "aac", "flac"].contains(extensionName) else {
+                throw VoiceOSError("个人录音入口只接受明确归属本人的音频文件")
+            }
+        }
         guard ["mp4", "mov", "m4v", "m4a", "mp3", "wav", "aiff", "aif", "caf", "aac", "flac"].contains(extensionName) else { throw VoiceOSError("请选择音频或视频文件") }
         let (bytes, hash) = try DurableFiles.hash(input)
         guard bytes > 0 else { throw VoiceOSError("文件为空") }
-        let fingerprint = "\(hash):\(bytes):\(extensionName):\(input.lastPathComponent)"
+        let fingerprint = (personalAudio ? "personal-audio-v1:" : "") + "\(hash):\(bytes):\(extensionName):\(input.lastPathComponent)"
         if let old = try db.query("SELECT * FROM sources WHERE command_id=?", [commandID]).first {
             guard old["input_fingerprint"] == fingerprint else { throw VoiceOSError("同一导入命令不能更换文件内容") }
             return old["id"]!
@@ -100,9 +114,9 @@ public actor VoiceOSStore {
         let staging = root.appendingPathComponent("staging/\(asset).part.\(extensionName)")
         let final = try assetURL(relativePath: relative)
         try db.execute("""
-        INSERT INTO sources(id,command_id,input_fingerprint,asset_id,version_id,name,kind,state,created_at,timezone,expected_bytes,expected_hash,relative_path)
-        VALUES(?,?,?,?,?,?,?,'receiving',?,?,?,?,?)
-        """, [id,commandID,fingerprint,asset,version,input.lastPathComponent,"unknown",Self.now(),TimeZone.current.identifier,String(bytes),hash,relative])
+        INSERT INTO sources(id,command_id,input_fingerprint,asset_id,version_id,name,kind,origin,speaker,state,created_at,timezone,expected_bytes,expected_hash,relative_path)
+        VALUES(?,?,?,?,?,?,?,?,?,'receiving',?,?,?,?,?)
+        """, [id,commandID,fingerprint,asset,version,input.lastPathComponent,"unknown",personalAudio ? "user" : "external",personalAudio ? "user" : "unknown",Self.now(),TimeZone.current.identifier,String(bytes),hash,relative])
         activeImports.insert(id)
         defer { activeImports.remove(id) }
         do {
@@ -112,6 +126,7 @@ public actor VoiceOSStore {
             let actual = try DurableFiles.hash(staging)
             guard actual.0 == bytes, actual.1 == hash else { throw VoiceOSError("复制期间输入发生变化，无法确认完整保存") }
             let info = try await inspector.inspect(staging)
+            guard !personalAudio || info.kind == "audio" else { throw VoiceOSError("个人录音文件必须经核对为音频") }
             try db.execute("UPDATE sources SET state='sealed', duration=?, kind=? WHERE id=?", [String(info.duration),info.kind,id])
             try checkpoint(.sealed)
             try place(staging, final)

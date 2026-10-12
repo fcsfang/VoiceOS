@@ -60,7 +60,20 @@ extension VoiceOSStore {
         let sealed = try db.query("SELECT * FROM sources WHERE id=?",[sourceID]).first!
         try sealAndQueue(sealed,info:info); try checkpoint(.savedCommitted)
     }
+    static func isPersonalAudioImport(_ row: [String: String]) -> Bool {
+        guard let path = row["relative_path"], let hash = row["expected_hash"], let bytes = row["expected_bytes"], let name = row["name"] else { return false }
+        let ext = URL(fileURLWithPath: path).pathExtension.lowercased()
+        return ["m4a", "mp3", "wav", "aiff", "aif", "caf", "aac", "flac"].contains(ext)
+            && path == "assets/" + (row["asset_id"] ?? "") + "." + ext
+            && row["input_fingerprint"] == "personal-audio-v1:" + hash + ":" + bytes + ":" + ext + ":" + name
+    }
     static func validateStoredRecordings(_ db:Database) throws {
+        for row in try db.query("SELECT * FROM sources WHERE input_fingerprint LIKE 'personal-audio-v1:%'") {
+            guard isPersonalAudioImport(row), row["origin"] == "user", row["speaker"] == "user",
+                  ["audio", "unknown"].contains(row["kind"] ?? ""), row["feedback_json"] == nil else {
+                throw VoiceOSError("用户提供录音的归属或原件身份不一致")
+            }
+        }
         for row in try db.query("SELECT * FROM sources WHERE input_fingerprint LIKE 'microphone-v1:%'") {
             guard row["input_fingerprint"] == "microphone-v1:"+row["id"]!, row["kind"] == "audio",
                   row["origin"] == "user", row["speaker"] == "user", row["relative_path"] == "assets/"+row["asset_id"]!+".caf",

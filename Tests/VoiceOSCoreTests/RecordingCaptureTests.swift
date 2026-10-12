@@ -18,6 +18,78 @@ final class RecordingCaptureTests: XCTestCase {
         let file = try AVAudioFile(forWriting:intent.stagingURL,settings:format.settings)
         try file.write(from:buffer) // Synthetic tone; no device or permission request.
     }
+    private struct TranscriptFixture: SpeechPort {
+        func transcribe(_ url: URL, locale: String) async throws -> SpeechText { SpeechText(text: "这是我的个人表达") }
+    }
+    func testExplicitPersonalImportKeepsAttributionAndRequiresSeparateCloudGrant() async throws {
+        let s = try await store(), recording = try await s.beginDictation(); try audio(recording)
+        try await s.sealDictation(sourceID: recording.sourceID)
+        let file = try await s.playableURL(sourceID: recording.sourceID)
+        let personal = try await s.importPersonalAudio(file, commandID: "personal")
+        let replay = try await s.importPersonalAudio(file, commandID: "personal")
+        XCTAssertEqual(personal, replay)
+        do { _ = try await s.importFile(file, commandID: "personal"); XCTFail("Cannot change attribution on command replay") } catch {}
+        let external = try await s.importFile(file, commandID: "external")
+        let config = ModelConfiguration(provider: "fixture", model: "fixture", promptVersion: "v1", schemaVersion: "v1", destination: .cloud)
+        do { _ = try await s.prepareExpressionProcessingIntent(sourceID: personal, cognition: config, association: config); XCTFail("No transcript yet") } catch {}
+        try await s.processTranscriptions(using: TranscriptFixture())
+        do { _ = try await s.prepareExpressionProcessingIntent(sourceID: personal, cognition: config, association: config); XCTFail("Attribution grants no cloud permission") } catch {}
+        _ = try await s.setSourceLocalOnly(sourceID: personal, expectedVersion: 1, localOnly: false)
+        let snapshot = try await s.prepareExpressionProcessingIntent(sourceID: personal, cognition: config, association: config)
+        XCTAssertEqual(snapshot.context.sources[0].origin, "user")
+        let intent = try await s.enqueueExpressionProcessingIntent(snapshot, commandID: "audio-queue", cognition: config, association: config)
+        XCTAssertEqual(intent.state, .queued)
+        _ = try await s.setSourceLocalOnly(sourceID: external, expectedVersion: 1, localOnly: false)
+        do { _ = try await s.prepareExpressionProcessingIntent(sourceID: external, cognition: config, association: config); XCTFail("External audio cannot become personal expression") } catch {}
+        let currentStore = s
+        let history = try await currentStore.processingIntents(); XCTAssertEqual(history.count, 1)
+        let rows = try await currentStore.sources()
+        XCTAssertEqual(rows.first { $0.id == personal }?.speaker, "user")
+        XCTAssertEqual(rows.first { $0.id == external }?.speaker, "unknown")
+        let package = base.appendingPathComponent("audio-package")
+        try await currentStore.exportPackage(to: package, includeMedia: true)
+        XCTAssertEqual(try VoiceOSStore.packageSummary(at: package).version, 25)
+        try await VoiceOSStore.restorePackage(from: package, to: base.appendingPathComponent("audio-restored"), inspector: NativeMediaInspector())
+        let restored = try await store("audio-restored")
+        let restoredHistory = try await restored.processingIntents(); XCTAssertEqual(restoredHistory[0].state, .frozen)
+        let restoredRows = try await restored.sources(); XCTAssertEqual(restoredRows.first { $0.id == personal }?.origin, "user")
+    }
+    func testPersonalImportSealedRecoveryKeepsOwnershipAndOneTranscriptionJob() async throws {
+        let input = base.appendingPathComponent("user-provided.caf")
+        do {
+            let fixture = try await store("input")
+            let capture = try await fixture.beginDictation(); try audio(capture)
+            try await fixture.sealDictation(sourceID: capture.sourceID)
+            let file = try await fixture.playableURL(sourceID: capture.sourceID)
+            try FileManager.default.copyItem(at: file, to: input)
+        }
+        do {
+            let s = try await store(checkpoint: { if $0 == .sealed { throw VoiceOSError("synthetic import interruption") } })
+            do { _ = try await s.importPersonalAudio(input, commandID: "personal-interrupted"); XCTFail() } catch {}
+        }
+        let recovered = try await store()
+        let id = try await recovered.importPersonalAudio(input, commandID: "personal-interrupted")
+        let rows = try await recovered.sources()
+        XCTAssertEqual(rows.count, 1); XCTAssertEqual(rows[0].id, id)
+        XCTAssertEqual(rows[0].state, "saved"); XCTAssertEqual(rows[0].jobState, "queued")
+        XCTAssertEqual(rows[0].origin, "user"); XCTAssertEqual(rows[0].speaker, "user"); XCTAssertTrue(rows[0].localOnly)
+        try await recovered.processTranscriptions(using: TranscriptFixture())
+        let after = try await recovered.sources(); XCTAssertEqual(after.count, 1); XCTAssertEqual(after[0].jobState, "completed")
+    }
+    func testMalformedPersonalImportRetainsMigratableInterruptedHistory() async throws {
+        let s = try await store(), file = base.appendingPathComponent("malformed.wav")
+        try Data("not audio".utf8).write(to: file)
+        do { _ = try await s.importPersonalAudio(file, commandID: "bad-personal"); XCTFail() } catch {}
+        let rows = try await s.sources(); XCTAssertEqual(rows.count, 1); XCTAssertEqual(rows[0].state, "interrupted")
+        XCTAssertNil(rows[0].jobState)
+        let package = base.appendingPathComponent("interrupted-personal-package")
+        try await s.exportPackage(to: package)
+        try await VoiceOSStore.restorePackage(from: package, to: base.appendingPathComponent("interrupted-personal-restored"), inspector: NativeMediaInspector())
+        let restored = try await store("interrupted-personal-restored"), history = try await restored.sources()
+        XCTAssertEqual(history[0].state, "interrupted"); XCTAssertEqual(history[0].origin, "user")
+        XCTAssertNil(history[0].jobState); XCTAssertTrue(history[0].localOnly)
+        do { _ = try await restored.playableURL(sourceID: history[0].id); XCTFail("Interrupted history cannot invent an original") } catch {}
+    }
     func testIntentPrecedesBytesAndCannotStartTwoRecordings() async throws {
         let s = try await store(), intent = try await s.beginDictation(commandID:"start")
         let same = try await s.beginDictation(commandID:"start"); XCTAssertEqual(same.sourceID,intent.sourceID)

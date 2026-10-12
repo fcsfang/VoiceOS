@@ -44,7 +44,7 @@ struct Check {
             if args[0] == "typed-cognition-fixture" { try await runTypedCognitionFixture(store); return }
             if args[0] == "discussion-question-fixture" { try await runDiscussionQuestionFixture(store); return }
             if args[0] == "source-continuation-fixture" { try await runSourceContinuationFixture(store); return }
-            if args[0] == "expression-queue-fixture" { try await runExpressionQueueFixture(store); return }
+            if ["expression-queue-fixture", "personal-audio-queue-fixture"].contains(args[0]) { try await runExpressionQueueFixture(store, existingAudio: args[0] == "personal-audio-queue-fixture"); return }
             if args[0] == "expression-queue-read" {
                 let intents = try await store.processingIntents()
                 let output:[String:Any] = ["integrity":try await store.integrityCheck(),
@@ -144,9 +144,12 @@ struct Check {
             } else if args[0] == "quiet-ignore-fixture" {
                 guard let item = try await store.cognitiveFeedback().first else { throw VoiceOSError("fixture requires an accepted current relevance receipt") }
                 try await store.ignoreCognitiveFeedback(attemptID:item.attemptID,candidateID:item.hit.id,commandID:"synthetic-quiet-ignore")
-            } else if args[0] == "import" {
+            } else if ["import", "import-personal-audio"].contains(args[0]) {
                 guard args.count >= 3 else { throw VoiceOSError("missing file") }
-                _ = try await store.importFile(URL(fileURLWithPath: args[2]), commandID: args.count > 3 ? args[3] : UUID().uuidString)
+                let file = URL(fileURLWithPath: args[2]), command = args.count > 3 ? args[3] : UUID().uuidString
+                if args[0] == "import-personal-audio" {
+                    _ = try await store.importPersonalAudio(file, commandID: command)
+                } else { _ = try await store.importFile(file, commandID: command) }
             } else if args[0] == "expression-fixture" {
                 _ = try await store.recordUserExpression("我会整理开发验证素材。以后也许研究检索。我现在不打算学习摄影。", commandID: "synthetic-expression")
             } else if args[0] == "extracted-action-fixture" {
@@ -224,9 +227,13 @@ private actor FileRemindersFixture: RemindersPort {
     }
 }
 
-private func runExpressionQueueFixture(_ store: VoiceOSStore) async throws {
+private func runExpressionQueueFixture(_ store: VoiceOSStore, existingAudio: Bool = false) async throws {
     _ = try await store.recordUserExpression("合成历史表达：需要核对条件。", commandID: "queue-history")
-    let current = try await store.recordUserExpression("合成当前表达：请理解并关联这次文字。", commandID: "queue-current")
+    let current: String
+    if existingAudio {
+        guard let audio = try await store.sources().first(where: { $0.kind == "audio" && $0.origin == "user" && $0.speaker == "user" && !($0.transcript ?? "").isEmpty }) else { throw VoiceOSError("fixture requires transcribed personal audio") }
+        current = audio.id
+    } else { current = try await store.recordUserExpression("合成当前表达：请理解并关联这次文字。", commandID: "queue-current") }
     let configuration = ModelConfiguration(provider: "queue-fixture", model: "synthetic", promptVersion: "v1", schemaVersion: "v1", destination: .local)
     let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: current, cognition: configuration, association: configuration)
     let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "queue-processing", cognition: configuration, association: configuration)
