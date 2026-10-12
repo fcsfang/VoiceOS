@@ -1291,10 +1291,15 @@ struct CenterView: View {
                                         let link = model.reminderLinks.first { $0.actionID == action.id }
                                         if let link {
                                             Text("提醒事项：" + reminderLabel(link.state)).font(.caption).foregroundStyle(.secondary)
-                                            if let title = link.remoteTitle { Text("外部标题：" + title).font(.caption) }
-                                            if let at = link.lastCheckedAt ?? link.lastObservedAt { Text("最近核对：" + at).font(.caption).foregroundStyle(.secondary) }
-                                            if let done = link.remoteCompleted { Text(done ? "外部回读：已完成" : "外部回读：未完成").font(.caption) }
-                                            Button("回读提醒事项") { Task { await model.readReminder(link) } }.disabled(model.remindersBusy || model.reminderCalendarID != link.calendarID)
+                                            if let title = link.remoteTitle { Text("上次回读标题：" + title).font(.caption) }
+                                            if let at = link.lastCheckedAt ?? link.lastObservedAt { Text("最近完成核对：" + at).font(.caption).foregroundStyle(.secondary) }
+                                            if let done = link.remoteCompleted {
+                                                Text((link.state == "linked" ? "外部回读：" : "上次外部回读：") + (done ? "已完成" : "未完成")).font(.caption)
+                                            }
+                                            if link.state != "linked", link.remoteCompleted != nil {
+                                                Text("保留上次观测，当前状态尚未确认。").font(.caption).foregroundStyle(.secondary)
+                                            }
+                                            Button("回读提醒事项") { Task { await model.readReminder(link) } }.disabled(model.remindersBusy || model.reminderAccess?.enabled != true || model.reminderCalendarID != link.calendarID)
                                         } else if action.kind == "task" {
                                             Text("当前只同步任务标题，不设置期限或提醒时间。").font(.caption).foregroundStyle(.secondary)
                                             Text("目标清单：" + model.reminderCalendarTitle).font(.caption).foregroundStyle(.secondary)
