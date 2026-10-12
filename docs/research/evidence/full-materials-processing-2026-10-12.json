@@ -1,0 +1,45 @@
+{
+  "date": "2026-10-12",
+  "purpose": "两段正式视频 Track 2（用户本人音轨）的长文本认知流程证据",
+  "route": "M2→M3；segment extraction → SSE aggregation → local cognition commit",
+  "audio_uploaded": false,
+  "external_task_writes": 0,
+  "reminder_links_created": 0,
+  "materials": [
+    {
+      "source_id": "68CCAE2A-FA26-4AC1-BC18-88A5A9F0FDE9",
+      "runtime": "runtime/development-20261012/podcast-part1-0000-1800",
+      "track": 2,
+      "transcription_backend": "Qwen3-ASR-1.7B-8bit@a8379a2 MLXAudio0.5.8 chunk30-v1",
+      "transcript_scalars": 7073,
+      "latest_batch_id": "F6762E26-9341-4795-964D-3B93AE9B9BDD",
+      "latest_batch_state": "queued",
+      "extraction": {"segments": 2, "states": ["completed", "completed"]},
+      "aggregation": {"state": "completed", "input_tokens": 7909, "output_tokens": 10023},
+      "cognition": {"saved": true, "claim_count": 27, "action_count": 9},
+      "reminder_sync": {"eligible_auto_send": 0, "created": 0},
+      "integrity": true
+    },
+    {
+      "source_id": "16E2A677-E57C-4766-B586-FC531B8E3229",
+      "runtime": "runtime/queue-fixes-20261012/podcast-personal-40min-library",
+      "track": 2,
+      "transcription_backend": "Apple SpeechAnalyzer",
+      "transcript_scalars": 5280,
+      "latest_batch_id": "1F05507B-0148-4497-ADEE-23F536F46CCE",
+      "latest_batch_state": "queued",
+      "extraction": {"segments": 2, "states": ["completed", "completed"]},
+      "aggregation": {"state": "completed", "input_tokens": 8773, "output_tokens": 8204},
+      "cognition": {"saved": true, "claim_count": 19, "action_count": 3},
+      "reminder_sync": {"eligible_auto_send": 0, "created": 0},
+      "integrity": true
+    }
+  ],
+  "known_boundaries": [
+    "旧批次的 blocked/rejected/unknown 回执全部保留，未自动重发。",
+    "长文本流程已完成结构化认知提交；自然语义质量仍需人工抽样审阅。",
+    "第二段逐字稿 backend 为旧 Apple SpeechAnalyzer，尚未重新用 Qwen 生成；音频未上传。",
+    "外部提醒事项写入未发生，因为当前两份正式素材的任务均由模型标记为 autoSend=false；模糊 opportunity 保留为本地候选。",
+    "M3 故障变体、离线/睡眠与冲突补偿仍按路线图单独验收。"
+  ]
+}

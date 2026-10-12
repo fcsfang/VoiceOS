@@ -62,6 +62,26 @@ extension VoiceOSStore {
         try Self.validateStoredSegmentAggregation(db)
         return try db.query("SELECT * FROM segmented_aggregation_attempts WHERE batch_id=?",[batchID]).first.map(Self.aggregationAttempt)
     }
+    /// Re-check a durable rejected response after a local provenance validator
+    /// fix. This never calls a model or changes the stored response; it only
+    /// reopens the parent when the same immutable receipt now passes all local
+    /// checks.
+    public func revalidateRejectedSegmentAggregation(batchID: String, extraction: ModelConfiguration,
+                                                     aggregation: ModelConfiguration) throws {
+        let batch = try segmentedProcessingBatch(id: batchID)
+        guard batch.state == .rejected, let attempt = try segmentAggregationAttempt(batchID: batchID),
+              attempt.state == .rejected, attempt.response != nil else { throw VoiceOSError("只能重验带完整回执的 rejected 聚合批次") }
+        let attempts = try segmentExtractionAttempts(batchID: batchID)
+        guard attempts.count == batch.scope.plan.segments.count, attempts.allSatisfy({ $0.state == .completed && $0.response != nil }) else { throw VoiceOSError("重验批次缺少完整片段回执") }
+        let ledger = try Self.segmentedEvidenceLedger(batchID: batchID, scope: batch.scope,
+            inputs: attempts.map { .init(segmentID: $0.request.segment.id, proposals: $0.response!.proposals) })
+        _ = try Self.validateSegmentAggregationReview(attempt.response!.review, ledger: ledger)
+        _ = try Self.segmentFinalProposals(attempt.response!, batch: batch, ledger: ledger)
+        try db.transaction {
+            try db.execute("UPDATE segmented_aggregation_attempts SET state='completed',error=NULL,updated_at=? WHERE id=? AND state='rejected'", [Self.processingNow(), attempt.id])
+            try db.execute("UPDATE segmented_processing_batches SET state='queued',error=NULL,updated_at=? WHERE id=? AND state='rejected'", [Self.processingNow(), batchID])
+        }
+    }
     /// Persist a whole-source judgment, without committing cognitive entities yet.
     public func runSegmentAggregation(batchID: String, using port: any SegmentAggregationPort) async throws -> SegmentAggregationAttempt? {
         guard ready else { throw VoiceOSError("资料库尚未准备好") }

@@ -159,15 +159,15 @@ extension VoiceOSStore {
                 guard !action.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action.title.unicodeScalars.count <= 2000,
                       !action.quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action.quote.unicodeScalars.count <= 2000,
                       !action.autoSend || action.kind == .task,
-                      (action.kind == .aiSuggestion && proposal.ownership == .aiCandidate) || (action.kind != .aiSuggestion && proposal.ownership == .userTentative),
-                      proposal.references.contains(where: { ref in
-                          context.sources.contains { source in
-                              guard source.sourceID == ref.sourceID, source.transcriptVersionID == ref.transcriptVersionID,
-                                    let span = source.spans.first(where: { $0.id == ref.spanID }) else { return false }
-                              let scalars = Array(source.text.unicodeScalars)
-                              return String(String.UnicodeScalarView(scalars[span.textStart..<span.textEnd])).contains(action.quote)
-                          }
-                      }) else { throw VoiceOSError("行动提取缺少原话、正确归属或可执行范围") }
+                      (action.kind == .aiSuggestion && proposal.ownership == .aiCandidate) || (action.kind != .aiSuggestion && proposal.ownership == .userTentative) else { throw VoiceOSError("行动提取缺少原话、正确归属或可执行范围") }
+                let refsBySource = Dictionary(grouping: proposal.references, by: { "\($0.sourceID):\($0.transcriptVersionID)" })
+                guard refsBySource.values.contains(where: { refs in
+                    guard let source = context.sources.first(where: { s in s.sourceID == refs[0].sourceID && s.transcriptVersionID == refs[0].transcriptVersionID }) else { return false }
+                    let ranges = refs.compactMap { ref in source.spans.first(where: { $0.id == ref.spanID }) }.map { ($0.textStart, $0.textEnd) }
+                    guard let left = ranges.map({ $0.0 }).min(), let right = ranges.map({ $0.1 }).max(), left < right else { return false }
+                    let scalars = Array(source.text.unicodeScalars)
+                    return String(String.UnicodeScalarView(scalars[left..<right])).contains(action.quote)
+                }) else { throw VoiceOSError("行动提取缺少原话、正确归属或可执行范围") }
             }
         }
     }

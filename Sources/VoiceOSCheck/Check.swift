@@ -45,6 +45,16 @@ struct Check {
                 }
             })
             try await store.recover()
+            if args[0] == "segmented-revalidate-rejected" {
+                guard args.count == 3 else { throw VoiceOSError("segmented-revalidate-rejected requires batch ID") }
+                let batch = try await store.segmentedProcessingBatch(id: args[2])
+                let extraction = ModelConfiguration(provider: batch.scope.extraction.provider, model: batch.scope.extraction.model, promptVersion: batch.scope.extraction.promptVersion, schemaVersion: batch.scope.extraction.schemaVersion, destination: batch.scope.extraction.destination)
+                let aggregation = ModelConfiguration(provider: batch.scope.aggregation.provider, model: batch.scope.aggregation.model, promptVersion: batch.scope.aggregation.promptVersion, schemaVersion: batch.scope.aggregation.schemaVersion, destination: batch.scope.aggregation.destination)
+                try await store.revalidateRejectedSegmentAggregation(batchID: batch.id, extraction: extraction, aggregation: aggregation)
+                let claimIDs = try await store.commitSegmentedCognition(batchID: batch.id, extraction: extraction, aggregation: aggregation)
+                let output: [String: Any] = ["batch_id": batch.id, "state": (try await store.segmentedProcessingBatch(id: batch.id)).state.rawValue, "claim_count": claimIDs.count, "integrity": try await store.integrityCheck()]
+                print(String(decoding: try JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]), as: UTF8.self)); return
+            }
             if args[0] == "question-active-answer-fixture" { try await runQuestionActiveAnswerFixture(store); return }
             if args[0] == "question-reopen-fixture" { try await runQuestionReopenFixture(store); return }
             if args[0] == "question-association-fixture" { try await runQuestionAssociationFixture(store); return }

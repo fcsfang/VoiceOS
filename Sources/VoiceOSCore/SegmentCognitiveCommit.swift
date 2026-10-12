@@ -29,22 +29,46 @@ extension VoiceOSStore {
         let source=batch.scope.plan.source
         var handled: Set<String>=[], proposals: [ClaimProposal]=[]
         for claim in final {
-            guard !claim.evidenceIDs.isEmpty, Set(claim.evidenceIDs).count == claim.evidenceIDs.count,
-                  claim.evidenceIDs.allSatisfy({ evidence[$0] != nil }) else { throw VoiceOSError("最终认知缺少有效原话证据或重复引用") }
-            let spanIDs=Set(claim.evidenceIDs.flatMap { evidence[$0]!.references.map(\.spanID) })
+            var claimEvidenceIDs = claim.evidenceIDs
+            if let actionID = claim.actionEvidenceID, let decision = decisions[actionID] {
+                // Keep an action's supporting provenance inside the committed
+                // claim when the model omitted one of those IDs from
+                // evidenceIDs. Added IDs still come only from the immutable
+                // ledger; no evidence is synthesized locally.
+                for id in decision.supportingEvidenceIDs where !claimEvidenceIDs.contains(id) { claimEvidenceIDs.append(id) }
+            }
+            guard !claimEvidenceIDs.isEmpty, Set(claimEvidenceIDs).count == claimEvidenceIDs.count,
+                  claimEvidenceIDs.allSatisfy({ evidence[$0] != nil }) else { throw VoiceOSError("最终认知缺少有效原话证据或重复引用") }
+            let spanIDs=Set(claimEvidenceIDs.flatMap { evidence[$0]!.references.map(\.spanID) })
             let refs=source.spans.filter { spanIDs.contains($0.id) }.map { ClaimReference(sourceID:source.sourceID,transcriptVersionID:source.transcriptVersionID,spanID:$0.id) }
             if let action=claim.action {
-                guard let id=claim.actionEvidenceID,claim.evidenceIDs.contains(id),handled.insert(id).inserted,
+                guard let id=claim.actionEvidenceID,claimEvidenceIDs.contains(id),handled.insert(id).inserted,
                       let decision=decisions[id],let original=evidence[id],original.proposal.kind == .possibleAction,
                       [.accept,.ambiguous].contains(decision.disposition),
-                      decision.supportingEvidenceIDs.allSatisfy({ claim.evidenceIDs.contains($0) }),
+                      decision.supportingEvidenceIDs.allSatisfy({ claimEvidenceIDs.contains($0) }),
                       original.proposal.quote.contains(action.quote), !action.quote.isEmpty,
                       action.kind != .aiSuggestion,
                       decision.disposition != .ambiguous || (action.kind == .opportunity && !action.autoSend) else {
                     throw VoiceOSError("最终行动与整篇判断或原话不一致，不能释放拒绝、重复或模糊任务")
                 }
             } else if claim.actionEvidenceID != nil { throw VoiceOSError("行动身份缺少最终行动") }
-            proposals.append(.init(statement:claim.statement,ownership:claim.ownership,references:refs,action:claim.action,contentKind:claim.contentKind))
+            // A user transcript can quote an external person, but it is still
+            // a user-owned source. Preserve the claim while refusing to treat
+            // it as an externally sourced fact; unresolved is the safe local
+            // projection until an external source is linked.
+            let ownership: CandidateOwnership
+            if claim.ownership == .external && source.origin == "user" {
+                ownership = .unresolved
+            } else if claim.ownership == .unresolved, let action = claim.action,
+                      action.kind == .opportunity, !action.autoSend, source.origin == "user" {
+                // An explicitly user-spoken "record this" opportunity can be
+                // retained as a non-executable user task candidate even when
+                // the model marked its ownership unresolved.
+                ownership = .userTentative
+            } else {
+                ownership = claim.ownership
+            }
+            proposals.append(.init(statement:claim.statement,ownership:ownership,references:refs,action:claim.action,contentKind:claim.contentKind))
         }
         let retained=Set(response.review.actionDecisions.filter { [.accept,.ambiguous].contains($0.disposition) }.map(\.evidenceID))
         guard handled == retained else { throw VoiceOSError("最终提案必须恰好覆盖全部保留或待明确行动") }
