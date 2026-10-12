@@ -1,6 +1,6 @@
 # 长录音分段执行契约（实施草案）
 
-日期：2026-10-12。状态：执行契约仍为工程草案；范围准备及[持久父批次基础](m4-segmented-processing-batch.md)已实现；[本地证据账本校验](m4-segmented-evidence.md)也已实现；[通用片段端口及持久attempt暂存](m4-segment-extraction.md)已实现；真实云端驱动和聚合提交未实现。基线为本地无损分段切片6ed452e。本文是下一实施切片的验收依据，不表示当前已支持分段云端处理。
+日期：2026-10-12。状态：执行契约仍为工程草案；范围准备及[持久父批次基础](m4-segmented-processing-batch.md)已实现；[本地证据账本校验](m4-segmented-evidence.md)也已实现；[通用片段端口及持久attempt暂存](m4-segment-extraction.md)已实现；[整篇行动判断本地校验](m4-segment-aggregation-validation.md)已实现；真实云端驱动、聚合回执和最终提交未实现。基线为本地无损分段切片6ed452e。本文是下一实施切片的验收依据，不表示当前已支持分段云端处理。
 
 ## 已实现的范围准备
 

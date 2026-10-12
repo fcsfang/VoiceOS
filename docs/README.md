@@ -2,7 +2,9 @@
 
 更新日期：2026-10-12。
 
-最新切片见[分段提取持久记录](engineering/m4-segment-extraction.md)：415项回归、三个实际强退窗口和签名构建通过；schema28，含片段尝试的迁移包v28。已支持单段预留、结果暂存、未知不重发、取消/更正后的迟到结果冻结；整篇聚合、真实云端驱动及原生分段执行入口尚未接入，完整MVP未验收。
+最新切片见[分段提取持久记录](engineering/m4-segment-extraction.md)：片段阶段415项回归、三个实际强退窗口和签名构建通过；schema28，含片段尝试的迁移包v28。已支持单段预留、结果暂存、未知不重发、取消/更正后的迟到结果冻结；整篇聚合、真实云端驱动及原生分段执行入口尚未接入，完整MVP未验收。
+
+[整篇判断本地门槛](engineering/m4-segment-aggregation-validation.md)随后接入，最新422项回归通过：完整证据与行动覆盖、重复关系及未完句阻塞已校验；不等同成功聚合回执或自然理解。
 
 真实40分钟本人音轨的5280字符可无损分成2段；本轮采用固定空提案的本地夹具验证暂存及迁移冻结，没有评分自然语义质量。先读[当前接续状态](planning/overnight-progress.md)，再按需要查看[分段总契约](engineering/m4-segmented-expression-processing-contract.md)、[本地证据账本](engineering/m4-segmented-evidence.md)、[录制处理请求](engineering/m4-recording-processing-request.md)和[个人录音归属](engineering/m4-personal-audio-processing.md)。
 

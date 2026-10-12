@@ -67,10 +67,18 @@ final class SegmentExtractionTests: XCTestCase {
         let calls = await port.calls; XCTAssertEqual(calls,batch.scope.plan.segments.count)
         let ledger = try await s.preparePersistedSegmentedEvidenceLedger(batchID:batch.id,extraction:config(),aggregation:config())
         XCTAssertEqual(ledger.evidence[0].proposal.kind,.possibleAction); XCTAssertEqual(ledger.evidence.last?.proposal.kind,.negation)
+        let review = SegmentAggregationReview(batchID:batch.id,ledgerDigest:ledger.contentDigest,reviewedEvidenceIDs:ledger.evidence.map(\.id),
+            actionDecisions:ledger.evidence.filter { $0.proposal.kind == .possibleAction }.map {
+                .init(evidenceID:$0.id,disposition:.reject,supportingEvidenceIDs:ledger.evidence.map(\.id),explanation:"后段改变主意，合成判断不创建任务")
+            })
+        let validation = try await s.validatePersistedSegmentAggregationReview(review,extraction:config(),aggregation:config())
+        XCTAssertEqual(validation.review.actionDecisions.first?.disposition,.reject)
         let actions = try await s.actions(), claims = try await s.candidateClaims(), oldCalls = try await s.modelAttempts()
         XCTAssertTrue(actions.isEmpty); XCTAssertTrue(claims.isEmpty); XCTAssertTrue(oldCalls.isEmpty)
         let history = try await s.segmentExtractionAttempts(batchID:batch.id)
         XCTAssertTrue(history.allSatisfy { $0.state == .completed && $0.usage?["input_tokens"] == 12 })
+        _ = try await s.cancelSegmentedProcessingBatch(id:batch.id)
+        do { _ = try await s.validatePersistedSegmentAggregationReview(review,extraction:config(),aggregation:config()); XCTFail("取消后的判断不能接纳") } catch {}
     }
     func testSuccessfulEmptyResponsesHaveCompleteReceiptsAndNoResend() async throws {
         let s = try await store(), batch = try await seed(s), port = ExtractionFixture(config(),mode:.empty)

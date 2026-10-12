@@ -1,6 +1,6 @@
 # VoiceOS 夜间开发进度
 
-更新时间：2026-10-12 分段提取持久尝试切片（Asia/Shanghai）
+更新时间：2026-10-12 分段提取及整篇判断本地门槛（Asia/Shanghai）
 
 ## 当前接续状态
 
@@ -12,6 +12,7 @@
 - 真实40分钟本人音轨（第二段视频，轨2，偏移120秒，时长2400秒）的5280字符分为2段。本轮本地夹具固定返回空提案，两段完成、v28引用导出及恢复冻结通过；这是执行机制证据，不是自然理解质量验收。媒体、逐字稿和包留在忽略的runtime。
 - 新增篡改负例在重算内层及manifest摘要后仍拒绝：伪造政策、完成quote、与旧model_attempts冲突的producer顺序。来源更正后的合法旧历史仍可读取。
 - 签名构建与`codesign --verify --deep --strict`通过；本切片没有原生UI改动或云端、麦克风、提醒事项写入。没有后台运行句柄。日志位于`runtime/queue-fixes-20261012/segment-extraction-*.log`，脱敏[验证证据](../research/evidence/segment-extraction-validation-2026-10-12.json)与[强退证据](../research/evidence/segment-extraction-recovery-2026-10-12.json)已保存。
+- 片段切片已提交为`352524e`。随后[整篇判断结构门槛](../engineering/m4-segment-aggregation-validation.md)接入，最新422项回归通过：全部证据和潜在行动恰好覆盖、原话依据、重复链无环且指向保留项、未完句阻塞。持久消费入口校验及取消后拒绝通过，不创建认知/行动实体；这是本地校验，不是聚合成功回执。最新签名构建与严格codesign校验通过，无后台句柄；新证据见整篇判断契约。
 - 下一步：持久聚合预留、全部潜在行动accept/reject/ambiguous/duplicate覆盖、未完句门槛和最终原子认知提交；再接长来源关联、真实云端及原生入口。完整自然闭环和MVP仍未验收。
 - 原个人文字队列、录制请求、轨2归属、无损分段原生预览及历史审核修复已实现，勿重复实施。详见[修复记录](../engineering/m4-expression-processing-reliability.md)、[录制请求](../engineering/m4-recording-processing-request.md)、[无损计划](../engineering/m4-transcript-segmentation.md)。
 - 日常资料库和用户11.4秒录音此前已恢复，本切片未切换或修改。提醒事项连接此前显示权限不可用/自动回读暂停，本轮未刷新其状态；不能据旧授权宣称当前回读可用。真实云端running的UI取消仍待验收。
