@@ -22,6 +22,21 @@ private actor TextReminderPort: RemindersPort {
     }
 }
 final class UserExpressionTests: XCTestCase {
+    func testConnectorCancellationStopsRefreshBeforeReconciliation() async throws {
+        let s = try await store(), port = TextReminderPort()
+        _ = try await s.setReminderAccess(calendarID: "fixture", title: "fixture", enabled: true, expectedVersion: 0)
+        let id = try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。")
+        _ = try await s.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+        let (attempt, p) = try await proposals(s, id)
+        _ = try await s.commitLocalClaims(attemptID: attempt, proposals: [p[0]])
+        await port.installAfterCreate { throw CancellationError() }
+        do { try await s.refreshAuthorizedReminders(expectedAccessVersion: 1, using: port); XCTFail("cancelled refresh") }
+        catch is CancellationError {} catch { XCTFail("cancellation was lost: \(error)") }
+        let calls = await port.findCalls; XCTAssertEqual(calls, 1)
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
+        let link = try await s.reminderLinks()[0]
+        XCTAssertEqual(link.state, "unknown"); XCTAssertNil(link.remoteCompleted)
+    }
     func testRevokedScopeDuringCreateStopsFurtherReadback() async throws {
         let s=try await store(),port=TextReminderPort()
         _=try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)

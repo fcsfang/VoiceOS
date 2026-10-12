@@ -424,6 +424,66 @@ final class StoreTests: XCTestCase {
         let creates = await port.creates; XCTAssertEqual(creates, 0)
         let link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "unknown")
     }
+    func testCancelledSendBeforeEntryDoesNotReserveOrCallConnector() async throws {
+        let store = try await store(); let (_, id) = try await reminderFixture(store)
+        let port = TestReminders()
+        let running = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        }
+        do { try await running.value; XCTFail("cancelled send") }
+        catch is CancellationError {} catch { XCTFail("cancellation was lost: \(error)") }
+        let links = try await store.reminderLinks(); XCTAssertTrue(links.isEmpty)
+        let creates = await port.creates; XCTAssertEqual(creates, 0)
+    }
+    func testCancellationDuringPreflightCannotCreateEvenIfConnectorIgnoresCancellation() async throws {
+        let store = try await store(); let (_, id) = try await reminderFixture(store)
+        let port = TestReminders(suspended: true)
+        let running = Task { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port) }
+        await port.waitStarted(); running.cancel(); await port.release()
+        do { try await running.value; XCTFail("cancelled preflight") }
+        catch is CancellationError {} catch { XCTFail("cancellation was lost: \(error)") }
+        let creates = await port.creates; XCTAssertEqual(creates, 0)
+        let link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "unknown")
+        // A later, non-cancelled recovery remains read-only, even after an
+        // empty preflight. It cannot assume the persisted attempt is safe to repeat.
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        let after = await port.creates; XCTAssertEqual(after, 0)
+        let recovered = try await store.reminderLinks()[0]; XCTAssertEqual(recovered.state, "missing")
+    }
+    func testCancellationAfterExternalSaveKeepsUnknownUntilReadOnlyRecovery() async throws {
+        let store = try await store(); let (_, id) = try await reminderFixture(store)
+        let port = TestReminders(suspendCreate: true)
+        let running = Task { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port) }
+        await port.waitStarted(); running.cancel(); await port.release()
+        do { try await running.value; XCTFail("cancelled saved send") }
+        catch is CancellationError {} catch { XCTFail("cancellation was lost: \(error)") }
+        var link = try await store.reminderLinks()[0]
+        XCTAssertEqual(link.state, "unknown"); XCTAssertNil(link.remoteCompleted)
+        try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port)
+        link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "linked"); XCTAssertEqual(link.remoteCompleted, false)
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
+        let action = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(action.state, "open")
+    }
+    func testCancelledReadCannotApplyLateCompletionOrLosePriorObservation() async throws {
+        let store = try await store(); let (_, id) = try await reminderFixture(store)
+        let port = TestReminders()
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        let link = try await store.reminderLinks()[0]
+        await port.edit(completed: true); await port.suspendRead()
+        let running = Task { try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port) }
+        await port.waitStarted(); running.cancel(); await port.release()
+        do { try await running.value; XCTFail("cancelled read") }
+        catch is CancellationError {} catch { XCTFail("cancellation was lost: \(error)") }
+        let uncertain = try await store.reminderLinks()[0]
+        XCTAssertEqual(uncertain.state, "unknown"); XCTAssertEqual(uncertain.remoteCompleted, false)
+        XCTAssertEqual(uncertain.lastObservedAt, link.lastObservedAt)
+        let before = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(before.state, "open")
+        try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port)
+        let after = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(after.state, "completed"); XCTAssertEqual(after.version, 2)
+        let history = try await store.actionHistory(actionID: id); XCTAssertEqual(history.count, 2)
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
+    }
     func testPermissionTighteningDuringInFlightSaveFreezesActionAndKeepsObservation() async throws {
         let store = try await store(); let (_,id) = try await reminderFixture(store); let port = TestReminders(suspendCreate: true)
         let running = Task { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port) }

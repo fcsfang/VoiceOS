@@ -33,6 +33,7 @@ extension VoiceOSStore {
     }
     /// One create attempt per action identity. Every subsequent invocation only reads.
     public func sendTaskToReminders(actionID: String, expectedVersion: Int, calendarID: String, using port: any RemindersPort, expectedAccessVersion: Int? = nil) async throws {
+        try Task.checkCancellation()
         try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
         if let existing = try db.query("SELECT * FROM reminder_links WHERE action_id=?", [actionID]).first {
             guard existing["calendar_id"] == calendarID else { throw VoiceOSError("已有提醒事项尝试，不能更换清单重复创建") }
@@ -50,6 +51,7 @@ extension VoiceOSStore {
             try checkpoint(.reminderReserved)
             // Explicit preflight query. Absence after a prior attempt never permits recreation.
             let found = try await port.find(calendarID: calendarID, externalID: nil, marker: marker)
+            try Task.checkCancellation()
             try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
             guard found.isEmpty else { throw VoiceOSError("操作标记已有匹配，停止新建并请回读") }
             guard let current = try actions().first(where: { $0.id == actionID }), current.version == expectedVersion, try reminderSourceAllowed(current) else { throw VoiceOSError("发送前行动或依据已变化") }
@@ -65,6 +67,10 @@ extension VoiceOSStore {
             try applyReminder(matches, linkID: id)
         } catch {
             try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=? AND state='reserved'", [id])
+            // Preserve cancellation for the refresh orchestrator: stopping a
+            // send must also stop its follow-up reconciliation, even when a
+            // connector returns normally after the task was cancelled.
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
             throw VoiceOSError("提醒事项结果尚未确认；尝试已保留，请回读，不会自动重建")
         }
     }
@@ -75,6 +81,7 @@ extension VoiceOSStore {
         }
     }
     public func readReminder(linkID: String, calendarID: String, using port: any RemindersPort, expectedAccessVersion: Int? = nil) async throws {
+        try Task.checkCancellation()
         try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
         guard !activeReminderLinks.contains(linkID) else { throw VoiceOSError("提醒事项操作正在进行") }
         guard let link = try db.query("SELECT * FROM reminder_links WHERE id=?", [linkID]).first, link["calendar_id"] == calendarID else { throw VoiceOSError("只能回读明确选定清单内的关联任务") }
@@ -86,6 +93,7 @@ extension VoiceOSStore {
             try applyReminder(matches, linkID: linkID)
         } catch {
             try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=?", [linkID])
+            if error is CancellationError || Task.isCancelled { throw CancellationError() }
             throw VoiceOSError("提醒事项回读失败，结果未知；没有修改或重建外部任务")
         }
     }
