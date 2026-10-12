@@ -21,7 +21,11 @@ private actor ResolutionPort: RemindersPort {
     }
     func edit(completed: Bool, title: String? = nil, corruptMarker: Bool = false) {
         let old = items[0]
-        items[0] = .init(id: old.id, title: title ?? old.title, completed: completed, marker: corruptMarker ? "invalid" : old.marker)
+        items[0] = .init(id: old.id, title: title ?? old.title, completed: completed, marker: corruptMarker ? "invalid" : old.marker, dueDate: old.dueDate)
+    }
+    func editDue(_ due: ReminderDueDate?) {
+        let old = items[0]
+        items[0] = .init(id: old.id, title: old.title, completed: old.completed, marker: old.marker, dueDate: due)
     }
     func duplicate() { let old = items[0]; items.append(.init(id: "duplicate", title: old.title, completed: old.completed, marker: old.marker)) }
     func remove() { items = [] }
@@ -200,11 +204,11 @@ final class ReminderStatusResolutionTests: XCTestCase {
         let (store, _, _, _) = try await fixture()
         let file = await store.root.appendingPathComponent("voiceos.sqlite")
         let original = try Database(file)
-        let tableNames = try original.query("SELECT name FROM sqlite_master WHERE type='table' AND name!='reminder_status_resolutions'").compactMap { $0["name"] }
+        let tableNames = try original.query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT IN ('reminder_status_resolutions','reminder_time_observations')").compactMap { $0["name"] }
         let before = try Dictionary(uniqueKeysWithValues: tableNames.map { ($0, try original.query("SELECT * FROM \($0) ORDER BY id")) })
-        try original.execute("DROP TABLE reminder_status_resolutions"); try original.execute("PRAGMA user_version=31")
+        try original.execute("DROP TABLE reminder_time_observations"); try original.execute("DROP TABLE reminder_status_resolutions"); try original.execute("PRAGMA user_version=31")
         let upgraded = try Database(file)
-        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "32")
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "33")
         XCTAssertTrue(try upgraded.query("SELECT * FROM reminder_status_resolutions").isEmpty)
         for table in tableNames { XCTAssertEqual(try upgraded.query("SELECT * FROM \(table) ORDER BY id"), before[table]) }
     }
@@ -233,5 +237,52 @@ final class ReminderStatusResolutionTests: XCTestCase {
             XCTFail("reserved command namespace")
         } catch {}
         let action = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(action.version, 2)
+    }
+    func testDueChangesPreserveStatusAndUnknownVersusNoneAcrossMigration() async throws {
+        let (store, port, link, _) = try await fixture()
+        let due = ReminderDueDate.dateOnly(localDate: "2026-10-13", timeZone: "Pacific/Kiritimati")
+        await port.editDue(due)
+        try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: port, expectedAccessVersion: 1)
+        let dated = try await store.reminderLinks()[0]
+        XCTAssertEqual(dated.remoteDueDate, due)
+        XCTAssertNotEqual(dated.lastObservationID, link.lastObservationID)
+        try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: port, expectedAccessVersion: 1)
+        let repeated = try await store.reminderLinks()[0]
+        XCTAssertEqual(repeated.lastObservationID, dated.lastObservationID)
+        await port.editDue(nil)
+        try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: port, expectedAccessVersion: 1)
+        let unknown = try await store.reminderLinks()[0]
+        XCTAssertNil(unknown.remoteDueDate)
+        XCTAssertNotEqual(unknown.lastObservationID, dated.lastObservationID)
+        await port.editDue(.some(.none))
+        try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: port, expectedAccessVersion: 1)
+        let none = try await store.reminderLinks()[0]
+        XCTAssertEqual(none.remoteDueDate, .some(.none))
+        let action = try await store.actions(includeHistory: true)[0]
+        XCTAssertEqual(action.version, 2); XCTAssertEqual(action.state, "completed")
+        let package = base.appendingPathComponent("time-package")
+        try await store.exportPackage(to: package, includeMedia: true)
+        XCTAssertEqual(try VoiceOSStore.packageSummary(at: package).version, 33)
+        let restoredRoot = base.appendingPathComponent("time-restored")
+        try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: ResolutionInspector())
+        let restored = try VoiceOSStore(root: restoredRoot, inspector: ResolutionInspector()); try await restored.recover()
+        let restoredLink = try await restored.reminderLinks()[0]
+        XCTAssertEqual(restoredLink.remoteDueDate, .some(.none))
+        let db = try Database(restoredRoot.appendingPathComponent("voiceos.sqlite"))
+        let dates = try db.query("SELECT * FROM reminder_time_observations")
+        XCTAssertEqual(dates.count, 2)
+        XCTAssertTrue(dates.contains { $0["due_json"]?.contains("2026-10-13") == true })
+        let access = try await restored.reminderAccess(); XCTAssertNil(access)
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
+    }
+    func testDueDriftDuringResolutionCannotAdoptPreviouslyDisplayedObservation() async throws {
+        let (store, port, link, _) = try await fixture()
+        await port.editDue(.dateOnly(localDate: "2026-10-15", timeZone: nil))
+        do { _ = try await accept(store, port, link); XCTFail("date drift reused old observation") } catch {}
+        let updated = try await store.reminderLinks()[0]
+        XCTAssertNotEqual(updated.lastObservationID, link.lastObservationID)
+        let action = try await store.actions(includeHistory: true)[0]
+        XCTAssertEqual(action.version, 2); XCTAssertEqual(action.state, "completed")
+        let claims = try await store.candidateClaims(); XCTAssertEqual(claims[0].evidenceState, "unverified")
     }
 }

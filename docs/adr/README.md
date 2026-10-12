@@ -61,3 +61,5 @@
 - [ADR-032 精简片段与聚合请求](032-compact-segment-extraction.md)：独立v3候选，持久完整身份、云端只发送本段归属与原文；旧请求不升级。
 
 - [ADR033：提醒事项状态冲突恢复](033-reminder-status-resolution.md) — schema32/含记录的包v32；显式采用新鲜外部状态，保留历史基线并恢复后续自动完成回流。
+
+- [ADR034：提醒事项时间观测与三方基础](034-reminder-time-observation-and-merge.md) — schema33/含时间的包v33；保留日期/时刻/未知语义，纯策略尚未接实际改期执行。

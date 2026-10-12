@@ -1310,6 +1310,7 @@ struct CenterView: View {
                                             if let done = link.remoteCompleted {
                                                 Text((link.state == "linked" ? "外部回读：" : "上次外部回读：") + (done ? "已完成" : "未完成")).font(.caption)
                                             }
+                                            Text("上次回读期限：" + (link.remoteDueDate?.summary ?? "未能核对")).font(.caption).foregroundStyle(.secondary)
                                             if link.state != "linked", link.remoteCompleted != nil {
                                                 Text("保留上次观测，当前状态尚未确认。").font(.caption).foregroundStyle(.secondary)
                                             }

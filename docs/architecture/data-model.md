@@ -147,3 +147,7 @@ W17新增conversations和conversation_user_turns，格式v14/schema15；每个�
 ## W14 状态冲突恢复实施增量（2026-10-13）
 
 schema32 新增 `reminder_status_resolutions`，不可变记录 link、observation、action_revision、恢复前同步基线、恢复后行动版本、授权版本及命令摘要。`reminder_links.action_version` 保留创建时值，不改写历史观测校验；最新恢复版本作为后续完成同步基线。恢复只改变本地状态，用户修订、记录及 link 状态同事务。含恢复记录的包 v32 校验历史基线和观测/修订绑定，恢复不带连接权限；其他库按既有内容选择兼容包版本。见 [ADR033](../adr/033-reminder-status-resolution.md)。时间字段与完整三方调和仍待实现。
+
+## W14 时间回读实施增量（2026-10-13）
+
+schema33 `reminder_time_observations(id,due_json)` 引用不可变外部观测，记录类型化 `none/dateOnly/instant`。没有行表示该观测的期限未知；旧历史不回填。时间单独变化同样生成新观测并与时间行原子保存。含时间行包 v33 保留当地日期与明确时区，验证日期/引用；恢复仍不携带连接授权。`ReminderScheduleProposal` 和 `ReminderScheduleMerge` 为内存提案/纯决策，不是已实现的 ScheduleRevision 或 Operation；安全外写仍待实现。见 [ADR034](../adr/034-reminder-time-observation-and-merge.md)。

@@ -6,8 +6,9 @@ public struct ReminderSnapshot: Sendable, Codable {
     public let title: String
     public let completed: Bool
     public let marker: String
-    public init(id: String, title: String, completed: Bool, marker: String) {
-        self.id = id; self.title = title; self.completed = completed; self.marker = marker
+    public let dueDate: ReminderDueDate?
+    public init(id: String, title: String, completed: Bool, marker: String, dueDate: ReminderDueDate? = nil) {
+        self.id = id; self.title = title; self.completed = completed; self.marker = marker; self.dueDate = dueDate
     }
 }
 public protocol RemindersPort: Sendable {
@@ -26,11 +27,12 @@ public struct ReminderLink: Identifiable, Sendable {
     public let lastCheckedAt: String?
     public let lastObservationID: String?
     public let remoteMarkerValid: Bool?
+    public let remoteDueDate: ReminderDueDate?
 }
 extension VoiceOSStore {
     public func reminderLinks() throws -> [ReminderLink] {
         try db.query("SELECT l.*,o.id AS observation_id,o.marker_valid,o.title AS remote_title,o.completed AS remote_completed,o.created_at AS observed_at FROM reminder_links l LEFT JOIN reminder_observations o ON o.id=(SELECT id FROM reminder_observations WHERE link_id=l.id ORDER BY sequence DESC LIMIT 1) ORDER BY l.created_at,l.id").map {
-            ReminderLink(id: $0["id"]!, actionID: $0["action_id"]!, calendarID: $0["calendar_id"]!, state: $0["state"]!, externalID: $0["external_id"], remoteTitle: $0["remote_title"], remoteCompleted: $0["remote_completed"].map { $0 == "1" }, lastObservedAt: $0["observed_at"], lastCheckedAt: $0["last_checked_at"], lastObservationID: $0["observation_id"], remoteMarkerValid: $0["marker_valid"].map { $0 == "1" })
+            ReminderLink(id: $0["id"]!, actionID: $0["action_id"]!, calendarID: $0["calendar_id"]!, state: $0["state"]!, externalID: $0["external_id"], remoteTitle: $0["remote_title"], remoteCompleted: $0["remote_completed"].map { $0 == "1" }, lastObservedAt: $0["observed_at"], lastCheckedAt: $0["last_checked_at"], lastObservationID: $0["observation_id"], remoteMarkerValid: $0["marker_valid"].map { $0 == "1" }, remoteDueDate: try storedReminderDue(observationID: $0["observation_id"]))
         }
     }
     /// One create attempt per action identity. Every subsequent invocation only reads.
@@ -120,6 +122,7 @@ extension VoiceOSStore {
             try db.execute("UPDATE reminder_links SET state=?,last_checked_at=? WHERE id=?", [matches.isEmpty ? "missing" : "conflict",ISO8601DateFormatter().string(from: Date()),linkID]); return
         }
         guard !remote.id.isEmpty, remote.id.utf8.count <= 4096, remote.title.unicodeScalars.count <= 10000, remote.marker.utf8.count <= 4096 else { throw VoiceOSError("提醒事项字段无效或过长") }
+        try remote.dueDate?.validate()
         let action = try actions(includeHistory: true).first { $0.id == link["action_id"] }
         let validMarker = remote.marker == link["marker"]
         let observationID = UUID().uuidString
@@ -144,9 +147,15 @@ extension VoiceOSStore {
                 }
             }
             let prior = try db.query("SELECT * FROM reminder_observations WHERE link_id=? ORDER BY sequence DESC LIMIT 1", [linkID]).first
-            let changed = prior?["external_id"] != remote.id || prior?["title"] != remote.title || prior?["completed"] != (remote.completed ? "1" : "0") || prior?["marker_valid"] != (validMarker ? "1" : "0")
+            let priorDue = try storedReminderDue(observationID: prior?["id"])
+            let changed = prior?["external_id"] != remote.id || prior?["title"] != remote.title || prior?["completed"] != (remote.completed ? "1" : "0") || prior?["marker_valid"] != (validMarker ? "1" : "0") || priorDue != remote.dueDate
             if changed || feedbackID != nil {
                 try db.execute("INSERT INTO reminder_observations(id,link_id,external_id,title,completed,marker_valid,feedback_revision_id,created_at,sequence) VALUES(?,?,?,?,?,?,?,?,?)", [observationID,linkID,remote.id,remote.title,remote.completed ? "1" : "0",validMarker ? "1" : "0",feedbackID,ISO8601DateFormatter().string(from: Date()),String(sequence)])
+                if let due = remote.dueDate {
+                    let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+                    let json = String(decoding: try encoder.encode(due), as: UTF8.self)
+                    try db.execute("INSERT INTO reminder_time_observations(id,due_json) VALUES(?,?)", [observationID,json])
+                }
             }
             try db.execute("UPDATE reminder_links SET state=?,external_id=?,last_checked_at=? WHERE id=?", [conflict ? "conflict" : "linked",remote.id,ISO8601DateFormatter().string(from: Date()),linkID])
             try checkpoint(.reminderFeedbackUncommitted)
@@ -178,5 +187,15 @@ extension VoiceOSStore {
             guard try db.query("SELECT id FROM reminder_observations WHERE feedback_revision_id=?", [revision["id"]]).count == 1 else { throw VoiceOSError("迁移外部完成反馈缺少唯一回读依据") }
         }
         try validateReminderStatusResolutions(db)
+        for row in try db.query("SELECT * FROM reminder_time_observations") {
+            guard let json = row["due_json"], json.utf8.count <= 4096 else { throw VoiceOSError("迁移提醒事项时间观测无效") }
+            try JSONDecoder().decode(ReminderDueDate.self, from: Data(json.utf8)).validate()
+        }
+    }
+    func storedReminderDue(observationID: String?) throws -> ReminderDueDate? {
+        guard let observationID, let row = try db.query("SELECT due_json FROM reminder_time_observations WHERE id=?", [observationID]).first else { return nil }
+        let due = try JSONDecoder().decode(ReminderDueDate.self, from: Data(row["due_json"]!.utf8))
+        try due.validate()
+        return due
     }
 }

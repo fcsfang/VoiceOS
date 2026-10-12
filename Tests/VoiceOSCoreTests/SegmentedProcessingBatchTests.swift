@@ -157,7 +157,7 @@ final class SegmentedProcessingBatchTests: XCTestCase {
         }
         do {
             let db = try Database(base.appendingPathComponent("root/voiceos.sqlite"))
-            try db.execute("DROP TABLE segmented_processing_batches"); try db.execute("DROP TABLE reminder_status_resolutions"); try db.execute("PRAGMA user_version=26")
+            try db.execute("DROP TABLE segmented_processing_batches"); try db.execute("DROP TABLE reminder_time_observations"); try db.execute("DROP TABLE reminder_status_resolutions"); try db.execute("PRAGMA user_version=26")
         }
         let s = try await store(), batches = try await s.segmentedProcessingBatches()
         XCTAssertTrue(batches.isEmpty)

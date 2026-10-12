@@ -45,7 +45,7 @@ public final class NativeReminders: RemindersPort {
                     guard let items else { complete(.failure(VoiceOSError("提醒事项读取未返回结果"))); return }
                     guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess else { complete(.failure(VoiceOSError("回读期间权限已变化"))); return }
                     let results = items.filter { $0.calendar.calendarIdentifier == calendarID && ($0.notes == marker || (externalID != nil && $0.calendarItemIdentifier == externalID)) }.map {
-                        ReminderSnapshot(id: $0.calendarItemIdentifier, title: $0.title ?? "", completed: $0.isCompleted, marker: $0.notes ?? "")
+                        ReminderSnapshot(id: $0.calendarItemIdentifier, title: $0.title ?? "", completed: $0.isCompleted, marker: $0.notes ?? "", dueDate: ReminderDueDate.reading($0.dueDateComponents))
                     }
                     complete(.success(results))
                 }
