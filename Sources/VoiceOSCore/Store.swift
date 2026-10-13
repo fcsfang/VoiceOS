@@ -32,6 +32,7 @@ public actor VoiceOSStore {
         guard !ready, activeImports.isEmpty else { return }
         try db.execute("UPDATE reminder_links SET state='unknown' WHERE state='reserved'")
         try db.execute("UPDATE reminder_schedule_operations SET state='blocked',reason='写前进程退出；未派发，不自动继续' WHERE state='reserved'")
+        try db.execute("UPDATE reminder_compensation_operations SET state='blocked',reason='补偿写前进程退出，未派发且不自动续写' WHERE state='reserved'")
         // Startup only: the process lock proves the previous worker no longer owns a lease.
         try db.execute("UPDATE jobs SET state='queued', lease_token=NULL WHERE state='running'")
         try db.execute("UPDATE model_attempts SET state='unknown',error='进程退出前结果未登记；不会自动重发' WHERE state='reserved'")
@@ -95,6 +96,7 @@ public actor VoiceOSStore {
         try Self.validateReminderScheduleBases(db)
         try Self.validateReminderScheduleGrants(db)
         try Self.validateReminderScheduleOperations(db)
+        try Self.validateReminderCompensations(db)
         ready = true
     }
     @discardableResult

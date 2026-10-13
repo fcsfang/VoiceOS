@@ -140,3 +140,8 @@ Task 候选状态：planned、active、completed、cancelled、deferred；Opport
 ## W16 影响核对第一切片（2026-10-13）
 
 明确纠错修订先冻结→从实际版本引用重建受影响行动→区分无外部关联/未授权现状未知/改期未知/身份不明/真实完成事实/待核对未完成任务。控制中心入口只读，复用外部回读权限屏障；冻结不转为“已撤销”，不借完成标记实现取消，也不造Outcome。认可/隐私限制/迁移冻结不构成错误根。具体补偿操作尚未接，见[ADR039](../adr/039-correction-action-impact-projection.md)。
+
+
+## W16 具体期限补偿（2026-10-13）
+
+明确纠错冻结→影响核对→推导连续confirmed AI排期链之前due→持久plan→用户具体grant→reserved/fresh read→持久unknown→Native最终授权/仅改due→应答＋唯一观测同事务→confirmed或observed。变化/撤回/取消阻止旧写；reserved退出blocked，unknown只读恢复，conflict保留外部值。保存后撤回不假装撤销已发生效果；同一计划不可重发。迁移plan/grant/operation frozen，不恢复执行。原行动始终冻结，不生成Outcome、不标记完成或取消任务。见[ADR040](../adr/040-corrective-reminder-due-compensation.md)。

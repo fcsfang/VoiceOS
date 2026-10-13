@@ -70,6 +70,11 @@ public enum SaveCheckpoint: String, Sendable {
     case scheduleOperationUncommitted, scheduleOperationCommitted
     case scheduleGrantUncommitted, scheduleGrantCommitted
     case scheduleGrantRevocationUncommitted, scheduleGrantRevocationCommitted
+    case compensationPlanUncommitted, compensationPlanCommitted
+    case compensationGrantUncommitted, compensationGrantCommitted
+    case compensationRevocationUncommitted, compensationRevocationCommitted
+    case compensationOperationReserved, compensationOperationAttempted, compensationOperationSaved
+    case compensationOperationUncommitted, compensationOperationCommitted
 }
 
 public struct TranscriptSpan: Codable, Sendable, Identifiable {

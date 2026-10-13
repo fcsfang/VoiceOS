@@ -242,6 +242,10 @@ final class ControlCenter: ObservableObject {
     @Published var reviewingClaim = false
     @Published var actionRecords: [ActionRecord] = []
     @Published var correctionImpacts: [CorrectionActionImpact] = []
+    @Published var compensationPlans: [ReminderCompensationPlan] = []
+    @Published var compensationGrants: [ReminderCompensationGrant] = []
+    @Published var compensationOperations: [ReminderCompensationOperation] = []
+    @Published var pendingCompensation: ReminderCompensationPlan?
     @Published var scheduleIntents: [ActionScheduleIntent] = []
     @Published var scheduleOperations: [ReminderScheduleOperation] = []
     @Published var scheduleGrants: [ReminderScheduleGrant] = []
@@ -375,6 +379,9 @@ final class ControlCenter: ObservableObject {
             outcomeOrigins = try await store?.conversationOutcomeOrigins() ?? []
             actionRecords = try await store?.actions(includeHistory: true) ?? []
             correctionImpacts = try await store?.correctionActionImpacts() ?? []
+            compensationPlans = try await store?.reminderCompensationPlans() ?? []
+            compensationGrants = try await store?.reminderCompensationGrants() ?? []
+            compensationOperations = try await store?.reminderCompensationOperations() ?? []
             scheduleIntents = try await store?.actionScheduleIntents() ?? []
             scheduleOperations = try await store?.reminderScheduleOperations() ?? []
             scheduleGrants = try await store?.reminderScheduleGrants() ?? []
@@ -930,6 +937,51 @@ final class ControlCenter: ObservableObject {
         do {
             _ = try await store?.revokeReminderScheduleGrant(grantID: grant.id, reason: "用户在控制中心撤回本次改期确认", actor: .user)
             status = "本次确认已撤回；已派发的效果保留核对记录，不自动撤销"
+        } catch { status = error.localizedDescription }
+        await refresh()
+    }
+    func prepareCompensation(_ impact: CorrectionActionImpact) async {
+        guard let store, let access = reminderAccess, access.enabled, !remindersBusy else { return }
+        do {
+            let id = try await store.recordReminderCompensationPlan(actionID: impact.action.id,expectedImpactDigest: impact.digest,expectedAccessVersion: access.version)
+            await refresh()
+            pendingCompensation = compensationPlans.first { $0.id == id }
+        } catch { status = error.localizedDescription }
+    }
+    func confirmCompensation(_ plan: ReminderCompensationPlan, commandID: String) async -> Bool {
+        guard let store, !remindersBusy else { return false }
+        remindersBusy = true; defer { remindersBusy = false }
+        var approved = false
+        do {
+            let grant = try await store.confirmReminderCompensation(planID: plan.id,displayedEffectDigest: plan.digest,actor: .user,commandID: commandID)
+            approved = true
+            _ = try await store.executeReminderCompensation(planID: plan.id,grantID: grant,using: reminders,commandID: "compensation-effect:"+commandID)
+            status = "期限补偿尝试已登记，请查看保存与回读状态；旧行动仍暂停"
+        } catch { status = error.localizedDescription }
+        await refresh(); return approved
+    }
+    func executeCompensation(_ plan: ReminderCompensationPlan, grant: ReminderCompensationGrant) async {
+        guard let store, !remindersBusy else { return }
+        remindersBusy = true; defer { remindersBusy = false }
+        do {
+            _ = try await store.executeReminderCompensation(planID: plan.id,grantID: grant.id,using: reminders)
+            status = "补偿尝试已保留，请查看实际效果"
+        } catch { status = error.localizedDescription }
+        await refresh()
+    }
+    func revokeCompensation(_ grant: ReminderCompensationGrant) async {
+        do {
+            _ = try await store?.revokeReminderCompensation(grantID: grant.id,reason: "用户在控制中心撤回期限补偿确认",actor: .user)
+            status = "补偿许可已撤回；已派发效果仅回读核对，不自动反向改期"
+        } catch { status = error.localizedDescription }
+        await refresh()
+    }
+    func reconcileCompensation(_ operation: ReminderCompensationOperation) async {
+        guard let store, let access = reminderAccess, access.enabled, !remindersBusy else { return }
+        remindersBusy = true; defer { remindersBusy = false }
+        do {
+            try await store.reconcileReminderCompensation(operationID: operation.id,expectedAccessVersion: access.version,using: reminders)
+            status = "补偿效果已只读核对，没有重发"
         } catch { status = error.localizedDescription }
         await refresh()
     }

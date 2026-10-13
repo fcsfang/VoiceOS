@@ -72,3 +72,5 @@
 - [ADR038：期限字段归属与后续重排](038-reminder-due-provenance.md) — schema37/依据包v37；连续应答/观测依据、人工与未知间隔保护。
 
 - [ADR039：纠错行动影响只读投影](039-correction-action-impact-projection.md) — W16第一切片；明确纠错根、实际版本依赖与外部现状核对，具体补偿仍待实现。
+
+- [ADR040：明确纠错后的期限补偿](040-corrective-reminder-due-compensation.md) — schema38/补偿包v38；连续已确认AI链恢复、具体效果许可/撤回、一次尝试及unknown只读核对；原生验收仍待完成。

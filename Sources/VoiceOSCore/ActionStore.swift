@@ -107,5 +107,6 @@ extension VoiceOSStore {
         try validateReminderScheduleBases(db)
         try validateReminderScheduleGrants(db)
         try validateReminderScheduleOperations(db)
+        try validateReminderCompensations(db)
     }
 }

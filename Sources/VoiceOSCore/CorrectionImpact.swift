@@ -61,6 +61,7 @@ extension VoiceOSStore {
                                          desired: try JSONDecoder().decode(ReminderDueDate.self,from: Data(row["desired_json"]!.utf8)),
                                          saveAcknowledged: row["save_acknowledged"] == "1")
             }
+            let compensations = try link.map { try db.query("SELECT * FROM reminder_compensation_operations WHERE link_id=? ORDER BY created_at,id", [$0.id]) } ?? []
             let summary: String
             if link == nil { summary = "旧行动已停止；没有关联外部任务，不需要外部撤销" }
             else if access?.enabled != true || access?.calendarID != link?.calendarID {
@@ -72,6 +73,12 @@ extension VoiceOSStore {
                 summary = "旧行动已停止；外部身份或现状未核对，不能假定已撤销或重建"
             } else if link?.remoteCompleted == true {
                 summary = "旧依据已停止；保留外部已完成事实，纠错不自动撤回真实执行结果"
+            } else if compensations.contains(where: { $0["validity"] == "current" && ["unknown","conflict"].contains($0["state"] ?? "") }) {
+                summary = "旧行动已停止；期限补偿效果待只读核对，不重发或反向写入"
+            } else if compensations.contains(where: { $0["state"] == "confirmed" }) {
+                summary = "已记录期限补偿的保存应答与回读；任务仍保留，旧行动仍停止；当前期限以最新观测为准"
+            } else if compensations.contains(where: { $0["state"] == "observed" }) {
+                summary = "已观察到期限补偿目标，写入归属未确认；任务仍保留，旧行动仍停止；当前期限以最新观测为准"
             } else {
                 summary = "旧行动已停止；上次观测的外部任务仍保留，需核对是否保留、改写或取消；尚未执行补偿"
             }
@@ -79,10 +86,17 @@ extension VoiceOSStore {
             let operationState = operations.map { [$0["id"] ?? "",$0["state"] ?? "",$0["result_observation_id"] ?? "",$0["save_acknowledged"] ?? ""] }.flatMap { $0 }
             let fields = ["correction-action-impact-v1",action.id,String(action.version),action.state,action.validity,
                           link?.id ?? "",link?.state ?? "",link?.externalID ?? "",link?.lastObservationID ?? "",
-                          access.map { String($0.version) } ?? "",access?.enabled == true ? "enabled" : "paused",access?.calendarID ?? ""]
-                + orderedRoots.map(\.id) + operationState
+                          access.map { String($0.version) } ?? "",access?.enabled == true ? "enabled" : "paused",access?.calendarID ?? "",
+                          String(claim.reviewVersion)]
+            var sourceState: [String] = []
+            for id in Set(claim.references.map(\.sourceID)).sorted() {
+                guard let source = try db.query("SELECT s.*,t.current_version_id FROM sources s LEFT JOIN transcripts t ON t.source_id=s.id WHERE s.id=?", [id]).first else {
+                    throw VoiceOSError("纠错影响缺少引用来源")
+                }
+                sourceState += [id,source["state"] ?? "",source["policy_version"] ?? "",source["current_version_id"] ?? "",source["expected_hash"] ?? ""]
+            }
             return .init(action: action,roots: orderedRoots,link: link,scheduleEffects: effects,summary: summary,
-                         digest: try Self.actionHash(fields))
+                         digest: try Self.actionHash(fields + orderedRoots.map(\.id) + operationState + sourceState))
         }
     }
 }

@@ -116,12 +116,13 @@ extension VoiceOSStore {
             throw VoiceOSError("提醒事项回读失败，结果未知；没有修改或重建外部任务")
         }
     }
-    func applyReminder(_ matches: [ReminderSnapshot], linkID: String, includingScheduleOperation: String? = nil) throws {
+    func applyReminder(_ matches: [ReminderSnapshot], linkID: String, includingScheduleOperation: String? = nil, includingCompensationOperation: String? = nil) throws {
         guard let link = try db.query("SELECT * FROM reminder_links WHERE id=?", [linkID]).first else { throw VoiceOSError("提醒事项关联缺失") }
         guard matches.count == 1, let remote = matches.first else {
             try db.transaction {
                 try db.execute("UPDATE reminder_links SET state=?,last_checked_at=? WHERE id=?", [matches.isEmpty ? "missing" : "conflict",ISO8601DateFormatter().string(from: Date()),linkID])
                 _ = try observePendingScheduleOperations(matches, linkID: linkID, including: includingScheduleOperation)
+                _ = try observePendingCompensationOperations(matches,linkID: linkID,including: includingCompensationOperation)
             }
             return
         }
@@ -138,6 +139,7 @@ extension VoiceOSStore {
         var conflict = !validMarker || !stableIdentity
         let baseline = try reminderStatusBaseline(link)
         var confirmedScheduleOperations: [String] = []
+        var confirmedCompensations: [String] = []
         try db.transaction {
             if validMarker, stableIdentity, let action, action.validity == "current" {
                 if remote.completed && action.state == "open" && action.version == baseline {
@@ -167,10 +169,12 @@ extension VoiceOSStore {
             }
             try db.execute("UPDATE reminder_links SET state=?,external_id=?,last_checked_at=? WHERE id=?", [conflict ? "conflict" : "linked",link["external_id"] ?? remote.id,ISO8601DateFormatter().string(from: Date()),linkID])
             confirmedScheduleOperations = try observePendingScheduleOperations(matches, linkID: linkID, including: includingScheduleOperation)
+            confirmedCompensations = try observePendingCompensationOperations(matches,linkID: linkID,including: includingCompensationOperation)
             try checkpoint(.reminderFeedbackUncommitted)
         }
         try checkpoint(.reminderFeedbackCommitted)
         for _ in confirmedScheduleOperations { try checkpoint(.scheduleOperationCommitted) }
+        for _ in confirmedCompensations { try checkpoint(.compensationOperationCommitted) }
     }
     static func validateStoredReminders(_ db: Database) throws {
         for link in try db.query("SELECT l.*,a.kind,a.title,a.version AS latest_version FROM reminder_links l JOIN actions a ON a.id=l.action_id") {

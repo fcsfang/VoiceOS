@@ -172,3 +172,8 @@ schema37新增 `reminder_schedule_bases`（id、唯一intent_id、authority、�
 ## W16 纠错行动影响投影（2026-10-13）
 
 `CorrectionActionImpact`从已有claim_reviews、transcript_revisions/实际claim引用、冻结action、link/observation及schedule operation投影，不引入新持久实体或授权。根限明确correction/transcription_error且版本晚于绑定；普通主题关系、隐私/迁移冻结不冒充错误。当前digest包含根/行动/外部观测/操作及清单授权，迁移可重建清单而不恢复执行。此投影不代表具体补偿计划或执行回执，后续持久补偿单独设计。见[ADR039](../adr/039-correction-action-impact-projection.md)。
+
+
+## W16 期限补偿实施增量（2026-10-13）
+
+schema38新增`reminder_compensation_plans`（行动/排期版本、link/observation/access、纠错根/原操作链、before/desired及唯一effect_digest）、`reminder_compensation_grants`（唯一plan与用户具体效果）、`reminder_compensation_revocations`（不可变撤回）、`reminder_compensation_operations`（唯一plan、grant、状态/尝试/应答/结果观测）。不修改行动状态版本或解冻认知。恢复目标重推自连续已确认AI期限链，不能仅凭hash替换目标。有计划包v38按四表依赖顺序导入，计划/许可/操作frozen，不恢复清单授权；旧格式拒绝补偿文件。影响digest补充当前claim review、来源policy/state/文字版本/hash。见[ADR040](../adr/040-corrective-reminder-due-compensation.md)。
