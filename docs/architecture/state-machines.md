@@ -135,3 +135,8 @@ Task 候选状态：planned、active、completed、cancelled、deferred；Opport
 ## W14 连续期限归属（2026-10-13）
 
 新意图固定历史basis（归属＋先前confirmed操作）；保存应答/匹配观测与连续未变due才支持后续自主调整。人工变更/未知间隔破坏连续依据；规划后变化返回replanKeepingRemote，需新版本。单字段改名保留due依据，但执行仍比较完整当前快照。observed不成为AI归属；迁移basis仅历史、意图/操作frozen。见[ADR038](../adr/038-reminder-due-provenance.md)。
+
+
+## W16 影响核对第一切片（2026-10-13）
+
+明确纠错修订先冻结→从实际版本引用重建受影响行动→区分无外部关联/未授权现状未知/改期未知/身份不明/真实完成事实/待核对未完成任务。控制中心入口只读，复用外部回读权限屏障；冻结不转为“已撤销”，不借完成标记实现取消，也不造Outcome。认可/隐私限制/迁移冻结不构成错误根。具体补偿操作尚未接，见[ADR039](../adr/039-correction-action-impact-projection.md)。

@@ -241,6 +241,7 @@ final class ControlCenter: ObservableObject {
     @Published var claimHistory: [ClaimReviewVersion] = []
     @Published var reviewingClaim = false
     @Published var actionRecords: [ActionRecord] = []
+    @Published var correctionImpacts: [CorrectionActionImpact] = []
     @Published var scheduleIntents: [ActionScheduleIntent] = []
     @Published var scheduleOperations: [ReminderScheduleOperation] = []
     @Published var scheduleGrants: [ReminderScheduleGrant] = []
@@ -373,6 +374,7 @@ final class ControlCenter: ObservableObject {
             claimOrigins = try await store?.discussionClaimOrigins() ?? []
             outcomeOrigins = try await store?.conversationOutcomeOrigins() ?? []
             actionRecords = try await store?.actions(includeHistory: true) ?? []
+            correctionImpacts = try await store?.correctionActionImpacts() ?? []
             scheduleIntents = try await store?.actionScheduleIntents() ?? []
             scheduleOperations = try await store?.reminderScheduleOperations() ?? []
             scheduleGrants = try await store?.reminderScheduleGrants() ?? []
@@ -1107,6 +1109,7 @@ struct CenterView: View {
     @State private var writingExpression = false
     @State private var feedbackAction: ActionRecord?
     @State private var scheduleAction: ActionRecord?
+    @State private var showingCorrectionImpacts = false
     @State private var showingRestore = false
     @State private var searching = false
     @State private var showingQuietFeedback = false
@@ -1378,6 +1381,9 @@ struct CenterView: View {
                                         Text("\(action.kind == "task" ? "明确任务" : (action.kind == "opportunity" ? "探索意图" : "AI 建议")) · \(action.state == "completed" ? "已完成" : (action.state == "dismissed" ? "暂不跟进" : "待跟进")) · 第 \(action.version) 版").font(.caption)
                                         Text(action.validity == "frozen" ? "认知或授权已变化，暂停使用；历史保留" : "本地意图记录 · 外部同步状态见下方").font(.caption).foregroundStyle(.secondary)
                                         Text("认知依据：第 \(action.claimReviewVersion) 版").font(.caption).foregroundStyle(.secondary)
+                                        if model.correctionImpacts.contains(where: { $0.action.id == action.id }) {
+                                            Button("查看纠错影响") { showingCorrectionImpacts = true }
+                                        }
                                         if action.kind == "task" {
                                             Button("设置本地期限选择") { scheduleAction = action }
                                                 .disabled(model.savingAction || model.remindersBusy || action.validity != "current" || action.state != "open")
@@ -1504,6 +1510,10 @@ struct CenterView: View {
                         Divider()
                     }
                 }
+                if !model.correctionImpacts.isEmpty {
+                    Divider()
+                    Button("查看纠错影响（\(model.correctionImpacts.count)）") { showingCorrectionImpacts = true }
+                }
             } label: {
                 Label(activeProcessingCount == 0 ? "处理记录" : "处理 \(activeProcessingCount)", systemImage: activeProcessingCount == 0 ? "clock.arrow.circlepath" : "hourglass")
             }.disabled(!model.initialized)
@@ -1545,6 +1555,7 @@ struct CenterView: View {
         .sheet(isPresented: $showingRestore) { PackageRestoreView { showingRestore = false } }
         .sheet(item: $feedbackAction) { action in ActionFeedbackView(action: action, model: model) { feedbackAction = nil } }
         .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
+        .sheet(isPresented: $showingCorrectionImpacts) { CorrectionImpactView(model: model) { showingCorrectionImpacts = false } }
         .sheet(item: $model.pendingScheduleEffect) { effect in ReminderScheduleConfirmationView(effect: effect, model: model) { model.pendingScheduleEffect = nil } }
         .sheet(isPresented: $writingExpression) { UserExpressionView(model: model) { writingExpression = false } }
         .sheet(item: $editing) { record in

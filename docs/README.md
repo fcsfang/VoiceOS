@@ -1,6 +1,6 @@
 # VoiceOS 文档索引
 
-**当前接续（2026-10-13）：** 按M2→M3收口；真实素材已有认知与九条未完成提醒事项。W14已有具体效果确认/撤回、本地期限编辑及可追溯字段归属/连续弹性重排；schema37/有依据包v37，旧v34–36兼容。539项回归、稳定签名构建通过，零真实任务改动。W16补偿、语音期限提取、运行时UI与真实改期仍待完成；自然案例A/M3仍partial。先读[夜间进度](planning/overnight-progress.md)、[M3矩阵](testing/m3-evidence-status-2026-10-13.md)与[ADR038](adr/038-reminder-due-provenance.md)，沿[路线图](planning/implementation-roadmap.md)接续，不扩展M4。
+**当前接续（2026-10-13）：** 按M2→M3收口，W14具体效果确认/撤回、本地期限编辑与字段归属/连续重排已完成工程增量；W16已进入明确纠错的行动影响与只读核对。schema37/有依据包v37；最近全套539项通过，新增纠错影响6项专项与稳定签名通过，零真实任务改动。具体外部补偿、语音期限提取、运行时UI/真实改期和自然案例A仍待完成，M3仍partial。先读[夜间进度](planning/overnight-progress.md)、[M3矩阵](testing/m3-evidence-status-2026-10-13.md)和[ADR039](adr/039-correction-action-impact-projection.md)，沿[路线图](planning/implementation-roadmap.md)接续，不扩展M4。
 
 ## 历史接续记录
 

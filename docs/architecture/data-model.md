@@ -167,3 +167,8 @@ schema36新增 `reminder_schedule_grants`（唯一intent、link、observation、
 ## W14 字段归属实施增量（2026-10-13）
 
 schema37新增 `reminder_schedule_bases`（id、唯一intent_id、authority、可选operation_id），与新意图同事务保存；其归属依据为历史证据，不是独立授权。confirmed/保存应答＋唯一匹配观测及连续未变due支持AI弹性；observed/unknown不支持，明确承诺不降级。初始无期限与人工移除/未知后无期限分开。当前预览再核对归属，变化须新意图。历史保守归属不因迟到核对改写；旧无basis按原规则验证。有basis包v37按v36表后追加basis；恢复仍冻结意图/操作且不恢复授权。见[ADR038](../adr/038-reminder-due-provenance.md)。
+
+
+## W16 纠错行动影响投影（2026-10-13）
+
+`CorrectionActionImpact`从已有claim_reviews、transcript_revisions/实际claim引用、冻结action、link/observation及schedule operation投影，不引入新持久实体或授权。根限明确correction/transcription_error且版本晚于绑定；普通主题关系、隐私/迁移冻结不冒充错误。当前digest包含根/行动/外部观测/操作及清单授权，迁移可重建清单而不恢复执行。此投影不代表具体补偿计划或执行回执，后续持久补偿单独设计。见[ADR039](../adr/039-correction-action-impact-projection.md)。
