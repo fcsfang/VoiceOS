@@ -4,6 +4,11 @@ import CryptoKit
 public enum ActionKind: String, Codable, Sendable { case task, opportunity, aiSuggestion = "ai_suggestion" }
 public enum ActionIntentActor: String, Sendable { case user, ai }
 public enum LocalActionState: String, Sendable { case open, completed, dismissed }
+public struct ActionIntentMetadata: Codable, Sendable {
+    public let intentType: String
+    public let followupState: String
+    public let uncertain: Bool
+}
 public struct ActionRecord: Identifiable, Sendable {
     public let id: String
     public let claimID: String
@@ -16,6 +21,7 @@ public struct ActionRecord: Identifiable, Sendable {
     public let validity: String
     public let version: Int
     public let autoSend: Bool
+    public let intent: ActionIntentMetadata?
 }
 public struct ActionRevision: Identifiable, Sendable {
     public let id: String
@@ -50,8 +56,8 @@ extension VoiceOSStore {
         let clause = includeHistory ? "" : "WHERE validity='current' AND state='open'"
         return try db.query("SELECT * FROM actions \(clause) ORDER BY created_at,id").map(Self.actionRecord)
     }
-    private static func actionRecord(_ row: [String: String]) -> ActionRecord {
-        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1")
+    private static func actionRecord(_ row: [String: String]) throws -> ActionRecord {
+        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1", intent: try row["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self, from: Data($0.utf8)) })
     }
     @discardableResult
     public func setActionState(actionID: String, expectedVersion: Int, state: LocalActionState, note: String = "", commandID: String = UUID().uuidString) throws -> Int {

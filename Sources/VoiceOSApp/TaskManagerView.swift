@@ -6,19 +6,20 @@ struct TaskManagerView: View {
     let dismiss: () -> Void
     @State private var section = "tasks"
     @State private var query = ""
+    @State private var ideaKind = "all"
     @State private var feedbackAction: ActionRecord?
     @State private var historyAction: ActionRecord?
     private let sections = [("tasks", "待跟进"), ("review", "待核对"), ("ideas", "问题与目标"), ("completed", "已完成"), ("activities", "录音活动")]
 
     private func category(_ action: ActionRecord) -> String {
         if action.state == "completed" { return "completed" }
-        if action.validity != "current" || action.title.contains("待核对") { return "review" }
-        if action.title.hasPrefix("【录音中活动】") { return "activities" }
+        if action.validity != "current" || action.intent?.uncertain == true || action.intent?.followupState == "needs_review" || action.title.contains("待核对") { return "review" }
+        if action.intent?.followupState == "recorded_activity" || action.title.hasPrefix("【录音中活动】") { return "activities" }
         return action.kind == "task" ? "tasks" : "ideas"
     }
     private var visible: [ActionRecord] {
         model.actionRecords.filter { action in
-            category(action) == section && action.state != "dismissed" &&
+            category(action) == section && action.state != "dismissed" && (section != "ideas" || ideaKind == "all" || action.intent?.intentType == ideaKind) &&
             (query.isEmpty || action.title.localizedCaseInsensitiveContains(query) || action.note.localizedCaseInsensitiveContains(query))
         }
     }
@@ -48,6 +49,11 @@ struct TaskManagerView: View {
                     Text(label + "（\(model.actionRecords.filter { category($0) == key && $0.state != "dismissed" }.count)）").tag(key)
                 }
             }.pickerStyle(.segmented)
+            if section == "ideas" {
+                Picker("意图类型", selection: $ideaKind) {
+                    Text("全部").tag("all"); Text("问题").tag("question"); Text("长期目标").tag("goal"); Text("想法与需求").tag("idea")
+                }.pickerStyle(.segmented)
+            }
             TextField("查找任务或原话", text: $query)
             ScrollViewReader { proxy in
                 ScrollView {

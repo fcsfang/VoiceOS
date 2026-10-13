@@ -31,6 +31,9 @@ app = ROOT / 'dist' / 'VoiceOS.app'
 mac = app / 'Contents' / 'MacOS'
 mac.mkdir(parents=True, exist_ok=True)
 shutil.copy2(bin_path / 'VoiceOS', mac / 'VoiceOS')
+organizer = app / 'Contents' / 'Resources' / 'organize_podcast.py'
+organizer.parent.mkdir(parents=True, exist_ok=True)
+shutil.copy2(ROOT / 'scripts' / 'organize_podcast.py', organizer)
 resources = app / 'Contents' / 'Resources' / 'BGE'
 if resources.exists(): shutil.rmtree(resources)  # Only generated build resources.
 if args.semantic_model:

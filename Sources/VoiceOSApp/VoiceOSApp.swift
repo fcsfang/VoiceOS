@@ -178,6 +178,14 @@ final class ControlCenter: ObservableObject {
     }
     @Published var status = "正在检查资料库…"
     @Published var importing = false
+    @Published var fullRecordingInput: FullRecordingInput?
+    @Published var fullRecordingBusy = false
+    @Published var fullRecordingStatus = ""
+    @Published var fullRecordingCount: Int?
+    @Published var fullRecordingOutput: URL?
+    private var fullRecordingWorker: Task<Void, Never>?
+    private var fullRecordingLog: URL?
+    private var textConfigurationFile: URL?
     @Published var changingPolicy = false
     @Published var understandingSource: String?
     @Published var modelConfigured = false
@@ -473,6 +481,7 @@ final class ControlCenter: ObservableObject {
             segmentExtractionModel=suite.segmentExtraction;segmentAggregationModel=suite.segmentAggregation
             textModel = port; modelConfigured = true
             UserDefaults.standard.set(file.path, forKey: "voiceos.textModelConfigPath.v1")
+            textConfigurationFile = file
             modelSummary = "gpt-6.1-sol · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
             status = "文本模型已就绪 · 只处理你选择并授权的文字"
             // A queued intent may have been restored before the user selected a
@@ -481,6 +490,126 @@ final class ControlCenter: ObservableObject {
             // remains the single-owner gate for concurrent work.
             scheduleProcessing()
         } catch { status = error.localizedDescription }
+    }
+    func chooseFullRecording() {
+        guard !fullRecordingBusy else { return }
+        let panel = NSOpenPanel(); panel.title = "完整整理我的录音或 OBS 视频"; panel.prompt = "选择完整素材"
+        panel.allowedContentTypes = [.audio, .movie, UTType(filenameExtension: "mkv") ?? .data]
+        panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task {
+                do {
+                    let media = try await FullRecordingOrganizer.inspect(url)
+                    self.fullRecordingCount = nil; self.fullRecordingStatus = ""
+                    self.fullRecordingOutput = nil
+                    self.fullRecordingInput = FullRecordingInput(url: url, media: media)
+                } catch { self.status = error.localizedDescription }
+            }
+        }
+    }
+    func cancelFullRecording() { fullRecordingWorker?.cancel() }
+    func openFullRecordingOutput() {
+        if let fullRecordingOutput { NSWorkspace.shared.open(fullRecordingOutput.appendingPathComponent("完整任务清单.md")) }
+    }
+    func isCompletelyOrganized(_ record: SourceRecord) -> Bool {
+        let claimIDs = Set((currentClaimsBySource[record.id] ?? []).map(\.id))
+        return actionRecords.contains { claimIDs.contains($0.claimID) && $0.intent != nil }
+    }
+    func organizeRecording(_ input: FullRecordingInput, track: Int) {
+        guard let store, var speech = speechPort as? LocalQwenSpeechPort, !fullRecordingBusy, worker == nil,
+              understandingWorker == nil, !dictationActive, let configuration = textConfigurationFile,
+              let script = Bundle.main.url(forResource: "organize_podcast", withExtension: "py") else {
+            fullRecordingStatus = "请先配置 Qwen 和文本模型，并等待当前处理结束"; return
+        }
+        fullRecordingBusy = true; fullRecordingCount = nil
+        fullRecordingWorker = Task {
+            let refreshTask = watchFullRecording()
+            defer { refreshTask.cancel(); fullRecordingBusy = false; fullRecordingWorker = nil; fullRecordingLog = nil }
+            do {
+                let root = await store.root
+                let staging = root.appendingPathComponent("整理/导入-" + UUID().uuidString)
+                try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                let log = staging.appendingPathComponent("处理日志.txt"); fullRecordingLog = log
+                setFullRecordingStatus("正在提取完整本人音轨…")
+                let audio = staging.appendingPathComponent(input.url.deletingPathExtension().lastPathComponent + "_音轨\(track + 1).wav")
+                try await FullRecordingOrganizer.extract(input.url, track: track, to: audio, log: log)
+                try Task.checkCancellation()
+                let attrs = try FileManager.default.attributesOfItem(atPath: input.url.path)
+                let identity = input.url.path + ":\(track):" + String(describing: attrs[.size]) + ":" + String(describing: attrs[.modificationDate])
+                let id = try await store.importPersonalAudio(audio, commandID: "full-recording:" + identity)
+                selected = id
+                try await store.retryTranscription(sourceID: id)
+                try JSONSerialization.data(withJSONObject: ["original_media_path": input.url.path, "audio_track": track + 1, "full_duration_seconds": input.media.duration], options: [.prettyPrinted, .sortedKeys]).write(to: staging.appendingPathComponent("原始素材.json"), options: .atomic)
+                speech.progressLog = log
+                setFullRecordingStatus("Qwen 正在本地转写完整音轨…")
+                try await store.processTranscriptions(using: speech, sourceIDs: [id])
+                try Task.checkCancellation()
+                try await completeFullOrganization(sourceID: id, speech: speech, configuration: configuration, script: script)
+            } catch is CancellationError { setFullRecordingStatus("已停止；原件、逐字稿和已完成整理结果保留") }
+            catch { setFullRecordingStatus(error.localizedDescription) }
+            await refresh()
+        }
+    }
+    func organizeFullTranscript(_ record: SourceRecord) {
+        guard let speech = speechPort as? LocalQwenSpeechPort, let configuration = textConfigurationFile,
+              let script = Bundle.main.url(forResource: "organize_podcast", withExtension: "py"),
+              !fullRecordingBusy, worker == nil, understandingWorker == nil else { status = "请先配置模型并等待当前处理结束"; return }
+        fullRecordingBusy = true; fullRecordingCount = nil
+        fullRecordingWorker = Task {
+            let refreshTask = watchFullRecording()
+            defer { refreshTask.cancel(); fullRecordingBusy = false; fullRecordingWorker = nil; fullRecordingLog = nil }
+            do { try await completeFullOrganization(sourceID: record.id, speech: speech, configuration: configuration, script: script) }
+            catch is CancellationError { setFullRecordingStatus("已停止；逐字稿与已完成的整理结果保留") }
+            catch { setFullRecordingStatus(error.localizedDescription) }
+            await refresh()
+        }
+    }
+    private func completeFullOrganization(sourceID: String, speech: LocalQwenSpeechPort, configuration: URL, script: URL) async throws {
+        guard let store, let record = try await store.sources().first(where: { $0.id == sourceID }), let version = record.transcriptVersionID else { throw VoiceOSError("完整转写尚未保存") }
+        let policy = try await store.sourcePolicy(sourceID: sourceID)
+        if policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: sourceID, expectedVersion: policy.version, localOnly: false) }
+        let root = await store.root
+        let base = root.appendingPathComponent("整理/" + sourceID + "/" + version)
+        let folder = base.appendingPathComponent(record.name)
+        _ = try await store.writeOrganizingInput(sourceID: sourceID, to: folder)
+        let log = base.appendingPathComponent("处理日志.txt"); fullRecordingLog = log
+        setFullRecordingStatus("正在逐段提取全部意图，随后全文复查漏项…")
+        try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, configuration: configuration, log: log)
+        try Task.checkCancellation()
+        let count = try await store.ingestOrganizedPodcast(at: base, allowReminderWrites: reminderAccess?.enabled == true && reminderAccess?.title == "VoiceOS")
+        fullRecordingCount = count
+        fullRecordingOutput = base
+        await refresh()
+        await automaticReminderRefresh()
+        setFullRecordingStatus("完整整理已保存 \(count) 个事项 · 明确待办、待核对、问题与目标分别查看")
+    }
+    private func setFullRecordingStatus(_ message: String) { fullRecordingStatus = message; status = message }
+    private func watchFullRecording() -> Task<Void, Never> {
+        Task {
+            while !Task.isCancelled {
+                await refresh()
+                guard !Task.isCancelled else { return }
+                if let log = fullRecordingLog, let text = try? String(contentsOf: log, encoding: .utf8),
+                   let last = text.split(separator: "\n").last, !last.isEmpty { setFullRecordingStatus(String(last)) }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+    func chooseOrganizedResult() {
+        guard !fullRecordingBusy, !importing else { return }
+        let panel = NSOpenPanel(); panel.title = "导入已完成的全文整理"; panel.canChooseDirectories = true; panel.canChooseFiles = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url, let store = self.store else { return }
+            Task {
+                self.importing = true; defer { self.importing = false }
+                do {
+                    let count = try await store.ingestOrganizedPodcast(at: url, allowReminderWrites: self.reminderAccess?.enabled == true && self.reminderAccess?.title == "VoiceOS")
+                    await self.refresh(); self.requestReminderRefresh()
+                    self.status = "已导入完整整理 \(count) 个事项；相同清单不会重复创建"
+                } catch { self.status = error.localizedDescription }
+            }
+        }
     }
     func prepareEnglishPractice(current: SourceRecord, priorIDs: [String]) async {
         guard let store, !englishBusy else { return }
@@ -647,7 +776,7 @@ final class ControlCenter: ObservableObject {
         if failures == 0 { status = "导入完成 · 可查看原件和转写状态" }
     }
     private func scheduleProcessing() {
-        guard worker == nil else { return }
+        guard worker == nil, !fullRecordingBusy else { return }
         // Owned by the application model, not the SwiftUI view task/window lifetime.
         worker = Task {
             await process()
@@ -1347,6 +1476,13 @@ struct CenterView: View {
                             Task { if await model.beginDiscussion(record) { showingDiscussion = true } }
                         }.disabled((record.transcript ?? "").isEmpty || !["saved","reference_only"].contains(record.state) || model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
                         VStack(alignment: .leading, spacing: 8) {
+                            if record.origin == "user", record.transcriptionBackend?.hasPrefix("Qwen3-ASR") == true {
+                                HStack {
+                                    Button(model.isCompletelyOrganized(record) ? "已完整整理" : "完整整理全部意图", systemImage: "checklist") { model.organizeFullTranscript(record) }
+                                        .disabled(model.isCompletelyOrganized(record) || !model.modelConfigured || model.fullRecordingBusy || model.understandingSource != nil)
+                                    Text("逐段提取 + 全文漏项复查 · 仅发送文字").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
                             HStack {
                                 Button(model.understandingSource == record.id ? "正在理解…" : record.origin == "user" ? "理解并关联历史" : "理解这份文字", systemImage: "sparkles") { model.understand(record) }
                                     .disabled(!model.modelConfigured || record.localOnly || (record.transcript ?? "").isEmpty || (record.transcript ?? "").unicodeScalars.count > 4000 || model.understandingSource != nil || model.discussionExtracting)
@@ -1645,6 +1781,12 @@ struct CenterView: View {
                 }.disabled(!model.initialized || model.dictationBusy)
             }
             Button("任务", systemImage: "checklist") { showingTasks = true }.disabled(!model.initialized)
+            if model.fullRecordingBusy {
+                Button("停止完整整理", systemImage: "stop.circle") { model.cancelFullRecording() }
+            } else {
+                Button("整理我的录音", systemImage: "waveform.badge.plus") { model.chooseFullRecording() }
+                    .disabled(!model.initialized || model.importing || model.dictationActive)
+            }
             Button("讨论记录",systemImage:"bubble.left.and.bubble.right") { Task { await model.refreshDiscussion(); showingDiscussion = true } }.disabled(!model.initialized)
             Button("静默回顾", systemImage:"text.bubble") { model.quietAssociationSourceID = nil; showingQuietFeedback = true }.disabled(!model.initialized)
             Button("查找历史文字", systemImage: "text.magnifyingglass") { searching = true }.disabled(!model.initialized)
@@ -1655,6 +1797,7 @@ struct CenterView: View {
             Menu("导入文件", systemImage: "square.and.arrow.down") {
                 Button("外部音频或视频…") { model.chooseFiles() }
                 Button("仅含我声音的录音…") { model.chooseFiles(personalAudio: true) }
+                Button("已完成的全文整理…") { model.chooseOrganizedResult() }
             }.disabled(!model.initialized || model.importing)
             Menu {
                 Button("打开已有资料库…",action:chooseLibrary)
@@ -1664,7 +1807,7 @@ struct CenterView: View {
                 Button("导出资料与原件…") { model.export(includeMedia: true) }
             } label: { Label("导出资料", systemImage: "square.and.arrow.up") }.disabled(!model.initialized || model.importing || model.dictationBusy || model.dictationActive)
         }
-        .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
+        .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("音视频仅本机 · 文字按授权处理").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
         .focusedSceneValue(\.voiceOSController, model)
         .navigationTitle(model.libraryTitle)
         .onOpenURL { url in
@@ -1678,6 +1821,9 @@ struct CenterView: View {
             }
         }
         .sheet(isPresented: $showingTasks) { TaskManagerView(model: model) { showingTasks = false } }
+        .sheet(item: $model.fullRecordingInput) { input in
+            FullRecordingView(model: model, input: input) { model.fullRecordingInput = nil; showingTasks = true }
+        }
         .sheet(isPresented: $showingSegmentation) { TranscriptSegmentationView(model:model) { showingSegmentation = false } }
         .sheet(isPresented: $showingDiscussion) { DiscussionView(model:model) { showingDiscussion = false } }
         .sheet(isPresented: $searching) { HistorySearchView(model:model) { searching = false } }

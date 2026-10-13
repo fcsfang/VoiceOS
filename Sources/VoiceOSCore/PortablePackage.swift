@@ -82,7 +82,7 @@ private enum PackageLayout {
         case 35: return version35Tables
         case 36: return version36Tables
         case 37: return version37Tables
-        case 38: return version38Tables
+        case 38, 39: return version38Tables
         default: return tables
         }
     }
@@ -119,7 +119,7 @@ extension VoiceOSStore {
         let file = try PackageLayout.safeFile(package, "manifest.json")
         guard let size = try file.resourceValues(forKeys:[.fileSizeKey]).fileSize, size > 0, size <= 1048576 else { throw VoiceOSError("迁移清单过大或为空") }
         let manifest = try JSONDecoder().decode(PackageManifest.self,from:Data(contentsOf:file))
-        guard manifest.format == "VoiceOS-local-package", (1...38).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
+        guard manifest.format == "VoiceOS-local-package", (1...39).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
               let count = manifest.counts["sources"], count >= 0, manifest.counts.values.allSatisfy({ $0 >= 0 && $0 <= 1000000 }) else { throw VoiceOSError("不支持此迁移包格式或记录数量") }
         return PackageSummary(version:manifest.version,createdAt:manifest.createdAt,sourceCount:count,omittedAssetCount:manifest.omittedAssetIDs.count,mediaIncluded:manifest.mediaIncluded)
     }
@@ -128,20 +128,7 @@ extension VoiceOSStore {
     public func exportPackage(to destination: URL, includeMedia: Bool = false) throws {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("导出目录已存在，请选择新目录") }
         guard try db.query("SELECT id FROM sources WHERE input_fingerprint LIKE 'microphone-v1:%' AND state='receiving' AND expected_bytes=0").isEmpty else { throw VoiceOSError("请先停止并封存录制，再导出资料") }
-        let hasRequests = try !db.query("SELECT id FROM recording_processing_requests LIMIT 1").isEmpty
-        let hasBatches = try !db.query("SELECT id FROM segmented_processing_batches LIMIT 1").isEmpty
-        let hasRecordingSegments=try !db.query("SELECT id FROM recording_segment_plans LIMIT 1").isEmpty
-        let hasReminderResolutions = try !db.query("SELECT id FROM reminder_status_resolutions LIMIT 1").isEmpty
-        let hasReminderTimes = try !db.query("SELECT id FROM reminder_time_observations LIMIT 1").isEmpty
-        let hasSchedules = try !db.query("SELECT id FROM action_schedule_intents LIMIT 1").isEmpty
-        let hasScheduleOperations = try !db.query("SELECT id FROM reminder_schedule_operations LIMIT 1").isEmpty
-        let hasCompensations = try !db.query("SELECT id FROM reminder_compensation_plans LIMIT 1").isEmpty
-        let hasScheduleBases = try !db.query("SELECT id FROM reminder_schedule_bases LIMIT 1").isEmpty
-        let hasScheduleGrants = try !db.query("SELECT id FROM reminder_schedule_grants LIMIT 1").isEmpty
-        let hasFinal = try !db.query("SELECT id FROM segmented_cognitive_commits LIMIT 1").isEmpty || db.query("SELECT * FROM segmented_aggregation_attempts").contains { try Self.aggregationAttempt($0).response?.finalClaims != nil }
-        let hasAggregation = try !db.query("SELECT id FROM segmented_aggregation_attempts LIMIT 1").isEmpty
-        let hasSegments = try !db.query("SELECT id FROM segmented_extraction_attempts LIMIT 1").isEmpty
-        let exportTables = hasCompensations ? PackageLayout.version38Tables : hasScheduleBases ? PackageLayout.version37Tables : hasScheduleGrants ? PackageLayout.version36Tables : hasScheduleOperations ? PackageLayout.version35Tables : hasSchedules ? PackageLayout.version34Tables : hasReminderTimes ? PackageLayout.version33Tables : hasReminderResolutions ? PackageLayout.version32Tables : hasRecordingSegments ? PackageLayout.version31Tables : hasFinal ? PackageLayout.version30Tables : hasAggregation ? PackageLayout.version29Tables : hasSegments ? PackageLayout.version28Tables : hasBatches ? PackageLayout.version27Tables : hasRequests ? PackageLayout.version26Tables : PackageLayout.tables
+        let exportTables = PackageLayout.version38Tables
         var rows: [String: [[String: String]]] = [:]
         try db.transaction {
             for table in exportTables { rows[table] = try db.query("SELECT * FROM \(table) ORDER BY id") }
@@ -182,8 +169,7 @@ extension VoiceOSStore {
                 files.append(verified)
             }
             if includeMedia { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let packageVersion = hasCompensations ? 38 : hasScheduleBases ? 37 : hasScheduleGrants ? 36 : hasScheduleOperations ? 35 : hasSchedules ? 34 : hasReminderTimes ? 33 : hasReminderResolutions ? 32 : hasRecordingSegments ? 31 : hasFinal ? 30 : hasAggregation ? 29 : hasSegments ? 28 : hasBatches ? 27 : hasRequests ? 26 : try db.query("SELECT id FROM sources WHERE input_fingerprint LIKE 'personal-audio-v1:%' LIMIT 1").isEmpty ? 24 : 25
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: packageVersion, databaseSchema: hasCompensations ? 38 : hasScheduleBases ? 37 : hasScheduleGrants ? 36 : hasScheduleOperations ? 35 : hasSchedules ? 34 : hasReminderTimes ? 33 : hasReminderResolutions ? 32 : hasRecordingSegments ? 31 : hasFinal ? 30 : hasAggregation ? 29 : hasSegments ? 28 : hasBatches ? 27 : hasRequests ? 26 : 25, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 39, databaseSchema: 39, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)
@@ -200,7 +186,7 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("恢复目标必须是新的空目录；现有资料库不会被覆盖") }
         let manifestURL = try PackageLayout.safeFile(package, "manifest.json")
         let manifest = try JSONDecoder().decode(PackageManifest.self, from: Data(contentsOf: manifestURL))
-        guard manifest.format == "VoiceOS-local-package", (1...38).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
+        guard manifest.format == "VoiceOS-local-package", (1...39).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
         guard manifest.version >= 26 || !manifest.files.contains(where: { $0.path == "recording_processing_requests.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带录制处理请求") }
         guard manifest.version >= 27 || !manifest.files.contains(where: { $0.path == "segmented_processing_batches.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带分段批次") }
         guard manifest.version >= 28 || !manifest.files.contains(where: { $0.path == "segmented_extraction_attempts.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带片段尝试") }

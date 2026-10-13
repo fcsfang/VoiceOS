@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Organize real podcast transcripts into complete, cited task lists."""
-import argparse, csv, hashlib, json, re, time, urllib.request, urllib.error
+import argparse, csv, hashlib, json, os, re, time, urllib.request, urllib.error
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +27,7 @@ quote必须逐字复制输入中完整、连续的原话，包含否定、条件
 
 
 def settings():
-    text = (ROOT / ".env").read_text().strip()
+    text = Path(os.environ.get("VOICEOS_MODEL_CONFIG_FILE", ROOT / ".env")).read_text().strip()
     if text.startswith("{"):
         options = json.loads(text)["provider"]["openai"]["options"]
         address, key = options["baseURL"], options["apiKey"]
@@ -102,12 +102,12 @@ def organize(folder):
     transcript = json.loads((folder / "Qwen完整逐字稿.json").read_text())
     source = json.loads((folder / "source.json").read_text())
     text, spans = transcript["text"], transcript["spans"]
-    if transcript["processed_chunks"] != transcript["total_chunks"]:
+    if not transcript.get("complete") and (transcript.get("processed_chunks") is None or transcript.get("processed_chunks") != transcript.get("total_chunks")):
         raise ValueError("Incomplete audio transcription")
     duration = transcript["duration_seconds"]
     source["duration_seconds"] = duration
     (folder / "source.json").write_text(json.dumps(source, ensure_ascii=False, indent=2))
-    readable = [f"# 完整逐字稿 — {folder.name}", "", f"Qwen 本地转写，完整本人音轨 {stamp(duration * 1000)}。时间对应30秒音频范围。", ""]
+    readable = [f"# 完整逐字稿 — {source.get('source_name', folder.name)}", "", f"Qwen 本地转写，完整本人音轨 {stamp(duration * 1000)}。时间对应30秒音频范围。", ""]
     for span in spans:
         readable.append(f"[{stamp(span['startMS'])}–{stamp(span['endMS'])}] {text[span['textStart']:span['textEnd']]}\n")
     (folder / "完整逐字稿.md").write_text("\n".join(readable))
@@ -185,6 +185,7 @@ def merge(folders, items, base):
     payload = {"items": items, "complete_transcripts": transcripts}
     if hints.exists(): payload["verified_term_context"] = json.loads(hints.read_text())
     prompt += "\nverified_term_context提供视频画面和官方项目核对的术语，只用于对应上下文的标题与说明；不要改动逐字引用。初步候选标的术语歧义若有明确核对依据可以解除uncertain，其他歧义保留。"
+    print("正在合并重复意图并核对跟进状态；全部候选保留", flush=True)
     groups = ask(payload, prompt, base / "清单合并模型结果.json", group_schema, max_output_tokens=32768)["groups"]
     corrections = base / "清单核对修订.json"
     corrections = json.loads(corrections.read_text()) if corrections.exists() else {}
@@ -217,10 +218,12 @@ def merge(folders, items, base):
               "unlocated_citations": sum(i["citation_status"] != "located" for i in items), "organizer_corrections": corrections,
               "term_context": payload.get("verified_term_context", []), "items": tasks}
     (base / "完整任务清单.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))
-    md = ["# 播客完整任务清单", "", "覆盖两段完整本人音轨，按时间逐段提取并独立复查漏项。全部候选保留后合并重复事项；任务未标记完成。", ""]
+    md = ["# 播客完整任务清单", "", "覆盖全部本人音轨，按时间逐段提取并独立复查漏项。全部候选保留后合并重复事项；任务未标记完成。", ""]
     for folder in folders:
         data = json.loads((folder / "Qwen完整逐字稿.json").read_text())
-        md.append(f"- {folder.name}：{stamp(data['duration_seconds'] * 1000)}，Qwen，{data['processed_chunks']}/{data['total_chunks']} 音频块。")
+        name = json.loads((folder / "source.json").read_text()).get("source_name", folder.name)
+        chunks = f"，{data['processed_chunks']}/{data['total_chunks']} 音频块" if data.get("total_chunks") else "，完整已保存逐字稿"
+        md.append(f"- {name}：{stamp(data['duration_seconds'] * 1000)}，Qwen{chunks}。")
     md.append("")
     sections = [(LABELS[kind], [t for t in tasks if t["intent_type"] == kind and t["followup_state"] != "recorded_activity"]) for kind in TYPES]
     sections.append(("录音中的即时操作与已处理事项", [t for t in tasks if t["followup_state"] == "recorded_activity"]))
