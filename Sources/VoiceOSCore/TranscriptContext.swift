@@ -21,7 +21,7 @@ public struct ContextTranscript: Codable, Sendable {
 extension VoiceOSStore {
     /// An actor turn captures only explicitly selected, usable, current transcripts.
     /// Budget overflow rejects the selection rather than silently omitting evidence.
-    public func prepareLocalTranscriptContext(sourceIDs: [String], scalarBudget: Int = 4000) throws -> LocalTranscriptContext {
+    public func prepareLocalTranscriptContext(sourceIDs: [String], scalarBudget: Int = 40000) throws -> LocalTranscriptContext {
         guard !sourceIDs.isEmpty, Set(sourceIDs).count == sourceIDs.count,
               scalarBudget > 0 else { throw VoiceOSError("请选择不重复的来源并设置有效上下文预算") }
         var selected: [ContextTranscript] = []

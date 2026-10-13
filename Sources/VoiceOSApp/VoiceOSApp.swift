@@ -224,6 +224,16 @@ final class ControlCenter: ObservableObject {
             scheduleProcessing()
         } catch { status="无法保存本地转写选择" }
     }
+    func useQwenSpeech(configPath: String) {
+        guard worker == nil,!dictationActive else { status="请等待当前处理结束后切换转写器";return }
+        do {
+            let configURL = URL(fileURLWithPath: configPath)
+            let configData = try Data(contentsOf: configURL)
+            try installSpeechSelection(.init(backend:.qwen, configuration:configData),persist:true)
+            status="已保存 Qwen 本地转写；已有逐字稿保持原版本"
+            scheduleProcessing()
+        } catch { status="无法启用本地 Qwen，请核对配置与模型：\(error.localizedDescription)" }
+    }
     @Published var attempts: [String: [ModelAttemptRecord]] = [:]
     @Published var processingIntents: [ExpressionProcessingIntentRecord] = []
     @Published var recordingRequests: [RecordingProcessingRequest] = []

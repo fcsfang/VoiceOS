@@ -30,11 +30,11 @@ extension VoiceOSStore {
     /// Do not silently drop private candidates or truncate original text to fit a cloud request.
     public func prepareRelevanceSnapshot(query: String, queryID: UUID, candidates: [RetrievalHit],
                                          destination: ModelDestination = .local, cloudQueryAllowed: Bool = false,
-                                         scalarBudget: Int = 4000) throws -> RelevanceSnapshot {
+                                         scalarBudget: Int = 40000) throws -> RelevanceSnapshot {
         guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               query.unicodeScalars.count <= 512, (1...8).contains(candidates.count),
               Set(candidates.map(\.id)).count == candidates.count,
-              (1...4000).contains(scalarBudget),
+              (1...40000).contains(scalarBudget),
               query.unicodeScalars.count + candidates.reduce(0, { $0 + $1.document.text.unicodeScalars.count }) <= scalarBudget else {
             throw VoiceOSError("相关性上下文超过查询、候选或文字预算；请明确缩小范围")
         }

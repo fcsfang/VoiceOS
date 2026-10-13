@@ -69,9 +69,9 @@ extension VoiceOSStore {
         let source = snapshot.context.sources[0]
         // Historical validation uses the recorded transcript and permission epoch,
         // not today's values: corrections/revocations must retain auditable history.
-        guard UUID(uuidString: snapshot.id) != nil, snapshot.context.scalarBudget == 4000,
+        guard UUID(uuidString: snapshot.id) != nil, snapshot.context.scalarBudget == 40000,
               snapshot.cognition.isValid, snapshot.association.isValid,
-              source.origin == "user", source.speaker == "user", source.text.unicodeScalars.count <= 4000,
+              source.origin == "user", source.speaker == "user", source.text.unicodeScalars.count <= 40000,
               snapshot.cognition.destination != .cloud || !source.localOnly,
               snapshot.contentDigest == (try expressionProcessingIntentDigest(context: snapshot.context, policyVersion: snapshot.policyVersion, cognition: snapshot.cognition, association: snapshot.association)),
               let version = try db.query("SELECT v.text,v.spans_json,t.source_id,t.input_version_id,s.origin,s.speaker FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [source.transcriptVersionID]).first,

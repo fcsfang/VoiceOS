@@ -32,7 +32,7 @@ extension VoiceOSStore {
         guard cognitionIdentity.isValid, associationIdentity.isValid, cognition.destination == association.destination,
               let record = try sources().first(where: { $0.id == sourceID }), ["user_text", "audio"].contains(record.kind),
               record.origin == "user", record.speaker == "user" else { throw VoiceOSError("处理意图只覆盖明确的个人文字或个人录音逐字稿及有效的同目的地端口") }
-        let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: 4000)
+        let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: 40000)
         let policy = try sourcePolicy(sourceID: sourceID)
         guard cognition.destination != .cloud || !policy.localOnly else { throw VoiceOSError("请先明确允许本次文字云端处理；处理意图不能自行授予权限") }
         let digest = try Self.expressionProcessingIntentDigest(context: context, policyVersion: policy.version, cognition: cognitionIdentity, association: associationIdentity)
@@ -42,7 +42,7 @@ extension VoiceOSStore {
         guard UUID(uuidString: snapshot.id) != nil, snapshot.context.sources.count == 1,
               snapshot.cognition == ProcessingModelIdentity(cognition), snapshot.association == ProcessingModelIdentity(association) else { throw VoiceOSError("处理端口身份已变化；原处理意图不能扩大到新配置") }
         let current = try prepareExpressionProcessingIntent(sourceID: snapshot.context.sources[0].sourceID, cognition: cognition, association: association)
-        guard snapshot.context.scalarBudget == 4000,
+        guard snapshot.context.scalarBudget == 40000,
               try Self.relevanceJSON(snapshot.context) == Self.relevanceJSON(current.context),
               snapshot.policyVersion == current.policyVersion, snapshot.contentDigest == current.contentDigest else { throw VoiceOSError("处理意图的原话、版本、授权或摘要已变化") }
     }

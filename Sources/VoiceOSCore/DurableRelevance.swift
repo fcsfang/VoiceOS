@@ -129,7 +129,7 @@ extension VoiceOSStore {
             let s = try JSONDecoder().decode(RelevanceSnapshot.self, from: Data(json.utf8))
             guard UUID(uuidString: s.id) != nil, !s.query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
                   s.query.unicodeScalars.count <= 512, (1...8).contains(s.candidates.count),
-                  Set(s.candidates.map(\.id)).count == s.candidates.count, (1...4000).contains(s.scalarBudget),
+                  Set(s.candidates.map(\.id)).count == s.candidates.count, (1...40000).contains(s.scalarBudget),
                   s.query.unicodeScalars.count + s.candidates.reduce(0, { $0 + $1.document.text.unicodeScalars.count }) <= s.scalarBudget,
                   s.destination.rawValue == row["destination"], (s.destination == .local || (s.cloudQueryAllowed && s.candidates.allSatisfy({ !$0.document.localOnly }))),
                   try relevanceDigest(query:s.query,queryID:s.queryID,candidates:s.candidates,destination:s.destination,cloudQueryAllowed:s.cloudQueryAllowed,scalarBudget:s.scalarBudget) == s.contentDigest,

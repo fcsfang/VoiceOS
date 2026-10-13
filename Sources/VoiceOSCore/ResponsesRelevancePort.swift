@@ -27,7 +27,7 @@ public struct ResponsesRelevancePort: RelevanceModelPort {
               UUID(uuidString: s.id) != nil, !s.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               s.query.unicodeScalars.count <= 512, (1...8).contains(s.candidates.count),
               Set(s.candidates.map(\.id)).count == s.candidates.count,
-              s.candidates.allSatisfy({ !$0.document.localOnly }), (1...4000).contains(s.scalarBudget),
+              s.candidates.allSatisfy({ !$0.document.localOnly }), (1...40000).contains(s.scalarBudget),
               s.query.unicodeScalars.count + s.candidates.reduce(0, { $0 + $1.document.text.unicodeScalars.count }) <= s.scalarBudget,
               try VoiceOSStore.relevanceDigest(query:s.query,queryID:s.queryID,candidates:s.candidates,destination:s.destination,cloudQueryAllowed:s.cloudQueryAllowed,scalarBudget:s.scalarBudget) == s.contentDigest else { throw ModelPortFailure.rejected("相关性请求身份、授权或预算不符") }
         let candidates = s.candidates.map { ["id": $0.id, "origin": $0.document.origin, "text": $0.document.text] }

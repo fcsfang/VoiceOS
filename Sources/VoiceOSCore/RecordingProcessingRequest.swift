@@ -120,7 +120,7 @@ extension VoiceOSStore {
                 guard !(current.transcript ?? "").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw VoiceOSError("逐字稿为空") }
                 // Only the original local transcription may satisfy the automatic request.
                 guard try db.query("SELECT version_no FROM transcript_versions WHERE id=?", [current.transcriptVersionID]).first?["version_no"] == "1" else { throw VoiceOSError("逐字稿已更正；需重新明确处理") }
-                if (current.transcript ?? "").unicodeScalars.count>4000 {
+                if (current.transcript ?? "").unicodeScalars.count>40000 {
                     try reconcileLongRecordingRequest(row,current:current,extraction:segmentExtraction,aggregation:segmentAggregation)
                     continue
                 }
