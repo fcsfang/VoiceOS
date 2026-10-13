@@ -87,6 +87,9 @@ struct TaskManagerView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(feedback.kind == "outcome" ? "实际结果" : "我的反思").font(.headline)
                             Text(feedback.text).textSelection(.enabled)
+                            if let recordingID = feedback.recordingSourceID {
+                                Button("查看原始口述") { model.selected = recordingID; historyAction = nil; dismiss() }
+                            }
                             Divider()
                         }
                     }

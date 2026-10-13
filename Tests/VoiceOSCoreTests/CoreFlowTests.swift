@@ -84,7 +84,7 @@ final class CoreFlowTests: XCTestCase {
     }
 
     func testRecordingRunsTranscriptionUnderstandingAndAssociation() async throws {
-        let store = try await openStore(), model = FlowModel(), association = FlowAssociation()
+        let store = try await openStore(), model = FlowModel(createsTask: true), association = FlowAssociation()
         let intent = try await store.beginProcessingDictation(cognition: model.configuration, association: association.configuration)
         let format = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 12000)!
@@ -100,6 +100,11 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(result.state, .completed)
         XCTAssertEqual(sources.first?.transcript, "我认为检索质量比记忆容量更值得研究。")
         XCTAssertEqual(claims.first?.references.first?.sourceID, intent.sourceID)
+        let actions = try await store.actions(), action = try XCTUnwrap(actions.first)
+        _ = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: .reflection,
+                                                text: "这是口述后核对的实际收获。", recordingSourceID: intent.sourceID)
+        let feedback = try await store.actionFeedback(actionID: action.id)
+        XCTAssertEqual(feedback.first?.recordingSourceID, intent.sourceID)
     }
 
     func testIdeaFindsHistoryWithoutCreatingTask() async throws {

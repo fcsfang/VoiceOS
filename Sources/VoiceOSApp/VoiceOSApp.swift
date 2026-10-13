@@ -357,6 +357,13 @@ final class ControlCenter: ObservableObject {
         do { try await store.sealDictation(sourceID:record.id); status = "可解码片段已保存；它是中断片段，不代表完整表达"; await refresh(); scheduleProcessing() }
         catch { status = "片段尚不能完整解码，保留待核对"; await refresh() }
     }
+    func startFeedbackDictation() async -> String? {
+        guard speechPort is LocalQwenSpeechPort, worker == nil, !fullRecordingBusy, !dictationActive, !dictationBusy else {
+            status = "请先配置 Qwen，并等待当前录音或转写结束"; return nil
+        }
+        await startDictation()
+        return dictationActive ? dictationSource : nil
+    }
     private var worker: Task<Void, Never>?
     func start() async {
         guard store == nil else { return }
@@ -1195,11 +1202,11 @@ final class ControlCenter: ObservableObject {
         } catch { status = error.localizedDescription }
         await refresh()
     }
-    func saveFeedback(_ action: ActionRecord, kind: ActionFeedbackKind, text: String, commandID: String) async -> Bool {
+    func saveFeedback(_ action: ActionRecord, kind: ActionFeedbackKind, text: String, recordingSourceID: String? = nil, commandID: String) async -> Bool {
         guard let store, !savingFeedback else { return false }
         savingFeedback = true; defer { savingFeedback = false }
         do {
-            selected = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: kind, text: text, commandID: commandID)
+            selected = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: kind, text: text, recordingSourceID: recordingSourceID, commandID: commandID)
             await refresh(); status = "结果或反思已保存并关联原行动 · 未改变完成或证据状态"
             return true
         } catch { status = error.localizedDescription; await refresh(); return false }
@@ -2128,27 +2135,54 @@ struct ActionFeedbackView: View {
     @State private var saving = false
     @State private var errorText = ""
     @State private var commandID = UUID().uuidString
+    @State private var recordingID: String?
+    @State private var appliedRecording = false
+    private var recording: SourceRecord? { model.records.first { $0.id == recordingID } }
+    private var waitingForVoice: Bool { recordingID != nil && !appliedRecording && (model.dictationActive || model.dictationBusy || ["queued", "running"].contains(recording?.jobState ?? "")) }
+    private func applyTranscription() {
+        guard !appliedRecording, let recording, recording.jobState == "completed", let transcript = recording.transcript else { return }
+        text += (text.isEmpty ? "" : "\n") + transcript
+        appliedRecording = true
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("记录结果或反思").font(.title2)
             Text("关联：" + action.title + " · 第 \(action.version) 版").foregroundStyle(.secondary)
             Picker("类型", selection: $kind) { Text("实际结果").tag("outcome"); Text("我的反思").tag("reflection") }.pickerStyle(.segmented).disabled(saving)
-            TextEditor(text: $text).frame(minHeight: 180).border(.secondary.opacity(0.2)).disabled(saving)
+            HStack {
+                if recordingID != nil, model.dictationActive {
+                    Button("停止并转写") { model.stopDictation() }.disabled(model.dictationBusy)
+                    Text("正在录制这条任务的结果…").foregroundStyle(.secondary)
+                } else if waitingForVoice {
+                    ProgressView().controlSize(.small); Text("Qwen 正在本机转写…").foregroundStyle(.secondary)
+                } else if recordingID == nil {
+                    Button("口述进展或结果", systemImage: "mic") {
+                        Task { recordingID = await model.startFeedbackDictation(); if recordingID == nil { errorText = model.status } }
+                    }.disabled(saving || model.dictationBusy || model.dictationActive || model.fullRecordingBusy)
+                } else {
+                    Text(appliedRecording ? "口述已填入下方，可核对修改。原始录音保留。" : "转写未完成，录音已保留；也可以直接写下结果。")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            TextEditor(text: $text).frame(minHeight: 180).border(.secondary.opacity(0.2)).disabled(saving || waitingForVoice)
             Text("这是可选记录。原文先仅本地保存，保留与原行动的关联；不会自动改变任务状态、认可观点或标记已验证。").font(.caption).foregroundStyle(.secondary)
             if !errorText.isEmpty { Text(errorText).font(.callout).foregroundStyle(.red) }
             HStack {
-                Button("取消", action:dismiss).disabled(saving)
+                Button("取消", action:dismiss).disabled(saving || (recordingID != nil && (model.dictationActive || model.dictationBusy)))
                 Spacer(); Text("\(text.unicodeScalars.count)/4000").font(.caption)
                 Button(saving ? "正在保存…" : "保存反馈") {
                     saving = true; errorText = ""
                     Task {
-                        if await model.saveFeedback(action,kind:ActionFeedbackKind(rawValue:kind)!,text:text,commandID:commandID) { dismiss() }
+                        let savedRecording = recording?.state == "saved" ? recordingID : nil
+                        if await model.saveFeedback(action,kind:ActionFeedbackKind(rawValue:kind)!,text:text,recordingSourceID:savedRecording,commandID:commandID) { dismiss() }
                         else { errorText = model.status }
                         saving = false
                     }
-                }.keyboardShortcut(.defaultAction).disabled(saving || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
+                }.keyboardShortcut(.defaultAction).disabled(saving || waitingForVoice || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
             }
         }.padding(24).frame(width:620)
+            .onChange(of: recording?.transcriptVersionID) { _, _ in applyTranscription() }
+            .interactiveDismissDisabled(saving || (recordingID != nil && model.dictationActive))
     }
 }
 
