@@ -239,10 +239,10 @@ enum SegmentResponseSchemas {
     static func strings() -> [String:Any] { ["type":"array","items":string] }
     static func object(_ properties: [String:Any]) -> [String:Any] { ["type":"object","properties":properties,"required":properties.keys.sorted(),"additionalProperties":false] }
     static func nullable(_ schema: [String:Any]) -> [String:Any] { ["anyOf":[schema,["type":"null"]]] }
-    static let extraction=object(["proposals":["type":"array","maxItems":32,"items":object([
+    static let extraction=object(["proposals":["type":"array","items":object([
         "kind":["type":"string","enum":["statement","question","possibleAction","condition","negation","correction","quotation","incompleteBoundary"]],
         "statement":string,"quote":string,"textStart":["type":"integer"],"textEnd":["type":"integer"],"spanIDs":strings()])]])
-    static let extractionQuotes=object(["proposals":["type":"array","maxItems":32,"items":object([
+    static let extractionQuotes=object(["proposals":["type":"array","items":object([
         "kind":["type":"string","enum":["statement","question","possibleAction","condition","negation","correction","quotation","incompleteBoundary"]],
         "statement":string,"quote":string])]])
     static let aggregation: [String:Any] = {
@@ -253,7 +253,7 @@ enum SegmentResponseSchemas {
         let claim=object(["statement":string,"ownership":["type":"string","enum":["user_tentative","unresolved","ai_candidate","external"]],
             "contentKind":["type":"string","enum":["statement","question","hypothesis","reflection","unclassified"]],
             "evidenceIDs":strings(),"actionEvidenceID":nullable(string),"action":nullable(action)])
-        return object(["review":review,"finalClaims":["type":"array","maxItems":32,"items":claim]])
+        return object(["review":review,"finalClaims":["type":"array","items":claim]])
     }()
     static func decode(_ envelope: ResponsesEnvelope,schema: [String:Any]) throws -> Data {
         guard envelope.status == .completed,let text=envelope.text else { throw VoiceOSError("分段响应未完整完成") }

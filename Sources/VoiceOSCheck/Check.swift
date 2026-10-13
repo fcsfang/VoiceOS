@@ -8,9 +8,14 @@ struct Check {
     static func main() async {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
-            let usage = "usage: voiceos-check <read|import|import-personal-audio|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]"
+            let usage = "usage: voiceos-check <read|import|import-personal-audio|ingest-podcast|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]"
             guard args.count >= 2 else { throw VoiceOSError(usage) }
             let command = args[0], root = URL(fileURLWithPath: args[1])
+            if command == "ingest-podcast" {
+                guard args.count == 3 || (args.count == 4 && args[3] == "--allow-reminders") else { throw VoiceOSError("ingest-podcast <data-dir> <organized-podcast-directory> [--allow-reminders]") }
+                try await ingestPodcast(at: URL(fileURLWithPath: args[2]), into: root, allowReminderWrites: args.count == 4)
+                return
+            }
             switch command {
             case "read", "transcribe":
                 guard args.count == 2 else { throw VoiceOSError(usage) }
@@ -36,7 +41,11 @@ struct Check {
                 if command == "import-personal-audio" { _ = try await store.importPersonalAudio(file, commandID: commandID) }
                 else { _ = try await store.importFile(file, commandID: commandID) }
             case "transcribe":
-                try await store.processTranscriptions(using: NativeSpeechPort())
+                guard let data = UserDefaults(suiteName: "local.voiceos.app")?.data(forKey: "voiceos.localSpeechSelection.v1"),
+                      let selection = try? JSONDecoder().decode(LocalSpeechSelection.self, from: data), selection.backend == .qwen else {
+                    throw VoiceOSError("请先在应用中启用 Qwen 本地转写；不会默认使用 Apple")
+                }
+                try await store.processTranscriptions(using: selection.port())
             case "transcribe-qwen":
                 let port = try LocalQwenSpeechPort(python: URL(fileURLWithPath: args[2]), runner: URL(fileURLWithPath: args[3]), model: URL(fileURLWithPath: args[4]))
                 try await store.processTranscriptions(using: port)

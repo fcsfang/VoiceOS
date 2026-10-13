@@ -190,7 +190,7 @@ final class ControlCenter: ObservableObject {
         let encoded=try JSONEncoder().encode(selection)
         if persist { UserDefaults.standard.set(encoded,forKey:speechPreferenceKey) }
         speechPort=port
-        speechSummary=selection.backend == .qwen ? "Qwen 本地转写 · 最多30秒定位范围" : "Apple 本地转写 · 明确选择的备选"
+        speechSummary="Qwen 本地转写 · 最多30秒定位范围"
     }
     private func restoreSpeechSelection() {
         guard let data=UserDefaults.standard.data(forKey:speechPreferenceKey) else {
@@ -215,14 +215,6 @@ final class ControlCenter: ObservableObject {
             status="Qwen 转写选择已保存，重启后继续使用；已有逐字稿保持原版本"
             scheduleProcessing()
         } catch { status="无法启用本地 Qwen，请核对配置与模型；保留当前转写器" }
-    }
-    func useAppleSpeech() {
-        guard worker == nil,!dictationActive else { status="请等待当前处理结束后切换转写器";return }
-        do {
-            try installSpeechSelection(.init(backend:.apple),persist:true)
-            status="已保存 Apple 本地转写备选；已有逐字稿保持原版本"
-            scheduleProcessing()
-        } catch { status="无法保存本地转写选择" }
     }
     @Published var attempts: [String: [ModelAttemptRecord]] = [:]
     @Published var processingIntents: [ExpressionProcessingIntentRecord] = []
@@ -371,6 +363,8 @@ final class ControlCenter: ObservableObject {
             restoreSpeechSelection()
             if let path = ProcessInfo.processInfo.environment["VOICEOS_MODEL_CONFIG_FILE"] {
                 configureTextModel(URL(fileURLWithPath: path))
+            } else if let path = UserDefaults.standard.string(forKey: "voiceos.textModelConfigPath.v1") ?? Bundle.main.object(forInfoDictionaryKey: "VoiceOSModelConfigurationPath") as? String {
+                configureTextModel(URL(fileURLWithPath: path))
             }
             await refresh()
             scheduleProcessing()
@@ -477,6 +471,7 @@ final class ControlCenter: ObservableObject {
             relevance.cancel();relevanceModel=suite.relevance
             segmentExtractionModel=suite.segmentExtraction;segmentAggregationModel=suite.segmentAggregation
             textModel = port; modelConfigured = true
+            UserDefaults.standard.set(file.path, forKey: "voiceos.textModelConfigPath.v1")
             modelSummary = "gpt-6.1-sol · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
             status = "文本模型已就绪 · 只处理你选择并授权的文字"
             // A queued intent may have been restored before the user selected a
@@ -844,6 +839,17 @@ final class ControlCenter: ObservableObject {
             reminderSyncStatus = "正在核对所选清单的任务"
             await refresh(); requestReminderRefresh()
         } catch { status = error.localizedDescription }
+    }
+    func connectVoiceOSCalendar() async {
+        guard !remindersBusy else { return }
+        remindersBusy = true
+        do {
+            let calendar = try await reminders.voiceOSCalendar()
+            if !reminderCalendars.contains(where: { $0.id == calendar.id }) { reminderCalendars.append(calendar) }
+            proposedReminderCalendarID = calendar.id
+            remindersBusy = false
+            await saveReminderConnection()
+        } catch { remindersBusy = false; status = error.localizedDescription }
     }
     func disconnectReminders() async {
         guard let store, let access = reminderAccess else { return }
@@ -1313,7 +1319,6 @@ struct CenterView: View {
                             HStack {
                                 Menu("本地转写器") {
                                     Button("启用本地 Qwen…") { model.chooseLocalSpeech() }
-                                    Button("使用 Apple 本地转写") { model.useAppleSpeech() }
                                 }
                                 Text(model.speechSummary).font(.caption).foregroundStyle(.secondary)
                             }
@@ -1657,6 +1662,7 @@ struct CenterView: View {
                     Text("请选择清单").tag("")
                     ForEach(model.reminderCalendars) { calendar in Text(calendar.title).tag(calendar.id) }
                 }
+                Button("新建并连接 VoiceOS 清单") { Task { await model.connectVoiceOSCalendar() } }.disabled(model.remindersBusy)
                 Text("此清单持续授权保存在本机。重开、变化或唤醒后核对关联任务，并自动发送已提取、文本允许外发的普通明确任务，可随时停止；导出恢复不会携带此权限。").font(.caption)
                 HStack { Button("取消") { model.choosingReminderCalendar = false }; Spacer(); Button("保存连接授权") { Task { await model.saveReminderConnection() } }.disabled(model.proposedReminderCalendarID.isEmpty) }
             }.padding(24).frame(width: 600)

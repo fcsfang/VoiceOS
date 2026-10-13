@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import time
 import uuid
 
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -44,30 +45,46 @@ def main():
     samples = np.frombuffer(raw, dtype=np.float32)
     if not samples.size or not np.isfinite(samples).all():
         raise ValueError("Decoded audio is empty or invalid")
+    progress = args.output.with_suffix(".progress.json")
+    signature = {"audio": str(args.audio.resolve()), "bytes": args.audio.stat().st_size,
+                 "model": str(args.model.resolve()), "locale": args.locale, "backend": IDENTITY}
+    state = json.loads(progress.read_text()) if progress.exists() else {}
+    if state and state.get("input") != signature:
+        raise ValueError("Saved transcription belongs to another input")
     model = None
-    text, spans = "", []
+    text, spans = state.get("text", ""), state.get("spans", [])
     chunk_size = 30 * 16000
-    for begin in range(0, len(samples), chunk_size):
+    total = (len(samples) + chunk_size - 1) // chunk_size
+    started = time.monotonic()
+    for begin in range(state.get("next_sample", 0), len(samples), chunk_size):
         chunk = samples[begin:begin + chunk_size]
-        if np.count_nonzero(chunk) == 0:
-            continue
-        if model is None:
-            model = load(str(args.model.resolve()))
-        result = model.generate(mx.array(chunk), language="Chinese" if args.locale == "zh_CN" else "English",
-                                temperature=0.0, max_tokens=1024, verbose=False)
-        if result.generation_tokens >= 1024:
-            raise ValueError("Chunk token budget exhausted; refusing partial transcript")
-        part = result.text
+        part = ""
+        if np.count_nonzero(chunk) != 0:
+            if model is None:
+                model = load(str(args.model.resolve()))
+            result = model.generate(mx.array(chunk), language="Chinese" if args.locale == "zh_CN" else "English",
+                                    temperature=0.0, max_tokens=1024, verbose=False)
+            if result.generation_tokens >= 1024:
+                raise ValueError("Chunk token budget exhausted; refusing partial transcript")
+            part = result.text
         if part:
             spans.append({"id": str(uuid.uuid4()).upper(), "textStart": len(text),
                           "textEnd": len(text) + len(part), "startMS": round(begin / 16),
                           "endMS": round((begin + len(chunk)) / 16)})
             text += part
         mx.clear_cache()
+        completed = min(begin + len(chunk), len(samples))
+        temporary = progress.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"input": signature, "next_sample": completed,
+                                        "text": text, "spans": spans}, ensure_ascii=False))
+        temporary.replace(progress)
+        print(f"Qwen {begin // chunk_size + 1}/{total} · {completed / 16000:.1f}s · {len(text)} characters · {time.monotonic() - started:.0f}s elapsed", flush=True)
     with args.output.open("x", encoding="utf-8") as handle:
         json.dump({"backend": IDENTITY, "text": text, "spans": spans,
                    "timestamp_precision": "audio chunks up to 30 seconds; not word alignment",
-                   "audio_uploaded": False}, handle, ensure_ascii=False)
+                   "audio_uploaded": False, "duration_seconds": len(samples) / 16000,
+                   "processed_chunks": total, "total_chunks": total}, handle, ensure_ascii=False)
+    progress.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

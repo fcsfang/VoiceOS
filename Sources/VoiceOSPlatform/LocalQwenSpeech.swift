@@ -56,21 +56,15 @@ public struct LocalQwenSpeechPort: SpeechPort {
 /// Machine-local setup, deliberately separate from portable product records.
 /// Restoring a missing Qwen installation must never quietly select Apple.
 public struct LocalSpeechSelection: Codable, Sendable {
-    public enum Backend: String, Codable, Sendable { case qwen, apple }
+    public enum Backend: String, Codable, Sendable { case qwen }
     public let backend: Backend
     public let configuration: Data?
     public init(backend: Backend = .qwen, configuration: Data? = nil) {
         self.backend=backend; self.configuration=configuration
     }
     public func port() throws -> any SpeechPort {
-        switch backend {
-        case .apple:
-            guard configuration==nil else { throw VoiceOSError("Apple 转写选择不能附带 Qwen 配置") }
-            return NativeSpeechPort()
-        case .qwen:
-            guard let configuration else { throw VoiceOSError("请先配置已选定的本地 Qwen 转写模型") }
-            return try LocalQwenSpeechPort.load(configurationData:configuration)
-        }
+        guard let configuration else { throw VoiceOSError("请先配置已选定的本地 Qwen 转写模型") }
+        return try LocalQwenSpeechPort.load(configurationData:configuration)
     }
 }
 

@@ -22,6 +22,16 @@ public final class NativeReminders: RemindersSchedulingPort {
         guard try await store.requestFullAccessToReminders() else { throw VoiceOSError("提醒事项权限未授予；没有读取或写入任务") }
         return store.calendars(for: .reminder).filter(\.allowsContentModifications).map { ReminderCalendar(id: $0.calendarIdentifier, title: $0.title) }
     }
+    public func voiceOSCalendar() async throws -> ReminderCalendar {
+        let calendars = try await authorize().filter { $0.title == "VoiceOS" }
+        if calendars.count == 1 { return calendars[0] }
+        guard calendars.isEmpty else { throw VoiceOSError("存在多个 VoiceOS 清单，请从列表选择") }
+        guard let source = store.defaultCalendarForNewReminders()?.source else { throw VoiceOSError("没有可创建提醒事项清单的账户") }
+        let calendar = EKCalendar(for: .reminder, eventStore: store)
+        calendar.title = "VoiceOS"; calendar.source = source
+        try store.saveCalendar(calendar, commit: true)
+        return ReminderCalendar(id: calendar.calendarIdentifier, title: calendar.title)
+    }
     private func calendar(_ id: String) throws -> EKCalendar {
         guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess else { throw VoiceOSError("提醒事项权限不可用") }
         store.refreshSourcesIfNecessary()
