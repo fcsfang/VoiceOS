@@ -1,0 +1,62 @@
+{
+  "recorded_at": "2026-10-13T00:57:02.242464+00:00",
+  "baseline_commit": "e6e0457",
+  "work_package": "W16",
+  "schema": 38,
+  "status": "processing_and_reuse_dependency_roots_implemented",
+  "delivered": [
+    "full_processing_input_error_roots",
+    "ai_anchor_input_provenance",
+    "immutable_multilevel_outcome_reuse_dependencies",
+    "shared_runtime_and_compensation_history_root_validation",
+    "all_dependency_sources_bound_to_current_impact_digest"
+  ],
+  "checks": {
+    "targeted": {
+      "passed": true,
+      "count": 74,
+      "failures": 0,
+      "seconds": 5.405,
+      "log": "/tmp/voiceos-correction-dependencies-targeted.log"
+    },
+    "previous_stage_full_regression": {
+      "passed": true,
+      "count": 568,
+      "boundary": "prior_due_compensation_stage",
+      "log": "/tmp/voiceos-compensation-regression.log"
+    },
+    "signed_bge_build": {
+      "passed": true,
+      "log": "/tmp/voiceos-correction-dependencies-signing.log"
+    },
+    "strict_codesign": {
+      "passed": true
+    },
+    "diff_whitespace": {
+      "passed": true
+    }
+  },
+  "new_tests": 5,
+  "strengthened_existing_cases": [
+    "ai_anchor_and_cited_history",
+    "two_level_shared_outcome_dependency"
+  ],
+  "external_activity": {
+    "cloud_requests": 0,
+    "microphone_recordings": 0,
+    "real_reminder_mutations": 0,
+    "user_app_restarted": false
+  },
+  "evidence_limits": [
+    "current_persistent_paths_only",
+    "task_cancellation_and_other_compensation_pending",
+    "reunderstanding_product_flow_pending",
+    "native_ui_and_real_eventkit_compensation_pending",
+    "no_natural_user_outcome_fabricated"
+  ],
+  "no_product_direction_change": true,
+  "m3_status": "partial",
+  "ac17_status": "partial",
+  "ac18_status": "partial",
+  "natural_case_a_status": "partial"
+}

@@ -31,7 +31,7 @@ extension VoiceOSStore {
             let chain = try compensationChain(db,observationID: observation["id"]!,actionVersion: actionVersion,
                                                scheduleVersion: scheduleVersion,includeFrozen: true)
             guard chain.ids == operationIDs, chain.desired == desired else { throw VoiceOSError("补偿目标不能脱离已确认的AI排期链") }
-            let actualRoots = try storedCorrectionRoots(db,action: action)
+            let actualRoots = Set(try correctionRoots(db,claimID: action["claim_id"]!,pinnedReviewVersion: Int(action["claim_review_version"]!)!).map(\.id))
             guard Set(roots).isSubset(of: actualRoots) else { throw VoiceOSError("补偿计划缺少实际明确纠错与版本依赖") }
         }
         for row in try db.query("SELECT * FROM reminder_compensation_grants") {
@@ -70,19 +70,5 @@ extension VoiceOSStore {
                 }
             } else if row["result_observation_id"] != nil { throw VoiceOSError("未成功核对补偿不能携带成功观测") }
         }
-    }
-    private static func storedCorrectionRoots(_ db: Database, action: [String:String]) throws -> Set<String> {
-        var roots = Set(try db.query("SELECT id FROM claim_reviews WHERE claim_id=? AND version>? AND reason='correction'",
-                                     [action["claim_id"],action["claim_review_version"]]).compactMap { $0["id"] })
-        guard let claim = try db.query("SELECT refs_json FROM claims WHERE id=?", [action["claim_id"]]).first else { return roots }
-        for ref in try JSONDecoder().decode([ClaimReference].self,from: Data(claim["refs_json"]!.utf8)) {
-            for row in try db.query("""
-                SELECT r.id FROM transcript_revisions r JOIN transcripts t ON t.id=r.transcript_id
-                JOIN transcript_versions old ON old.id=r.from_version_id
-                JOIN transcript_versions pinned ON pinned.id=? AND pinned.transcript_id=t.id
-                WHERE t.source_id=? AND old.version_no>=pinned.version_no AND r.reason='transcription_error'
-                """, [ref.transcriptVersionID,ref.sourceID]) { roots.insert(row["id"]!) }
-        }
-        return roots
     }
 }

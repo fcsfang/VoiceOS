@@ -64,12 +64,18 @@ final class ReminderCompensationTests: XCTestCase {
     }
     override func tearDownWithError() throws { try FileManager.default.removeItem(at: base) }
     private func fixture(checkpoint: @escaping @Sendable (SaveCheckpoint) throws -> Void = { _ in },
-                         authority: ScheduleAuthority = .aiFlexible, correct: Bool = true) async throws -> (VoiceOSStore,CompensationPort,String,String,String,ReminderLink) {
+                         authority: ScheduleAuthority = .aiFlexible, correct: Bool = true, includeBackground: Bool = false) async throws -> (VoiceOSStore,CompensationPort,String,String,String,ReminderLink) {
         let store = try VoiceOSStore(root: base.appendingPathComponent(UUID().uuidString),inspector: CompensationInspector(),checkpoint: checkpoint)
         try await store.recover()
         let text = "我要整理研究资料。", source = try await store.recordUserExpression(text)
         _ = try await store.setSourceLocalOnly(sourceID: source,expectedVersion: 1,localOnly: false)
-        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [source]), input = context.sources[0]
+        var sourceIDs = [source]
+        if includeBackground {
+            let background = try await store.recordUserExpression("未引用的历史背景。")
+            _ = try await store.setSourceLocalOnly(sourceID: background,expectedVersion: 1,localOnly: false)
+            sourceIDs.append(background)
+        }
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: sourceIDs), input = context.sources[0]
         let contextID = try await store.persistLocalContext(context)
         let attempt = try await store.reserveLocalModelAttempt(contextID: contextID,model: "fixture",promptVersion: "v1",schemaVersion: "v1")
         let claims = try await store.commitLocalClaims(attemptID: attempt,proposals: [
@@ -135,6 +141,24 @@ final class ReminderCompensationTests: XCTestCase {
         let repeatedOp = try await execute(store,port,p,grant,command: "another-execute"); XCTAssertEqual(op,repeatedOp)
         let writes = await port.writes; XCTAssertEqual(writes,2)
         do { _ = try await execute(store,port,p,"another-grant"); XCTFail("changed grant") } catch {}
+    }
+    func testUncitedInputRootBindsCompensationAndPolicyChangesBlockItsWrite() async throws {
+        let (store,port,action,_,source,_) = try await fixture(correct: false,includeBackground: true)
+        let sources = try await store.sources()
+        let background = try XCTUnwrap(sources.first { $0.id != source })
+        _ = try await store.correctTranscript(sourceID: background.id,expectedVersionID: background.transcriptVersionID!,text: "历史背景原文有误。")
+        let p = try await plan(store,action), grant = try await approve(store,p)
+        await port.configure(find: { _ = try await store.setSourceLocalOnly(sourceID: background.id,expectedVersion: 2,localOnly: true) })
+        do { _ = try await execute(store,port,p,grant); XCTFail("uncited input policy drift") } catch {}
+        let op = try await store.reminderCompensationOperations()[0]; XCTAssertEqual(op.state,.blocked); XCTAssertFalse(op.attempted)
+        let writes = await port.writes; XCTAssertEqual(writes,1)
+        let package = base.appendingPathComponent("indirect-package"), root = base.appendingPathComponent("indirect-restored")
+        try await store.exportPackage(to: package,includeMedia: true)
+        try await VoiceOSStore.restorePackage(from: package,to: root,inspector: CompensationInspector())
+        let restored = try VoiceOSStore(root: root,inspector: CompensationInspector()); try await restored.recover()
+        let impacts = try await restored.correctionActionImpacts()
+        XCTAssertEqual(impacts[0].roots.map(\.sourceID),[background.id])
+        let plans = try await restored.reminderCompensationPlans(); XCTAssertEqual(plans[0].validity,"frozen")
     }
     func testExplicitCommitmentAndHumanDueChangesCannotInferCompensation() async throws {
         let (pledged,_,action,_,_,_) = try await fixture(authority: .userCommitment)

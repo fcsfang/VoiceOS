@@ -110,4 +110,43 @@ final class CorrectionImpactTests: XCTestCase {
         let writes = await port.writes; XCTAssertEqual(writes,1)
         let valid = try await restored.integrityCheck(); XCTAssertTrue(valid)
     }
+    func testUncitedActualInputCorrectionIsVisibleAndSurvivesMigration() async throws {
+        let (store,_,_,_,_) = try await fixture()
+        let background = try await store.recordUserExpression("历史背景：先整理研究资料。")
+        let expression = try await store.recordUserExpression("我会核对研究资料。")
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [background,expression])
+        let id = try await store.persistLocalContext(context)
+        let attempt = try await store.reserveLocalModelAttempt(contextID: id,model: "fixture",promptVersion: "v1",schemaVersion: "v1")
+        let source = context.sources[1]
+        let claim = try await store.commitLocalClaims(attemptID: attempt,proposals: [.init(statement: source.text,ownership: .userTentative,references: [.init(sourceID: expression,transcriptVersionID: source.transcriptVersionID,spanID: source.spans[0].id)])])[0]
+        let action = try await store.createAction(claimID: claim,expectedClaimReviewVersion: 0,title: "核对研究资料",kind: .task)
+        _ = try await store.correctTranscript(sourceID: background,expectedVersionID: context.sources[0].transcriptVersionID,text: "历史背景：不需要整理资料。")
+        let impact = try await store.correctionActionImpacts().first { $0.action.id == action }
+        XCTAssertEqual(impact?.roots.map(\.sourceID),[background])
+        XCTAssertTrue(impact?.roots[0].summary.contains("处理或复用输入") == true)
+        let package = base.appendingPathComponent("input-package"), root = base.appendingPathComponent("input-restored")
+        try await store.exportPackage(to: package,includeMedia: true)
+        try await VoiceOSStore.restorePackage(from: package,to: root,inspector: ImpactInspector())
+        let restored = try VoiceOSStore(root: root,inspector: ImpactInspector()); try await restored.recover()
+        let after = try await restored.correctionActionImpacts().first { $0.action.id == action }
+        XCTAssertEqual(after?.roots.map(\.id),impact?.roots.map(\.id))
+    }
+    func testUnrelatedAndPredatingTranscriptCorrectionsAreNotActionErrorRoots() async throws {
+        let (store,source,claim,_,_) = try await fixture()
+        let unrelated = try await store.recordUserExpression("同主题历史背景。")
+        let old = try await store.transcriptHistory(sourceID: unrelated)[0]
+        _ = try await store.correctTranscript(sourceID: unrelated,expectedVersionID: old.id,text: "同主题背景更正。")
+        _ = try await store.reviewClaim(claimID: claim,expectedVersion: 0,action: .endorse)
+        let impacts = try await store.correctionActionImpacts(); XCTAssertTrue(impacts.isEmpty)
+        let original = try await store.transcriptHistory(sourceID: source)[0]
+        _ = try await store.correctTranscript(sourceID: source,expectedVersionID: original.id,text: "现在我会核对研究资料。")
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [source]), input = context.sources[0]
+        let contextID = try await store.persistLocalContext(context)
+        let attempt = try await store.reserveLocalModelAttempt(contextID: contextID,model: "fixture",promptVersion: "v1",schemaVersion: "v1")
+        let newClaim = try await store.commitLocalClaims(attemptID: attempt,proposals: [.init(statement: input.text,ownership: .userTentative,references: [.init(sourceID: source,transcriptVersionID: input.transcriptVersionID,spanID: input.spans[0].id)])])[0]
+        let newAction = try await store.createAction(claimID: newClaim,expectedClaimReviewVersion: 0,title: "核对资料",kind: .task)
+        _ = try await store.reviewClaim(claimID: newClaim,expectedVersion: 0,action: .endorse)
+        let after = try await store.correctionActionImpacts()
+        XCTAssertFalse(after.contains { $0.action.id == newAction })
+    }
 }

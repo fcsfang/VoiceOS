@@ -177,3 +177,6 @@ schema37新增 `reminder_schedule_bases`（id、唯一intent_id、authority、�
 ## W16 期限补偿实施增量（2026-10-13）
 
 schema38新增`reminder_compensation_plans`（行动/排期版本、link/observation/access、纠错根/原操作链、before/desired及唯一effect_digest）、`reminder_compensation_grants`（唯一plan与用户具体效果）、`reminder_compensation_revocations`（不可变撤回）、`reminder_compensation_operations`（唯一plan、grant、状态/尝试/应答/结果观测）。不修改行动状态版本或解冻认知。恢复目标重推自连续已确认AI期限链，不能仅凭hash替换目标。有计划包v38按四表依赖顺序导入，计划/许可/操作frozen，不恢复清单授权；旧格式拒绝补偿文件。影响digest补充当前claim review、来源policy/state/文字版本/hash。见[ADR040](../adr/040-corrective-reminder-due-compensation.md)。
+
+
+W16依赖覆盖（2026-10-13）：纠错行动根从原model_attempt的context_inputs及conversation_outcome snapshot.reusePlan.priorResults逐级追溯，按producer身份去重；完整输入区别于claim refs/context_anchor。影响摘要覆盖全依赖来源的当前状态/权限/文字版本/hash，补偿迁移共用真实根校验。无新表或包版本，不从同主题/后续会话发言反推依赖。见[ADR041](../adr/041-correction-processing-dependencies.md)。

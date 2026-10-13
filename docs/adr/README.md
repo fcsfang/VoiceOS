@@ -74,3 +74,5 @@
 - [ADR039：纠错行动影响只读投影](039-correction-action-impact-projection.md) — W16第一切片；明确纠错根、实际版本依赖与外部现状核对，具体补偿仍待实现。
 
 - [ADR040：明确纠错后的期限补偿](040-corrective-reminder-due-compensation.md) — schema38/补偿包v38；连续已确认AI链恢复、具体效果许可/撤回、一次尝试及unknown只读核对；原生验收仍待完成。
+
+- [ADR041：完整处理与成果复用输入的纠错追溯](041-correction-processing-dependencies.md) — 共用错误根解析、不可变处理依赖、未引用背景与多级复用、全依赖来源绑定；schema38不变。

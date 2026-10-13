@@ -34,26 +34,8 @@ extension VoiceOSStore {
         let access = try reminderAccess()
         return try actions.compactMap { action in
             guard let claim = claims[action.claimID] else { return nil }
-            var roots: [String: CorrectionImpactRoot] = [:]
-            for row in try db.query("SELECT * FROM claim_reviews WHERE claim_id=? AND version>? AND reason='correction' ORDER BY version",
-                                    [claim.id,String(action.claimReviewVersion)]) {
-                roots[row["id"]!] = .init(id: row["id"]!, kind: "claim_correction", sourceID: nil,
-                                          summary: "认知第\(row["version"]!)版明确纠错；行动引用第\(action.claimReviewVersion)版")
-            }
-            for ref in claim.references {
-                let revisions = try db.query("""
-                    SELECT r.id FROM transcript_revisions r
-                    JOIN transcripts t ON t.id=r.transcript_id
-                    JOIN transcript_versions old ON old.id=r.from_version_id
-                    JOIN transcript_versions pinned ON pinned.id=? AND pinned.transcript_id=t.id
-                    WHERE t.source_id=? AND old.version_no>=pinned.version_no AND r.reason='transcription_error'
-                    """, [ref.transcriptVersionID,ref.sourceID])
-                for row in revisions {
-                    roots[row["id"]!] = .init(id: row["id"]!, kind: "transcription_error", sourceID: ref.sourceID,
-                                              summary: "行动引用的逐字稿随后已纠错；旧引用保留但不继续执行")
-                }
-            }
-            guard !roots.isEmpty else { return nil }
+            let orderedRoots = try Self.correctionRoots(db,claimID: claim.id,pinnedReviewVersion: action.claimReviewVersion)
+            guard !orderedRoots.isEmpty else { return nil }
             let link = links.first { $0.actionID == action.id }
             let operations = try link.map { try db.query("SELECT * FROM reminder_schedule_operations WHERE link_id=? ORDER BY created_at,id", [$0.id]) } ?? []
             let effects = try operations.map { row in
@@ -82,14 +64,13 @@ extension VoiceOSStore {
             } else {
                 summary = "旧行动已停止；上次观测的外部任务仍保留，需核对是否保留、改写或取消；尚未执行补偿"
             }
-            let orderedRoots = roots.values.sorted { $0.id < $1.id }
             let operationState = operations.map { [$0["id"] ?? "",$0["state"] ?? "",$0["result_observation_id"] ?? "",$0["save_acknowledged"] ?? ""] }.flatMap { $0 }
             let fields = ["correction-action-impact-v1",action.id,String(action.version),action.state,action.validity,
                           link?.id ?? "",link?.state ?? "",link?.externalID ?? "",link?.lastObservationID ?? "",
                           access.map { String($0.version) } ?? "",access?.enabled == true ? "enabled" : "paused",access?.calendarID ?? "",
                           String(claim.reviewVersion)]
             var sourceState: [String] = []
-            for id in Set(claim.references.map(\.sourceID)).sorted() {
+            for id in Set(try Self.correctionInputVersions(db,claimID: claim.id).map(\.sourceID)).sorted() {
                 guard let source = try db.query("SELECT s.*,t.current_version_id FROM sources s LEFT JOIN transcripts t ON t.source_id=s.id WHERE s.id=?", [id]).first else {
                     throw VoiceOSError("纠错影响缺少引用来源")
                 }

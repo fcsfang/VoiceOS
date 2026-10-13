@@ -1,6 +1,6 @@
 # VoiceOS 文档索引
 
-**当前接续（2026-10-13）：** 按M2→M3收口，W16已完成明确纠错影响、只读核对及连续已确认AI排期链的期限恢复：具体效果确认/撤回、人工字段保护、一次尝试与unknown只读恢复。schema38/有补偿包v38，568项完整回归、稳定签名与严格codesign通过，零真实任务改动。任务取消、全部间接派生图、语音期限提取、原生UI/真实EventKit补偿和自然案例A仍待完成，M3仍partial。先读[夜间进度](planning/overnight-progress.md)、[M3矩阵](testing/m3-evidence-status-2026-10-13.md)和[ADR040](adr/040-corrective-reminder-due-compensation.md)，沿[路线图](planning/implementation-roadmap.md)接续，不扩展M4。
+**当前接续（2026-10-13）：** 沿M2→M3收口，W16期限补偿已提交`e6e0457`；随后补齐未引用背景、AI锚点和多级成果复用输入的纠错追溯，共用根校验并使全部依赖来源的变化停止旧许可。schema38/补偿包v38；最新74项相关检查与稳定签名通过，上一补偿阶段568项全套通过。任务取消/其他补偿、重新理解流程、语音期限提取、原生UI/真实EventKit补偿和自然案例A仍开放，M3仍partial。先读[夜间进度](planning/overnight-progress.md)、[M3矩阵](testing/m3-evidence-status-2026-10-13.md)及[ADR041](adr/041-correction-processing-dependencies.md)，沿[路线图](planning/implementation-roadmap.md)接续，不扩展M4。
 
 ## 历史接续记录
 

@@ -145,3 +145,6 @@ Task 候选状态：planned、active、completed、cancelled、deferred；Opport
 ## W16 具体期限补偿（2026-10-13）
 
 明确纠错冻结→影响核对→推导连续confirmed AI排期链之前due→持久plan→用户具体grant→reserved/fresh read→持久unknown→Native最终授权/仅改due→应答＋唯一观测同事务→confirmed或observed。变化/撤回/取消阻止旧写；reserved退出blocked，unknown只读恢复，conflict保留外部值。保存后撤回不假装撤销已发生效果；同一计划不可重发。迁移plan/grant/operation frozen，不恢复执行。原行动始终冻结，不生成Outcome、不标记完成或取消任务。见[ADR040](../adr/040-corrective-reminder-due-compensation.md)。
+
+
+W16依赖追溯（2026-10-13）：既有冻结屏障不变；当前影响/补偿许可从原处理及不可变复用producer输入重建错误根。来源更正需晚于实际输入，早期回复不因未来发言更正而被误归因；全依赖来源变化使旧效果不再live，恢复仍冻结。见[ADR041](../adr/041-correction-processing-dependencies.md)。
