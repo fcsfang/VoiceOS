@@ -1,6 +1,8 @@
 # VoiceOS 文档索引
 
-**当前接续（2026-10-13）：** 沿M2→M3收口，W16期限补偿已提交`e6e0457`；随后补齐未引用背景、AI锚点和多级成果复用输入的纠错追溯，共用根校验并使全部依赖来源的变化停止旧许可。schema38/补偿包v38；最新74项相关检查与稳定签名通过，上一补偿阶段568项全套通过。任务取消/其他补偿、重新理解流程、语音期限提取、原生UI/真实EventKit补偿和自然案例A仍开放，M3仍partial。先读[夜间进度](planning/overnight-progress.md)、[M3矩阵](testing/m3-evidence-status-2026-10-13.md)及[ADR041](adr/041-correction-processing-dependencies.md)，沿[路线图](planning/implementation-roadmap.md)接续，不扩展M4。
+**开发执行入口（2026-10-13）：** 从 [自动推进脚手架](agents/README.md) 查看诊断与运行命令，再按 [Agent工作流](agents/workflow.md) 与 [权威任务记录](agents/issue-tracker.md) 领取工程任务，按需调用 [Skills](../.agents/CATALOG.md)。下方接续是产品实现证据，夜间提示已退出执行入口。
+
+**产品实现快照（2026-10-13，非任务派发）：** 沿M2→M3收口，W16期限补偿已提交`e6e0457`；随后补齐未引用背景、AI锚点和多级成果复用输入的纠错追溯，共用根校验并使全部依赖来源的变化停止旧许可。schema38/补偿包v38；最新74项相关检查与稳定签名通过，上一补偿阶段568项全套通过。任务取消/其他补偿、重新理解流程、语音期限提取、原生UI/真实EventKit补偿和自然案例A仍开放，M3仍partial。先读[夜间进度](planning/overnight-progress.md)、[M3矩阵](testing/m3-evidence-status-2026-10-13.md)及[ADR041](adr/041-correction-processing-dependencies.md)，沿[路线图](planning/implementation-roadmap.md)接续，不扩展M4。
 
 ## 历史接续记录
 
