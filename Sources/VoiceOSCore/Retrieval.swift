@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 public struct RetrievalDocument: Codable, Sendable, Identifiable {
     public let id: String
@@ -45,6 +46,8 @@ public struct RetrievalResult: Sendable {
     public let scannedSources: Int
     public let scannedFragments: Int
     public let matchingSources: Int
+    fileprivate let window: RetrievalWindow
+    fileprivate let corpusDigest: String
 }
 extension VoiceOSStore {
     /// Read current originals, never frozen derived claims or old transcript versions.
@@ -97,9 +100,22 @@ extension VoiceOSStore {
               spans.contains(where: { $0.id == doc.spanID && $0.textStart <= doc.textStart && $0.textEnd >= doc.textEnd }),
               String(String.UnicodeScalarView(scalars[doc.textStart..<doc.textEnd])) == doc.text else { throw VoiceOSError("检索摘录与原文不一致") }
     }
+    /// A ranking (including no matches) depends on every scanned input, not just
+    /// the displayed hits. Newly available originals can also change the answer.
+    public func validateRetrievalResult(_ result: RetrievalResult) throws {
+        guard try retrievalCorpusDigest(retrievalDocuments(window: result.window)) == result.corpusDigest else {
+            throw VoiceOSError("历史资料已变化，请重新查找")
+        }
+    }
+    private func retrievalCorpusDigest(_ documents: [RetrievalDocument]) throws -> String {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        return SHA256.hash(data: try encoder.encode(documents)).map { String(format: "%02x", $0) }.joined()
+    }
     public func retrieve(_ query: String, semantic: Bool = false, limit: Int = 20, using port: any LocalRetrievalPort) async throws -> RetrievalResult {
         guard !query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty, query.unicodeScalars.count <= 512, (1...100).contains(limit) else { throw VoiceOSError("请填写不超过 512 字的查询并使用有效结果数量") }
-        let docs = try retrievalDocuments(window:semantic ? port.semanticWindow : RetrievalWindow(scalars:800,overlap:512))
+        let window = semantic ? port.semanticWindow : RetrievalWindow(scalars:800,overlap:512)
+        let docs = try retrievalDocuments(window:window)
+        let corpusDigest = try retrievalCorpusDigest(docs)
         let matches = try await port.rank(query:query,documents:docs,semantic:semantic)
         try Task.checkCancellation()
         let lookup = Dictionary(uniqueKeysWithValues:docs.map { ($0.id,$0) })
@@ -114,6 +130,8 @@ extension VoiceOSStore {
         hits.sort { if $0.method != $1.method { return $0.method == "exact" }; if $0.score != $1.score { return $0.score > $1.score }; return $0.id < $1.id }
         var seen: Set<String> = []
         let unique = hits.filter { seen.insert($0.document.sourceID).inserted }
-        return RetrievalResult(hits:Array(unique.prefix(limit)),scannedSources:Set(docs.map(\.sourceID)).count,scannedFragments:docs.count,matchingSources:unique.count)
+        let result = RetrievalResult(hits:Array(unique.prefix(limit)),scannedSources:Set(docs.map(\.sourceID)).count,scannedFragments:docs.count,matchingSources:unique.count,window:window,corpusDigest:corpusDigest)
+        try validateRetrievalResult(result)
+        return result
     }
 }

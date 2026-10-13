@@ -25,7 +25,7 @@ else:
     signing_identity = candidates[0]
 env = dict(os.environ)
 env.pop('SDKROOT', None)
-subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build'], cwd=ROOT, env=env, check=True)
+subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build', '--product', 'VoiceOS'], cwd=ROOT, env=env, check=True)
 bin_path = Path(subprocess.check_output(['xcrun', '--sdk', 'macosx', 'swift', 'build', '--show-bin-path'], cwd=ROOT, env=env, text=True).strip())
 app = ROOT / 'dist' / 'VoiceOS.app'
 mac = app / 'Contents' / 'MacOS'

@@ -20,9 +20,11 @@ extension VoiceOSStore {
         }
         let result = try db.transaction {
             guard let row = try db.query("""
-            SELECT t.* FROM transcripts t JOIN sources s ON s.id=t.source_id
+            SELECT t.*,v.text AS current_text FROM transcripts t JOIN sources s ON s.id=t.source_id
+            JOIN transcript_versions v ON v.id=t.current_version_id
             WHERE s.id=? AND s.state IN ('saved','reference_only') AND t.current_version_id=?
             """, [sourceID,expectedVersionID]).first else { throw VoiceOSError("逐字稿已经更新，请重新打开当前版本再更正") }
+            guard text != row["current_text"] else { throw VoiceOSError("文字未改变，无需保存更正") }
             let versionID = UUID().uuidString
             let next = Int(row["version"]!)! + 1
             // Editing changes text alignment. Keep the original timed version; do not invent new timestamps.

@@ -62,7 +62,19 @@ final class ControlCenter: ObservableObject {
         do {
             let items = try await store.expressionAssociationFeedback(currentSourceID: id)
             let attempts = try await store.expressionAssociationAttempts().filter { $0.currentSourceID == id }
-            if selected == id { selectedAssociationFeedback = items; selectedAssociationAttempts = attempts }
+            if selected == id {
+                selectedAssociationFeedback = items; selectedAssociationAttempts = attempts
+                if let source = records.first(where: { $0.id == id }) {
+                    let current = attempts.first {
+                        $0.snapshot.current.sources.first?.transcriptVersionID == source.transcriptVersionID && $0.snapshot.policyVersion == source.policyVersion
+                    }
+                    if current?.validity == "frozen" {
+                        associationStatuses[id] = "旧关联依据已变化，已暂停使用；保留历史，不自动重发。"
+                    } else if current == nil, !attempts.isEmpty {
+                        associationStatuses[id] = nil
+                    }
+                }
+            }
         } catch { if selected == id { selectedAssociationFeedback = []; selectedAssociationAttempts = [] } }
     }
     private func associateUnderstoodExpression(_ id: String, segmentedBatchID: String? = nil) async {
@@ -83,6 +95,7 @@ final class ControlCenter: ObservableObject {
             case .noCandidates: associationStatuses[id] = "本机召回没有找到可用候选；未调用关联模型，不代表历史一定没有相关内容。"
             case .inFlight: associationStatuses[id] = "关联已有在途预留；不会重复发送。"
             case .unknown: associationStatuses[id] = "关联结果未知；已保留尝试和已知用量，不自动重发。"
+            case .frozen: associationStatuses[id] = "旧关联依据已变化，已暂停使用；保留历史，不自动重发。"
             case .completed: associationStatuses[id] = result.attempt?.proposals.isEmpty == true ? "关联判断已完成，没有直接相关提案。" : "历史关联已保存；关系属于AI提案，未改变观点或行动。"
             }
         } catch { associationStatuses[id] = "关联未完成：" + error.localizedDescription }
@@ -408,9 +421,15 @@ final class ControlCenter: ObservableObject {
             if let plan = segmentationPlan, !records.contains(where: { $0.id == plan.source.sourceID && $0.transcriptVersionID == plan.source.transcriptVersionID && $0.policyVersion == plan.policyVersion && ["saved","reference_only"].contains($0.state) }) {
                 segmentationPlan = nil; segmentationStatus = "原话或授权已变化，请重新查看分段"
             }
-            if let result = retrievalResult, result.hits.contains(where: { hit in
-                !records.contains { $0.id == hit.document.sourceID && $0.transcriptVersionID == hit.document.transcriptVersionID && $0.policyVersion == hit.document.policyVersion && ["saved","reference_only"].contains($0.state) }
-            }) { cancelHistorySearch(); retrievalStatus = "历史资料已变化，请重新查找" }
+            if let result = retrievalResult, let store {
+                let generation = retrievalGeneration
+                do { try await store.validateRetrievalResult(result) }
+                catch {
+                    if generation == retrievalGeneration {
+                        cancelHistorySearch(); retrievalStatus = "历史资料已变化，请重新查找"
+                    }
+                }
+            }
 
             if let store {
                 await relevance.validate(store:store)
@@ -702,6 +721,8 @@ final class ControlCenter: ObservableObject {
                             ? "理解与关联判断已完成 · 没有直接相关提案"
                             : "理解与关联判断已完成 · 关系提案已保存，未改变观点或行动"
                     }
+                } else if result.state == .frozen, result.phase == .association {
+                    status = "当前文字的理解已保留 · 旧关联已冻结，未重发；请核对纠错后的依据"
                 } else { status = "表达处理状态：\(result.state.rawValue)" }
                 requestReminderRefresh()
             } catch { status = error.localizedDescription; break }
@@ -753,7 +774,7 @@ final class ControlCenter: ObservableObject {
         guard let store, let version = record.transcriptVersionID else { return false }
         do {
             _ = try await store.correctTranscript(sourceID: record.id, expectedVersionID: version, text: text)
-            await refresh(); status = "更正已保存 · 原件和旧逐字稿保留"; return true
+            await refresh(); status = "更正已保存 · 旧理解与行动已暂停，外部任务保留；可重新理解当前文字"; return true
         } catch { status = error.localizedDescription; return false }
     }
     func changeTextPolicy(_ record: SourceRecord) async {
@@ -1767,7 +1788,7 @@ private struct TranscriptCorrectionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("更正逐字稿").font(.title2)
-            Text("仅更正识别文字；原件和旧逐字稿保留。新文字的时间定位会标为未确认。").foregroundStyle(.secondary)
+            Text("仅更正识别文字；原件和旧逐字稿保留。旧理解与行动停止继续使用，外部任务仍保留。保存后可重新理解当前文字，新文字的时间定位未确认。").foregroundStyle(.secondary)
             TextEditor(text: $text).font(.body).border(.secondary.opacity(0.3))
             HStack {
                 Spacer()

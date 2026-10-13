@@ -48,7 +48,7 @@ extension VoiceOSStore {
                 a=try JSONDecoder().decode(ProcessingModelIdentity.self,from:Data(row["aggregation_json"]!.utf8))
             guard try recordingSegmentIdentities(cognition:c,extraction:processingIdentity(e),aggregation:processingIdentity(a)) != nil else { throw VoiceOSError("录制分段端口历史无效") }
             if let state=row["association_state"] {
-                guard ["paused","localOnly","modelUnavailable","budgetExceeded","noCandidates","inFlight","completed","unknown","cancelled"].contains(state),row["batch_id"] != nil else { throw VoiceOSError("录制长关联阶段无效") }
+                guard ["paused","localOnly","modelUnavailable","budgetExceeded","noCandidates","inFlight","completed","unknown","frozen","cancelled"].contains(state),row["batch_id"] != nil else { throw VoiceOSError("录制长关联阶段无效") }
             }
             if let batchID=row["batch_id"] {
                 guard row["processing_intent_id"] == nil,let parent=try db.query("SELECT * FROM segmented_processing_batches WHERE id=?",[batchID]).first else { throw VoiceOSError("录制分段批次缺失或与普通队列冲突") }
@@ -60,12 +60,12 @@ extension VoiceOSStore {
                       original["version_no"] == "1" else { throw VoiceOSError("录制长文字与预先授权范围不一致") }
                 if let state=row["association_state"],state != "cancelled" {
                     guard try !db.query("SELECT id FROM segmented_cognitive_commits WHERE batch_id=?",[batchID]).isEmpty else { throw VoiceOSError("录制关联阶段缺少整篇认知提交") }
-                    if ["completed","unknown","inFlight"].contains(state) {
-                        let matching=try db.query("SELECT state,snapshot_json FROM expression_association_attempts WHERE current_source_id=?",[s.sourceID]).filter {
+                    if ["completed","unknown","inFlight","frozen"].contains(state) {
+                        let matching=try db.query("SELECT state,validity,snapshot_json FROM expression_association_attempts WHERE current_source_id=?",[s.sourceID]).filter {
                             let snapshot=try JSONDecoder().decode(ExpressionAssociationSnapshot.self,from:Data($0["snapshot_json"]!.utf8))
                             return snapshot.policyVersion == b.scope.plan.policyVersion && snapshot.current.sources.first?.transcriptVersionID == s.transcriptVersionID
                         }
-                        guard matching.contains(where:{ state == "inFlight" || $0["state"] == state }) else { throw VoiceOSError("录制关联阶段没有对应尝试回执") }
+                        guard matching.contains(where:{ state == "frozen" ? $0["validity"] == "frozen" : state == "inFlight" || $0["state"] == state }) else { throw VoiceOSError("录制关联阶段没有对应尝试回执") }
                     }
                 }
             }
