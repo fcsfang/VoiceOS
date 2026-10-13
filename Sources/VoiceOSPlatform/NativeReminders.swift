@@ -38,6 +38,13 @@ public final class NativeReminders: RemindersSchedulingPort {
         guard let calendar = store.calendar(withIdentifier: id), calendar.allowsContentModifications else { throw VoiceOSError("明确选定的提醒事项清单不可用；不会另选清单") }
         return calendar
     }
+    private func marker(_ item: EKReminder) -> String {
+        let noteLink = item.notes?.components(separatedBy: "\n").last(where: { $0.hasPrefix("voiceos://task/") }).flatMap(URL.init(string:))
+        if let url = item.url ?? noteLink, url.scheme == "voiceos", url.host == "task", UUID(uuidString: url.lastPathComponent) != nil {
+            return "voiceos-action:" + url.lastPathComponent
+        }
+        return item.notes ?? ""
+    }
     public func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
         try Task.checkCancellation()
         guard !reading else { throw VoiceOSError("提醒事项读取正在进行") }
@@ -54,8 +61,8 @@ public final class NativeReminders: RemindersSchedulingPort {
                     guard gate.isWaiting else { return }
                     guard let items else { complete(.failure(VoiceOSError("提醒事项读取未返回结果"))); return }
                     guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess else { complete(.failure(VoiceOSError("回读期间权限已变化"))); return }
-                    let results = items.filter { $0.calendar.calendarIdentifier == calendarID && ($0.notes == marker || (externalID != nil && $0.calendarItemIdentifier == externalID)) }.map {
-                        ReminderSnapshot(id: $0.calendarItemIdentifier, title: $0.title ?? "", completed: $0.isCompleted, marker: $0.notes ?? "", dueDate: ReminderDueDate.reading($0.dueDateComponents))
+                    let results = items.filter { $0.calendar.calendarIdentifier == calendarID && (self.marker($0) == marker || (externalID != nil && $0.calendarItemIdentifier == externalID)) }.map {
+                        ReminderSnapshot(id: $0.calendarItemIdentifier, title: $0.title ?? "", completed: $0.isCompleted, marker: self.marker($0), dueDate: ReminderDueDate.reading($0.dueDateComponents))
                     }
                     complete(.success(results))
                 }
@@ -65,12 +72,14 @@ public final class NativeReminders: RemindersSchedulingPort {
         try Task.checkCancellation()
         return snapshots
     }
-    public func create(calendarID: String, title: String, marker: String) async throws {
+    public func create(calendarID: String, title: String, marker: String, context: String) async throws {
         try Task.checkCancellation()
         guard !reading else { throw VoiceOSError("提醒事项读取正在进行") }
         let target = try calendar(calendarID)
         let item = EKReminder(eventStore: store)
-        item.calendar = target; item.title = title; item.notes = marker
+        let link = "voiceos://task/" + marker.replacingOccurrences(of: "voiceos-action:", with: "")
+        item.calendar = target; item.title = title; item.notes = context + "\n\n在 VoiceOS 查看：\n" + link
+        item.url = URL(string: link)
         // No guessed deadline, alarm, priority, or changes to other items.
         do { try store.save(item, commit: true) }
         catch { throw VoiceOSError("提醒事项写入结果未知") }
@@ -92,7 +101,7 @@ public final class NativeReminders: RemindersSchedulingPort {
         guard let item = store.calendarItem(withIdentifier: expected.id) as? EKReminder,
               item.calendar.calendarIdentifier == calendarID,
               ReminderSnapshot(id: item.calendarItemIdentifier, title: item.title ?? "", completed: item.isCompleted,
-                               marker: item.notes ?? "", dueDate: ReminderDueDate.reading(item.dueDateComponents)) == expected else {
+                               marker: marker(item), dueDate: ReminderDueDate.reading(item.dueDateComponents)) == expected else {
             throw VoiceOSError("最终保存前身份或字段已变化；没有修改")
         }
         // EventKit has no remote atomic compare-and-swap. The synchronous final
@@ -103,54 +112,29 @@ public final class NativeReminders: RemindersSchedulingPort {
         catch { throw VoiceOSError("提醒事项改期结果未知；只能回读，不重发") }
     }
 
-    /// Development verification only: mark the one explicitly identified item
-    /// complete, then let VoiceOS observe the change through its normal readback.
-    public func markCompleted(calendarID: String, externalID: String) async throws {
-        try Task.checkCancellation()
-        let target = try calendar(calendarID)
-        let predicate = store.predicateForReminders(in: [target])
-        let gate = CallbackWait<[EKReminder]>()
-        let items = try await gate.wait(timeout: readTimeout) { complete in
-            let token = store.fetchReminders(matching: predicate) { reminders in
-                Task { @MainActor in
-                    guard gate.isWaiting else { return }
-                    guard let reminders else { complete(.failure(VoiceOSError("提醒事项完成核对未返回结果"))); return }
-                    complete(.success(reminders))
-                }
-            }
-            return { [store] in store.cancelFetchRequest(token) }
-        }
-        guard let item = items.first(where: { $0.calendar.calendarIdentifier == calendarID && $0.calendarItemIdentifier == externalID }) else {
-            throw VoiceOSError("未找到明确指定的 VoiceOS 任务；不会修改其他提醒事项")
-        }
-        item.isCompleted = true
-        do { try store.save(item, commit: true) }
-        catch { throw VoiceOSError("提醒事项完成写入结果未知") }
+    public func updateContext(calendarID: String, externalID: String, marker: String, context: String) throws {
+        guard !reading else { throw VoiceOSError("提醒事项读取正在进行") }
+        _ = try calendar(calendarID)
+        guard let item = store.calendarItem(withIdentifier: externalID) as? EKReminder,
+              item.calendar.calendarIdentifier == calendarID, self.marker(item) == marker else { throw VoiceOSError("提醒事项身份已变化，请重新核对") }
+        let existing = item.notes == marker ? "" : (item.notes ?? "")
+        var notes = existing.hasPrefix("来源：") ? existing : context + (existing.isEmpty ? "" : "\n\n我的补充：\n" + existing)
+        let url = URL(string: "voiceos://task/" + marker.replacingOccurrences(of: "voiceos-action:", with: ""))
+        if let link = url?.absoluteString, !notes.contains(link) { notes += "\n\n在 VoiceOS 查看：\n" + link }
+        if item.notes == notes, item.url == url { return }
+        item.notes = notes; item.url = url
+        try store.save(item, commit: true)
     }
-
-    /// Development fixture only: reopen the one explicitly identified item.
-    /// Formal material processing never calls this method; newly created items
-    /// remain open until the user completes them in Apple Reminders.
-    public func markIncomplete(calendarID: String, externalID: String) async throws {
+    public func setCompletion(calendarID: String, externalID: String, marker: String, completed: Bool,
+                              authorize: @MainActor () async throws -> Void) async throws {
+        let matches = try await find(calendarID: calendarID, externalID: externalID, marker: marker)
+        guard matches.count == 1, matches[0].id == externalID, matches[0].marker == marker else { throw VoiceOSError("提醒事项身份需重新核对") }
+        try await authorize()
         try Task.checkCancellation()
-        let target = try calendar(calendarID)
-        let predicate = store.predicateForReminders(in: [target])
-        let gate = CallbackWait<[EKReminder]>()
-        let items = try await gate.wait(timeout: readTimeout) { complete in
-            let token = store.fetchReminders(matching: predicate) { reminders in
-                Task { @MainActor in
-                    guard gate.isWaiting else { return }
-                    guard let reminders else { complete(.failure(VoiceOSError("提醒事项未完成核对未返回结果"))); return }
-                    complete(.success(reminders))
-                }
-            }
-            return { [store] in store.cancelFetchRequest(token) }
-        }
-        guard let item = items.first(where: { $0.calendar.calendarIdentifier == calendarID && $0.calendarItemIdentifier == externalID }) else {
-            throw VoiceOSError("未找到明确指定的 VoiceOS 任务；不会修改其他提醒事项")
-        }
-        item.isCompleted = false
-        do { try store.save(item, commit: true) }
-        catch { throw VoiceOSError("提醒事项未完成写入结果未知") }
+        _ = try calendar(calendarID)
+        guard let item = store.calendarItem(withIdentifier: externalID) as? EKReminder,
+              item.calendar.calendarIdentifier == calendarID, self.marker(item) == marker else { throw VoiceOSError("保存前提醒事项身份已变化") }
+        item.isCompleted = completed
+        try store.save(item, commit: true)
     }
 }

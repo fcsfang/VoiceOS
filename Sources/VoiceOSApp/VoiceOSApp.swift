@@ -246,6 +246,7 @@ final class ControlCenter: ObservableObject {
     @Published var claimHistory: [ClaimReviewVersion] = []
     @Published var reviewingClaim = false
     @Published var actionRecords: [ActionRecord] = []
+    @Published var focusedTaskID: String?
     @Published var correctionImpacts: [CorrectionActionImpact] = []
     @Published var compensationPlans: [ReminderCompensationPlan] = []
     @Published var compensationGrants: [ReminderCompensationGrant] = []
@@ -870,6 +871,7 @@ final class ControlCenter: ObservableObject {
         guard reminderAccess?.enabled == true else { return }
         reminderRefresh.request()
     }
+    func refreshTaskReminders() async { await automaticReminderRefresh() }
     private func automaticReminderRefresh() async {
         guard let store, let access = reminderAccess, access.enabled else { return }
         if remindersBusy { return }
@@ -910,6 +912,32 @@ final class ControlCenter: ObservableObject {
             activeActionTitle = action.title
         }
         catch { status = error.localizedDescription }
+    }
+    func focusReminder(_ url: URL) async -> Bool {
+        guard url.scheme == "voiceos", url.host == "task", UUID(uuidString: url.lastPathComponent) != nil else { return false }
+        await refresh()
+        guard let link = reminderLinks.first(where: { $0.id == url.lastPathComponent }),
+              let action = actionRecords.first(where: { $0.id == link.actionID }) else { status = "这条提醒的来源不在当前资料库中"; return false }
+        focusedTaskID = action.id
+        selected = claims.first(where: { $0.id == action.claimID })?.references.first?.sourceID
+        return true
+    }
+    func enrichReminderContexts() async {
+        guard let store, let access = reminderAccess, access.enabled, !remindersBusy else { return }
+        remindersBusy = true; defer { remindersBusy = false; requestReminderRefresh() }
+        var count = 0
+        do {
+            for link in reminderLinks where link.calendarID == access.calendarID && link.state == "linked" {
+                guard let id = link.externalID, let action = actionRecords.first(where: { $0.id == link.actionID }),
+                      action.validity == "current", reminderSourceAllowed(action) else { continue }
+                let context = try await store.reminderContext(actionID: action.id)
+                guard (try await store.reminderAccess())?.version == access.version else { throw VoiceOSError("提醒事项连接已变化，停止补充出处") }
+                try reminders.updateContext(calendarID: access.calendarID, externalID: id, marker: "voiceos-action:" + link.id, context: context)
+                count += 1
+            }
+            status = "已为 \(count) 条提醒事项补充原话、时间与来源链接"
+        } catch { status = "已补充 \(count) 条出处；" + error.localizedDescription }
+        await refresh()
     }
     func acceptReminderStatus(_ link: ReminderLink, action: ActionRecord) async {
         guard let store, let access = reminderAccess, access.enabled,
@@ -1051,8 +1079,19 @@ final class ControlCenter: ObservableObject {
         guard let store, !savingAction else { return }
         savingAction = true; defer { savingAction = false }
         do {
-            _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state)
-            status = "行动状态已保存 · 观点仍需独立验证"
+            if state != .dismissed, let link = reminderLinks.first(where: { $0.actionID == action.id }), let id = link.externalID {
+                guard let access = reminderAccess, access.enabled, access.calendarID == link.calendarID, !remindersBusy else { throw VoiceOSError("请先恢复提醒事项连接，或在 Apple 提醒事项中更改完成状态") }
+                remindersBusy = true; defer { remindersBusy = false; requestReminderRefresh() }
+                try await reminders.setCompletion(calendarID: link.calendarID, externalID: id, marker: "voiceos-action:" + link.id, completed: state == .completed) {
+                    guard let currentAccess = try await store.reminderAccess(), currentAccess.enabled, currentAccess.version == access.version,
+                          let current = try await store.actions(includeHistory: true).first(where: { $0.id == action.id }), current.validity == "current", current.version == action.version else { throw VoiceOSError("任务或连接已变化，请重新核对") }
+                }
+                try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: reminders, expectedAccessVersion: access.version)
+                status = "完成状态已同步并回读；可以补充实际结果或收获"
+            } else {
+                _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state)
+                status = "行动状态已保存"
+            }
         } catch { status = error.localizedDescription }
         await refresh()
     }
@@ -1194,6 +1233,8 @@ struct CenterView: View {
     @State private var showingQuietFeedback = false
     @State private var showingDiscussion = false
     @State private var showingEnglishPractice = false
+    @State private var showingTasks = false
+    @State private var pendingTaskURL: URL?
     @Environment(\.openWindow) private var openWindow
     private var activeProcessingCount: Int {
         model.processingIntents.filter { [.queued, .running].contains($0.state) }.count + model.recordingRequests.filter { $0.state == "waiting" }.count + model.segmentedBatches.filter { canStopSegmented($0) }.count
@@ -1603,6 +1644,7 @@ struct CenterView: View {
                     Button("录制并处理文字（原始音频不上传）") { Task { await model.startDictation(processAfterTranscription: true) } }.disabled(!model.modelConfigured)
                 }.disabled(!model.initialized || model.dictationBusy)
             }
+            Button("任务", systemImage: "checklist") { showingTasks = true }.disabled(!model.initialized)
             Button("讨论记录",systemImage:"bubble.left.and.bubble.right") { Task { await model.refreshDiscussion(); showingDiscussion = true } }.disabled(!model.initialized)
             Button("静默回顾", systemImage:"text.bubble") { model.quietAssociationSourceID = nil; showingQuietFeedback = true }.disabled(!model.initialized)
             Button("查找历史文字", systemImage: "text.magnifyingglass") { searching = true }.disabled(!model.initialized)
@@ -1625,6 +1667,17 @@ struct CenterView: View {
         .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
         .focusedSceneValue(\.voiceOSController, model)
         .navigationTitle(model.libraryTitle)
+        .onOpenURL { url in
+            if model.initialized { Task { if await model.focusReminder(url) { showingTasks = true } } }
+            else { pendingTaskURL = url }
+        }
+        .onChange(of: model.initialized) { _, ready in
+            if ready, let url = pendingTaskURL {
+                pendingTaskURL = nil
+                Task { if await model.focusReminder(url) { showingTasks = true } }
+            }
+        }
+        .sheet(isPresented: $showingTasks) { TaskManagerView(model: model) { showingTasks = false } }
         .sheet(isPresented: $showingSegmentation) { TranscriptSegmentationView(model:model) { showingSegmentation = false } }
         .sheet(isPresented: $showingDiscussion) { DiscussionView(model:model) { showingDiscussion = false } }
         .sheet(isPresented: $searching) { HistorySearchView(model:model) { searching = false } }

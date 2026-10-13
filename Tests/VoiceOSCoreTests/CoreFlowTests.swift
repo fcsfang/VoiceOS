@@ -28,11 +28,13 @@ private struct FlowAssociation: ExpressionAssociationPort {
 }
 private actor FlowReminders: RemindersPort {
     var items: [ReminderSnapshot] = []
+    var contexts: [String] = []
     func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
         items.filter { $0.marker == marker || $0.id == externalID }
     }
-    func create(calendarID: String, title: String, marker: String) async throws {
+    func create(calendarID: String, title: String, marker: String, context: String) async throws {
         items.append(.init(id: UUID().uuidString, title: title, completed: false, marker: marker))
+        contexts.append(context)
     }
     func complete() { items = items.map { .init(id: $0.id, title: $0.title, completed: true, marker: $0.marker) } }
 }
@@ -68,6 +70,8 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(action.claimID, claims.first?.id)
         _ = try await store.setReminderAccess(calendarID: "fixture", title: "测试清单", enabled: true, expectedVersion: 0)
         try await store.sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: "fixture", using: reminders, expectedAccessVersion: 1)
+        let context = await reminders.contexts.first
+        XCTAssertTrue(context?.contains("原话：我会查阅相关论文。") == true)
         let links = try await store.reminderLinks(), link = try XCTUnwrap(links.first)
         await reminders.complete()
         try await store.readReminder(linkID: link.id, calendarID: "fixture", using: reminders, expectedAccessVersion: 1)
