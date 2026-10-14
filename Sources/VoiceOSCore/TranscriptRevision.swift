@@ -2,6 +2,32 @@ import Foundation
 import CryptoKit
 
 extension VoiceOSStore {
+    // A confirmed offline ASR result keeps real chunk timing and an explicit system provenance.
+    @discardableResult
+    public func applyReviewedQwenTranscript(sourceID: String, expectedVersionID: String, speech: SpeechText, responseID: String) throws -> String {
+        guard !responseID.isEmpty else { throw VoiceOSError("音频重识别缺少核对回执") }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let encodedSpans = try encoder.encode(speech.spans)
+        let digest = SHA256.hash(data: Data(responseID.utf8) + Data(speech.text.utf8) + encodedSpans).map { String(format: "%02x", $0) }.joined()
+        let reason = "qwen_audio_review:" + digest
+        if let saved = try db.query("SELECT v.id,t.current_version_id FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id WHERE t.source_id=? AND v.reason=?", [sourceID,reason]).first {
+            guard saved["id"] == saved["current_version_id"] else { throw VoiceOSError("音频核对版本已被后续更正，不能重新激活旧文字") }
+            return saved["id"]!
+        }
+        return try db.transaction {
+            guard let row = try db.query("SELECT t.*,s.duration,v.text AS current_text FROM transcripts t JOIN sources s ON s.id=t.source_id JOIN transcript_versions v ON v.id=t.current_version_id WHERE s.id=? AND s.state='saved' AND t.current_version_id=?", [sourceID,expectedVersionID]).first,
+                  row["backend"]?.hasPrefix("Qwen3-ASR") == true else { throw VoiceOSError("音频核对的原话或授权已变化，请重新整理") }
+            try speech.validate(duration: row["duration"].flatMap(Double.init))
+            guard !speech.text.isEmpty, speech.spans.allSatisfy({ $0.startMS != nil && $0.endMS != nil }) else { throw VoiceOSError("音频核对必须保留实际录音时间范围") }
+            if speech.text == row["current_text"] { return expectedVersionID }
+            let id = UUID().uuidString, next = Int(row["version"]!)! + 1
+            try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,?,?,?,?,'system',?)", [id,row["id"],String(next),speech.text,String(decoding:encodedSpans,as:UTF8.self),reason,Self.now()])
+            try db.execute("UPDATE transcripts SET current_version_id=?,version=? WHERE id=?", [id,String(next),row["id"]])
+            try invalidateCognition(sourceID: sourceID)
+            return id
+        }
+    }
+
     public func transcriptHistory(sourceID: String) throws -> [TranscriptVersion] {
         try db.query("""
         SELECT v.*,t.current_version_id FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id

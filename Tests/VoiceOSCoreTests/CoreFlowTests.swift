@@ -125,6 +125,14 @@ final class CoreFlowTests: XCTestCase {
         payload["api_review_completed"] = true
         payload["continuations_checked"] = true
         try JSONSerialization.data(withJSONObject: payload).write(to: base.appendingPathComponent("完整任务清单.json"))
+        do { _ = try await store.ingestOrganizedPodcast(at: base, requireAPIReview: true); XCTFail("独立质量核对完成前不能接入") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("独立语义或音频疑点核对")) }
+        payload["independent_semantic_review_completed"] = true
+        payload["audio_review_completed"] = true
+        var checkedTranscript = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("Qwen完整逐字稿.json"))) as? [String: Any])
+        checkedTranscript["transcription_review"] = ["completed": true, "changed": false, "response_id": "flow-audio-review"]
+        try JSONSerialization.data(withJSONObject: checkedTranscript).write(to: folder.appendingPathComponent("Qwen核对逐字稿.json"))
+        try JSONSerialization.data(withJSONObject: payload).write(to: base.appendingPathComponent("完整任务清单.json"))
         let count = try await store.ingestOrganizedPodcast(at: base, requireAPIReview: true)
         XCTAssertEqual(count, 2)
         let organized = try await store.latestCandidateClaims(for: intent.sourceID), organizedIDs = Set(organized.map(\.id))
@@ -156,14 +164,20 @@ final class CoreFlowTests: XCTestCase {
         let history = try JSONDecoder().decode([ExistingRecordingTask].self, from: Data(contentsOf: historyFile))
         let target = try XCTUnwrap(history.first { $0.id == targetAction.id })
         let targetJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(target))
-        let nextSources = try await store.sources(), nextSource = try XCTUnwrap(nextSources.first { $0.id == next.sourceID })
-        func ref(_ quote: String) -> [String: Any] { ["recording": "next-recording", "quote": quote, "citation_status": "located", "span_ids": [nextSource.spans[0].id]] }
+        let correctedTranscript = transcript.replacingOccurrences(of: "重排能提高相关性", with: "重排不一定能提高相关性")
+        let correctedSpan = TranscriptSpan(textStart: 0, textEnd: correctedTranscript.unicodeScalars.count, startMS: 0, endMS: 500)
+        func ref(_ quote: String) -> [String: Any] { ["recording": "next-recording", "quote": quote, "citation_status": "located", "span_ids": [correctedSpan.id]] }
         let nextItems: [[String: Any]] = [
             ["id": "R1", "title": "研究检索质量", "intent_type": "task", "uncertain": false, "followup_state": "pending", "notes": "", "references": [ref("我还要研究检索质量。")], "continuation": ["relation": "repeat", "target": targetJSON, "notes": "同一待办"]],
-            ["id": "K2", "title": "重排能提高相关性", "intent_type": "claim", "uncertain": false, "followup_state": "knowledge", "notes": "", "references": [ref("我已经比较了两种检索方法，发现重排能提高相关性。")], "continuation": ["relation": "outcome", "target": targetJSON, "notes": "实际收获"]],
+            ["id": "K2", "title": "重排不一定能提高相关性", "intent_type": "claim", "uncertain": false, "followup_state": "knowledge", "notes": "", "references": [ref("我已经比较了两种检索方法，发现重排不一定能提高相关性。")], "continuation": ["relation": "outcome", "target": targetJSON, "notes": "实际收获"]],
             ["id": "T2", "title": "做一次容量对比实验", "intent_type": "task", "uncertain": false, "followup_state": "pending", "notes": "", "references": [ref("下一步另做一次容量对比实验。")]]
         ]
-        let nextPayload: [String: Any] = ["source_folders": [nextFolder.path], "all_audio_complete": true, "all_windows_checked": true, "api_review_completed": true, "continuations_checked": true, "items": nextItems]
+        var nextChecked = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: nextFolder.appendingPathComponent("Qwen完整逐字稿.json"))) as? [String: Any])
+        nextChecked["text"] = correctedTranscript
+        nextChecked["spans"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode([correctedSpan]))
+        nextChecked["transcription_review"] = ["completed": true, "changed": true, "response_id": "flow-next-audio-review"]
+        try JSONSerialization.data(withJSONObject: nextChecked).write(to: nextFolder.appendingPathComponent("Qwen核对逐字稿.json"))
+        let nextPayload: [String: Any] = ["source_folders": [nextFolder.path], "all_audio_complete": true, "all_windows_checked": true, "api_review_completed": true, "continuations_checked": true, "independent_semantic_review_completed": true, "audio_review_completed": true, "items": nextItems]
         try JSONSerialization.data(withJSONObject: nextPayload).write(to: nextBase.appendingPathComponent("完整任务清单.json"))
         _ = try await store.ingestOrganizedPodcast(at: nextBase, allowReminderWrites: true, requireAPIReview: true)
         try await store.refreshAuthorizedReminders(expectedAccessVersion: 1, using: reminders)
@@ -171,16 +185,25 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(after.count, repeated.count + 1)
         XCTAssertEqual(after.first { $0.id == targetAction.id }?.state, "open")
         XCTAssertEqual(Set(linked.map(\.relation)), ["repeat", "outcome"])
-        XCTAssertTrue(linked.allSatisfy { $0.recordingSourceID == next.sourceID && transcript.contains($0.text) })
+        XCTAssertTrue(linked.allSatisfy { $0.recordingSourceID == next.sourceID && correctedTranscript.contains($0.text) })
         let afterReminders = await reminders.items.count
         XCTAssertEqual(afterReminders, reminderCount + 1)
         _ = try await store.ingestOrganizedPodcast(at: nextBase, allowReminderWrites: true, requireAPIReview: true)
         try await store.recover()
         let retained = try await store.actionFeedback(actionID: targetAction.id)
         XCTAssertEqual(retained.count, 2)
-        _ = try await store.correctTranscript(sourceID: next.sourceID, expectedVersionID: nextSource.transcriptVersionID!, text: transcript + "补充：需要继续验证。")
+        let beforeCorrection = try await store.transcriptHistory(sourceID: next.sourceID)
+        _ = try await store.correctTranscript(sourceID: next.sourceID, expectedVersionID: beforeCorrection[0].id, text: correctedTranscript + "补充：需要继续验证。")
         let stale = try await store.actionFeedback(actionID: targetAction.id)
         XCTAssertTrue(stale.allSatisfy { $0.sourceState == "frozen" })
+        let audioHistory = try await store.transcriptHistory(sourceID: next.sourceID)
+        XCTAssertEqual(audioHistory.count, 3)
+        XCTAssertTrue(audioHistory.contains { $0.reason.hasPrefix("qwen_audio_review:") && $0.text == correctedTranscript })
+        XCTAssertEqual(audioHistory.last?.text, transcript)
+        try await store.recover()
+        let package = root.appendingPathComponent("audio-reviewed-package"), restoredRoot = root.appendingPathComponent("audio-reviewed-restore")
+        try await store.exportPackage(to: package, includeMedia: true)
+        try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
     }
 
     func testIdeaFindsHistoryWithoutCreatingTask() async throws {

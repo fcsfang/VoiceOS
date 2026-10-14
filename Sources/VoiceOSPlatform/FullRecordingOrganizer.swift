@@ -36,9 +36,15 @@ public enum FullRecordingOrganizer {
         guard track >= 0, !FileManager.default.fileExists(atPath: output.path) else { throw VoiceOSError("音轨选择或输出路径无效") }
         try await run(executable: executable("ffmpeg"), arguments: ["-v", "error", "-nostdin", "-i", input.path, "-map", "0:a:\(track)", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", output.path], log: log)
     }
-    public static func organize(folder: URL, script: URL, python: URL, configuration: URL, log: URL) async throws {
-        try await run(executable: python, arguments: [script.path, folder.path, "--include-knowledge"], log: log,
-                      environment: ["PATH": "/opt/homebrew/bin:/usr/bin:/bin", "VOICEOS_MODEL_CONFIG_FILE": configuration.path, "PYTHONUNBUFFERED": "1"])
+    public static func organize(folder: URL, script: URL, python: URL, configuration: URL, log: URL, qwen: LocalQwenSpeechPort? = nil) async throws {
+        var arguments = [script.path, folder.path, "--include-knowledge"]
+        if let qwen {
+            let local = folder.deletingLastPathComponent().appendingPathComponent("本地Qwen配置.json")
+            try qwen.configurationData().write(to: local, options: .atomic)
+            arguments += ["--asr-config", local.path]
+        }
+        try await run(executable: python, arguments: arguments, log: log,
+                      environment: ["PATH": "/opt/homebrew/bin:/usr/bin:/bin", "VOICEOS_MODEL_CONFIG_FILE": configuration.path, "PYTHONUNBUFFERED": "1", "PYTHONDONTWRITEBYTECODE": "1"])
     }
     private static func run(executable: URL, arguments: [String], log: URL, environment: [String: String]? = nil) async throws {
         FileManager.default.createFile(atPath: log.path, contents: nil)

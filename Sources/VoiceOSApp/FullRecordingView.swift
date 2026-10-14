@@ -28,7 +28,7 @@ struct FullRecordingView: View {
             Text("OBS 通常将本人麦克风保存在音轨 2。请按这份素材的实际设置选择，避免把嘉宾或系统声音当成自己的意图。")
                 .font(.callout).foregroundStyle(.secondary)
             Toggle("所选音轨是我的声音", isOn: $ownVoice).disabled(model.fullRecordingBusy || model.fullRecordingCount != nil)
-            Text("Qwen 在本机完整转写所选音轨；逐字稿发送到已配置文本模型，自动提取、复查漏项并核对修订意图。核对完成后，明确待办同步到已连接的 VoiceOS 清单；原始音视频保存在本机。")
+            Text("Qwen 在本机完整转写所选音轨，并重识别影响意图的转写疑点；文本模型自动提取、复查漏项、独立核对合并和已有任务的关联。核对完成后，明确待办同步到 VoiceOS 清单；原稿和修订历史保留，音视频只在本机处理。")
                 .font(.callout)
             if model.fullRecordingBusy { ProgressView().controlSize(.small) }
             Text(model.fullRecordingStatus).font(.callout).textSelection(.enabled).frame(minHeight: 48, alignment: .topLeading)

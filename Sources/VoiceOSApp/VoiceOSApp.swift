@@ -643,8 +643,8 @@ final class ControlCenter: ObservableObject {
         _ = try await store.writeOrganizingInput(sourceID: sourceID, to: folder)
         _ = try await store.writeExistingTaskInput(to: base.appendingPathComponent("已有任务.json"), excludingSourceIDs: [sourceID])
         let log = base.appendingPathComponent("处理日志.txt"); fullRecordingLog = log
-        setFullRecordingStatus("正在提取与漏项复查，随后由外部 API 核对意图并接续已有任务…")
-        try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, configuration: configuration, log: log)
+        setFullRecordingStatus("正在核对转写疑点，再进行意图提取、独立语义复核和任务接续…")
+        try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, configuration: configuration, log: log, qwen: speech)
         try Task.checkCancellation()
         let count = try await store.ingestOrganizedPodcast(at: base, allowReminderWrites: reminderAccess?.enabled == true && reminderAccess?.title == "VoiceOS", requireAPIReview: true)
         fullRecordingCount = count
@@ -1952,7 +1952,7 @@ struct CenterView: View {
                 ScrollView {
                     ForEach(model.history) { version in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("第 \(version.number) 版 · \(version.reason == "original" ? "本地识别原稿" : "识别文字更正")\(version.isCurrent ? " · 当前" : " · 历史")").font(.headline)
+                            Text("第 \(version.number) 版 · \(version.reason == "original" ? "本地识别原稿" : version.reason.hasPrefix("qwen_audio_review:") ? "Qwen 音频重识别核对" : "识别文字更正")\(version.isCurrent ? " · 当前" : " · 历史")").font(.headline)
                             Text(version.text.isEmpty ? "（空文字）" : version.text).textSelection(.enabled)
                             Divider()
                         }

@@ -9,6 +9,9 @@ public struct LocalQwenSpeechPort: SpeechPort {
     private let model: URL
     public var progressLog: URL?
     public var pythonExecutable: URL { python }
+    public func configurationData() throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["format": "voiceos-local-qwen-v1", "python": python.path, "runner": runner.path, "model": model.path], options: [.sortedKeys])
+    }
     public static func load(from file: URL) throws -> LocalQwenSpeechPort {
         try load(configurationData:Data(contentsOf:file))
     }

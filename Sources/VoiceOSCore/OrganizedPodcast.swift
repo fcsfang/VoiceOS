@@ -2,6 +2,11 @@ import Foundation
 import CryptoKit
 
 private struct CompletedQwenTranscript: Codable, SpeechPort {
+    struct Review: Codable {
+        let completed: Bool
+        let changed: Bool
+        let response_id: String
+    }
     let backend: String
     let text: String
     let spans: [TranscriptSpan]
@@ -9,6 +14,7 @@ private struct CompletedQwenTranscript: Codable, SpeechPort {
     let total_chunks: Int?
     let complete: Bool?
     let duration_seconds: Double?
+    var transcription_review: Review? = nil
     var backendIdentity: String { backend }
     func transcribe(_ url: URL, locale: String) async throws -> SpeechText {
         guard backend.hasPrefix("Qwen3-ASR"), complete == true || (processed_chunks != nil && processed_chunks == total_chunks) else { throw VoiceOSError("完整 Qwen 转写尚未完成") }
@@ -26,6 +32,8 @@ private struct OrganizedTasks: Decodable {
     let all_windows_checked: Bool
     let api_review_completed: Bool?
     let continuations_checked: Bool?
+    let independent_semantic_review_completed: Bool?
+    let audio_review_completed: Bool?
     let items: [Task]
     struct Task: Decodable {
         let id: String
@@ -54,6 +62,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     guard tasks.all_audio_complete, tasks.all_windows_checked else { throw VoiceOSError("全长转写与漏项复查尚未完成") }
     guard !requireAPIReview || tasks.api_review_completed == true else { throw VoiceOSError("外部 API 意图核对尚未完成；没有接入初稿或写入提醒事项") }
     guard !requireAPIReview || tasks.continuations_checked == true else { throw VoiceOSError("已有任务接续核对尚未完成；没有接入初稿或写入提醒事项") }
+    guard !requireAPIReview || (tasks.independent_semantic_review_completed == true && tasks.audio_review_completed == true) else { throw VoiceOSError("独立语义或音频疑点核对尚未完成；没有写入提醒事项") }
     let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
     if allowReminderWrites {
         guard let access = try reminderAccess(), access.enabled, access.title == "VoiceOS" else { throw VoiceOSError("请先在应用中连接正式 VoiceOS 清单") }
@@ -62,22 +71,40 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     var budget = 1
     for path in tasks.source_folders {
         let folder = URL(fileURLWithPath: path), name = folder.lastPathComponent
-        let transcript = try JSONDecoder().decode(CompletedQwenTranscript.self, from: Data(contentsOf: folder.appendingPathComponent("Qwen完整逐字稿.json")))
+        let original = try JSONDecoder().decode(CompletedQwenTranscript.self, from: Data(contentsOf: folder.appendingPathComponent("Qwen完整逐字稿.json")))
+        let reviewed = folder.appendingPathComponent("Qwen核对逐字稿.json")
+        let transcript = FileManager.default.fileExists(atPath: reviewed.path) ? try JSONDecoder().decode(CompletedQwenTranscript.self, from: Data(contentsOf: reviewed)) : original
+        if requireAPIReview {
+            guard transcript.transcription_review?.completed == true, transcript.transcription_review?.response_id.isEmpty == false else { throw VoiceOSError("逐字稿缺少音频疑点核对回执") }
+        }
         let manifest = try JSONDecoder().decode(OrganizedSource.self, from: Data(contentsOf: folder.appendingPathComponent("source.json")))
         let id: String
         if let existingID = manifest.voiceos_source_id {
             guard let existing = try sources().first(where: { $0.id == existingID }),
-                  existing.transcriptVersionID == manifest.voiceos_transcript_version_id,
-                  existing.transcript == transcript.text, existing.transcriptionBackend == transcript.backend,
-                  try encoder.encode(existing.spans) == encoder.encode(transcript.spans) else { throw VoiceOSError("完整整理的原话版本已变化，请重新整理") }
+                  existing.transcriptionBackend == original.backend, let originalVersion = manifest.voiceos_transcript_version_id else { throw VoiceOSError("完整整理的原话版本已变化，请重新整理") }
             guard !existing.localOnly else { throw VoiceOSError("这份文字已限制为仅本机，完整整理结果暂未接回；原件和逐字稿保留") }
+            if let review = transcript.transcription_review, review.completed, review.changed {
+                if existing.transcriptVersionID == originalVersion {
+                    guard existing.transcript == original.text, try encoder.encode(existing.spans) == encoder.encode(original.spans) else { throw VoiceOSError("重识别的原转写已变化") }
+                }
+                _ = try applyReviewedQwenTranscript(sourceID: existingID, expectedVersionID: originalVersion,
+                                                   speech: SpeechText(text: transcript.text, spans: transcript.spans), responseID: review.response_id)
+            } else {
+                guard existing.transcriptVersionID == originalVersion, existing.transcript == transcript.text,
+                      try encoder.encode(existing.spans) == encoder.encode(transcript.spans) else { throw VoiceOSError("完整整理的原话版本已变化，请重新整理") }
+            }
             id = existingID
         } else {
             let audio = folder.appendingPathComponent("完整本人音轨.wav")
             let namedAudio = folder.appendingPathComponent(name + "_完整本人音轨.wav")
             if !FileManager.default.fileExists(atPath: namedAudio.path) { try FileManager.default.linkItem(at: audio, to: namedAudio) }
             id = try await importPersonalAudio(namedAudio, commandID: "podcast-full-qwen:" + name)
-            try await processTranscriptions(using: transcript, sourceIDs: [id])
+            try await processTranscriptions(using: original, sourceIDs: [id])
+            if let review = transcript.transcription_review, review.completed, review.changed,
+               let version = try sources().first(where: { $0.id == id })?.transcriptVersionID {
+                _ = try applyReviewedQwenTranscript(sourceID: id, expectedVersionID: version,
+                                                   speech: SpeechText(text: transcript.text, spans: transcript.spans), responseID: review.response_id)
+            }
         }
         if allowReminderWrites, manifest.voiceos_source_id == nil {
             let policy = try sourcePolicy(sourceID: id)
@@ -164,6 +191,8 @@ public func writeOrganizingInput(sourceID: String, to folder: URL) throws -> Loc
     let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: text.unicodeScalars.count)
     guard !context.sources[0].localOnly else { throw VoiceOSError("请允许本份文字用于完整整理") }
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    let audio = folder.appendingPathComponent("完整本人音轨.wav")
+    if !FileManager.default.fileExists(atPath: audio.path) { try FileManager.default.linkItem(at: try playableURL(sourceID: sourceID), to: audio) }
     let transcript = CompletedQwenTranscript(backend: backend, text: text, spans: record.spans,
                                            processed_chunks: nil, total_chunks: nil, complete: true, duration_seconds: duration)
     let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]

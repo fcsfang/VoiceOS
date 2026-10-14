@@ -370,7 +370,8 @@ extension VoiceOSStore {
             SELECT v.id FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id
             LEFT JOIN transcript_revisions r ON r.to_version_id=v.id
             WHERE v.version_no<1 OR v.version_no>t.version OR (v.version_no>1 AND
-            (r.id IS NULL OR v.reason!='transcription_error' OR v.actor!='user'))
+            (r.id IS NULL OR v.reason!='transcription_error' OR v.actor!='user') AND
+            NOT (v.actor='system' AND v.reason LIKE 'qwen_audio_review:%'))
             UNION ALL
             SELECT r.id FROM transcript_revisions r JOIN transcript_versions f ON f.id=r.from_version_id
             JOIN transcript_versions n ON n.id=r.to_version_id
