@@ -78,7 +78,7 @@ public final class NativeReminders: RemindersSchedulingPort {
         let target = try calendar(calendarID)
         let item = EKReminder(eventStore: store)
         let link = "voiceos://task/" + marker.replacingOccurrences(of: "voiceos-action:", with: "")
-        item.calendar = target; item.title = title; item.notes = context + "\n\n在 VoiceOS 查看：\n" + link
+        item.calendar = target; item.title = title; item.notes = "详情：" + link
         item.url = URL(string: link)
         // No guessed deadline, alarm, priority, or changes to other items.
         do { try store.save(item, commit: true) }
@@ -117,10 +117,16 @@ public final class NativeReminders: RemindersSchedulingPort {
         _ = try calendar(calendarID)
         guard let item = store.calendarItem(withIdentifier: externalID) as? EKReminder,
               item.calendar.calendarIdentifier == calendarID, self.marker(item) == marker else { throw VoiceOSError("提醒事项身份已变化，请重新核对") }
-        let existing = item.notes == marker ? "" : (item.notes ?? "")
-        var notes = existing.hasPrefix("来源：") ? existing : context + (existing.isEmpty ? "" : "\n\n我的补充：\n" + existing)
+        var existing = item.notes == marker ? "" : (item.notes ?? "")
         let url = URL(string: "voiceos://task/" + marker.replacingOccurrences(of: "voiceos-action:", with: ""))
-        if let link = url?.absoluteString, !notes.contains(link) { notes += "\n\n在 VoiceOS 查看：\n" + link }
+        guard let link = url?.absoluteString else { throw VoiceOSError("提醒事项链接无效") }
+        let compact = "详情：" + link
+        // Only remove our exact generated text; any user's additions remain.
+        if existing.hasPrefix(context) { existing.removeFirst(context.count) }
+        existing = existing.replacingOccurrences(of: "\n\n在 VoiceOS 查看：\n" + link, with: "")
+        if existing.hasPrefix(compact) { existing.removeFirst(compact.count) }
+        existing = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        let notes = compact + (existing.isEmpty ? "" : "\n" + existing)
         if item.notes == notes, item.url == url { return }
         item.notes = notes; item.url = url
         try store.save(item, commit: true)

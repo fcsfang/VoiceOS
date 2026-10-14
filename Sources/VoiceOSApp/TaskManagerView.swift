@@ -12,6 +12,7 @@ struct TaskManagerView: View {
     @State private var historyAction: ActionRecord?
     @State private var confirmingAction: ActionRecord?
     @State private var playbackActionID: String?
+    @State private var expandedActions: Set<String> = []
     private let sections = [("tasks", "待跟进"), ("review", "待核对"), ("ideas", "问题与目标"), ("completed", "已完成"), ("activities", "录音活动")]
 
     private func category(_ action: ActionRecord) -> String {
@@ -33,11 +34,24 @@ struct TaskManagerView: View {
         }
     }
     private func selectFocusedTask() {
-        if let action = model.actionRecords.first(where: { $0.id == model.focusedTaskID }) { query = ""; ideaKind = "all"; section = category(action) }
+        if let action = model.actionRecords.first(where: { $0.id == model.focusedTaskID }) { query = ""; ideaKind = "all"; section = category(action); expandedActions.insert(action.id) }
     }
     private func sourceNames(_ action: ActionRecord) -> String {
         guard let claim = model.claims.first(where: { $0.id == action.claimID }) else { return "出处待核对" }
-        return Set(claim.references.compactMap { ref in model.records.first(where: { $0.id == ref.sourceID })?.name }).sorted().joined(separator: " · ")
+        return Set(claim.references.map(\.sourceID)).sorted().compactMap { id in
+            guard let record = model.records.first(where: { $0.id == id }) else { return nil }
+            let refs = claim.references.filter { $0.sourceID == id && $0.transcriptVersionID == record.transcriptVersionID }
+            let timed = record.spans.filter { span in refs.contains(where: { $0.spanID == span.id }) }.compactMap { span -> (Int, Int)? in
+                guard let start = span.startMS, let end = span.endMS else { return nil }; return (start, end)
+            }.sorted { $0.0 < $1.0 }
+            var ranges: [(Int, Int)] = []
+            for (start, end) in timed {
+                if let last = ranges.last, start <= last.1 + 1000 { ranges[ranges.count - 1].1 = max(last.1, end) }
+                else { ranges.append((start, end)) }
+            }
+            func time(_ ms: Int) -> String { let sec = ms / 1000; return String(format: "%02d:%02d:%02d", sec / 3600, sec / 60 % 60, sec % 60) }
+            return record.name + (ranges.isEmpty ? "" : " · " + ranges.map { time($0.0) + "–" + time($0.1) }.joined(separator: "；"))
+        }.joined(separator: "\n")
     }
     private func feedbackCount(_ action: ActionRecord) -> Int {
         model.records.filter { $0.feedbackActionID == action.id }.count
@@ -51,7 +65,7 @@ struct TaskManagerView: View {
                 }
                 Spacer()
                 Button("同步提醒事项") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
-                Button("补充提醒出处") { Task { await model.enrichReminderContexts() } }.disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
+                Button("精简提醒显示") { Task { await model.enrichReminderContexts() } }.disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
             }
             Picker("查看", selection: $section) {
                 ForEach(sections, id: \.0) { key, label in
@@ -66,7 +80,7 @@ struct TaskManagerView: View {
             TextField("查找任务或原话", text: $query)
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
+                    LazyVStack(alignment: .leading, spacing: 6) {
                         if visible.isEmpty {
                             ContentUnavailableView(section == "completed" ? "完成的任务会汇入这里" : "这里暂时没有事项", systemImage: section == "completed" ? "checkmark.circle" : "tray",
                                                    description: Text(section == "completed" ? "在 VoiceOS 或 Apple 提醒事项中完成任务后，可以记录结果或继续思考。" : "可以切换分类，或换一个关键词。"))
@@ -114,29 +128,20 @@ struct TaskManagerView: View {
         }
     }
     @ViewBuilder private func card(_ action: ActionRecord) -> some View {
+        DisclosureGroup(isExpanded: Binding(get: { expandedActions.contains(action.id) }, set: { if $0 { expandedActions.insert(action.id) } else { expandedActions.remove(action.id) } })) {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                Image(systemName: action.state == "completed" ? "checkmark.circle.fill" : action.kind == "task" ? "circle" : "lightbulb")
-                    .foregroundStyle(action.state == "completed" ? .green : .secondary)
-                Text(action.title).font(.headline).textSelection(.enabled)
-                Spacer()
-                if feedbackCount(action) > 0 { Text("\(feedbackCount(action)) 条结果").font(.caption).foregroundStyle(.secondary) }
-            }
-            Text(sourceNames(action)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            Text(sourceNames(action)).font(.caption).foregroundStyle(.secondary)
             if !action.note.isEmpty {
-                DisclosureGroup("原话与说明") {
-                    Text(action.note).textSelection(.enabled)
-                    if let claim = model.claims.first(where: { $0.id == action.claimID }), let detail = claim.statement.components(separatedBy: "\n说明：").dropFirst().first {
-                        Text(detail).foregroundStyle(.secondary).textSelection(.enabled)
-                    }
-                }.font(.callout)
+                Text(action.note).textSelection(.enabled)
+                if let claim = model.claims.first(where: { $0.id == action.claimID }), let detail = claim.statement.components(separatedBy: "\n说明：").dropFirst().first {
+                    Text(detail).foregroundStyle(.secondary).textSelection(.enabled)
+                }
             }
             HStack {
                 Button("查看出处") {
                     if let id = model.claims.first(where: { $0.id == action.claimID })?.references.first?.sourceID { model.selected = id; dismiss() }
                 }
-                Button("回听原话") { Task { if await model.playActionOriginal(action) { playbackActionID = action.id } } }
-                    .disabled(action.validity != "current")
+                Button("回听原话") { Task { if await model.playActionOriginal(action) { playbackActionID = action.id } } }.disabled(action.validity != "current")
                 Button(action.state == "completed" ? "记录结果或收获" : "记录进展") { feedbackAction = action }.disabled(model.savingFeedback || action.validity != "current")
                 if feedbackCount(action) > 0 { Button("查看结果") { Task { await model.actionHistory(action); historyAction = action } } }
                 Spacer()
@@ -144,11 +149,19 @@ struct TaskManagerView: View {
                     Button("核对为待办") { confirmingAction = action }.disabled(model.savingAction)
                 }
                 if action.kind == "task", action.validity == "current" {
-                    Button(action.state == "completed" ? "重新跟进" : "标记已完成") { Task { await model.changeAction(action, state: action.state == "completed" ? .open : .completed) } }
-                        .disabled(model.savingAction || model.remindersBusy)
+                    Button(action.state == "completed" ? "重新跟进" : "标记已完成") { Task { await model.changeAction(action, state: action.state == "completed" ? .open : .completed) } }.disabled(model.savingAction || model.remindersBusy)
                 }
             }.buttonStyle(.bordered)
-        }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        }.padding(.top, 8)
+        } label: {
+            HStack {
+                Image(systemName: action.state == "completed" ? "checkmark.circle.fill" : action.kind == "task" ? "circle" : "lightbulb")
+                    .foregroundStyle(action.state == "completed" ? .green : .secondary)
+                Text(action.title).font(.body).textSelection(.enabled)
+                Spacer()
+                if feedbackCount(action) > 0 { Text("\(feedbackCount(action)) 条结果").font(.caption).foregroundStyle(.secondary) }
+            }
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(action.id == model.focusedTaskID ? Color.accentColor : .clear, lineWidth: 2))
     }
