@@ -37,7 +37,7 @@ public enum FullRecordingOrganizer {
         try await run(executable: executable("ffmpeg"), arguments: ["-v", "error", "-nostdin", "-i", input.path, "-map", "0:a:\(track)", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", output.path], log: log)
     }
     public static func organize(folder: URL, script: URL, python: URL, configuration: URL, log: URL) async throws {
-        try await run(executable: python, arguments: [script.path, folder.path], log: log,
+        try await run(executable: python, arguments: [script.path, folder.path, "--include-knowledge"], log: log,
                       environment: ["PATH": "/opt/homebrew/bin:/usr/bin:/bin", "VOICEOS_MODEL_CONFIG_FILE": configuration.path, "PYTHONUNBUFFERED": "1"])
     }
     private static func run(executable: URL, arguments: [String], log: URL, environment: [String: String]? = nil) async throws {

@@ -20,6 +20,7 @@ private actor FlowModel: ModelPort {
     }
 }
 private struct FlowSpeech: SpeechPort {
+    let backendIdentity = "Qwen3-ASR-flow-fixture"
     func transcribe(_ url: URL, locale: String) async throws -> SpeechText { SpeechText(text: "我认为检索质量比记忆容量更值得研究。") }
 }
 private struct FlowAssociation: ExpressionAssociationPort {
@@ -105,6 +106,30 @@ final class CoreFlowTests: XCTestCase {
                                                 text: "这是口述后核对的实际收获。", recordingSourceID: intent.sourceID)
         let feedback = try await store.actionFeedback(actionID: action.id)
         XCTAssertEqual(feedback.first?.recordingSourceID, intent.sourceID)
+        // The full organizer saves knowledge and follow-ups separately in the same recording flow.
+        let base = root.appendingPathComponent("organized"), folder = base.appendingPathComponent("recording")
+        let policy = try await store.sourcePolicy(sourceID: intent.sourceID)
+        _ = try await store.setSourceLocalOnly(sourceID: intent.sourceID, expectedVersion: policy.version, localOnly: false)
+        _ = try await store.writeOrganizingInput(sourceID: intent.sourceID, to: folder)
+        let source = try XCTUnwrap(sources.first)
+        let reference: [String: Any] = ["recording": "recording", "quote": source.transcript!, "citation_status": "located", "span_ids": [source.spans[0].id]]
+        let items: [[String: Any]] = [
+            ["id": "K1", "title": "检索质量比记忆容量更值得研究", "intent_type": "claim", "uncertain": false, "followup_state": "knowledge", "notes": "口述观点", "references": [reference]],
+            ["id": "T1", "title": "研究检索质量", "intent_type": "task", "uncertain": false, "followup_state": "pending", "notes": "需跟进", "references": [reference]]
+        ]
+        let payload: [String: Any] = ["source_folders": [folder.path], "all_audio_complete": true, "all_windows_checked": true, "items": items]
+        try JSONSerialization.data(withJSONObject: payload).write(to: base.appendingPathComponent("完整任务清单.json"))
+        let count = try await store.ingestOrganizedPodcast(at: base)
+        XCTAssertEqual(count, 2)
+        let organized = try await store.latestCandidateClaims(for: intent.sourceID), organizedIDs = Set(organized.map(\.id))
+        let savedActions = try await store.actions(includeHistory: true)
+        let followups = savedActions.filter { organizedIDs.contains($0.claimID) }
+        XCTAssertEqual(organized.count, 2)
+        XCTAssertEqual(followups.count, 1)
+        XCTAssertEqual(followups.first?.intent?.intentType, "task")
+        _ = try await store.ingestOrganizedPodcast(at: base)
+        let repeated = try await store.actions(includeHistory: true)
+        XCTAssertEqual(repeated.count, savedActions.count)
     }
 
     func testIdeaFindsHistoryWithoutCreatingTask() async throws {

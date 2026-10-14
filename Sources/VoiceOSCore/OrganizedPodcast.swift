@@ -65,6 +65,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
                   existing.transcriptVersionID == manifest.voiceos_transcript_version_id,
                   existing.transcript == transcript.text, existing.transcriptionBackend == transcript.backend,
                   try encoder.encode(existing.spans) == encoder.encode(transcript.spans) else { throw VoiceOSError("完整整理的原话版本已变化，请重新整理") }
+            guard !existing.localOnly else { throw VoiceOSError("这份文字已限制为仅本机，完整整理结果暂未接回；原件和逐字稿保留") }
             id = existingID
         } else {
             let audio = folder.appendingPathComponent("完整本人音轨.wav")
@@ -73,7 +74,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
             id = try await importPersonalAudio(namedAudio, commandID: "podcast-full-qwen:" + name)
             try await processTranscriptions(using: transcript, sourceIDs: [id])
         }
-        if allowReminderWrites {
+        if allowReminderWrites, manifest.voiceos_source_id == nil {
             let policy = try sourcePolicy(sourceID: id)
             if policy.localOnly { _ = try setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: false) }
         }
@@ -105,22 +106,27 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
         let needsReview = task.uncertain || located.isEmpty
         let isTask = task.intent_type == "task" && !needsReview && task.followup_state == "pending"
         let kind: ActionKind = isTask ? .task : .opportunity
-        let labels = ["question": "问题", "goal": "长期目标", "idea": "想法", "uncertain": "待核对"]
+        let labels = ["question": "问题", "goal": "长期目标", "idea": "想法", "uncertain": "待核对", "claim": "观点"]
         let prefix = task.followup_state == "recorded_activity" ? "录音中活动" : (labels[task.intent_type] ?? (isTask ? "" : "待核对"))
         let title = (prefix.isEmpty ? "" : "【\(prefix)】") + task.title + (needsReview ? "（待核对）" : "")
         let statement = title + (notes.isEmpty ? "" : "\n说明：" + notes)
+        let action: ExtractedAction? = task.intent_type == "claim" ? nil : .init(title: title, kind: kind, quote: quote, autoSend: false)
         proposals.append(.init(statement: statement, ownership: .userTentative, references: references,
-                               action: .init(title: title, kind: kind, quote: quote, autoSend: false)))
+                               action: action, contentKind: task.intent_type == "claim" ? .statement : nil))
     }
     let listDigest = SHA256.hash(data: taskData).map { String(format: "%02x", $0) }.joined()
-    let ids = try importOrganizedClaims(context: context, proposals: proposals, commandID: "podcast-comprehensive:" + context.contentDigest + ":" + listDigest)
+    let command = "podcast-comprehensive:" + context.contentDigest + ":" + listDigest
+    guard try db.query("SELECT state FROM contexts WHERE command_id=?", [command]).first?["state"] != "frozen" else { throw VoiceOSError("这份整理的原话或授权已变化，旧结果继续暂停；没有重新激活任务") }
+    let ids = try importOrganizedClaims(context: context, proposals: proposals, commandID: command)
     guard let claimID = ids.first else { return 0 }
     let actions = try db.query("SELECT a.id,c.ordinal FROM actions a JOIN claims c ON c.id=a.claim_id WHERE c.attempt_id=(SELECT attempt_id FROM claims WHERE id=?) AND a.command_id=('extracted:'||c.attempt_id||':'||c.ordinal) ORDER BY c.ordinal", [claimID])
-    guard actions.count == tasks.items.count else { throw VoiceOSError("整理事项与保存的任务数量不一致") }
+    guard actions.count == proposals.filter({ $0.action != nil }).count else { throw VoiceOSError("整理事项与保存的任务数量不一致") }
+    let actionIDs = Dictionary(uniqueKeysWithValues: actions.map { (Int($0["ordinal"]!)!, $0["id"]!) })
     try db.transaction {
-        for (task, action) in zip(tasks.items, actions) {
+        for (index, task) in tasks.items.enumerated() where proposals[index].action != nil {
+            guard let actionID = actionIDs[index] else { throw VoiceOSError("整理事项缺少对应任务") }
             let metadata = ActionIntentMetadata(intentType: task.intent_type, followupState: task.followup_state, uncertain: task.uncertain)
-            try db.execute("UPDATE actions SET intent_json=? WHERE id=?", [String(decoding: try encoder.encode(metadata), as: UTF8.self), action["id"]!])
+            try db.execute("UPDATE actions SET intent_json=? WHERE id=?", [String(decoding: try encoder.encode(metadata), as: UTF8.self), actionID])
         }
     }
     return ids.count

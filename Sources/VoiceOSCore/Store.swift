@@ -109,6 +109,12 @@ public actor VoiceOSStore {
     public func importPersonalAudio(_ input: URL, commandID: String = UUID().uuidString) async throws -> String {
         try await importMedia(input, commandID: commandID, personalAudio: true)
     }
+    public func importedSourceID(commandID: String) throws -> String? {
+        try db.query("SELECT id FROM sources WHERE command_id=?", [commandID]).first?["id"]
+    }
+    public func personalAudioSourceID(sha256: String) throws -> String? {
+        try db.query("SELECT id FROM sources WHERE expected_hash=? AND origin='user' AND speaker='user' AND state='saved' ORDER BY created_at LIMIT 1", [sha256]).first?["id"]
+    }
     private func importMedia(_ input: URL, commandID: String, personalAudio: Bool) async throws -> String {
         guard ready, !commandID.isEmpty else { throw VoiceOSError("资料库尚未完成恢复或导入命令为空") }
         let extensionName = input.pathExtension.lowercased()

@@ -185,6 +185,8 @@ def merge(folders, items, base):
     payload = {"items": items, "complete_transcripts": transcripts}
     if hints.exists(): payload["verified_term_context"] = json.loads(hints.read_text())
     prompt += "\nverified_term_context提供视频画面和官方项目核对的术语，只用于对应上下文的标题与说明；不要改动逐字引用。初步候选标的术语歧义若有明确核对依据可以解除uncertain，其他歧义保留。"
+    if "claim" in TYPES:
+        prompt += "\n用户自己的观点、判断、解释、学习收获单独保留为claim，跟进状态用knowledge；不要把它们改写成未来任务。只转述嘉宾且没有用户明确认同的观点不冒充用户观点。实际未来意图仍按task/question/goal/idea分类，不把任务改成普通观点而漏掉跟进。"
     print("正在合并重复意图并核对跟进状态；全部候选保留", flush=True)
     groups = ask(payload, prompt, base / "清单合并模型结果.json", group_schema, max_output_tokens=32768)["groups"]
     corrections = base / "清单核对修订.json"
@@ -218,7 +220,7 @@ def merge(folders, items, base):
               "unlocated_citations": sum(i["citation_status"] != "located" for i in items), "organizer_corrections": corrections,
               "term_context": payload.get("verified_term_context", []), "items": tasks}
     (base / "完整任务清单.json").write_text(json.dumps(result, ensure_ascii=False, indent=2))
-    md = ["# 播客完整任务清单", "", "覆盖全部本人音轨，按时间逐段提取并独立复查漏项。全部候选保留后合并重复事项；任务未标记完成。", ""]
+    md = ["# 完整表达整理" if "claim" in TYPES else "# 播客完整任务清单", "", "覆盖全部本人音轨，按时间逐段提取并独立复查漏项。全部候选保留后合并重复事项；任务未标记完成。", ""]
     for folder in folders:
         data = json.loads((folder / "Qwen完整逐字稿.json").read_text())
         name = json.loads((folder / "source.json").read_text()).get("source_name", folder.name)
@@ -230,7 +232,8 @@ def merge(folders, items, base):
     for heading, selected in sections:
         md.extend([f"## {heading}（{len(selected)}）", ""])
         for task in selected:
-            md.append(f"- [ ] **{task['id']} · {task['title']}**" + (" · 待核对" if task["uncertain"] else ""))
+            marker = "- " if task["intent_type"] == "claim" else "- [ ] "
+            md.append(marker + f"**{task['id']} · {task['title']}**" + (" · 待核对" if task["uncertain"] else ""))
             if task["notes"]: md.append(f"  - 说明：{task['notes']}")
             md.append(f"  - 跟进状态：{FOLLOWUP[task['followup_state']]}")
             if task.get("status_evidence"): md.append(f"  - 状态依据：{task['status_evidence']['recording']} — {task['status_evidence']['quote']}")
@@ -253,7 +256,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("folders", type=Path, nargs="+")
     parser.add_argument("--extract-only", action="store_true")
+    parser.add_argument("--include-knowledge", action="store_true")
     args = parser.parse_args()
+    if args.include_knowledge:
+        global PROMPT
+        TYPES.append("claim")
+        LABELS["claim"] = "观点与收获"
+        FOLLOWUP["knowledge"] = "知识记录"
+        PROMPT += "\n同时提取用户自己明确提出的观点、判断、解释、学习收获，intent_type=claim。它们保存为知识，不创建行动或提醒。保留原话与条件，不把猜测标成事实；只转述嘉宾且没有用户明确认同的内容不冒充用户观点。任务、问题、目标与需求仍全面提取，不能被普通观点替代。"
     items = []
     for folder in args.folders: items.extend(organize(folder.resolve()))
     if not args.extract_only:
