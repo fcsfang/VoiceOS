@@ -117,9 +117,13 @@ final class CoreFlowTests: XCTestCase {
             ["id": "K1", "title": "检索质量比记忆容量更值得研究", "intent_type": "claim", "uncertain": false, "followup_state": "knowledge", "notes": "口述观点", "references": [reference]],
             ["id": "T1", "title": "研究检索质量", "intent_type": "task", "uncertain": false, "followup_state": "pending", "notes": "需跟进", "references": [reference]]
         ]
-        let payload: [String: Any] = ["source_folders": [folder.path], "all_audio_complete": true, "all_windows_checked": true, "items": items]
+        var payload: [String: Any] = ["source_folders": [folder.path], "all_audio_complete": true, "all_windows_checked": true, "items": items]
         try JSONSerialization.data(withJSONObject: payload).write(to: base.appendingPathComponent("完整任务清单.json"))
-        let count = try await store.ingestOrganizedPodcast(at: base)
+        do { _ = try await store.ingestOrganizedPodcast(at: base, requireAPIReview: true); XCTFail("初稿不能进入自动同步流程") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("意图核对尚未完成")) }
+        payload["api_review_completed"] = true
+        try JSONSerialization.data(withJSONObject: payload).write(to: base.appendingPathComponent("完整任务清单.json"))
+        let count = try await store.ingestOrganizedPodcast(at: base, requireAPIReview: true)
         XCTAssertEqual(count, 2)
         let organized = try await store.latestCandidateClaims(for: intent.sourceID), organizedIDs = Set(organized.map(\.id))
         let savedActions = try await store.actions(includeHistory: true)

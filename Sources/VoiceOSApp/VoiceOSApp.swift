@@ -642,15 +642,15 @@ final class ControlCenter: ObservableObject {
         let folder = base.appendingPathComponent(record.name)
         _ = try await store.writeOrganizingInput(sourceID: sourceID, to: folder)
         let log = base.appendingPathComponent("处理日志.txt"); fullRecordingLog = log
-        setFullRecordingStatus("正在逐段提取全部意图，随后全文复查漏项…")
+        setFullRecordingStatus("正在提取与漏项复查，随后由外部 API 核对修订全部意图…")
         try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, configuration: configuration, log: log)
         try Task.checkCancellation()
-        let count = try await store.ingestOrganizedPodcast(at: base, allowReminderWrites: reminderAccess?.enabled == true && reminderAccess?.title == "VoiceOS")
+        let count = try await store.ingestOrganizedPodcast(at: base, allowReminderWrites: reminderAccess?.enabled == true && reminderAccess?.title == "VoiceOS", requireAPIReview: true)
         fullRecordingCount = count
         fullRecordingOutput = base
         await refresh()
         await automaticReminderRefresh()
-        setFullRecordingStatus("完整整理已保存 \(count) 个事项 · 明确待办、待核对、问题与目标分别查看")
+        setFullRecordingStatus("外部 API 核对完成 · 已保存 \(count) 条观点与意图，明确待办自动同步提醒")
     }
     private func setFullRecordingStatus(_ message: String) { fullRecordingStatus = message; status = message }
     private func watchFullRecording() -> Task<Void, Never> {

@@ -24,6 +24,7 @@ private struct OrganizedTasks: Decodable {
     let source_folders: [String]
     let all_audio_complete: Bool
     let all_windows_checked: Bool
+    let api_review_completed: Bool?
     let items: [Task]
     struct Task: Decodable {
         let id: String
@@ -45,10 +46,11 @@ private struct OrganizedTasks: Decodable {
 }
 
 extension VoiceOSStore {
-public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool = false) async throws -> Int {
+public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool = false, requireAPIReview: Bool = false) async throws -> Int {
     let taskData = try Data(contentsOf: directory.appendingPathComponent("完整任务清单.json"))
     let tasks = try JSONDecoder().decode(OrganizedTasks.self, from: taskData)
     guard tasks.all_audio_complete, tasks.all_windows_checked else { throw VoiceOSError("全长转写与漏项复查尚未完成") }
+    guard !requireAPIReview || tasks.api_review_completed == true else { throw VoiceOSError("外部 API 意图核对尚未完成；没有接入初稿或写入提醒事项") }
     let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
     if allowReminderWrites {
         guard let access = try reminderAccess(), access.enabled, access.title == "VoiceOS" else { throw VoiceOSError("请先在应用中连接正式 VoiceOS 清单") }
