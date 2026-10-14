@@ -60,6 +60,32 @@ extension VoiceOSStore {
         ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1", intent: try row["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self, from: Data($0.utf8)) })
     }
     @discardableResult
+    public func confirmOpportunityAsTask(actionID: String, expectedVersion: Int, title: String, commandID: String = UUID().uuidString) throws -> String {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let command = "confirmed-intent:" + commandID, sourceCommand = "confirmed-intent-source:" + commandID
+        if let receipt = try db.query("SELECT * FROM actions WHERE command_id=?", [command]).first {
+            guard receipt["title"] == title, let revision = try db.query("SELECT * FROM action_revisions WHERE command_id=?", [sourceCommand]).first,
+                  revision["action_id"] == actionID, revision["from_version"] == String(expectedVersion) else { throw VoiceOSError("同一次核对不能更换事项或标题") }
+            return receipt["id"]!
+        }
+        guard !title.isEmpty, title.unicodeScalars.count <= 2000,
+              let original = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+              original.validity == "current", original.state == "open", original.kind == "opportunity", original.intentActor == "user", original.version == expectedVersion,
+              let claim = try candidateClaims().first(where: { $0.id == original.claimID }), claim.reviewVersion == original.claimReviewVersion else { throw VoiceOSError("事项或原话已变化，请重新核对") }
+        let id = UUID().uuidString, now = ISO8601DateFormatter().string(from: Date())
+        let fingerprint = try Self.actionHash([claim.id,String(claim.reviewVersion),title,"task","user",original.note])
+        let note = "已核对为明确待办：" + id
+        let revisionHash = try Self.actionHash([actionID,String(expectedVersion),"dismissed",note])
+        let metadata = ActionIntentMetadata(intentType: "task", followupState: "pending", uncertain: false)
+        // Keep the model's original opportunity; the user's decision creates a task and retires its old card together.
+        try db.transaction {
+            try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,intent_json) VALUES(?,?,?,?,'task','user',?,'open','current',?,?,?,?)", [id,claim.id,String(claim.reviewVersion),title,original.note,command,fingerprint,now,String(decoding: try JSONEncoder().encode(metadata), as: UTF8.self)])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'dismissed',?,'user',?,?,?)", [UUID().uuidString,actionID,String(expectedVersion+1),String(expectedVersion),note,sourceCommand,revisionHash,now])
+            try db.execute("UPDATE actions SET state='dismissed',version=? WHERE id=?", [String(expectedVersion+1),actionID])
+        }
+        return id
+    }
+    @discardableResult
     public func setActionState(actionID: String, expectedVersion: Int, state: LocalActionState, note: String = "", commandID: String = UUID().uuidString) throws -> Int {
         guard !commandID.hasPrefix("reminder-status-resolution:") else { throw VoiceOSError("提醒事项状态恢复须绑定回读依据，不能使用普通状态命令") }
         let hash = try Self.actionHash([actionID,String(expectedVersion),state.rawValue,note])

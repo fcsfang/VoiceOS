@@ -243,6 +243,7 @@ final class ControlCenter: ObservableObject {
     private var understandingWorker: Task<Void, Never>?
     @Published var initialized = false
     @Published var player: AVPlayer?
+    private var playbackBoundary: Any?
     @Published var history: [TranscriptVersion] = []
     @Published var claims: [CandidateClaim] = []
     /// Source-facing claims use only the newest completed producer for that
@@ -888,15 +889,37 @@ final class ControlCenter: ObservableObject {
             await refresh()
         } catch { status = error.localizedDescription; await refresh() }
     }
-    func playSpan(_ record: SourceRecord, milliseconds: Int) async {
+    func stopPlayback() {
+        player?.pause()
+        if let playbackBoundary { player?.removeTimeObserver(playbackBoundary); self.playbackBoundary = nil }
+        player = nil
+    }
+    @discardableResult
+    func playSpan(_ record: SourceRecord, milliseconds: Int, endMilliseconds: Int? = nil) async -> Bool {
         do {
-            guard let url = try await store?.playableURL(sourceID: record.id) else { return }
-            player?.pause()
+            guard let url = try await store?.playableURL(sourceID: record.id) else { return false }
+            stopPlayback()
             let playback = AVPlayer(url: url)
             player = playback
             await playback.seek(to: CMTime(value: Int64(milliseconds), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
+            if let end = endMilliseconds, end > milliseconds {
+                playbackBoundary = playback.addBoundaryTimeObserver(forTimes: [NSValue(time: CMTime(value: Int64(end), timescale: 1000))], queue: .main) { [weak playback] in playback?.pause() }
+            }
             playback.play()
-        } catch { status = error.localizedDescription; await refresh() }
+            return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
+    }
+    func playActionOriginal(_ action: ActionRecord) async -> Bool {
+        guard let claim = claims.first(where: { $0.id == action.claimID }), let first = claim.references.first,
+              let record = records.first(where: { $0.id == first.sourceID }), record.transcriptVersionID == first.transcriptVersionID else { status = "原话版本已变化，请先核对出处"; return false }
+        let spans = claim.references.filter { $0.sourceID == record.id && $0.transcriptVersionID == record.transcriptVersionID }
+            .compactMap { ref in record.spans.first(where: { $0.id == ref.spanID }) }.sorted { ($0.startMS ?? 0) < ($1.startMS ?? 0) }
+        guard let start = spans.first?.startMS, var end = spans.first?.endMS else { status = "这份原文没有可回听的录音时间"; return false }
+        for span in spans.dropFirst() {
+            guard let next = span.startMS, next <= end + 1000, let finish = span.endMS else { break }
+            end = max(end, finish)
+        }
+        return await playSpan(record, milliseconds: start, endMilliseconds: end)
     }
     func historyFor(_ record: SourceRecord) async {
         do { history = try await store?.transcriptHistory(sourceID: record.id) ?? [] }
@@ -950,6 +973,16 @@ final class ControlCenter: ObservableObject {
         do {
             _ = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: claim.reviewVersion, title: title, kind: kind, note: note, commandID: commandID)
             await refresh(); status = "意图已保存到 VoiceOS · 尚未写入提醒事项"; return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
+    }
+    func confirmTask(_ action: ActionRecord, title: String, commandID: String) async -> Bool {
+        guard let store, !savingAction else { return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            focusedTaskID = try await store.confirmOpportunityAsTask(actionID: action.id, expectedVersion: action.version, title: title, commandID: commandID)
+            await refresh(); await automaticReminderRefresh()
+            status = "已按你的核对保存为明确待办 · " + reminderSyncStatus
+            return true
         } catch { status = error.localizedDescription; await refresh(); return false }
     }
     func connectReminders() async {
@@ -1587,7 +1620,7 @@ struct CenterView: View {
                                     }
                                 }
                             }
-                            if let player = model.player { VideoPlayer(player: player).frame(height: record.kind == "video" ? 260 : 80) }
+                            if let player = model.player { NativePlayerView(player: player).frame(height: record.kind == "video" ? 260 : 80) }
                         } else { Text(transcriptStatus(record)).foregroundStyle(.secondary) }
                         if let error = record.error { Text(error).foregroundStyle(.orange) }
                         let related = model.currentClaimsBySource[record.id] ?? []
@@ -1926,7 +1959,7 @@ struct CenterView: View {
                 HStack { Spacer(); Button("完成") { showClaimHistory = false }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 660, height: 440)
         }
-        .onChange(of: model.selected) { _, _ in model.player?.pause(); model.player = nil; model.sourceDiscussions=[];Task { await model.refreshSourceDiscussions(); await model.refreshAssociationSelection() } }
+        .onChange(of: model.selected) { _, _ in model.stopPlayback(); model.sourceDiscussions=[];Task { await model.refreshSourceDiscussions(); await model.refreshAssociationSelection() } }
         .frame(minWidth: 840, minHeight: 540)
         .task { await model.start() }
     }

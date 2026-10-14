@@ -117,6 +117,13 @@ final class CoreFlowTests: XCTestCase {
         let current = try await store.retrieve("检索质量", using: NativeRetrieval()), actions = try await store.actions()
         XCTAssertEqual(current.matchingSources, 2)
         XCTAssertTrue(actions.isEmpty)
+        let claims = try await store.latestCandidateClaims(for: oldID), claim = try XCTUnwrap(claims.first)
+        let opportunityID = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: claim.reviewVersion, title: "【问题】检索质量如何改善", kind: .opportunity)
+        let taskID = try await store.confirmOpportunityAsTask(actionID: opportunityID, expectedVersion: 1, title: "研究检索质量的改进方法")
+        let history = try await store.actions(includeHistory: true)
+        XCTAssertEqual(history.first(where: { $0.id == opportunityID })?.state, "dismissed")
+        XCTAssertEqual(history.first(where: { $0.id == taskID })?.kind, "task")
+        XCTAssertEqual(history.first(where: { $0.id == taskID })?.intent?.uncertain, false)
     }
 
     func testCorrectionPreservesHistoryAndRefreshesUnderstanding() async throws {

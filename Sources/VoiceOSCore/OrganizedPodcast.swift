@@ -115,7 +115,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     let listDigest = SHA256.hash(data: taskData).map { String(format: "%02x", $0) }.joined()
     let ids = try importOrganizedClaims(context: context, proposals: proposals, commandID: "podcast-comprehensive:" + context.contentDigest + ":" + listDigest)
     guard let claimID = ids.first else { return 0 }
-    let actions = try db.query("SELECT a.id,c.ordinal FROM actions a JOIN claims c ON c.id=a.claim_id WHERE c.attempt_id=(SELECT attempt_id FROM claims WHERE id=?) ORDER BY c.ordinal", [claimID])
+    let actions = try db.query("SELECT a.id,c.ordinal FROM actions a JOIN claims c ON c.id=a.claim_id WHERE c.attempt_id=(SELECT attempt_id FROM claims WHERE id=?) AND a.command_id=('extracted:'||c.attempt_id||':'||c.ordinal) ORDER BY c.ordinal", [claimID])
     guard actions.count == tasks.items.count else { throw VoiceOSError("整理事项与保存的任务数量不一致") }
     try db.transaction {
         for (task, action) in zip(tasks.items, actions) {

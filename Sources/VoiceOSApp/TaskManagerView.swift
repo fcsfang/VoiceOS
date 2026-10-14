@@ -1,4 +1,5 @@
 import SwiftUI
+import AVKit
 import VoiceOSCore
 
 struct TaskManagerView: View {
@@ -9,12 +10,20 @@ struct TaskManagerView: View {
     @State private var ideaKind = "all"
     @State private var feedbackAction: ActionRecord?
     @State private var historyAction: ActionRecord?
+    @State private var confirmingAction: ActionRecord?
+    @State private var playbackActionID: String?
     private let sections = [("tasks", "待跟进"), ("review", "待核对"), ("ideas", "问题与目标"), ("completed", "已完成"), ("activities", "录音活动")]
 
     private func category(_ action: ActionRecord) -> String {
         if action.state == "completed" { return "completed" }
-        if action.validity != "current" || action.intent?.uncertain == true || action.intent?.followupState == "needs_review" || action.title.contains("待核对") { return "review" }
-        if action.intent?.followupState == "recorded_activity" || action.title.hasPrefix("【录音中活动】") { return "activities" }
+        if action.validity != "current" { return "review" }
+        if let intent = action.intent {
+            if intent.uncertain || intent.followupState == "needs_review" || intent.intentType == "uncertain" { return "review" }
+            if intent.followupState == "recorded_activity" { return "activities" }
+        } else {
+            if action.title.contains("待核对") { return "review" }
+            if action.title.hasPrefix("【录音中活动】") { return "activities" }
+        }
         return action.kind == "task" ? "tasks" : "ideas"
     }
     private var visible: [ActionRecord] {
@@ -24,7 +33,7 @@ struct TaskManagerView: View {
         }
     }
     private func selectFocusedTask() {
-        if let action = model.actionRecords.first(where: { $0.id == model.focusedTaskID }) { section = category(action) }
+        if let action = model.actionRecords.first(where: { $0.id == model.focusedTaskID }) { query = ""; ideaKind = "all"; section = category(action) }
     }
     private func sourceNames(_ action: ActionRecord) -> String {
         guard let claim = model.claims.first(where: { $0.id == action.claimID }) else { return "出处待核对" }
@@ -75,8 +84,14 @@ struct TaskManagerView: View {
                 Text(model.remindersBusy ? "正在同步提醒事项…" : model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary)
                 Spacer(); Button("完成", action: dismiss).keyboardShortcut(.cancelAction)
             }
+            if let id = playbackActionID, let player = model.player {
+                Text("回听：" + (model.actionRecords.first(where: { $0.id == id })?.title ?? "原话")).font(.caption).lineLimit(1)
+                NativePlayerView(player: player).frame(height: 64)
+            }
             Text(model.status).font(.caption).foregroundStyle(.secondary).lineLimit(2)
         }.padding(24).frame(width: 920, height: 660)
+        .onDisappear { if playbackActionID != nil { model.stopPlayback() } }
+        .sheet(item: $confirmingAction) { action in ConfirmTaskView(action: action, model: model) { confirmingAction = nil } }
         .sheet(item: $feedbackAction) { action in ActionFeedbackView(action: action, model: model) { feedbackAction = nil } }
         .sheet(item: $historyAction) { action in
             VStack(alignment: .leading, spacing: 16) {
@@ -120,9 +135,14 @@ struct TaskManagerView: View {
                 Button("查看出处") {
                     if let id = model.claims.first(where: { $0.id == action.claimID })?.references.first?.sourceID { model.selected = id; dismiss() }
                 }
+                Button("回听原话") { Task { if await model.playActionOriginal(action) { playbackActionID = action.id } } }
+                    .disabled(action.validity != "current")
                 Button(action.state == "completed" ? "记录结果或收获" : "记录进展") { feedbackAction = action }.disabled(model.savingFeedback || action.validity != "current")
                 if feedbackCount(action) > 0 { Button("查看结果") { Task { await model.actionHistory(action); historyAction = action } } }
                 Spacer()
+                if action.kind == "opportunity", action.validity == "current", action.state == "open", action.intentActor == "user" {
+                    Button("核对为待办") { confirmingAction = action }.disabled(model.savingAction)
+                }
                 if action.kind == "task", action.validity == "current" {
                     Button(action.state == "completed" ? "重新跟进" : "标记已完成") { Task { await model.changeAction(action, state: action.state == "completed" ? .open : .completed) } }
                         .disabled(model.savingAction || model.remindersBusy)
@@ -131,5 +151,39 @@ struct TaskManagerView: View {
         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(action.id == model.focusedTaskID ? Color.accentColor : .clear, lineWidth: 2))
+    }
+}
+
+private struct ConfirmTaskView: View {
+    let action: ActionRecord
+    @ObservedObject var model: ControlCenter
+    let dismiss: () -> Void
+    @State private var title = ""
+    @State private var error = ""
+    @State private var commandID = UUID().uuidString
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("核对为明确待办").font(.title2)
+            Text("确认这是你仍需跟进的事情，并把标题改成实际要做的动作。保存后会同步到已连接的提醒事项清单。")
+                .font(.callout).foregroundStyle(.secondary)
+            TextField("需要跟进什么", text: $title).disabled(model.savingAction)
+            ScrollView { Text(action.note).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 160)
+            if !error.isEmpty { Text(error).foregroundStyle(.red) }
+            HStack {
+                Button("取消", action: dismiss).disabled(model.savingAction)
+                Spacer()
+                Button("确认为待办") {
+                    Task {
+                        if await model.confirmTask(action, title: title, commandID: commandID) { dismiss() }
+                        else { error = model.status }
+                    }
+                }.buttonStyle(.borderedProminent).disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }.padding(24).frame(width: 620)
+        .onAppear {
+            title = action.title.replacingOccurrences(of: "（待核对）", with: "")
+            if title.hasPrefix("【"), let end = title.firstIndex(of: "】") { title = String(title[title.index(after: end)...]) }
+        }
+        .interactiveDismissDisabled(model.savingAction)
     }
 }
