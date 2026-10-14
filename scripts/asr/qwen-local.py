@@ -25,8 +25,9 @@ def main():
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--locale", choices=["zh_CN", "en_US"], default="zh_CN")
-    parser.add_argument("--chunk-seconds", type=int, choices=[15, 30], default=30)
+    parser.add_argument("--chunk-seconds", type=int, default=30)
     args = parser.parse_args()
+    if not 1 <= args.chunk_seconds <= 30: parser.error("Chunk length must be between 1 and 30 seconds")
     if args.output.exists() or not args.audio.is_file() or not (args.model / "model.safetensors").is_file():
         parser.error("Local files and a new output are required")
     if importlib.metadata.version("mlx-audio") != "0.5.8":
