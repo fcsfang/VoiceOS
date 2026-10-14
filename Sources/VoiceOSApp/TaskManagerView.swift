@@ -28,10 +28,15 @@ struct TaskManagerView: View {
         return action.kind == "task" ? "tasks" : "ideas"
     }
     private var visible: [ActionRecord] {
-        model.actionRecords.filter { action in
+        listedActions.filter { action in
             category(action) == section && action.state != "dismissed" && (section != "ideas" || ideaKind == "all" || action.intent?.intentType == ideaKind) &&
             (query.isEmpty || action.title.localizedCaseInsensitiveContains(query) || action.note.localizedCaseInsensitiveContains(query))
         }
+    }
+    private var listedActions: [ActionRecord] {
+        let current = Set(model.currentClaimsBySource.values.flatMap { $0.map(\.id) })
+        // A new complete organization replaces prior idea proposals, while real tasks and results stay visible.
+        return model.actionRecords.filter { $0.kind != "opportunity" || $0.intent == nil || $0.validity != "current" || $0.state != "open" || current.contains($0.claimID) }
     }
     private func selectFocusedTask() {
         if let action = model.actionRecords.first(where: { $0.id == model.focusedTaskID }) { query = ""; ideaKind = "all"; section = category(action); expandedActions.insert(action.id) }
@@ -69,7 +74,7 @@ struct TaskManagerView: View {
             }
             Picker("查看", selection: $section) {
                 ForEach(sections, id: \.0) { key, label in
-                    Text(label + "（\(model.actionRecords.filter { category($0) == key && $0.state != "dismissed" }.count)）").tag(key)
+                    Text(label + "（\(listedActions.filter { category($0) == key && $0.state != "dismissed" }.count)）").tag(key)
                 }
             }.pickerStyle(.segmented)
             if section == "ideas" {

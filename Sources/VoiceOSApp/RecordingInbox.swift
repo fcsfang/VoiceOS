@@ -99,6 +99,7 @@ final class RecordingInbox: ObservableObject {
         UserDefaults.standard.set(Array(failures), forKey: key + ".failures")
     }
     private func files(in directory: URL, voiceMemos: Bool) throws -> [String: String] {
+        let directory = voiceMemos && directory.lastPathComponent != "Recordings" ? directory.appendingPathComponent("Recordings") : directory
         // Explicitly check the protected directory: enumeration must not silently look empty.
         _ = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         var result: [String: String] = [:]

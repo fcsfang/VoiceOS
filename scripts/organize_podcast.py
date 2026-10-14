@@ -175,7 +175,7 @@ def organize(folder):
     return items
 
 
-def merge(folders, items, base):
+def merge(folders, items, base, render_only=False):
     by_id = {item["candidate_id"]: item for item in items}
     group_schema = obj({"groups": {"type": "array", "items": obj({"title": {"type": "string"}, "intent_type": {"type": "string", "enum": TYPES}, "uncertain": {"type": "boolean"}, "notes": {"type": "string"}, "followup_state": {"type": "string", "enum": list(FOLLOWUP)}, "status_quote": {"type": "string"}, "status_recording": {"type": "string"}, "members": {"type": "array", "items": {"type": "string"}}})}})
     prompt = """把真实播客的全部意图候选整理为全面可用的清单。只合并确实是同一件事的重复提及，禁止把多个独立交付物合成一个大任务。每个candidate_id必须恰好出现在一个group的members中，不得删除候选。没有任务数量上限。对可疑意图/术语保留并标注待核对，不发明用户承诺或新任务。改写标题为清楚的实际动作/问题，保留条件，不写'记录到待办列表'等元动作。同一技术的不同转写拼法只能在上下文确实支持时合并，否则待核对。长期目标、产品需求和具体待办分清，不把它们都变成提醒事项。"""
@@ -188,7 +188,8 @@ def merge(folders, items, base):
     if "claim" in TYPES:
         prompt += "\n用户自己的观点、判断、解释、学习收获单独保留为claim，跟进状态用knowledge；不要把它们改写成未来任务。只转述嘉宾且没有用户明确认同的观点不冒充用户观点。实际未来意图仍按task/question/goal/idea分类，不把任务改成普通观点而漏掉跟进。"
     print("正在合并重复意图并核对跟进状态；全部候选保留", flush=True)
-    groups = ask(payload, prompt, base / "清单合并模型结果.json", group_schema, max_output_tokens=32768)["groups"]
+    groups = (json.loads((base / "清单合并模型结果.json").read_text())["result"]["groups"] if render_only else
+              ask(payload, prompt, base / "清单合并模型结果.json", group_schema, max_output_tokens=32768)["groups"])
     corrections = base / "清单核对修订.json"
     corrections = json.loads(corrections.read_text()) if corrections.exists() else {}
     seen, tasks = set(), []
@@ -257,6 +258,7 @@ def main():
     parser.add_argument("folders", type=Path, nargs="+")
     parser.add_argument("--extract-only", action="store_true")
     parser.add_argument("--include-knowledge", action="store_true")
+    parser.add_argument("--render-only", action="store_true", help="Apply checked corrections to saved results without calling a model")
     args = parser.parse_args()
     if args.include_knowledge:
         global PROMPT
@@ -265,9 +267,15 @@ def main():
         FOLLOWUP["knowledge"] = "知识记录"
         PROMPT += "\n同时提取用户自己明确提出的观点、判断、解释、学习收获，intent_type=claim。它们保存为知识，不创建行动或提醒。保留原话与条件，不把猜测标成事实；只转述嘉宾且没有用户明确认同的内容不冒充用户观点。任务、问题、目标与需求仍全面提取，不能被普通观点替代。"
     items = []
-    for folder in args.folders: items.extend(organize(folder.resolve()))
+    for folder in args.folders:
+        if args.render_only:
+            saved = json.loads((folder / "意图候选.json").read_text())
+            if not all(w["status"] in ["extracted_and_checked", "no_transcribed_speech"] for w in saved["windows"]):
+                raise ValueError("Complete extraction and omission checks are required")
+            items.extend(saved["items"])
+        else: items.extend(organize(folder.resolve()))
     if not args.extract_only:
-        merge([p.resolve() for p in args.folders], items, args.folders[0].resolve().parent)
+        merge([p.resolve() for p in args.folders], items, args.folders[0].resolve().parent, render_only=args.render_only)
 
 
 if __name__ == "__main__": main()
