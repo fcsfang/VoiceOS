@@ -8,7 +8,7 @@ struct Check {
     static func main() async {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
-            let usage = "usage: voiceos-check <read|import|import-personal-audio|ingest-podcast|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]"
+            let usage = "usage: voiceos-check <read|import|import-personal-audio|ingest-podcast|task-context|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]"
             guard args.count >= 2 else { throw VoiceOSError(usage) }
             let command = args[0], root = URL(fileURLWithPath: args[1])
             if command == "ingest-podcast" {
@@ -17,6 +17,8 @@ struct Check {
                 return
             }
             switch command {
+            case "task-context":
+                guard args.count == 3 else { throw VoiceOSError("task-context <data-dir> <output-json>") }
             case "read", "transcribe":
                 guard args.count == 2 else { throw VoiceOSError(usage) }
             case "import", "import-personal-audio":
@@ -36,6 +38,10 @@ struct Check {
             let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
             try await store.recover()
             switch command {
+            case "task-context":
+                let count = try await store.writeExistingTaskInput(to: URL(fileURLWithPath: args[2]))
+                print("已导出 \(count) 条获文字处理授权的现有任务。")
+                return
             case "import", "import-personal-audio":
                 let file = URL(fileURLWithPath: args[2]), commandID = args.count == 4 ? args[3] : UUID().uuidString
                 if command == "import-personal-audio" { _ = try await store.importPersonalAudio(file, commandID: commandID) }

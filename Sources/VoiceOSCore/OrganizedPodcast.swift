@@ -25,6 +25,7 @@ private struct OrganizedTasks: Decodable {
     let all_audio_complete: Bool
     let all_windows_checked: Bool
     let api_review_completed: Bool?
+    let continuations_checked: Bool?
     let items: [Task]
     struct Task: Decodable {
         let id: String
@@ -34,6 +35,7 @@ private struct OrganizedTasks: Decodable {
         let followup_state: String
         let notes: String
         let references: [Reference]
+        let continuation: OrganizedTaskContinuation?
     }
     struct Reference: Decodable {
         let recording: String
@@ -51,6 +53,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     let tasks = try JSONDecoder().decode(OrganizedTasks.self, from: taskData)
     guard tasks.all_audio_complete, tasks.all_windows_checked else { throw VoiceOSError("全长转写与漏项复查尚未完成") }
     guard !requireAPIReview || tasks.api_review_completed == true else { throw VoiceOSError("外部 API 意图核对尚未完成；没有接入初稿或写入提醒事项") }
+    guard !requireAPIReview || tasks.continuations_checked == true else { throw VoiceOSError("已有任务接续核对尚未完成；没有接入初稿或写入提醒事项") }
     let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
     if allowReminderWrites {
         guard let access = try reminderAccess(), access.enabled, access.title == "VoiceOS" else { throw VoiceOSError("请先在应用中连接正式 VoiceOS 清单") }
@@ -84,6 +87,13 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
         budget += transcript.text.unicodeScalars.count
     }
     let context = try prepareLocalTranscriptContext(sourceIDs: tasks.source_folders.compactMap { sourceIDs[URL(fileURLWithPath: $0).lastPathComponent] }, scalarBudget: budget)
+    let listDigest = SHA256.hash(data: taskData).map { String(format: "%02x", $0) }.joined()
+    let command = "podcast-comprehensive:" + context.contentDigest + ":" + listDigest
+    guard try db.query("SELECT state FROM contexts WHERE command_id=?", [command]).first?["state"] != "frozen" else { throw VoiceOSError("这份整理的原话或授权已变化，旧结果继续暂停；没有重新激活任务") }
+    let alreadyImported = !(try db.query("SELECT c.id FROM claims c JOIN model_attempts m ON m.id=c.attempt_id JOIN contexts x ON x.id=m.context_id WHERE x.command_id=? AND m.state='completed'", [command])).isEmpty
+    if !alreadyImported {
+        try validateTaskContinuations(tasks.items.compactMap(\.continuation), excludingSourceIDs: Set(sourceIDs.values))
+    }
     var proposals: [ClaimProposal] = []
     for task in tasks.items {
         var references: [ClaimReference] = [], seen: Set<String> = []
@@ -106,19 +116,23 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
             notes += "；逐字引用未定位，原话栏显示待核对录音段落，不能视为精确引文。"
         }
         let needsReview = task.uncertain || located.isEmpty
+        if let link = task.continuation {
+            guard tasks.api_review_completed == true, tasks.continuations_checked == true, !needsReview,
+                  located.count == task.references.count, located.allSatisfy({ $0.quote.unicodeScalars.count <= 4000 }),
+                  link.relation != "repeat" || (task.intent_type == "task" && task.followup_state == "pending") else {
+                throw VoiceOSError("接续事项缺少已核对的完整原话，清单保留但未关联旧任务")
+            }
+        }
         let isTask = task.intent_type == "task" && !needsReview && task.followup_state == "pending"
         let kind: ActionKind = isTask ? .task : .opportunity
         let labels = ["question": "问题", "goal": "长期目标", "idea": "想法", "uncertain": "待核对", "claim": "观点"]
         let prefix = task.followup_state == "recorded_activity" ? "录音中活动" : (labels[task.intent_type] ?? (isTask ? "" : "待核对"))
         let title = (prefix.isEmpty ? "" : "【\(prefix)】") + task.title + (needsReview ? "（待核对）" : "")
         let statement = title + (notes.isEmpty ? "" : "\n说明：" + notes)
-        let action: ExtractedAction? = task.intent_type == "claim" ? nil : .init(title: title, kind: kind, quote: quote, autoSend: false)
+        let action: ExtractedAction? = task.intent_type == "claim" || task.continuation != nil ? nil : .init(title: title, kind: kind, quote: quote, autoSend: false)
         proposals.append(.init(statement: statement, ownership: .userTentative, references: references,
                                action: action, contentKind: task.intent_type == "claim" ? .statement : nil))
     }
-    let listDigest = SHA256.hash(data: taskData).map { String(format: "%02x", $0) }.joined()
-    let command = "podcast-comprehensive:" + context.contentDigest + ":" + listDigest
-    guard try db.query("SELECT state FROM contexts WHERE command_id=?", [command]).first?["state"] != "frozen" else { throw VoiceOSError("这份整理的原话或授权已变化，旧结果继续暂停；没有重新激活任务") }
     let ids = try importOrganizedClaims(context: context, proposals: proposals, commandID: command)
     guard let claimID = ids.first else { return 0 }
     let actions = try db.query("SELECT a.id,c.ordinal FROM actions a JOIN claims c ON c.id=a.claim_id WHERE c.attempt_id=(SELECT attempt_id FROM claims WHERE id=?) AND a.command_id=('extracted:'||c.attempt_id||':'||c.ordinal) ORDER BY c.ordinal", [claimID])
@@ -129,6 +143,15 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
             guard let actionID = actionIDs[index] else { throw VoiceOSError("整理事项缺少对应任务") }
             let metadata = ActionIntentMetadata(intentType: task.intent_type, followupState: task.followup_state, uncertain: task.uncertain)
             try db.execute("UPDATE actions SET intent_json=? WHERE id=?", [String(decoding: try encoder.encode(metadata), as: UTF8.self), actionID])
+        }
+    }
+    let claimIDs = try db.query("SELECT id FROM claims WHERE attempt_id=(SELECT attempt_id FROM claims WHERE id=?) ORDER BY ordinal", [claimID]).compactMap { $0["id"] }
+    for (index, task) in tasks.items.enumerated() {
+        guard let link = task.continuation else { continue }
+        for (referenceIndex, ref) in task.references.enumerated() {
+            guard let sourceID = sourceIDs[ref.recording] else { throw VoiceOSError("接续事项缺少录音出处") }
+            try recordTaskContinuation(link, claimID: claimIDs[index], quote: ref.quote, recordingSourceID: sourceID,
+                                       commandID: command + ":continuation:" + task.id + ":\(referenceIndex)")
         }
     }
     return ids.count

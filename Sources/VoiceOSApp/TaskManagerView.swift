@@ -119,8 +119,10 @@ struct TaskManagerView: View {
                     if model.feedbackRecords.isEmpty { Text("还没有结果记录。愿意时补一句实际进展或收获即可。").foregroundStyle(.secondary) }
                     ForEach(model.feedbackRecords) { feedback in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(feedback.kind == "outcome" ? "实际结果" : "我的反思").font(.headline)
+                            Text(feedback.label).font(.headline)
                             Text(feedback.text).textSelection(.enabled)
+                            if feedback.relation != nil { Text("录音原话 · API 自动关联").font(.caption).foregroundStyle(.secondary) }
+                            if feedback.sourceState == "frozen" { Text("原话已变化，关联待重新核对").font(.caption).foregroundStyle(.secondary) }
                             if let recordingID = feedback.recordingSourceID {
                                 Button("查看原始口述") { model.selected = recordingID; historyAction = nil; dismiss() }
                             }
@@ -148,7 +150,7 @@ struct TaskManagerView: View {
                 }
                 Button("回听原话") { Task { if await model.playActionOriginal(action) { playbackActionID = action.id } } }.disabled(action.validity != "current")
                 Button(action.state == "completed" ? "记录结果或收获" : "记录进展") { feedbackAction = action }.disabled(model.savingFeedback || action.validity != "current")
-                if feedbackCount(action) > 0 { Button("查看结果") { Task { await model.actionHistory(action); historyAction = action } } }
+                if feedbackCount(action) > 0 { Button("查看接续记录") { Task { await model.actionHistory(action); historyAction = action } } }
                 Spacer()
                 if action.kind == "opportunity", action.validity == "current", action.state == "open", action.intentActor == "user" {
                     Button("核对为待办") { confirmingAction = action }.disabled(model.savingAction)
@@ -164,7 +166,7 @@ struct TaskManagerView: View {
                     .foregroundStyle(action.state == "completed" ? .green : .secondary)
                 Text(action.title).font(.body).textSelection(.enabled)
                 Spacer()
-                if feedbackCount(action) > 0 { Text("\(feedbackCount(action)) 条结果").font(.caption).foregroundStyle(.secondary) }
+                if feedbackCount(action) > 0 { Text("\(feedbackCount(action)) 条记录").font(.caption).foregroundStyle(.secondary) }
             }
         }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))

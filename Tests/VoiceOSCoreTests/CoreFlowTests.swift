@@ -21,7 +21,8 @@ private actor FlowModel: ModelPort {
 }
 private struct FlowSpeech: SpeechPort {
     let backendIdentity = "Qwen3-ASR-flow-fixture"
-    func transcribe(_ url: URL, locale: String) async throws -> SpeechText { SpeechText(text: "我认为检索质量比记忆容量更值得研究。") }
+    var text = "我认为检索质量比记忆容量更值得研究。"
+    func transcribe(_ url: URL, locale: String) async throws -> SpeechText { SpeechText(text: text) }
 }
 private struct FlowAssociation: ExpressionAssociationPort {
     let configuration = flowConfiguration
@@ -122,6 +123,7 @@ final class CoreFlowTests: XCTestCase {
         do { _ = try await store.ingestOrganizedPodcast(at: base, requireAPIReview: true); XCTFail("初稿不能进入自动同步流程") }
         catch { XCTAssertTrue(error.localizedDescription.contains("意图核对尚未完成")) }
         payload["api_review_completed"] = true
+        payload["continuations_checked"] = true
         try JSONSerialization.data(withJSONObject: payload).write(to: base.appendingPathComponent("完整任务清单.json"))
         let count = try await store.ingestOrganizedPodcast(at: base, requireAPIReview: true)
         XCTAssertEqual(count, 2)
@@ -134,6 +136,51 @@ final class CoreFlowTests: XCTestCase {
         _ = try await store.ingestOrganizedPodcast(at: base)
         let repeated = try await store.actions(includeHistory: true)
         XCTAssertEqual(repeated.count, savedActions.count)
+        // A later recording repeats an old task, reports a result, and adds a distinct next step.
+        let targetAction = try XCTUnwrap(followups.first), reminders = FlowReminders()
+        _ = try await store.setReminderAccess(calendarID: "fixture", title: "VoiceOS", enabled: true, expectedVersion: 0)
+        try await store.refreshAuthorizedReminders(expectedAccessVersion: 1, using: reminders)
+        let reminderCount = await reminders.items.count
+        let next = try await store.beginDictation()
+        buffer.floatChannelData![0][0] = 0.02
+        do { let file = try AVAudioFile(forWriting: next.stagingURL, settings: format.settings); try file.write(from: buffer) }
+        try await store.sealDictation(sourceID: next.sourceID)
+        let transcript = "我还要研究检索质量。我已经比较了两种检索方法，发现重排能提高相关性。下一步另做一次容量对比实验。"
+        try await store.processTranscriptions(using: FlowSpeech(text: transcript), sourceIDs: [next.sourceID])
+        let nextPolicy = try await store.sourcePolicy(sourceID: next.sourceID)
+        _ = try await store.setSourceLocalOnly(sourceID: next.sourceID, expectedVersion: nextPolicy.version, localOnly: false)
+        let nextBase = root.appendingPathComponent("next-organized"), nextFolder = nextBase.appendingPathComponent("next-recording")
+        _ = try await store.writeOrganizingInput(sourceID: next.sourceID, to: nextFolder)
+        let historyFile = nextBase.appendingPathComponent("已有任务.json")
+        _ = try await store.writeExistingTaskInput(to: historyFile, excludingSourceIDs: [next.sourceID])
+        let history = try JSONDecoder().decode([ExistingRecordingTask].self, from: Data(contentsOf: historyFile))
+        let target = try XCTUnwrap(history.first { $0.id == targetAction.id })
+        let targetJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(target))
+        let nextSources = try await store.sources(), nextSource = try XCTUnwrap(nextSources.first { $0.id == next.sourceID })
+        func ref(_ quote: String) -> [String: Any] { ["recording": "next-recording", "quote": quote, "citation_status": "located", "span_ids": [nextSource.spans[0].id]] }
+        let nextItems: [[String: Any]] = [
+            ["id": "R1", "title": "研究检索质量", "intent_type": "task", "uncertain": false, "followup_state": "pending", "notes": "", "references": [ref("我还要研究检索质量。")], "continuation": ["relation": "repeat", "target": targetJSON, "notes": "同一待办"]],
+            ["id": "K2", "title": "重排能提高相关性", "intent_type": "claim", "uncertain": false, "followup_state": "knowledge", "notes": "", "references": [ref("我已经比较了两种检索方法，发现重排能提高相关性。")], "continuation": ["relation": "outcome", "target": targetJSON, "notes": "实际收获"]],
+            ["id": "T2", "title": "做一次容量对比实验", "intent_type": "task", "uncertain": false, "followup_state": "pending", "notes": "", "references": [ref("下一步另做一次容量对比实验。")]]
+        ]
+        let nextPayload: [String: Any] = ["source_folders": [nextFolder.path], "all_audio_complete": true, "all_windows_checked": true, "api_review_completed": true, "continuations_checked": true, "items": nextItems]
+        try JSONSerialization.data(withJSONObject: nextPayload).write(to: nextBase.appendingPathComponent("完整任务清单.json"))
+        _ = try await store.ingestOrganizedPodcast(at: nextBase, allowReminderWrites: true, requireAPIReview: true)
+        try await store.refreshAuthorizedReminders(expectedAccessVersion: 1, using: reminders)
+        let after = try await store.actions(includeHistory: true), linked = try await store.actionFeedback(actionID: targetAction.id)
+        XCTAssertEqual(after.count, repeated.count + 1)
+        XCTAssertEqual(after.first { $0.id == targetAction.id }?.state, "open")
+        XCTAssertEqual(Set(linked.map(\.relation)), ["repeat", "outcome"])
+        XCTAssertTrue(linked.allSatisfy { $0.recordingSourceID == next.sourceID && transcript.contains($0.text) })
+        let afterReminders = await reminders.items.count
+        XCTAssertEqual(afterReminders, reminderCount + 1)
+        _ = try await store.ingestOrganizedPodcast(at: nextBase, allowReminderWrites: true, requireAPIReview: true)
+        try await store.recover()
+        let retained = try await store.actionFeedback(actionID: targetAction.id)
+        XCTAssertEqual(retained.count, 2)
+        _ = try await store.correctTranscript(sourceID: next.sourceID, expectedVersionID: nextSource.transcriptVersionID!, text: transcript + "补充：需要继续验证。")
+        let stale = try await store.actionFeedback(actionID: targetAction.id)
+        XCTAssertTrue(stale.allSatisfy { $0.sourceState == "frozen" })
     }
 
     func testIdeaFindsHistoryWithoutCreatingTask() async throws {

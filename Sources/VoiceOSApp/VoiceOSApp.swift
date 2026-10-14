@@ -641,8 +641,9 @@ final class ControlCenter: ObservableObject {
         let base = root.appendingPathComponent("整理/" + sourceID + "/" + version)
         let folder = base.appendingPathComponent(record.name)
         _ = try await store.writeOrganizingInput(sourceID: sourceID, to: folder)
+        _ = try await store.writeExistingTaskInput(to: base.appendingPathComponent("已有任务.json"), excludingSourceIDs: [sourceID])
         let log = base.appendingPathComponent("处理日志.txt"); fullRecordingLog = log
-        setFullRecordingStatus("正在提取与漏项复查，随后由外部 API 核对修订全部意图…")
+        setFullRecordingStatus("正在提取与漏项复查，随后由外部 API 核对意图并接续已有任务…")
         try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, configuration: configuration, log: log)
         try Task.checkCancellation()
         let count = try await store.ingestOrganizedPodcast(at: base, allowReminderWrites: reminderAccess?.enabled == true && reminderAccess?.title == "VoiceOS", requireAPIReview: true)
@@ -650,7 +651,7 @@ final class ControlCenter: ObservableObject {
         fullRecordingOutput = base
         await refresh()
         await automaticReminderRefresh()
-        setFullRecordingStatus("外部 API 核对完成 · 已保存 \(count) 条观点与意图，明确待办自动同步提醒")
+        setFullRecordingStatus("已保存 \(count) 条观点与意图 · 重复提及和进展接回原任务，新的明确待办同步提醒")
     }
     private func setFullRecordingStatus(_ message: String) { fullRecordingStatus = message; status = message }
     private func watchFullRecording() -> Task<Void, Never> {
@@ -1990,9 +1991,10 @@ struct CenterView: View {
                     }
                     ForEach(model.feedbackRecords) { feedback in
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("\(feedback.kind == "outcome" ? "结果" : "反思") · 关联第 \(feedback.actionVersion) 版").font(.headline)
+                            Text("\(feedback.label) · 关联第 \(feedback.actionVersion) 版").font(.headline)
                             Text(feedback.text).textSelection(.enabled)
-                            Text("用户记录 · 不自动验证观点").font(.caption).foregroundStyle(.secondary)
+                            Text(feedback.relation == nil ? "用户记录 · 不自动验证观点" : "录音原话 · API 自动关联，不自动验证观点").font(.caption).foregroundStyle(.secondary)
+                            if feedback.sourceState == "frozen" { Text("原话已变化，关联待重新核对").font(.caption).foregroundStyle(.secondary) }
                             if feedback.sourceState == "quarantined" { Text("原件不可用，保留历史文本").font(.caption).foregroundStyle(.secondary) }
                             Button("查看反馈原文") { model.selected = feedback.sourceID; showActionHistory = false }
                             Divider()
