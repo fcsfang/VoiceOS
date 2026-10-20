@@ -16,8 +16,11 @@ final class LocalTextModelTests: XCTestCase {
         XCTAssertEqual(outcome.configuration.provider,port.configuration.provider)
         XCTAssertEqual(outcome.configuration.model,"gpt-6.1-sol")
         XCTAssertEqual(outcome.configuration.promptVersion,"discussion-outcomes-reuse-v1")
+        let english=try LocalTextModel.loadEnglish(from:file)
+        XCTAssertEqual(english.configuration.provider,port.configuration.provider)
+        XCTAssertEqual(english.configuration.promptVersion,"english-practice-v1")
         let suite=try LocalTextModel.loadSuite(from:file)
-        XCTAssertEqual(Set([suite.cognition.configuration.provider,suite.discussion.configuration.provider,suite.relevance.configuration.provider,suite.outcome.configuration.provider]),[port.configuration.provider])
+        XCTAssertEqual(Set([suite.cognition.configuration.provider,suite.discussion.configuration.provider,suite.relevance.configuration.provider,suite.outcome.configuration.provider,suite.english.configuration.provider]),[port.configuration.provider])
     }
     func testMalformedDuplicateAndOversizedConfigurationFailWithoutEchoingContents() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -27,5 +30,14 @@ final class LocalTextModelTests: XCTestCase {
             do { _ = try LocalTextModel.load(from: file); XCTFail("must reject") }
             catch { XCTAssertFalse(error.localizedDescription.contains("secret")) }
         }
+    }
+    func testOpenCodeStyleJSONConfigurationLoadsWithoutExposingCredential() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let json: [String: Any] = ["provider": ["openai": ["options": ["baseURL": "https://api.chiyi.cc/v1", "apiKey": "json-secret"]]]]
+        try JSONSerialization.data(withJSONObject: json).write(to: file)
+        let suite = try LocalTextModel.loadSuite(from: file)
+        XCTAssertEqual(suite.english.configuration.provider, "responses:api.chiyi.cc")
+        XCTAssertEqual(suite.english.configuration.promptVersion, "english-practice-v1")
     }
 }

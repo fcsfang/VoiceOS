@@ -89,7 +89,7 @@ extension VoiceOSStore {
         try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT c.id FROM claims c JOIN discussion_claim_derivations d ON d.claim_id=c.id JOIN discussion_attempts a ON a.id=d.discussion_attempt_id WHERE a.validity='frozen')")
     }
     static func validateStoredDiscussionDerivations(_ db:Database) throws {
-        guard try db.query("SELECT m.id FROM model_attempts m LEFT JOIN discussion_claim_derivations d ON d.model_attempt_id=m.id WHERE (m.execution_kind='discussion_derivation' AND d.id IS NULL) OR (m.provider='discussion_derivation' AND m.execution_kind!='discussion_derivation')").isEmpty else { throw VoiceOSError("本地派生不能冒充模型调用或缺少出处关系") }
+        guard try db.query("SELECT m.id FROM model_attempts m LEFT JOIN discussion_claim_derivations d ON d.model_attempt_id=m.id WHERE (m.execution_kind='discussion_derivation' AND d.id IS NULL AND m.provider NOT LIKE 'english_feedback:%') OR (m.provider='discussion_derivation' AND m.execution_kind!='discussion_derivation')").isEmpty else { throw VoiceOSError("本地派生不能冒充模型调用或缺少出处关系") }
         for d in try db.query("SELECT * FROM discussion_claim_derivations") {
             guard let parent=try db.query("SELECT * FROM discussion_attempts WHERE id=? AND state='completed'",[d["discussion_attempt_id"]]).first,
                   let index=d["part_index"].flatMap(Int.init),

@@ -8,12 +8,13 @@ public enum LocalTextModel {
         public let relevance:ResponsesRelevancePort
         public let discussion:ResponsesDiscussionPort
         public let outcome:ResponsesOutcomePort
+        public let english:ResponsesEnglishPracticePort
     }
     /// Read credentials once; publish all ports only after the complete suite validates.
     public static func loadSuite(from file:URL) throws -> Suite {
         let (address,key)=try settings(from:file)
         do {
-            return Suite(cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"))
+            return Suite(cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),english:try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"))
         } catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
     public static func load(from file: URL) throws -> ResponsesModelPort {
@@ -36,10 +37,26 @@ public enum LocalTextModel {
         do { return try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol") }
         catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
+    public static func loadEnglish(from file:URL) throws -> ResponsesEnglishPracticePort {
+        let (address,key)=try settings(from:file)
+        do { return try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol") }
+        catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
+    }
     private static func settings(from file: URL) throws -> (URL, String) {
         do {
             let bytes = try Data(contentsOf: file)
             guard bytes.count <= 16384, let text = String(data: bytes, encoding: .utf8) else { throw VoiceOSError("invalid config") }
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("{") {
+                guard let root = try JSONSerialization.jsonObject(with: Data(trimmed.utf8)) as? [String: Any],
+                      let providers = root["provider"] as? [String: Any],
+                      let openAI = providers["openai"] as? [String: Any],
+                      let options = openAI["options"] as? [String: Any],
+                      let rawAddress = options["baseURL"] as? String,
+                      let key = options["apiKey"] as? String,
+                      let address = URL(string: rawAddress), !key.isEmpty, key != "REPLACE_LOCALLY" else { throw VoiceOSError("missing config") }
+                return (address, key)
+            }
             var settings: [String: String] = [:]
             for raw in text.split(separator: "\n") {
                 let line = raw.trimmingCharacters(in: .whitespaces)
