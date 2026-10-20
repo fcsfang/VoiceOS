@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -477,6 +477,59 @@ final class Database {
                 try execute("CREATE TABLE questions(id TEXT PRIMARY KEY,claim_id TEXT NOT NULL UNIQUE REFERENCES claims(id),seed_json TEXT NOT NULL,seed_digest TEXT NOT NULL,version INTEGER NOT NULL CHECK(version>0),status TEXT NOT NULL CHECK(status IN ('open','exploring','resolved','closed')),validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),created_at TEXT NOT NULL)")
                 try execute("CREATE TABLE question_revisions(id TEXT PRIMARY KEY,question_id TEXT NOT NULL REFERENCES questions(id),command_id TEXT NOT NULL UNIQUE,from_version INTEGER NOT NULL,to_version INTEGER NOT NULL,from_status TEXT NOT NULL,to_status TEXT NOT NULL,input_json TEXT NOT NULL,input_digest TEXT NOT NULL,actor TEXT NOT NULL CHECK(actor='user'),created_at TEXT NOT NULL,UNIQUE(question_id,to_version),CHECK(to_version=from_version+1))")
                 try execute("PRAGMA user_version=24")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "24" {
+            try transaction {
+                try execute("""
+                CREATE TABLE IF NOT EXISTS processing_intents (
+                  id TEXT PRIMARY KEY,
+                  command_id TEXT NOT NULL UNIQUE,
+                  command_fingerprint TEXT NOT NULL,
+                  source_id TEXT NOT NULL REFERENCES sources(id),
+                  source_version_id TEXT NOT NULL,
+                  transcript_version_id TEXT NOT NULL REFERENCES transcript_versions(id),
+                  policy_version INTEGER NOT NULL CHECK(policy_version>=1),
+                  snapshot_json TEXT NOT NULL,
+                  snapshot_digest TEXT NOT NULL,
+                  cognition_provider TEXT NOT NULL,
+                  cognition_model TEXT NOT NULL,
+                  cognition_prompt_version TEXT NOT NULL,
+                  cognition_schema_version TEXT NOT NULL,
+                  cognition_destination TEXT NOT NULL CHECK(cognition_destination IN ('local','cloud')),
+                  association_provider TEXT NOT NULL,
+                  association_model TEXT NOT NULL,
+                  association_prompt_version TEXT NOT NULL,
+                  association_schema_version TEXT NOT NULL,
+                  association_destination TEXT NOT NULL CHECK(association_destination IN ('local','cloud')),
+                  state TEXT NOT NULL CHECK(state IN ('queued','running','completed','unknown','blocked','cancelled','frozen','rejected')),
+                  phase TEXT NOT NULL CHECK(phase IN ('queued','cognition','association','completed')),
+                  cognition_attempt_id TEXT REFERENCES model_attempts(id),
+                  association_attempt_id TEXT REFERENCES expression_association_attempts(id),
+                  error TEXT,
+                  cancel_reason TEXT,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                )
+                """)
+                try execute("CREATE INDEX IF NOT EXISTS processing_intents_source ON processing_intents(source_id,created_at,id)")
+                try execute("CREATE INDEX IF NOT EXISTS processing_intents_state ON processing_intents(state,created_at,id)")
+                try execute("PRAGMA user_version=25")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "25" {
+            try transaction {
+                try execute("""
+                CREATE TABLE IF NOT EXISTS recording_processing_requests (
+                  id TEXT PRIMARY KEY, command_id TEXT NOT NULL UNIQUE,
+                  source_id TEXT NOT NULL UNIQUE REFERENCES sources(id), source_version_id TEXT NOT NULL,
+                  policy_version INTEGER NOT NULL, cognition_json TEXT NOT NULL, association_json TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('waiting','enqueued','blocked','cancelled','frozen')),
+                  processing_intent_id TEXT REFERENCES processing_intents(id), error TEXT,
+                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                )
+                """)
+                try execute("PRAGMA user_version=26")
             }
         }
     }
