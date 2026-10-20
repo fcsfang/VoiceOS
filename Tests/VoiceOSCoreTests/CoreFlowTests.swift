@@ -683,25 +683,45 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertThrowsError(try VoiceOSStore.validateExpressionActionReview(duplicate,input:actionInput)) { error in
             XCTAssertTrue(error.localizedDescription.contains("被多个旧行动沿用"))
         }
-        func actionReply(_ id:String,_ decisions:[RecordingExpressionActionDecision]) throws -> ModelHTTPReply {
-            let text=String(decoding:try JSONEncoder().encode(["decisions":decisions]),as:UTF8.self)
+        func actionReply(_ id:String,_ decisions:[RecordingExpressionActionDecision],text:String? = nil) throws -> ModelHTTPReply {
+            let text=try text ?? String(decoding:JSONEncoder().encode(["decisions":decisions]),as:UTF8.self)
             let content:[String:String] = ["type":"output_text","text":text]
             let message:[String:Any] = ["type":"message","role":"assistant","status":"completed","content":[content]]
             let envelope:[String:Any] = ["id":id,"status":"completed","output":[message]]
             return .init(status:200,body:try JSONSerialization.data(withJSONObject:envelope))
         }
-        let actionTransport=FlowFollowupTransport(try [actionReply("invalid-draft",duplicate),actionReply("invalid-review",duplicate),actionReply("repaired-draft",accepted),actionReply("repaired-review",accepted)])
+        let malformed="{\"actions\":[]}"
+        let actionTransport=FlowFollowupTransport(try [actionReply("malformed-draft",duplicate,text:malformed),actionReply("invalid-draft",duplicate),actionReply("malformed-review",duplicate,text:malformed),actionReply("invalid-review",duplicate),actionReply("repaired-draft",accepted),actionReply("repaired-review",accepted)])
         let repairingPort=try ResponsesRecordingExpressionPort(baseURL:URL(string:"https://api.openai.com/v1")!,apiKey:"fixture",model:"flow",transport:actionTransport)
         try await grouped.finishRecordingExpression(whole,using:repairingPort)
         let actionRequests=await actionTransport.requests
-        XCTAssertEqual(actionRequests.count,4)
-        let repairBody=try XCTUnwrap(JSONSerialization.jsonObject(with:actionRequests[2]) as? [String:Any])
+        XCTAssertEqual(actionRequests.count,6)
+        for index in [1,3] {
+            let body=try XCTUnwrap(JSONSerialization.jsonObject(with:actionRequests[index]) as? [String:Any])
+            let content=try XCTUnwrap((body["input"] as? [[String:Any]])?.first?["content"] as? String)
+            let payload=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(content.utf8)) as? [String:Any])
+            XCTAssertEqual(payload["rejectedOutput"] as? String,malformed)
+            XCTAssertTrue((payload["validationError"] as? String)?.contains("decisions") == true)
+            XCTAssertEqual(payload["draft"] != nil,index == 3)
+        }
+        let repairBody=try XCTUnwrap(JSONSerialization.jsonObject(with:actionRequests[4]) as? [String:Any])
         let repairInput=try XCTUnwrap((repairBody["input"] as? [[String:Any]])?.first?["content"] as? String)
         let repairPayload=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(repairInput.utf8)) as? [String:Any])
         XCTAssertTrue((repairPayload["validationError"] as? String)?.contains(reportDecision.newID) == true)
         let repairedExpressions=try await grouped.recordingExpressions()
         let repairedExpression=try XCTUnwrap(repairedExpressions.first { $0.id == whole.id })
         XCTAssertEqual(repairedExpression.actionReviewResponseIDs,["repaired-draft","repaired-review"])
+        let malformedTransport=FlowFollowupTransport(try (0..<3).map { try actionReply("malformed-\($0)",accepted,text:malformed) })
+        let malformedPort=try ResponsesRecordingExpressionPort(baseURL:URL(string:"https://api.openai.com/v1")!,apiKey:"fixture",model:"flow",transport:malformedTransport)
+        do {
+            _ = try await malformedPort.reconcile(actionInput)
+            XCTFail("Repeated malformed action output must fail without accepting a review")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("decisions"))
+            XCTAssertFalse(error.localizedDescription.contains(malformed))
+        }
+        let malformedRequests=await malformedTransport.requests
+        XCTAssertEqual(malformedRequests.count,3)
         let finalActions=try await grouped.actions(includeHistory:true)
         let current=finalActions.filter { $0.validity == "current" && $0.state != "dismissed" }
         XCTAssertEqual(current.count,2)
