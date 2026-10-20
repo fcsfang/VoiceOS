@@ -23,6 +23,7 @@ public struct NativeMediaInspector: MediaInspector {
     }
 }
 public struct NativeSpeechPort: SpeechPort {
+    public let backendIdentity = "Apple SpeechAnalyzer"
     public init() {}
     public func transcribe(_ url: URL, locale identifier: String) async throws -> SpeechText {
         guard SpeechTranscriber.isAvailable else { throw VoiceOSError("此设备暂不支持本地转写") }

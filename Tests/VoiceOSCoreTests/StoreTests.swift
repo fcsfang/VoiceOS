@@ -9,6 +9,7 @@ private struct Inspector: MediaInspector {
     }
 }
 private struct Speech: SpeechPort {
+    let backendIdentity = "synthetic-test-speech"
     let text: String
     func transcribe(_ url: URL, locale: String) async throws -> SpeechText { SpeechText(text: text) }
 }
@@ -90,6 +91,20 @@ final class StoreTests: XCTestCase {
         let store = try VoiceOSStore(root: base.appendingPathComponent("store"), inspector: Inspector())
         try await store.recover()
         return store
+    }
+    func testPortableTranscriptRetainsActualBackendInsteadOfClaimingNativeRecognition() async throws {
+        let store=try await store();_=try await store.importFile(fixture())
+        try await store.processTranscriptions(using:Speech(text:"合成转写原文"))
+        let package=base.appendingPathComponent("backend-package")
+        try await store.exportPackage(to:package)
+        let row=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:package.appendingPathComponent("transcripts.jsonl"))) as? [String:Any])
+        XCTAssertEqual(row["backend"] as? String,"synthetic-test-speech")
+        let target=base.appendingPathComponent("backend-restored")
+        try await VoiceOSStore.restorePackage(from:package,to:target,inspector:Inspector())
+        let r=try VoiceOSStore(root:target,inspector:Inspector());try await r.recover()
+        let restoredPackage=base.appendingPathComponent("backend-restored-package");try await r.exportPackage(to:restoredPackage)
+        let restored=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(contentsOf:restoredPackage.appendingPathComponent("transcripts.jsonl"))) as? [String:Any])
+        XCTAssertEqual(restored["backend"] as? String,"synthetic-test-speech")
     }
     func testMalformedRealDriverResponseRetainsUsageButNeverCommitsClaims() async throws {
         let store = try await store(); let source = try await store.importFile(fixture())

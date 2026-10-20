@@ -7,6 +7,8 @@ public actor VoiceOSStore {
     private let inspector: any MediaInspector
     var ready = false
     private var activeImports: Set<String> = []
+    var activeCaptures: Set<String> = []
+    func inspectRecording(_ file:URL) async throws -> MediaInfo { try await inspector.inspect(file) }
     private var processing = false
     var activeReminderLinks: Set<String> = []
     let checkpoint: @Sendable (SaveCheckpoint) throws -> Void
@@ -29,8 +31,12 @@ public actor VoiceOSStore {
         try db.execute("UPDATE jobs SET state='queued', lease_token=NULL WHERE state='running'")
         try db.execute("UPDATE model_attempts SET state='unknown',error='进程退出前结果未登记；不会自动重发' WHERE state='reserved'")
         try db.execute("UPDATE relevance_attempts SET state='unknown',error='进程退出前相关性结果未登记；不会自动重发' WHERE state='reserved'")
+        try db.execute("UPDATE discussion_attempts SET state='unknown',error='进程退出前讨论结果未登记；不自动重发' WHERE state='reserved'")
         for row in try db.query("SELECT * FROM sources ORDER BY created_at") {
             let id = row["id"]!
+            if row["input_fingerprint"] == "microphone-v1:"+id, row["expected_bytes"] == "0" {
+                try interruptDictation(sourceID:id); continue
+            }
             if ["interrupted", "quarantined", "reference_only"].contains(row["state"]!) { continue }
             let final = try assetURL(relativePath: row["relative_path"]!)
             let staging = root.appendingPathComponent("staging/\(row["asset_id"]!).part.\(final.pathExtension)")
@@ -58,6 +64,13 @@ public actor VoiceOSStore {
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT a.id FROM model_attempts a JOIN contexts x ON x.id=a.context_id WHERE x.state='stale')")
         try Self.validateStoredRelevance(db)
         try Self.validateStoredCognitiveFeedback(db)
+        try Self.validateStoredRecordings(db)
+        try Self.validateStoredConversations(db)
+        try Self.validateStoredDiscussionAttempts(db)
+        try freezeDiscussionDerivations()
+        try Self.validateStoredDiscussionDerivations(db)
+        try freezeConversationOutcomes()
+        try Self.validateStoredConversationOutcomes(db)
         ready = true
     }
     @discardableResult
@@ -130,6 +143,8 @@ public actor VoiceOSStore {
     }
     public func processTranscriptions(using speech: any SpeechPort) async throws {
         guard ready, !processing else { return }
+        let backend = speech.backendIdentity
+        guard !backend.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty, backend.utf8.count <= 160, !backend.contains("\n"), !backend.contains("\r") else { throw VoiceOSError("转写端口身份无效") }
         processing = true
         defer { processing = false }
         while let row = try db.query("""
@@ -154,8 +169,8 @@ public actor VoiceOSStore {
                     let transcriptID = UUID().uuidString
                     try db.execute("""
                     INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at)
-                    VALUES(?,?,?,?,?,'verbatim',?,'zh_CN','Apple SpeechAnalyzer',?)
-                    """, [transcriptID,source,row["asset_id"],row["input_version_id"],job,text,Self.now()])
+                    VALUES(?,?,?,?,?,'verbatim',?,'zh_CN',?,?)
+                    """, [transcriptID,source,row["asset_id"],row["input_version_id"],job,text,backend,Self.now()])
                     let versionID = UUID().uuidString
                     let spans = String(decoding: try JSONEncoder().encode(result.spans), as: UTF8.self)
                     try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,1,?,?, 'original','system',?)", [versionID,transcriptID,text,spans,Self.now()])

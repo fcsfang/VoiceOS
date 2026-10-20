@@ -14,8 +14,10 @@ public protocol MediaInspector: Sendable {
     func inspect(_ url: URL) async throws -> MediaInfo
 }
 public protocol SpeechPort: Sendable {
+    var backendIdentity: String { get }
     func transcribe(_ url: URL, locale: String) async throws -> SpeechText
 }
+public extension SpeechPort { var backendIdentity: String { "unspecified-speech-port" } }
 public struct SourceRecord: Identifiable, Sendable {
     public let id: String
     public let assetID: String
@@ -45,6 +47,10 @@ public enum SaveCheckpoint: String, Sendable {
     case modelReserved, claimsUncommitted, claimsCommitted, correctionUncommitted, correctionCommitted
     case relevanceReserved, relevanceUncommitted, relevanceCommitted
     case quietPreferenceUncommitted, quietPreferenceCommitted, quietIgnoreUncommitted, quietIgnoreCommitted
+    case conversationUncommitted, conversationCommitted, conversationTurnUncommitted, conversationTurnCommitted
+    case conversationEndUncommitted, conversationEndCommitted
+    case discussionCandidateReserved, discussionCandidateUncommitted, discussionCandidateCommitted, outcomeReserved, outcomeUncommitted, outcomeCommitted
+    case discussionReserved, discussionUncommitted, discussionCommitted
     case policyUncommitted, policyCommitted
     case reviewUncommitted, reviewCommitted
     case reminderReserved, reminderSaved, reminderFeedbackUncommitted, reminderFeedbackCommitted

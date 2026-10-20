@@ -66,13 +66,13 @@ extension VoiceOSStore {
     }
     public func generateClaims(contextID: String, using port: any ModelPort) async throws -> [String] {
         let config = port.configuration
-        guard !config.provider.isEmpty, config.provider != "local_fixture", !config.model.isEmpty,
+        guard !config.provider.isEmpty, !["local_fixture","discussion_derivation"].contains(config.provider), !config.provider.hasPrefix("discussion_outcome:"), !config.model.isEmpty,
               !config.promptVersion.isEmpty, !config.schemaVersion.isEmpty else { throw VoiceOSError("模型端口配置缺少身份或版本") }
         guard try db.query("SELECT destination FROM contexts WHERE id=?", [contextID]).first?["destination"] == config.destination.rawValue else { throw VoiceOSError("模型目的地与上下文不一致") }
         let context = try localContext(id: contextID)
         if config.destination == .cloud, context.sources.contains(where: \.localOnly) { throw VoiceOSError("仅本地来源禁止云端发送") }
         let attempt = UUID().uuidString
-        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at) VALUES(?,?,?,?,?,?,'reserved',?)", [attempt,contextID,config.provider,config.model,config.promptVersion,config.schemaVersion,ISO8601DateFormatter().string(from: Date())])
+        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)", [attempt,contextID,config.provider,config.model,config.promptVersion,config.schemaVersion,ISO8601DateFormatter().string(from: Date()),try db.nextModelProducerSequence()])
         try checkpoint(.modelReserved)
         let response: ModelResponse
         do { response = try await port.generate(ModelRequest(attemptID: attempt, context: context, configuration: config)) }
@@ -111,6 +111,8 @@ extension VoiceOSStore {
 }
 
 public struct ModelAttemptRecord: Identifiable, Sendable {
+    public let producerSequence:Int64
+    public let executionKind: String
     public let id: String
     public let state: String
     public let provider: String
@@ -126,7 +128,7 @@ extension VoiceOSStore {
             rows = try db.query("SELECT a.*,c.state AS context_state FROM model_attempts a JOIN contexts c ON c.id=a.context_id WHERE a.context_id IN (SELECT context_id FROM context_inputs WHERE source_id=?) ORDER BY a.created_at,a.id", [sourceID])
         } else { rows = try db.query("SELECT a.*,c.state AS context_state FROM model_attempts a JOIN contexts c ON c.id=a.context_id ORDER BY a.created_at,a.id") }
         return try rows.map { row in
-            ModelAttemptRecord(id: row["id"]!, state: row["state"]!, provider: row["provider"]!, model: row["model"]!, usage: try row["usage_json"].map { try JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) }, billingState: "unknown", contextState: row["context_state"]!)
+            ModelAttemptRecord(producerSequence:Int64(row["producer_sequence"]!)!,executionKind:row["execution_kind"]!,id: row["id"]!, state: row["state"]!, provider: row["provider"]!, model: row["model"]!, usage: try row["usage_json"].map { try JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) }, billingState:row["execution_kind"] == "discussion_derivation" ? "not_applicable" : "unknown", contextState: row["context_state"]!)
         }
     }
 }
@@ -136,6 +138,11 @@ extension VoiceOSStore {
 extension VoiceOSStore {
     public func understandSource(sourceID: String, using port: any ModelPort) async throws -> [String] {
         let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID])
+        guard try db.query("""
+        SELECT o.id FROM conversation_outcome_attempts o JOIN conversation_user_turns t ON t.conversation_id=o.conversation_id
+        JOIN context_inputs i ON i.context_id=t.context_id
+        WHERE t.source_id=? AND i.transcript_version_id=? LIMIT 1
+        """,[sourceID,context.sources[0].transcriptVersionID]).isEmpty else { throw VoiceOSError("这轮原话已有讨论成果理解记录；请查看原成果，不会跨入口重复发送。独立重整与共享身份待后续接入") }
         let policy = try sourcePolicy(sourceID: sourceID)
         let config = port.configuration
         let identity = ["understand-v1", sourceID, context.contentDigest, String(policy.version), config.provider, config.model, config.promptVersion, config.schemaVersion, config.destination.rawValue]

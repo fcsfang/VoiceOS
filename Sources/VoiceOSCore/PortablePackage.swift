@@ -25,8 +25,30 @@ private enum PackageLayout {
     static let version9Tables = version6Tables + ["reminder_links", "reminder_observations"]
     static let version10Tables = version9Tables + ["action_feedback"]
     static let version11Tables = version10Tables + ["relevance_attempts", "relevance_inputs"]
-    static let tables = version11Tables + ["cognitive_feedback_ignores", "cognitive_feedback_preferences"]
-    static let integerFields: Set<String> = ["auto_send", "sequence", "action_version", "completed", "marker_valid", "claim_review_version", "review_version", "policy_version", "from_version", "to_version", "from_local_only", "to_local_only", "ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
+    static let version13Tables = version11Tables + ["cognitive_feedback_ignores", "cognitive_feedback_preferences"]
+    static let version14Tables = version13Tables + ["conversations", "conversation_user_turns"]
+    static let version15Tables = version14Tables + ["discussion_attempts"]
+    static let version16Tables = version15Tables + ["discussion_claim_derivations"]
+    static let tables = version16Tables + ["conversation_outcome_attempts"]
+    static func tables(for version: Int) -> [String] {
+        switch version {
+        case 1: return legacyTables
+        case 2: return version2Tables
+        case 3: return version3Tables
+        case 4: return version4Tables
+        case 5: return version5Tables
+        case 6: return version6Tables
+        case 7...9: return version9Tables
+        case 10: return version10Tables
+        case 11: return version11Tables
+        case 12...13: return version13Tables
+        case 14: return version14Tables
+        case 15: return version15Tables
+        case 16: return version16Tables
+        default: return tables
+        }
+    }
+    static let integerFields: Set<String> = ["producer_sequence", "part_index", "conversation_version", "auto_send", "sequence", "action_version", "completed", "marker_valid", "claim_review_version", "review_version", "policy_version", "from_version", "to_version", "from_local_only", "to_local_only", "ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
     static func json(_ row: [String: String]) -> [String: Any] {
         row.reduce(into: [String: Any]()) { out, pair in
             if integerFields.contains(pair.key), let number = Int64(pair.value) { out[pair.key] = number }
@@ -59,7 +81,7 @@ extension VoiceOSStore {
         let file = try PackageLayout.safeFile(package, "manifest.json")
         guard let size = try file.resourceValues(forKeys:[.fileSizeKey]).fileSize, size > 0, size <= 1048576 else { throw VoiceOSError("迁移清单过大或为空") }
         let manifest = try JSONDecoder().decode(PackageManifest.self,from:Data(contentsOf:file))
-        guard manifest.format == "VoiceOS-local-package", (1...12).contains(manifest.version), manifest.databaseSchema == manifest.version + 1,
+        guard manifest.format == "VoiceOS-local-package", (1...18).contains(manifest.version), manifest.databaseSchema == manifest.version + 1,
               let count = manifest.counts["sources"], count >= 0, manifest.counts.values.allSatisfy({ $0 >= 0 && $0 <= 1000000 }) else { throw VoiceOSError("不支持此迁移包格式或记录数量") }
         return PackageSummary(version:manifest.version,createdAt:manifest.createdAt,sourceCount:count,omittedAssetCount:manifest.omittedAssetIDs.count,mediaIncluded:manifest.mediaIncluded)
     }
@@ -67,9 +89,16 @@ extension VoiceOSStore {
     /// Includes external mapping/history, never credentials or live authorization.
     public func exportPackage(to destination: URL, includeMedia: Bool = false) throws {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("导出目录已存在，请选择新目录") }
+        guard try db.query("SELECT id FROM sources WHERE input_fingerprint LIKE 'microphone-v1:%' AND state='receiving' AND expected_bytes=0").isEmpty else { throw VoiceOSError("请先停止并封存录制，再导出资料") }
         var rows: [String: [[String: String]]] = [:]
         try db.transaction {
             for table in PackageLayout.tables { rows[table] = try db.query("SELECT * FROM \(table) ORDER BY id") }
+        }
+        if includeMedia {
+            for source in rows["sources"]! where source["input_fingerprint"] == "microphone-v1:"+source["id"]! && source["expected_bytes"] == "0" {
+                let draft = root.appendingPathComponent("staging/"+source["asset_id"]!+".part.caf")
+                guard !FileManager.default.fileExists(atPath:draft.path) else { throw VoiceOSError("存在未封存录制片段，请先核对；原件打包不会静默遗漏这些片段") }
+            }
         }
         let sourceStates = Dictionary(uniqueKeysWithValues: rows["sources"]!.map { ($0["id"]!, $0["state"]!) })
         let temporary = destination.deletingLastPathComponent().appendingPathComponent(".voiceos-export-\(UUID().uuidString)")
@@ -101,7 +130,7 @@ extension VoiceOSStore {
                 files.append(verified)
             }
             if includeMedia { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 12, databaseSchema: 13, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 18, databaseSchema: 19, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)
@@ -118,8 +147,8 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("恢复目标必须是新的空目录；现有资料库不会被覆盖") }
         let manifestURL = try PackageLayout.safeFile(package, "manifest.json")
         let manifest = try JSONDecoder().decode(PackageManifest.self, from: Data(contentsOf: manifestURL))
-        guard manifest.format == "VoiceOS-local-package", (1...12).contains(manifest.version), manifest.databaseSchema == manifest.version + 1 else { throw VoiceOSError("不支持此迁移包格式") }
-        let tables = manifest.version == 1 ? PackageLayout.legacyTables : (manifest.version == 2 ? PackageLayout.version2Tables : (manifest.version == 3 ? PackageLayout.version3Tables : (manifest.version == 4 ? PackageLayout.version4Tables : (manifest.version == 5 ? PackageLayout.version5Tables : (manifest.version == 6 ? PackageLayout.version6Tables : (manifest.version <= 9 ? PackageLayout.version9Tables : (manifest.version == 10 ? PackageLayout.version10Tables : (manifest.version == 11 ? PackageLayout.version11Tables : PackageLayout.tables))))))))
+        guard manifest.format == "VoiceOS-local-package", (1...18).contains(manifest.version), manifest.databaseSchema == manifest.version + 1 else { throw VoiceOSError("不支持此迁移包格式") }
+        let tables = PackageLayout.tables(for: manifest.version)
         guard Set(manifest.files.map(\.path)).count == manifest.files.count,
               Set(manifest.counts.keys) == Set(tables),
               Set(manifest.omittedAssetIDs).count == manifest.omittedAssetIDs.count else { throw VoiceOSError("迁移清单重复或缺少记录") }
@@ -157,9 +186,10 @@ extension VoiceOSStore {
             guard let asset = source["asset_id"], UUID(uuidString: asset) != nil,
                   let versionID = source["version_id"], UUID(uuidString: versionID) != nil,
                   let version = source["version"].flatMap(Int.init), version >= 1,
-                  let bytes = source["expected_bytes"].flatMap(Int64.init), bytes > 0,
+                  let bytes = source["expected_bytes"].flatMap(Int64.init), (bytes > 0 || (manifest.version >= 13 && bytes == 0 && source["state"] == "interrupted" && source["input_fingerprint"] == "microphone-v1:" + source["id"]!)),
                   let hash = source["expected_hash"], hash.count == 64, hash.allSatisfy({ "0123456789abcdef".contains($0) }),
                   ((source["origin"] == "external" && source["speaker"] == "unknown") ||
+                   (manifest.version >= 13 && source["origin"] == "user" && source["speaker"] == "user" && source["kind"] == "audio" && source["input_fingerprint"] == "microphone-v1:" + source["id"]!) ||
                    (manifest.version >= 9 && source["origin"] == "user" && source["speaker"] == "user" && source["kind"] == "user_text" && (source["input_fingerprint"] == "user-text-v1:" + hash || (manifest.version >= 10 && source["feedback_json"] != nil)))),
                   (source["local_only"] == "1" || (manifest.version >= 4 && source["local_only"] == "0")) else {
                 throw VoiceOSError("迁移包来源字段与当前支持范围不符")
@@ -192,14 +222,14 @@ extension VoiceOSStore {
                 guard copied.0 == actual.0, copied.1 == actual.1 else { throw VoiceOSError("恢复副本完整性校验失败") }
             }
             guard Set(verifiedFiles.keys) == expectedPaths else { throw VoiceOSError("迁移清单包含不受支持的文件") }
-            try populateRestore(temporary, rows: rows, omittedSources: omittedSources, tables: tables)
+            try populateRestore(temporary, rows: rows, omittedSources: omittedSources, tables: tables, packageVersion: manifest.version)
             try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets"))
             try DurableFiles.syncDirectory(temporary)
             try FileManager.default.moveItem(at: temporary, to: destination)
             try DurableFiles.syncDirectory(destination.deletingLastPathComponent())
         } catch { try? FileManager.default.removeItem(at: temporary); throw error }
     }
-    private static func populateRestore(_ directory: URL, rows: [String: [[String: String]]], omittedSources: Set<String>, tables: [String]) throws {
+    private static func populateRestore(_ directory: URL, rows: [String: [[String: String]]], omittedSources: Set<String>, tables: [String], packageVersion:Int) throws {
         let database = try Database(directory.appendingPathComponent("voiceos.sqlite"))
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: directory.appendingPathComponent("voiceos.sqlite").path)
         try database.transaction {
@@ -208,10 +238,18 @@ extension VoiceOSStore {
                 for var row in rows[table]! {
                     guard Set(row.keys).isSubset(of: columns), row["id"] != nil else { throw VoiceOSError("迁移包有未知字段或缺少身份") }
                     if table == "sources", omittedSources.contains(row["id"]!) { row["state"] = "reference_only"; row["error"] = "原件未随迁移包附带" }
+                    if table == "sources", row["input_fingerprint"] == "microphone-v1:"+row["id"]!, row["expected_bytes"] == "0" {
+                        row["error"] = "未封存录制；暂存片段未随包迁移，请保留原资料库核对"
+                    }
                     if table == "model_attempts", row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前结果未登记；不会自动重发" }
                     if table == "relevance_attempts" {
                         row["validity"] = "frozen"
                         if row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前相关性结果未登记；不会自动重发" }
+                    }
+                    if table == "conversations" { row["validity"] = "frozen" }
+                    if table == "discussion_attempts" {
+                        row["validity"] = "frozen"
+                        if row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前讨论结果未登记；不自动重发" }
                     }
                     if table == "jobs", ["queued", "running"].contains(row["state"] ?? "") { row["state"] = "blocked"; row["error"] = "迁移后暂停，请明确重试"; row.removeValue(forKey: "lease_token") }
                     let keys = row.keys.sorted()
@@ -219,6 +257,19 @@ extension VoiceOSStore {
                 }
             }
             if tables == PackageLayout.legacyTables { try database.backfillTranscriptVersions() }
+            if packageVersion < 18 {
+                for row in try database.query("SELECT snapshot_json FROM conversation_outcome_attempts") {
+                    let snapshot=try JSONDecoder().decode(ConversationOutcomeSnapshot.self,from:Data(row["snapshot_json"]!.utf8))
+                    guard snapshot.reusePlan == nil else { throw VoiceOSError("旧格式不能携带需要持久生产顺序的成果复用目录") }
+                }
+                try database.backfillModelProducerSequence()
+            }
+            try database.execute("UPDATE contexts SET state='stale' WHERE id IN (SELECT context_id FROM model_attempts WHERE execution_kind='discussion_derivation')")
+            try database.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT id FROM model_attempts WHERE execution_kind='discussion_derivation')")
+            try database.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT id FROM claims WHERE attempt_id IN (SELECT id FROM model_attempts WHERE execution_kind='discussion_derivation'))")
+            try database.execute("UPDATE contexts SET state='stale' WHERE id IN (SELECT m.context_id FROM model_attempts m JOIN conversation_outcome_attempts o ON o.id=m.id)")
+            try database.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT id FROM conversation_outcome_attempts)")
+            try database.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT id FROM claims WHERE attempt_id IN (SELECT id FROM conversation_outcome_attempts))")
             guard try database.query("""
             SELECT t.id FROM transcripts t LEFT JOIN transcript_versions v ON v.id=t.current_version_id
             WHERE v.id IS NULL OR v.transcript_id!=t.id OR v.version_no!=t.version
@@ -249,6 +300,11 @@ extension VoiceOSStore {
             try VoiceOSStore.validateStoredCognition(database)
             try VoiceOSStore.validateStoredRelevance(database)
             try VoiceOSStore.validateStoredCognitiveFeedback(database)
+            try VoiceOSStore.validateStoredRecordings(database)
+            try VoiceOSStore.validateStoredConversations(database)
+            try VoiceOSStore.validateStoredDiscussionAttempts(database)
+            try VoiceOSStore.validateStoredDiscussionDerivations(database)
+            try VoiceOSStore.validateStoredConversationOutcomes(database)
             guard try database.query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("恢复记录存在悬空引用") }
             guard try database.query("""
             SELECT j.id FROM jobs j JOIN sources s ON s.id=j.source_id WHERE j.input_version_id!=s.version_id
