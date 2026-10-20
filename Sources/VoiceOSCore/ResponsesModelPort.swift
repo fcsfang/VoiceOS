@@ -95,32 +95,11 @@ public struct ResponsesModelPort: ModelPort {
     static func parse(_ data: Data) throws -> ModelResponse {
         var knownInput: Int?, knownOutput: Int?
         do {
-            guard data.count <= 262144, let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let status = root["status"] as? String else { throw ModelPortFailure.rejected("响应外层格式无效") }
-            let usage = root["usage"] as? [String: Any]
-            func token(_ field: String) throws -> Int? {
-                guard let value = usage?[field], !(value is NSNull) else { return nil }
-                guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
-                      number.doubleValue >= 0, number.doubleValue < Double(Int.max),
-                      number.doubleValue.rounded(.towardZero) == number.doubleValue else { throw ModelPortFailure.rejected("响应用量格式无效") }
-                return number.intValue
-            }
-            let input = try token("input_tokens"), output = try token("output_tokens")
+            let envelope = try ResponsesEnvelope.parse(data)
+            let input = envelope.inputTokens, output = envelope.outputTokens
             knownInput = input; knownOutput = output
-            if status == "incomplete" { return ModelResponse(status: .incomplete, claims: [], inputTokens: input, outputTokens: output) }
-            guard status == "completed", let items = root["output"] as? [[String: Any]] else { throw ModelPortFailure.rejected("响应未处于可接纳的完成状态") }
-            var texts: [String] = []; var refused = false
-            for item in items {
-                if item["type"] as? String == "reasoning" { continue }
-                guard item["type"] as? String == "message", item["role"] as? String == "assistant",
-                      item["status"] as? String == "completed", let content = item["content"] as? [[String: Any]] else { throw ModelPortFailure.rejected("响应包含不支持的输出项") }
-                for part in content {
-                    if part["type"] as? String == "refusal" { refused = true }
-                    else if part["type"] as? String == "output_text", let text = part["text"] as? String { texts.append(text) }
-                    else { throw ModelPortFailure.rejected("响应包含不支持的内容项") }
-                }
-            }
-            if refused { return ModelResponse(status: .refused, claims: [], inputTokens: input, outputTokens: output) }
+            if envelope.status != .completed { return ModelResponse(status: envelope.status, claims: [], inputTokens: input, outputTokens: output) }
+            let texts = envelope.text.map { [$0] } ?? []
             guard texts.count == 1, let body = texts.first?.data(using: .utf8),
                   let object = try JSONSerialization.jsonObject(with: body) as? [String: Any], Set(object.keys) == ["claims"],
                   let claims = object["claims"] as? [[String: Any]], claims.count <= 32 else { throw ModelPortFailure.rejected("结构化陈述格式无效") }
@@ -142,7 +121,7 @@ public struct ResponsesModelPort: ModelPort {
             }
             struct Payload: Decodable { let claims: [ClaimProposal] }
             return ModelResponse(status: .completed, claims: try JSONDecoder().decode(Payload.self, from: body).claims, inputTokens: input, outputTokens: output)
-        } catch ModelPortFailure.rejected(let reason, _, _) { throw ModelPortFailure.rejected(reason, inputTokens: knownInput, outputTokens: knownOutput) }
+        } catch ModelPortFailure.rejected(let reason, let input, let output) { throw ModelPortFailure.rejected(reason, inputTokens: input ?? knownInput, outputTokens: output ?? knownOutput) }
         catch { throw ModelPortFailure.rejected("模型响应无法解析", inputTokens: knownInput, outputTokens: knownOutput) }
     }
 }

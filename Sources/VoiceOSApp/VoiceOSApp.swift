@@ -9,6 +9,86 @@ import VoiceOSPlatform
 final class ControlCenter: ObservableObject {
     @Published var records: [SourceRecord] = []
     @Published var selected: String?
+    @Published var retrievalResult: RetrievalResult?
+    @Published var retrievalStatus = ""
+    @Published var searchingHistory = false
+    private let retrieval = NativeRetrieval()
+    private let semanticRetrieval: CoreMLRetrieval? = Bundle.main.resourceURL.map { $0.appendingPathComponent("BGE",isDirectory:true) }.flatMap { FileManager.default.fileExists(atPath:$0.appendingPathComponent("manifest.json").path) ? CoreMLRetrieval(root:$0) : nil }
+    var semanticAvailable: Bool { semanticRetrieval != nil }
+    private var retrievalWorker: Task<Void,Never>?
+    private var retrievalGeneration = UUID()
+    let relevance = RelevanceQueryCoordinator()
+    @Published var quietFeedback: [CognitiveFeedbackItem] = []
+    @Published var quietMode: CognitiveFeedbackMode = .normal
+    @Published var quietStatus = ""
+    private var quietVersion = 0
+    func refreshQuietFeedback() async {
+        guard let store else { return }
+        do {
+            let preference = try await store.cognitiveFeedbackPreference()
+            quietMode = preference.mode; quietVersion = preference.version
+            quietFeedback = try await store.cognitiveFeedback()
+            quietStatus = "只展示已接纳的相关原文；未确认支持、修正或观点认可，不产生回复任务。"
+        } catch { quietFeedback = []; quietStatus = error.localizedDescription }
+    }
+    func changeQuietMode(_ mode: CognitiveFeedbackMode) async {
+        guard let store else { return }
+        do { try await store.setCognitiveFeedbackMode(mode,expectedVersion:quietVersion); await refreshQuietFeedback() }
+        catch { await refreshQuietFeedback(); quietStatus = error.localizedDescription }
+    }
+    func ignoreQuietFeedback(_ item: CognitiveFeedbackItem) async {
+        guard let store else { return }
+        do { try await store.ignoreCognitiveFeedback(attemptID:item.attemptID,candidateID:item.hit.id); await refreshQuietFeedback() }
+        catch { await refreshQuietFeedback(); quietStatus = error.localizedDescription }
+    }
+    func openQuietFeedback(_ item: CognitiveFeedbackItem) async -> Bool {
+        guard let store else { return false }
+        do {
+            let hit = try await store.cognitiveFeedbackHit(attemptID:item.attemptID,candidateID:item.hit.id)
+            selected = hit.document.sourceID; await refresh(); return true
+        } catch { await refreshQuietFeedback(); quietStatus = error.localizedDescription; return false }
+    }
+    private var relevanceModel: ResponsesRelevancePort?
+    func prepareRelevance(query: String, candidates: [RetrievalHit]) async {
+        guard let store else { return }
+        await relevance.prepare(query:query,candidates:candidates,store:store)
+    }
+    func judgeRelevance() {
+        guard let store, let port = relevanceModel else { return }
+        relevance.run(store:store,port:port)
+    }
+    func cancelHistorySearch() {
+        relevance.cancel()
+        retrievalWorker?.cancel(); retrievalWorker = nil; retrievalGeneration = UUID()
+        searchingHistory = false; retrievalResult = nil; retrievalStatus = ""
+    }
+    func searchHistory(query: String, semantic: Bool) {
+        guard let store else { return }
+        cancelHistorySearch(); let generation = retrievalGeneration
+        let port: any LocalRetrievalPort
+        if semantic {
+            guard let semanticRetrieval else { retrievalStatus = "本地语义资源未安装，请使用关键词查找"; return }
+            port = semanticRetrieval
+        } else { port = retrieval }
+        searchingHistory = true; retrievalStatus = "正在本机查找历史文字…"
+        retrievalWorker = Task {
+            do {
+                let result = try await store.retrieve(query,semantic:semantic,limit:semantic ? 8 : 20,using:port)
+                guard generation == retrievalGeneration else { return }
+                retrievalResult = result
+                retrievalStatus = semantic ? "本机扫描 \(result.scannedSources) 份资料 · 显示 \(result.hits.count) 份按排序候选，尚未判断相关性" : "此次扫描 \(result.scannedSources) 份资料 · 找到 \(result.matchingSources) 份，显示 \(result.hits.count) 份"
+            } catch {
+                guard generation == retrievalGeneration else { return }
+                retrievalStatus = error.localizedDescription
+            }
+            searchingHistory = false; retrievalWorker = nil
+        }
+    }
+    func openRetrievalHit(_ hit: RetrievalHit) async -> Bool {
+        guard let store else { return false }
+        do { try await store.validateRetrievalHit(hit); selected = hit.document.sourceID; await refresh(); return true }
+        catch { cancelHistorySearch(); retrievalStatus = error.localizedDescription; return false }
+    }
     @Published var query = ""
     var filtered: [SourceRecord] {
         query.isEmpty ? records : records.filter { $0.name.localizedCaseInsensitiveContains(query) || ($0.transcript?.localizedCaseInsensitiveContains(query) ?? false) }
@@ -87,7 +167,13 @@ final class ControlCenter: ObservableObject {
             reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
             if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
             records = try await store?.sources() ?? []
+            if let result = retrievalResult, result.hits.contains(where: { hit in
+                !records.contains { $0.id == hit.document.sourceID && $0.transcriptVersionID == hit.document.transcriptVersionID && $0.policyVersion == hit.document.policyVersion && ["saved","reference_only"].contains($0.state) }
+            }) { cancelHistorySearch(); retrievalStatus = "历史资料已变化，请重新查找" }
+
             if let store {
+                await relevance.validate(store:store)
+                await refreshQuietFeedback()
                 var loaded: [String: [ModelAttemptRecord]] = [:]
                 for record in records { loaded[record.id] = try await store.modelAttempts(sourceID: record.id) }
                 attempts = loaded
@@ -106,6 +192,8 @@ final class ControlCenter: ObservableObject {
     private func configureTextModel(_ file: URL) {
         do {
             let port = try LocalTextModel.load(from: file)
+            let selector = try LocalTextModel.loadRelevance(from:file)
+            relevance.cancel(); relevanceModel = selector
             textModel = port; modelConfigured = true
             modelSummary = "gpt-6.1-sol · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
             status = "文本模型已就绪 · 只处理你选择并授权的文字"
@@ -371,6 +459,8 @@ struct CenterView: View {
     @State private var writingExpression = false
     @State private var feedbackAction: ActionRecord?
     @State private var showingRestore = false
+    @State private var searching = false
+    @State private var showingQuietFeedback = false
     @Environment(\.openWindow) private var openWindow
     private func chooseLibrary() {
         let panel = NSOpenPanel(); panel.title = "打开已有 VoiceOS 资料库"; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
@@ -405,7 +495,7 @@ struct CenterView: View {
                             Button("查看关联行动") { Task { await model.actionHistory(action); showActionHistory = true } }
                         }
                         Button(record.localOnly ? "允许这份资料的文本用于云端" : "将这份资料限制为仅本地") { Task { await model.changeTextPolicy(record) } }.disabled(model.changingPolicy)
-                        Text("此选项仅授权文本；点击“理解这份文字”才发送所选文字，原始音频和视频仍仅本机。").font(.caption).foregroundStyle(.secondary)
+                        Text("此选项仅授权文本；执行文字理解或相关性判断时才发送选中的文字，原始音频和视频仍仅本机。").font(.caption).foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Button(model.understandingSource == record.id ? "正在理解…" : "理解这份文字", systemImage: "sparkles") { model.understand(record) }
@@ -533,6 +623,8 @@ struct CenterView: View {
             } else { ContentUnavailableView("选择一份资料", systemImage: "doc.text.magnifyingglass", description: Text("原件和逐字稿保存在 VoiceOS 自己的资料库中。")) }
         }
         .toolbar {
+            Button("静默回顾", systemImage:"text.bubble") { showingQuietFeedback = true }.disabled(!model.initialized)
+            Button("查找历史文字", systemImage: "text.magnifyingglass") { searching = true }.disabled(!model.initialized)
             Button("连接提醒事项…") { Task { await model.connectReminders() } }.disabled(!model.initialized || model.remindersBusy)
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
             Button("记录我的表达", systemImage: "square.and.pencil") { writingExpression = true }.disabled(!model.initialized)
@@ -548,6 +640,8 @@ struct CenterView: View {
         .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
         .focusedSceneValue(\.voiceOSController, model)
         .navigationTitle(model.libraryTitle)
+        .sheet(isPresented: $searching) { HistorySearchView(model:model) { searching = false } }
+        .sheet(isPresented: $showingQuietFeedback) { CognitiveFeedbackView(model:model) { showingQuietFeedback = false } }
         .sheet(isPresented: $showingRestore) { PackageRestoreView { showingRestore = false } }
         .sheet(item: $feedbackAction) { action in ActionFeedbackView(action: action, model: model) { feedbackAction = nil } }
         .sheet(isPresented: $writingExpression) { UserExpressionView(model: model) { writingExpression = false } }
@@ -931,5 +1025,128 @@ extension FocusedValues {
     var voiceOSController: ControlCenter? {
         get { self[VoiceOSControllerKey.self] }
         set { self[VoiceOSControllerKey.self] = newValue }
+    }
+}
+
+struct CognitiveFeedbackView: View {
+    @ObservedObject var model: ControlCenter
+    let dismiss: () -> Void
+    var body: some View {
+        VStack(alignment:.leading,spacing:14) {
+            Text("静默回顾").font(.title2)
+            Text("可以直接关闭，不要求回应。当前显示你主动查找后接纳的相关原文；新表达的自动关联仍在开发。").font(.callout).foregroundStyle(.secondary)
+            Picker("显示方式",selection:Binding(get:{ model.quietMode },set:{ mode in Task { await model.changeQuietMode(mode) } })) {
+                Text("正常显示").tag(CognitiveFeedbackMode.normal)
+                Text("减少显示 · 一次一条").tag(CognitiveFeedbackMode.reduced)
+                Text("暂停显示").tag(CognitiveFeedbackMode.paused)
+            }.pickerStyle(.segmented)
+            Text(model.quietStatus).font(.caption).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment:.leading,spacing:16) {
+                    if model.quietFeedback.isEmpty {
+                        Text(model.quietMode == .paused ? "已暂停静默回顾，原文与历史保留。" : "暂无可显示的相关原文。无需回复或补做任务。")
+                    }
+                    ForEach(model.quietFeedback) { item in
+                        VStack(alignment:.leading,spacing:8) {
+                            Text("你查找的是：\(item.query)").font(.headline).textSelection(.enabled)
+                            Text("模型选中的相关原文 · \(item.hit.document.origin == "user" ? "用户表达" : "外部资料")").font(.caption).foregroundStyle(.secondary)
+                            Text(item.hit.document.text).textSelection(.enabled)
+                            Text(item.hit.document.name + " · " + item.hit.document.createdAt).font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                Button("查看原文与出处") { Task { if await model.openQuietFeedback(item) { dismiss() } } }
+                                Button("忽略这条") { Task { await model.ignoreQuietFeedback(item) } }
+                            }
+                        }.padding(12).frame(maxWidth:.infinity,alignment:.leading).background(.quaternary.opacity(0.35),in:RoundedRectangle(cornerRadius:8))
+                    }
+                }.frame(maxWidth:.infinity,alignment:.leading)
+            }
+            HStack { Spacer(); Button("完成",action:dismiss).keyboardShortcut(.cancelAction) }
+        }.padding(24).frame(width:720,height:560).task { await model.refreshQuietFeedback() }
+    }
+}
+
+struct HistorySearchView: View {
+    @ObservedObject var model: ControlCenter
+    let dismiss: () -> Void
+    @State private var query = ""
+    @State private var question = ""
+    @State private var selectedIDs: Set<String> = []
+    @State private var semantic = false
+    private var candidates: [RetrievalHit] { (model.retrievalResult?.hits ?? []).filter { selectedIDs.contains($0.id) } }
+    var body: some View {
+        VStack(alignment:.leading,spacing:14) {
+            Text("查找历史文字").font(.title2)
+            TextField(semantic ? "输入想找回的问题或想法" : "先输入原文关键词",text:$query).onSubmit { model.searchHistory(query:query,semantic:semantic) }
+            Toggle("按意思找原文（本机）",isOn:$semantic).disabled(!model.semanticAvailable)
+            Text(model.semanticAvailable ? "查找仅在本机进行；按意思找到的只是候选。选中原文后，可单独让文本模型判断与你的问题是否直接相关。" : "关键词查找在本机进行。这个构建尚未包含本地语义资源；选中原文后仍可单独判断相关性。").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button(model.searchingHistory ? "正在查找…" : "查找") { model.searchHistory(query:query,semantic:semantic) }.disabled(model.searchingHistory || query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || query.unicodeScalars.count > 512)
+                if model.searchingHistory { Button("停止查找") { model.cancelHistorySearch() } }
+                Text("\(query.unicodeScalars.count)/512").font(.caption)
+            }
+            Text(model.retrievalStatus).font(.caption)
+            RelevanceSearchPanel(model:model,coordinator:model.relevance,question:$question,candidates:candidates,dismiss:dismiss)
+            ScrollView {
+                if let result = model.retrievalResult {
+                    if result.hits.isEmpty { Text("未找到候选。不代表历史中一定没有相关内容，可以换个表述或关键词。").foregroundStyle(.secondary) }
+                    ForEach(result.hits) { hit in
+                        VStack(alignment:.leading,spacing:6) {
+                            Text(hit.document.name).font(.headline)
+                            Toggle("加入相关性判断",isOn:Binding(get:{ selectedIDs.contains(hit.id) },set:{ value in
+                                if value { selectedIDs.insert(hit.id) } else { selectedIDs.remove(hit.id) }
+                            })).disabled(!selectedIDs.contains(hit.id) && selectedIDs.count >= 8)
+                            Text("\(hit.method == "exact" ? "文字匹配" : "语义候选 · 待核对") · \(hit.document.origin == "user" ? "用户原文" : "外部原文 · 说话人待核对") · \(hit.document.localOnly ? "仅本地" : "文本可用于云端")").font(.caption).foregroundStyle(.secondary)
+                            Text(hit.document.text).textSelection(.enabled)
+                            Text(hit.document.createdAt).font(.caption).foregroundStyle(.secondary)
+                            Button("查看原文与出处") { Task { if await model.openRetrievalHit(hit) { dismiss() } } }
+                            Divider()
+                        }.frame(maxWidth:.infinity,alignment:.leading)
+                    }
+                }
+            }
+            Button("完成",action:dismiss)
+        }.padding(24).frame(width:720,height:740)
+        .onChange(of:query) { selectedIDs = []; model.cancelHistorySearch() }
+        .onChange(of:selectedIDs) { model.relevance.cancel() }
+        .onChange(of:question) { model.relevance.cancel() }
+        .onChange(of:semantic) { selectedIDs = []; model.cancelHistorySearch() }
+        .onDisappear { model.cancelHistorySearch() }
+    }
+}
+
+struct RelevanceSearchPanel: View {
+    @ObservedObject var model: ControlCenter
+    @ObservedObject var coordinator: RelevanceQueryCoordinator
+    @Binding var question: String
+    let candidates: [RetrievalHit]
+    let dismiss: () -> Void
+    private var scalars: Int { question.unicodeScalars.count + candidates.reduce(0) { $0 + $1.document.text.unicodeScalars.count } }
+    var body: some View {
+        VStack(alignment:.leading,spacing:8) {
+            TextField("想找回的问题或想法",text:$question)
+            Text("已选 \(candidates.count)/8 份原文 · 问题与原文共 \(scalars)/4000 字符").font(.caption)
+            Text("判断时发送本次问题与所选原文，不发送音视频。仅本地资料需先到出处页面授权；相关不表示支持或已验证，也不创建行动。").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("准备所选原文") { Task { await model.prepareRelevance(query:question,candidates:candidates) } }
+                    .disabled(coordinator.busy || candidates.isEmpty || question.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || question.unicodeScalars.count > 512 || scalars > 4000)
+                Button("用文本模型判断") { model.judgeRelevance() }
+                    .disabled(coordinator.busy || coordinator.snapshot == nil || !model.modelConfigured)
+                if coordinator.busy { Button("停止判断") { coordinator.stop() } }
+                if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
+            }
+            Text(coordinator.status).font(.caption).accessibilityIdentifier("relevanceStatus")
+            if let usage = coordinator.usage {
+                Text("输入 \(usage["input_tokens"].map(String.init) ?? "未知") · 输出 \(usage["output_tokens"].map(String.init) ?? "未知") token · 账单费用未知").font(.caption).foregroundStyle(.secondary)
+            }
+            if let hits = coordinator.hits {
+                ForEach(hits) { hit in
+                    HStack(alignment:.top) {
+                        Text(hit.document.text).lineLimit(3).textSelection(.enabled)
+                        Spacer()
+                        Button("核对相关原文") { Task { if await model.openRetrievalHit(hit) { dismiss() } } }
+                    }
+                }
+            }
+        }.padding(12).background(.quaternary.opacity(0.35),in:RoundedRectangle(cornerRadius:8))
     }
 }
