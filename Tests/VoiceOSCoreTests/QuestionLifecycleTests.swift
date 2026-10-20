@@ -58,9 +58,9 @@ final class QuestionLifecycleTests: XCTestCase {
         let bytes = try JSONEncoder().encode(legacy), json = try XCTUnwrap(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
         XCTAssertNil(json["contentKind"]); XCTAssertNil(try JSONDecoder().decode(ClaimProposal.self, from: bytes).contentKind)
         let dbURL = root.appendingPathComponent("old22.sqlite")
-        do { let db = try Database(dbURL); try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("ALTER TABLE claims DROP COLUMN content_kind"); try db.execute("PRAGMA user_version=22") }
+        do { let db = try Database(dbURL); try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("ALTER TABLE claims DROP COLUMN content_kind"); try db.execute("DROP TABLE reminder_compensation_operations"); try db.execute("DROP TABLE reminder_compensation_revocations"); try db.execute("DROP TABLE reminder_compensation_grants"); try db.execute("DROP TABLE reminder_compensation_plans"); try db.execute("DROP TABLE reminder_schedule_bases"); try db.execute("DROP TABLE reminder_schedule_operations"); try db.execute("DROP TABLE reminder_schedule_grant_revocations"); try db.execute("DROP TABLE reminder_schedule_grants"); try db.execute("DROP TABLE action_schedule_intents"); try db.execute("DROP TABLE reminder_time_observations"); try db.execute("DROP TABLE reminder_status_resolutions"); try db.execute("PRAGMA user_version=22") }
         let upgraded = try Database(dbURL)
-        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "31")
+        XCTAssertEqual(try upgraded.query("PRAGMA user_version").first?["user_version"], "38")
         XCTAssertTrue(try upgraded.query("PRAGMA table_info(claims)").contains(where: { $0["name"] == "content_kind" }))
     }
     func testAIQuestionCandidateStaysAIAndFakeQuoteFails() async throws {

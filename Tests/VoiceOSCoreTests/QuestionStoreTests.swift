@@ -125,10 +125,10 @@ final class QuestionStoreTests: XCTestCase {
         try FileManager.default.createDirectory(at: fixture.root, withIntermediateDirectories: true)
         do {
             let db = try Database(file)
-            try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("PRAGMA user_version=23")
+            try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("DROP TABLE reminder_compensation_operations"); try db.execute("DROP TABLE reminder_compensation_revocations"); try db.execute("DROP TABLE reminder_compensation_grants"); try db.execute("DROP TABLE reminder_compensation_plans"); try db.execute("DROP TABLE reminder_schedule_bases"); try db.execute("DROP TABLE reminder_schedule_operations"); try db.execute("DROP TABLE reminder_schedule_grant_revocations"); try db.execute("DROP TABLE reminder_schedule_grants"); try db.execute("DROP TABLE action_schedule_intents"); try db.execute("DROP TABLE reminder_time_observations"); try db.execute("DROP TABLE reminder_status_resolutions"); try db.execute("PRAGMA user_version=23")
         }
         let db = try Database(file)
-            XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], "31")
+            XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], "38")
         XCTAssertTrue(try db.query("SELECT * FROM questions").isEmpty)
         XCTAssertTrue(try db.query("PRAGMA foreign_key_check").isEmpty)
     }

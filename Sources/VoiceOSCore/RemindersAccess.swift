@@ -32,6 +32,15 @@ extension VoiceOSStore {
         try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
         let linked = Set(try reminderLinks().map(\.actionID))
         let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
+        // Historical model batches remain auditable, but only claims from the
+        // newest completed producer for each source may create new external
+        // tasks.  Otherwise an old, previously unlinked task could reappear
+        // after reprocessing and become a duplicate reminder.
+        let sourceIDs = try db.query("SELECT id FROM sources").compactMap { $0["id"] }
+        var currentClaimIDs = Set<String>()
+        for sourceID in sourceIDs {
+            currentClaimIDs.formUnion(try latestCandidateClaims(for: sourceID).map(\.id))
+        }
         // A fresh understanding of the same source may add distinct task
         // identities. Keep a title barrier only within that source; identical
         // titles in separate recordings remain independent user tasks.
@@ -42,7 +51,7 @@ extension VoiceOSStore {
             for ref in refs { linkedTitleSources.insert(title + "|" + ref.sourceID) }
         }
         let pending = try actions().filter { action in
-            guard action.kind == "task", action.intentActor == "user", !linked.contains(action.id), let claim = claims[action.claimID] else { return false }
+            guard action.kind == "task", action.intentActor == "user", !linked.contains(action.id), currentClaimIDs.contains(action.claimID), let claim = claims[action.claimID] else { return false }
             guard !claim.references.contains(where: { linkedTitleSources.contains(action.title + "|" + $0.sourceID) }) else { return false }
             // P01 grants the assistant autonomy for user-owned task actions.
             // The model may conservatively set autoSend=false; that flag is
@@ -56,6 +65,9 @@ extension VoiceOSStore {
             // Do not let a local-only source block unrelated authorized tasks.
             let claim = try candidateClaims().first { $0.id == action.claimID }
             guard let claim, try claim.references.allSatisfy({ try sourcePolicy(sourceID: $0.sourceID).localOnly == false }) else { continue }
+            // An earlier task's await may let a newer batch supersede the
+            // remaining snapshot. Skip it without starving unrelated sources.
+            guard try reminderCognitionIsLatest(action) else { continue }
             try await sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
         }
     }

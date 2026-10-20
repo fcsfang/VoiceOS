@@ -232,6 +232,8 @@ extension VoiceOSStore {
                 try updateProcessing(id, state: .completed, phase: .completed, error: nil)
             case .unknown:
                 try updateProcessing(id, state: .unknown, phase: .association, error: "关联结果未知，不自动重发")
+            case .frozen:
+                try updateProcessing(id, state: .frozen, phase: .association, error: "关联依据已变化，回执作为冻结历史保留；未重发")
             case .paused, .localOnly, .modelUnavailable, .budgetExceeded, .inFlight:
                 try updateProcessing(id, state: .blocked, phase: .association, error: "关联阶段未执行：\(association.state.rawValue)")
             }
