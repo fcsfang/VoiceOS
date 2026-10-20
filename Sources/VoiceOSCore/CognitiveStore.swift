@@ -302,9 +302,10 @@ extension VoiceOSStore {
                 guard inputs.contains(where: { $0["source_id"] == input.sourceID && $0["transcript_version_id"] == input.transcriptVersionID }),
                       let version = try db.query("SELECT v.*,t.source_id,t.current_version_id,s.version_id,s.duration,s.state,s.origin,s.speaker,s.local_only,s.policy_version FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [input.transcriptVersionID]).first,
                       version["source_id"] == input.sourceID, version["version_id"] == input.sourceVersionID,
-                      (version["text"] == input.text || (row["state"] != "current" && version["reason"] == "ai_superseded")) else { throw VoiceOSError("迁移上下文来源版本不一致") }
+                      version["origin"] == input.origin, version["speaker"] == input.speaker,
+                      (version["text"] == input.text || isPrunedHistoricalTranscript(version, historical: row["state"] == "stale")) else { throw VoiceOSError("迁移上下文来源版本不一致") }
                 let spans = try JSONDecoder().decode([TranscriptSpan].self, from: Data(version["spans_json"]!.utf8))
-                guard try (row["state"] != "current" && version["reason"] == "ai_superseded") || (encoder.encode(spans) == encoder.encode(input.spans)) else { throw VoiceOSError("迁移上下文片段不一致") }
+                guard try isPrunedHistoricalTranscript(version, historical: row["state"] == "stale") || (encoder.encode(spans) == encoder.encode(input.spans)) else { throw VoiceOSError("迁移上下文片段不一致") }
                 try SpeechText(text: input.text, spans: input.spans).validate(duration: version["duration"].flatMap(Double.init))
                 if row["state"] == "current" {
                     guard version["current_version_id"] == input.transcriptVersionID,

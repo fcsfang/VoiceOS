@@ -67,6 +67,12 @@ private struct FlowAssociation: ExpressionAssociationPort {
     let configuration = flowConfiguration
     func associate(_ request: ExpressionAssociationRequest) async throws -> ExpressionAssociationResponse { .init(proposals: []) }
 }
+private struct FlowRelevance: RelevanceModelPort {
+    let configuration = flowConfiguration
+    func select(_ request: RelevanceModelRequest) async throws -> RelevanceModelResponse {
+        .init(status: .completed, selection: .init(snapshotID: request.snapshot.id, queryID: request.snapshot.queryID, candidateIDs: request.snapshot.candidates.map(\.id)))
+    }
+}
 private actor FlowTopics: TopicOrganizationPort {
     let questionID: String
     let unrelatedID: String
@@ -612,6 +618,32 @@ final class CoreFlowTests: XCTestCase {
         let historicalQuestion = try await store.recordUserExpression("请保留校正前的讨论依据。")
         _ = try await store.appendConversationUserSource(conversationID: historicalDiscussion, sourceID: historicalQuestion, expectedVersion: 1)
         let localUnreviewed = try await store.prepareLocalTranscriptContext(sourceIDs: [next.sourceID])
+        let queuedHistory = try await store.prepareExpressionProcessingIntent(sourceID: next.sourceID, cognition: model.configuration, association: association.configuration)
+        let queuedHistoryID = try await store.enqueueExpressionProcessingIntent(queuedHistory, cognition: model.configuration, association: association.configuration).id
+        let segmentedHistory = try await store.prepareSegmentedExpressionProcessingScope(sourceID: next.sourceID, extraction: model.configuration, aggregation: model.configuration, segmentScalarBudget: 20)
+        let segmentedHistoryID = try await store.enqueueSegmentedProcessingBatch(segmentedHistory, extraction: model.configuration, aggregation: model.configuration).id
+        let historicalHits = try await store.retrieve("检索", using: NativeRetrieval())
+        let oldHit = try XCTUnwrap(historicalHits.hits.first { $0.document.sourceID == next.sourceID })
+        let otherHit = try XCTUnwrap(historicalHits.hits.first { $0.document.sourceID == intent.sourceID })
+        let relevanceHistory = try await store.prepareRelevanceSnapshot(query: "检索", queryID: UUID(), candidates: [oldHit])
+        _ = try await store.performRelevanceSelection(relevanceHistory, using: FlowRelevance())
+        let associationHistory = try await store.prepareExpressionAssociation(currentSourceID: next.sourceID, candidates: [otherHit])
+        _ = try await store.reserveExpressionAssociation(associationHistory, configuration: association.configuration)
+        let candidateHistory = try await store.prepareExpressionAssociation(currentSourceID: historicalQuestion, candidates: [oldHit])
+        _ = try await store.reserveExpressionAssociation(candidateHistory, configuration: association.configuration)
+        let questionRef = ClaimReference(sourceID: next.sourceID, transcriptVersionID: localUnreviewed.sources[0].transcriptVersionID, spanID: localUnreviewed.sources[0].spans[0].id)
+        let questionClaims = try await store.importOrganizedClaims(context: localUnreviewed, proposals: [.init(statement: "检索该怎样验证？", ownership: .userTentative, references: [questionRef], contentKind: .question)], commandID: "historical-question")
+        let questionSeed = try await store.prepareQuestionSeed(claimID: questionClaims[0], expectedReviewVersion: 0, original: .init(reference: questionRef, quote: transcript))
+        let historicalQuestionID = try await store.registerQuestion(questionSeed)
+        let answerQuestionContext = try await store.prepareLocalTranscriptContext(sourceIDs: [historicalQuestion])
+        let answerQuestionRef = ClaimReference(sourceID: historicalQuestion, transcriptVersionID: answerQuestionContext.sources[0].transcriptVersionID, spanID: answerQuestionContext.sources[0].spans[0].id)
+        let answerQuestionClaims = try await store.importOrganizedClaims(context: answerQuestionContext, proposals: [.init(statement: "答案是否仍有效？", ownership: .userTentative, references: [answerQuestionRef], contentKind: .question)], commandID: "historical-answer-question")
+        let answerQuestionSeed = try await store.prepareQuestionSeed(claimID: answerQuestionClaims[0], expectedReviewVersion: 0, original: .init(reference: answerQuestionRef, quote: answerQuestionContext.sources[0].text))
+        let answerQuestionID = try await store.registerQuestion(answerQuestionSeed)
+        let answerTransition = try await store.prepareStoredQuestionTransition(questionID: answerQuestionID, expectedVersion: 1, to: .resolved, reason: "合成答案已记录", resolution: .init(reference: questionRef, quote: transcript))
+        _ = try await store.transitionQuestion(questionID: answerQuestionID, input: answerTransition)
+
+
         XCTAssertEqual(localUnreviewed.sources.first?.text, transcript)
         let blockedModel = FlowModel(destination: .cloud)
         do { _ = try await store.continueSourceUnderstanding(sourceID: next.sourceID, using: blockedModel); XCTFail("完整校正前不能云端理解") }
@@ -656,6 +688,28 @@ final class CoreFlowTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: correctedManifest).write(to: nextFolder.appendingPathComponent("source.json"))
         try JSONSerialization.data(withJSONObject: nextChecked).write(to: nextFolder.appendingPathComponent("Qwen完整逐字稿.json"))
         _ = try await store.applyTranscriptQualityResult(sourceID: next.sourceID, expectedVersionID: originalVersion, from: nextFolder)
+        let correctedDatabase = await store.db
+        for validate in [VoiceOSStore.validateStoredRelevance, VoiceOSStore.validateStoredConversations,
+                         VoiceOSStore.validateStoredExpressionAssociations, VoiceOSStore.validateStoredQuestions,
+                         VoiceOSStore.validateStoredProcessingIntents, VoiceOSStore.validateStoredSegmentedProcessingBatches] {
+            do { try validate(correctedDatabase) } catch { XCTFail("AI 更正后的历史校验失败：\(error.localizedDescription)") }
+        }
+        let blockedHistory = try await store.runExpressionProcessingIntent(id: queuedHistoryID, retrieval: NativeRetrieval(), cognitionPort: model, associationPort: association)
+        XCTAssertEqual(blockedHistory.state, .blocked)
+        let blockedBatch = try await store.segmentedProcessingBatch(id: segmentedHistoryID)
+        XCTAssertEqual(blockedBatch.state, .blocked)
+        let changedAnswer = try await store.questions().first { $0.id == answerQuestionID }
+        XCTAssertEqual(changedAnswer?.validity, "frozen")
+        XCTAssertEqual(changedAnswer?.canReopen, true)
+        let reopenAnswer = try await store.prepareStoredQuestionTransition(questionID: answerQuestionID, expectedVersion: 2, to: .open, reason: "答案更正后重新核对")
+        _ = try await store.transitionQuestion(questionID: answerQuestionID, input: reopenAnswer)
+        let reopenedAnswer = try await store.questions().first { $0.id == answerQuestionID }
+        XCTAssertEqual(reopenedAnswer?.validity, "current")
+        do { try await store.validateExpressionProcessingIntent(queuedHistory, cognition: model.configuration, association: association.configuration); XCTFail("历史处理意图不能发送") } catch {}
+        do { try await store.validateSegmentedExpressionProcessingScope(segmentedHistory, extraction: model.configuration, aggregation: model.configuration); XCTFail("历史分段范围不能发送") } catch {}
+        do { try await store.validateRelevanceSnapshot(relevanceHistory, currentQueryID: relevanceHistory.queryID); XCTFail("历史摘录不能发送") } catch {}
+        do { try await store.validateQuestionSeed(questionSeed); XCTFail("历史提问不能充当当前依据") } catch {}
+        do { try await store.validateExpressionAssociation(associationHistory); XCTFail("历史关联原话不能发送") } catch {}
         let reviewedSource = try await store.sources().first { $0.id == next.sourceID }
         XCTAssertEqual(reviewedSource?.needsTranscriptionReview, false)
         XCTAssertEqual(reviewedSource?.transcript, correctedTranscript)
@@ -691,6 +745,13 @@ final class CoreFlowTests: XCTestCase {
         try await VoiceOSStore.restorePackage(from: contextPackage, to: contextRestore, inspector: NativeMediaInspector())
         let contextStore = try VoiceOSStore(root: contextRestore, inspector: NativeMediaInspector())
         try await contextStore.recover()
+        let restoredQueue = try await contextStore.runExpressionProcessingIntent(id: queuedHistoryID, retrieval: NativeRetrieval(), cognitionPort: model, associationPort: association)
+        XCTAssertEqual(restoredQueue.state, .frozen)
+        let restoredBatch = try await contextStore.segmentedProcessingBatch(id: segmentedHistoryID)
+        XCTAssertEqual(restoredBatch.state, .frozen)
+        let restoredQuestion = try await contextStore.questions().first { $0.id == historicalQuestionID }
+        XCTAssertEqual(restoredQuestion?.validity, "frozen")
+        do { try await contextStore.validateExpressionAssociation(candidateHistory); XCTFail("更正前的关联候选不得发送") } catch {}
         let historicalSession = try await contextStore.conversation(id: historicalDiscussion)
         XCTAssertEqual(historicalSession.validity, "frozen")
         let historicalSources = try await contextStore.conversationHistorySources(conversationID: historicalDiscussion)

@@ -145,15 +145,16 @@ extension VoiceOSStore {
                       d.id == d.sourceID+":"+d.transcriptVersionID+":"+String(d.textStart),
                       input["ordinal"] == String(ordinal), input["source_id"] == d.sourceID,
                       input["transcript_version_id"] == d.transcriptVersionID, input["policy_version"] == String(d.policyVersion),
-                      let version = try db.query("SELECT v.*,t.input_version_id,t.source_id,s.origin,s.name,s.created_at AS source_created,s.local_only,s.policy_version FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [d.transcriptVersionID]).first,
+                      let version = try db.query("SELECT v.*,t.current_version_id,t.input_version_id,t.source_id,s.origin,s.name,s.created_at AS source_created,s.local_only,s.policy_version FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [d.transcriptVersionID]).first,
                       version["source_id"] == d.sourceID, version["input_version_id"] == d.sourceVersionID,
                       version["origin"] == d.origin, version["name"] == d.name, version["source_created"] == d.createdAt,
                       d.policyVersion > 0, d.policyVersion <= Int(version["policy_version"]!)! else { throw VoiceOSError("相关性历史引用身份不一致") }
                 let scalars = Array(version["text"]!.unicodeScalars)
                 let spans = try JSONDecoder().decode([TranscriptSpan].self, from: Data(version["spans_json"]!.utf8))
-                guard d.textStart >= 0, d.textEnd > d.textStart, d.textEnd <= scalars.count,
-                      spans.contains(where: { $0.id == d.spanID && $0.textStart <= d.textStart && $0.textEnd >= d.textEnd }),
-                      String(String.UnicodeScalarView(scalars[d.textStart..<d.textEnd])) == d.text else { throw VoiceOSError("相关性历史摘录不一致") }
+                guard d.textStart >= 0, d.textEnd > d.textStart, d.textEnd - d.textStart == d.text.unicodeScalars.count, !d.spanID.isEmpty,
+                      isPrunedHistoricalTranscript(version, historical: row["validity"] == "frozen") ||
+                        (d.textEnd <= scalars.count && spans.contains(where: { $0.id == d.spanID && $0.textStart <= d.textStart && $0.textEnd >= d.textEnd }) &&
+                         String(String.UnicodeScalarView(scalars[d.textStart..<d.textEnd])) == d.text) else { throw VoiceOSError("相关性历史摘录不一致") }
                 let historicalLocal = d.policyVersion == Int(version["policy_version"]!)! ? version["local_only"] : try db.query("SELECT from_local_only FROM source_policy_revisions WHERE source_id=? AND from_version=?", [d.sourceID,String(d.policyVersion)]).first?["from_local_only"]
                 guard historicalLocal == (d.localOnly ? "1":"0") else { throw VoiceOSError("相关性历史权限不一致") }
             }
