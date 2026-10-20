@@ -9,5 +9,5 @@ let package = Package(
         .target(name: "VoiceOSPlatform", dependencies: ["VoiceOSCore"]),
         .executableTarget(name: "VoiceOSApp", dependencies: ["VoiceOSCore", "VoiceOSPlatform"]),
         .executableTarget(name: "VoiceOSCheck", dependencies: ["VoiceOSCore", "VoiceOSPlatform"]),
-        .testTarget(name: "VoiceOSCoreTests", dependencies: ["VoiceOSCore"])
+        .testTarget(name: "VoiceOSCoreTests", dependencies: ["VoiceOSCore", "VoiceOSPlatform"])
     ])

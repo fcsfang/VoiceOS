@@ -31,10 +31,22 @@ public struct SourceRecord: Identifiable, Sendable {
     public let relativePath: String
     public let transcriptVersionID: String?
     public let spans: [TranscriptSpan]
+    public let localOnly: Bool
+    public let policyVersion: Int
+    public let origin: String
+    public let speaker: String
+    public let feedbackActionID: String?
+    public let feedbackActionVersion: Int?
+    public let feedbackKind: String?
 }
 public enum SaveCheckpoint: String, Sendable {
     case intent, copyChunk, copyComplete, sealed, renamed, savedUncommitted, savedCommitted
     case jobClaimed, transcriptUncommitted, transcriptCommitted
+    case modelReserved, claimsUncommitted, claimsCommitted, correctionUncommitted, correctionCommitted
+    case policyUncommitted, policyCommitted
+    case reviewUncommitted, reviewCommitted
+    case reminderReserved, reminderSaved, reminderFeedbackUncommitted, reminderFeedbackCommitted
+    case actionUncommitted, actionCommitted, actionStateUncommitted, actionStateCommitted
 }
 
 public struct TranscriptSpan: Codable, Sendable, Identifiable {

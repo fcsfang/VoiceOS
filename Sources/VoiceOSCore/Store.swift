@@ -5,10 +5,11 @@ public actor VoiceOSStore {
     private let lock: StoreLock
     let db: Database
     private let inspector: any MediaInspector
-    private var ready = false
+    var ready = false
     private var activeImports: Set<String> = []
     private var processing = false
-    private let checkpoint: @Sendable (SaveCheckpoint) throws -> Void
+    var activeReminderLinks: Set<String> = []
+    let checkpoint: @Sendable (SaveCheckpoint) throws -> Void
 
     public init(root: URL, inspector: any MediaInspector,
                 checkpoint: @escaping @Sendable (SaveCheckpoint) throws -> Void = { _ in }) throws {
@@ -23,8 +24,10 @@ public actor VoiceOSStore {
     }
     public func recover() async throws {
         guard !ready, activeImports.isEmpty else { return }
+        try db.execute("UPDATE reminder_links SET state='unknown' WHERE state='reserved'")
         // Startup only: the process lock proves the previous worker no longer owns a lease.
         try db.execute("UPDATE jobs SET state='queued', lease_token=NULL WHERE state='running'")
+        try db.execute("UPDATE model_attempts SET state='unknown',error='进程退出前结果未登记；不会自动重发' WHERE state='reserved'")
         for row in try db.query("SELECT * FROM sources ORDER BY created_at") {
             let id = row["id"]!
             if ["interrupted", "quarantined", "reference_only"].contains(row["state"]!) { continue }
@@ -43,7 +46,7 @@ public actor VoiceOSStore {
                     else { try quarantine(id, "原件完整性核对失败") }
                     continue
                 }
-                let info = try await inspector.inspect(file)
+                let info = row["kind"] == "user_text" ? try Self.inspectUserText(file) : try await inspector.inspect(file)
                 if row["state"] != "saved" {
                     try db.execute("UPDATE sources SET state='sealed', duration=?, kind=? WHERE id=?", [String(info.duration), info.kind, id])
                     if file != final { try place(staging, final) }
@@ -51,6 +54,7 @@ public actor VoiceOSStore {
                 }
             } catch { try quarantine(id, "无法验证媒体原件，请保留副本并检查文件") }
         }
+        try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT a.id FROM model_attempts a JOIN contexts x ON x.id=a.context_id WHERE x.state='stale')")
         ready = true
     }
     @discardableResult
@@ -104,7 +108,8 @@ public actor VoiceOSStore {
         FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
         LEFT JOIN transcripts t ON t.job_id=j.id LEFT JOIN transcript_versions v ON v.id=t.current_version_id ORDER BY s.created_at DESC,s.id
         """).map { row in
-            SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!, transcriptVersionID: row["transcript_version_id"], spans: try row["spans_json"].map { try JSONDecoder().decode([TranscriptSpan].self, from: Data($0.utf8)) } ?? [])
+            let feedback = try Self.feedbackIntent(row["feedback_json"])
+            return SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!, transcriptVersionID: row["transcript_version_id"], spans: try row["spans_json"].map { try JSONDecoder().decode([TranscriptSpan].self, from: Data($0.utf8)) } ?? [], localOnly: row["local_only"] != "0", policyVersion: Int(row["policy_version"]!)!, origin: row["origin"]!, speaker: row["speaker"]!, feedbackActionID: feedback?.actionID, feedbackActionVersion: feedback?.actionVersion, feedbackKind: feedback?.kind.rawValue)
         }
     }
     public func playableURL(sourceID: String) throws -> URL {
@@ -164,11 +169,14 @@ public actor VoiceOSStore {
     public func integrityCheck() throws -> Bool {
         try db.query("PRAGMA integrity_check").first?["integrity_check"] == "ok" && db.query("PRAGMA foreign_key_check").isEmpty
     }
-    private func sealAndQueue(_ row: [String: String], info: MediaInfo) throws {
+    func sealAndQueue(_ row: [String: String], info: MediaInfo) throws {
         try db.transaction {
             try db.execute("INSERT OR IGNORE INTO assets(id,source_id,relative_path,bytes,sha256,role) VALUES(?,?,?,?,?,'original')", [row["asset_id"],row["id"],row["relative_path"],row["expected_bytes"],row["expected_hash"]])
             try db.execute("UPDATE sources SET state='saved',duration=?,kind=?,error=NULL WHERE id=?", [String(info.duration),info.kind,row["id"]])
+            if info.kind == "user_text" { try commitUserText(row) }
+            else {
             try db.execute("INSERT OR IGNORE INTO jobs(id,source_id,input_version_id,stage,config,state) VALUES(?,?,?,'transcription','apple-local-zh_CN-v1','queued')", [UUID().uuidString,row["id"],row["version_id"]])
+            }
             try checkpoint(.savedUncommitted)
         }
     }
@@ -177,17 +185,18 @@ public actor VoiceOSStore {
         try db.transaction {
             try db.execute("UPDATE sources SET state='quarantined',error=? WHERE id=?", [reason,id])
             try db.execute("UPDATE jobs SET state='blocked',lease_token=NULL,error=? WHERE source_id=?", [reason,id])
+            try invalidateCognition(sourceID: id)
         }
     }
-    private func place(_ staging: URL, _ final: URL) throws {
+    func place(_ staging: URL, _ final: URL) throws {
         try FileManager.default.moveItem(at: staging, to: final)
         try DurableFiles.syncDirectory(final.deletingLastPathComponent())
         try DurableFiles.syncDirectory(staging.deletingLastPathComponent())
     }
-    private func assetURL(relativePath: String) throws -> URL {
+    func assetURL(relativePath: String) throws -> URL {
         let path = root.appendingPathComponent(relativePath).standardizedFileURL
         guard relativePath.hasPrefix("assets/"), path.deletingLastPathComponent() == root.appendingPathComponent("assets") else { throw VoiceOSError("非法资产路径") }
         return path
     }
-    private static func now() -> String { ISO8601DateFormatter().string(from: Date()) }
+    static func now() -> String { ISO8601DateFormatter().string(from: Date()) }
 }
