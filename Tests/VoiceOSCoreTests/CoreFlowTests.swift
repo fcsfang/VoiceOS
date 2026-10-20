@@ -570,7 +570,34 @@ final class CoreFlowTests: XCTestCase {
             .init(statement:"整理方案B对比报告",ownership:.userTentative,references:wholeRefs,action:.init(title:"整理方案B对比报告",kind:.task,quote:wholeContext.sources.last!.text)),
             .init(statement:"整理背景笔记",ownership:.userTentative,references:wholeRefs,action:.init(title:"整理背景笔记",kind:.task,quote:wholeContext.sources.last!.text))
         ],commandID:"whole-expression")
-        try await grouped.finishRecordingExpression(whole,using:actionPort)
+        let actionInput=try await grouped.prepareExpressionActionReview(whole)
+        let accepted=try await fixture.reconcile(actionInput).0
+        let reportDecision=try XCTUnwrap(accepted.first { $0.relation == "same" && $0.oldID != completed.id })
+        let duplicate=accepted.map { decision in
+            decision.oldID == completed.id ? RecordingExpressionActionDecision(oldID:decision.oldID,newID:reportDecision.newID,relation:"same",sourceID:decision.sourceID,quote:decision.quote) : decision
+        }
+        XCTAssertThrowsError(try VoiceOSStore.validateExpressionActionReview(duplicate,input:actionInput)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("被多个旧行动沿用"))
+        }
+        func actionReply(_ id:String,_ decisions:[RecordingExpressionActionDecision]) throws -> ModelHTTPReply {
+            let text=String(decoding:try JSONEncoder().encode(["decisions":decisions]),as:UTF8.self)
+            let content:[String:String] = ["type":"output_text","text":text]
+            let message:[String:Any] = ["type":"message","role":"assistant","status":"completed","content":[content]]
+            let envelope:[String:Any] = ["id":id,"status":"completed","output":[message]]
+            return .init(status:200,body:try JSONSerialization.data(withJSONObject:envelope))
+        }
+        let actionTransport=FlowFollowupTransport(try [actionReply("invalid-draft",duplicate),actionReply("invalid-review",duplicate),actionReply("repaired-draft",accepted),actionReply("repaired-review",accepted)])
+        let repairingPort=try ResponsesRecordingExpressionPort(baseURL:URL(string:"https://api.openai.com/v1")!,apiKey:"fixture",model:"flow",transport:actionTransport)
+        try await grouped.finishRecordingExpression(whole,using:repairingPort)
+        let actionRequests=await actionTransport.requests
+        XCTAssertEqual(actionRequests.count,4)
+        let repairBody=try XCTUnwrap(JSONSerialization.jsonObject(with:actionRequests[2]) as? [String:Any])
+        let repairInput=try XCTUnwrap((repairBody["input"] as? [[String:Any]])?.first?["content"] as? String)
+        let repairPayload=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(repairInput.utf8)) as? [String:Any])
+        XCTAssertTrue((repairPayload["validationError"] as? String)?.contains(reportDecision.newID) == true)
+        let repairedExpressions=try await grouped.recordingExpressions()
+        let repairedExpression=try XCTUnwrap(repairedExpressions.first { $0.id == whole.id })
+        XCTAssertEqual(repairedExpression.actionReviewResponseIDs,["repaired-draft","repaired-review"])
         let finalActions=try await grouped.actions(includeHistory:true)
         let current=finalActions.filter { $0.validity == "current" && $0.state != "dismissed" }
         XCTAssertEqual(current.count,2)
