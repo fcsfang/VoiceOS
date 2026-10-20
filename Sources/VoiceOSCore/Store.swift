@@ -28,6 +28,7 @@ public actor VoiceOSStore {
         // Startup only: the process lock proves the previous worker no longer owns a lease.
         try db.execute("UPDATE jobs SET state='queued', lease_token=NULL WHERE state='running'")
         try db.execute("UPDATE model_attempts SET state='unknown',error='进程退出前结果未登记；不会自动重发' WHERE state='reserved'")
+        try db.execute("UPDATE relevance_attempts SET state='unknown',error='进程退出前相关性结果未登记；不会自动重发' WHERE state='reserved'")
         for row in try db.query("SELECT * FROM sources ORDER BY created_at") {
             let id = row["id"]!
             if ["interrupted", "quarantined", "reference_only"].contains(row["state"]!) { continue }
@@ -55,6 +56,8 @@ public actor VoiceOSStore {
             } catch { try quarantine(id, "无法验证媒体原件，请保留副本并检查文件") }
         }
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT a.id FROM model_attempts a JOIN contexts x ON x.id=a.context_id WHERE x.state='stale')")
+        try Self.validateStoredRelevance(db)
+        try Self.validateStoredCognitiveFeedback(db)
         ready = true
     }
     @discardableResult

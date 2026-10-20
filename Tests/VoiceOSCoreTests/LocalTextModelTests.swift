@@ -9,6 +9,9 @@ final class LocalTextModelTests: XCTestCase {
         let port = try LocalTextModel.load(from: file)
         XCTAssertEqual(port.configuration.provider, "responses:api.chiyi.cc")
         XCTAssertEqual(port.configuration.model, "gpt-6.1-sol")
+        let relevance = try LocalTextModel.loadRelevance(from:file)
+        XCTAssertEqual(relevance.configuration.provider,port.configuration.provider)
+        XCTAssertEqual(relevance.configuration.promptVersion,"relevance-single-v1")
     }
     func testMalformedDuplicateAndOversizedConfigurationFailWithoutEchoingContents() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
