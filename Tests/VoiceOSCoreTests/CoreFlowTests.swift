@@ -608,6 +608,9 @@ final class CoreFlowTests: XCTestCase {
         _ = try await store.writeOrganizingInput(sourceID: next.sourceID, to: nextFolder)
         let unreviewedSource = try await store.sources().first { $0.id == next.sourceID }
         XCTAssertEqual(unreviewedSource?.needsTranscriptionReview, true)
+        let historicalDiscussion = try await store.beginConversation(sourceIDs: [next.sourceID])
+        let historicalQuestion = try await store.recordUserExpression("请保留校正前的讨论依据。")
+        _ = try await store.appendConversationUserSource(conversationID: historicalDiscussion, sourceID: historicalQuestion, expectedVersion: 1)
         let localUnreviewed = try await store.prepareLocalTranscriptContext(sourceIDs: [next.sourceID])
         XCTAssertEqual(localUnreviewed.sources.first?.text, transcript)
         let blockedModel = FlowModel(destination: .cloud)
@@ -687,6 +690,14 @@ final class CoreFlowTests: XCTestCase {
         try await store.exportPackage(to: contextPackage, includeMedia: true)
         try await VoiceOSStore.restorePackage(from: contextPackage, to: contextRestore, inspector: NativeMediaInspector())
         let contextStore = try VoiceOSStore(root: contextRestore, inspector: NativeMediaInspector())
+        try await contextStore.recover()
+        let historicalSession = try await contextStore.conversation(id: historicalDiscussion)
+        XCTAssertEqual(historicalSession.validity, "frozen")
+        let historicalSources = try await contextStore.conversationHistorySources(conversationID: historicalDiscussion)
+        XCTAssertEqual(historicalSources.first?.text, transcript)
+        let historicalTurns = try await contextStore.conversationUserTurns(conversationID: historicalDiscussion)
+        XCTAssertEqual(historicalTurns.first?.text, "请保留校正前的讨论依据。")
+        do { _ = try await contextStore.prepareConversationInput(id: historicalDiscussion, expectedVersion: 2, destination: .local); XCTFail("冻结历史不能重新进入模型输入") } catch {}
         let restoredContextSource = try await contextStore.sources().first { $0.id == next.sourceID }
         XCTAssertEqual(restoredContextSource?.transcriptionReview?.correction_count, 1)
         XCTAssertNil(restoredContextSource?.transcriptionReview?.corrections)
