@@ -23,10 +23,20 @@ public struct RecordingExpression: Codable, Sendable, Identifiable {
     public var state: String
     public var previousActionIDs: [String]
     public var actionReviewResponseIDs: [String]? = nil
+    public var actionReviewDecisions: [RecordingExpressionActionDecision]? = nil
     public var reminderUpdates: [String]? = nil
     public var taskReviewPending: Bool? = nil
     public var externalVersions: [String:String]? = nil
     public var externalPolicies: [String:Int]? = nil
+    public func requiresActionReview(actionID:String) -> Bool {
+        guard state == "completed" else { return true }
+        guard let decisions=actionReviewDecisions else { return taskReviewPending == true }
+        let uncertain=decisions.filter { $0.relation == "uncertain" }
+        guard uncertain.allSatisfy({ $0.possibleNewIDs != nil }) else { return true }
+        let possible=Set(uncertain.flatMap { $0.possibleNewIDs ?? [] })
+        return uncertain.contains { $0.oldID == actionID } || possible.contains(actionID) ||
+            decisions.contains { $0.relation == "same" && $0.oldID == actionID && possible.contains($0.newID) }
+    }
     public var digest: String { VoiceOSStore.relevanceHash(Data((sourceIDs.map { $0+":"+(versions[$0] ?? "") } + (externalVersions ?? [:]).keys.sorted().map { $0+":"+(externalVersions?[$0] ?? "") }).joined(separator:"\n").utf8)) }
 }
 public struct RecordingExpressionProposal: Codable, Sendable {
@@ -231,11 +241,12 @@ extension VoiceOSStore {
             try validateLocalTranscriptContext(input.context)
             guard try Self.relevanceJSON(prepareExpressionActionReview(current)) == Self.relevanceJSON(input) else { throw VoiceOSError("接续核对期间行动或原话已变化，等待重新核对") }
             try Self.validateExpressionActionReview(reviewed.0,input:input)
-            guard reviewed.1.count >= 2 else { throw VoiceOSError("补录任务接续缺少独立核对") }
+            guard reviewed.1.count >= 2,Set(reviewed.1).count == reviewed.1.count,reviewed.1.allSatisfy({ !$0.isEmpty }) else { throw VoiceOSError("补录任务接续缺少独立核对") }
             decisions=reviewed.0;completed.actionReviewResponseIDs=reviewed.1
         }
         completed.reminderUpdates=decisions.filter { $0.relation == "same" || $0.relation == "withdraw" }.map(\.oldID)
         completed.taskReviewPending=decisions.contains { $0.relation == "uncertain" }
+        completed.actionReviewDecisions=decisions
         let latest=try latestCandidateClaimsBySource()
         let keep=Set(input.context.sources.flatMap { latest[$0.sourceID] ?? [] }.map(\.id))
         var replaced=Set<String>()
@@ -254,6 +265,7 @@ extension VoiceOSStore {
                 presentation.correctedActionIDs=nil;presentation.correctedSourceIDs=nil;presentation.recordingUnderstandingIsCorrection=nil
                 try saveExpressionPresentation(presentation,sourceID:id)
             }
+            try Self.validateStoredExpressionActionReviews(db)
         }
     }
 }

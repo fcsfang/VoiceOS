@@ -76,7 +76,7 @@ extension VoiceOSStore {
               let action = try actions().first(where: { $0.id == actionID }), action.version == expectedVersion, action.kind == "task", action.intentActor == "user" else {
             throw VoiceOSError("只能把有效的明确任务发送到所选清单")
         }
-        guard try reminderSourceAllowed(action) else { throw VoiceOSError("行动依据含仅本地资料，不能写入提醒事项") }
+        guard try reminderSourceAllowed(action) else { throw VoiceOSError("行动依据仅限本机或连续表达仍待核对，不能写入提醒事项") }
         if expectedAccessVersion != nil {
             guard try reminderCognitionIsLatest(action) else { throw VoiceOSError("行动认知批次已更新，停止历史任务外写") }
         }
@@ -116,7 +116,10 @@ extension VoiceOSStore {
     func reminderSourceAllowed(_ action: ActionRecord) throws -> Bool {
         guard let claim = try candidateClaims().first(where: { $0.id == action.claimID }), !claim.references.isEmpty else { return false }
         return try claim.references.allSatisfy { ref in
-            try db.query("SELECT local_only FROM sources WHERE id=?", [ref.sourceID]).first?["local_only"] == "0"
+            guard let source=try db.query("SELECT local_only,presentation_json FROM sources WHERE id=?", [ref.sourceID]).first,source["local_only"] == "0" else { return false }
+            if let raw=source["presentation_json"],let expression=try JSONDecoder().decode(RecordingPresentation.self,from:Data(raw.utf8)).expression,
+               expression.requiresActionReview(actionID:action.id) { return false }
+            return true
         }
     }
     /// A source may be reprocessed while the connector's preflight is awaiting.
