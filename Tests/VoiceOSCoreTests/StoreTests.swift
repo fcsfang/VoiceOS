@@ -163,6 +163,19 @@ final class StoreTests: XCTestCase {
         do { _ = try await restored.understandSource(sourceID: source, using: port); XCTFail("restored unknown resend") } catch {}
         let finalCalls = await port.calls; XCTAssertEqual(finalCalls, 1)
     }
+    func testCancelledUnderstandingDoesNotAcceptLateResponseAndKeepsUsage() async throws {
+        let store = try await store(); let source = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "外部资料"))
+        let port = TestModelPort(suspended: true)
+        let running = Task { try await store.understandSource(sourceID: source, using: port) }
+        await port.waitStarted(); running.cancel(); await port.release()
+        do { _ = try await running.value; XCTFail("cancelled response must reject") } catch {}
+        let claims = try await store.candidateClaims(), attempts = try await store.modelAttempts(sourceID: source)
+        XCTAssertTrue(claims.isEmpty); XCTAssertEqual(attempts.first?.state, "rejected")
+        XCTAssertEqual(attempts.first?.usage?["input_tokens"], 10); XCTAssertEqual(attempts.first?.usage?["output_tokens"], 5)
+        do { _ = try await store.understandSource(sourceID: source, using: port); XCTFail("cancelled attempt must not resend") } catch {}
+        let calls = await port.calls; XCTAssertEqual(calls, 1)
+    }
     private func reviewFixture(_ store: VoiceOSStore) async throws -> CandidateClaim {
         let source = try await store.importFile(fixture())
         try await store.processTranscriptions(using: Speech(text: "外部测试资料"))

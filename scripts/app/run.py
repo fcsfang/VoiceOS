@@ -19,7 +19,7 @@ env.pop('VOICEOS_TEST_CAPTURE_SECONDS', None)
 if args.capture_limit_seconds is not None:
     env['VOICEOS_TEST_CAPTURE_SECONDS'] = str(args.capture_limit_seconds)
 config = ROOT / '.env'
-if config.exists():
+if config.exists() and not env.get('VOICEOS_MODEL_CONFIG_FILE'):
     env['VOICEOS_MODEL_CONFIG_FILE'] = str(config)
 if args.data_dir:
     env['VOICEOS_DATA_DIR'] = str(args.data_dir.resolve())

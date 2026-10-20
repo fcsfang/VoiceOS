@@ -65,6 +65,7 @@ extension VoiceOSStore {
         return result
     }
     public func generateClaims(contextID: String, using port: any ModelPort) async throws -> [String] {
+        try Task.checkCancellation()
         let config = port.configuration
         guard !config.provider.isEmpty, !["local_fixture","discussion_derivation"].contains(config.provider), !config.provider.hasPrefix("discussion_outcome:"), !config.model.isEmpty,
               !config.promptVersion.isEmpty, !config.schemaVersion.isEmpty else { throw VoiceOSError("模型端口配置缺少身份或版本") }
@@ -78,8 +79,8 @@ extension VoiceOSStore {
         do { response = try await port.generate(ModelRequest(attemptID: attempt, context: context, configuration: config)) }
         catch ModelPortFailure.rejected(let reason, let input, let output) {
             var usage: [String: Int] = [:]
-            if let input { usage["input_tokens"] = input }
-            if let output { usage["output_tokens"] = output }
+            if let input, input >= 0 { usage["input_tokens"] = input }
+            if let output, output >= 0 { usage["output_tokens"] = output }
             if !usage.isEmpty {
                 let encoded = try JSONSerialization.data(withJSONObject: usage, options: [.sortedKeys])
                 try db.execute("UPDATE model_attempts SET usage_json=? WHERE id=?", [String(decoding: encoded, as: UTF8.self),attempt])
@@ -106,7 +107,13 @@ extension VoiceOSStore {
             try db.execute("UPDATE model_attempts SET state='rejected',error='响应未完成或被拒绝' WHERE id=?", [attempt])
             throw VoiceOSError("模型没有返回可接纳的完整响应")
         }
-        return try commitClaims(attemptID: attempt, proposals: response.claims)
+        do {
+            try Task.checkCancellation()
+            return try commitClaims(attemptID: attempt, proposals: response.claims)
+        } catch {
+            try db.execute("UPDATE model_attempts SET state='rejected',error='结果因取消、来源或提交状态未接纳；不自动重发' WHERE id=? AND state='reserved'", [attempt])
+            throw error
+        }
     }
 }
 
@@ -128,7 +135,7 @@ extension VoiceOSStore {
             rows = try db.query("SELECT a.*,c.state AS context_state FROM model_attempts a JOIN contexts c ON c.id=a.context_id WHERE a.context_id IN (SELECT context_id FROM context_inputs WHERE source_id=?) ORDER BY a.created_at,a.id", [sourceID])
         } else { rows = try db.query("SELECT a.*,c.state AS context_state FROM model_attempts a JOIN contexts c ON c.id=a.context_id ORDER BY a.created_at,a.id") }
         return try rows.map { row in
-            ModelAttemptRecord(producerSequence:Int64(row["producer_sequence"]!)!,executionKind:row["execution_kind"]!,id: row["id"]!, state: row["state"]!, provider: row["provider"]!, model: row["model"]!, usage: try row["usage_json"].map { try JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) }, billingState:row["execution_kind"] == "discussion_derivation" ? "not_applicable" : "unknown", contextState: row["context_state"]!)
+            ModelAttemptRecord(producerSequence:Int64(row["producer_sequence"]!)!,executionKind:row["execution_kind"]!,id: row["id"]!, state: row["state"]!, provider: row["provider"]!, model: row["model"]!, usage: try row["usage_json"].map { try JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) }, billingState:row["execution_kind"] == "discussion_derivation" && row["provider"]?.hasPrefix("english_feedback:") != true ? "not_applicable" : "unknown", contextState: row["context_state"]!)
         }
     }
 }
