@@ -32,6 +32,7 @@ public struct SourceRecord: Identifiable, Sendable {
     public let error: String?
     public let relativePath: String
     public let transcriptVersionID: String?
+    public let transcriptionBackend: String?
     public let spans: [TranscriptSpan]
     public let localOnly: Bool
     public let policyVersion: Int
@@ -57,6 +58,9 @@ public enum SaveCheckpoint: String, Sendable {
     case reviewUncommitted, reviewCommitted
     case questionUncommitted, questionCommitted
     case recordingRequestUncommitted, recordingRequestCommitted, recordingRequestQueueCommitted
+    case segmentExtractionReserved, segmentExtractionUncommitted, segmentExtractionCommitted
+    case segmentAggregationReserved, segmentAggregationUncommitted, segmentAggregationCommitted
+    case segmentedBatchUncommitted, segmentedBatchCommitted, segmentedBatchCancelUncommitted, segmentedBatchCancelCommitted
     case processingIntentReserved, processingIntentUncommitted, processingIntentCommitted
     case reminderReserved, reminderSaved, reminderFeedbackUncommitted, reminderFeedbackCommitted
     case actionUncommitted, actionCommitted, actionStateUncommitted, actionStateCommitted

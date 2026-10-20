@@ -57,6 +57,8 @@ extension VoiceOSStore {
             try checkpoint(.reminderSaved)
             // Save return is not readback evidence. Record ambiguity before the next await.
             try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=?", [id])
+            try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
+            try Task.checkCancellation()
             let matches = try await port.find(calendarID: calendarID, externalID: nil, marker: marker)
             try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
             try Task.checkCancellation()

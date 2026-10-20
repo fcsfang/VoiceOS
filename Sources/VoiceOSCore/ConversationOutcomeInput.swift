@@ -94,7 +94,7 @@ extension VoiceOSStore {
         guard (1...12000).contains(context.scalarBudget),size <= context.scalarBudget,size <= 12000 else { throw VoiceOSError("完整讨论成果输入超过预算，不静默删减历史") }
     }
     public static func validateConversationOutcomeProposals(_ proposals:[ConversationOutcomeProposal],snapshot:ConversationOutcomeSnapshot) throws {
-        guard proposals.count <= 32,proposals.filter({ $0.action?.autoSend == true }).count <= 3 else { throw VoiceOSError("讨论成果数量超限") }
+        guard proposals.count <= 32 else { throw VoiceOSError("讨论成果数量超限") }
         for proposal in proposals {
             guard proposal.contentKind != .question || proposal.action == nil else { throw VoiceOSError("讨论问题不能同时作为行动承诺") }
             guard !proposal.statement.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,proposal.statement.unicodeScalars.count <= 2000,

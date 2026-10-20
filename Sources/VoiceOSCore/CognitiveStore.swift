@@ -102,34 +102,39 @@ extension VoiceOSStore {
             throw error
         }
         // Validation and commit have no await; this actor is the sole writer.
-        var ids: [String] = []
-        try db.transaction {
-            for (ordinal, proposal) in proposals.enumerated() {
-                let id = UUID().uuidString; ids.append(id)
-                try db.execute("INSERT INTO claims(id,attempt_id,ordinal,statement,ownership,evidence_state,validity,refs_json,created_at,action_json,content_kind) VALUES(?,?,?,?,?,'unverified','current',?,?,?,?)", [id,attemptID,String(ordinal),proposal.statement,proposal.ownership.rawValue,try json(proposal.references),timestamp(),try proposal.action.map { try json($0) },proposal.contentKind?.rawValue])
-                if let action = proposal.action {
-                    let actor = action.kind == .aiSuggestion ? "ai" : "user"
-                    let command = "extracted:" + attemptID + ":" + String(ordinal)
-                    let fingerprint = try Self.actionHash([id,"0",action.title,action.kind.rawValue,actor,action.quote])
-                    try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,auto_send) VALUES(?,?,0,?,?,?,?,'open','current',?,?,?,?)", [UUID().uuidString,id,action.title,action.kind.rawValue,actor,action.quote,command,fingerprint,timestamp(),action.autoSend ? "1" : "0"])
-                }
-            }
-            try db.execute("UPDATE model_attempts SET state='completed',result_digest=? WHERE id=? AND state='reserved'", [digest,attemptID])
-            // Typed questions share the claims transaction: no partial identity after a crash.
-            for (index, proposal) in proposals.enumerated() where proposal.contentKind == .question {
-                let ref = proposal.references[0]
-                let context = try localContext(id: attempt["context_id"]!)
-                guard let source = context.sources.first(where: { $0.sourceID == ref.sourceID }),
-                      let span = source.spans.first(where: { $0.id == ref.spanID }) else { throw VoiceOSError("问题出处缺失") }
-                let scalars = Array(source.text.unicodeScalars)
-                let quote = String(String.UnicodeScalarView(scalars[span.textStart..<min(span.textEnd, span.textStart + 2000)]))
-                let seed = try prepareQuestionSeed(claimID: ids[index], expectedReviewVersion: 0, original: .init(reference: ref, quote: quote), scalarBudget: context.scalarBudget)
-                _ = try insertQuestion(seed)
-            }
-            try additionalCommit(ids)
-            try checkpoint(.claimsUncommitted)
-        }
+        let ids = try db.transaction { try insertValidatedClaims(attemptID:attemptID,proposals:proposals,additionalCommit:additionalCommit) }
         try checkpoint(.claimsCommitted)
+        return ids
+    }
+    /// Caller owns the transaction and has validated the original typed producer.
+    func insertValidatedClaims(attemptID: String, proposals: [ClaimProposal], additionalCommit: ([String]) throws -> Void = { _ in }) throws -> [String] {
+        guard let attempt=try db.query("SELECT * FROM model_attempts WHERE id=? AND state='reserved'",[attemptID]).first else { throw VoiceOSError("认知生产者未预留") }
+        let digest=try hash(proposals)
+        var ids: [String] = []
+        for (ordinal, proposal) in proposals.enumerated() {
+            let id = UUID().uuidString; ids.append(id)
+            try db.execute("INSERT INTO claims(id,attempt_id,ordinal,statement,ownership,evidence_state,validity,refs_json,created_at,action_json,content_kind) VALUES(?,?,?,?,?,'unverified','current',?,?,?,?)", [id,attemptID,String(ordinal),proposal.statement,proposal.ownership.rawValue,try json(proposal.references),timestamp(),try proposal.action.map { try json($0) },proposal.contentKind?.rawValue])
+            if let action = proposal.action {
+                let actor = action.kind == .aiSuggestion ? "ai" : "user"
+                let command = "extracted:" + attemptID + ":" + String(ordinal)
+                let fingerprint = try Self.actionHash([id,"0",action.title,action.kind.rawValue,actor,action.quote])
+                try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,auto_send) VALUES(?,?,0,?,?,?,?,'open','current',?,?,?,?)", [UUID().uuidString,id,action.title,action.kind.rawValue,actor,action.quote,command,fingerprint,timestamp(),action.autoSend ? "1" : "0"])
+            }
+        }
+        try db.execute("UPDATE model_attempts SET state='completed',result_digest=? WHERE id=? AND state='reserved'", [digest,attemptID])
+        // Typed questions share the claims transaction: no partial identity after a crash.
+        for (index, proposal) in proposals.enumerated() where proposal.contentKind == .question {
+            let ref = proposal.references[0]
+            let context = try localContext(id: attempt["context_id"]!)
+            guard let source = context.sources.first(where: { $0.sourceID == ref.sourceID }),
+                  let span = source.spans.first(where: { $0.id == ref.spanID }) else { throw VoiceOSError("问题出处缺失") }
+            let scalars = Array(source.text.unicodeScalars)
+            let quote = String(String.UnicodeScalarView(scalars[span.textStart..<min(span.textEnd, span.textStart + 2000)]))
+            let seed = try prepareQuestionSeed(claimID: ids[index], expectedReviewVersion: 0, original: .init(reference: ref, quote: quote), scalarBudget: context.scalarBudget)
+            _ = try insertQuestion(seed)
+        }
+        try additionalCommit(ids)
+        try checkpoint(.claimsUncommitted)
         return ids.sorted()
     }
     public func candidateClaims(includeFrozen: Bool = false) throws -> [CandidateClaim] {
@@ -142,8 +147,34 @@ extension VoiceOSStore {
             CandidateClaim(contentKind: $0["reviewed_statement"] != nil && $0["reviewed_statement"] != $0["statement"] ? nil : $0["content_kind"].flatMap(CognitiveContentKind.init(rawValue:)), id: $0["id"]!, statement: $0["reviewed_statement"] ?? $0["statement"]!, ownership: $0["reviewed_ownership"] ?? $0["ownership"]!, evidenceState: $0["evidence_state"]!, validity: $0["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data($0["refs_json"]!.utf8)), reviewVersion: Int($0["review_version"]!)!, reviewState: $0["review_state"] ?? "pending")
         }
     }
+
+    /// Returns the latest completed cognition producer that used a source.
+    ///
+    /// Reprocessing a source creates a new immutable model attempt so that the
+    /// old result remains auditable.  The control center needs a current view,
+    /// however, rather than rendering every historical attempt as if it were a
+    /// second set of thoughts.  This helper deliberately keeps the historical
+    /// `candidateClaims` API unchanged and narrows only the source-facing view.
+    public func latestCandidateClaims(for sourceID: String, includeFrozen: Bool = false) throws -> [CandidateClaim] {
+        guard let attempt = try db.query("""
+            SELECT a.id
+            FROM model_attempts a
+            JOIN context_inputs i ON i.context_id=a.context_id
+            WHERE i.source_id=? AND a.state='completed'
+            -- created_at is intentionally human-readable and may have only
+            -- second-level precision.  producer_sequence is the durable
+            -- ordering authority for model results, including rapid retries.
+            ORDER BY a.producer_sequence DESC, a.created_at DESC, a.id DESC
+            LIMIT 1
+            """, [sourceID]).first,
+              let attemptID = attempt["id"] else { return [] }
+        let ids = Set(try db.query("SELECT id FROM claims WHERE attempt_id=?", [attemptID]).compactMap { $0["id"] })
+        return try candidateClaims(includeFrozen: includeFrozen).filter { claim in
+            ids.contains(claim.id) && claim.references.contains { $0.sourceID == sourceID }
+        }
+    }
     static func validateProposals(_ proposals: [ClaimProposal], context: LocalTranscriptContext) throws {
-        guard proposals.count <= 32, proposals.filter({ $0.action?.autoSend == true }).count <= 3 else { throw VoiceOSError("行动提取超过单次范围") }
+        guard proposals.count <= 32 else { throw VoiceOSError("行动提取超过单次范围") }
         for proposal in proposals {
             guard proposal.contentKind != .question || proposal.action == nil else { throw VoiceOSError("问题不能同时作为行动承诺；需分开提取") }
             guard !proposal.statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !proposal.references.isEmpty, proposal.references.count <= 32, proposal.statement.unicodeScalars.count <= 2000 else { throw VoiceOSError("认知候选缺少内容或出处") }
@@ -154,15 +185,15 @@ extension VoiceOSStore {
                 guard !action.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action.title.unicodeScalars.count <= 2000,
                       !action.quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, action.quote.unicodeScalars.count <= 2000,
                       !action.autoSend || action.kind == .task,
-                      (action.kind == .aiSuggestion && proposal.ownership == .aiCandidate) || (action.kind != .aiSuggestion && proposal.ownership == .userTentative),
-                      proposal.references.contains(where: { ref in
-                          context.sources.contains { source in
-                              guard source.sourceID == ref.sourceID, source.transcriptVersionID == ref.transcriptVersionID,
-                                    let span = source.spans.first(where: { $0.id == ref.spanID }) else { return false }
-                              let scalars = Array(source.text.unicodeScalars)
-                              return String(String.UnicodeScalarView(scalars[span.textStart..<span.textEnd])).contains(action.quote)
-                          }
-                      }) else { throw VoiceOSError("行动提取缺少原话、正确归属或可执行范围") }
+                      (action.kind == .aiSuggestion && proposal.ownership == .aiCandidate) || (action.kind != .aiSuggestion && proposal.ownership == .userTentative) else { throw VoiceOSError("行动提取缺少原话、正确归属或可执行范围") }
+                let refsBySource = Dictionary(grouping: proposal.references, by: { "\($0.sourceID):\($0.transcriptVersionID)" })
+                guard refsBySource.values.contains(where: { refs in
+                    guard let source = context.sources.first(where: { s in s.sourceID == refs[0].sourceID && s.transcriptVersionID == refs[0].transcriptVersionID }) else { return false }
+                    let ranges = refs.compactMap { ref in source.spans.first(where: { $0.id == ref.spanID }) }.map { ($0.textStart, $0.textEnd) }
+                    guard let left = ranges.map({ $0.0 }).min(), let right = ranges.map({ $0.1 }).max(), left < right else { return false }
+                    let scalars = Array(source.text.unicodeScalars)
+                    return String(String.UnicodeScalarView(scalars[left..<right])).contains(action.quote)
+                }) else { throw VoiceOSError("行动提取缺少原话、正确归属或可执行范围") }
             }
         }
     }
@@ -240,6 +271,9 @@ extension VoiceOSStore {
     }
     // Call inside the same transaction as a correction/quarantine.
     func invalidateCognition(sourceID: String) throws {
+        try db.execute("UPDATE segmented_processing_batches SET state='blocked',error='来源文字、授权或原件已变化',updated_at=? WHERE source_id=? AND state='queued'",[Self.processingNow(),sourceID])
+        try db.execute("UPDATE segmented_aggregation_attempts SET validity='frozen' WHERE batch_id IN (SELECT id FROM segmented_processing_batches WHERE source_id=?)",[sourceID])
+        try db.execute("UPDATE segmented_extraction_attempts SET validity='frozen' WHERE batch_id IN (SELECT id FROM segmented_processing_batches WHERE source_id=?)",[sourceID])
         try db.execute("UPDATE relevance_attempts SET validity='frozen' WHERE id IN (SELECT attempt_id FROM relevance_inputs WHERE source_id=?)", [sourceID])
         for row in try db.query("SELECT context_id FROM context_inputs WHERE source_id=?", [sourceID]) { try freezeContext(row["context_id"]!) }
     }

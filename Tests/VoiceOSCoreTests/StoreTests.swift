@@ -142,6 +142,23 @@ final class StoreTests: XCTestCase {
         XCTAssertEqual(all.filter { $0.validity == "frozen" }.count, 1)
         XCTAssertEqual(all.filter { $0.validity == "current" }.count, 1)
     }
+    func testLatestCandidateClaimsUsesNewestSourceProducerAndKeepsHistory() async throws {
+        let store = try await store(); let source = try await store.importFile(fixture())
+        try await store.processTranscriptions(using: Speech(text: "第一版表达"))
+        let port = TestModelPort()
+        let first = try await store.understandSource(sourceID: source, using: port)
+        let sourceRows = try await store.sources()
+        let version = try XCTUnwrap(sourceRows.first?.transcriptVersionID)
+        _ = try await store.correctTranscript(sourceID: source, expectedVersionID: version, text: "第二版表达")
+        let second = try await store.understandSource(sourceID: source, using: port)
+
+        let history = try await store.candidateClaims(includeFrozen: true)
+        XCTAssertEqual(history.count, 2)
+        XCTAssertEqual(history.filter { $0.validity == "frozen" }.count, 1)
+        let current = try await store.latestCandidateClaims(for: source, includeFrozen: true)
+        XCTAssertEqual(current.map(\.id), second)
+        XCTAssertFalse(current.map(\.id).contains(first[0]))
+    }
     func testUnderstandingUnknownAndConcurrentAttemptsNeverResend() async throws {
         let store = try await store(); let source = try await store.importFile(fixture())
         try await store.processTranscriptions(using: Speech(text: "外部资料"))
