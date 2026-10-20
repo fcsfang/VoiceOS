@@ -122,7 +122,7 @@ extension VoiceOSStore {
                 if input.to == .resolved {
                     guard let evidence = input.resolution, let context = input.resolutionContext, let policy = input.resolutionPolicyVersion,
                           try relevanceJSON(evidence.reference) != relevanceJSON(seed.original.reference) else { throw VoiceOSError("问题解决历史缺少新增答案") }
-                    try validateStoredQuestionContext(db, context: context, policies: [evidence.reference.sourceID: policy])
+                    try validateStoredQuestionContext(db, context: context, policies: [evidence.reference.sourceID: policy], historical: true)
                     try validateQuestionEvidence(evidence, context: context, personal: true)
                 } else { guard input.resolution == nil, input.resolutionContext == nil, input.resolutionPolicyVersion == nil else { throw VoiceOSError("非解决事件包含答案") } }
                 expectedVersion += 1; status = input.to
@@ -139,19 +139,21 @@ extension VoiceOSStore {
         let references = try JSONDecoder().decode([ClaimReference].self, from: Data(claim["refs_json"]!.utf8))
         guard references.contains(where: { $0.sourceID == seed.original.reference.sourceID && $0.transcriptVersionID == seed.original.reference.transcriptVersionID && $0.spanID == seed.original.reference.spanID }),
               Set(references.map(\.sourceID)) == Set(seed.context.sources.map(\.sourceID)) else { throw VoiceOSError("问题引用未选入原认知") }
-        try validateStoredQuestionContext(db, context: seed.context, policies: seed.policyVersions)
+        try validateStoredQuestionContext(db, context: seed.context, policies: seed.policyVersions, historical: claim["validity"] == "frozen")
         try validateQuestionEvidence(seed.original, context: seed.context, personal: seed.ownership == "user_tentative")
     }
-    private static func validateStoredQuestionContext(_ db: Database, context: LocalTranscriptContext, policies: [String: Int]) throws {
+    private static func validateStoredQuestionContext(_ db: Database, context: LocalTranscriptContext, policies: [String: Int], historical: Bool) throws {
         guard (1...12000).contains(context.scalarBudget), context.sources.reduce(0, { $0 + $1.text.unicodeScalars.count }) <= context.scalarBudget,
               context.contentDigest == (try relevanceHash(Data(relevanceJSON(context.sources).utf8))),
               !context.sources.isEmpty, Set(context.sources.map(\.sourceID)).count == context.sources.count, Set(policies.keys) == Set(context.sources.map(\.sourceID)) else { throw VoiceOSError("问题上下文身份无效") }
         for source in context.sources {
-            guard let row = try db.query("SELECT v.text,v.spans_json,t.source_id,t.input_version_id,s.origin,s.speaker,s.policy_version,s.local_only FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [source.transcriptVersionID]).first,
+            guard let row = try db.query("SELECT v.*,t.current_version_id,t.source_id,t.input_version_id,s.origin,s.speaker,s.policy_version,s.local_only,s.duration FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [source.transcriptVersionID]).first,
                   row["source_id"] == source.sourceID, row["input_version_id"] == source.sourceVersionID,
-                  row["origin"] == source.origin, row["speaker"] == source.speaker, row["text"] == source.text,
-                  try relevanceJSON(JSONDecoder().decode([TranscriptSpan].self, from: Data(row["spans_json"]!.utf8))) == relevanceJSON(source.spans),
+                  row["origin"] == source.origin, row["speaker"] == source.speaker,
+                  try isPrunedHistoricalTranscript(row, historical: historical) ||
+                    (row["text"] == source.text && relevanceJSON(JSONDecoder().decode([TranscriptSpan].self, from: Data(row["spans_json"]!.utf8))) == relevanceJSON(source.spans)),
                   let policy = policies[source.sourceID], policy > 0, policy <= Int(row["policy_version"]!)! else { throw VoiceOSError("问题原话版本不一致") }
+            try SpeechText(text: source.text, spans: source.spans).validate(duration: row["duration"].flatMap(Double.init))
             let local = row["policy_version"] == String(policy) ? row["local_only"] : try db.query("SELECT from_local_only FROM source_policy_revisions WHERE source_id=? AND from_version=?", [source.sourceID, String(policy)]).first?["from_local_only"]
             guard local == (source.localOnly ? "1" : "0") else { throw VoiceOSError("问题历史权限不一致") }
         }

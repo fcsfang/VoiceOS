@@ -10,6 +10,7 @@ struct FullRecordingInput: Identifiable {
 struct FullRecordingView: View {
     @ObservedObject var model: ControlCenter
     let input: FullRecordingInput
+    var embedded = false
     let showTasks: () -> Void
     @State private var track = 0
     @State private var ownVoice = false
@@ -25,10 +26,10 @@ struct FullRecordingView: View {
             Picker("本人音轨", selection: $track) {
                 ForEach(input.media.tracks) { audio in Text(audio.title).tag(audio.id) }
             }.disabled(model.fullRecordingBusy || model.fullRecordingCount != nil)
-            Text("OBS 通常将本人麦克风保存在音轨 2。请按这份素材的实际设置选择，避免把嘉宾或系统声音当成自己的意图。")
+            Text(RecordingMediaInfo.personalRecordingLayout)
                 .font(.callout).foregroundStyle(.secondary)
             Toggle("所选音轨是我的声音", isOn: $ownVoice).disabled(model.fullRecordingBusy || model.fullRecordingCount != nil)
-            Text("Qwen 在本机完整转写所选音轨，并重识别影响意图的转写疑点；文本模型自动提取、复查漏项、独立核对合并和已有任务的关联。核对完成后，明确待办同步到 VoiceOS 清单；原稿和修订历史保留，音视频只在本机处理。")
+            Text(input.media.contextTrack != nil && track == input.media.personalTrack ? "Qwen 在本机分别完整转写你的声音和节目声音，AI 校正后结合双轨全文理解，保留双方原话与时间。节目观点、你的复述与看法分开，只有你明确要做的事进入待办。双轨文字使用已配置模型，原始音视频留在本机。" : "Qwen 在本机完整转写本人音轨，AI 依据全文校正识别错误，保留原意与修订历史。随后整理观点与明确待办；原始音视频保留在本机。")
                 .font(.callout)
             if model.fullRecordingBusy { ProgressView().controlSize(.small) }
             Text(model.fullRecordingStatus).font(.callout).textSelection(.enabled).frame(minHeight: 48, alignment: .topLeading)
@@ -45,8 +46,11 @@ struct FullRecordingView: View {
                         .buttonStyle(.borderedProminent).disabled(!ownVoice || model.fullRecordingBusy || !model.modelConfigured)
                 }
             }
-        }.padding(24).frame(width: 600)
-            .onAppear { track = input.media.tracks.count > 1 ? 1 : 0 }
+        }.padding(24).frame(width: embedded ? nil : 600).frame(maxWidth: embedded ? 780 : nil)
+            .onAppear {
+                track = input.media.personalTrack
+                ownVoice = input.media.usesPersonalRecordingLayout
+            }
             .interactiveDismissDisabled(model.fullRecordingBusy)
     }
 }

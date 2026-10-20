@@ -145,11 +145,12 @@ extension VoiceOSStore {
                 guard try db.query("SELECT mode FROM cognitive_feedback_preferences WHERE version=?", [String(snapshot.preferenceVersion)]).first?["mode"] == snapshot.preferenceMode.rawValue else { throw VoiceOSError("关联偏好历史不一致") }
             }
             let source = snapshot.current.sources[0]
-            guard let version = try db.query("SELECT v.text,v.spans_json,t.source_id,t.input_version_id,s.origin,s.speaker FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [source.transcriptVersionID]).first,
+            guard let version = try db.query("SELECT v.*,t.current_version_id,t.source_id,t.input_version_id,s.origin,s.speaker,s.duration FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [source.transcriptVersionID]).first,
                   version["source_id"] == source.sourceID, version["input_version_id"] == source.sourceVersionID,
                   version["origin"] == source.origin, version["speaker"] == source.speaker,
-                  version["text"] == source.text,
-                  try relevanceJSON(JSONDecoder().decode([TranscriptSpan].self, from: Data(version["spans_json"]!.utf8))) == relevanceJSON(source.spans) else { throw VoiceOSError("关联当前原话历史不一致") }
+                  try isPrunedHistoricalTranscript(version, historical: context["state"] == "stale") ||
+                    (version["text"] == source.text && relevanceJSON(JSONDecoder().decode([TranscriptSpan].self, from: Data(version["spans_json"]!.utf8))) == relevanceJSON(source.spans)) else { throw VoiceOSError("关联当前原话历史不一致") }
+            try SpeechText(text: source.text, spans: source.spans).validate(duration: version["duration"].flatMap(Double.init))
             try validateAssociationPolicy(db, sourceID: source.sourceID, version: snapshot.policyVersion, localOnly: source.localOnly)
             for hit in snapshot.candidates { try validateAssociationHistoricalHit(db, hit: hit) }
             if row["state"] == "completed" {
@@ -171,13 +172,14 @@ extension VoiceOSStore {
     private static func validateAssociationHistoricalHit(_ db: Database, hit: RetrievalHit) throws {
         let d = hit.document
         guard d.id == d.sourceID + ":" + d.transcriptVersionID + ":" + String(d.textStart),
-              let version = try db.query("SELECT v.text,v.spans_json,t.source_id,t.input_version_id,s.name,s.origin,s.created_at FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [d.transcriptVersionID]).first,
+              let version = try db.query("SELECT v.*,t.current_version_id,t.source_id,t.input_version_id,s.name,s.origin,s.created_at FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [d.transcriptVersionID]).first,
               version["source_id"] == d.sourceID, version["input_version_id"] == d.sourceVersionID,
               version["name"] == d.name, version["origin"] == d.origin, version["created_at"] == d.createdAt else { throw VoiceOSError("关联历史窗口身份不一致") }
         let text = Array(version["text"]!.unicodeScalars), spans = try JSONDecoder().decode([TranscriptSpan].self, from: Data(version["spans_json"]!.utf8))
-        guard d.textStart >= 0, d.textEnd > d.textStart, d.textEnd <= text.count,
-              spans.contains(where: { $0.id == d.spanID && $0.textStart <= d.textStart && $0.textEnd >= d.textEnd }),
-              String(String.UnicodeScalarView(text[d.textStart..<d.textEnd])) == d.text else { throw VoiceOSError("关联历史窗口内容不一致") }
+        guard d.textStart >= 0, d.textEnd > d.textStart, d.textEnd - d.textStart == d.text.unicodeScalars.count, !d.spanID.isEmpty,
+              isPrunedHistoricalTranscript(version, historical: true) ||
+                (d.textEnd <= text.count && spans.contains(where: { $0.id == d.spanID && $0.textStart <= d.textStart && $0.textEnd >= d.textEnd }) &&
+                 String(String.UnicodeScalarView(text[d.textStart..<d.textEnd])) == d.text) else { throw VoiceOSError("关联历史窗口内容不一致") }
         try validateAssociationPolicy(db, sourceID: d.sourceID, version: d.policyVersion, localOnly: d.localOnly)
     }
 }

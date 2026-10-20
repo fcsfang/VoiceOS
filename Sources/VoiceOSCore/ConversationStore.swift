@@ -172,7 +172,7 @@ extension VoiceOSStore {
         return try JSONDecoder().decode(LocalTranscriptContext.self,from:Data(row["snapshot_json"]!.utf8))
     }
     static func validateStoredConversations(_ db:Database) throws {
-        func checkedContext(_ id:String?) throws -> (LocalTranscriptContext,String) {
+        func checkedContext(_ id:String?, frozen:Bool) throws -> (LocalTranscriptContext,String) {
             guard let row = try db.query("SELECT * FROM contexts WHERE id=? AND destination='local'",[id]).first else { throw VoiceOSError("讨论缺少本地上下文") }
             let snapshot = try JSONDecoder().decode(LocalTranscriptContext.self,from:Data(row["snapshot_json"]!.utf8))
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
@@ -183,17 +183,19 @@ extension VoiceOSStore {
                   snapshot.sources.reduce(0, { $0 + $1.text.unicodeScalars.count }) <= snapshot.scalarBudget,
                   digest == snapshot.contentDigest, digest == row["digest"] else { throw VoiceOSError("讨论上下文摘要或预算不一致") }
             for source in snapshot.sources {
-                guard let version = try db.query("SELECT v.*,t.source_id,s.version_id,s.origin,s.speaker FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?",[source.transcriptVersionID]).first,
+                guard let version = try db.query("SELECT v.*,t.source_id,t.current_version_id,s.version_id,s.origin,s.speaker,s.duration FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?",[source.transcriptVersionID]).first,
                       inputs.contains(where: { $0["source_id"] == source.sourceID && $0["transcript_version_id"] == source.transcriptVersionID }),
                       version["source_id"] == source.sourceID, version["version_id"] == source.sourceVersionID,
-                      version["text"] == source.text, version["origin"] == source.origin, version["speaker"] == source.speaker,
-                      try encoder.encode(source.spans) == encoder.encode(JSONDecoder().decode([TranscriptSpan].self,from:Data(version["spans_json"]!.utf8))) else { throw VoiceOSError("讨论上下文历史与来源不一致") }
+                      version["origin"] == source.origin, version["speaker"] == source.speaker,
+                      try isPrunedHistoricalTranscript(version, historical: frozen && row["state"] == "stale") ||
+                        (version["text"] == source.text && encoder.encode(source.spans) == encoder.encode(JSONDecoder().decode([TranscriptSpan].self,from:Data(version["spans_json"]!.utf8)))) else { throw VoiceOSError("讨论上下文历史与来源不一致") }
+                try SpeechText(text: source.text, spans: source.spans).validate(duration: version["duration"].flatMap(Double.init))
             }
             return (snapshot,row["state"]!)
         }
         for row in try db.query("SELECT * FROM conversations") {
             let turns = try db.query("SELECT * FROM conversation_user_turns WHERE conversation_id=? ORDER BY ordinal",[row["id"]])
-            let (_,entryState) = try checkedContext(row["entry_context_id"])
+            let (_,entryState) = try checkedContext(row["entry_context_id"], frozen: row["validity"] == "frozen")
             guard !(row["entry_command_id"] ?? "").isEmpty,
                   row["validity"] != "current" || entryState == "current",
                   turns.count <= 40,
@@ -201,7 +203,7 @@ extension VoiceOSStore {
                   (row["state"] == "active" && row["end_command_id"] == nil && row["ended_at"] == nil) ||
                   (row["state"] == "ended" && !(row["end_command_id"] ?? "").isEmpty && row["ended_at"] != nil) else { throw VoiceOSError("讨论状态或版本链不一致") }
             for (index,turn) in turns.enumerated() {
-                let (snapshot,turnState) = try checkedContext(turn["context_id"])
+                let (snapshot,turnState) = try checkedContext(turn["context_id"], frozen: row["validity"] == "frozen")
                 guard turn["ordinal"] == String(index+1), turn["speaker"] == "user", !(turn["command_id"] ?? "").isEmpty,
                       row["validity"] != "current" || turnState == "current" else { throw VoiceOSError("讨论发言版本或上下文不一致") }
                 guard snapshot.sources.count == 1, let source = snapshot.sources.first, source.sourceID == turn["source_id"],

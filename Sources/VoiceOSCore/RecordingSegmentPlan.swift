@@ -56,8 +56,8 @@ extension VoiceOSStore {
                 let b=try segmentedBatchRecord(parent),s=b.scope.plan.source
                 guard b.commandID == "record-segment:"+row["id"]!,s.sourceID == row["source_id"],s.sourceVersionID == row["source_version_id"],
                       b.scope.plan.policyVersion == Int(row["policy_version"]!),b.scope.extraction == e,b.scope.aggregation == a,
-                      let original=try db.query("SELECT version_no FROM transcript_versions WHERE id=?",[s.transcriptVersionID]).first,
-                      original["version_no"] == "1" else { throw VoiceOSError("录制长文字与预先授权范围不一致") }
+                      let original=try db.query("SELECT version_no,reason FROM transcript_versions WHERE id=?",[s.transcriptVersionID]).first,
+                      original["version_no"] == "1" || original["reason"] == "ai_corrected" || original["reason"] == "ai_superseded" else { throw VoiceOSError("录制长文字与预先授权范围不一致") }
                 if let state=row["association_state"],state != "cancelled" {
                     guard try !db.query("SELECT id FROM segmented_cognitive_commits WHERE batch_id=?",[batchID]).isEmpty else { throw VoiceOSError("录制关联阶段缺少整篇认知提交") }
                     if ["completed","unknown","inFlight","frozen"].contains(state) {

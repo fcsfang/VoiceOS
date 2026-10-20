@@ -26,6 +26,7 @@ extension VoiceOSStore {
             throw VoiceOSError("分段处理范围需要明确的个人表达、有效的同目的地端口及证据预算")
         }
         let plan = try prepareTranscriptSegmentation(sourceID:sourceID,scalarBudget:segmentScalarBudget)
+        guard extraction.destination != .cloud || !record.needsTranscriptionReview else { throw VoiceOSError("请先完成整份语音文字的校正，再分段理解") }
         guard !plan.source.text.isEmpty, plan.segments.count > 1 else {
             throw VoiceOSError("分段处理范围需要超过所选单段预算的非空原话")
         }

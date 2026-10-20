@@ -117,13 +117,14 @@ extension VoiceOSStore {
               scope.contentDigest == (try segmentedScopeDigest(plan:p,extraction:scope.extraction,aggregation:scope.aggregation,evidenceBudget:scope.evidenceScalarBudget)),
               s.origin == "user", s.speaker == "user", scope.extraction.destination != .cloud || !s.localOnly,
               let historical = try db.query("""
-              SELECT v.text,v.spans_json,t.source_id,t.input_version_id,s.version_id,s.kind,s.origin,s.speaker,s.duration,s.policy_version,s.local_only
+              SELECT v.*,t.current_version_id,t.source_id,t.input_version_id,s.version_id,s.kind,s.origin,s.speaker,s.duration,s.policy_version,s.local_only
               FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?
               """,[s.transcriptVersionID]).first,
               ["user_text","audio"].contains(historical["kind"] ?? ""), historical["source_id"] == s.sourceID,
               historical["input_version_id"] == s.sourceVersionID, historical["version_id"] == s.sourceVersionID,
-              historical["text"] == s.text, historical["origin"] == s.origin, historical["speaker"] == s.speaker,
-              try relevanceJSON(JSONDecoder().decode([TranscriptSpan].self,from:Data(historical["spans_json"]!.utf8))) == relevanceJSON(s.spans),
+              historical["origin"] == s.origin, historical["speaker"] == s.speaker,
+              try isPrunedHistoricalTranscript(historical, historical: batch.state != .queued) ||
+                (historical["text"] == s.text && relevanceJSON(JSONDecoder().decode([TranscriptSpan].self,from:Data(historical["spans_json"]!.utf8))) == relevanceJSON(s.spans)),
               let currentPolicyVersion = Int(historical["policy_version"] ?? ""),
               p.policyVersion > 0, p.policyVersion <= currentPolicyVersion else {
             throw VoiceOSError("分段批次来源、端口或历史快照不一致")

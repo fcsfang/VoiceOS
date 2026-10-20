@@ -41,6 +41,8 @@ public struct SourceRecord: Identifiable, Sendable {
     public let feedbackActionID: String?
     public let feedbackActionVersion: Int?
     public let feedbackKind: String?
+    public let timeZone: String
+    public let presentation: RecordingPresentation?
 }
 public enum SaveCheckpoint: String, Sendable {
     case intent, copyChunk, copyComplete, sealed, renamed, savedUncommitted, savedCommitted

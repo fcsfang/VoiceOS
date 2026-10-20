@@ -74,12 +74,14 @@ extension VoiceOSStore {
               source.origin == "user", source.speaker == "user", source.text.unicodeScalars.count <= 4000,
               snapshot.cognition.destination != .cloud || !source.localOnly,
               snapshot.contentDigest == (try expressionProcessingIntentDigest(context: snapshot.context, policyVersion: snapshot.policyVersion, cognition: snapshot.cognition, association: snapshot.association)),
-              let version = try db.query("SELECT v.text,v.spans_json,t.source_id,t.input_version_id,s.origin,s.speaker FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [source.transcriptVersionID]).first,
+              let version = try db.query("SELECT v.*,t.current_version_id,t.source_id,t.input_version_id,s.origin,s.speaker,s.duration FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [source.transcriptVersionID]).first,
               version["source_id"] == source.sourceID, version["input_version_id"] == source.sourceVersionID,
-              version["text"] == source.text, version["origin"] == source.origin, version["speaker"] == source.speaker,
-              try relevanceJSON(JSONDecoder().decode([TranscriptSpan].self, from: Data(version["spans_json"]!.utf8))) == relevanceJSON(source.spans),
+              version["origin"] == source.origin, version["speaker"] == source.speaker,
+              try isPrunedHistoricalTranscript(version, historical: true) ||
+                (version["text"] == source.text && relevanceJSON(JSONDecoder().decode([TranscriptSpan].self, from: Data(version["spans_json"]!.utf8))) == relevanceJSON(source.spans)),
               let policy = try db.query("SELECT policy_version,local_only FROM sources WHERE id=?", [source.sourceID]).first,
               snapshot.policyVersion > 0, snapshot.policyVersion <= Int(policy["policy_version"]!)! else { throw VoiceOSError("处理意图原话或授权历史不一致") }
+        try SpeechText(text: source.text, spans: source.spans).validate(duration: version["duration"].flatMap(Double.init))
         let historicalLocal = policy["policy_version"] == String(snapshot.policyVersion) ? policy["local_only"] :
             try db.query("SELECT from_local_only FROM source_policy_revisions WHERE source_id=? AND from_version=?", [source.sourceID, String(snapshot.policyVersion)]).first?["from_local_only"]
         guard historicalLocal == (source.localOnly ? "1" : "0") else { throw VoiceOSError("处理意图授权历史不一致") }

@@ -206,10 +206,12 @@ extension VoiceOSStore {
         for _ in confirmedCompensations { try checkpoint(.compensationOperationCommitted) }
     }
     static func validateStoredReminders(_ db: Database) throws {
-        for link in try db.query("SELECT l.*,a.kind,a.title,a.version AS latest_version FROM reminder_links l JOIN actions a ON a.id=l.action_id") {
+        for link in try db.query("SELECT l.*,a.kind,a.title,a.intent_json,a.version AS latest_version FROM reminder_links l JOIN actions a ON a.id=l.action_id") {
+            let metadata=try link["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self,from:Data($0.utf8)) }
+            let historicTitle=metadata?.expressionHistory?.contains { $0.fromTitle == link["desired_title"] } == true
             guard link["kind"] == "task", link["marker"] == "voiceos-action:" + link["id"]!,
                   let pin = link["action_version"].flatMap(Int.init), let latest = link["latest_version"].flatMap(Int.init), pin <= latest,
-                  link["desired_title"] == link["title"], !(link["calendar_id"] ?? "").isEmpty else { throw VoiceOSError("迁移提醒事项身份或行动版本不一致") }
+                  (link["desired_title"] == link["title"] || historicTitle), !(link["calendar_id"] ?? "").isEmpty else { throw VoiceOSError("迁移提醒事项身份或行动版本不一致") }
             if pin > 1 { guard try db.query("SELECT id FROM action_revisions WHERE action_id=? AND version=?", [link["action_id"],String(pin)]).count == 1 else { throw VoiceOSError("迁移提醒事项缺少行动版本") } }
             let observations = try db.query("SELECT sequence FROM reminder_observations WHERE link_id=? ORDER BY sequence", [link["id"]])
             for (i, row) in observations.enumerated() { guard row["sequence"] == String(i+1) else { throw VoiceOSError("迁移提醒事项回读历史不连续") } }
