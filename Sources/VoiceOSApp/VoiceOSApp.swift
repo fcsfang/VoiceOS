@@ -415,9 +415,16 @@ final class ControlCenter: ObservableObject {
     @Published var choosingReminderCalendar = false
     private let reminders = NativeReminders()
     var reminderCalendarTitle: String { reminderCalendars.first { $0.id == reminderCalendarID }?.title ?? (reminderAccess?.enabled == true ? reminderAccess!.title : "未选择清单") }
+    func recordingActionRequiresReview(_ action:ActionRecord) -> Bool {
+        let sourceIDs=Set(claims.first(where: { $0.id == action.claimID })?.references.map(\.sourceID) ?? [])
+        return records.contains { source in
+            guard let expression=source.presentation?.expression else { return false }
+            return (sourceIDs.contains(source.id) || expression.previousActionIDs.contains(action.id)) && expression.requiresActionReview(actionID:action.id)
+        }
+    }
     func reminderSourceAllowed(_ action: ActionRecord) -> Bool {
         guard let claim = claims.first(where: { $0.id == action.claimID }) else { return false }
-        return !claim.references.isEmpty && claim.references.allSatisfy { ref in records.contains { $0.id == ref.sourceID && !$0.localOnly } }
+        return !recordingActionRequiresReview(action) && !claim.references.isEmpty && claim.references.allSatisfy { ref in records.contains { $0.id == ref.sourceID && !$0.localOnly } }
     }
     private let rootOverride: URL?
     var libraryTitle: String { rootOverride == nil ? "VoiceOS" : "独立资料库 · " + rootOverride!.lastPathComponent }

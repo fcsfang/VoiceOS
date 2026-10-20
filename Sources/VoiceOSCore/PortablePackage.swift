@@ -420,6 +420,7 @@ extension VoiceOSStore {
             try VoiceOSStore.validateStoredRelevance(database)
             try VoiceOSStore.validateStoredCognitiveFeedback(database)
             try VoiceOSStore.validateStoredRecordings(database)
+            try VoiceOSStore.validateStoredExpressionActionReviews(database)
             try VoiceOSStore.validateStoredConversations(database)
             try VoiceOSStore.validateStoredDiscussionAttempts(database)
             try VoiceOSStore.validateStoredDiscussionDerivations(database)

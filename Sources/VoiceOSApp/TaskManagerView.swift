@@ -23,6 +23,7 @@ struct TaskManagerView: View {
 
     private func category(_ action: ActionRecord) -> String {
         if action.state == "completed" { return "completed" }
+        if model.recordingActionRequiresReview(action) { return "review" }
         if action.validity != "current" { return "review" }
         if let intent = action.intent {
             if intent.uncertain || intent.followupState == "needs_review" || intent.intentType == "uncertain" { return "review" }
@@ -211,6 +212,7 @@ struct TaskManagerView: View {
                     if fields.due != .none { Image(systemName: "calendar").foregroundStyle(.secondary) }
                     if !fields.alerts.isEmpty { Image(systemName: "bell").foregroundStyle(.secondary) }
                 }
+                if model.recordingActionRequiresReview(action) { Text("待核对，暂不同步").font(.caption).foregroundStyle(.secondary) }
                 if feedbackCount(action) > 0 { Text("\(feedbackCount(action)) 条记录").font(.caption).foregroundStyle(.secondary) }
                 if let execution = model.assistantExecutions.first(where: { $0.actionID == action.id }) {
                     Text(assistantExecutionLabel(execution)).font(.caption).foregroundStyle(palette.accent)
