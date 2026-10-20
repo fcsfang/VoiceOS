@@ -15,7 +15,7 @@ struct DailyWorkbenchView: View {
     @State private var nextFeedback: ActionRecord?
     @State private var nextTask: ActionRecord?
 
-    private var tasks: [ActionRecord] { model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" } }
+    private var tasks: [ActionRecord] { model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" && !model.workspaceTaskRequiresReview($0) } }
     private func fields(_ action: ActionRecord) -> ReminderFields? {
         let receipt = action.intent?.reminderFields
         if model.reminderLinks.contains(where: { $0.actionID == action.id }) { return receipt?.observed }

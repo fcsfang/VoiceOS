@@ -526,7 +526,7 @@ struct WorkspaceView: View {
                 }
             }
             if actionFilter == "全部", !paused.isEmpty {
-                WorkspaceSection(title:"需要重新识别的待办",subtitle:"尚未登记完成，AI 提取已暂停。打开任务，再进入材料查看原因与重新识别。",icon:"pause.circle",count:paused.count) {
+                WorkspaceSection(title:"需要核对的待办",subtitle:"尚未登记完成，行动关系待核对或 AI 提取已暂停。打开任务查看依据和具体原因。",icon:"pause.circle",count:paused.count) {
                     ForEach(paused) { action in actionRow(action);if action.id != paused.last?.id { Divider() } }
                 }
             }
@@ -548,7 +548,7 @@ struct WorkspaceView: View {
             case "历史记录": return action.validity != "current" && !model.workspaceTaskRequiresReview(action)
             case "待核对": return model.workspaceTaskRequiresReview(action) || action.validity == "current" && (action.intent?.uncertain == true || action.intent?.followupState == "needs_review")
             case "问题与目标": return action.kind != "task" && action.state != "dismissed"
-            default: return action.kind == "task" && action.state == "open" && action.validity == "current"
+            default: return action.kind == "task" && action.state == "open" && action.validity == "current" && !model.workspaceTaskRequiresReview(action)
             }
         }
     }

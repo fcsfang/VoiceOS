@@ -33,6 +33,7 @@ extension ControlCenter {
         }
     }
     func workspaceTaskRequiresReview(_ action: ActionRecord) -> Bool {
+        if recordingActionRequiresReview(action) { return action.state == "open" }
         guard action.validity != "current", action.state == "open" else { return false }
         if actionRecords.contains(where: { $0.claimID == action.claimID && $0.validity == "current" && $0.claimReviewVersion > action.claimReviewVersion }) { return false }
         let refs = claims.first(where: { $0.id == action.claimID })?.references ?? []
@@ -51,7 +52,7 @@ extension ControlCenter {
             return workspaceTaskRequiresReview(action) ? "AI 提取已暂停 · 不代表已完成或识别有误" : "之前提取的问题与目标 · 历史记录"
         }
         let completion = action.state == "completed" ? "已登记完成" : action.state == "dismissed" ? "已停止跟进" : "尚未登记完成"
-        if action.validity == "current" { return completion }
+        if action.validity == "current" { return completion + (recordingActionRequiresReview(action) ? " · 行动关系待核对，暂不同步" : "") }
         return completion + (workspaceTaskRequiresReview(action) ? " · AI 提取已暂停" : " · 历史记录")
     }
     var workspacePausedTasks: [ActionRecord] { actionRecords.filter { $0.kind == "task" && workspaceTaskRequiresReview($0) } }
@@ -152,7 +153,7 @@ struct WorkspaceProcessingView: View {
                     }
                 }
                 if !model.workspacePausedTasks.isEmpty {
-                    WorkspaceSection(title:"这些待办需要重新识别",subtitle:"以下事项尚未登记完成，AI 提取已暂停。打开材料可查看具体原因，并让 AI 重新识别观点和任务；只有发现转写文字不对时才需要手动更正。",icon:"pause.circle",count:model.workspacePausedTasks.count) {
+                    WorkspaceSection(title:"这些待办需要核对",subtitle:"以下事项尚未登记完成，行动关系待核对或 AI 提取已暂停。打开任务查看依据与原因；确认原话有误后再更正文字或重新识别。",icon:"pause.circle",count:model.workspacePausedTasks.count) {
                         let ids=Set(model.workspacePausedTasks.flatMap { task in model.claims.first(where: { $0.id == task.claimID })?.references.map(\.sourceID) ?? [] })
                         ForEach(model.records.filter { ids.contains($0.id) }) { source in
                             WorkspaceRow(title:source.workspaceTitle,subtitle:"查看暂停原因、受影响的任务和处理按钮",trailing:"打开材料") { openSource(source.id) }

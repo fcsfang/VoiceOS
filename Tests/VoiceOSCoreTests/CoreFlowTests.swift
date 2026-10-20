@@ -220,6 +220,7 @@ private actor FlowKnowledgeTransport: ModelHTTPTransport {
 private actor FlowReminders: RemindersFieldsPort, RecordingExpressionRemindersPort {
     var items: [ReminderSnapshot] = []
     var contexts: [String] = []
+    var expressionEdits = 0
     func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
         items.filter { $0.marker == marker || $0.id == externalID }
     }
@@ -243,6 +244,7 @@ private actor FlowReminders: RemindersFieldsPort, RecordingExpressionRemindersPo
         }
     }
     func reconcileExpression(_ edit:RecordingExpressionReminderEdit,authorize:@Sendable () async throws -> Void) async throws -> ReminderSnapshot {
+        expressionEdits += 1
         guard let index=items.firstIndex(where: { $0.id == edit.externalID && $0.marker == edit.marker }) else { throw VoiceOSError("提醒身份不符") }
         let old=items[index]
         if old.completed { return old }
@@ -347,6 +349,12 @@ private func verifyScopedExpressionActionReview(at root:URL) async throws {
         let links=try await store.reminderLinks(),remote=await reminders.items
         XCTAssertEqual(links.count,3);XCTAssertEqual(remote.count,3)
         XCTAssertTrue(links.contains { $0.actionID == label.id })
+        try await store.syncRecordingExpressionReminders(using:reminders)
+        let edits=await reminders.expressionEdits,afterSync=await reminders.items
+        XCTAssertEqual(edits,0)
+        XCTAssertTrue(afterSync.contains { $0.title == "整理报告" })
+        let pendingUpdates=try await store.recordingExpressions().first?.reminderUpdates
+        XCTAssertTrue(pendingUpdates?.contains(report.id) == true)
         var legacy=completed;legacy.actionReviewDecisions=nil
         XCTAssertTrue(legacy.requiresActionReview(actionID:clear.id))
         var missing=completed

@@ -17,6 +17,7 @@ extension VoiceOSStore {
         guard let access=try reminderAccess(),access.enabled,access.title == "VoiceOS" else { return }
         for expression in try recordingExpressions() where expression.state == "completed" {
             for actionID in expression.reminderUpdates ?? [] {
+                if expression.requiresActionReview(actionID:actionID) { continue }
                 guard let link=try db.query("SELECT * FROM reminder_links WHERE action_id=?",[actionID]).first else {
                     try finishExpressionReminderUpdate(expressionID:expression.id,actionID:actionID);continue
                 }
@@ -27,7 +28,7 @@ extension VoiceOSStore {
                 let edit=RecordingExpressionReminderEdit(calendarID:access.calendarID,externalID:externalID,marker:marker,expectedTitle:original,desiredTitle:desired,withdraw:withdrawal,expectedFields:action.intent?.reminderFields?.desired)
                 let snapshot=try await port.reconcileExpression(edit) { [self] in
                     guard let latest=try await self.reminderAccess(),latest.enabled,latest.version == access.version,
-                          try await self.recordingExpressions().contains(where: { $0.id == expression.id && $0.digest == expression.digest && $0.state == "completed" }) else { throw VoiceOSError("补录提醒接续前授权或表达已变化") }
+                          try await self.recordingExpressions().contains(where: { $0.id == expression.id && $0.digest == expression.digest && $0.state == "completed" && !$0.requiresActionReview(actionID:actionID) }) else { throw VoiceOSError("补录提醒接续前授权或表达已变化") }
                 }
                 guard snapshot.id == externalID,snapshot.marker == marker,snapshot.completed || snapshot.title == desired,
                       !withdrawal || snapshot.completed || (snapshot.fields?.alerts.isEmpty == true && snapshot.fields?.due == ReminderDueDate.none) else { throw VoiceOSError("补录提醒接续未通过回读，保留处理记录") }
