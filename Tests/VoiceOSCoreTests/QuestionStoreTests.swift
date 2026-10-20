@@ -128,7 +128,7 @@ final class QuestionStoreTests: XCTestCase {
             try db.execute("DROP TABLE question_revisions"); try db.execute("DROP TABLE questions"); try db.execute("PRAGMA user_version=23")
         }
         let db = try Database(file)
-            XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], "26")
+            XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], "31")
         XCTAssertTrue(try db.query("SELECT * FROM questions").isEmpty)
         XCTAssertTrue(try db.query("PRAGMA foreign_key_check").isEmpty)
     }

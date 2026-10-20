@@ -8,12 +8,54 @@ private struct RejectMedia: MediaInspector {
 private actor TextReminderPort: RemindersPort {
     var items: [ReminderSnapshot] = []
     var creates = 0
-    func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] { items.filter { $0.marker == marker || $0.id == externalID } }
+    var failCreates=false
+    var findCalls=0
+    var afterCreate: (@Sendable () async throws -> Void)?
+    func installAfterCreate(_ hook: @escaping @Sendable () async throws -> Void) { afterCreate=hook }
+    func failFutureCreates() { failCreates=true }
+    func completeExisting() { items=items.map { .init(id:$0.id,title:$0.title,completed:true,marker:$0.marker) } }
+    func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] { findCalls += 1;return items.filter { $0.marker == marker || $0.id == externalID } }
     func create(calendarID: String, title: String, marker: String) async throws {
         creates += 1; items.append(ReminderSnapshot(id: UUID().uuidString, title: title, completed: false, marker: marker))
+        try await afterCreate?()
+        if failCreates { throw VoiceOSError("lost create receipt") }
     }
 }
 final class UserExpressionTests: XCTestCase {
+    func testRevokedScopeDuringCreateStopsFurtherReadback() async throws {
+        let s=try await store(),port=TextReminderPort()
+        _=try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)
+        let id=try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。")
+        _=try await s.setSourceLocalOnly(sourceID:id,expectedVersion:1,localOnly:false)
+        let (attempt,p)=try await proposals(s,id);_=try await s.commitLocalClaims(attemptID:attempt,proposals:[p[0]])
+        await port.installAfterCreate { _=try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:false,expectedVersion:1) }
+        do { try await s.refreshAuthorizedReminders(expectedAccessVersion:1,using:port);XCTFail() } catch {}
+        let calls=await port.findCalls;XCTAssertEqual(calls,1) // preflight only
+        let links=try await s.reminderLinks();XCTAssertEqual(links.first?.state,"unknown")
+    }
+    func testFailedNewCreateDoesNotStarveExistingCompletionFeedback() async throws {
+        let s=try await store(),port=TextReminderPort()
+        _=try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)
+        func addTask(_ command: String) async throws {
+            let id=try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。",commandID:command)
+            _=try await s.setSourceLocalOnly(sourceID:id,expectedVersion:1,localOnly:false)
+            let (attempt,p)=try await proposals(s,id)
+            _=try await s.commitLocalClaims(attemptID:attempt,proposals:[p[0]])
+        }
+        try await addTask("first")
+        try await s.refreshAuthorizedReminders(expectedAccessVersion:1,using:port)
+        let links=try await s.reminderLinks(),first=try XCTUnwrap(links.first)
+        await port.completeExisting();await port.failFutureCreates()
+        try await addTask("second")
+        do { try await s.refreshAuthorizedReminders(expectedAccessVersion:1,using:port);XCTFail() } catch {}
+        let actions=try await s.actions(includeHistory:true)
+        XCTAssertEqual(actions.first { $0.id==first.actionID }?.state,"completed")
+        let history=try await s.actionHistory(actionID:first.actionID)
+        XCTAssertEqual(history.last?.actor,"external")
+        try await s.refreshAuthorizedReminders(expectedAccessVersion:1,using:port)
+        let creates=await port.creates;XCTAssertEqual(creates,2)
+        let claims=try await s.candidateClaims();XCTAssertTrue(claims.allSatisfy { $0.evidenceState == "unverified" })
+    }
     private var base: URL!
     override func setUpWithError() throws { base = FileManager.default.temporaryDirectory.appendingPathComponent("expression-tests-" + UUID().uuidString); try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true) }
     override func tearDownWithError() throws { try FileManager.default.removeItem(at: base) }
@@ -61,7 +103,7 @@ final class UserExpressionTests: XCTestCase {
             do { _ = try await s.commitLocalClaims(attemptID:attempt,proposals:[originals[0],bad]); XCTFail() } catch {}
         }
         let (attempt, _) = try await proposals(s,id)
-        do { _ = try await s.commitLocalClaims(attemptID:attempt,proposals:Array(repeating: originals[0],count:4)); XCTFail() } catch {}
+        do { _ = try await s.commitLocalClaims(attemptID:attempt,proposals:Array(repeating: originals[0],count:33)); XCTFail() } catch {}
         let claims = try await s.candidateClaims(); let actions = try await s.actions(); XCTAssertTrue(claims.isEmpty); XCTAssertTrue(actions.isEmpty)
         let snapshot = try await s.prepareLocalTranscriptContext(sourceIDs:[id]); let input = snapshot.sources[0]
         let external = ContextTranscript(sourceID: id, sourceVersionID:input.sourceVersionID,transcriptVersionID:input.transcriptVersionID,origin:"external",speaker:"unknown",localOnly:true,text:input.text,spans:input.spans)
@@ -81,6 +123,37 @@ final class UserExpressionTests: XCTestCase {
         try await s.activateExtractedTasks(expectedAccessVersion:1,using:port); let after = await port.creates; XCTAssertEqual(after,1)
         _ = try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:false,expectedVersion:1)
         do { try await s.activateExtractedTasks(expectedAccessVersion:1,using:port); XCTFail() } catch {}
+    }
+    func testExplicitSpokenTaskActivatesWhenModelIsConservative() async throws {
+        let s = try await store()
+        let text = "明确计划接下来完成整理开发验证素材。"
+        let id = try await s.recordUserExpression(text)
+        _ = try await s.setSourceLocalOnly(sourceID:id,expectedVersion:1,localOnly:false)
+        let context = try await s.prepareLocalTranscriptContext(sourceIDs:[id]), input = context.sources[0]
+        let persisted = try await s.persistLocalContext(context)
+        let attempt = try await s.reserveLocalModelAttempt(contextID:persisted,model:"fixture",promptVersion:"v2",schemaVersion:"v2")
+        let ref = ClaimReference(sourceID:id,transcriptVersionID:input.transcriptVersionID,spanID:input.spans[0].id)
+        _ = try await s.commitLocalClaims(attemptID:attempt,proposals:[.init(statement:text,ownership:.userTentative,references:[ref],action:.init(title:"完成整理开发验证素材",kind:.task,quote:text,autoSend:false))])
+        _ = try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)
+        let port = TextReminderPort(); try await s.activateExtractedTasks(expectedAccessVersion:1,using:port)
+        let creates = await port.creates; XCTAssertEqual(creates,1)
+    }
+    func testMoreThanThreeUserTasksActivateWithoutDevelopmentCap() async throws {
+        let s = try await store()
+        let text = "我会整理开发验证素材。"
+        let id = try await s.recordUserExpression(text)
+        _ = try await s.setSourceLocalOnly(sourceID:id,expectedVersion:1,localOnly:false)
+        let context = try await s.prepareLocalTranscriptContext(sourceIDs:[id]), input = context.sources[0]
+        let persisted = try await s.persistLocalContext(context)
+        let attempt = try await s.reserveLocalModelAttempt(contextID:persisted,model:"fixture",promptVersion:"v2",schemaVersion:"v2")
+        let ref = ClaimReference(sourceID:id,transcriptVersionID:input.transcriptVersionID,spanID:input.spans[0].id)
+        let proposals = ["整理", "开发", "验证", "素材"].map { title in
+            ClaimProposal(statement:"明确任务：\(title)",ownership:.userTentative,references:[ref],action:.init(title:title,kind:.task,quote:text,autoSend:false))
+        }
+        _ = try await s.commitLocalClaims(attemptID:attempt,proposals:proposals)
+        _ = try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)
+        let port = TextReminderPort(); try await s.activateExtractedTasks(expectedAccessVersion:1,using:port)
+        let count = await port.creates; XCTAssertEqual(count,4)
     }
     func testMigrationRejectsMissingExtractedActionEvenWithNewFileDigest() async throws {
         let s = try await store(); let id = try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。")

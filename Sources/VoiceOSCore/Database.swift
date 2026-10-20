@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -532,6 +532,104 @@ final class Database {
                 try execute("PRAGMA user_version=26")
             }
         }
+        if try query("PRAGMA user_version").first?["user_version"] == "26" {
+            try transaction {
+                try execute("""
+                CREATE TABLE IF NOT EXISTS segmented_processing_batches (
+                  id TEXT PRIMARY KEY, command_id TEXT NOT NULL UNIQUE, command_fingerprint TEXT NOT NULL,
+                  source_id TEXT NOT NULL REFERENCES sources(id), source_version_id TEXT NOT NULL,
+                  transcript_version_id TEXT NOT NULL REFERENCES transcript_versions(id), policy_version INTEGER NOT NULL,
+                  scope_json TEXT NOT NULL, scope_digest TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('queued','blocked','cancelled','frozen')),
+                  error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                )
+                """)
+                try execute("CREATE INDEX IF NOT EXISTS segmented_batches_source ON segmented_processing_batches(source_id,created_at,id)")
+                try execute("PRAGMA user_version=27")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "27" {
+            try transaction {
+                guard let original = try query("SELECT sql FROM sqlite_master WHERE name='segmented_processing_batches'").first?["sql"] else { throw VoiceOSError("缺少分段批次表") }
+                let revised = original.replacingOccurrences(of:"segmented_processing_batches",with:"segmented_batches_next")
+                    .replacingOccurrences(of:"'frozen'",with:"'frozen','unknown','rejected'")
+                try execute(revised)
+                try execute("INSERT INTO segmented_batches_next SELECT * FROM segmented_processing_batches")
+                try execute("DROP TABLE segmented_processing_batches")
+                try execute("ALTER TABLE segmented_batches_next RENAME TO segmented_processing_batches")
+                try execute("CREATE INDEX segmented_batches_source ON segmented_processing_batches(source_id,created_at,id)")
+                try execute("""
+                CREATE TABLE IF NOT EXISTS segmented_extraction_attempts (
+                  id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES segmented_processing_batches(id), segment_id TEXT NOT NULL,
+                  producer_sequence INTEGER NOT NULL UNIQUE CHECK(typeof(producer_sequence)='integer' AND producer_sequence>0),
+                  input_json TEXT NOT NULL, input_digest TEXT NOT NULL,
+                  result_json TEXT, result_digest TEXT, usage_json TEXT,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','completed','unknown','rejected')),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')), error TEXT,
+                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(batch_id,segment_id)
+                )
+                """)
+                try execute("PRAGMA user_version=28")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "28" {
+            try transaction {
+                try execute("""
+                CREATE TABLE IF NOT EXISTS segmented_aggregation_attempts (
+                  id TEXT PRIMARY KEY, batch_id TEXT NOT NULL UNIQUE REFERENCES segmented_processing_batches(id),
+                  producer_sequence INTEGER NOT NULL UNIQUE CHECK(typeof(producer_sequence)='integer' AND producer_sequence>0),
+                  input_json TEXT NOT NULL, input_digest TEXT NOT NULL,
+                  result_json TEXT, result_digest TEXT, usage_json TEXT,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','completed','unknown','rejected')),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')), error TEXT,
+                  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                )
+                """)
+                try execute("PRAGMA user_version=29")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "29" {
+            guard let original=try query("SELECT sql FROM sqlite_master WHERE name='model_attempts'").first?["sql"] else { throw VoiceOSError("缺少模型记录表") }
+            let revised=original.replacingOccurrences(of:"^CREATE TABLE (?:\"model_attempts\"|model_attempts)",with:"CREATE TABLE model_attempts_next",options:.regularExpression)
+                .replacingOccurrences(of:"'model_request','discussion_derivation')",with:"'model_request','discussion_derivation','segmented_derivation')")
+            let indexes=try query("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='model_attempts' AND sql IS NOT NULL").compactMap { $0["sql"] }
+            try execute("PRAGMA foreign_keys=OFF")
+            do {
+                try transaction {
+                    try execute(revised)
+                    try execute("INSERT INTO model_attempts_next SELECT * FROM model_attempts")
+                    try execute("DROP TABLE model_attempts")
+                    try execute("ALTER TABLE model_attempts_next RENAME TO model_attempts")
+                    for sql in indexes { try execute(sql) }
+                    try execute("""
+                    CREATE TABLE IF NOT EXISTS segmented_cognitive_commits (
+                      id TEXT PRIMARY KEY REFERENCES segmented_aggregation_attempts(id),
+                      batch_id TEXT NOT NULL UNIQUE REFERENCES segmented_processing_batches(id),
+                      model_attempt_id TEXT NOT NULL UNIQUE REFERENCES model_attempts(id),
+                      proposals_json TEXT NOT NULL, proposals_digest TEXT NOT NULL, created_at TEXT NOT NULL
+                    )
+                    """)
+                    guard try query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("聚合认知升级引用校验失败") }
+                    try execute("PRAGMA user_version=30")
+                }
+            } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
+            try execute("PRAGMA foreign_keys=ON")
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "30" {
+            try transaction {
+                try execute("""
+                CREATE TABLE IF NOT EXISTS recording_segment_plans (
+                  id TEXT PRIMARY KEY REFERENCES recording_processing_requests(id),
+                  extraction_json TEXT NOT NULL, aggregation_json TEXT NOT NULL,
+                  batch_id TEXT UNIQUE REFERENCES segmented_processing_batches(id), association_state TEXT, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("PRAGMA user_version=31")
+            }
+        }
+
     }
     /// Only called for pre-sequence schemas/packages. Retrospective order is a baseline,
     /// not evidence of the original wall-clock order; all new producers follow it.
@@ -542,7 +640,7 @@ final class Database {
         }
     }
     func nextModelProducerSequence() throws -> String {
-        guard let value=try query("SELECT COALESCE(MAX(producer_sequence),0) AS value FROM model_attempts").first?["value"].flatMap(Int64.init),value < Int64.max else { throw VoiceOSError("成果生产者顺序已超出范围") }
+        guard let value=try query("SELECT COALESCE(MAX(producer_sequence),0) AS value FROM (SELECT producer_sequence FROM model_attempts UNION ALL SELECT producer_sequence FROM segmented_extraction_attempts UNION ALL SELECT producer_sequence FROM segmented_aggregation_attempts)").first?["value"].flatMap(Int64.init),value < Int64.max else { throw VoiceOSError("成果生产者顺序已超出范围") }
         return String(value+1)
     }
     deinit { sqlite3_close(handle) }
