@@ -202,6 +202,9 @@ extension VoiceOSStore {
                 try updateProcessing(id, state: terminal, phase: .cognition, error: "理解阶段状态为 \(cognition.state)，不会自动重发")
                 return try processingIntent(id: id)
             }
+            if try db.query("SELECT id FROM sources WHERE id=? AND feedback_json IS NOT NULL AND local_only=0", [snapshot.context.sources[0].sourceID]).first != nil {
+                _ = try enqueueRecordingFollowup(sourceID: snapshot.context.sources[0].sourceID)
+            }
             row = try processingRow(id: id)
             guard row["state"] == ExpressionProcessingIntentState.running.rawValue else { return try processingRecord(row) }
             try db.execute("UPDATE processing_intents SET phase='association',updated_at=? WHERE id=?", [Self.processingNow(), id])

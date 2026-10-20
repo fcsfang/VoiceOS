@@ -30,6 +30,18 @@ public struct ActionFeedbackRecord: Identifiable, Sendable {
     }
 }
 extension VoiceOSStore {
+    /// Reuse the ordinary durable expression flow for explicitly authorized
+    /// results, including after reopening or configuring a model later.
+    public func enqueueActionFeedbackUnderstanding(cognition: ModelConfiguration, association: ModelConfiguration) throws {
+        for source in try sources() where source.kind == "user_text" && source.feedbackActionID != nil && !source.localOnly && ["saved", "reference_only"].contains(source.state) {
+            let raw = try db.query("SELECT feedback_json FROM sources WHERE id=?", [source.id]).first?["feedback_json"]
+            guard try Self.feedbackIntent(raw)?.organizedClaimID == nil else { continue }
+            let snapshot = try prepareExpressionProcessingIntent(sourceID: source.id, cognition: cognition, association: association)
+            _ = try enqueueExpressionProcessingIntent(snapshot, commandID: "feedback-understanding:" + source.id + ":" + snapshot.contentDigest,
+                                                     cognition: cognition, association: association)
+        }
+    }
+
     @discardableResult
     public func recordActionFeedback(actionID: String, expectedVersion: Int, kind: ActionFeedbackKind, text: String, recordingSourceID: String? = nil, commandID: String = UUID().uuidString) throws -> String {
         if let recordingSourceID { try Self.validateFeedbackRecording(recordingSourceID, db: db) }
