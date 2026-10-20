@@ -227,14 +227,25 @@ extension VoiceOSStore {
         }
         var practices: [PracticeHistory] = []
         for prior in priorFollowups.reversed() where prior.sourceID != sourceID && prior.state == "completed" && prior.result?.english.isPractice == true {
-            guard !practices.contains(where: { $0.sourceID == prior.sourceID }), let old = catalog[prior.sourceID], !old.localOnly, old.policyVersion == prior.input.policyVersion, old.transcriptVersionID == prior.input.current.sources[0].transcriptVersionID,
+            guard !practices.contains(where: { $0.sourceID == prior.sourceID }), let old = catalog[prior.sourceID], !old.localOnly,
+                  ["saved", "reference_only"].contains(old.state), !old.needsTranscriptionReview,
+                  old.policyVersion == prior.input.policyVersion, let version = old.transcriptVersionID,
+                  version == prior.input.current.sources[0].transcriptVersionID, let text = old.transcript,
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  (try? validateLocalTranscriptContext(prior.input.current)) != nil,
+                  (try? validateContinuousRecordingContext(prior.input.continuousExpression, sourceID: old.id)) != nil,
                   let english = prior.result?.english else { continue }
-            let feedback = try followupJSON(english)
-            practices.append(.init(sourceID: old.id, transcriptVersionID: old.transcriptVersionID!, text: old.transcript!, feedback: feedback, policyVersion: old.policyVersion))
+            let ownFeedback = PracticeFollowup(isPractice: english.isPractice, evidenceQuote: english.evidenceQuote,
+                suggestions: english.suggestions, comparisons: [], nextExercise: english.nextExercise)
+            practices.append(.init(sourceID: old.id, transcriptVersionID: version, text: text, feedback: try followupJSON(ownFeedback), policyVersion: old.policyVersion))
         }
         for prior in try englishFeedbackAttempts() where prior.validity == "current" && prior.state == "completed" && prior.currentSourceID != sourceID {
-            guard !practices.contains(where: { $0.sourceID == prior.currentSourceID }), let old = catalog[prior.currentSourceID], !old.localOnly, let version = old.transcriptVersionID, let result = prior.result else { continue }
-            practices.append(.init(sourceID: old.id, transcriptVersionID: version, text: old.transcript ?? "", feedback: try followupJSON(result), policyVersion: old.policyVersion))
+            guard !practices.contains(where: { $0.sourceID == prior.currentSourceID }), let old = catalog[prior.currentSourceID], !old.localOnly,
+                  ["saved", "reference_only"].contains(old.state), !old.needsTranscriptionReview,
+                  let version = old.transcriptVersionID, let text = old.transcript,
+                  !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, let result = prior.result else { continue }
+            let ownFeedback = EnglishPracticeResponse(suggestions: result.suggestions, comparisons: [], inputTokens: result.inputTokens, outputTokens: result.outputTokens)
+            practices.append(.init(sourceID: old.id, transcriptVersionID: version, text: text, feedback: try followupJSON(ownFeedback), policyVersion: old.policyVersion))
         }
         return .init(current: current, policyVersion: source.policyVersion, recordedAt: source.createdAt, thoughts: historical, goals: goals, tasks: tasks, practices: practices, currentUnderstanding: (latestBySource[sourceID] ?? []).map(\.statement), feedbackActionID: source.feedbackActionID,continuousExpression:try continuousRecordingContext(sourceID:sourceID))
     }
@@ -283,7 +294,6 @@ extension VoiceOSStore {
             tasks: input.tasks.filter { taskIDs.contains($0.id) || $0.goalID.map { goals.contains($0) } == true || $0.id == input.feedbackActionID },
             practices: input.practices.filter { practices.contains($0.sourceID) }, currentUnderstanding: input.currentUnderstanding,
             feedbackActionID: input.feedbackActionID,continuousExpression:input.continuousExpression)
-        // inputDigest identifies the original generation input for deduplication.
         return receipt
     }
     @discardableResult
@@ -309,8 +319,6 @@ extension VoiceOSStore {
         }.reversed()
     }
     private func saveRecordingFollowup(_ value: RecordingFollowupReceipt) throws {
-        // Generation sees the complete history directory. A completed result
-        // only needs the evidence it actually uses, not a copy of the library.
         let receipt = compactFollowup(value)
         var history = try db.query("SELECT followup_json FROM sources WHERE id=?", [receipt.sourceID]).first?["followup_json"].map { try JSONDecoder().decode([RecordingFollowupReceipt].self, from: Data($0.utf8)) } ?? []
         if let index = history.firstIndex(where: { $0.id == receipt.id }) { history[index] = receipt } else { history.append(receipt) }
@@ -356,8 +364,6 @@ extension VoiceOSStore {
             guard let goal = receipt.input.goals.first(where: { $0.id == plan.goalID }),
                   let action = actions[goal.id], action.validity == "current", action.state == "open", action.version == goal.version,
                   (try? thought(goal.thought)) != nil,
-                  // A result, reopened step or newly selected task changes this
-                  // goal's next move; unrelated goals remain usable.
                   try followupJSON(tasks.filter { $0.goalID == goal.id }) == followupJSON(receipt.input.tasks.filter { $0.goalID == goal.id }.sorted { $0.id < $1.id }),
                   plan.phases.flatMap(\.steps).allSatisfy({ step in
                       if step.existingTaskID.isEmpty { return true }
@@ -443,8 +449,6 @@ extension VoiceOSStore {
             guard !ids.isEmpty, ids.allSatisfy({ !$0.isEmpty }) else { throw VoiceOSError("跟进结果缺少模型回执") }
             try Self.validateFollowupResult(result, input: input)
             receipt.result = result; receipt.responseIDs = ids; receipt.state = "completed"
-            // Keep independent results even if a referenced task changed while
-            // the model was running. Each component is checked again before use.
             guard try recordingFollowupValidity(receipt).sourceCurrent else { throw VoiceOSError("录音原话或授权已变化，请重新生成跟进") }
             try saveRecordingFollowup(receipt)
             return receipt
@@ -492,7 +496,6 @@ extension VoiceOSStore {
             guard let task = try actions(includeHistory: true).first(where: { $0.id == step.existingTaskID }), task.validity == "current", task.state == "open" else { throw VoiceOSError("这个步骤已完成或发生变化，请刷新目标建议") }
             return step.existingTaskID
         }
-        if let existing = try actions(includeHistory: true).first(where: { $0.validity == "current" && $0.state == "open" && $0.kind == "task" && $0.title == step.title }) { return existing.id }
         let id = try createAction(claimID: goal.thought.id, expectedClaimReviewVersion: goal.thought.reviewVersion, title: step.title, kind: .task, note: step.condition, commandID: command)
         let intent = ActionIntentMetadata(intentType: "task", followupState: "pending", uncertain: false, goalID: goalID)
         try db.execute("UPDATE actions SET intent_json=? WHERE id=?", [try followupJSON(intent), id])
