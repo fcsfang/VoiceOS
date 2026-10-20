@@ -13,7 +13,7 @@ public struct ReminderSnapshot: Sendable, Codable, Equatable {
 }
 public protocol RemindersPort: Sendable {
     func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot]
-    func create(calendarID: String, title: String, marker: String) async throws
+    func create(calendarID: String, title: String, marker: String, context: String) async throws
 }
 public struct ReminderLink: Identifiable, Sendable {
     public let id: String
@@ -30,6 +30,35 @@ public struct ReminderLink: Identifiable, Sendable {
     public let remoteDueDate: ReminderDueDate?
 }
 extension VoiceOSStore {
+    public func reminderContext(actionID: String) throws -> String {
+        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+              action.validity == "current", let claim = try candidateClaims().first(where: { $0.id == action.claimID }) else { throw VoiceOSError("任务出处不可用或已变化") }
+        var lines: [String] = []
+        for sourceID in Set(claim.references.map(\.sourceID)).sorted() {
+            guard let name = try db.query("SELECT name FROM sources WHERE id=?", [sourceID]).first?["name"] else { continue }
+            let refs = claim.references.filter { $0.sourceID == sourceID }
+            var spans: [TranscriptSpan] = []
+            for version in Set(refs.map(\.transcriptVersionID)) {
+                if let json = try db.query("SELECT spans_json FROM transcript_versions WHERE id=?", [version]).first?["spans_json"] {
+                    spans += try JSONDecoder().decode([TranscriptSpan].self, from: Data(json.utf8)).filter { span in refs.contains { $0.spanID == span.id } }
+                }
+            }
+            var ranges: [(Int, Int)] = []
+            let timed = spans.compactMap { span -> (Int, Int)? in
+                guard let start = span.startMS, let end = span.endMS else { return nil }; return (start, end)
+            }.sorted { $0.0 < $1.0 }
+            for (start, end) in timed {
+                if let previous = ranges.last, start <= previous.1 + 1000 { ranges[ranges.count - 1].1 = max(previous.1, end) }
+                else { ranges.append((start, end)) }
+            }
+            func time(_ ms: Int) -> String { let seconds = ms / 1000; return String(format: "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60) }
+            let range = ranges.isEmpty ? "" : " [" + ranges.map { time($0.0) + "–" + time($0.1) }.joined(separator: "；") + "]"
+            lines.append("来源：" + name + range)
+        }
+        if !action.note.isEmpty { lines.append("原话：" + action.note) }
+        if let detail = claim.statement.components(separatedBy: "\n说明：").dropFirst().first, !detail.isEmpty { lines.append("说明：" + detail) }
+        return lines.joined(separator: "\n\n")
+    }
     public func reminderLinks() throws -> [ReminderLink] {
         try db.query("SELECT l.*,o.id AS observation_id,o.marker_valid,o.title AS remote_title,o.completed AS remote_completed,o.created_at AS observed_at FROM reminder_links l LEFT JOIN reminder_observations o ON o.id=(SELECT id FROM reminder_observations WHERE link_id=l.id ORDER BY sequence DESC LIMIT 1) ORDER BY l.created_at,l.id").map {
             ReminderLink(id: $0["id"]!, actionID: $0["action_id"]!, calendarID: $0["calendar_id"]!, state: $0["state"]!, externalID: $0["external_id"], remoteTitle: $0["remote_title"], remoteCompleted: $0["remote_completed"].map { $0 == "1" }, lastObservedAt: $0["observed_at"], lastCheckedAt: $0["last_checked_at"], lastObservationID: $0["observation_id"], remoteMarkerValid: $0["marker_valid"].map { $0 == "1" }, remoteDueDate: try storedReminderDue(observationID: $0["observation_id"]))
@@ -65,7 +94,7 @@ extension VoiceOSStore {
             if expectedAccessVersion != nil {
                 guard try reminderCognitionIsLatest(current) else { throw VoiceOSError("发送前认知批次已更新，停止历史任务外写") }
             }
-            try await port.create(calendarID: calendarID, title: action.title, marker: marker)
+            try await port.create(calendarID: calendarID, title: action.title, marker: marker, context: reminderContext(actionID: actionID))
             try checkpoint(.reminderSaved)
             // Save return is not readback evidence. Record ambiguity before the next await.
             try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=?", [id])

@@ -109,6 +109,12 @@ public actor VoiceOSStore {
     public func importPersonalAudio(_ input: URL, commandID: String = UUID().uuidString) async throws -> String {
         try await importMedia(input, commandID: commandID, personalAudio: true)
     }
+    public func importedSourceID(commandID: String) throws -> String? {
+        try db.query("SELECT id FROM sources WHERE command_id=?", [commandID]).first?["id"]
+    }
+    public func personalAudioSourceID(sha256: String) throws -> String? {
+        try db.query("SELECT id FROM sources WHERE expected_hash=? AND origin='user' AND speaker='user' AND state='saved' ORDER BY created_at LIMIT 1", [sha256]).first?["id"]
+    }
     private func importMedia(_ input: URL, commandID: String, personalAudio: Bool) async throws -> String {
         guard ready, !commandID.isEmpty else { throw VoiceOSError("资料库尚未完成恢复或导入命令为空") }
         let extensionName = input.pathExtension.lowercased()
@@ -182,7 +188,7 @@ public actor VoiceOSStore {
     public func retryTranscription(sourceID: String) throws {
         try db.execute("UPDATE jobs SET state='queued',error=NULL WHERE source_id=? AND state IN ('failed','blocked') AND EXISTS(SELECT 1 FROM sources WHERE id=? AND state='saved')", [sourceID,sourceID])
     }
-    public func processTranscriptions(using speech: any SpeechPort) async throws {
+    public func processTranscriptions(using speech: any SpeechPort, sourceIDs: [String]? = nil) async throws {
         guard ready, !processing else { return }
         let backend = speech.backendIdentity
         guard !backend.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty, backend.utf8.count <= 160, !backend.contains("\n"), !backend.contains("\r") else { throw VoiceOSError("转写端口身份无效") }
@@ -190,8 +196,8 @@ public actor VoiceOSStore {
         defer { processing = false }
         while let row = try db.query("""
         SELECT j.*,s.asset_id,s.relative_path FROM jobs j JOIN sources s ON s.id=j.source_id
-        WHERE j.state='queued' AND s.state='saved' AND j.input_version_id=s.version_id ORDER BY s.created_at LIMIT 1
-        """).first {
+        WHERE j.state='queued' AND s.state='saved' AND j.input_version_id=s.version_id ORDER BY s.created_at
+        """).first(where: { sourceIDs?.contains($0["source_id"]!) ?? true }) {
             let job = row["id"]!; let source = row["source_id"]!; let lease = UUID().uuidString
             try db.execute("UPDATE jobs SET state='running',config=?,lease_token=?,attempts=attempts+1 WHERE id=?", [backend,lease,job])
             do {

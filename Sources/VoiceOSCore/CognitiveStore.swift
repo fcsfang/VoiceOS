@@ -86,6 +86,16 @@ extension VoiceOSStore {
         guard try db.query("SELECT provider FROM model_attempts WHERE id=?", [attemptID]).first?["provider"] == "local_fixture" else { throw VoiceOSError("只能提交本地夹具调用") }
         return try commitClaims(attemptID: attemptID, proposals: proposals)
     }
+    /// Import an already organized real task list; this records a local projection, not a new cloud call or user approval.
+    public func importOrganizedClaims(context: LocalTranscriptContext, proposals: [ClaimProposal], commandID: String) throws -> [String] {
+        let contextID = try persistLocalContext(context, commandID: commandID)
+        if let old = try db.query("SELECT id FROM model_attempts WHERE context_id=? AND provider='organized_import'", [contextID]).first {
+            return try commitClaims(attemptID: old["id"]!, proposals: proposals)
+        }
+        let id = UUID().uuidString
+        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence,execution_kind) VALUES(?,?,'organized_import','podcast-task-organizer-v1','comprehensive-v1','claims-actions-v3','reserved',?,?,'model_request')", [id,contextID,timestamp(),try db.nextModelProducerSequence()])
+        return try commitClaims(attemptID: id, proposals: proposals)
+    }
     func commitClaims(attemptID: String, proposals: [ClaimProposal], additionalCommit: ([String]) throws -> Void = { _ in }) throws -> [String] {
         guard let attempt = try db.query("SELECT * FROM model_attempts WHERE id=?", [attemptID]).first else { throw VoiceOSError("调用记录不存在") }
         let digest = try hash(proposals)
@@ -174,10 +184,9 @@ extension VoiceOSStore {
         }
     }
     static func validateProposals(_ proposals: [ClaimProposal], context: LocalTranscriptContext) throws {
-        guard proposals.count <= 32 else { throw VoiceOSError("行动提取超过单次范围") }
         for proposal in proposals {
             guard proposal.contentKind != .question || proposal.action == nil else { throw VoiceOSError("问题不能同时作为行动承诺；需分开提取") }
-            guard !proposal.statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !proposal.references.isEmpty, proposal.references.count <= 32, proposal.statement.unicodeScalars.count <= 2000 else { throw VoiceOSError("认知候选缺少内容或出处") }
+            guard !proposal.statement.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !proposal.references.isEmpty, proposal.statement.unicodeScalars.count <= 2000 else { throw VoiceOSError("认知候选缺少内容或出处") }
             for ref in proposal.references {
                 guard context.sources.contains(where: { $0.sourceID == ref.sourceID && $0.transcriptVersionID == ref.transcriptVersionID && $0.spans.contains(where: { $0.id == ref.spanID }) && (proposal.ownership != .external || $0.origin == "external") && (proposal.ownership != .userTentative || ($0.origin == "user" && $0.speaker == "user")) }) else { throw VoiceOSError("认知候选引用了未选入或错误版本的来源片段") }
             }
