@@ -8,6 +8,12 @@ public struct ActionIntentMetadata: Codable, Sendable {
     public let intentType: String
     public let followupState: String
     public let uncertain: Bool
+    public var goalID: String? = nil
+    public var reminderFields: ReminderFieldReceipt? = nil
+    public var expressionHistory: [ExpressionActionAdoption]? = nil
+    public var expressionWithdrawal: RecordingExpressionActionDecision? = nil
+    public var expressionWithdrawalVersionID: String? = nil
+    public var expressionWithdrawalResponseIDs: [String]? = nil
 }
 public struct ActionRecord: Identifiable, Sendable {
     public let id: String
@@ -23,7 +29,7 @@ public struct ActionRecord: Identifiable, Sendable {
     public let autoSend: Bool
     public let intent: ActionIntentMetadata?
 }
-public struct ActionRevision: Identifiable, Sendable {
+public struct ActionRevision: Identifiable, Codable, Sendable {
     public let id: String
     public let version: Int
     public let state: String
@@ -41,7 +47,7 @@ extension VoiceOSStore {
             return receipt["id"]!
         }
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.unicodeScalars.count <= 2000, note.unicodeScalars.count <= 2000 else { throw VoiceOSError("行动内容为空或过长") }
-        guard let claim = try candidateClaims().first(where: { $0.id == claimID }), claim.reviewVersion == expectedClaimReviewVersion else { throw VoiceOSError("认知已更正、拒绝或失效，请重新核对行动依据") }
+        guard let claim = try candidateClaim(id: claimID), claim.reviewVersion == expectedClaimReviewVersion else { throw VoiceOSError("认知已更正、拒绝或失效，请重新核对行动依据") }
         guard (kind == .aiSuggestion) == (intentActor == .ai), intentActor != .ai || claim.ownership == "ai_candidate" else { throw VoiceOSError("AI 建议不能成为用户承诺的任务或探索意图") }
         let id = UUID().uuidString
         try db.transaction {
@@ -71,7 +77,7 @@ extension VoiceOSStore {
         guard !title.isEmpty, title.unicodeScalars.count <= 2000,
               let original = try actions(includeHistory: true).first(where: { $0.id == actionID }),
               original.validity == "current", original.state == "open", original.kind == "opportunity", original.intentActor == "user", original.version == expectedVersion,
-              let claim = try candidateClaims().first(where: { $0.id == original.claimID }), claim.reviewVersion == original.claimReviewVersion else { throw VoiceOSError("事项或原话已变化，请重新核对") }
+              let claim = try candidateClaim(id: original.claimID), claim.reviewVersion == original.claimReviewVersion else { throw VoiceOSError("事项或原话已变化，请重新核对") }
         let id = UUID().uuidString, now = ISO8601DateFormatter().string(from: Date())
         let fingerprint = try Self.actionHash([claim.id,String(claim.reviewVersion),title,"task","user",original.note])
         let note = "已核对为明确待办：" + id
@@ -116,6 +122,7 @@ extension VoiceOSStore {
     }
     static func validateStoredActions(_ db: Database) throws {
         for action in try db.query("SELECT a.*,c.review_version AS latest_review,c.validity AS claim_validity,c.ownership AS original_owner FROM actions a JOIN claims c ON c.id=a.claim_id") {
+            _ = try validatedExpressionHistory(db,action:action)
             guard let pinned = action["claim_review_version"].flatMap(Int.init), let latest = action["latest_review"].flatMap(Int.init), pinned >= 0, pinned <= latest,
                   let title = action["title"], !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.unicodeScalars.count <= 2000,
                   (action["note"]?.unicodeScalars.count ?? 2001) <= 2000 else { throw VoiceOSError("迁移行动内容或认知版本不完整") }

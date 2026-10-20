@@ -32,7 +32,7 @@ extension VoiceOSStore {
     }
     /// Benign endorsement does not replace identity; provenance/content/ownership changes freeze it.
     func validateCurrentQuestionSeed(_ seed: QuestionSeedSnapshot) throws {
-        guard let claim = try candidateClaims().first(where: { $0.id == seed.claimID }) else { throw VoiceOSError("问题候选已拒绝或依据冻结") }
+        guard let claim = try candidateClaim(id: seed.claimID) else { throw VoiceOSError("问题候选已拒绝或依据冻结") }
         let fresh = try prepareQuestionSeed(claimID: claim.id, expectedReviewVersion: claim.reviewVersion, original: seed.original, scalarBudget: seed.context.scalarBudget)
         guard fresh.statement == seed.statement, fresh.ownership == seed.ownership, fresh.contentKind == seed.contentKind,
               try Self.relevanceJSON(fresh.context) == Self.relevanceJSON(seed.context), fresh.policyVersions == seed.policyVersions else { throw VoiceOSError("问题内容、归属或出处已变化") }
@@ -62,13 +62,17 @@ extension VoiceOSStore {
         }
     }
     public func questionHistory(questionID: String) throws -> [QuestionRevision] {
-        try db.query("SELECT * FROM question_revisions WHERE question_id=? ORDER BY to_version", [questionID]).map {
-            .init(id: $0["id"]!, questionID: questionID, commandID: $0["command_id"]!, input: try JSONDecoder().decode(QuestionTransitionSnapshot.self, from: Data($0["input_json"]!.utf8)), createdAt: $0["created_at"]!)
-        }
+        try db.query("SELECT * FROM question_revisions WHERE question_id=? ORDER BY to_version", [questionID]).map(Self.questionRevision)
+    }
+    public func questionHistories() throws -> [String: [QuestionRevision]] {
+        try Dictionary(grouping: db.query("SELECT * FROM question_revisions ORDER BY question_id,to_version").map(Self.questionRevision), by: \.questionID)
+    }
+    private static func questionRevision(_ row: [String: String]) throws -> QuestionRevision {
+        .init(id: row["id"]!, questionID: row["question_id"]!, commandID: row["command_id"]!, input: try JSONDecoder().decode(QuestionTransitionSnapshot.self, from: Data(row["input_json"]!.utf8)), createdAt: row["created_at"]!)
     }
     public func prepareStoredQuestionTransition(questionID: String, expectedVersion: Int, to: QuestionStatus, reason: String, resolution: OutcomeSourceEvidence? = nil) throws -> QuestionTransitionSnapshot {
         guard let question = try questions().first(where: { $0.id == questionID }), (question.validity == "current" || (question.canReopen && to == .open)), question.version == expectedVersion,
-              let claim = try candidateClaims().first(where: { $0.id == question.seed.claimID }) else { throw VoiceOSError("问题版本或依据已变化") }
+              let claim = try candidateClaim(id: question.seed.claimID) else { throw VoiceOSError("问题版本或依据已变化") }
         let fresh = try prepareQuestionSeed(claimID: claim.id, expectedReviewVersion: claim.reviewVersion, original: question.seed.original, scalarBudget: question.seed.context.scalarBudget)
         return try prepareQuestionTransition(seed: fresh, expectedVersion: expectedVersion, from: question.status, to: to, reason: reason, resolution: resolution)
     }

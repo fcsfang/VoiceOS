@@ -20,7 +20,7 @@ public struct ResponsesOutcomePort:ConversationOutcomePort {
     func makeRequest(_ request:ConversationOutcomeRequest) throws -> URLRequest {
         let s=request.snapshot,c=request.configuration
         guard c.provider == configuration.provider,c.model == configuration.model,c.promptVersion == configuration.promptVersion,c.schemaVersion == configuration.schemaVersion,c.destination == .cloud,
-              UUID(uuidString:request.attemptID) != nil,s.input.destination == .cloud,s.sessionState == "ended",!s.input.userTurns.isEmpty,s.input.userTurns.count <= 40,
+              UUID(uuidString:request.attemptID) != nil,s.input.destination == .cloud,s.sessionState == "ended",!s.input.userTurns.isEmpty,
               s.input.conversationVersion == s.input.userTurns.count+2,!s.context.sources.isEmpty,s.context.sources.allSatisfy({ !$0.localOnly }),
               let plan=s.reusePlan,plan.conversationID == s.input.conversationID,plan.conversationVersion == s.input.conversationVersion,
               plan.personalTargets.allSatisfy({ s.input.userTurns.contains($0) }) else { throw ModelPortFailure.rejected("成果请求身份、结束范围、许可或复用输入不符") }
@@ -62,11 +62,11 @@ public struct ResponsesOutcomePort:ConversationOutcomePort {
         let input:[String:Any]=["sources":sources,"historySourceIDs":s.input.historySourceIDs,"timeline":timeline,
             "newPersonalTargets":try JSONSerialization.jsonObject(with:encoder.encode(plan.personalTargets)),"existingResultIdentities":prior,"alreadyRetainedAIParagraphs":retained]
         let content=String(decoding:try JSONSerialization.data(withJSONObject:input,options:[.sortedKeys]),as:UTF8.self)
-        let payload:[String:Any]=["model":configuration.model,"store":false,"reasoning":["effort":"low"],"max_output_tokens":2048,"truncation":"disabled","instructions":Self.instructions,
+        let payload:[String:Any]=["model":configuration.model,"store":false,"reasoning":["effort":"low"],"max_output_tokens":8192,"truncation":"disabled","instructions":Self.instructions,
             "input":[["role":"user","content":content]],"text":["format":["type":"json_schema","name":"voiceos_discussion_outcomes","strict":true,"schema":Self.schema]]]
         let data=try JSONSerialization.data(withJSONObject:payload,options:[.sortedKeys])
-        guard data.count <= 160000 else { throw ModelPortFailure.rejected("完整成果请求超过字节预算") }
-        var http=URLRequest(url:endpoint,timeoutInterval:60);http.httpMethod="POST";http.httpBody=data
+        guard data.count <= 4000000 else { throw ModelPortFailure.rejected("完整成果请求超过字节预算") }
+        var http=URLRequest(url:endpoint,timeoutInterval:600);http.httpMethod="POST";http.httpBody=data
         http.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization");http.setValue("application/json",forHTTPHeaderField:"Content-Type");return http
     }
     static var schema:[String:Any] {

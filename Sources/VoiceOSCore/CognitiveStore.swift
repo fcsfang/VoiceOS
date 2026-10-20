@@ -42,6 +42,34 @@ public struct CandidateClaim: Identifiable, Sendable {
     public let reviewState: String
 }
 extension VoiceOSStore {
+    /// Explain the saved extraction against today's source; never guess why a task was completed.
+    public func understandingPauseExplanation(sourceID: String) throws -> String {
+        guard let row = try db.query("""
+            SELECT x.snapshot_json,i.policy_version FROM model_attempts a
+            JOIN contexts x ON x.id=a.context_id JOIN context_inputs i ON i.context_id=x.id
+            WHERE i.source_id=? AND a.state='completed'
+              AND EXISTS(SELECT 1 FROM claims c WHERE c.attempt_id=a.id)
+            ORDER BY a.producer_sequence DESC LIMIT 1
+            """, [sourceID]).first,
+              let saved = row["snapshot_json"],
+              let previous = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(saved.utf8)).sources.first(where: { $0.sourceID == sourceID }),
+              let source = try sources().first(where: { $0.id == sourceID }) else {
+            return "应用暂停了之前提取的观点和任务，但没有保存具体原因。"
+        }
+        if source.state == "quarantined" { return "保存的原件未通过完整性检查。请先恢复可用原件，暂时不能重新识别。" }
+        if source.localOnly { return "这份文字现在仅限本机使用，之前的云端识别已暂停。" }
+        if previous.transcriptVersionID != source.transcriptVersionID || previous.text != source.transcript {
+            return "转写文字已更正，之前提取的观点和任务尚未按更正后的文字重新识别。"
+        }
+        if previous.origin != source.origin || previous.speaker != source.speaker {
+            return "这份材料的说话人或内容归属已调整，需要重新区分谁的观点、谁要做的事。"
+        }
+        if row["policy_version"] != String(source.policyVersion) { return "这份文字的云端使用许可已调整，之前的识别不能直接沿用。" }
+        if try json(previous.transcriptionReview) != json(source.transcriptionReview) {
+            return "转写文字没有变化。应用更新了转写核对记录，之前提取的观点和任务需要重新识别。"
+        }
+        return "之前提取的观点或其关联材料已被暂停使用；任务是否完成仍以单独保存的完成记录为准。"
+    }
     @discardableResult
     public func persistLocalContext(_ context: LocalTranscriptContext, commandID: String = UUID().uuidString, destination: ModelDestination = .local) throws -> String {
         // Receipts replay original identity even after invalidation; never reactivate it.
@@ -66,6 +94,7 @@ extension VoiceOSStore {
         let context = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(row["snapshot_json"]!.utf8))
         do {
             try validateLocalTranscriptContext(context)
+            if let focus = context.reflectionFocus { try validateReflectionBasis(focus) }
             guard try db.query("SELECT i.id FROM context_inputs i JOIN sources s ON s.id=i.source_id WHERE i.context_id=? AND i.policy_version!=s.policy_version", [id]).isEmpty else { throw VoiceOSError("来源授权版本已变化") }
         }
         catch { try db.transaction { try freezeContext(id) }; throw error }
@@ -148,14 +177,53 @@ extension VoiceOSStore {
         return ids.sorted()
     }
     public func candidateClaims(includeFrozen: Bool = false) throws -> [CandidateClaim] {
+        try candidateClaimRows(includeFrozen: includeFrozen).map(decodeCandidateClaim)
+    }
+
+    func candidateClaim(id: String) throws -> CandidateClaim? {
+        try candidateClaimRows(includeFrozen: false, claimID: id).first.map(decodeCandidateClaim)
+    }
+
+    private func candidateClaimRows(includeFrozen: Bool, attemptID: String? = nil, claimID: String? = nil) throws -> [[String: String]] {
+        let selection = (attemptID == nil ? "" : " AND a.id=?") + (claimID == nil ? "" : " AND c.id=?")
+        let arguments = [attemptID, claimID].compactMap { $0 }
         // Dynamic read checks are a second barrier in addition to atomic invalidation.
-        for row in try db.query("SELECT id FROM contexts WHERE state='current'") {
+        // A detail read checks its own producers; it must not decode and validate
+        // the whole library for each claim or recording.
+        for row in try db.query("SELECT DISTINCT x.id FROM contexts x JOIN model_attempts a ON a.context_id=x.id JOIN claims c ON c.attempt_id=a.id WHERE x.state='current'\(selection)", arguments) {
             do { _ = try localContext(id: row["id"]!) } catch { try db.transaction { try freezeContext(row["id"]!) } }
         }
-        let whereClause = includeFrozen ? "" : "WHERE c.validity='current' AND x.state='current' AND COALESCE(r.decision,'pending')!='rejected'"
-        return try db.query("SELECT c.*,r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision AS review_state FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version \(whereClause) ORDER BY c.created_at,c.id").map {
-            CandidateClaim(contentKind: $0["reviewed_statement"] != nil && $0["reviewed_statement"] != $0["statement"] ? nil : $0["content_kind"].flatMap(CognitiveContentKind.init(rawValue:)), id: $0["id"]!, statement: $0["reviewed_statement"] ?? $0["statement"]!, ownership: $0["reviewed_ownership"] ?? $0["ownership"]!, evidenceState: $0["evidence_state"]!, validity: $0["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data($0["refs_json"]!.utf8)), reviewVersion: Int($0["review_version"]!)!, reviewState: $0["review_state"] ?? "pending")
+        let whereClause = includeFrozen ? "WHERE 1=1" : "WHERE c.validity='current' AND x.state='current' AND COALESCE(r.decision,'pending')!='rejected'"
+        return try db.query("SELECT c.*,r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision AS review_state FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version \(whereClause)\(selection) ORDER BY c.created_at,c.id", arguments)
+    }
+
+    private func decodeCandidateClaim(_ row: [String: String]) throws -> CandidateClaim {
+        CandidateClaim(contentKind: row["reviewed_statement"] != nil && row["reviewed_statement"] != row["statement"] ? nil : row["content_kind"].flatMap(CognitiveContentKind.init(rawValue:)), id: row["id"]!, statement: row["reviewed_statement"] ?? row["statement"]!, ownership: row["reviewed_ownership"] ?? row["ownership"]!, evidenceState: row["evidence_state"]!, validity: row["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data(row["refs_json"]!.utf8)), reviewVersion: Int(row["review_version"]!)!, reviewState: row["review_state"] ?? "pending")
+    }
+
+    /// Batch source-facing view for the library: validate contexts and read claims
+    /// once, rather than repeating both operations for every recording.
+    public func latestCandidateClaimsBySource(includeFrozen: Bool = false) throws -> [String: [CandidateClaim]] {
+        var latestAttemptBySource: [String: String] = [:]
+        for row in try db.query("""
+            SELECT i.source_id,a.id
+            FROM model_attempts a
+            JOIN context_inputs i ON i.context_id=a.context_id
+            WHERE a.state='completed' AND a.provider NOT LIKE 'english_feedback:%'
+            ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC
+            """) {
+            if let sourceID = row["source_id"], latestAttemptBySource[sourceID] == nil {
+                latestAttemptBySource[sourceID] = row["id"]
+            }
         }
+        var result = latestAttemptBySource.mapValues { _ in [CandidateClaim]() }
+        for row in try candidateClaimRows(includeFrozen: includeFrozen) {
+            let claim = try decodeCandidateClaim(row)
+            for sourceID in Set(claim.references.map(\.sourceID)) where latestAttemptBySource[sourceID] == row["attempt_id"] {
+                result[sourceID, default: []].append(claim)
+            }
+        }
+        return result
     }
 
     /// Returns the latest completed cognition producer that used a source.
@@ -170,7 +238,7 @@ extension VoiceOSStore {
             SELECT a.id
             FROM model_attempts a
             JOIN context_inputs i ON i.context_id=a.context_id
-            WHERE i.source_id=? AND a.state='completed'
+            WHERE i.source_id=? AND a.state='completed' AND a.provider NOT LIKE 'english_feedback:%'
             -- created_at is intentionally human-readable and may have only
             -- second-level precision.  producer_sequence is the durable
             -- ordering authority for model results, including rapid retries.
@@ -178,9 +246,8 @@ extension VoiceOSStore {
             LIMIT 1
             """, [sourceID]).first,
               let attemptID = attempt["id"] else { return [] }
-        let ids = Set(try db.query("SELECT id FROM claims WHERE attempt_id=?", [attemptID]).compactMap { $0["id"] })
-        return try candidateClaims(includeFrozen: includeFrozen).filter { claim in
-            ids.contains(claim.id) && claim.references.contains { $0.sourceID == sourceID }
+        return try candidateClaimRows(includeFrozen: includeFrozen, attemptID: attemptID).map(decodeCandidateClaim).filter { claim in
+            claim.references.contains { $0.sourceID == sourceID }
         }
     }
     static func validateProposals(_ proposals: [ClaimProposal], context: LocalTranscriptContext) throws {
@@ -235,9 +302,9 @@ extension VoiceOSStore {
                 guard inputs.contains(where: { $0["source_id"] == input.sourceID && $0["transcript_version_id"] == input.transcriptVersionID }),
                       let version = try db.query("SELECT v.*,t.source_id,t.current_version_id,s.version_id,s.duration,s.state,s.origin,s.speaker,s.local_only,s.policy_version FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [input.transcriptVersionID]).first,
                       version["source_id"] == input.sourceID, version["version_id"] == input.sourceVersionID,
-                      version["text"] == input.text else { throw VoiceOSError("迁移上下文来源版本不一致") }
+                      (version["text"] == input.text || (row["state"] != "current" && version["reason"] == "ai_superseded")) else { throw VoiceOSError("迁移上下文来源版本不一致") }
                 let spans = try JSONDecoder().decode([TranscriptSpan].self, from: Data(version["spans_json"]!.utf8))
-                guard try encoder.encode(spans) == encoder.encode(input.spans) else { throw VoiceOSError("迁移上下文片段不一致") }
+                guard try (row["state"] != "current" && version["reason"] == "ai_superseded") || (encoder.encode(spans) == encoder.encode(input.spans)) else { throw VoiceOSError("迁移上下文片段不一致") }
                 try SpeechText(text: input.text, spans: input.spans).validate(duration: version["duration"].flatMap(Double.init))
                 if row["state"] == "current" {
                     guard version["current_version_id"] == input.transcriptVersionID,
@@ -269,11 +336,23 @@ extension VoiceOSStore {
             let proposal = try JSONDecoder().decode(ExtractedAction.self, from: Data(claim["action_json"]!.utf8))
             let command = "extracted:" + claim["attempt_id"]! + ":" + claim["ordinal"]!
             let rows = try db.query("SELECT * FROM actions WHERE command_id=?", [command])
-            guard rows.count == 1, let action = rows.first, action["claim_id"] == claim["id"], action["claim_review_version"] == "0",
-                  action["title"] == proposal.title, action["kind"] == proposal.kind.rawValue, action["note"] == proposal.quote,
-                  action["intent_actor"] == (proposal.kind == .aiSuggestion ? "ai" : "user"), action["auto_send"] == (proposal.autoSend ? "1" : "0") else { throw VoiceOSError("行动提取结果与原始调用不一致") }
+            guard rows.count == 1,let action=rows.first else { throw VoiceOSError("行动提取缺少原始身份") }
+            let history=try validatedExpressionHistory(db,action:action)
+            let origin=history.first
+            guard (origin?.fromClaimID ?? action["claim_id"]) == claim["id"],
+                  (origin?.fromTitle ?? action["title"]) == proposal.title,(origin?.fromKind ?? action["kind"]) == proposal.kind.rawValue,
+                  (origin?.fromNote ?? action["note"]) == proposal.quote,
+                  action["intent_actor"] == (proposal.kind == .aiSuggestion ? "ai" : "user"),
+                  (origin?.fromAutoSend ?? (action["auto_send"] == "1")) == proposal.autoSend else { throw VoiceOSError("行动提取结果与原始调用不一致") }
+            let pinned = origin?.fromReviewVersion ?? (Int(action["claim_review_version"] ?? "") ?? -1)
+            let reviews = try db.query("SELECT reason FROM claim_reviews WHERE claim_id=? AND version<=CAST(? AS INTEGER)", [claim["id"],String(pinned)])
+            guard pinned >= 0, reviews.count == pinned, reviews.allSatisfy({ $0["reason"] == "explicit_endorsement" }) else {
+                throw VoiceOSError("提取行动只能沿用内容未变的认可版本")
+            }
         }
-        guard try db.query("SELECT a.id FROM actions a JOIN claims c ON c.id=a.claim_id WHERE a.auto_send=1 AND (c.action_json IS NULL OR a.command_id!=('extracted:' || c.attempt_id || ':' || c.ordinal))").isEmpty else { throw VoiceOSError("自动行动缺少提取依据") }
+        for action in try db.query("SELECT a.* FROM actions a JOIN claims c ON c.id=a.claim_id WHERE a.auto_send=1 AND (c.action_json IS NULL OR a.command_id!=('extracted:' || c.attempt_id || ':' || c.ordinal))") {
+            guard !(try validatedExpressionHistory(db,action:action)).isEmpty else { throw VoiceOSError("自动行动缺少提取依据") }
+        }
         try validateStoredClaimReviews(db)
         try validateStoredActions(db)
         try validateStoredReminders(db)
@@ -286,7 +365,7 @@ extension VoiceOSStore {
         try db.execute("UPDATE relevance_attempts SET validity='frozen' WHERE id IN (SELECT attempt_id FROM relevance_inputs WHERE source_id=?)", [sourceID])
         for row in try db.query("SELECT context_id FROM context_inputs WHERE source_id=?", [sourceID]) { try freezeContext(row["context_id"]!) }
     }
-    private func freezeContext(_ id: String) throws {
+    func freezeContext(_ id: String) throws {
         try db.execute("UPDATE contexts SET state='stale' WHERE id=?", [id])
         try db.execute("UPDATE conversations SET validity='frozen' WHERE entry_context_id=? OR id IN (SELECT conversation_id FROM conversation_user_turns WHERE context_id=?)",[id,id])
         try db.execute("UPDATE discussion_attempts SET validity='frozen' WHERE context_id=? OR conversation_id IN (SELECT id FROM conversations WHERE validity='frozen')",[id])

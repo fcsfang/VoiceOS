@@ -53,8 +53,16 @@ extension VoiceOSStore {
         guard !turns.isEmpty else { throw VoiceOSError("讨论没有个人发言，不提取成果") }
         var ids=history
         for turn in turns where !ids.contains(turn.sourceID) { ids.append(turn.sourceID) }
-        let context=try prepareLocalTranscriptContext(sourceIDs:ids,scalarBudget:scalarBudget)
+        let entry = try conversationHistoryContext(id)
+        guard try recordingContextSourceIDs(sourceIDs:history) == history else { throw VoiceOSError("讨论成果依据已增加节目上下文，请从当前材料继续") }
+        try validateLocalTranscriptContext(entry)
         let replies=try outcomeReplies(id,destination:destination)
+        if let focus = entry.conversationFocus { try validateConversationThoughtFocus(focus) }
+        if let focus = entry.reflectionFocus { try validateReflectionFocus(focus) }
+        let replyCharacters = replies.reduce(0) { $0 + $1.parts.reduce(0) { $0 + $1.text.unicodeScalars.count } }
+        var context = try prepareFullDiscussionContext(sourceIDs:ids,minimumBudget:scalarBudget,replyCharacters:replyCharacters)
+        context.conversationFocus = entry.conversationFocus
+        context.reflectionFocus = entry.reflectionFocus
         try Self.validateOutcomeBudget(context,replies)
         let contextID=try persistLocalContext(context,commandID:"discussion-outcome:"+commandID,destination:destination)
         let input=PreparedConversationInput(conversationID:id,conversationVersion:session.version,contextID:contextID,historySourceIDs:history,userTurns:turns.map { ConversationTurnReference(turnID:$0.id,sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID) },destination:destination)
@@ -69,6 +77,13 @@ extension VoiceOSStore {
         guard ready,session.validity == "current",session.state == snapshot.sessionState,session.version == input.conversationVersion,
               try db.query("SELECT destination FROM contexts WHERE id=?",[input.contextID]).first?["destination"] == input.destination.rawValue else { throw VoiceOSError("讨论成果输入状态或目的地已变化") }
         let current=try localContext(id:input.contextID),history=try conversationHistorySources(conversationID:input.conversationID).map(\.sourceID),turns=try conversationUserTurns(conversationID:input.conversationID)
+        if let focus = current.conversationFocus { try validateConversationThoughtFocus(focus) }
+        if let focus = current.reflectionFocus { try validateReflectionFocus(focus) }
+        let entry = try conversationHistoryContext(input.conversationID)
+        guard try recordingContextSourceIDs(sourceIDs:history) == history else { throw VoiceOSError("讨论成果缺少当前配对的节目来源") }
+        try validateLocalTranscriptContext(entry)
+        guard try Self.relevanceJSON(current.conversationFocus) == Self.relevanceJSON(entry.conversationFocus) else { throw VoiceOSError("讨论成果焦点与入口不一致") }
+        guard try Self.relevanceJSON(current.reflectionFocus) == Self.relevanceJSON(entry.reflectionFocus) else { throw VoiceOSError("讨论成果范围与入口不一致") }
         let refs=turns.map { ConversationTurnReference(turnID:$0.id,sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID) }
         var ids=history
         for turn in turns where !ids.contains(turn.sourceID) { ids.append(turn.sourceID) }
@@ -91,7 +106,7 @@ extension VoiceOSStore {
     }
     static func validateOutcomeBudget(_ context:LocalTranscriptContext,_ replies:[ConversationOutcomeReply]) throws {
         let size=context.sources.reduce(0) { $0+$1.text.unicodeScalars.count }+replies.reduce(0) { $0+$1.parts.reduce(0) { $0+$1.text.unicodeScalars.count } }
-        guard (1...12000).contains(context.scalarBudget),size <= context.scalarBudget,size <= 12000 else { throw VoiceOSError("完整讨论成果输入超过预算，不静默删减历史") }
+        guard context.scalarBudget > 0,size <= context.scalarBudget else { throw VoiceOSError("完整讨论成果输入超过预算，不静默删减历史") }
     }
     public static func validateConversationOutcomeProposals(_ proposals:[ConversationOutcomeProposal],snapshot:ConversationOutcomeSnapshot) throws {
         for proposal in proposals {

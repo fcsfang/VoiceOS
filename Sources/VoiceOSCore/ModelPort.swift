@@ -38,6 +38,22 @@ public struct SourcePolicy: Sendable {
     public let version: Int
 }
 extension VoiceOSStore {
+    /// Cloud cognition must wait for the recording's full audio/context review.
+    /// Local reading and local models remain available while that review is pending.
+    func requireReviewedTranscriptions(sourceIDs: [String], destination: ModelDestination) throws {
+        guard destination == .cloud else { return }
+        let ids = Set(sourceIDs)
+        let pending = try sources().filter { ids.contains($0.id) && $0.needsTranscriptionReview }
+        guard !pending.isEmpty else { return }
+        for source in pending {
+            // Completed cloud derivations from the unchecked transcript remain
+            // historical evidence, never a current route around the new barrier.
+            for row in try db.query("SELECT DISTINCT c.id FROM contexts c JOIN context_inputs i ON i.context_id=c.id WHERE i.source_id=? AND c.destination='cloud' AND c.state='current'",[source.id]) {
+                try freezeContext(row["id"]!)
+            }
+        }
+        throw VoiceOSError("请先完成这份 Qwen 录音的全文转写校正，再进行云端理解或跟进")
+    }
     public func sourcePolicy(sourceID: String) throws -> SourcePolicy {
         guard let row = try db.query("SELECT local_only,policy_version FROM sources WHERE id=?", [sourceID]).first else { throw VoiceOSError("来源不存在") }
         guard let version = row["policy_version"].flatMap(Int.init), version > 0 else { throw VoiceOSError("来源授权版本无效") }
@@ -45,6 +61,9 @@ extension VoiceOSStore {
     }
     @discardableResult
     public func setSourceLocalOnly(sourceID: String, expectedVersion: Int, localOnly: Bool, commandID: String = UUID().uuidString) throws -> Int {
+        if !localOnly {
+            guard try db.query("SELECT state FROM sources WHERE id=?", [sourceID]).first?["state"] != "trashed" else { throw VoiceOSError("请先从回收站恢复材料，再允许云端处理") }
+        }
         let fingerprint = SHA256.hash(data: try JSONSerialization.data(withJSONObject: [sourceID,String(expectedVersion),String(localOnly)])).map { String(format: "%02x", $0) }.joined()
         if let receipt = try db.query("SELECT * FROM source_policy_revisions WHERE command_id=?", [commandID]).first {
             guard receipt["input_fingerprint"] == fingerprint else { throw VoiceOSError("同一授权命令不能改变内容") }
@@ -71,6 +90,7 @@ extension VoiceOSStore {
               !config.promptVersion.isEmpty, !config.schemaVersion.isEmpty else { throw VoiceOSError("模型端口配置缺少身份或版本") }
         guard try db.query("SELECT destination FROM contexts WHERE id=?", [contextID]).first?["destination"] == config.destination.rawValue else { throw VoiceOSError("模型目的地与上下文不一致") }
         let context = try localContext(id: contextID)
+        try requireReviewedTranscriptions(sourceIDs:context.sources.map(\.sourceID),destination:config.destination)
         if config.destination == .cloud, context.sources.contains(where: \.localOnly) { throw VoiceOSError("仅本地来源禁止云端发送") }
         let attempt = UUID().uuidString
         try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)", [attempt,contextID,config.provider,config.model,config.promptVersion,config.schemaVersion,ISO8601DateFormatter().string(from: Date()),try db.nextModelProducerSequence()])
@@ -109,6 +129,7 @@ extension VoiceOSStore {
         }
         do {
             try Task.checkCancellation()
+            try requireReviewedTranscriptions(sourceIDs:context.sources.map(\.sourceID),destination:config.destination)
             return try commitClaims(attemptID: attempt, proposals: response.claims)
         } catch {
             try db.execute("UPDATE model_attempts SET state='rejected',error='结果因取消、来源或提交状态未接纳；不自动重发' WHERE id=? AND state='reserved'", [attempt])
@@ -134,9 +155,17 @@ extension VoiceOSStore {
         if let sourceID {
             rows = try db.query("SELECT a.*,c.state AS context_state FROM model_attempts a JOIN contexts c ON c.id=a.context_id WHERE a.context_id IN (SELECT context_id FROM context_inputs WHERE source_id=?) ORDER BY a.created_at,a.id", [sourceID])
         } else { rows = try db.query("SELECT a.*,c.state AS context_state FROM model_attempts a JOIN contexts c ON c.id=a.context_id ORDER BY a.created_at,a.id") }
-        return try rows.map { row in
-            ModelAttemptRecord(producerSequence:Int64(row["producer_sequence"]!)!,executionKind:row["execution_kind"]!,id: row["id"]!, state: row["state"]!, provider: row["provider"]!, model: row["model"]!, usage: try row["usage_json"].map { try JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) }, billingState:row["execution_kind"] == "segmented_derivation" || row["execution_kind"] == "discussion_derivation" && row["provider"]?.hasPrefix("english_feedback:") != true ? "not_applicable" : "unknown", contextState: row["context_state"]!)
+        return try rows.map(Self.modelAttemptRecord)
+    }
+    public func modelAttemptsBySource() throws -> [String: [ModelAttemptRecord]] {
+        var result: [String: [ModelAttemptRecord]] = [:]
+        for row in try db.query("SELECT a.*,c.state AS context_state,i.source_id FROM model_attempts a JOIN contexts c ON c.id=a.context_id JOIN context_inputs i ON i.context_id=c.id ORDER BY a.created_at,a.id") {
+            result[row["source_id"]!, default: []].append(try Self.modelAttemptRecord(row))
         }
+        return result
+    }
+    private static func modelAttemptRecord(_ row: [String: String]) throws -> ModelAttemptRecord {
+        ModelAttemptRecord(producerSequence:Int64(row["producer_sequence"]!)!,executionKind:row["execution_kind"]!,id: row["id"]!, state: row["state"]!, provider: row["provider"]!, model: row["model"]!, usage: try row["usage_json"].map { try JSONDecoder().decode([String: Int].self, from: Data($0.utf8)) }, billingState:row["execution_kind"] == "segmented_derivation" || row["execution_kind"] == "discussion_derivation" && row["provider"]?.hasPrefix("english_feedback:") != true ? "not_applicable" : "unknown", contextState: row["context_state"]!)
     }
 }
 
@@ -144,7 +173,9 @@ extension VoiceOSStore {
 // New source text or policy permits new work; reopening a window never resends old work.
 extension VoiceOSStore {
     public func understandSource(sourceID: String, using port: any ModelPort) async throws -> [String] {
-        let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID])
+        let source = try sources().first { $0.id == sourceID }
+        let budget = source?.kind == "external_text" ? max(1, source?.transcript?.unicodeScalars.count ?? 0) : 4000
+        let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: budget)
         guard try db.query("""
         SELECT o.id FROM conversation_outcome_attempts o JOIN conversation_user_turns t ON t.conversation_id=o.conversation_id
         JOIN context_inputs i ON i.context_id=t.context_id
@@ -153,10 +184,11 @@ extension VoiceOSStore {
         let policy = try sourcePolicy(sourceID: sourceID)
         // A contract/model upgrade is not permission to replay an existing expression attempt.
         guard try db.query("""
-        SELECT a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
+        SELECT a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id JOIN contexts x ON x.id=a.context_id
         WHERE i.source_id=? AND i.transcript_version_id=? AND COALESCE(i.policy_version,1)=CAST(? AS INTEGER)
+          AND x.digest=?
           AND a.execution_kind='model_request' LIMIT 1
-        """, [sourceID, context.sources[0].transcriptVersionID, String(policy.version)]).isEmpty else {
+        """, [sourceID, context.sources[0].transcriptVersionID, String(policy.version), context.contentDigest]).isEmpty else {
             throw VoiceOSError("当前原话与授权已有理解尝试；模型或Schema更新不会重发，请查看原记录")
         }
         let config = port.configuration

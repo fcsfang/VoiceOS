@@ -3,6 +3,7 @@ import VoiceOSCore
 
 struct DiscussionView: View {
     @ObservedObject var model:ControlCenter
+    var initialText: String = ""
     let dismiss:()->Void
     @State private var text=""
     @State private var allowCloud=true
@@ -11,7 +12,7 @@ struct DiscussionView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
             HStack {
-                Text("继续讨论").font(.title2)
+                Text(model.discussionReflection == nil ? "继续讨论" : "一起回顾 · 认知与行动").font(.title2)
                 Spacer()
                 Button("关闭",action:dismiss)
             }
@@ -27,11 +28,19 @@ struct DiscussionView: View {
                         DisclosureGroup("入口原文与来源") {
                             ForEach(model.discussionHistory,id:\.sourceID) { source in
                                 VStack(alignment:.leading,spacing:6) {
-                                    Text(source.origin == "user" ? "我的历史表达" : "外部资料 · 不代表我的观点").font(.headline)
+                                    Text(source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的历史表达" : "外部资料 · 不代表我的观点").font(.headline)
                                     Text(source.text).textSelection(.enabled)
                                     Text(source.localOnly ? "当时仅本地" : "当时允许云端文本").font(.caption).foregroundStyle(.secondary)
                                 }.padding(.vertical,8)
                             }
+                        }
+                        if let focus = model.discussionReflection {
+                            if let question = focus.question {
+                                Text(question.title).font(.headline).textSelection(.enabled)
+                            }
+                            Text(focus.isTopicOverview ? "主题全貌 · \(focus.sourceIDs.count) 份完整材料" : "回顾 \(focus.start.formatted(date: .abbreviated, time: .omitted)) — \(focus.end.addingTimeInterval(-1).formatted(date: .abbreviated, time: .omitted)) · \(focus.sourceIDs.count) 份完整原文").font(.callout)
+                            Text(focus.reviewPurpose).font(.callout).foregroundStyle(.secondary)
+                            Text("以进入时选定的资料为依据，早期资料作为背景；新记录可从认知地图重新进入回顾。").font(.caption).foregroundStyle(.secondary)
                         }
                         if model.discussionTurns.isEmpty { Text("先口述或输入本轮发言；保存后再发送。") }
                         ForEach(model.discussionTurns) { turn in
@@ -112,6 +121,17 @@ struct DiscussionView: View {
                     }.frame(maxWidth:.infinity,alignment:.leading).padding(.vertical,6)
                 }.frame(minHeight:180)
                 if model.discussionWritable {
+                    if model.discussionReflection != nil {
+                        HStack {
+                            Text("接着想").font(.caption).foregroundStyle(.secondary)
+                            ForEach(ReflectionReviewFollowup.allCases, id: \.self) { followup in
+                                Button(followup.label) {
+                                    text += (text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n") + followup.prompt
+                                }.help("将追问加入可编辑草稿，保存后再发送")
+                            }
+                            Spacer()
+                        }.disabled(model.discussionSaving || model.discussionSending || model.dictationActive)
+                    }
                     HStack {
                         if model.dictationActive {
                             Button("停止并保存本轮口述") { model.stopDictation() }.disabled(model.dictationBusy)
@@ -156,6 +176,7 @@ struct DiscussionView: View {
                 ContentUnavailableView("还没有选择讨论",systemImage:"bubble.left.and.bubble.right",description:Text("在资料详情点击“继续讨论”建立新的讨论，或选择已保存历史。"))
             }
         }.padding(24).frame(width:760,height:780)
+        .onAppear { text = initialText }
         .sheet(item:$referencePreview) { preview in
             VStack(alignment:.leading,spacing:12) {
                 Text("当时引用的原文版本").font(.title2)

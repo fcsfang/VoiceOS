@@ -17,6 +17,12 @@ struct Check {
                 return
             }
             switch command {
+            case "followup":
+                guard args.count == 4 else { throw VoiceOSError("followup <data-dir> <source-id> <model-config>") }
+            case "recording-titles":
+                guard args.count == 3 else { throw VoiceOSError("recording-titles <data-dir> <model-config>") }
+            case "reminder-fields":
+                guard args.count >= 3 else { throw VoiceOSError("reminder-fields <data-dir> <model-config> [task-id...]；仅生成本地字段，不写 Apple 提醒事项") }
             case "task-context":
                 guard args.count == 3 else { throw VoiceOSError("task-context <data-dir> <output-json>") }
             case "read", "transcribe":
@@ -38,6 +44,27 @@ struct Check {
             let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
             try await store.recover()
             switch command {
+            case "recording-titles":
+                let port = try LocalTextModel.loadSuite(from: URL(fileURLWithPath: args[2])).recordingTitles
+                let count = try await store.generateRecordingTitles(using: port)
+                print("已完成内容命名：\(count)份")
+                for record in try await store.sources() { print(record.id + " " + record.displayTitle) }
+                return
+            case "reminder-fields":
+                let port = try LocalTextModel.loadSuite(from: URL(fileURLWithPath: args[2])).reminderFields
+                try await store.extractReminderFields(using: port, actionIDs: args.count > 3 ? Set(args.dropFirst(3)) : nil)
+                struct Result: Encodable { let taskID: String; let title: String; let fields: ReminderFieldReceipt }
+                let results = try await store.actions().compactMap { action -> Result? in
+                    guard let fields = action.intent?.reminderFields, fields.desired != nil else { return nil }
+                    return Result(taskID: action.id, title: action.title, fields: fields)
+                }
+                print(String(decoding: try JSONEncoder().encode(results), as: UTF8.self))
+                return
+            case "followup":
+                let port = try LocalTextModel.loadSuite(from: URL(fileURLWithPath: args[3])).followup
+                let receipt = try await store.processRecordingFollowup(sourceID: args[2], using: port, retry: true)
+                print(String(decoding: try JSONEncoder().encode(receipt), as: UTF8.self))
+                return
             case "task-context":
                 let count = try await store.writeExistingTaskInput(to: URL(fileURLWithPath: args[2]))
                 print("已导出 \(count) 条获文字处理授权的现有任务。")

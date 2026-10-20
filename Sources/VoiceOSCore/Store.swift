@@ -7,6 +7,7 @@ public actor VoiceOSStore {
     private let inspector: any MediaInspector
     var ready = false
     private var activeImports: Set<String> = []
+    private var verifiedFiles: [URL: (stamp: DurableFiles.Fingerprint, bytes: Int64, hash: String)] = [:]
     var activeCaptures: Set<String> = []
     func inspectRecording(_ file:URL) async throws -> MediaInfo { try await inspector.inspect(file) }
     private var processing = false
@@ -15,6 +16,9 @@ public actor VoiceOSStore {
     var segmentAggregationActive = false
     var activeReminderLinks: Set<String> = []
     var activeEnglishAttempts: Set<String> = []
+    var assistantExecutionActive = false
+    var assistantDiscoveryActive = false
+    var activeAssistantRequests: [String: @Sendable () -> Void] = [:]
     let checkpoint: @Sendable (SaveCheckpoint) throws -> Void
 
     public init(root: URL, inspector: any MediaInspector,
@@ -40,12 +44,16 @@ public actor VoiceOSStore {
         try db.execute("UPDATE discussion_attempts SET state='unknown',error='进程退出前讨论结果未登记；不自动重发' WHERE state='reserved'")
         try db.execute("UPDATE english_feedback_attempts SET state='unknown',error='进程退出前英文反馈未登记；不自动重发' WHERE state='reserved'")
         try db.execute("UPDATE expression_association_attempts SET state='unknown',error='进程退出前关联结果未登记；不自动重发' WHERE state='reserved'")
+        try db.execute("UPDATE assistant_executions SET state='failed',error='执行因应用退出中断，可手动重试' WHERE state='running'")
+        try db.execute("UPDATE assistant_assessments SET state='failed',error='评估因应用退出中断' WHERE state='running'")
+        try recoverRecordingFollowups()
+        try recoverKnowledgeReviews()
         for row in try db.query("SELECT * FROM sources ORDER BY created_at") {
             let id = row["id"]!
             if row["input_fingerprint"] == "microphone-v1:"+id, row["expected_bytes"] == "0" {
                 try interruptDictation(sourceID:id); continue
             }
-            if ["interrupted", "quarantined", "reference_only"].contains(row["state"]!) { continue }
+            if ["interrupted", "quarantined", "reference_only", "trashed"].contains(row["state"]!) { continue }
             let final = try assetURL(relativePath: row["relative_path"]!)
             let staging = root.appendingPathComponent("staging/\(row["asset_id"]!).part.\(final.pathExtension)")
             let file = FileManager.default.fileExists(atPath: final.path) ? final : staging
@@ -55,13 +63,17 @@ public actor VoiceOSStore {
                 continue
             }
             do {
-                let (bytes, hash) = try DurableFiles.hash(file)
+                let (bytes, hash) = try verifiedHash(file)
                 guard String(bytes) == row["expected_bytes"], hash == row["expected_hash"] else {
                     if row["state"] == "receiving" { try interrupt(id, "保存被中断，副本不完整") }
                     else { try quarantine(id, "原件完整性核对失败") }
                     continue
                 }
-                let info = row["kind"] == "user_text" ? try Self.inspectUserText(file) : try await inspector.inspect(file)
+                let info: MediaInfo
+                if row["kind"] == "ai_text" { info = try Self.inspectAssistantText(file) }
+                else if row["kind"] == "user_text" { info = try Self.inspectUserText(file) }
+                else if row["kind"] == "external_text" { info = try Self.inspectExternalText(file) }
+                else { info = try await inspector.inspect(file) }
                 if row["state"] != "saved" {
                     try db.execute("UPDATE sources SET state='sealed', duration=?, kind=? WHERE id=?", [String(info.duration), info.kind, id])
                     if file != final { try place(staging, final) }
@@ -83,6 +95,11 @@ public actor VoiceOSStore {
         try Self.validateStoredExpressionAssociations(db)
         try Self.validateStoredExpressionAssociationIgnores(db)
         try Self.validateStoredQuestions(db)
+        try Self.validateStoredReflectionQuestions(db)
+        try Self.validateStoredTopicFeedback(db)
+        try Self.validateStoredExternalTexts(db)
+        try Self.validateStoredAssistantExecutions(db)
+        try Self.validateStoredKnowledgeReviews(db)
         try Self.validateStoredProcessingIntents(db)
         try Self.validateStoredRecordingProcessingRequests(db)
         try Self.validateStoredRecordingSegmentPlans(db)
@@ -167,23 +184,41 @@ public actor VoiceOSStore {
     }
     public func sources() throws -> [SourceRecord] {
         try db.query("""
-        SELECT s.*,j.state AS job_state,j.error AS job_error,v.text AS transcript,t.current_version_id AS transcript_version_id,t.backend AS transcription_backend,v.spans_json
+        SELECT s.id,s.asset_id,s.name,s.state,s.kind,s.created_at,s.expected_bytes,s.duration,s.error,s.relative_path,
+               s.local_only,s.policy_version,s.origin,s.speaker,s.feedback_json,s.timezone,s.presentation_json,
+               j.state AS job_state,j.error AS job_error,v.text AS transcript,t.current_version_id AS transcript_version_id,t.backend AS transcription_backend,v.spans_json
         FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
         LEFT JOIN transcripts t ON t.job_id=j.id LEFT JOIN transcript_versions v ON v.id=t.current_version_id ORDER BY s.created_at DESC,s.id
         """).map { row in
             let feedback = try Self.feedbackIntent(row["feedback_json"])
-            return SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!, transcriptVersionID: row["transcript_version_id"], transcriptionBackend: row["transcription_backend"], spans: try row["spans_json"].map { try JSONDecoder().decode([TranscriptSpan].self, from: Data($0.utf8)) } ?? [], localOnly: row["local_only"] != "0", policyVersion: Int(row["policy_version"]!)!, origin: row["origin"]!, speaker: row["speaker"]!, feedbackActionID: feedback?.actionID, feedbackActionVersion: feedback?.actionVersion, feedbackKind: feedback?.kind.rawValue)
+            return SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!, transcriptVersionID: row["transcript_version_id"], transcriptionBackend: row["transcription_backend"], spans: try row["spans_json"].map { try JSONDecoder().decode([TranscriptSpan].self, from: Data($0.utf8)) } ?? [], localOnly: row["local_only"] != "0", policyVersion: Int(row["policy_version"]!)!, origin: row["origin"]!, speaker: row["speaker"]!, feedbackActionID: feedback?.actionID, feedbackActionVersion: feedback?.actionVersion, feedbackKind: feedback?.kind.rawValue, timeZone: row["timezone"]!, presentation: try row["presentation_json"].map { try JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8)) })
         }
     }
     public func playableURL(sourceID: String) throws -> URL {
         guard let row = try db.query("SELECT * FROM sources WHERE id=? AND state='saved'", [sourceID]).first else { throw VoiceOSError("此原件尚未可靠保存") }
         let url = try assetURL(relativePath: row["relative_path"]!)
-        let actual = try DurableFiles.hash(url)
+        let actual: (Int64, String)
+        do { actual = try verifiedHash(url) }
+        catch {
+            try quarantine(sourceID, "原件缺失或无法完整核对")
+            throw VoiceOSError("原件缺失或无法完整核对，已暂停后续处理")
+        }
         guard actual.0 == Int64(row["expected_bytes"]!), actual.1 == row["expected_hash"]! else {
             try quarantine(sourceID, "原件完整性核对失败")
             throw VoiceOSError("原件完整性核对失败，已暂停后续处理")
         }
         return url
+    }
+    private func verifiedHash(_ url: URL) throws -> (Int64, String) {
+        // Session-only reuse. ctime also changes if equal-size contents are edited
+        // and mtime is restored; inode detects replacement. DB/policy checks stay live.
+        let before = try DurableFiles.fingerprint(url)
+        if let cached = verifiedFiles[url], cached.stamp == before { return (cached.bytes, cached.hash) }
+        verifiedFiles[url] = nil
+        let result = try DurableFiles.hash(url)
+        guard try DurableFiles.fingerprint(url) == before else { throw VoiceOSError("原件在核对期间发生变化") }
+        verifiedFiles[url] = (before, result.0, result.1)
+        return result
     }
     public func retryTranscription(sourceID: String) throws {
         try db.execute("UPDATE jobs SET state='queued',error=NULL WHERE source_id=? AND state IN ('failed','blocked') AND EXISTS(SELECT 1 FROM sources WHERE id=? AND state='saved')", [sourceID,sourceID])
@@ -239,6 +274,7 @@ public actor VoiceOSStore {
             try db.execute("INSERT OR IGNORE INTO assets(id,source_id,relative_path,bytes,sha256,role) VALUES(?,?,?,?,?,'original')", [row["asset_id"],row["id"],row["relative_path"],row["expected_bytes"],row["expected_hash"]])
             try db.execute("UPDATE sources SET state='saved',duration=?,kind=?,error=NULL WHERE id=?", [String(info.duration),info.kind,row["id"]])
             if info.kind == "user_text" { try commitUserText(row) }
+            else if info.kind == "external_text" { try commitExternalText(row) }
             else {
             try db.execute("INSERT OR IGNORE INTO jobs(id,source_id,input_version_id,stage,config,state) VALUES(?,?,?,'transcription','pending-local-speech-v1','queued')", [UUID().uuidString,row["id"],row["version_id"]])
             }

@@ -3,21 +3,27 @@ import VoiceOSCore
 
 struct CorrectionImpactView: View {
     @ObservedObject var model: ControlCenter
+    var embedded = false
     let dismiss: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("纠错影响与外部核对").font(.title2)
-            Text("明确纠错先阻止旧依据继续执行。下面依据已保存的修订和操作历史列出受影响行动；不代表所有行动都错误，也不代表外部任务已撤销。").font(.callout).foregroundStyle(.secondary)
+            Text("更正后的处理情况").font(.title2)
+            Text("更正后的内容会用于后续理解。下面保留的是依赖更正前内容的任务：原有完成记录和反馈不会丢失；已写入系统提醒事项的任务也不会凭一次更正就被删除。").font(.callout).foregroundStyle(.secondary)
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     ForEach(model.correctionImpacts) { impact in
                         VStack(alignment: .leading, spacing: 8) {
                             Text(impact.action.title).font(.headline)
+                            ForEach(impact.understandingProgress) { progress in
+                                Text(progress.summary).font(.callout)
+                                if let id = progress.sourceID {
+                                    Button("查看更正后的原文与理解") { model.selected = id; dismiss() }
+                                }
+                            }
                             Text(impact.summary).font(.callout)
-                            ForEach(impact.roots) { root in
-                                Text(root.summary).font(.caption).foregroundStyle(.secondary)
-                                if let id = root.sourceID {
-                                    Button("查看纠错来源") { model.selected = id; dismiss() }
+                            DisclosureGroup("为什么保留这项历史任务") {
+                                ForEach(impact.roots) { root in
+                                    Text(root.summary).font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                             if let link = impact.link {
@@ -45,13 +51,15 @@ struct CorrectionImpactView: View {
                         }
                         Divider()
                     }
-                    if model.correctionImpacts.isEmpty { Text("当前没有可定位到明确纠错的受影响行动。").foregroundStyle(.secondary) }
+                    if model.correctionImpacts.isEmpty { Text("目前没有因明确更正而暂停的任务。").foregroundStyle(.secondary) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            Text("可查看并确认恢复AI排期之前的期限。任务取消仍需另行处理；期限补偿不代表任务或旧认知已恢复有效。").font(.caption).foregroundStyle(.secondary)
+            if model.correctionImpacts.contains(where: { !$0.scheduleEffects.isEmpty }) {
+                Text("如果此前 AI 改过期限，可查看恢复期限的具体方案。恢复期限会保留任务的真实完成状态。").font(.caption).foregroundStyle(.secondary)
+            }
             Text(model.status).font(.caption).foregroundStyle(.secondary)
-            HStack { Spacer(); Button("完成", action: dismiss).keyboardShortcut(.defaultAction) }
-        }.padding(24).frame(width: 720, height: 620)
+            if !embedded { HStack { Spacer(); Button("完成", action: dismiss).keyboardShortcut(.defaultAction) } }
+        }.padding(24).frame(width: embedded ? nil : 720, height: embedded ? nil : 620)
             .sheet(item: $model.pendingCompensation) { plan in
                 CompensationConfirmationView(plan: plan,model: model) { model.pendingCompensation = nil }
             }

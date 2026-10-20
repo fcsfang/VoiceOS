@@ -12,7 +12,7 @@ public protocol EnglishPracticeModelPort: Sendable {
     var configuration: ModelConfiguration { get }
     func generate(_ request: EnglishPracticeRequest) async throws -> EnglishPracticeResponse
 }
-public struct EnglishPracticeResponse: Sendable {
+public struct EnglishPracticeResponse: Codable, Sendable {
     public let suggestions: [EnglishSuggestionProposal]
     public let comparisons: [EnglishComparisonProposal]
     public let inputTokens: Int?
