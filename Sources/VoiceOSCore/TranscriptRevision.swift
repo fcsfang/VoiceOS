@@ -2,6 +2,12 @@ import Foundation
 import CryptoKit
 
 extension VoiceOSStore {
+    static func isPrunedHistoricalTranscript(_ version: [String: String], historical: Bool) -> Bool {
+        guard historical, let id = version["id"], let current = version["current_version_id"], id != current else { return false }
+        return version["reason"] == "ai_superseded" && version["actor"] == "system"
+            && version["text"] == "" && version["spans_json"] == "[]"
+    }
+
     // Automatic correction replaces the current text; it does not create a second full draft.
     @discardableResult
     public func applyReviewedQwenTranscript(sourceID: String, expectedVersionID: String, speech: SpeechText, responseID: String) throws -> String {
