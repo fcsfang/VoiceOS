@@ -48,7 +48,7 @@ public struct RetrievalResult: Sendable {
 }
 extension VoiceOSStore {
     /// Read current originals, never frozen derived claims or old transcript versions.
-    private func retrievalDocuments(window: RetrievalWindow) throws -> [RetrievalDocument] {
+    func retrievalDocuments(window: RetrievalWindow) throws -> [RetrievalDocument] {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
         guard (1...800).contains(window.scalars), (0..<window.scalars).contains(window.overlap) else { throw VoiceOSError("本地检索切片配置无效") }
         let rows = try db.query("""

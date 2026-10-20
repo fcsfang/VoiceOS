@@ -127,7 +127,7 @@ final class ConversationRepliesTests:XCTestCase {
         let s=try await store(),input=try await input(s),id=try await s.performConversationReply(input,using:DiscussionFixture())
         let package=base.appendingPathComponent("package"),target=base.appendingPathComponent("restored")
         try await s.exportPackage(to:package)
-        XCTAssertEqual(try VoiceOSStore.packageSummary(at:package).version,19)
+        XCTAssertEqual(try VoiceOSStore.packageSummary(at:package).version,23)
         try await VoiceOSStore.restorePackage(from:package,to:target,inspector:DiscussionInspector())
         let r=try await store("restored"),rows=try await r.discussionAttempts(conversationID:input.conversationID)
         XCTAssertEqual(rows[0].id,id);XCTAssertEqual(rows[0].state,"completed");XCTAssertEqual(rows[0].validity,"frozen");XCTAssertEqual(rows[0].parts.count,2)

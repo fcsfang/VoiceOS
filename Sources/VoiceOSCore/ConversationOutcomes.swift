@@ -143,7 +143,7 @@ extension VoiceOSStore {
             if proposal.ownership == .userTentative { refs=proposal.sourceEvidence.map(\.reference) }
             var seen:Set<String>=[]
             refs=refs.filter { seen.insert($0.sourceID+":"+$0.transcriptVersionID+":"+$0.spanID).inserted }
-            return ClaimProposal(statement:proposal.statement,ownership:proposal.ownership,references:refs,action:proposal.ownership == .aiCandidate ? nil:proposal.action)
+            return ClaimProposal(statement:proposal.statement,ownership:proposal.ownership,references:refs,action:proposal.ownership == .aiCandidate ? nil:proposal.action,contentKind:proposal.contentKind)
         }
     }
     func freezeConversationOutcomes() throws {

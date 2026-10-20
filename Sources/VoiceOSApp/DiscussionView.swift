@@ -88,8 +88,12 @@ struct DiscussionView: View {
                             ForEach(Array(outcome.proposals.enumerated()),id:\.offset) { index,proposal in
                                 VStack(alignment:.leading,spacing:6) {
                                     Text(proposal.ownership == .aiCandidate ? "AI 候选" : (proposal.ownership == .userTentative ? "我的暂定表达" : "归属待核对")).font(.caption)
+                                    Text(proposal.contentKind?.displayName ?? "内容类型未分类").font(.caption).foregroundStyle(.secondary)
                                     Text(proposal.statement).textSelection(.enabled)
                                     if outcome.claimIDs.indices.contains(index),let claim=model.claims.first(where: { $0.id == outcome.claimIDs[index] }) {
+                                        if let question=model.questionRecords.first(where: { $0.seed.claimID == claim.id }) {
+                                            QuestionStateView(question: question, model: model)
+                                        }
                                         Button("查看成果候选与行动") { model.selected=claim.references.first?.sourceID;dismiss() }
                                     }
                                     if let action=proposal.action,proposal.ownership == .aiCandidate { Text("AI 行动建议（未创建个人任务）："+action.title).font(.caption).foregroundStyle(.secondary) }

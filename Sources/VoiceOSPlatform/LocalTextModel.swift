@@ -9,12 +9,13 @@ public enum LocalTextModel {
         public let discussion:ResponsesDiscussionPort
         public let outcome:ResponsesOutcomePort
         public let english:ResponsesEnglishPracticePort
+        public let association:ResponsesExpressionAssociationPort
     }
     /// Read credentials once; publish all ports only after the complete suite validates.
     public static func loadSuite(from file:URL) throws -> Suite {
         let (address,key)=try settings(from:file)
         do {
-            return Suite(cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),english:try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"))
+            return Suite(cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),english:try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),association:try ResponsesExpressionAssociationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"))
         } catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
     public static func load(from file: URL) throws -> ResponsesModelPort {

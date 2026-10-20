@@ -43,6 +43,18 @@ final class ResponsesModelPortTests: XCTestCase {
         }
         XCTAssertThrowsError(try ResponsesModelPort(baseURL: URL(string: "https://api.chiyi.cc/v1")!, apiKey: "test\r\nInjected: bad", model: "test"))
     }
+    func testTypedQuestionAndLegacyClassificationRemainDistinct() throws {
+        let ref = ["sourceID": UUID().uuidString, "transcriptVersionID": UUID().uuidString, "spanID": UUID().uuidString]
+        let legacy: [String: Any] = ["statement": "什么证据能限制猜想？", "ownership": "user_tentative", "references": [ref]]
+        let decoded = try ResponsesModelPort.parse(response([legacy])); XCTAssertNil(decoded.claims[0].contentKind)
+        XCTAssertThrowsError(try ResponsesModelPort.parse(response([legacy]), requireContentKind: true))
+        let typed = legacy.merging(["contentKind": "question"]) { _, new in new }
+        XCTAssertEqual(try ResponsesModelPort.parse(response([typed]), requireContentKind: true).claims[0].contentKind, .question)
+        XCTAssertThrowsError(try ResponsesModelPort.parse(response([typed.merging(["contentKind": "resolved"]) { _, new in new }])))
+        let action: [String: Any] = ["title": "制造任务", "kind": "task", "quote": "什么证据", "autoSend": true]
+        XCTAssertThrowsError(try ResponsesModelPort.parse(response([typed.merging(["action": action]) { _, new in new }])))
+        let p = try port(); XCTAssertEqual(p.configuration.promptVersion, "expression-actions-v3"); XCTAssertEqual(p.configuration.schemaVersion, "claims-actions-v3")
+    }
     func testCompletedClaimsParseAndUnknownFieldsReject() throws {
         let ref = ["sourceID": UUID().uuidString, "transcriptVersionID": UUID().uuidString, "spanID": UUID().uuidString]
         let claim: [String: Any] = ["statement": "外部说法", "ownership": "external", "references": [ref]]

@@ -151,6 +151,14 @@ extension VoiceOSStore {
         WHERE t.source_id=? AND i.transcript_version_id=? LIMIT 1
         """,[sourceID,context.sources[0].transcriptVersionID]).isEmpty else { throw VoiceOSError("这轮原话已有讨论成果理解记录；请查看原成果，不会跨入口重复发送。独立重整与共享身份待后续接入") }
         let policy = try sourcePolicy(sourceID: sourceID)
+        // A contract/model upgrade is not permission to replay an existing expression attempt.
+        guard try db.query("""
+        SELECT a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
+        WHERE i.source_id=? AND i.transcript_version_id=? AND COALESCE(i.policy_version,1)=CAST(? AS INTEGER)
+          AND a.execution_kind='model_request' LIMIT 1
+        """, [sourceID, context.sources[0].transcriptVersionID, String(policy.version)]).isEmpty else {
+            throw VoiceOSError("当前原话与授权已有理解尝试；模型或Schema更新不会重发，请查看原记录")
+        }
         let config = port.configuration
         let identity = ["understand-v1", sourceID, context.contentDigest, String(policy.version), config.provider, config.model, config.promptVersion, config.schemaVersion, config.destination.rawValue]
         let digest = SHA256.hash(data: try JSONSerialization.data(withJSONObject: identity)).map { String(format: "%02x", $0) }.joined()
