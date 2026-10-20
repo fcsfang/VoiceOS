@@ -36,7 +36,8 @@ public struct RecordingExpressionActionDecision: Codable, Sendable {
     public let relation:String
     public let sourceID:String
     public let quote:String
-    public init(oldID:String,newID:String,relation:String,sourceID:String,quote:String) { self.oldID=oldID;self.newID=newID;self.relation=relation;self.sourceID=sourceID;self.quote=quote }
+    public var possibleNewIDs:[String]? = nil
+    public init(oldID:String,newID:String,relation:String,sourceID:String,quote:String,possibleNewIDs:[String]? = nil) { self.oldID=oldID;self.newID=newID;self.relation=relation;self.sourceID=sourceID;self.quote=quote;self.possibleNewIDs=possibleNewIDs }
 }
 public protocol RecordingExpressionActionPort: Sendable {
     func reconcile(_ input:RecordingExpressionActionInput) async throws -> ([RecordingExpressionActionDecision],[String])
@@ -64,6 +65,9 @@ extension VoiceOSStore {
         guard decisions.count == old.count,Set(decisions.map(\.oldID)) == Set(old.keys) else { throw VoiceOSError("补录接续没有逐项核对原有行动") }
         var adopted=Set<String>()
         for decision in decisions {
+            if let possible=decision.possibleNewIDs {
+                guard Set(possible).count == possible.count,possible.allSatisfy({ new[$0] != nil }),decision.relation == "uncertain" || possible.isEmpty else { throw VoiceOSError("补录行动 \(decision.oldID) 的 possibleNewIDs 必须是不重复的本次新行动，仅 uncertain 可以填写候选") }
+            }
             guard input.transcriptionCorrection != true || decision.relation != "withdraw" else {
                 throw VoiceOSError("原文纠错不能被解释为用户后来撤回真实任务")
             }
@@ -75,6 +79,45 @@ extension VoiceOSStore {
                 guard adopted.insert(next.id).inserted else { throw VoiceOSError("补录行动 newID=\(next.id) 被多个旧行动沿用；每个新行动只能接回一个旧身份，其余无法确定的旧行动用 uncertain") }
             } else {
                 guard decision.newID.isEmpty,decision.relation != "history" || prior.state == "completed",decision.relation != "withdraw" || prior.state != "completed" else { throw VoiceOSError("补录不能撤销真实完成记录") }
+            }
+        }
+    }
+    static func validateStoredExpressionActionReviews(_ database:Database) throws {
+        let sources=try database.query("SELECT id,presentation_json FROM sources")
+        let actions=Dictionary(uniqueKeysWithValues:try database.query("SELECT a.id,a.kind,a.state,c.refs_json FROM actions a JOIN claims c ON c.id=a.claim_id").map { ($0["id"]!,$0) })
+        var seen:[String:String]=[:]
+        for source in sources {
+            guard let raw=source["presentation_json"],let expression=try JSONDecoder().decode(RecordingPresentation.self,from:Data(raw.utf8)).expression,
+                  let decisions=expression.actionReviewDecisions else { continue }
+            let encoded=try relevanceJSON(expression)
+            if let previous=seen[expression.id] {
+                guard previous == encoded else { throw VoiceOSError("连续表达的行动核对副本不一致") }
+                continue
+            }
+            seen[expression.id]=encoded
+            let members=Set(expression.sourceIDs),previous=Set(expression.previousActionIDs),reviewed=Set(decisions.map(\.oldID))
+            let required=previous.filter { actions[$0]?["state"] != "dismissed" }
+            guard required.isSubset(of:reviewed),expression.state == "completed",expression.taskReviewPending == decisions.contains(where: { $0.relation == "uncertain" }),
+                  Set(decisions.map(\.oldID)).count == decisions.count,Set(decisions.map(\.oldID)).isSubset(of:previous) else { throw VoiceOSError("连续表达的行动核对状态或旧身份不一致") }
+            if !decisions.isEmpty {
+                let receipts=expression.actionReviewResponseIDs ?? []
+                guard receipts.count >= 2,Set(receipts).count == receipts.count,receipts.allSatisfy({ !$0.isEmpty }) else { throw VoiceOSError("连续表达的行动核对缺少独立回执") }
+            }
+            var adopted=Set<String>()
+            for decision in decisions {
+                guard ["same","withdraw","history","uncertain"].contains(decision.relation),members.contains(decision.sourceID),!decision.quote.isEmpty,
+                      let old=actions[decision.oldID] else { throw VoiceOSError("保存的补录行动判断缺少真实身份或原话依据") }
+                let possible=decision.possibleNewIDs ?? []
+                guard Set(possible).count == possible.count,decision.relation == "uncertain" || possible.isEmpty else { throw VoiceOSError("保存的补录行动候选范围不一致") }
+                let targets=possible + (decision.relation == "same" ? [decision.newID] : [])
+                guard targets.allSatisfy({ !previous.contains($0) && actions[$0] != nil }) else { throw VoiceOSError("保存的补录行动候选不属于本次新行动") }
+                if decision.relation == "same" {
+                    guard actions[decision.newID]?["kind"] == old["kind"],adopted.insert(decision.newID).inserted else { throw VoiceOSError("保存的补录行动身份映射不一致") }
+                } else if !decision.newID.isEmpty { throw VoiceOSError("保存的补录行动擅自沿用新身份") }
+                for id in [decision.oldID]+targets {
+                    let refs=try JSONDecoder().decode([ClaimReference].self,from:Data(actions[id]!["refs_json"]!.utf8))
+                    guard !members.isDisjoint(with:refs.map(\.sourceID)) else { throw VoiceOSError("保存的行动核对引用其他连续表达") }
+                }
             }
         }
     }
