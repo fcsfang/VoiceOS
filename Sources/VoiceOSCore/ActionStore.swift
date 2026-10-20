@@ -8,6 +8,7 @@ public struct ActionIntentMetadata: Codable, Sendable {
     public let intentType: String
     public let followupState: String
     public let uncertain: Bool
+    public var goalID: String? = nil
     public var expressionHistory: [ExpressionActionAdoption]? = nil
     public var expressionWithdrawal: RecordingExpressionActionDecision? = nil
     public var expressionWithdrawalVersionID: String? = nil

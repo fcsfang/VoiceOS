@@ -188,6 +188,14 @@ final class ControlCenter: ObservableObject {
     private var fullRecordingSourceID: String?
     let recordingInbox = RecordingInbox()
     private var recordingExpressionModel: ResponsesRecordingExpressionPort?
+    private var followupModel: ResponsesRecordingFollowupPort?
+    @Published var recordingFollowups: [RecordingFollowupReceipt] = []
+    @Published var followupValidity: [String: RecordingFollowupValidity] = [:]
+    @Published var followupBusy = false
+    @Published var followupStatus = ""
+    @Published var taskPresentation = 0
+    private var followupWorker: Task<Void, Never>?
+    private var followupTimer: Timer?
     private var recordingTitleModel: ResponsesRecordingTitlePort?
     private var recordingTitleWorker: Task<Void, Never>?
     private var recordingTitlesPending = false
@@ -367,12 +375,12 @@ final class ControlCenter: ObservableObject {
         if organize, records.first(where: { $0.id == id })?.state == "saved" {
             dictationBusy = false
             organizeSavedRecording(sourceID: id, transcribeFirst: true)
-        } else { scheduleProcessing() }
+        } else { scheduleProcessing(); resumeRecordingFollowups() }
     }
     func recoverDictation(_ record:SourceRecord) async {
         guard let store, !dictationBusy, !dictationActive else { return }
         dictationBusy = true; defer { dictationBusy = false }
-        do { try await store.sealDictation(sourceID:record.id); status = "可解码片段已保存；它是中断片段，不代表完整表达"; await refresh(); scheduleProcessing() }
+        do { try await store.sealDictation(sourceID:record.id); status = "可解码片段已保存；它是中断片段，不代表完整表达"; await refresh(); scheduleProcessing(); resumeRecordingFollowups() }
         catch { status = "片段尚不能完整解码，保留待核对"; await refresh() }
     }
     func startFeedbackDictation() async -> String? {
@@ -478,6 +486,8 @@ final class ControlCenter: ObservableObject {
                 var loaded: [String: [ModelAttemptRecord]] = [:]
                 for record in records { loaded[record.id] = try await store.modelAttempts(sourceID: record.id) }
                 attempts = loaded
+                recordingFollowups = try await store.recordingFollowups()
+                followupValidity = try await store.recordingFollowupValidities(recordingFollowups)
                 englishAttempts = try await store.englishFeedbackAttempts()
                 processingIntents = try await store.processingIntents()
                 recordingRequests = try await store.recordingProcessingRequests()
@@ -511,6 +521,7 @@ final class ControlCenter: ObservableObject {
             // transport and 600-second window. Its versioned identity prevents
             // queued non-streaming attempts from being silently replayed.
             let suite=try LocalTextModel.loadSuite(from:file,segmentRequestTimeout:600,segmentStreaming:true),port=suite.cognition
+            followupModel=suite.followup
             recordingExpressionModel=suite.recordingExpressions;recordingTitleModel=suite.recordingTitles
             discussionModel=suite.discussion;outcomeModel=suite.outcome
             englishModel=suite.english;associationModel=suite.association
@@ -527,6 +538,7 @@ final class ControlCenter: ObservableObject {
             // remains the single-owner gate for concurrent work.
             scheduleProcessing()
             queueRecordingTitles()
+            resumeRecordingFollowups()
         } catch { status = error.localizedDescription }
     }
     private func prepareRecordingContext(input:URL,media:RecordingMediaInfo,personalSourceID:String,personalTrack:Int,staging:URL,speech:LocalQwenSpeechPort) async throws {
@@ -572,7 +584,7 @@ final class ControlCenter: ObservableObject {
         fullRecordingWorker=Task {
             let refreshTask=watchFullRecording()
             var outcomes:[String:RecordingInboxOutcome]=[:]
-            defer { refreshTask.cancel();fullRecordingBusy=false;fullRecordingWorker=nil;fullRecordingLog=nil;fullRecordingSourceID=nil;finished(outcomes);scheduleProcessing() }
+            defer { refreshTask.cancel();fullRecordingBusy=false;fullRecordingWorker=nil;fullRecordingLog=nil;fullRecordingSourceID=nil;finished(outcomes);scheduleProcessing(); resumeRecordingFollowups() }
             do {
                 let root=await store.root
                 for entry in batch {
@@ -653,7 +665,7 @@ final class ControlCenter: ObservableObject {
         fullRecordingBusy=true;fullRecordingCount=nil
         fullRecordingWorker=Task {
             let refreshTask=watchFullRecording()
-            defer { refreshTask.cancel();fullRecordingBusy=false;fullRecordingWorker=nil;fullRecordingLog=nil;fullRecordingSourceID=nil;scheduleProcessing() }
+            defer { refreshTask.cancel();fullRecordingBusy=false;fullRecordingWorker=nil;fullRecordingLog=nil;fullRecordingSourceID=nil;scheduleProcessing(); resumeRecordingFollowups() }
             do {
                 setFullRecordingStatus("正在为已接收录音补充连续表达判断，复用完整转写…")
                 try await preparePendingCorrectedRecordingContexts()
@@ -710,6 +722,7 @@ final class ControlCenter: ObservableObject {
             try await FullRecordingOrganizer.organize(folders:folders,script:script,python:speech.pythonExecutable,configuration:configuration,log:log)
             _ = try await store.ingestOrganizedPodcast(at:base,allowReminderWrites:false,requireAPIReview:true)
             try await store.finishRecordingExpression(expression,using:grouping)
+            for id in expression.sourceIDs { _ = try await store.enqueueRecordingFollowup(sourceID: id) }
             fullRecordingOutput=base
             await refresh()
         }
@@ -823,7 +836,7 @@ final class ControlCenter: ObservableObject {
         fullRecordingWorker = Task {
             let refreshTask = watchFullRecording()
             var success = false
-            defer { refreshTask.cancel(); fullRecordingBusy = false; fullRecordingWorker = nil; fullRecordingLog = nil; fullRecordingSourceID = nil; finished?(success); scheduleProcessing() }
+            defer { refreshTask.cancel(); fullRecordingBusy = false; fullRecordingWorker = nil; fullRecordingLog = nil; fullRecordingSourceID = nil; finished?(success); scheduleProcessing(); resumeRecordingFollowups() }
             do {
                 let root = await store.root
                 let staging = root.appendingPathComponent("整理/导入-" + UUID().uuidString)
@@ -897,7 +910,7 @@ final class ControlCenter: ObservableObject {
         fullRecordingSourceID = sourceID
         fullRecordingWorker = Task {
             let refreshTask = watchFullRecording()
-            defer { refreshTask.cancel(); fullRecordingBusy = false; fullRecordingWorker = nil; fullRecordingLog = nil; fullRecordingSourceID = nil; scheduleProcessing() }
+            defer { refreshTask.cancel(); fullRecordingBusy = false; fullRecordingWorker = nil; fullRecordingLog = nil; fullRecordingSourceID = nil; scheduleProcessing(); resumeRecordingFollowups() }
             do {
                 let policy = try await store.sourcePolicy(sourceID: sourceID)
                 if policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: sourceID, expectedVersion: policy.version, localOnly: false) }
@@ -947,6 +960,7 @@ final class ControlCenter: ObservableObject {
         let count = try await store.ingestOrganizedPodcast(at: base, allowReminderWrites: reminderAccess?.enabled == true && reminderAccess?.title == "VoiceOS", requireAPIReview: true)
         fullRecordingCount = count
         fullRecordingOutput = base
+        _ = try await store.enqueueRecordingFollowup(sourceID: sourceID)
         await refresh()
         requestReminderRefresh()
         queueRecordingTitles()
@@ -997,6 +1011,77 @@ final class ControlCenter: ObservableObject {
         } catch { englishStatus = error.localizedDescription }
         englishAttempts = (try? await store.englishFeedbackAttempts()) ?? englishAttempts
         englishBusy = false
+    }
+    func processFollowup(sourceID: String, retry: Bool = false) async {
+        if followupBusy {
+            do { _ = try await store?.enqueueRecordingFollowup(sourceID: sourceID, retry: retry) }
+            catch { followupStatus = error.localizedDescription }
+            return
+        }
+        guard let store, let port = followupModel else { return }
+        followupBusy = true; followupStatus = "正在关联旧思想、调整目标下一步并延续英语反馈…"
+        defer { followupBusy = false; scheduleProcessing(); resumeRecordingFollowups() }
+        do {
+            let receipt = try await store.processRecordingFollowup(sourceID: sourceID, using: port, retry: retry)
+            followupStatus = receipt.state == "completed" ? "思想关联、目标建议与练习反馈已保存" : "这份跟进尚未完成，可重新生成"
+        } catch { followupStatus = "录音与任务已保留，自动跟进未完成：" + error.localizedDescription }
+        await refresh()
+    }
+    private func queueActionFollowups(_ actionIDs: Set<String>) async {
+        do { _ = try await store?.enqueueActionFollowups(actionIDs: actionIDs) }
+        catch { followupStatus = "任务已保存，目标跟进尚未排入：" + error.localizedDescription }
+        await refresh()
+        resumeRecordingFollowups()
+    }
+    private func resumeRecordingFollowups() {
+        guard initialized, followupModel != nil, followupWorker == nil, !fullRecordingBusy, !dictationActive else { return }
+        followupWorker = Task {
+            defer { followupWorker = nil }
+            var attempted = Set<String>()
+            while !Task.isCancelled, !fullRecordingBusy, !dictationActive, let store {
+                guard let next = (try? await store.pendingRecordingFollowups())?.first(where: { !attempted.contains($0.id) }) else { return }
+                attempted.insert(next.id)
+                await processFollowup(sourceID: next.sourceID)
+            }
+        }
+    }
+    func refreshFollowup(_ sourceID: String) {
+        Task {
+            do { _ = try await store?.enqueueRecordingFollowup(sourceID: sourceID, retry: true); await refresh(); resumeRecordingFollowups() }
+            catch { followupStatus = error.localizedDescription }
+        }
+    }
+    func showTask(_ id: String) {
+        focusedTaskID = id; taskPresentation += 1
+    }
+    func activateStep(_ step: GoalStep, plan: GoalPlan, receipt: RecordingFollowupReceipt) async {
+        if !step.existingTaskID.isEmpty {
+            guard let task = actionRecords.first(where: { $0.id == step.existingTaskID }),
+                  task.validity == "current", task.state == "open", task.title == step.title else {
+                followupStatus = "这个步骤已完成或变化，请更新目标建议"; return
+            }
+            showTask(task.id); return
+        }
+        guard let store, !savingAction else { return }
+        savingAction = true; defer { savingAction = false }
+        do {
+            let id = try await store.activateGoalStep(receiptID: receipt.id, goalID: plan.goalID, step: step)
+            await refresh()
+            if let task = actionRecords.first(where: { $0.id == id }), reminderAccess?.enabled == true, !reminderLinks.contains(where: { $0.actionID == id }) { await sendReminder(task) }
+            showTask(id)
+            followupStatus = "已选择这一步；后续进展会用于调整目标建议"
+            await queueActionFollowups([id])
+        } catch { followupStatus = error.localizedDescription }
+    }
+    func playFollowupQuote(sourceID: String, quote: String) async {
+        guard let record = records.first(where: { $0.id == sourceID }), let text = record.transcript, let range = text.range(of: quote) else { return }
+        let start = text[..<range.lowerBound].unicodeScalars.count
+        let end = start + quote.unicodeScalars.count
+        let spans = record.spans.filter { $0.textEnd > start && $0.textStart < end }
+        if let begin = spans.first?.startMS, let finish = spans.last?.endMS { _ = await playSpan(record, milliseconds: begin, endMilliseconds: finish) }
+        else if !spans.isEmpty, ["audio","video"].contains(record.kind) {
+            if await playSpan(record,milliseconds:0) { status="更正稿未精确定位，正在回听完整录音" }
+        }
     }
     func understand(_ record: SourceRecord) {
         guard let store, let port = textModel, understandingWorker == nil, !discussionExtracting, !record.localOnly,
@@ -1067,6 +1152,7 @@ final class ControlCenter: ObservableObject {
             status = result.reused ? "沿用已有理解 · 核对关联处理，不重复生成候选或任务" : "理解完成 · \(result.claimIDs.count) 条候选待核对"
             await refresh(); requestReminderRefresh()
             await associateUnderstoodExpression(sourceID)
+            await processFollowup(sourceID: sourceID)
         } else {
             let label: String
             switch result.state {
@@ -1165,7 +1251,7 @@ final class ControlCenter: ObservableObject {
                 } else {
                     pendingIntent = false
                 }
-                if pendingTranscription || pendingIntent { scheduleProcessing() }
+                if pendingTranscription || pendingIntent { scheduleProcessing(); resumeRecordingFollowups() }
             }
         }
     }
@@ -1194,6 +1280,10 @@ final class ControlCenter: ObservableObject {
             do { try await store.reconcileRecordingProcessingRequests(cognition: cognition.configuration, association: association.configuration,segmentExtraction:segmentExtractionModel?.configuration,segmentAggregation:segmentAggregationModel?.configuration) }
             catch { status = error.localizedDescription }
         }
+        if let cognition = textModel, let association = associationModel {
+            do { try await store.enqueueActionFeedbackUnderstanding(cognition: cognition.configuration, association: association.configuration) }
+            catch { status = "结果原话已保留，知识整理尚未排入：" + error.localizedDescription }
+        }
         await processExpressionQueue(store)
         if let extraction=segmentExtractionModel,let aggregation=segmentAggregationModel {
             do {
@@ -1207,6 +1297,7 @@ final class ControlCenter: ObservableObject {
             } catch { status=error.localizedDescription }
         }
         await refresh()
+        resumeRecordingFollowups()
     }
     private func processExpressionQueue(_ store: VoiceOSStore) async {
         guard let cognition = textModel else { return }
@@ -1438,9 +1529,10 @@ final class ControlCenter: ObservableObject {
     private func installReminderRefresh() {
         guard reminderObservers.isEmpty else { return }
         reminderObservers.append(reminders.observeChanges { [weak self] in self?.requestReminderRefresh() })
-        reminderObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh() } })
-        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh() } }
+        reminderObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh(); self?.resumeRecordingFollowups() } })
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh(); self?.resumeRecordingFollowups() } }
         reminderTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh() } }
+        followupTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in self?.resumeRecordingFollowups() } }
     }
     private func requestReminderRefresh() {
         guard reminderAccess?.enabled == true else { return }
@@ -1451,6 +1543,7 @@ final class ControlCenter: ObservableObject {
         guard let store, let access = reminderAccess, access.enabled else { return }
         if remindersBusy { return }
         guard reminders.isAuthorized else { reminderSyncStatus = "系统权限不可用 · 自动回读暂停"; return }
+        let before = Dictionary(uniqueKeysWithValues: actionRecords.filter { $0.kind == "task" }.map { ($0.id, String($0.version) + ":" + $0.state) })
         remindersBusy = true
         defer { remindersBusy = false }
         do {
@@ -1461,6 +1554,8 @@ final class ControlCenter: ObservableObject {
             if reminderAccess?.version == access.version { reminderSyncStatus = "自动同步未全部完成 · 已保存各任务状态，不自动重建" }
         }
         await refresh()
+        let changed = Set(actionRecords.filter { $0.kind == "task" && before[$0.id] != String($0.version) + ":" + $0.state }.map(\.id))
+        if !changed.isEmpty { await queueActionFollowups(changed) }
     }
     func sendReminder(_ action: ActionRecord) async {
         guard let store, let access = reminderAccess, access.enabled, !remindersBusy, !reminderCalendarID.isEmpty else { return }
@@ -1641,12 +1736,23 @@ final class ControlCenter: ObservableObject {
         } catch { status = error.localizedDescription }
         await refresh()
     }
-    func saveFeedback(_ action: ActionRecord, kind: ActionFeedbackKind, text: String, recordingSourceID: String? = nil, commandID: String) async -> Bool {
+    func saveFeedback(_ action: ActionRecord, kind: ActionFeedbackKind, text: String, recordingSourceID: String? = nil, commandID: String, allowCloud: Bool = true) async -> Bool {
         guard let store, !savingFeedback else { return false }
         savingFeedback = true; defer { savingFeedback = false }
         do {
             selected = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: kind, text: text, recordingSourceID: recordingSourceID, commandID: commandID)
-            await refresh(); status = "结果或反思已保存并关联原行动 · 未改变完成或证据状态"
+            if allowCloud, let id = selected {
+                let policy = try await store.sourcePolicy(sourceID: id)
+                if policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: false) }
+            }
+            if allowCloud {
+                if let cognition = textModel, let association = associationModel {
+                    do { try await store.enqueueActionFeedbackUnderstanding(cognition: cognition.configuration, association: association.configuration) }
+                    catch { followupStatus = "结果已保存，知识整理尚未排入：" + error.localizedDescription }
+                }
+            }
+            await refresh(); scheduleProcessing()
+            status = allowCloud ? "结果原话已关联原行动，知识与思想跟进将在后台整理" : "结果原话已关联原行动 · 仅本地保存"
             return true
         } catch { status = error.localizedDescription; await refresh(); return false }
     }
@@ -1668,7 +1774,7 @@ final class ControlCenter: ObservableObject {
                 status = "行动状态已保存"
             }
         } catch { status = error.localizedDescription }
-        await refresh()
+        await refresh(); await queueActionFollowups([action.id])
     }
     func reviewHistory(_ claim: CandidateClaim) async {
         do { claimHistory = try await store?.claimReviewHistory(claimID: claim.id) ?? [] }
@@ -1679,7 +1785,7 @@ final class ControlCenter: ObservableObject {
         catch { status = error.localizedDescription; await refresh() }
     }
     func retry(_ record: SourceRecord) async {
-        do { try await store?.retryTranscription(sourceID: record.id); await refresh(); scheduleProcessing() }
+        do { try await store?.retryTranscription(sourceID: record.id); await refresh(); scheduleProcessing(); resumeRecordingFollowups() }
         catch { status = error.localizedDescription }
     }
 }
@@ -1807,6 +1913,7 @@ struct CenterView: View {
     @State private var searching = false
     @State private var showingQuietFeedback = false
     @State private var showingDiscussion = false
+    @State private var showingFollowups = false
     @State private var showingEnglishPractice = false
     @State private var showingTasks = false
     @State private var showingRecordingInbox = false
@@ -1955,6 +2062,9 @@ struct CenterView: View {
                                 if let error=batch.error { Text(error).font(.caption).foregroundStyle(.secondary) }
                             }
 
+                            if let followup = model.recordingFollowups.last(where: { $0.sourceID == record.id }) {
+                                RecordingFollowupSummary(receipt: followup, model: model) { showingFollowups = true }
+                            }
                             if record.localOnly { Text("允许这份资料的文本用于云端后，可以理解文字。").font(.caption).foregroundStyle(.secondary) }
                             if let attempts = model.attempts[record.id], !attempts.isEmpty {
                                 DisclosureGroup("理解与候选整理记录（\(attempts.count)）") {
@@ -2238,6 +2348,7 @@ struct CenterView: View {
             Button("讨论记录",systemImage:"bubble.left.and.bubble.right") { Task { await model.refreshDiscussion(); showingDiscussion = true } }.disabled(!model.initialized)
             Button("静默回顾", systemImage:"text.bubble") { model.quietAssociationSourceID = nil; showingQuietFeedback = true }.disabled(!model.initialized)
             Button("查找历史文字", systemImage: "text.magnifyingglass") { searching = true }.disabled(!model.initialized)
+            Button("思想与下一步", systemImage: "sparkles") { showingFollowups = true }.disabled(!model.initialized)
             Button("英文表达反馈", systemImage: "character.book.closed") { showingEnglishPractice = true }.disabled(!model.initialized)
             Button("连接提醒事项…") { Task { await model.connectReminders() } }.disabled(!model.initialized || model.remindersBusy)
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
@@ -2277,6 +2388,8 @@ struct CenterView: View {
         .sheet(isPresented: $showingDiscussion) { DiscussionView(model:model) { showingDiscussion = false } }
         .sheet(isPresented: $searching) { HistorySearchView(model:model) { searching = false } }
         .sheet(isPresented: $showingQuietFeedback) { CognitiveFeedbackView(model:model) { showingQuietFeedback = false } }
+        .sheet(isPresented: $showingFollowups) { RecordingFollowupView(model: model) { showingFollowups = false } }
+        .onChange(of: model.taskPresentation) { _, _ in showingFollowups = false; showingTasks = true }
         .sheet(isPresented: $showingEnglishPractice) { EnglishPracticeView(model: model) { showingEnglishPractice = false } }
         .sheet(isPresented: $showingRestore) { PackageRestoreView { showingRestore = false } }
         .sheet(item: $feedbackAction) { action in ActionFeedbackView(action: action, model: model) { feedbackAction = nil } }
@@ -2586,6 +2699,7 @@ struct ActionFeedbackView: View {
     @State private var commandID = UUID().uuidString
     @State private var recordingID: String?
     @State private var appliedRecording = false
+    @State private var allowFollowup = true
     private var recording: SourceRecord? { model.records.first { $0.id == recordingID } }
     private var waitingForVoice: Bool { recordingID != nil && !appliedRecording && (model.dictationActive || model.dictationBusy || ["queued", "running"].contains(recording?.jobState ?? "")) }
     private func applyTranscription() {
@@ -2614,7 +2728,8 @@ struct ActionFeedbackView: View {
                 }
             }
             TextEditor(text: $text).frame(minHeight: 180).border(.secondary.opacity(0.2)).disabled(saving || waitingForVoice)
-            Text("这是可选记录。原文先仅本地保存，保留与原行动的关联；不会自动改变任务状态、认可观点或标记已验证。").font(.caption).foregroundStyle(.secondary)
+            Text("这是可选记录，原话与原行动保持关联。开启下方选项后，应用会自动核对思想变化与目标下一步；不会把反馈当成事实已验证。").font(.caption).foregroundStyle(.secondary)
+            Toggle("将反馈文字用于整理知识、更新思想与目标", isOn: $allowFollowup).font(.caption).disabled(saving)
             if !errorText.isEmpty { Text(errorText).font(.callout).foregroundStyle(.red) }
             HStack {
                 Button("取消", action:dismiss).disabled(saving || (recordingID != nil && (model.dictationActive || model.dictationBusy)))
@@ -2623,7 +2738,7 @@ struct ActionFeedbackView: View {
                     saving = true; errorText = ""
                     Task {
                         let savedRecording = recording?.state == "saved" ? recordingID : nil
-                        if await model.saveFeedback(action,kind:ActionFeedbackKind(rawValue:kind)!,text:text,recordingSourceID:savedRecording,commandID:commandID) { dismiss() }
+                        if await model.saveFeedback(action,kind:ActionFeedbackKind(rawValue:kind)!,text:text,recordingSourceID:savedRecording,commandID:commandID,allowCloud:allowFollowup) { dismiss() }
                         else { errorText = model.status }
                         saving = false
                     }

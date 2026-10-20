@@ -40,6 +40,7 @@ public actor VoiceOSStore {
         try db.execute("UPDATE discussion_attempts SET state='unknown',error='进程退出前讨论结果未登记；不自动重发' WHERE state='reserved'")
         try db.execute("UPDATE english_feedback_attempts SET state='unknown',error='进程退出前英文反馈未登记；不自动重发' WHERE state='reserved'")
         try db.execute("UPDATE expression_association_attempts SET state='unknown',error='进程退出前关联结果未登记；不自动重发' WHERE state='reserved'")
+        try recoverRecordingFollowups()
         for row in try db.query("SELECT * FROM sources ORDER BY created_at") {
             let id = row["id"]!
             if row["input_fingerprint"] == "microphone-v1:"+id, row["expected_bytes"] == "0" {
