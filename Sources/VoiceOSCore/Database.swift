@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -97,6 +97,194 @@ final class Database {
                 """)
                 try backfillTranscriptVersions()
                 try execute("PRAGMA user_version=3")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "3" {
+            try transaction {
+                try execute("""
+                CREATE TABLE contexts (
+                  id TEXT PRIMARY KEY, command_id TEXT NOT NULL UNIQUE, snapshot_json TEXT NOT NULL,
+                  digest TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('current','stale')), created_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE context_inputs (
+                  id TEXT PRIMARY KEY, context_id TEXT NOT NULL REFERENCES contexts(id),
+                  source_id TEXT NOT NULL REFERENCES sources(id), transcript_version_id TEXT NOT NULL REFERENCES transcript_versions(id),
+                  UNIQUE(context_id,source_id)
+                )
+                """)
+                try execute("""
+                CREATE TABLE model_attempts (
+                  id TEXT PRIMARY KEY, context_id TEXT NOT NULL REFERENCES contexts(id), provider TEXT NOT NULL CHECK(provider='local_fixture'),
+                  model TEXT NOT NULL, prompt_version TEXT NOT NULL, schema_version TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','completed','unknown','rejected')),
+                  result_digest TEXT, usage_json TEXT, error TEXT, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE claims (
+                  id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL REFERENCES model_attempts(id), ordinal INTEGER NOT NULL CHECK(ordinal>=0), statement TEXT NOT NULL,
+                  ownership TEXT NOT NULL CHECK(ownership IN ('external','ai_candidate','unresolved')),
+                  evidence_state TEXT NOT NULL CHECK(evidence_state='unverified'),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')), refs_json TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(attempt_id,ordinal)
+                )
+                """)
+                try execute("PRAGMA user_version=4")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "4" {
+            try transaction {
+                try execute("ALTER TABLE sources ADD COLUMN policy_version INTEGER NOT NULL DEFAULT 1")
+                try execute("ALTER TABLE context_inputs ADD COLUMN policy_version INTEGER NOT NULL DEFAULT 1")
+                try execute("ALTER TABLE contexts ADD COLUMN destination TEXT NOT NULL DEFAULT 'local' CHECK(destination IN ('local','cloud'))")
+                try execute("""
+                CREATE TABLE source_policy_revisions (
+                  id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id), from_version INTEGER NOT NULL,
+                  to_version INTEGER NOT NULL, from_local_only INTEGER NOT NULL, to_local_only INTEGER NOT NULL,
+                  command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, actor TEXT NOT NULL CHECK(actor='user'),
+                  created_at TEXT NOT NULL, UNIQUE(source_id,to_version)
+                )
+                """)
+                // Provider names are metadata; only an injected port can perform work.
+                try execute("ALTER TABLE model_attempts RENAME TO old_model_attempts")
+                try execute("""
+                CREATE TABLE model_attempts (
+                  id TEXT PRIMARY KEY, context_id TEXT NOT NULL REFERENCES contexts(id), provider TEXT NOT NULL,
+                  model TEXT NOT NULL, prompt_version TEXT NOT NULL, schema_version TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','completed','unknown','rejected')),
+                  result_digest TEXT, usage_json TEXT, error TEXT, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("INSERT INTO model_attempts SELECT * FROM old_model_attempts")
+                // Rebuild dependent table so its FK points at the new attempt table.
+                try execute("ALTER TABLE claims RENAME TO old_claims")
+                try execute("""
+                CREATE TABLE claims (
+                  id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL REFERENCES model_attempts(id), ordinal INTEGER NOT NULL CHECK(ordinal>=0), statement TEXT NOT NULL,
+                  ownership TEXT NOT NULL CHECK(ownership IN ('external','ai_candidate','unresolved')),
+                  evidence_state TEXT NOT NULL CHECK(evidence_state='unverified'),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')), refs_json TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(attempt_id,ordinal)
+                )
+                """)
+                try execute("INSERT INTO claims SELECT * FROM old_claims")
+                try execute("DROP TABLE old_claims")
+                try execute("DROP TABLE old_model_attempts")
+                try execute("PRAGMA user_version=5")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "5" {
+            try transaction {
+                try execute("ALTER TABLE claims ADD COLUMN review_version INTEGER NOT NULL DEFAULT 0 CHECK(review_version>=0)")
+                try execute("""
+                CREATE TABLE claim_reviews (
+                  id TEXT PRIMARY KEY, claim_id TEXT NOT NULL REFERENCES claims(id), version INTEGER NOT NULL CHECK(version>0),
+                  from_version INTEGER NOT NULL CHECK(from_version>=0), decision TEXT NOT NULL CHECK(decision IN ('pending','endorsed','rejected')),
+                  statement TEXT NOT NULL, ownership TEXT NOT NULL CHECK(ownership IN ('external','ai_candidate','unresolved')),
+                  reason TEXT NOT NULL CHECK(reason IN ('explicit_endorsement','explicit_rejection','correction')), note TEXT NOT NULL,
+                  actor TEXT NOT NULL CHECK(actor='user'), command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL,
+                  UNIQUE(claim_id,version)
+                )
+                """)
+                try execute("PRAGMA user_version=6")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "6" {
+            try transaction {
+                try execute("""
+                CREATE TABLE actions (
+                  id TEXT PRIMARY KEY, claim_id TEXT NOT NULL REFERENCES claims(id), claim_review_version INTEGER NOT NULL CHECK(claim_review_version>=0),
+                  title TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('task','opportunity','ai_suggestion')),
+                  intent_actor TEXT NOT NULL CHECK(intent_actor IN ('user','ai')), note TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('open','completed','dismissed')), validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),
+                  version INTEGER NOT NULL DEFAULT 1 CHECK(version>=1), command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL,
+                  CHECK((kind='ai_suggestion' AND intent_actor='ai') OR (kind!='ai_suggestion' AND intent_actor='user')),
+                  CHECK(state!='completed' OR kind='task')
+                )
+                """)
+                try execute("""
+                CREATE TABLE action_revisions (
+                  id TEXT PRIMARY KEY, action_id TEXT NOT NULL REFERENCES actions(id), version INTEGER NOT NULL CHECK(version>1), from_version INTEGER NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('open','completed','dismissed')), note TEXT NOT NULL, actor TEXT NOT NULL CHECK(actor='user'),
+                  command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(action_id,version)
+                )
+                """)
+                try execute("PRAGMA user_version=7")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "7" {
+            try transaction {
+                try execute("ALTER TABLE action_revisions RENAME TO old_action_revisions")
+                try execute("""
+                CREATE TABLE action_revisions (
+                  id TEXT PRIMARY KEY, action_id TEXT NOT NULL REFERENCES actions(id), version INTEGER NOT NULL CHECK(version>1), from_version INTEGER NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('open','completed','dismissed')), note TEXT NOT NULL, actor TEXT NOT NULL CHECK(actor IN ('user','external')),
+                  command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(action_id,version)
+                )
+                """)
+                try execute("INSERT INTO action_revisions SELECT * FROM old_action_revisions")
+                try execute("DROP TABLE old_action_revisions")
+                try execute("""
+                CREATE TABLE reminder_links (
+                  id TEXT PRIMARY KEY, action_id TEXT NOT NULL UNIQUE REFERENCES actions(id), action_version INTEGER NOT NULL CHECK(action_version>=1),
+                  calendar_id TEXT NOT NULL, marker TEXT NOT NULL UNIQUE, desired_title TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','unknown','linked','missing','conflict')),
+                  external_id TEXT, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE reminder_observations (
+                  id TEXT PRIMARY KEY, link_id TEXT NOT NULL REFERENCES reminder_links(id), external_id TEXT NOT NULL,
+                  title TEXT NOT NULL, completed INTEGER NOT NULL CHECK(completed IN (0,1)), marker_valid INTEGER NOT NULL CHECK(marker_valid IN (0,1)),
+                  feedback_revision_id TEXT REFERENCES action_revisions(id), created_at TEXT NOT NULL, sequence INTEGER NOT NULL CHECK(sequence>=1), UNIQUE(link_id,sequence)
+                )
+                """)
+                try execute("PRAGMA user_version=8")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "8" {
+            try transaction {
+                try execute("ALTER TABLE reminder_links ADD COLUMN last_checked_at TEXT")
+                // Device-local authorization history. Deliberately not in portable packages.
+                try execute("""
+                CREATE TABLE reminder_access (
+                  id TEXT PRIMARY KEY, version INTEGER NOT NULL UNIQUE CHECK(version>=1), calendar_id TEXT NOT NULL,
+                  title TEXT NOT NULL, enabled INTEGER NOT NULL CHECK(enabled IN (0,1)), created_at TEXT NOT NULL
+                )
+                """)
+                try execute("PRAGMA user_version=9")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "9" {
+            try execute("PRAGMA foreign_keys=OFF")
+            do {
+                try transaction {
+                    for table in ["claims", "claim_reviews"] {
+                        guard let original = try query("SELECT sql FROM sqlite_master WHERE name=?", [table]).first?["sql"] else { throw VoiceOSError("认知表缺失，不能升级") }
+                        let revised = original.replacingOccurrences(of: "CREATE TABLE \(table)", with: "CREATE TABLE \(table)_next").replacingOccurrences(of: "'external','ai_candidate','unresolved'", with: "'external','ai_candidate','unresolved','user_tentative'")
+                        try execute(revised)
+                        try execute("INSERT INTO \(table)_next SELECT * FROM \(table)")
+                        try execute("DROP TABLE \(table)")
+                        try execute("ALTER TABLE \(table)_next RENAME TO \(table)")
+                    }
+                    guard try query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("认知升级引用校验失败") }
+                    try execute("ALTER TABLE claims ADD COLUMN action_json TEXT")
+                    try execute("ALTER TABLE actions ADD COLUMN auto_send INTEGER NOT NULL DEFAULT 0 CHECK(auto_send IN (0,1))")
+                    try execute("PRAGMA user_version=10")
+                }
+            } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
+            try execute("PRAGMA foreign_keys=ON")
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "10" {
+            try transaction {
+                try execute("ALTER TABLE sources ADD COLUMN feedback_json TEXT")
+                try execute("""
+                CREATE TABLE action_feedback (
+                  id TEXT PRIMARY KEY, action_id TEXT NOT NULL REFERENCES actions(id), action_version INTEGER NOT NULL CHECK(action_version>=1),
+                  source_id TEXT NOT NULL UNIQUE REFERENCES sources(id), kind TEXT NOT NULL CHECK(kind IN ('outcome','reflection')), created_at TEXT NOT NULL, sequence INTEGER NOT NULL CHECK(sequence>=1), UNIQUE(action_id,sequence)
+                )
+                """)
+                try execute("PRAGMA user_version=11")
             }
         }
     }
