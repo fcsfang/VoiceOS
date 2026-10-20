@@ -70,7 +70,9 @@ extension VoiceOSStore {
             guard let prior=old[decision.oldID],["same","withdraw","history","uncertain"].contains(decision.relation),!decision.quote.isEmpty,
                   sources[decision.sourceID]?.origin == "user",sources[decision.sourceID]?.speaker == "user",sources[decision.sourceID]?.text.contains(decision.quote) == true else { throw VoiceOSError("补录行动的接续缺少有效原话依据") }
             if decision.relation == "same" {
-                guard let next=new[decision.newID],next.kind == prior.kind,adopted.insert(next.id).inserted else { throw VoiceOSError("补录行动映射重复或身份不一致") }
+                guard let next=new[decision.newID] else { throw VoiceOSError("补录行动 \(prior.id) 的 newID=\(decision.newID) 不在本次新行动中") }
+                guard next.kind == prior.kind else { throw VoiceOSError("补录行动 \(prior.id) 的 kind=\(prior.kind)，不能沿用 newID=\(next.id) 的 kind=\(next.kind)；无法同类接续时用 uncertain") }
+                guard adopted.insert(next.id).inserted else { throw VoiceOSError("补录行动 newID=\(next.id) 被多个旧行动沿用；每个新行动只能接回一个旧身份，其余无法确定的旧行动用 uncertain") }
             } else {
                 guard decision.newID.isEmpty,decision.relation != "history" || prior.state == "completed",decision.relation != "withdraw" || prior.state != "completed" else { throw VoiceOSError("补录不能撤销真实完成记录") }
             }
