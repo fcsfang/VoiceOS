@@ -95,6 +95,35 @@ public struct RecordingFollowupResult: Codable, Sendable {
     public let goalPlans: [GoalPlan]
     public let english: PracticeFollowup
 }
+public enum RecordingFollowupStage: String, Codable, Sendable {
+    case selectHistory, generateFollowup
+}
+public struct RecordingFollowupRejectedResponse: Codable, Sendable {
+    public let stage: RecordingFollowupStage
+    public let wireAttempt: Int
+    public let responseID: String?
+    public let path: String
+    public let diagnostic: String
+    public let rawResponse: Data
+}
+public struct RecordingFollowupGeneration: Sendable {
+    public let result: RecordingFollowupResult
+    public let responseIDs: [String]
+    public let rejectedResponses: [RecordingFollowupRejectedResponse]
+    public init(result: RecordingFollowupResult, responseIDs: [String], rejectedResponses: [RecordingFollowupRejectedResponse] = []) {
+        self.result = result; self.responseIDs = responseIDs; self.rejectedResponses = rejectedResponses
+    }
+}
+struct RecordingFollowupGenerationFailure: LocalizedError {
+    let underlying: Error
+    let stage: RecordingFollowupStage?
+    let responseIDs: [String]
+    let rejectedResponses: [RecordingFollowupRejectedResponse]
+    var errorDescription: String? {
+        let stageName = stage == .selectHistory ? "相关历史选择" : "自动跟进"
+        return stageName + "失败：" + underlying.localizedDescription
+    }
+}
 public struct RecordingFollowupReceipt: Codable, Sendable, Identifiable {
     public let id: String
     public let inputDigest: String
@@ -106,6 +135,7 @@ public struct RecordingFollowupReceipt: Codable, Sendable, Identifiable {
     public let createdAt: String
     public var retryCount: Int? = nil
     public var retryAt: String? = nil
+    public var rejectedResponses: [RecordingFollowupRejectedResponse]? = nil
     public var sourceID: String { input.current.sources[0].sourceID }
 }
 public struct RecordingFollowupValidity: Sendable {
@@ -121,7 +151,7 @@ public struct RecordingFollowupTransientError: LocalizedError {
     public var errorDescription: String? { "自动跟进模型 HTTP \(status)，服务暂时不可用，原件已保存" }
 }
 public protocol RecordingFollowupPort: Sendable {
-    func generate(_ input: RecordingFollowupInput) async throws -> (RecordingFollowupResult, [String])
+    func generate(_ input: RecordingFollowupInput) async throws -> RecordingFollowupGeneration
 }
 
 extension VoiceOSStore {
@@ -401,10 +431,14 @@ extension VoiceOSStore {
         }
         let dateFormatter = ISO8601DateFormatter(); dateFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let matching = queued?.inputDigest == digest ? queued : nil
-        var receipt = RecordingFollowupReceipt(id: matching?.id ?? UUID().uuidString, inputDigest: digest, input: input, state: "running", result: nil, responseIDs: [], error: nil, createdAt: matching?.createdAt ?? dateFormatter.string(from: Date()), retryCount: matching?.retryCount, retryAt: nil)
+        var receipt = RecordingFollowupReceipt(id: matching?.id ?? UUID().uuidString, inputDigest: digest, input: input, state: "running", result: nil, responseIDs: [], error: nil, createdAt: matching?.createdAt ?? dateFormatter.string(from: Date()), retryCount: matching?.retryCount, retryAt: nil, rejectedResponses: matching?.rejectedResponses)
         try saveRecordingFollowup(receipt)
         do {
-            let (result, ids) = try await port.generate(input)
+            let generated = try await port.generate(input)
+            receipt.responseIDs = generated.responseIDs
+            let rejections = (receipt.rejectedResponses ?? []) + generated.rejectedResponses
+            receipt.rejectedResponses = rejections.isEmpty ? nil : rejections
+            let result = generated.result, ids = generated.responseIDs
             try Task.checkCancellation()
             guard !ids.isEmpty, ids.allSatisfy({ !$0.isEmpty }) else { throw VoiceOSError("跟进结果缺少模型回执") }
             try Self.validateFollowupResult(result, input: input)
@@ -415,6 +449,11 @@ extension VoiceOSStore {
             try saveRecordingFollowup(receipt)
             return receipt
         } catch {
+            if let failure = error as? RecordingFollowupGenerationFailure {
+                receipt.responseIDs = failure.responseIDs
+                let rejections = (receipt.rejectedResponses ?? []) + failure.rejectedResponses
+                receipt.rejectedResponses = rejections.isEmpty ? nil : rejections
+            }
             receipt.state = "failed"; receipt.error = error.localizedDescription
             if Self.isTransientFollowupError(error), (receipt.retryCount ?? 0) < 2 {
                 let nextCount = (receipt.retryCount ?? 0) + 1
@@ -425,7 +464,8 @@ extension VoiceOSStore {
             throw error
         }
     }
-    private static func isTransientFollowupError(_ error: Error) -> Bool {
+    private static func isTransientFollowupError(_ failure: Error) -> Bool {
+        let error = (failure as? RecordingFollowupGenerationFailure)?.underlying ?? failure
         if let error = error as? RecordingFollowupTransientError { return error.status == 429 || (500...599).contains(error.status) }
         guard let error = error as? URLError else { return false }
         switch error.code {

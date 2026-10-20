@@ -266,12 +266,25 @@ private struct FlowEnglish: EnglishPracticeModelPort {
     let response: EnglishPracticeResponse
     func generate(_ request: EnglishPracticeRequest) async throws -> EnglishPracticeResponse { response }
 }
+private actor FlowFollowupTransport: ModelHTTPTransport {
+    let replies: [ModelHTTPReply]
+    let cancelAt: Int?
+    var requests: [Data] = []
+    init(_ replies: [ModelHTTPReply], cancelAt: Int? = nil) { self.replies = replies; self.cancelAt = cancelAt }
+    func send(_ request: URLRequest) async throws -> ModelHTTPReply {
+        let index = requests.count
+        requests.append(request.httpBody ?? Data())
+        guard index < replies.count else { throw VoiceOSError("Unexpected follow-up send") }
+        if requests.count == cancelAt { withUnsafeCurrentTask { $0?.cancel() } }
+        return replies[index]
+    }
+}
 private actor FlowFollowup: RecordingFollowupPort {
     var calls = 0
     var remainingFailures = 0
     var duringGeneration: (@Sendable () async throws -> Void)?
     init(failures: Int = 0, duringGeneration: (@Sendable () async throws -> Void)? = nil) { self.remainingFailures = failures; self.duringGeneration = duringGeneration }
-    func generate(_ input: RecordingFollowupInput) async throws -> (RecordingFollowupResult, [String]) {
+    func generate(_ input: RecordingFollowupInput) async throws -> RecordingFollowupGeneration {
         calls += 1
         if remainingFailures > 0 { remainingFailures -= 1; throw URLError(.timedOut) }
         if let duringGeneration { self.duringGeneration = nil; try await duringGeneration() }
@@ -288,7 +301,7 @@ private actor FlowFollowup: RecordingFollowupPort {
         let oldPractice = input.practices.first { $0.text.contains("Today I explain") }
         let comparison: [PracticeComparison] = oldPractice.map { [.init(priorSourceID: $0.sourceID, priorQuote: $0.text, currentQuote: text, change: improved ? "improved" : "repeated", explanation: "比较同一技术主题的主谓一致表达")] } ?? []
         let english = PracticeFollowup(isPractice: true, evidenceQuote: text, suggestions: [.init(original: text, suggested: "The agent has a memory. It helps us find facts.", explanation: "注意单数主语的动词形式", possibleTranscriptIssue: false)], comparisons: comparison, nextExercise: "再用一分钟解释检索质量，练习 has 和 helps")
-        return (.init(thoughtUpdates: updates, goalPlans: plans, english: english), ["fixture-generation", "fixture-review"])
+        return .init(result: .init(thoughtUpdates: updates, goalPlans: plans, english: english), responseIDs: ["fixture-generation", "fixture-review"])
     }
 }
 private extension VoiceOSStore {
@@ -1681,6 +1694,110 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(retried.id, failed.id)
         XCTAssertEqual(retried.state, "completed")
         XCTAssertNil(retried.retryAt)
+        let nativeInput = try await store.prepareRecordingFollowup(sourceID: currentID)
+        let nativeResult = try await FlowFollowup().generate(nativeInput).result
+        func completed(_ id: String, _ value: Any) throws -> ModelHTTPReply {
+            let text = String(decoding: try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), as: UTF8.self)
+            return .init(status: 200, body: try JSONSerialization.data(withJSONObject: ["id": id, "status": "completed",
+                "output": [["type": "message", "role": "assistant", "status": "completed", "content": [["type": "output_text", "text": text]]]]], options: [.sortedKeys]))
+        }
+        func nativePort(_ transport: FlowFollowupTransport) throws -> ResponsesRecordingFollowupPort {
+            try ResponsesRecordingFollowupPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture-model", transport: transport)
+        }
+        let selection: [String: Any] = ["thoughtIDs": nativeInput.thoughts.map(\.id), "goalIDs": nativeInput.goals.map(\.id),
+            "taskIDs": nativeInput.tasks.map(\.id), "practiceSourceIDs": nativeInput.practices.map(\.sourceID)]
+        let wrongSelection = try completed("rejected-selection", ["thoughts": [], "goals": [], "tasks": [], "practices": []])
+        let validSelection = try completed("accepted-selection", selection)
+        let resultObject = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(nativeResult)) as? [String: Any])
+        var incompleteResult = resultObject; incompleteResult.removeValue(forKey: "english")
+        let wrongResult = try completed("rejected-result", incompleteResult)
+        let validResult = try completed("accepted-result", resultObject)
+        let recoveringTransport = FlowFollowupTransport([wrongSelection, validSelection, wrongResult, validResult])
+        let native = try await store.processRecordingFollowup(sourceID: currentID, using: nativePort(recoveringTransport), retry: true)
+        XCTAssertEqual(native.responseIDs, ["accepted-selection", "accepted-result"])
+        XCTAssertEqual(native.rejectedResponses?.map(\.rawResponse), [wrongSelection.body, wrongResult.body])
+        XCTAssertEqual(native.rejectedResponses?.map(\.stage), [.selectHistory, .generateFollowup])
+        XCTAssertEqual(native.rejectedResponses?.map(\.wireAttempt), [1, 1])
+        XCTAssertEqual(native.rejectedResponses?.map(\.responseID), ["rejected-selection", "rejected-result"])
+        XCTAssertEqual(native.rejectedResponses?.first?.path, "$.goalIDs")
+        XCTAssertEqual(native.rejectedResponses?.last?.path, "$.english")
+        let nativeRequests = await recoveringTransport.requests
+        XCTAssertEqual(nativeRequests.count, 4)
+        for data in nativeRequests {
+            let request = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let instructions = try XCTUnwrap(request["instructions"] as? String)
+            let format = try XCTUnwrap((request["text"] as? [String: Any])?["format"] as? [String: Any])
+            let exactSchema = String(decoding: try JSONSerialization.data(withJSONObject: format["schema"]!, options: [.sortedKeys]), as: UTF8.self)
+            XCTAssertTrue(instructions.contains(exactSchema))
+            XCTAssertEqual((request["reasoning"] as? [String: String])?["effort"], "high")
+            XCTAssertEqual(request["truncation"] as? String, "disabled")
+            let messages = try XCTUnwrap(request["input"] as? [[String: Any]])
+            let content = try XCTUnwrap(messages.first?["content"] as? String)
+            let payload = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(content.utf8)) as? [String: Any])
+            let current = ((payload["recording"] as? [String: Any])?["current"] ?? payload["current"]) as? [String: Any]
+            let sources = current?["sources"] as? [[String: Any]]
+            XCTAssertEqual(sources?.first?["text"] as? String, nativeInput.current.sources[0].text)
+        }
+        var invalidSemantic = resultObject
+        var invalidEnglish = try XCTUnwrap(invalidSemantic["english"] as? [String: Any])
+        invalidEnglish["evidenceQuote"] = "A quotation absent from this recording."
+        invalidSemantic["english"] = invalidEnglish
+        let semanticReply = try completed("rejected-semantic", invalidSemantic)
+        let semanticTransport = FlowFollowupTransport([wrongSelection, validSelection, semanticReply])
+        do {
+            _ = try await store.processRecordingFollowup(sourceID: currentID, using: nativePort(semanticTransport), retry: true)
+            XCTFail("Semantic rejection must remain terminal")
+        } catch let failure as RecordingFollowupGenerationFailure {
+            XCTAssertEqual(failure.responseIDs, ["accepted-selection"])
+            XCTAssertEqual(failure.rejectedResponses.map(\.rawResponse), [wrongSelection.body, semanticReply.body])
+        }
+        let semanticSends = await semanticTransport.requests.count
+        XCTAssertEqual(semanticSends, 3)
+        let semanticReceipts = try await store.recordingFollowups()
+        let semanticFailure = try XCTUnwrap(semanticReceipts.last { $0.sourceID == currentID })
+        XCTAssertEqual(semanticFailure.responseIDs, ["accepted-selection"])
+        XCTAssertNil(semanticFailure.retryAt)
+        let budgetTransport = FlowFollowupTransport([.init(status: 503, body: Data()), wrongSelection, .init(status: 503, body: Data())])
+        do {
+            _ = try await store.processRecordingFollowup(sourceID: currentID, using: nativePort(budgetTransport), retry: true)
+            XCTFail("All wire attempts must share one stage budget")
+        } catch let failure as RecordingFollowupGenerationFailure {
+            XCTAssertEqual((failure.underlying as? RecordingFollowupTransientError)?.status, 503)
+            XCTAssertTrue(failure.responseIDs.isEmpty)
+            XCTAssertEqual(failure.rejectedResponses.map(\.rawResponse), [wrongSelection.body])
+            XCTAssertEqual(failure.rejectedResponses.first?.wireAttempt, 2)
+        }
+        let budgetSends = await budgetTransport.requests.count
+        XCTAssertEqual(budgetSends, 3)
+        let budgetReceipts = try await store.recordingFollowups()
+        let budgetFailure = try XCTUnwrap(budgetReceipts.last { $0.sourceID == currentID })
+        XCTAssertNotNil(budgetFailure.retryAt)
+        let cancelledTransport = FlowFollowupTransport([wrongSelection], cancelAt: 1)
+        let cancelledPort = try nativePort(cancelledTransport)
+        let cancelled = Task {
+            try await store.processRecordingFollowup(sourceID: currentID, using: cancelledPort, retry: true)
+        }
+        do { _ = try await cancelled.value; XCTFail("Cancellation must stop structural retries") }
+        catch let failure as RecordingFollowupGenerationFailure {
+            XCTAssertTrue(failure.underlying is CancellationError)
+            XCTAssertEqual(failure.rejectedResponses.map(\.rawResponse), [wrongSelection.body])
+        }
+        let cancelledSends = await cancelledTransport.requests.count
+        XCTAssertEqual(cancelledSends, 1)
+        let cancelledReceipts = try await store.recordingFollowups()
+        let cancelledReceipt = try XCTUnwrap(cancelledReceipts.last { $0.sourceID == currentID })
+        XCTAssertNil(cancelledReceipt.retryAt)
+        try await store.interruptFlowFollowup(cancelledReceipt.id)
+        let resumedTransport = FlowFollowupTransport([wrongSelection, validSelection, validResult])
+        let resumedNative = try await store.processRecordingFollowup(sourceID: currentID, using: nativePort(resumedTransport))
+        XCTAssertEqual(resumedNative.id, cancelledReceipt.id)
+        XCTAssertEqual(resumedNative.rejectedResponses?.map(\.rawResponse), [wrongSelection.body, wrongSelection.body])
+        var legacyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(native)) as? [String: Any])
+        legacyObject.removeValue(forKey: "rejectedResponses")
+        let legacy = try JSONDecoder().decode(RecordingFollowupReceipt.self, from: JSONSerialization.data(withJSONObject: legacyObject))
+        XCTAssertNil(legacy.rejectedResponses)
+        let legacyEncoded = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as? [String: Any])
+        XCTAssertNil(legacyEncoded["rejectedResponses"])
         let savedFollowups = try await store.recordingFollowups()
         let package = root.appendingPathComponent("followup-package"), restored = root.appendingPathComponent("followup-restored")
         try await store.exportPackage(to: package, includeMedia: true)
@@ -1689,6 +1806,14 @@ final class CoreFlowTests: XCTestCase {
         let retained = try await recovered.recordingFollowups()
         XCTAssertEqual(retained.map(\.id), savedFollowups.map(\.id))
         XCTAssertEqual(retained.last?.responseIDs, savedFollowups.last?.responseIDs)
+        let restoredNative = try XCTUnwrap(retained.first { $0.id == native.id })
+        XCTAssertEqual(restoredNative.rejectedResponses?.map(\.rawResponse), [wrongSelection.body, wrongResult.body])
+        XCTAssertEqual(restoredNative.responseIDs, ["accepted-selection", "accepted-result"])
+        let restoredSemantic = try XCTUnwrap(retained.first { $0.id == semanticFailure.id })
+        XCTAssertEqual(restoredSemantic.rejectedResponses?.last?.rawResponse, semanticReply.body)
+        XCTAssertEqual(restoredSemantic.responseIDs, ["accepted-selection"])
+        let restoredResumed = try XCTUnwrap(retained.first { $0.id == resumedNative.id })
+        XCTAssertEqual(restoredResumed.rejectedResponses?.map(\.rawResponse), [wrongSelection.body, wrongSelection.body])
         let sourceRecords = try await store.sources()
         let currentSource = try XCTUnwrap(sourceRecords.first { $0.id == currentID })
         _ = try await store.correctTranscript(sourceID: currentID, expectedVersionID: currentSource.transcriptVersionID!, text: "更正：此前并非练习原话。")
