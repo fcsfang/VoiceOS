@@ -168,6 +168,8 @@ final class ControlCenter: ObservableObject {
     @Published var modelConfigured = false
     @Published var modelSummary = "尚未配置文本模型"
     @Published var attempts: [String: [ModelAttemptRecord]] = [:]
+    @Published var processingIntents: [ExpressionProcessingIntentRecord] = []
+    @Published var recordingRequests: [RecordingProcessingRequest] = []
     private var textModel: ResponsesModelPort?
     private var englishModel: ResponsesEnglishPracticePort?
     @Published var englishSnapshot: EnglishPracticeSnapshot?
@@ -219,8 +221,13 @@ final class ControlCenter: ObservableObject {
     private var dictationInterrupted = false
     private let dictation = NativeDictation()
     private var dictationObservers: [NSObjectProtocol] = []
-    func startDictation() async {
+    func startDictation(processAfterTranscription: Bool = false) async {
         guard let store, !dictationBusy, !dictationActive else { return }
+        let processingConfigurations: (ModelConfiguration, ModelConfiguration)?
+        if processAfterTranscription {
+            guard let cognition = textModel, let association = associationModel else { status = "请先配置文本模型，再选择录制并处理"; return }
+            processingConfigurations = (cognition.configuration, association.configuration)
+        } else { processingConfigurations = nil }
         dictationBusy = true; defer { dictationBusy = false }
         let duration: TimeInterval?
         if let raw = ProcessInfo.processInfo.environment["VOICEOS_TEST_CAPTURE_SECONDS"] {
@@ -229,11 +236,15 @@ final class ControlCenter: ObservableObject {
         } else { duration = nil }
         guard await dictation.requestPermission() else { status = "麦克风未获授权，未开始录制；仍可导入文件"; return }
         do {
-            let intent = try await store.beginDictation()
+            let intent: RecordingIntent
+            if let configs = processingConfigurations {
+                intent = try await store.beginProcessingDictation(cognition: configs.0, association: configs.1)
+            } else { intent = try await store.beginDictation() }
             dictationSource = intent.sourceID; dictationInterrupted = false
             try dictation.start(at:intent.stagingURL,maximumDuration:duration) { [weak self] success in Task { await self?.finishDictation(success:success) } }
             dictationActive = true; selected = intent.sourceID
             status = duration.map { "正在进行\($0)秒限时采集 · 到时自动停止 · 仅本地" } ?? "正在录制我的口述 · 仅本地；停止后才核对并封存原件"
+            if processingConfigurations != nil { status = "正在录制并处理 · 请求已保存；封存及本地转写后处理文字，原始音频不上传" }
             await refresh()
         } catch {
             if let id = dictationSource { try? await store.interruptDictation(sourceID:id) }
@@ -320,6 +331,8 @@ final class ControlCenter: ObservableObject {
                 for record in records { loaded[record.id] = try await store.modelAttempts(sourceID: record.id) }
                 attempts = loaded
                 englishAttempts = try await store.englishFeedbackAttempts()
+                processingIntents = try await store.processingIntents()
+                recordingRequests = try await store.recordingProcessingRequests()
             }
         }
         catch { status = error.localizedDescription }
@@ -341,6 +354,11 @@ final class ControlCenter: ObservableObject {
             textModel = port; modelConfigured = true
             modelSummary = "gpt-6.1-sol · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
             status = "文本模型已就绪 · 只处理你选择并授权的文字"
+            // A queued intent may have been restored before the user selected a
+            // configuration. Wake the durable worker exactly once after the
+            // new model identity is installed; scheduleProcessing() itself
+            // remains the single-owner gate for concurrent work.
+            scheduleProcessing()
         } catch { status = error.localizedDescription }
     }
     func prepareEnglishPractice(current: SourceRecord, priorIDs: [String]) async {
@@ -370,8 +388,16 @@ final class ControlCenter: ObservableObject {
         // Application-owned: changing selection or closing the window does not resend/cancel.
         understandingWorker = Task {
             do {
-                let result = try await store.continueSourceUnderstanding(sourceID: record.id, using: port)
-                await applyUnderstandingContinuation(result, sourceID: record.id)
+                if record.origin == "user", record.speaker == "user", ["user_text", "audio"].contains(record.kind) {
+                    guard let association = associationModel else { throw VoiceOSError("关联模型尚未配置；个人表达尚未排队") }
+                    let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: record.id, cognition: port.configuration, association: association.configuration)
+                    let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "understand:" + record.id + ":" + snapshot.contentDigest, cognition: port.configuration, association: association.configuration)
+                    status = intent.state == .queued ? "个人表达已排队 · 原始录音仍在本机" : "已有处理回执：\(intent.state.rawValue)；未重复排队"
+                    scheduleProcessing()
+                } else {
+                    let result = try await store.continueSourceUnderstanding(sourceID: record.id, using: port)
+                    await applyUnderstandingContinuation(result, sourceID: record.id)
+                }
             } catch { status = error.localizedDescription }
             await refresh(); requestReminderRefresh()
             understandingSource = nil; understandingWorker = nil
@@ -401,6 +427,25 @@ final class ControlCenter: ObservableObject {
             return true
         } catch { status = error.localizedDescription; await refresh(); return false }
     }
+    func saveAndProcessExpression(_ text: String, commandID: String) async -> Bool {
+        guard let store, let cognition = textModel, let association = associationModel else {
+            status = "文本模型或关联模型尚未配置；原文仍可先本地保存"; return false
+        }
+        var savedSourceID: String?
+        do {
+            let source = try await store.recordUserExpression(text, commandID: commandID)
+            savedSourceID = source; selected = source
+            guard let current = try await store.sources().first(where: { $0.id == source }) else { throw VoiceOSError("表达保存后找不到来源") }
+            if current.localOnly { _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: current.policyVersion, localOnly: false) }
+            let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: source, cognition: cognition.configuration, association: association.configuration)
+            let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "process:" + commandID, cognition: cognition.configuration, association: association.configuration)
+            status = intent.state == .queued ? "原文已保存并排队处理 · 本次文字已允许云端" : "原文已保存 · 原处理回执：\(intent.state.rawValue)；未重复排队"
+            await refresh(); scheduleProcessing(); return true
+        } catch {
+            status = (savedSourceID == nil ? "原文未保存：" : "原文已保存，处理未排队：") + error.localizedDescription
+            await refresh(); return false
+        }
+    }
     func export(includeMedia: Bool) {
         let panel = NSSavePanel()
         panel.title = includeMedia ? "导出资料与原件" : "导出结构化资料"
@@ -414,18 +459,18 @@ final class ControlCenter: ObservableObject {
             }
         }
     }
-    func chooseFiles() {
+    func chooseFiles(personalAudio: Bool = false) {
         let panel = NSOpenPanel()
-        panel.title = "导入音频或视频"; panel.prompt = "导入"
-        panel.allowedContentTypes = [.audio, .movie]; panel.allowsMultipleSelection = true
+        panel.title = personalAudio ? "导入仅含我声音的录音 · 不上传原始音频" : "导入音频或视频"; panel.prompt = personalAudio ? "确认为我的录音" : "导入"
+        panel.allowedContentTypes = personalAudio ? [.audio] : [.audio, .movie]; panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.begin { response in
             guard response == .OK else { return }
             let urls = panel.urls
-            Task { await self.importFiles(urls) }
+            Task { await self.importFiles(urls, personalAudio: personalAudio) }
         }
     }
-    private func importFiles(_ urls: [URL]) async {
+    private func importFiles(_ urls: [URL], personalAudio: Bool = false) async {
         guard let store, !importing else { return }
         importing = true
         defer { importing = false }
@@ -433,7 +478,7 @@ final class ControlCenter: ObservableObject {
         for url in urls {
             let access = url.startAccessingSecurityScopedResource()
             status = "正在保存：\(url.lastPathComponent)"
-            do { selected = try await store.importFile(url) }
+            do { selected = personalAudio ? try await store.importPersonalAudio(url) : try await store.importFile(url) }
             catch { failures += 1; status = error.localizedDescription }
             if access { url.stopAccessingSecurityScopedResource() }
             await refresh()
@@ -448,8 +493,19 @@ final class ControlCenter: ObservableObject {
         worker = Task {
             await process()
             worker = nil
-            if let store, let pending = try? await store.sources(), pending.contains(where: { $0.jobState == "queued" }) {
-                scheduleProcessing()
+            if let store {
+                let pendingTranscription = (try? await store.sources())?.contains(where: { $0.jobState == "queued" }) == true
+                // A queued expression intent is intentionally left durable while
+                // no text model is configured. It must not cause a tight retry
+                // loop; configureTextModel() wakes it after a real identity is
+                // available.
+                let pendingIntent: Bool
+                if textModel != nil {
+                    pendingIntent = (try? await store.processingIntents())?.contains(where: { $0.state == .queued }) == true
+                } else {
+                    pendingIntent = false
+                }
+                if pendingTranscription || pendingIntent { scheduleProcessing() }
             }
         }
     }
@@ -465,7 +521,37 @@ final class ControlCenter: ObservableObject {
         defer { refreshTask.cancel() }
         do { try await store.processTranscriptions(using: NativeSpeechPort()) }
         catch { status = error.localizedDescription }
+        if let cognition = textModel, let association = associationModel {
+            do { try await store.reconcileRecordingProcessingRequests(cognition: cognition.configuration, association: association.configuration) }
+            catch { status = error.localizedDescription }
+        }
+        await processExpressionQueue(store)
         await refresh()
+    }
+    private func processExpressionQueue(_ store: VoiceOSStore) async {
+        guard let cognition = textModel else { return }
+        let association = associationModel
+        let local: any LocalRetrievalPort = semanticRetrieval ?? retrieval
+        while let intent = try? await store.processingIntents().first(where: { $0.state == .queued }) {
+            do {
+                let result = try await store.runExpressionProcessingIntent(id: intent.id, retrieval: local, cognitionPort: cognition, associationPort: association, semantic: semanticRetrieval != nil)
+                status = result.state == .completed ? "表达处理完成 · 认知、关联和历史回执已保存" : "表达处理状态：\(result.state.rawValue)"
+                requestReminderRefresh()
+            } catch { status = error.localizedDescription; break }
+        }
+    }
+    func cancelRecordingRequest(_ request: RecordingProcessingRequest) async {
+        guard let store else { return }
+        do { let cancelled = try await store.cancelRecordingProcessingRequest(id: request.id); status = cancelled ? "已取消文字处理 · 录音和本地转写保留" : "处理已结束或冻结，保留原回执"; await refresh() }
+        catch { status = error.localizedDescription }
+    }
+    func cancelProcessingIntent(_ intent: ExpressionProcessingIntentRecord) async {
+        guard let store, [.queued, .running].contains(intent.state) else { return }
+        do {
+            _ = try await store.cancelExpressionProcessingIntent(id: intent.id, reason: "用户从处理记录取消")
+            status = "已取消表达处理 · 已发出的模型请求保留历史，不自动重发"
+            await refresh()
+        } catch { status = error.localizedDescription; await refresh() }
     }
     func playSpan(_ record: SourceRecord, milliseconds: Int) async {
         do {
@@ -766,6 +852,34 @@ struct CenterView: View {
     @State private var showingDiscussion = false
     @State private var showingEnglishPractice = false
     @Environment(\.openWindow) private var openWindow
+    private var activeProcessingCount: Int {
+        model.processingIntents.filter { [.queued, .running].contains($0.state) }.count + model.recordingRequests.filter { $0.state == "waiting" }.count
+    }
+    private func recordingRequestState(_ state: String) -> String {
+        switch state {
+        case "waiting": return "等待封存和本地转写"
+        case "enqueued": return "已移交处理队列"
+        case "blocked": return "已阻断 · 需核对"
+        case "cancelled": return "已取消"
+        case "frozen": return "迁移后冻结"
+        default: return "状态待核对"
+        }
+    }
+    private func processingState(_ intent: ExpressionProcessingIntentRecord) -> String {
+        switch intent.state {
+        case .queued: return "等待处理"
+        case .running: return intent.phase == .cognition ? "正在理解" : "正在关联"
+        case .completed: return "已完成"
+        case .unknown: return "结果未知 · 不自动重发"
+        case .blocked: return "已阻塞 · 需核对"
+        case .cancelled: return "已取消"
+        case .frozen: return "冻结历史"
+        case .rejected: return "未接纳"
+        }
+    }
+    private func processingSourceName(_ intent: ExpressionProcessingIntentRecord) -> String {
+        model.records.first(where: { $0.id == intent.sourceID })?.name ?? String(intent.sourceID.prefix(8))
+    }
     private func chooseLibrary() {
         let panel = NSOpenPanel(); panel.title = "打开已有 VoiceOS 资料库"; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
         let completion: (NSApplication.ModalResponse) -> Void = { response in
@@ -983,10 +1097,38 @@ struct CenterView: View {
             } else { ContentUnavailableView("选择一份资料", systemImage: "doc.text.magnifyingglass", description: Text("原件和逐字稿保存在 VoiceOS 自己的资料库中。")) }
         }
         .toolbar {
+            Menu {
+                if model.processingIntents.isEmpty && model.recordingRequests.isEmpty {
+                    Text("暂无表达处理记录")
+                } else {
+                    ForEach(model.recordingRequests) { request in
+                        Text("录音处理 · \(recordingRequestState(request.state)) · \(model.records.first(where: { $0.id == request.sourceID })?.name ?? request.sourceID)")
+                        if let error = request.error { Text(error) }
+                        if request.state == "waiting" {
+                            Text("等待封存和本地转写；未发起模型请求")
+                            Button("取消文字处理（保留录音）") { Task { await model.cancelRecordingRequest(request) } }
+                        }
+                        Divider()
+                    }
+                    ForEach(model.processingIntents) { intent in
+                        Text("\(processingState(intent)) · \(processingSourceName(intent))")
+                        if let error = intent.error, !error.isEmpty { Text(error) }
+                        if [.queued, .running].contains(intent.state) {
+                            Button("取消这次处理") { Task { await model.cancelProcessingIntent(intent) } }
+                        }
+                        Divider()
+                    }
+                }
+            } label: {
+                Label(activeProcessingCount == 0 ? "处理记录" : "处理 \(activeProcessingCount)", systemImage: activeProcessingCount == 0 ? "clock.arrow.circlepath" : "hourglass")
+            }.disabled(!model.initialized)
             if model.dictationActive {
                 Button("停止并保存口述",systemImage:"stop.circle.fill") { model.stopDictation() }.disabled(model.dictationBusy)
             } else {
-                Button("开始我的口述",systemImage:"mic") { Task { await model.startDictation() } }.disabled(!model.initialized || model.dictationBusy).help("录制你自己的表达；第三方节目请使用导入，以保留外部来源身份。")
+                Menu("开始我的口述", systemImage: "mic") {
+                    Button("录制并本地保存") { Task { await model.startDictation() } }
+                    Button("录制并处理文字（原始音频不上传）") { Task { await model.startDictation(processAfterTranscription: true) } }.disabled(!model.modelConfigured)
+                }.disabled(!model.initialized || model.dictationBusy)
             }
             Button("讨论记录",systemImage:"bubble.left.and.bubble.right") { Task { await model.refreshDiscussion(); showingDiscussion = true } }.disabled(!model.initialized)
             Button("静默回顾", systemImage:"text.bubble") { model.quietAssociationSourceID = nil; showingQuietFeedback = true }.disabled(!model.initialized)
@@ -995,7 +1137,10 @@ struct CenterView: View {
             Button("连接提醒事项…") { Task { await model.connectReminders() } }.disabled(!model.initialized || model.remindersBusy)
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
             Button("记录我的表达", systemImage: "square.and.pencil") { writingExpression = true }.disabled(!model.initialized)
-            Button("导入文件", systemImage: "square.and.arrow.down") { model.chooseFiles() }.disabled(!model.initialized || model.importing)
+            Menu("导入文件", systemImage: "square.and.arrow.down") {
+                Button("外部音频或视频…") { model.chooseFiles() }
+                Button("仅含我声音的录音…") { model.chooseFiles(personalAudio: true) }
+            }.disabled(!model.initialized || model.importing)
             Menu {
                 Button("打开已有资料库…",action:chooseLibrary)
                 Button("从迁移包恢复…") { showingRestore = true }
@@ -1277,7 +1422,8 @@ struct UserExpressionView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("记录我的表达").font(.title2)
             Text("在这里写下你自己的想法或行动。引用他人时请明确说明；音视频导入仍按外部资料保存。").foregroundStyle(.secondary)
-            TextEditor(text: $text).frame(minHeight: 200).border(.secondary.opacity(0.2))
+            TextEditor(text: $text).frame(minHeight: 200).border(.secondary.opacity(0.2)).disabled(saving)
+            Text(model.status).font(.caption).foregroundStyle(.secondary)
             Text("原文先仅本地保存。允许文字用于云端并发起理解后，普通明确任务会按已保存的提醒事项清单授权自动发送；愿望与 AI 建议留在本地。").font(.caption).foregroundStyle(.secondary)
             HStack {
                 Button("取消", action: dismiss).disabled(saving)
@@ -1287,6 +1433,10 @@ struct UserExpressionView: View {
                     saving = true
                     Task { if await model.saveExpression(text, commandID: commandID) { dismiss() }; saving = false }
                 }.keyboardShortcut(.defaultAction).disabled(saving || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
+                Button(saving ? "正在排队…" : "保存并处理本次文字") {
+                    saving = true
+                    Task { if await model.saveAndProcessExpression(text, commandID: commandID) { dismiss() }; saving = false }
+                }.disabled(saving || !model.modelConfigured || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
             }
         }.padding(24).frame(width: 620)
     }
