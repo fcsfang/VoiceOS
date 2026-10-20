@@ -35,7 +35,7 @@ if args.semantic_model:
     notice = app / 'Contents' / 'Resources' / 'ThirdParty' / 'BGE-MIT.txt'
     notice.parent.mkdir(parents=True,exist_ok=True)
     shutil.copy2(ROOT / 'docs' / 'licenses' / 'BGE-MIT.txt',notice)
-info = dict(CFBundleIdentifier='local.voiceos.app', CFBundleName='VoiceOS', CFBundleDisplayName='VoiceOS', CFBundleExecutable='VoiceOS', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.0', CFBundleVersion='1', LSMinimumSystemVersion='26.0', NSHighResolutionCapable=True, NSRemindersFullAccessUsageDescription='VoiceOS 在你明确选定的清单创建任务并回读完成状态；其他清单的任务不会读取或修改。')
+info = dict(CFBundleIdentifier='local.voiceos.app', CFBundleName='VoiceOS', CFBundleDisplayName='VoiceOS', CFBundleExecutable='VoiceOS', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.0', CFBundleVersion='1', LSMinimumSystemVersion='26.0', NSHighResolutionCapable=True, NSMicrophoneUsageDescription='VoiceOS 仅在你主动开始口述时录制麦克风，停止后封存原件并在本机转写；不会自动上传音频。', NSRemindersFullAccessUsageDescription='VoiceOS 在你明确选定的清单创建任务并回读完成状态；其他清单的任务不会读取或修改。')
 with (app / 'Contents' / 'Info.plist').open('wb') as f: plistlib.dump(info, f)
 subprocess.run(['codesign', '--force', '--sign', '-', str(app)], check=True)
 subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)

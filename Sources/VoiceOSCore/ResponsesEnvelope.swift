@@ -19,8 +19,11 @@ struct ResponsesEnvelope {
                       number.doubleValue.rounded(.towardZero) == number.doubleValue else { throw ModelPortFailure.rejected("响应用量格式无效") }
                 return number.intValue
             }
-            let input = try token("input_tokens"), output = try token("output_tokens")
-            knownInput = input; knownOutput = output
+            var invalidUsage=false
+            do { knownInput=try token("input_tokens") } catch { invalidUsage=true }
+            do { knownOutput=try token("output_tokens") } catch { invalidUsage=true }
+            guard !invalidUsage else { throw ModelPortFailure.rejected("响应用量格式无效") }
+            let input=knownInput,output=knownOutput
             if status == "incomplete" { return ResponsesEnvelope(status: .incomplete, text: nil, inputTokens: input, outputTokens: output) }
             guard status == "completed", let items = root["output"] as? [[String: Any]] else { throw ModelPortFailure.rejected("响应未处于可接纳的完成状态") }
             var texts: [String] = []; var refused = false

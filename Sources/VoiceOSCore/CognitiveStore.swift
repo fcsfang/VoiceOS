@@ -75,7 +75,7 @@ extension VoiceOSStore {
         _ = try localContext(id: contextID)
         guard !model.isEmpty, !promptVersion.isEmpty, !schemaVersion.isEmpty else { throw VoiceOSError("模型调用配置缺少版本") }
         let id = UUID().uuidString
-        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at) VALUES(?,?,'local_fixture',?,?,?,'reserved',?)", [id,contextID,model,promptVersion,schemaVersion,timestamp()])
+        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,'local_fixture',?,?,?,'reserved',?,?)", [id,contextID,model,promptVersion,schemaVersion,timestamp(),try db.nextModelProducerSequence()])
         try checkpoint(.modelReserved)
         return id
     }
@@ -83,7 +83,7 @@ extension VoiceOSStore {
         guard try db.query("SELECT provider FROM model_attempts WHERE id=?", [attemptID]).first?["provider"] == "local_fixture" else { throw VoiceOSError("只能提交本地夹具调用") }
         return try commitClaims(attemptID: attemptID, proposals: proposals)
     }
-    func commitClaims(attemptID: String, proposals: [ClaimProposal]) throws -> [String] {
+    func commitClaims(attemptID: String, proposals: [ClaimProposal], additionalCommit: ([String]) throws -> Void = { _ in }) throws -> [String] {
         guard let attempt = try db.query("SELECT * FROM model_attempts WHERE id=?", [attemptID]).first else { throw VoiceOSError("调用记录不存在") }
         let digest = try hash(proposals)
         if attempt["state"] == "completed" {
@@ -112,6 +112,7 @@ extension VoiceOSStore {
                 }
             }
             try db.execute("UPDATE model_attempts SET state='completed',result_digest=? WHERE id=? AND state='reserved'", [digest,attemptID])
+            try additionalCommit(ids)
             try checkpoint(.claimsUncommitted)
         }
         try checkpoint(.claimsCommitted)
@@ -151,6 +152,7 @@ extension VoiceOSStore {
         }
     }
     static func validateStoredCognition(_ db: Database) throws {
+        guard try db.query("SELECT id FROM model_attempts WHERE producer_sequence IS NULL OR typeof(producer_sequence)!='integer' OR producer_sequence<=0").isEmpty else { throw VoiceOSError("成果生产者缺少有效持久顺序") }
         for source in try db.query("SELECT id,local_only,policy_version FROM sources") {
             guard let version = Int(source["policy_version"]!), version >= 1, ["0","1"].contains(source["local_only"]!) else { throw VoiceOSError("迁移来源授权格式错误") }
             let history = try db.query("SELECT * FROM source_policy_revisions WHERE source_id=? ORDER BY to_version", [source["id"]])
@@ -228,6 +230,10 @@ extension VoiceOSStore {
     }
     private func freezeContext(_ id: String) throws {
         try db.execute("UPDATE contexts SET state='stale' WHERE id=?", [id])
+        try db.execute("UPDATE conversations SET validity='frozen' WHERE entry_context_id=? OR id IN (SELECT conversation_id FROM conversation_user_turns WHERE context_id=?)",[id,id])
+        try db.execute("UPDATE discussion_attempts SET validity='frozen' WHERE context_id=? OR conversation_id IN (SELECT id FROM conversations WHERE validity='frozen')",[id])
+        try freezeDiscussionDerivations()
+        try freezeConversationOutcomes()
         try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT id FROM claims WHERE attempt_id IN (SELECT id FROM model_attempts WHERE context_id=?))", [id])
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT id FROM model_attempts WHERE context_id=?)", [id])
     }

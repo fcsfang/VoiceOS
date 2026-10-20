@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -329,6 +329,98 @@ final class Database {
                 try execute("PRAGMA user_version=13")
             }
         }
+        // Same columns, new microphone reservation/source semantics require a newer reader.
+        if try query("PRAGMA user_version").first?["user_version"] == "13" { try execute("PRAGMA user_version=14") }
+        if try query("PRAGMA user_version").first?["user_version"] == "14" {
+            try transaction {
+                try execute("""
+                CREATE TABLE conversations (
+                  id TEXT PRIMARY KEY, entry_command_id TEXT NOT NULL UNIQUE,
+                  entry_context_id TEXT NOT NULL REFERENCES contexts(id), version INTEGER NOT NULL CHECK(version>=1),
+                  state TEXT NOT NULL CHECK(state IN ('active','ended')),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),
+                  end_command_id TEXT UNIQUE, created_at TEXT NOT NULL, ended_at TEXT
+                )
+                """)
+                try execute("""
+                CREATE TABLE conversation_user_turns (
+                  id TEXT PRIMARY KEY, command_id TEXT NOT NULL UNIQUE,
+                  conversation_id TEXT NOT NULL REFERENCES conversations(id), ordinal INTEGER NOT NULL CHECK(ordinal>=1),
+                  source_id TEXT NOT NULL REFERENCES sources(id), context_id TEXT NOT NULL REFERENCES contexts(id),
+                  speaker TEXT NOT NULL CHECK(speaker='user'), created_at TEXT NOT NULL,
+                  UNIQUE(conversation_id,ordinal), UNIQUE(conversation_id,source_id)
+                )
+                """)
+                try execute("PRAGMA user_version=15")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "15" {
+            try transaction {
+                try execute("""
+                CREATE TABLE discussion_attempts (
+                  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id),
+                  reply_to_turn_id TEXT NOT NULL REFERENCES conversation_user_turns(id), context_id TEXT NOT NULL REFERENCES contexts(id),
+                  destination TEXT NOT NULL CHECK(destination IN ('local','cloud')), provider TEXT NOT NULL, model TEXT NOT NULL,
+                  prompt_version TEXT NOT NULL, schema_version TEXT NOT NULL, snapshot_json TEXT NOT NULL, snapshot_digest TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','completed','rejected','unknown')),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')), result_json TEXT, result_digest TEXT,
+                  usage_json TEXT, error TEXT, created_at TEXT NOT NULL, UNIQUE(conversation_id,reply_to_turn_id)
+                )
+                """)
+                try execute("PRAGMA user_version=16")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "16" {
+            try transaction {
+                try execute("ALTER TABLE model_attempts ADD COLUMN execution_kind TEXT NOT NULL DEFAULT 'model_request' CHECK(execution_kind IN ('model_request','discussion_derivation'))")
+                try execute("""
+                CREATE TABLE discussion_claim_derivations (
+                  id TEXT PRIMARY KEY, command_id TEXT NOT NULL UNIQUE,
+                  discussion_attempt_id TEXT NOT NULL REFERENCES discussion_attempts(id),
+                  part_index INTEGER NOT NULL CHECK(part_index>=0 AND part_index<8), part_digest TEXT NOT NULL,
+                  reference_kind TEXT NOT NULL CHECK(reference_kind IN ('model_citation','context_anchor')),
+                  model_attempt_id TEXT NOT NULL UNIQUE REFERENCES model_attempts(id),
+                  claim_id TEXT UNIQUE REFERENCES claims(id), state TEXT NOT NULL CHECK(state IN ('pending','completed')),
+                  created_at TEXT NOT NULL, UNIQUE(discussion_attempt_id,part_index)
+                )
+                """)
+                try execute("PRAGMA user_version=17")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "17" {
+            try transaction {
+                try execute("""
+                CREATE TABLE conversation_outcome_attempts (
+                  id TEXT PRIMARY KEY REFERENCES model_attempts(id),
+                  conversation_id TEXT NOT NULL UNIQUE REFERENCES conversations(id),
+                  conversation_version INTEGER NOT NULL CHECK(conversation_version>1),
+                  snapshot_json TEXT NOT NULL, snapshot_digest TEXT NOT NULL,
+                  result_json TEXT, result_digest TEXT, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("PRAGMA user_version=18")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "18" {
+            try transaction {
+                try execute("ALTER TABLE model_attempts ADD COLUMN producer_sequence INTEGER CHECK(producer_sequence IS NULL OR (typeof(producer_sequence)='integer' AND producer_sequence>0))")
+                try backfillModelProducerSequence()
+                try execute("CREATE UNIQUE INDEX model_producer_sequence ON model_attempts(producer_sequence)")
+                try execute("PRAGMA user_version=19")
+            }
+        }
+    }
+    /// Only called for pre-sequence schemas/packages. Retrospective order is a baseline,
+    /// not evidence of the original wall-clock order; all new producers follow it.
+    func backfillModelProducerSequence() throws {
+        try execute("UPDATE model_attempts SET producer_sequence=NULL")
+        for (index,row) in try query("SELECT id FROM model_attempts ORDER BY created_at,id").enumerated() {
+            try execute("UPDATE model_attempts SET producer_sequence=? WHERE id=?",[String(index+1),row["id"]])
+        }
+    }
+    func nextModelProducerSequence() throws -> String {
+        guard let value=try query("SELECT COALESCE(MAX(producer_sequence),0) AS value FROM model_attempts").first?["value"].flatMap(Int64.init),value < Int64.max else { throw VoiceOSError("成果生产者顺序已超出范围") }
+        return String(value+1)
     }
     deinit { sqlite3_close(handle) }
     func execute(_ sql: String, _ arguments: [String?] = []) throws { _ = try query(sql, arguments) }
