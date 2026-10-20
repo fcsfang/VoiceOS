@@ -54,6 +54,16 @@ final class ConversationOutcomesTests:XCTestCase {
         do { _=try await s.performConversationOutcome(input,using:port);XCTFail() } catch {}
         let calls=await port.calls;XCTAssertEqual(calls,1)
     }
+    func testUncitedHistoryCorrectionAppearsInMixedOutcomeTaskImpact() async throws {
+        let s=try await store(),input=try await setup(s)
+        _=try await s.performConversationOutcome(input,using:DurableOutcomePort())
+        let action=try await s.actions()[0],history=input.context.sources[0]
+        _=try await s.correctTranscript(sourceID:history.sourceID,expectedVersionID:history.transcriptVersionID,text:"合成旧猜想纠错。")
+        let impact=try await s.correctionActionImpacts().first { $0.action.id == action.id }
+        XCTAssertEqual(impact?.roots.map(\.sourceID),[history.sourceID])
+        XCTAssertEqual(impact?.action.state,"open")
+        let valid=try await s.integrityCheck();XCTAssertTrue(valid)
+    }
     func testActiveConversationCannotExtractAndUnknownCannotReprepareOrChangePortToResend() async throws {
         let s=try await store(),active=try await setup(s,end:false),port=DurableOutcomePort()
         do { _=try await s.performConversationOutcome(active,using:port);XCTFail() } catch {}

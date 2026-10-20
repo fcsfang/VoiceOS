@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36", "37", "38"].contains(version) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -630,6 +630,147 @@ final class Database {
             }
         }
 
+        if try query("PRAGMA user_version").first?["user_version"] == "31" {
+            try transaction {
+                try execute("""
+                CREATE TABLE reminder_status_resolutions (
+                  id TEXT PRIMARY KEY, link_id TEXT NOT NULL REFERENCES reminder_links(id),
+                  observation_id TEXT NOT NULL REFERENCES reminder_observations(id),
+                  action_revision_id TEXT NOT NULL UNIQUE REFERENCES action_revisions(id),
+                  base_action_version INTEGER NOT NULL CHECK(base_action_version>=1),
+                  action_version INTEGER NOT NULL CHECK(action_version>base_action_version),
+                  access_version INTEGER NOT NULL CHECK(access_version>=1),
+                  command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL,
+                  UNIQUE(link_id,action_version)
+                )
+                """)
+                try execute("PRAGMA user_version=32")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "32" {
+            try transaction {
+                try execute("""
+                CREATE TABLE reminder_time_observations (
+                  id TEXT PRIMARY KEY REFERENCES reminder_observations(id), due_json TEXT NOT NULL
+                )
+                """)
+                try execute("PRAGMA user_version=33")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "33" {
+            try transaction {
+                try execute("""
+                CREATE TABLE action_schedule_intents (
+                  id TEXT PRIMARY KEY, action_id TEXT NOT NULL REFERENCES actions(id),
+                  action_version INTEGER NOT NULL CHECK(action_version>=1), schedule_version INTEGER NOT NULL CHECK(schedule_version>=1),
+                  due_json TEXT NOT NULL, authority TEXT NOT NULL CHECK(authority IN ('ai_flexible','user_commitment')),
+                  actor TEXT NOT NULL CHECK(actor IN ('user','ai')), raw_expression TEXT NOT NULL,
+                  anchor_event_time TEXT NOT NULL, anchor_time_zone TEXT NOT NULL,
+                  base_observation_id TEXT REFERENCES reminder_observations(id),
+                  base_authority TEXT NOT NULL CHECK(base_authority IN ('ai_flexible','user_commitment','external_manual','unknown')),
+                  access_version INTEGER CHECK(access_version>=1), validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),
+                  command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL,
+                  UNIQUE(action_id,schedule_version)
+                )
+                """)
+                try execute("PRAGMA user_version=34")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "34" {
+            try transaction {
+                try execute("""
+                CREATE TABLE reminder_schedule_operations (
+                  id TEXT PRIMARY KEY, intent_id TEXT NOT NULL UNIQUE REFERENCES action_schedule_intents(id),
+                  link_id TEXT NOT NULL REFERENCES reminder_links(id),
+                  expected_observation_id TEXT NOT NULL REFERENCES reminder_observations(id),
+                  access_version INTEGER NOT NULL CHECK(access_version>=1), before_json TEXT NOT NULL, desired_json TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('reserved','unknown','confirmed','observed','conflict','blocked')),
+                  attempted INTEGER NOT NULL CHECK(attempted IN (0,1)), save_acknowledged INTEGER NOT NULL CHECK(save_acknowledged IN (0,1)),
+                  result_observation_id TEXT REFERENCES reminder_observations(id), validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),
+                  reason TEXT NOT NULL, command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL,
+                  created_at TEXT NOT NULL, checked_at TEXT
+                )
+                """)
+                try execute("PRAGMA user_version=35")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "35" {
+            try transaction {
+                try execute("""
+                CREATE TABLE reminder_schedule_grants (
+                  id TEXT PRIMARY KEY, intent_id TEXT NOT NULL UNIQUE REFERENCES action_schedule_intents(id),
+                  link_id TEXT NOT NULL REFERENCES reminder_links(id), observation_id TEXT NOT NULL REFERENCES reminder_observations(id),
+                  access_version INTEGER NOT NULL CHECK(access_version>=1), before_json TEXT NOT NULL, desired_json TEXT NOT NULL,
+                  effect_digest TEXT NOT NULL, actor TEXT NOT NULL CHECK(actor='user'), validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),
+                  command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE reminder_schedule_grant_revocations (
+                  id TEXT PRIMARY KEY, grant_id TEXT NOT NULL UNIQUE REFERENCES reminder_schedule_grants(id),
+                  actor TEXT NOT NULL CHECK(actor='user'), reason TEXT NOT NULL,
+                  command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("ALTER TABLE reminder_schedule_operations ADD COLUMN grant_id TEXT REFERENCES reminder_schedule_grants(id)")
+                try execute("PRAGMA user_version=36")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "36" {
+            try transaction {
+                try execute("""
+                CREATE TABLE reminder_schedule_bases (
+                  id TEXT PRIMARY KEY, intent_id TEXT NOT NULL UNIQUE REFERENCES action_schedule_intents(id),
+                  authority TEXT NOT NULL CHECK(authority IN ('ai_flexible','user_commitment','external_manual')),
+                  operation_id TEXT REFERENCES reminder_schedule_operations(id)
+                )
+                """)
+                try execute("PRAGMA user_version=37")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "37" {
+            try transaction {
+                try execute("""
+                CREATE TABLE reminder_compensation_plans (
+                  id TEXT PRIMARY KEY, action_id TEXT NOT NULL REFERENCES actions(id), action_version INTEGER NOT NULL CHECK(action_version>=1),
+                  schedule_version INTEGER NOT NULL CHECK(schedule_version>=1), link_id TEXT NOT NULL REFERENCES reminder_links(id),
+                  observation_id TEXT NOT NULL REFERENCES reminder_observations(id), access_version INTEGER NOT NULL CHECK(access_version>=1),
+                  roots_json TEXT NOT NULL, operations_json TEXT NOT NULL, impact_digest TEXT NOT NULL,
+                  before_json TEXT NOT NULL, desired_json TEXT NOT NULL, effect_digest TEXT NOT NULL UNIQUE,
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')), command_id TEXT NOT NULL UNIQUE,
+                  input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE reminder_compensation_grants (
+                  id TEXT PRIMARY KEY, plan_id TEXT NOT NULL UNIQUE REFERENCES reminder_compensation_plans(id),
+                  effect_digest TEXT NOT NULL, actor TEXT NOT NULL CHECK(actor='user'),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),
+                  command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE reminder_compensation_revocations (
+                  id TEXT PRIMARY KEY, grant_id TEXT NOT NULL UNIQUE REFERENCES reminder_compensation_grants(id),
+                  actor TEXT NOT NULL CHECK(actor='user'), reason TEXT NOT NULL,
+                  command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE reminder_compensation_operations (
+                  id TEXT PRIMARY KEY, plan_id TEXT NOT NULL UNIQUE REFERENCES reminder_compensation_plans(id),
+                  grant_id TEXT NOT NULL REFERENCES reminder_compensation_grants(id), link_id TEXT NOT NULL REFERENCES reminder_links(id),
+                  state TEXT NOT NULL CHECK(state IN ('reserved','unknown','confirmed','observed','conflict','blocked')),
+                  attempted INTEGER NOT NULL CHECK(attempted IN (0,1)), save_acknowledged INTEGER NOT NULL CHECK(save_acknowledged IN (0,1)),
+                  result_observation_id TEXT REFERENCES reminder_observations(id), validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),
+                  reason TEXT NOT NULL, command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL,
+                  created_at TEXT NOT NULL, checked_at TEXT
+                )
+                """)
+                try execute("PRAGMA user_version=38")
+            }
+        }
     }
     /// Only called for pre-sequence schemas/packages. Retrospective order is a baseline,
     /// not evidence of the original wall-clock order; all new producers follow it.

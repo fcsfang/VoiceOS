@@ -51,6 +51,7 @@ final class DiscussionCandidateDerivationTests:XCTestCase {
         for cited in [false,true] {
             let s=try await store(cited ? "cited":"anchor"),(input,attempt,_)=try await setup(s,cited:cited)
             let claim=try await s.retainDiscussionAICandidate(attemptID:attempt,partIndex:1)
+            let action=try await s.createAction(claimID:claim,expectedClaimReviewVersion:0,title:"AI待核对建议",kind:.aiSuggestion,intentActor:.ai)
             let origins=try await s.discussionClaimOrigins();XCTAssertEqual(origins[0].referenceKind,cited ? "model_citation":"context_anchor")
             let entry=try await s.conversationHistorySources(conversationID:input.conversationID)[0]
             _=try await s.correctTranscript(sourceID:entry.sourceID,expectedVersionID:entry.transcriptVersionID,text:"合成历史更正")
@@ -58,7 +59,20 @@ final class DiscussionCandidateDerivationTests:XCTestCase {
             XCTAssertEqual(frozen[0].validity,"frozen");XCTAssertEqual(models[0].contextState,"stale")
             let receipt=try await s.retainDiscussionAICandidate(attemptID:attempt,partIndex:1);XCTAssertEqual(receipt,claim)
             let active=try await s.candidateClaims();XCTAssertTrue(active.isEmpty)
+            let impact=try await s.correctionActionImpacts().first { $0.action.id == action }
+            XCTAssertEqual(impact?.roots.map(\.sourceID),[entry.sourceID])
         }
+    }
+    func testLaterConversationTurnDoesNotBecomeEarlierReplyDependency() async throws {
+        let s=try await store(),(input,attempt,_)=try await setup(s)
+        let claim=try await s.retainDiscussionAICandidate(attemptID:attempt,partIndex:1)
+        let action=try await s.createAction(claimID:claim,expectedClaimReviewVersion:0,title:"AI待核对建议",kind:.aiSuggestion,intentActor:.ai)
+        let later=try await s.recordUserExpression("后续另一个问题。")
+        _=try await s.appendConversationUserSource(conversationID:input.conversationID,sourceID:later,expectedVersion:2)
+        let version=try await s.transcriptHistory(sourceID:later)[0].id
+        _=try await s.correctTranscript(sourceID:later,expectedVersionID:version,text:"后续问题更正。")
+        let impacts=try await s.correctionActionImpacts()
+        XCTAssertFalse(impacts.contains { $0.action.id == action })
     }
     func testFrozenParentCannotCreateNewCandidateAndPolicyFreezesWholeInput() async throws {
         let s=try await store(),(input,attempt,_)=try await setup(s)

@@ -1,7 +1,7 @@
 import Foundation
 
 public enum ExpressionAssociationProcessingState: String, Sendable {
-    case paused, localOnly, modelUnavailable, budgetExceeded, noCandidates, inFlight, completed, unknown
+    case paused, localOnly, modelUnavailable, budgetExceeded, noCandidates, inFlight, completed, unknown, frozen
 }
 public struct ExpressionAssociationProcessing: Sendable {
     public let state: ExpressionAssociationProcessingState
@@ -26,12 +26,14 @@ extension VoiceOSStore {
         // Configuration upgrades are not authorization to regenerate a previous judgment.
         // Preserve the old request key for portable validation, but reuse by expression/policy epoch.
         if let prior = try existingExpressionAssociation(baseline) {
+            if prior.validity != "current" { return .init(state: .frozen, attempt: prior) }
             if prior.state == "reserved" { return .init(state: .inFlight, attempt: nil) }
             return .init(state: prior.state == "completed" ? .completed : .unknown, attempt: prior)
         }
         if let row = try db.query("SELECT id,state FROM expression_association_attempts WHERE request_key=?", [key]).first {
-            if row["state"] == "reserved" { return .init(state: .inFlight, attempt: nil) }
             guard let record = try expressionAssociationAttempts().first(where: { $0.id == row["id"] }) else { throw VoiceOSError("关联历史缺失") }
+            if record.validity != "current" { return .init(state: .frozen, attempt: record) }
+            if record.state == "reserved" { return .init(state: .inFlight, attempt: nil) }
             return .init(state: record.state == "completed" ? .completed : .unknown, attempt: record)
         }
         // Filter the local catalog before ranking; a cloud-bound candidate set never includes private history.
@@ -70,6 +72,7 @@ extension VoiceOSStore {
         let snapshot = try prepareExpressionAssociation(currentSourceID: sourceID, candidates: selected, destination: model.configuration.destination)
         do {
             let record = try await performExpressionAssociation(snapshot, using: model)
+            // 刚完成的调用，即使 validity 变成 frozen（取消后的迟到结果），处理状态仍然是 unknown（表示任务被取消）
             return .init(state: record.state == "completed" ? .completed : .unknown, attempt: record)
         } catch {
             // Only a terminal durable receipt may turn a transport failure into an unknown status.

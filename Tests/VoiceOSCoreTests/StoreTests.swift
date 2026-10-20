@@ -43,6 +43,7 @@ private actor TestReminders: RemindersPort {
     var creates = 0
     var loseReceipt = false
     var deny = false
+    var failReads = false
     var suspended = false
     var suspendCreate = false
     var gate: CheckedContinuation<Void, Never>?
@@ -50,7 +51,7 @@ private actor TestReminders: RemindersPort {
     init(loseReceipt: Bool = false, suspended: Bool = false, suspendCreate: Bool = false) { self.loseReceipt = loseReceipt; self.suspended = suspended; self.suspendCreate = suspendCreate }
     func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
         if suspended { suspended = false; await withCheckedContinuation { gate = $0; started?.resume(); started = nil } }
-        if deny { throw VoiceOSError("permission denied") }
+        if deny || failReads { throw VoiceOSError(deny ? "permission denied" : "readback unavailable") }
         return items.filter { $0.marker == marker || $0.id == externalID }
     }
     func create(calendarID: String, title: String, marker: String) async throws {
@@ -66,6 +67,7 @@ private actor TestReminders: RemindersPort {
     func duplicate() { let item = items[0]; items.append(ReminderSnapshot(id: UUID().uuidString, title: item.title, completed: item.completed, marker: item.marker)) }
     func removeAll() { items = [] }
     func setDeny() { deny = true }
+    func failFutureReads(_ value: Bool = true) { failReads = value }
     func suspendRead() { suspended = true }
     func waitStarted() async { if gate == nil { await withCheckedContinuation { started = $0 } } }
     func release() { gate?.resume(); gate = nil }
@@ -338,6 +340,23 @@ final class StoreTests: XCTestCase {
         let creates = await port.creates; XCTAssertEqual(creates, 1)
         do { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "other", using: port); XCTFail("scope change") } catch {}
     }
+    func testReadbackFailureBecomesUnknownThenRecoversWithoutRecreating() async throws {
+        let store = try await store(); let (_, id) = try await reminderFixture(store); let port = TestReminders()
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        let link = try await store.reminderLinks()[0]
+        await port.failFutureReads()
+        do { try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port); XCTFail("readback must fail") } catch {}
+        let failedLink = try await store.reminderLinks()[0]
+        let failedAction = try await store.actions()[0]
+        XCTAssertEqual(failedLink.state, "unknown")
+        XCTAssertEqual(failedAction.state, "open")
+        await port.failFutureReads(false)
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        let recovered = try await store.reminderLinks()[0]
+        XCTAssertEqual(recovered.state, "linked")
+        let creates = await port.creates
+        XCTAssertEqual(creates, 1)
+    }
     func testRemindersExternalRenameCompletionAndRestoreKeepEvidenceSeparate() async throws {
         let store = try await store(); let (_,id) = try await reminderFixture(store); let port = TestReminders()
         try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
@@ -404,6 +423,66 @@ final class StoreTests: XCTestCase {
         do { try await running.value; XCTFail("stale preflight") } catch {}
         let creates = await port.creates; XCTAssertEqual(creates, 0)
         let link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "unknown")
+    }
+    func testCancelledSendBeforeEntryDoesNotReserveOrCallConnector() async throws {
+        let store = try await store(); let (_, id) = try await reminderFixture(store)
+        let port = TestReminders()
+        let running = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        }
+        do { try await running.value; XCTFail("cancelled send") }
+        catch is CancellationError {} catch { XCTFail("cancellation was lost: \(error)") }
+        let links = try await store.reminderLinks(); XCTAssertTrue(links.isEmpty)
+        let creates = await port.creates; XCTAssertEqual(creates, 0)
+    }
+    func testCancellationDuringPreflightCannotCreateEvenIfConnectorIgnoresCancellation() async throws {
+        let store = try await store(); let (_, id) = try await reminderFixture(store)
+        let port = TestReminders(suspended: true)
+        let running = Task { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port) }
+        await port.waitStarted(); running.cancel(); await port.release()
+        do { try await running.value; XCTFail("cancelled preflight") }
+        catch is CancellationError {} catch { XCTFail("cancellation was lost: \(error)") }
+        let creates = await port.creates; XCTAssertEqual(creates, 0)
+        let link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "unknown")
+        // A later, non-cancelled recovery remains read-only, even after an
+        // empty preflight. It cannot assume the persisted attempt is safe to repeat.
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        let after = await port.creates; XCTAssertEqual(after, 0)
+        let recovered = try await store.reminderLinks()[0]; XCTAssertEqual(recovered.state, "missing")
+    }
+    func testCancellationAfterExternalSaveKeepsUnknownUntilReadOnlyRecovery() async throws {
+        let store = try await store(); let (_, id) = try await reminderFixture(store)
+        let port = TestReminders(suspendCreate: true)
+        let running = Task { try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port) }
+        await port.waitStarted(); running.cancel(); await port.release()
+        do { try await running.value; XCTFail("cancelled saved send") }
+        catch is CancellationError {} catch { XCTFail("cancellation was lost: \(error)") }
+        var link = try await store.reminderLinks()[0]
+        XCTAssertEqual(link.state, "unknown"); XCTAssertNil(link.remoteCompleted)
+        try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port)
+        link = try await store.reminderLinks()[0]; XCTAssertEqual(link.state, "linked"); XCTAssertEqual(link.remoteCompleted, false)
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
+        let action = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(action.state, "open")
+    }
+    func testCancelledReadCannotApplyLateCompletionOrLosePriorObservation() async throws {
+        let store = try await store(); let (_, id) = try await reminderFixture(store)
+        let port = TestReminders()
+        try await store.sendTaskToReminders(actionID: id, expectedVersion: 1, calendarID: "authorized", using: port)
+        let link = try await store.reminderLinks()[0]
+        await port.edit(completed: true); await port.suspendRead()
+        let running = Task { try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port) }
+        await port.waitStarted(); running.cancel(); await port.release()
+        do { try await running.value; XCTFail("cancelled read") }
+        catch is CancellationError {} catch { XCTFail("cancellation was lost: \(error)") }
+        let uncertain = try await store.reminderLinks()[0]
+        XCTAssertEqual(uncertain.state, "unknown"); XCTAssertEqual(uncertain.remoteCompleted, false)
+        XCTAssertEqual(uncertain.lastObservedAt, link.lastObservedAt)
+        let before = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(before.state, "open")
+        try await store.readReminder(linkID: link.id, calendarID: "authorized", using: port)
+        let after = try await store.actions(includeHistory: true)[0]; XCTAssertEqual(after.state, "completed"); XCTAssertEqual(after.version, 2)
+        let history = try await store.actionHistory(actionID: id); XCTAssertEqual(history.count, 2)
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
     }
     func testPermissionTighteningDuringInFlightSaveFreezesActionAndKeepsObservation() async throws {
         let store = try await store(); let (_,id) = try await reminderFixture(store); let port = TestReminders(suspendCreate: true)

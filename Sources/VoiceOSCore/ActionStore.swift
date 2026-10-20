@@ -55,6 +55,7 @@ extension VoiceOSStore {
     }
     @discardableResult
     public func setActionState(actionID: String, expectedVersion: Int, state: LocalActionState, note: String = "", commandID: String = UUID().uuidString) throws -> Int {
+        guard !commandID.hasPrefix("reminder-status-resolution:") else { throw VoiceOSError("提醒事项状态恢复须绑定回读依据，不能使用普通状态命令") }
         let hash = try Self.actionHash([actionID,String(expectedVersion),state.rawValue,note])
         if let receipt = try db.query("SELECT * FROM action_revisions WHERE command_id=?", [commandID]).first {
             guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一行动状态命令不能更换内容") }
@@ -102,5 +103,10 @@ extension VoiceOSStore {
             }
             guard state == action["state"] else { throw VoiceOSError("迁移行动当前状态与历史不一致") }
         }
+        try validateStoredActionSchedules(db)
+        try validateReminderScheduleBases(db)
+        try validateReminderScheduleGrants(db)
+        try validateReminderScheduleOperations(db)
+        try validateReminderCompensations(db)
     }
 }

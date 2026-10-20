@@ -276,6 +276,9 @@ final class ConversationOutcomeReuseTests:XCTestCase {
         _=try await s.performConversationReply(nextInput,using:ReuseDiscussion());try await s.endConversation(id:next,expectedVersion:2)
         let shared=try await s.prepareReusableConversationOutcome(id:next,expectedVersion:3,destination:.local)
         _=try await s.performConversationOutcome(shared,using:ReusableOutcomePort())
+        let sharedClaims=try await s.candidateClaims(),sharedRows=try await s.conversationOutcomes(conversationID:next)
+        let sharedAI=try XCTUnwrap(sharedClaims.first { sharedRows[0].claimIDs.contains($0.id) && $0.ownership == "ai_candidate" })
+        let sharedAction=try await s.createAction(claimID:sharedAI.id,expectedClaimReviewVersion:0,title:"共享AI待核对建议",kind:.aiSuggestion,intentActor:.ai)
         let sources=try await s.sources(),version=try XCTUnwrap(sources.first(where: { $0.id == extra })?.transcriptVersionID)
         _=try await s.correctTranscript(sourceID:extra,expectedVersionID:version,text:"合成其他依据已更正。")
         let session=try await s.conversation(id:original.input.conversationID),rows=try await s.conversationOutcomes(conversationID:session.id),claims=try await s.candidateClaims(includeFrozen:true)
@@ -284,6 +287,8 @@ final class ConversationOutcomeReuseTests:XCTestCase {
         XCTAssertEqual(nextRows[0].validity,"frozen")
         XCTAssertTrue(nextRows[0].claimIDs.allSatisfy { id in claims.first(where: { $0.id == id })?.validity == "frozen" })
         XCTAssertTrue(rows[0].claimIDs.allSatisfy { id in claims.first(where: { $0.id == id })?.validity == "frozen" })
+        let impact=try await s.correctionActionImpacts().first { $0.action.id == sharedAction }
+        XCTAssertEqual(impact?.roots.map(\.sourceID),[extra])
         let package=root.appendingPathComponent("dependency-package"),target=root.appendingPathComponent("dependency-restored")
         try await s.exportPackage(to:package);try await VoiceOSStore.restorePackage(from:package,to:target,inspector:ReuseInspector())
     }

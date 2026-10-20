@@ -41,6 +41,13 @@ private enum PackageLayout {
     static let version29Tables = version28Tables + ["segmented_aggregation_attempts"]
     static let version30Tables = version29Tables + ["segmented_cognitive_commits"]
     static let version31Tables = version30Tables + ["recording_segment_plans"]
+    static let version32Tables = version31Tables + ["reminder_status_resolutions"]
+    static let version33Tables = version32Tables + ["reminder_time_observations"]
+    static let version34Tables = version33Tables + ["action_schedule_intents"]
+    static let version35Tables = version34Tables + ["reminder_schedule_operations"]
+    static let version36Tables = version34Tables + ["reminder_schedule_grants", "reminder_schedule_grant_revocations", "reminder_schedule_operations"]
+    static let version37Tables = version36Tables + ["reminder_schedule_bases"]
+    static let version38Tables = version37Tables + ["reminder_compensation_plans", "reminder_compensation_grants", "reminder_compensation_revocations", "reminder_compensation_operations"]
     static func tables(for version: Int) -> [String] {
         switch version {
         case 1: return legacyTables
@@ -69,10 +76,17 @@ private enum PackageLayout {
         case 29: return version29Tables
         case 30: return version30Tables
         case 31: return version31Tables
+        case 32: return version32Tables
+        case 33: return version33Tables
+        case 34: return version34Tables
+        case 35: return version35Tables
+        case 36: return version36Tables
+        case 37: return version37Tables
+        case 38: return version38Tables
         default: return tables
         }
     }
-    static let integerFields: Set<String> = ["producer_sequence", "part_index", "conversation_version", "auto_send", "sequence", "action_version", "completed", "marker_valid", "claim_review_version", "review_version", "policy_version", "from_version", "to_version", "from_local_only", "to_local_only", "ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
+    static let integerFields: Set<String> = ["attempted", "save_acknowledged", "schedule_version", "base_action_version", "access_version", "producer_sequence", "part_index", "conversation_version", "auto_send", "sequence", "action_version", "completed", "marker_valid", "claim_review_version", "review_version", "policy_version", "from_version", "to_version", "from_local_only", "to_local_only", "ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
     static func json(_ row: [String: String]) -> [String: Any] {
         row.reduce(into: [String: Any]()) { out, pair in
             if integerFields.contains(pair.key), let number = Int64(pair.value) { out[pair.key] = number }
@@ -105,7 +119,7 @@ extension VoiceOSStore {
         let file = try PackageLayout.safeFile(package, "manifest.json")
         guard let size = try file.resourceValues(forKeys:[.fileSizeKey]).fileSize, size > 0, size <= 1048576 else { throw VoiceOSError("迁移清单过大或为空") }
         let manifest = try JSONDecoder().decode(PackageManifest.self,from:Data(contentsOf:file))
-        guard manifest.format == "VoiceOS-local-package", (1...31).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
+        guard manifest.format == "VoiceOS-local-package", (1...38).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
               let count = manifest.counts["sources"], count >= 0, manifest.counts.values.allSatisfy({ $0 >= 0 && $0 <= 1000000 }) else { throw VoiceOSError("不支持此迁移包格式或记录数量") }
         return PackageSummary(version:manifest.version,createdAt:manifest.createdAt,sourceCount:count,omittedAssetCount:manifest.omittedAssetIDs.count,mediaIncluded:manifest.mediaIncluded)
     }
@@ -117,10 +131,17 @@ extension VoiceOSStore {
         let hasRequests = try !db.query("SELECT id FROM recording_processing_requests LIMIT 1").isEmpty
         let hasBatches = try !db.query("SELECT id FROM segmented_processing_batches LIMIT 1").isEmpty
         let hasRecordingSegments=try !db.query("SELECT id FROM recording_segment_plans LIMIT 1").isEmpty
+        let hasReminderResolutions = try !db.query("SELECT id FROM reminder_status_resolutions LIMIT 1").isEmpty
+        let hasReminderTimes = try !db.query("SELECT id FROM reminder_time_observations LIMIT 1").isEmpty
+        let hasSchedules = try !db.query("SELECT id FROM action_schedule_intents LIMIT 1").isEmpty
+        let hasScheduleOperations = try !db.query("SELECT id FROM reminder_schedule_operations LIMIT 1").isEmpty
+        let hasCompensations = try !db.query("SELECT id FROM reminder_compensation_plans LIMIT 1").isEmpty
+        let hasScheduleBases = try !db.query("SELECT id FROM reminder_schedule_bases LIMIT 1").isEmpty
+        let hasScheduleGrants = try !db.query("SELECT id FROM reminder_schedule_grants LIMIT 1").isEmpty
         let hasFinal = try !db.query("SELECT id FROM segmented_cognitive_commits LIMIT 1").isEmpty || db.query("SELECT * FROM segmented_aggregation_attempts").contains { try Self.aggregationAttempt($0).response?.finalClaims != nil }
         let hasAggregation = try !db.query("SELECT id FROM segmented_aggregation_attempts LIMIT 1").isEmpty
         let hasSegments = try !db.query("SELECT id FROM segmented_extraction_attempts LIMIT 1").isEmpty
-        let exportTables = hasRecordingSegments ? PackageLayout.version31Tables : hasFinal ? PackageLayout.version30Tables : hasAggregation ? PackageLayout.version29Tables : hasSegments ? PackageLayout.version28Tables : hasBatches ? PackageLayout.version27Tables : hasRequests ? PackageLayout.version26Tables : PackageLayout.tables
+        let exportTables = hasCompensations ? PackageLayout.version38Tables : hasScheduleBases ? PackageLayout.version37Tables : hasScheduleGrants ? PackageLayout.version36Tables : hasScheduleOperations ? PackageLayout.version35Tables : hasSchedules ? PackageLayout.version34Tables : hasReminderTimes ? PackageLayout.version33Tables : hasReminderResolutions ? PackageLayout.version32Tables : hasRecordingSegments ? PackageLayout.version31Tables : hasFinal ? PackageLayout.version30Tables : hasAggregation ? PackageLayout.version29Tables : hasSegments ? PackageLayout.version28Tables : hasBatches ? PackageLayout.version27Tables : hasRequests ? PackageLayout.version26Tables : PackageLayout.tables
         var rows: [String: [[String: String]]] = [:]
         try db.transaction {
             for table in exportTables { rows[table] = try db.query("SELECT * FROM \(table) ORDER BY id") }
@@ -161,8 +182,8 @@ extension VoiceOSStore {
                 files.append(verified)
             }
             if includeMedia { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let packageVersion = hasRecordingSegments ? 31 : hasFinal ? 30 : hasAggregation ? 29 : hasSegments ? 28 : hasBatches ? 27 : hasRequests ? 26 : try db.query("SELECT id FROM sources WHERE input_fingerprint LIKE 'personal-audio-v1:%' LIMIT 1").isEmpty ? 24 : 25
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: packageVersion, databaseSchema: hasRecordingSegments ? 31 : hasFinal ? 30 : hasAggregation ? 29 : hasSegments ? 28 : hasBatches ? 27 : hasRequests ? 26 : 25, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            let packageVersion = hasCompensations ? 38 : hasScheduleBases ? 37 : hasScheduleGrants ? 36 : hasScheduleOperations ? 35 : hasSchedules ? 34 : hasReminderTimes ? 33 : hasReminderResolutions ? 32 : hasRecordingSegments ? 31 : hasFinal ? 30 : hasAggregation ? 29 : hasSegments ? 28 : hasBatches ? 27 : hasRequests ? 26 : try db.query("SELECT id FROM sources WHERE input_fingerprint LIKE 'personal-audio-v1:%' LIMIT 1").isEmpty ? 24 : 25
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: packageVersion, databaseSchema: hasCompensations ? 38 : hasScheduleBases ? 37 : hasScheduleGrants ? 36 : hasScheduleOperations ? 35 : hasSchedules ? 34 : hasReminderTimes ? 33 : hasReminderResolutions ? 32 : hasRecordingSegments ? 31 : hasFinal ? 30 : hasAggregation ? 29 : hasSegments ? 28 : hasBatches ? 27 : hasRequests ? 26 : 25, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)
@@ -179,13 +200,20 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("恢复目标必须是新的空目录；现有资料库不会被覆盖") }
         let manifestURL = try PackageLayout.safeFile(package, "manifest.json")
         let manifest = try JSONDecoder().decode(PackageManifest.self, from: Data(contentsOf: manifestURL))
-        guard manifest.format == "VoiceOS-local-package", (1...31).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
+        guard manifest.format == "VoiceOS-local-package", (1...38).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
         guard manifest.version >= 26 || !manifest.files.contains(where: { $0.path == "recording_processing_requests.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带录制处理请求") }
         guard manifest.version >= 27 || !manifest.files.contains(where: { $0.path == "segmented_processing_batches.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带分段批次") }
         guard manifest.version >= 28 || !manifest.files.contains(where: { $0.path == "segmented_extraction_attempts.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带片段尝试") }
         guard manifest.version >= 29 || !manifest.files.contains(where: { $0.path == "segmented_aggregation_attempts.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带聚合尝试") }
         guard manifest.version >= 30 || !manifest.files.contains(where: { $0.path == "segmented_cognitive_commits.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带整篇认知提交") }
         guard manifest.version >= 31 || !manifest.files.contains(where: { $0.path == "recording_segment_plans.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带录制分段范围") }
+        guard manifest.version >= 32 || !manifest.files.contains(where: { $0.path == "reminder_status_resolutions.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带提醒事项状态恢复") }
+        guard manifest.version >= 33 || !manifest.files.contains(where: { $0.path == "reminder_time_observations.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带提醒事项时间观测") }
+        guard manifest.version >= 34 || !manifest.files.contains(where: { $0.path == "action_schedule_intents.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带排期意图") }
+        guard manifest.version >= 35 || !manifest.files.contains(where: { $0.path == "reminder_schedule_operations.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带改期操作") }
+        guard manifest.version >= 36 || !manifest.files.contains(where: { ["reminder_schedule_grants.jsonl","reminder_schedule_grant_revocations.jsonl"].contains($0.path) }) else { throw VoiceOSError("旧迁移格式不能携带具体效果确认") }
+        guard manifest.version >= 37 || !manifest.files.contains(where: { $0.path == "reminder_schedule_bases.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带字段归属证据") }
+        guard manifest.version >= 38 || !manifest.files.contains(where: { $0.path.hasPrefix("reminder_compensation_") }) else { throw VoiceOSError("旧迁移格式不能携带补偿计划、许可或尝试") }
         var tables = PackageLayout.tables(for: manifest.version)
         // A newer package can be relabeled as an older compatibility fixture. The
         // additive queue table is safe to carry through that validation path.
@@ -288,6 +316,11 @@ extension VoiceOSStore {
                     if table == "model_attempts", row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前结果未登记；不会自动重发" }
                     if table == "english_feedback_attempts", row["state"] == "reserved" { row["state"] = "unknown"; row["error"] = "迁移前英文反馈未登记；不自动重发" }
                     if table == "questions" { row["validity"] = "frozen" }
+                    if table == "action_schedule_intents" { row["validity"] = "frozen" }
+                    if table == "reminder_schedule_operations" { row["validity"] = "frozen" }
+                    if table == "reminder_schedule_operations", packageVersion < 36, row["grant_id"] != nil { throw VoiceOSError("旧迁移格式不能携带具体效果确认绑定") }
+                    if table == "reminder_schedule_grants" { row["validity"] = "frozen" }
+                    if ["reminder_compensation_plans", "reminder_compensation_grants", "reminder_compensation_operations"].contains(table) { row["validity"] = "frozen" }
                     if packageVersion<30 {
                         if table == "model_attempts", row["execution_kind"] == "segmented_derivation" { throw VoiceOSError("旧格式不能携带整篇认知生产者") }
                         if table == "segmented_aggregation_attempts", try VoiceOSStore.aggregationAttempt(row).response?.finalClaims != nil { throw VoiceOSError("旧格式不能携带最终认知提案") }

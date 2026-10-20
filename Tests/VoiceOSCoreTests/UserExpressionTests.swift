@@ -11,10 +11,17 @@ private actor TextReminderPort: RemindersPort {
     var failCreates=false
     var findCalls=0
     var afterCreate: (@Sendable () async throws -> Void)?
+    var afterFind: (@Sendable () async throws -> Void)?
     func installAfterCreate(_ hook: @escaping @Sendable () async throws -> Void) { afterCreate=hook }
+    func installAfterFind(_ hook: @escaping @Sendable () async throws -> Void) { afterFind=hook }
     func failFutureCreates() { failCreates=true }
     func completeExisting() { items=items.map { .init(id:$0.id,title:$0.title,completed:true,marker:$0.marker) } }
-    func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] { findCalls += 1;return items.filter { $0.marker == marker || $0.id == externalID } }
+    func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
+        findCalls += 1
+        let hook = afterFind; afterFind = nil
+        try await hook?()
+        return items.filter { $0.marker == marker || $0.id == externalID }
+    }
     func create(calendarID: String, title: String, marker: String) async throws {
         creates += 1; items.append(ReminderSnapshot(id: UUID().uuidString, title: title, completed: false, marker: marker))
         try await afterCreate?()
@@ -22,6 +29,21 @@ private actor TextReminderPort: RemindersPort {
     }
 }
 final class UserExpressionTests: XCTestCase {
+    func testConnectorCancellationStopsRefreshBeforeReconciliation() async throws {
+        let s = try await store(), port = TextReminderPort()
+        _ = try await s.setReminderAccess(calendarID: "fixture", title: "fixture", enabled: true, expectedVersion: 0)
+        let id = try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。")
+        _ = try await s.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+        let (attempt, p) = try await proposals(s, id)
+        _ = try await s.commitLocalClaims(attemptID: attempt, proposals: [p[0]])
+        await port.installAfterCreate { throw CancellationError() }
+        do { try await s.refreshAuthorizedReminders(expectedAccessVersion: 1, using: port); XCTFail("cancelled refresh") }
+        catch is CancellationError {} catch { XCTFail("cancellation was lost: \(error)") }
+        let calls = await port.findCalls; XCTAssertEqual(calls, 1)
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
+        let link = try await s.reminderLinks()[0]
+        XCTAssertEqual(link.state, "unknown"); XCTAssertNil(link.remoteCompleted)
+    }
     func testRevokedScopeDuringCreateStopsFurtherReadback() async throws {
         let s=try await store(),port=TextReminderPort()
         _=try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)
@@ -154,6 +176,73 @@ final class UserExpressionTests: XCTestCase {
         _ = try await s.setReminderAccess(calendarID:"fixture",title:"fixture",enabled:true,expectedVersion:0)
         let port = TextReminderPort(); try await s.activateExtractedTasks(expectedAccessVersion:1,using:port)
         let count = await port.creates; XCTAssertEqual(count,4)
+    }
+    func testReminderActivationIgnoresUnlinkedHistoricalBatch() async throws {
+        let s = try await store()
+        let text = "我会整理开发验证素材。"
+        let id = try await s.recordUserExpression(text)
+        _ = try await s.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+        let context = try await s.prepareLocalTranscriptContext(sourceIDs: [id]), input = context.sources[0]
+        let ref = ClaimReference(sourceID: id, transcriptVersionID: input.transcriptVersionID, spanID: input.spans[0].id)
+        func commitTask(_ title: String) async throws {
+            let persisted = try await s.persistLocalContext(context)
+            let attempt = try await s.reserveLocalModelAttempt(contextID: persisted, model: "fixture", promptVersion: "v2", schemaVersion: "v2")
+            _ = try await s.commitLocalClaims(attemptID: attempt, proposals: [
+                .init(statement: "明确任务：\(title)", ownership: .userTentative, references: [ref], action: .init(title: title, kind: .task, quote: text))
+            ])
+        }
+        try await commitTask("旧批次任务")
+        try await commitTask("最新批次任务")
+        _ = try await s.setReminderAccess(calendarID: "fixture", title: "fixture", enabled: true, expectedVersion: 0)
+        let port = TextReminderPort()
+        try await s.activateExtractedTasks(expectedAccessVersion: 1, using: port)
+        let creates = await port.creates
+        XCTAssertEqual(creates, 1)
+        let links = try await s.reminderLinks()
+        XCTAssertEqual(links.count, 1)
+        XCTAssertEqual(links[0].remoteTitle, "最新批次任务")
+    }
+    func testNewBatchDuringPreflightStopsHistoricalWriteAndAllowsLatestTask() async throws {
+        let s = try await store(), port = TextReminderPort()
+        let id = try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。")
+        _ = try await s.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+        let (attempt, p) = try await proposals(s, id)
+        _ = try await s.commitLocalClaims(attemptID: attempt, proposals: [p[0]])
+        let (newAttempt, newer) = try await proposals(s, id)
+        let newTask = ClaimProposal(statement: "整理最新素材", ownership: .userTentative, references: newer[0].references,
+                                    action: .init(title: "整理最新素材", kind: .task, quote: "整理开发验证素材"))
+        await port.installAfterFind { _ = try await s.commitLocalClaims(attemptID: newAttempt, proposals: [newTask]) }
+        _ = try await s.setReminderAccess(calendarID: "fixture", title: "fixture", enabled: true, expectedVersion: 0)
+        do { try await s.activateExtractedTasks(expectedAccessVersion: 1, using: port); XCTFail("stale preflight") } catch {}
+        var creates = await port.creates; XCTAssertEqual(creates, 0)
+        let uncertain = try await s.reminderLinks()[0]; XCTAssertEqual(uncertain.state, "unknown")
+        try await s.refreshAuthorizedReminders(expectedAccessVersion: 1, using: port)
+        creates = await port.creates; XCTAssertEqual(creates, 1)
+        let linked = try await s.reminderLinks().filter { $0.state == "linked" }
+        XCTAssertEqual(linked.count, 1); XCTAssertEqual(linked[0].remoteTitle, "整理最新素材")
+    }
+    func testNewBatchDuringFirstCreateSkipsRemainingHistoricalTasksButReconcilesCreatedLink() async throws {
+        let s = try await store(), port = TextReminderPort()
+        let id = try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。")
+        _ = try await s.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+        let (attempt, p) = try await proposals(s, id)
+        let second = ClaimProposal(statement: "另一个明确交付物", ownership: .userTentative, references: p[0].references,
+                                   action: .init(title: "整理第二份素材", kind: .task, quote: "整理开发验证素材"))
+        _ = try await s.commitLocalClaims(attemptID: attempt, proposals: [p[0], second])
+        let (newAttempt, _) = try await proposals(s, id)
+        // Latest understanding contains no committed task. Already emitted
+        // history remains observable; the rest of the stale snapshot stays local.
+        await port.installAfterCreate { _ = try await s.commitLocalClaims(attemptID: newAttempt, proposals: []) }
+        _ = try await s.setReminderAccess(calendarID: "fixture", title: "fixture", enabled: true, expectedVersion: 0)
+        try await s.activateExtractedTasks(expectedAccessVersion: 1, using: port)
+        let creates = await port.creates; XCTAssertEqual(creates, 1)
+        await port.completeExisting()
+        try await s.refreshAuthorizedReminders(expectedAccessVersion: 1, using: port)
+        let links = try await s.reminderLinks(); XCTAssertEqual(links.count, 1); XCTAssertEqual(links[0].remoteCompleted, true)
+        let history = try await s.actions(includeHistory: true)
+        XCTAssertEqual(history.filter { $0.state == "completed" }.count, 1)
+        XCTAssertEqual(history.filter { $0.state == "open" }.count, 1)
+        let after = await port.creates; XCTAssertEqual(after, 1)
     }
     func testMigrationRejectsMissingExtractedActionEvenWithNewFileDigest() async throws {
         let s = try await store(); let id = try await s.recordUserExpression("我会整理开发验证素材，以后也许研究检索。")
