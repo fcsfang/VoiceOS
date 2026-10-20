@@ -58,7 +58,8 @@ extension VoiceOSStore {
     }
     static func expressionFingerprint(_ text: String, feedback: FeedbackIntent?) throws -> String {
         guard let feedback else { return "user-text-v1:" + SHA256.hash(data:Data(text.utf8)).map { String(format:"%02x",$0) }.joined() }
-        let values = [text,feedback.actionID,String(feedback.actionVersion),feedback.kind.rawValue]
+        var values = [text,feedback.actionID,String(feedback.actionVersion),feedback.kind.rawValue]
+        if let claimID = feedback.organizedClaimID { values += [claimID,feedback.relation ?? "",feedback.recordingSourceID ?? ""] }
         return "user-text-feedback-v1:" + SHA256.hash(data:try JSONSerialization.data(withJSONObject:values)).map { String(format:"%02x",$0) }.joined()
     }
     static func inspectUserText(_ file: URL) throws -> MediaInfo {

@@ -7,6 +7,11 @@ public struct LocalQwenSpeechPort: SpeechPort {
     private let python: URL
     private let runner: URL
     private let model: URL
+    public var progressLog: URL?
+    public var pythonExecutable: URL { python }
+    public func configurationData() throws -> Data {
+        try JSONSerialization.data(withJSONObject: ["format": "voiceos-local-qwen-v1", "python": python.path, "runner": runner.path, "model": model.path], options: [.sortedKeys])
+    }
     public static func load(from file: URL) throws -> LocalQwenSpeechPort {
         try load(configurationData:Data(contentsOf:file))
     }
@@ -38,8 +43,13 @@ public struct LocalQwenSpeechPort: SpeechPort {
         process.arguments=[runner.path,"--audio",url.path,"--model",model.path,"--output",output.path,"--locale",locale]
         // Do not inherit gateway/API credentials or Python path overrides.
         process.environment=["PATH":"/opt/homebrew/bin:/usr/bin:/bin","HF_HUB_OFFLINE":"1","HF_HUB_DISABLE_TELEMETRY":"1"]
-        process.standardOutput=FileHandle.nullDevice;process.standardError=FileHandle.nullDevice
-        let wait = LocalSpeechProcessWait(process)
+        let log = try progressLog.map { url -> FileHandle in
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            return try FileHandle(forWritingTo: url)
+        }
+        defer { try? log?.close() }
+        process.standardOutput=log ?? FileHandle.nullDevice;process.standardError=log ?? FileHandle.nullDevice
+        let wait = LocalProcessWait(process, failure: "本地 Qwen 转写未完成；保留原件，不自动切换服务")
         try await wait.run()
         struct Response: Decodable { let backend: String; let text: String; let spans: [TranscriptSpan]; let audio_uploaded: Bool }
         let data=try Data(contentsOf:output)
@@ -56,31 +66,26 @@ public struct LocalQwenSpeechPort: SpeechPort {
 /// Machine-local setup, deliberately separate from portable product records.
 /// Restoring a missing Qwen installation must never quietly select Apple.
 public struct LocalSpeechSelection: Codable, Sendable {
-    public enum Backend: String, Codable, Sendable { case qwen, apple }
+    public enum Backend: String, Codable, Sendable { case qwen }
     public let backend: Backend
     public let configuration: Data?
     public init(backend: Backend = .qwen, configuration: Data? = nil) {
         self.backend=backend; self.configuration=configuration
     }
     public func port() throws -> any SpeechPort {
-        switch backend {
-        case .apple:
-            guard configuration==nil else { throw VoiceOSError("Apple 转写选择不能附带 Qwen 配置") }
-            return NativeSpeechPort()
-        case .qwen:
-            guard let configuration else { throw VoiceOSError("请先配置已选定的本地 Qwen 转写模型") }
-            return try LocalQwenSpeechPort.load(configurationData:configuration)
-        }
+        guard let configuration else { throw VoiceOSError("请先配置已选定的本地 Qwen 转写模型") }
+        return try LocalQwenSpeechPort.load(configurationData:configuration)
     }
 }
 
 /// Process lifetime is serialized under a lock; cancellation kills this child
 /// and completion waits for termination before removing its private output.
-private final class LocalSpeechProcessWait: @unchecked Sendable {
+final class LocalProcessWait: @unchecked Sendable {
     private let process: Process
     private let lock=NSLock()
     private var cancelled=false
-    init(_ process: Process) { self.process=process }
+    private let failure: String
+    init(_ process: Process, failure: String) { self.process=process; self.failure=failure }
     func run() async throws {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void,Error>) in
@@ -91,10 +96,10 @@ private final class LocalSpeechProcessWait: @unchecked Sendable {
                     lock.lock();let wasCancelled=cancelled;lock.unlock()
                     if wasCancelled { continuation.resume(throwing:CancellationError()) }
                     else if child.terminationStatus==0 { continuation.resume() }
-                    else { continuation.resume(throwing:VoiceOSError("本地 Qwen 转写未完成；保留原件，不自动切换服务")) }
+                    else { continuation.resume(throwing:VoiceOSError(failure)) }
                 }
                 do { try process.run() }
-                catch { process.terminationHandler=nil;continuation.resume(throwing:VoiceOSError("无法启动本地 Qwen 转写")) }
+                catch { process.terminationHandler=nil;continuation.resume(throwing:VoiceOSError(failure)) }
             }
         } onCancel: {
             self.lock.lock();self.cancelled=true

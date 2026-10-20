@@ -25,12 +25,18 @@ else:
     signing_identity = candidates[0]
 env = dict(os.environ)
 env.pop('SDKROOT', None)
-subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build'], cwd=ROOT, env=env, check=True)
+subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build', '--product', 'VoiceOS'], cwd=ROOT, env=env, check=True)
 bin_path = Path(subprocess.check_output(['xcrun', '--sdk', 'macosx', 'swift', 'build', '--show-bin-path'], cwd=ROOT, env=env, text=True).strip())
 app = ROOT / 'dist' / 'VoiceOS.app'
 mac = app / 'Contents' / 'MacOS'
 mac.mkdir(parents=True, exist_ok=True)
 shutil.copy2(bin_path / 'VoiceOS', mac / 'VoiceOS')
+organizer = app / 'Contents' / 'Resources' / 'organize_podcast.py'
+organizer.parent.mkdir(parents=True, exist_ok=True)
+shutil.copy2(ROOT / 'scripts' / 'organize_podcast.py', organizer)
+shutil.copy2(ROOT / 'scripts' / 'organizer_quality.py', organizer.with_name('organizer_quality.py'))
+bytecode = organizer.parent / '__pycache__'
+if bytecode.exists(): shutil.rmtree(bytecode)  # Generated Python cache must not alter the signed app.
 resources = app / 'Contents' / 'Resources' / 'BGE'
 if resources.exists(): shutil.rmtree(resources)  # Only generated build resources.
 if args.semantic_model:
@@ -53,7 +59,11 @@ if args.semantic_model:
     notice.parent.mkdir(parents=True,exist_ok=True)
     shutil.copy2(ROOT / 'docs' / 'licenses' / 'BGE-MIT.txt',notice)
 info = dict(CFBundleIdentifier='local.voiceos.app', CFBundleName='VoiceOS', CFBundleDisplayName='VoiceOS', CFBundleExecutable='VoiceOS', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.0', CFBundleVersion='1', LSMinimumSystemVersion='26.0', NSHighResolutionCapable=True, NSMicrophoneUsageDescription='VoiceOS 仅在你主动开始口述时录制麦克风，停止后封存原件并在本机转写；不会自动上传音频。', NSRemindersFullAccessUsageDescription='VoiceOS 在你明确选定的清单创建任务并回读完成状态；其他清单的任务不会读取或修改。')
+if (ROOT / '.env').is_file(): info['VoiceOSModelConfigurationPath'] = str(ROOT / '.env')
+info['CFBundleURLTypes'] = [dict(CFBundleURLName='VoiceOS task', CFBundleURLSchemes=['voiceos'])]
 with (app / 'Contents' / 'Info.plist').open('wb') as f: plistlib.dump(info, f)
 subprocess.run(['codesign', '--force', '--sign', signing_identity, str(app)], check=True)
 subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)
+register = Path('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister')
+if register.is_file(): subprocess.run([str(register), '-f', str(app)], check=True)
 print(app)

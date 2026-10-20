@@ -1,0 +1,274 @@
+import XCTest
+import AVFoundation
+@testable import VoiceOSCore
+import VoiceOSPlatform
+
+// Simulated model/reminder ports exercise the user flows without cloud calls or personal data.
+private let flowConfiguration = ModelConfiguration(provider: "fixture", model: "flow", promptVersion: "v1", schemaVersion: "v1", destination: .local)
+
+private actor FlowModel: ModelPort {
+    let configuration = flowConfiguration
+    let createsTask: Bool
+    var calls = 0
+    init(createsTask: Bool = false) { self.createsTask = createsTask }
+    func generate(_ request: ModelRequest) async throws -> ModelResponse {
+        calls += 1
+        let source = request.context.sources[0]
+        let reference = ClaimReference(sourceID: source.sourceID, transcriptVersionID: source.transcriptVersionID, spanID: source.spans[0].id)
+        let action = createsTask ? ExtractedAction(title: source.text, kind: .task, quote: source.text, autoSend: true) : nil
+        return ModelResponse(status: .completed, claims: [ClaimProposal(statement: source.text, ownership: .userTentative, references: [reference], action: action)])
+    }
+}
+private struct FlowSpeech: SpeechPort {
+    let backendIdentity = "Qwen3-ASR-flow-fixture"
+    var text = "我认为检索质量比记忆容量更值得研究。"
+    func transcribe(_ url: URL, locale: String) async throws -> SpeechText { SpeechText(text: text) }
+}
+private struct FlowAssociation: ExpressionAssociationPort {
+    let configuration = flowConfiguration
+    func associate(_ request: ExpressionAssociationRequest) async throws -> ExpressionAssociationResponse { .init(proposals: []) }
+}
+private actor FlowReminders: RemindersPort {
+    var items: [ReminderSnapshot] = []
+    var contexts: [String] = []
+    func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
+        items.filter { $0.marker == marker || $0.id == externalID }
+    }
+    func create(calendarID: String, title: String, marker: String, context: String) async throws {
+        items.append(.init(id: UUID().uuidString, title: title, completed: false, marker: marker))
+        contexts.append(context)
+    }
+    func complete() { items = items.map { .init(id: $0.id, title: $0.title, completed: true, marker: $0.marker) } }
+}
+private struct FlowEnglish: EnglishPracticeModelPort {
+    let configuration = ModelConfiguration(provider: "fixture", model: "english", promptVersion: "english-practice-v1", schemaVersion: "english-feedback-v1", destination: .cloud)
+    let response: EnglishPracticeResponse
+    func generate(_ request: EnglishPracticeRequest) async throws -> EnglishPracticeResponse { response }
+}
+
+final class CoreFlowTests: XCTestCase {
+    private var root: URL!
+    override func setUpWithError() throws { root = FileManager.default.temporaryDirectory.appendingPathComponent("voiceos-flow-" + UUID().uuidString) }
+    override func tearDownWithError() throws { try? FileManager.default.removeItem(at: root) }
+    private func openStore() async throws -> VoiceOSStore {
+        let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
+        try await store.recover()
+        return store
+    }
+    private func expression(_ store: VoiceOSStore, text: String, model: FlowModel) async throws -> String {
+        let id = try await store.recordUserExpression(text)
+        _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+        _ = try await store.continueSourceUnderstanding(sourceID: id, using: model)
+        return id
+    }
+
+    func testExpressionCreatesKnowledgeTaskAndOutcome() async throws {
+        let store = try await openStore(), model = FlowModel(createsTask: true), reminders = FlowReminders()
+        let sourceID = try await expression(store, text: "我会查阅相关论文。", model: model)
+        let claims = try await store.candidateClaims(), actions = try await store.actions()
+        let action = try XCTUnwrap(actions.first)
+        XCTAssertEqual(claims.first?.references.first?.sourceID, sourceID)
+        XCTAssertEqual(claims.first?.ownership, "user_tentative")
+        XCTAssertEqual(action.claimID, claims.first?.id)
+        _ = try await store.setReminderAccess(calendarID: "fixture", title: "测试清单", enabled: true, expectedVersion: 0)
+        try await store.sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: "fixture", using: reminders, expectedAccessVersion: 1)
+        let context = await reminders.contexts.first
+        XCTAssertTrue(context?.contains("原话：我会查阅相关论文。") == true)
+        let links = try await store.reminderLinks(), link = try XCTUnwrap(links.first)
+        await reminders.complete()
+        try await store.readReminder(linkID: link.id, calendarID: "fixture", using: reminders, expectedAccessVersion: 1)
+        let completedActions = try await store.actions(includeHistory: true), completed = try XCTUnwrap(completedActions.first)
+        XCTAssertEqual(completed.state, "completed")
+        let feedbackID = try await store.recordActionFeedback(actionID: action.id, expectedVersion: completed.version, kind: .outcome, text: "阅读后发现检索质量确实影响结果。")
+        let feedback = try await store.actionFeedback(actionID: action.id)
+        XCTAssertEqual(feedback.first?.sourceID, feedbackID)
+        XCTAssertEqual(feedback.first?.actionID, action.id)
+    }
+
+    func testRecordingRunsTranscriptionUnderstandingAndAssociation() async throws {
+        let store = try await openStore(), model = FlowModel(createsTask: true), association = FlowAssociation()
+        let intent = try await store.beginProcessingDictation(cognition: model.configuration, association: association.configuration)
+        let format = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 12000)!
+        buffer.frameLength = 12000
+        for i in 0..<12000 { buffer.floatChannelData![0][i] = 0.01 * sin(Float(i) * 0.1) }
+        do { let file = try AVAudioFile(forWriting: intent.stagingURL, settings: format.settings); try file.write(from: buffer) }
+        try await store.sealDictation(sourceID: intent.sourceID)
+        try await store.processTranscriptions(using: FlowSpeech())
+        try await store.reconcileRecordingProcessingRequests(cognition: model.configuration, association: association.configuration)
+        let queues = try await store.processingIntents(), queue = try XCTUnwrap(queues.first)
+        let result = try await store.runExpressionProcessingIntent(id: queue.id, retrieval: NativeRetrieval(), cognitionPort: model, associationPort: association)
+        let sources = try await store.sources(), claims = try await store.candidateClaims()
+        XCTAssertEqual(result.state, .completed)
+        XCTAssertEqual(sources.first?.transcript, "我认为检索质量比记忆容量更值得研究。")
+        XCTAssertEqual(claims.first?.references.first?.sourceID, intent.sourceID)
+        let actions = try await store.actions(), action = try XCTUnwrap(actions.first)
+        _ = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: .reflection,
+                                                text: "这是口述后核对的实际收获。", recordingSourceID: intent.sourceID)
+        let feedback = try await store.actionFeedback(actionID: action.id)
+        XCTAssertEqual(feedback.first?.recordingSourceID, intent.sourceID)
+        // The full organizer saves knowledge and follow-ups separately in the same recording flow.
+        let base = root.appendingPathComponent("organized"), folder = base.appendingPathComponent("recording")
+        let policy = try await store.sourcePolicy(sourceID: intent.sourceID)
+        _ = try await store.setSourceLocalOnly(sourceID: intent.sourceID, expectedVersion: policy.version, localOnly: false)
+        _ = try await store.writeOrganizingInput(sourceID: intent.sourceID, to: folder)
+        let source = try XCTUnwrap(sources.first)
+        let reference: [String: Any] = ["recording": "recording", "quote": source.transcript!, "citation_status": "located", "span_ids": [source.spans[0].id]]
+        let items: [[String: Any]] = [
+            ["id": "K1", "title": "检索质量比记忆容量更值得研究", "intent_type": "claim", "uncertain": false, "followup_state": "knowledge", "notes": "口述观点", "references": [reference]],
+            ["id": "T1", "title": "研究检索质量", "intent_type": "task", "uncertain": false, "followup_state": "pending", "notes": "需跟进", "references": [reference]]
+        ]
+        var payload: [String: Any] = ["source_folders": [folder.path], "all_audio_complete": true, "all_windows_checked": true, "items": items]
+        try JSONSerialization.data(withJSONObject: payload).write(to: base.appendingPathComponent("完整任务清单.json"))
+        do { _ = try await store.ingestOrganizedPodcast(at: base, requireAPIReview: true); XCTFail("初稿不能进入自动同步流程") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("意图核对尚未完成")) }
+        payload["api_review_completed"] = true
+        payload["continuations_checked"] = true
+        try JSONSerialization.data(withJSONObject: payload).write(to: base.appendingPathComponent("完整任务清单.json"))
+        do { _ = try await store.ingestOrganizedPodcast(at: base, requireAPIReview: true); XCTFail("独立质量核对完成前不能接入") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("独立语义或音频疑点核对")) }
+        payload["independent_semantic_review_completed"] = true
+        payload["audio_review_completed"] = true
+        var checkedTranscript = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("Qwen完整逐字稿.json"))) as? [String: Any])
+        checkedTranscript["transcription_review"] = ["completed": true, "changed": false, "response_id": "flow-audio-review"]
+        try JSONSerialization.data(withJSONObject: checkedTranscript).write(to: folder.appendingPathComponent("Qwen核对逐字稿.json"))
+        try JSONSerialization.data(withJSONObject: payload).write(to: base.appendingPathComponent("完整任务清单.json"))
+        let count = try await store.ingestOrganizedPodcast(at: base, requireAPIReview: true)
+        XCTAssertEqual(count, 2)
+        let organized = try await store.latestCandidateClaims(for: intent.sourceID), organizedIDs = Set(organized.map(\.id))
+        let savedActions = try await store.actions(includeHistory: true)
+        let followups = savedActions.filter { organizedIDs.contains($0.claimID) }
+        XCTAssertEqual(organized.count, 2)
+        XCTAssertEqual(followups.count, 1)
+        XCTAssertEqual(followups.first?.intent?.intentType, "task")
+        _ = try await store.ingestOrganizedPodcast(at: base)
+        let repeated = try await store.actions(includeHistory: true)
+        XCTAssertEqual(repeated.count, savedActions.count)
+        // A later recording repeats an old task, reports a result, and adds a distinct next step.
+        let targetAction = try XCTUnwrap(followups.first), reminders = FlowReminders()
+        _ = try await store.setReminderAccess(calendarID: "fixture", title: "VoiceOS", enabled: true, expectedVersion: 0)
+        try await store.refreshAuthorizedReminders(expectedAccessVersion: 1, using: reminders)
+        let reminderCount = await reminders.items.count
+        let next = try await store.beginDictation()
+        buffer.floatChannelData![0][0] = 0.02
+        do { let file = try AVAudioFile(forWriting: next.stagingURL, settings: format.settings); try file.write(from: buffer) }
+        try await store.sealDictation(sourceID: next.sourceID)
+        let transcript = "我还要研究检索质量。我已经比较了两种检索方法，发现重排能提高相关性。下一步另做一次容量对比实验。"
+        try await store.processTranscriptions(using: FlowSpeech(text: transcript), sourceIDs: [next.sourceID])
+        let nextPolicy = try await store.sourcePolicy(sourceID: next.sourceID)
+        _ = try await store.setSourceLocalOnly(sourceID: next.sourceID, expectedVersion: nextPolicy.version, localOnly: false)
+        let nextBase = root.appendingPathComponent("next-organized"), nextFolder = nextBase.appendingPathComponent("next-recording")
+        _ = try await store.writeOrganizingInput(sourceID: next.sourceID, to: nextFolder)
+        let historyFile = nextBase.appendingPathComponent("已有任务.json")
+        _ = try await store.writeExistingTaskInput(to: historyFile, excludingSourceIDs: [next.sourceID])
+        let history = try JSONDecoder().decode([ExistingRecordingTask].self, from: Data(contentsOf: historyFile))
+        let target = try XCTUnwrap(history.first { $0.id == targetAction.id })
+        let targetJSON = try JSONSerialization.jsonObject(with: JSONEncoder().encode(target))
+        let correctedTranscript = transcript.replacingOccurrences(of: "重排能提高相关性", with: "重排不一定能提高相关性")
+        let correctedSpan = TranscriptSpan(textStart: 0, textEnd: correctedTranscript.unicodeScalars.count, startMS: 0, endMS: 500)
+        func ref(_ quote: String) -> [String: Any] { ["recording": "next-recording", "quote": quote, "citation_status": "located", "span_ids": [correctedSpan.id]] }
+        let nextItems: [[String: Any]] = [
+            ["id": "R1", "title": "研究检索质量", "intent_type": "task", "uncertain": false, "followup_state": "pending", "notes": "", "references": [ref("我还要研究检索质量。")], "continuation": ["relation": "repeat", "target": targetJSON, "notes": "同一待办"]],
+            ["id": "K2", "title": "重排不一定能提高相关性", "intent_type": "claim", "uncertain": false, "followup_state": "knowledge", "notes": "", "references": [ref("我已经比较了两种检索方法，发现重排不一定能提高相关性。")], "continuation": ["relation": "outcome", "target": targetJSON, "notes": "实际收获"]],
+            ["id": "T2", "title": "做一次容量对比实验", "intent_type": "task", "uncertain": false, "followup_state": "pending", "notes": "", "references": [ref("下一步另做一次容量对比实验。")]]
+        ]
+        var nextChecked = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: nextFolder.appendingPathComponent("Qwen完整逐字稿.json"))) as? [String: Any])
+        nextChecked["text"] = correctedTranscript
+        nextChecked["spans"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode([correctedSpan]))
+        nextChecked["transcription_review"] = ["completed": true, "changed": true, "response_id": "flow-next-audio-review"]
+        try JSONSerialization.data(withJSONObject: nextChecked).write(to: nextFolder.appendingPathComponent("Qwen核对逐字稿.json"))
+        let nextPayload: [String: Any] = ["source_folders": [nextFolder.path], "all_audio_complete": true, "all_windows_checked": true, "api_review_completed": true, "continuations_checked": true, "independent_semantic_review_completed": true, "audio_review_completed": true, "items": nextItems]
+        try JSONSerialization.data(withJSONObject: nextPayload).write(to: nextBase.appendingPathComponent("完整任务清单.json"))
+        _ = try await store.ingestOrganizedPodcast(at: nextBase, allowReminderWrites: true, requireAPIReview: true)
+        try await store.refreshAuthorizedReminders(expectedAccessVersion: 1, using: reminders)
+        let after = try await store.actions(includeHistory: true), linked = try await store.actionFeedback(actionID: targetAction.id)
+        XCTAssertEqual(after.count, repeated.count + 1)
+        XCTAssertEqual(after.first { $0.id == targetAction.id }?.state, "open")
+        XCTAssertEqual(Set(linked.map(\.relation)), ["repeat", "outcome"])
+        XCTAssertTrue(linked.allSatisfy { $0.recordingSourceID == next.sourceID && correctedTranscript.contains($0.text) })
+        let afterReminders = await reminders.items.count
+        XCTAssertEqual(afterReminders, reminderCount + 1)
+        _ = try await store.ingestOrganizedPodcast(at: nextBase, allowReminderWrites: true, requireAPIReview: true)
+        try await store.recover()
+        let retained = try await store.actionFeedback(actionID: targetAction.id)
+        XCTAssertEqual(retained.count, 2)
+        let beforeCorrection = try await store.transcriptHistory(sourceID: next.sourceID)
+        _ = try await store.correctTranscript(sourceID: next.sourceID, expectedVersionID: beforeCorrection[0].id, text: correctedTranscript + "补充：需要继续验证。")
+        let stale = try await store.actionFeedback(actionID: targetAction.id)
+        XCTAssertTrue(stale.allSatisfy { $0.sourceState == "frozen" })
+        let audioHistory = try await store.transcriptHistory(sourceID: next.sourceID)
+        XCTAssertEqual(audioHistory.count, 3)
+        XCTAssertTrue(audioHistory.contains { $0.reason.hasPrefix("qwen_audio_review:") && $0.text == correctedTranscript })
+        XCTAssertEqual(audioHistory.last?.text, transcript)
+        try await store.recover()
+        let package = root.appendingPathComponent("audio-reviewed-package"), restoredRoot = root.appendingPathComponent("audio-reviewed-restore")
+        try await store.exportPackage(to: package, includeMedia: true)
+        try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
+    }
+
+    func testIdeaFindsHistoryWithoutCreatingTask() async throws {
+        let store = try await openStore(), model = FlowModel()
+        let oldID = try await expression(store, text: "记忆系统需要关注检索质量。", model: model)
+        let previous = try await store.retrieve("检索质量", using: NativeRetrieval())
+        XCTAssertEqual(previous.hits.first?.document.sourceID, oldID)
+        _ = try await expression(store, text: "今天又想到检索质量和容量的关系。", model: model)
+        do { try await store.validateRetrievalResult(previous); XCTFail("新表达出现后应重新查找历史") } catch {}
+        let current = try await store.retrieve("检索质量", using: NativeRetrieval()), actions = try await store.actions()
+        XCTAssertEqual(current.matchingSources, 2)
+        XCTAssertTrue(actions.isEmpty)
+        let claims = try await store.latestCandidateClaims(for: oldID), claim = try XCTUnwrap(claims.first)
+        let opportunityID = try await store.createAction(claimID: claim.id, expectedClaimReviewVersion: claim.reviewVersion, title: "【问题】检索质量如何改善", kind: .opportunity)
+        let taskID = try await store.confirmOpportunityAsTask(actionID: opportunityID, expectedVersion: 1, title: "研究检索质量的改进方法")
+        let history = try await store.actions(includeHistory: true)
+        XCTAssertEqual(history.first(where: { $0.id == opportunityID })?.state, "dismissed")
+        XCTAssertEqual(history.first(where: { $0.id == taskID })?.kind, "task")
+        XCTAssertEqual(history.first(where: { $0.id == taskID })?.intent?.uncertain, false)
+    }
+
+    func testCorrectionPreservesHistoryAndRefreshesUnderstanding() async throws {
+        let store = try await openStore(), model = FlowModel()
+        let sourceID = try await expression(store, text: "我认为容量最重要。", model: model)
+        let sources = try await store.sources(), original = try XCTUnwrap(sources.first?.transcriptVersionID)
+        _ = try await store.correctTranscript(sourceID: sourceID, expectedVersionID: original, text: "我认为检索质量最重要。")
+        _ = try await store.continueSourceUnderstanding(sourceID: sourceID, using: model)
+        let history = try await store.transcriptHistory(sourceID: sourceID), current = try await store.latestCandidateClaims(for: sourceID)
+        XCTAssertEqual(Set(history.map(\.text)), ["我认为容量最重要。", "我认为检索质量最重要。"])
+        XCTAssertEqual(current.first?.statement, "我认为检索质量最重要。")
+        let updated = try await store.sources(), version = try XCTUnwrap(updated.first?.transcriptVersionID)
+        do { _ = try await store.correctTranscript(sourceID: sourceID, expectedVersionID: version, text: "我认为检索质量最重要。"); XCTFail("文字未变时应保持当前版本") }
+        catch { XCTAssertEqual(error.localizedDescription, "文字未改变，无需保存更正") }
+        let unchanged = try await store.transcriptHistory(sourceID: sourceID)
+        XCTAssertEqual(unchanged.count, 2)
+    }
+
+    func testEnglishPracticeStoresFeedbackAgainstPriorPractice() async throws {
+        let store = try await openStore()
+        let oldID = try await store.recordUserExpression("The model have one layer.")
+        let currentID = try await store.recordUserExpression("The model have two layers.")
+        for id in [oldID, currentID] { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false) }
+        let snapshot = try await store.prepareEnglishPractice(currentSourceID: currentID, priorSourceIDs: [oldID], destination: .cloud)
+        let source = try XCTUnwrap(snapshot.context.sources.first { $0.sourceID == currentID })
+        let reference = ClaimReference(sourceID: currentID, transcriptVersionID: source.transcriptVersionID, spanID: source.spans[0].id)
+        let suggestion = EnglishSuggestionProposal(kind: .grammar, original: .init(reference: reference, quote: source.text), suggestedText: "The model has two layers.", explanation: "Use has with a singular subject.")
+        let port = FlowEnglish(response: EnglishPracticeResponse(suggestions: [suggestion], comparisons: []))
+        _ = try await store.performEnglishFeedback(snapshot, using: port)
+        let feedback = try await store.englishFeedbackAttempts(), claims = try await store.candidateClaims()
+        XCTAssertEqual(feedback.first?.state, "completed")
+        XCTAssertEqual(feedback.first?.currentSourceID, currentID)
+        XCTAssertEqual(feedback.first?.priorSourceIDs, [oldID])
+        XCTAssertEqual(feedback.first?.result?.suggestions.first?.suggestedText, "The model has two layers.")
+        XCTAssertTrue(claims.isEmpty)
+    }
+
+    func testReopenReusesSavedUnderstanding() async throws {
+        let model = FlowModel()
+        let sourceID: String
+        do { let store = try await openStore(); sourceID = try await expression(store, text: "记忆系统要保留来源。", model: model) }
+        let reopened = try await openStore()
+        let result = try await reopened.continueSourceUnderstanding(sourceID: sourceID, using: model)
+        let claims = try await reopened.candidateClaims(), calls = await model.calls
+        XCTAssertTrue(result.reused)
+        XCTAssertEqual(claims.count, 1)
+        XCTAssertEqual(calls, 1)
+    }
+}

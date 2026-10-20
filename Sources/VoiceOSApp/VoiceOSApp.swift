@@ -178,6 +178,16 @@ final class ControlCenter: ObservableObject {
     }
     @Published var status = "正在检查资料库…"
     @Published var importing = false
+    @Published var fullRecordingInput: FullRecordingInput?
+    @Published var fullRecordingBusy = false
+    @Published var fullRecordingStatus = ""
+    @Published var fullRecordingCount: Int?
+    @Published var fullRecordingOutput: URL?
+    private var fullRecordingWorker: Task<Void, Never>?
+    private var fullRecordingLog: URL?
+    private var fullRecordingSourceID: String?
+    let recordingInbox = RecordingInbox()
+    private var textConfigurationFile: URL?
     @Published var changingPolicy = false
     @Published var understandingSource: String?
     @Published var modelConfigured = false
@@ -190,7 +200,7 @@ final class ControlCenter: ObservableObject {
         let encoded=try JSONEncoder().encode(selection)
         if persist { UserDefaults.standard.set(encoded,forKey:speechPreferenceKey) }
         speechPort=port
-        speechSummary=selection.backend == .qwen ? "Qwen 本地转写 · 最多30秒定位范围" : "Apple 本地转写 · 明确选择的备选"
+        speechSummary="Qwen 本地转写 · 最多30秒定位范围"
     }
     private func restoreSpeechSelection() {
         guard let data=UserDefaults.standard.data(forKey:speechPreferenceKey) else {
@@ -216,14 +226,6 @@ final class ControlCenter: ObservableObject {
             scheduleProcessing()
         } catch { status="无法启用本地 Qwen，请核对配置与模型；保留当前转写器" }
     }
-    func useAppleSpeech() {
-        guard worker == nil,!dictationActive else { status="请等待当前处理结束后切换转写器";return }
-        do {
-            try installSpeechSelection(.init(backend:.apple),persist:true)
-            status="已保存 Apple 本地转写备选；已有逐字稿保持原版本"
-            scheduleProcessing()
-        } catch { status="无法保存本地转写选择" }
-    }
     @Published var attempts: [String: [ModelAttemptRecord]] = [:]
     @Published var processingIntents: [ExpressionProcessingIntentRecord] = []
     @Published var recordingRequests: [RecordingProcessingRequest] = []
@@ -243,6 +245,7 @@ final class ControlCenter: ObservableObject {
     private var understandingWorker: Task<Void, Never>?
     @Published var initialized = false
     @Published var player: AVPlayer?
+    private var playbackBoundary: Any?
     @Published var history: [TranscriptVersion] = []
     @Published var claims: [CandidateClaim] = []
     /// Source-facing claims use only the newest completed producer for that
@@ -254,6 +257,7 @@ final class ControlCenter: ObservableObject {
     @Published var claimHistory: [ClaimReviewVersion] = []
     @Published var reviewingClaim = false
     @Published var actionRecords: [ActionRecord] = []
+    @Published var focusedTaskID: String?
     @Published var correctionImpacts: [CorrectionActionImpact] = []
     @Published var compensationPlans: [ReminderCompensationPlan] = []
     @Published var compensationGrants: [ReminderCompensationGrant] = []
@@ -296,15 +300,15 @@ final class ControlCenter: ObservableObject {
     @Published var dictationActive = false
     private var dictationSource: String?
     private var dictationInterrupted = false
+    private var dictationFullOrganization = false
     private let dictation = NativeDictation()
     private var dictationObservers: [NSObjectProtocol] = []
     func startDictation(processAfterTranscription: Bool = false) async {
-        guard let store, !dictationBusy, !dictationActive else { return }
-        let processingConfigurations: (ModelConfiguration, ModelConfiguration)?
+        guard let store, !dictationBusy, !dictationActive, !fullRecordingBusy, !importing, worker == nil, understandingWorker == nil else { status = "请等待当前录音或文字处理结束"; return }
         if processAfterTranscription {
-            guard let cognition = textModel, let association = associationModel else { status = "请先配置文本模型，再选择录制并处理"; return }
-            processingConfigurations = (cognition.configuration, association.configuration)
-        } else { processingConfigurations = nil }
+            guard speechPort is LocalQwenSpeechPort, modelConfigured, textConfigurationFile != nil,
+                  Bundle.main.url(forResource: "organize_podcast", withExtension: "py") != nil else { status = "请先配置 Qwen 和文本模型，再录制并完整整理"; return }
+        }
         dictationBusy = true; defer { dictationBusy = false }
         let duration: TimeInterval?
         if let raw = ProcessInfo.processInfo.environment["VOICEOS_TEST_CAPTURE_SECONDS"] {
@@ -313,19 +317,17 @@ final class ControlCenter: ObservableObject {
         } else { duration = nil }
         guard await dictation.requestPermission() else { status = "麦克风未获授权，未开始录制；仍可导入文件"; return }
         do {
-            let intent: RecordingIntent
-            if let configs = processingConfigurations {
-                intent = try await store.beginProcessingDictation(cognition: configs.0, association: configs.1, segmentExtraction:segmentExtractionModel?.configuration,segmentAggregation:segmentAggregationModel?.configuration)
-            } else { intent = try await store.beginDictation() }
+            let intent = try await store.beginDictation()
+            dictationFullOrganization = processAfterTranscription
             dictationSource = intent.sourceID; dictationInterrupted = false
             try dictation.start(at:intent.stagingURL,maximumDuration:duration) { [weak self] success in Task { await self?.finishDictation(success:success) } }
             dictationActive = true; selected = intent.sourceID
             status = duration.map { "正在进行\($0)秒限时采集 · 到时自动停止 · 仅本地" } ?? "正在录制我的口述 · 仅本地；停止后才核对并封存原件"
-            if processingConfigurations != nil { status = "正在录制并处理 · 请求已保存；封存及本地转写后处理文字，原始音频不上传" }
+            if processAfterTranscription { status = "正在录制 · 停止后完整转写并整理所有意图；仅文字用于云端" }
             await refresh()
         } catch {
             if let id = dictationSource { try? await store.interruptDictation(sourceID:id) }
-            dictationSource = nil; dictationActive = false; status = error.localizedDescription; await refresh()
+            dictationSource = nil; dictationActive = false; dictationFullOrganization = false; status = error.localizedDescription; await refresh()
         }
     }
     func stopDictation(interrupted:Bool = false) {
@@ -336,6 +338,8 @@ final class ControlCenter: ObservableObject {
     }
     private func finishDictation(success:Bool) async {
         guard let store, let id = dictationSource else { return }
+        let organize = dictationFullOrganization
+        dictationFullOrganization = false
         dictationSource = nil; dictationActive = false
         defer { dictationBusy = false }
         if success && !dictationInterrupted {
@@ -348,13 +352,23 @@ final class ControlCenter: ObservableObject {
         if discussionRecordingID == id {
             discussionStatus=records.first(where: { $0.id == id })?.state == "saved" ? "本轮口述原件已保存；等待本地转写与核对，尚未关联和发送。" : "本轮录制尚未正常保存，片段保留待核对；尚未关联和发送。"
         }
-        scheduleProcessing()
+        if organize, records.first(where: { $0.id == id })?.state == "saved" {
+            dictationBusy = false
+            organizeSavedRecording(sourceID: id, transcribeFirst: true)
+        } else { scheduleProcessing() }
     }
     func recoverDictation(_ record:SourceRecord) async {
         guard let store, !dictationBusy, !dictationActive else { return }
         dictationBusy = true; defer { dictationBusy = false }
         do { try await store.sealDictation(sourceID:record.id); status = "可解码片段已保存；它是中断片段，不代表完整表达"; await refresh(); scheduleProcessing() }
         catch { status = "片段尚不能完整解码，保留待核对"; await refresh() }
+    }
+    func startFeedbackDictation() async -> String? {
+        guard speechPort is LocalQwenSpeechPort, worker == nil, !fullRecordingBusy, !dictationActive, !dictationBusy else {
+            status = "请先配置 Qwen，并等待当前录音或转写结束"; return nil
+        }
+        await startDictation()
+        return dictationActive ? dictationSource : nil
     }
     private var worker: Task<Void, Never>?
     func start() async {
@@ -371,6 +385,8 @@ final class ControlCenter: ObservableObject {
             restoreSpeechSelection()
             if let path = ProcessInfo.processInfo.environment["VOICEOS_MODEL_CONFIG_FILE"] {
                 configureTextModel(URL(fileURLWithPath: path))
+            } else if let path = UserDefaults.standard.string(forKey: "voiceos.textModelConfigPath.v1") ?? Bundle.main.object(forInfoDictionaryKey: "VoiceOSModelConfigurationPath") as? String {
+                configureTextModel(URL(fileURLWithPath: path))
             }
             await refresh()
             scheduleProcessing()
@@ -379,6 +395,25 @@ final class ControlCenter: ObservableObject {
             dictationObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didWakeNotification,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.stopDictation(interrupted:true) } })
             dictationObservers.append(NotificationCenter.default.addObserver(forName:NSApplication.willTerminateNotification,object:nil,queue:.main) { [weak self] _ in MainActor.assumeIsolated { self?.stopDictation(interrupted:true) } })
             requestReminderRefresh()
+            if rootOverride == nil, ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"] == nil {
+                recordingInbox.start(canProcess: { [weak self] in
+                    guard let self else { return false }
+                    return self.initialized && self.modelConfigured && self.speechPort is LocalQwenSpeechPort && !self.fullRecordingBusy && self.worker == nil && self.understandingWorker == nil && !self.dictationActive && !self.dictationBusy && !self.importing
+                }, receive: { [weak self] url, voiceMemos, digest, finished in
+                    guard let self else { finished(false); return }
+                    do {
+                        if let id = try await store.personalAudioSourceID(sha256: digest),
+                           let existing = self.records.first(where: { $0.id == id }), self.isCompletelyOrganized(existing) {
+                            self.setFullRecordingStatus("这份素材已完整整理，未重复调用模型")
+                            finished(true); return
+                        }
+                        let media = try await FullRecordingOrganizer.inspect(url)
+                        let track = !voiceMemos && media.tracks.count > 1 ? 1 : 0
+                        self.organizeRecording(.init(url: url, media: media), track: track,
+                                               importCommand: "automatic-recording:" + digest + ":\(track)", finished: finished)
+                    } catch { self.status = error.localizedDescription; finished(false) }
+                })
+            }
         } catch { status = error.localizedDescription }
     }
     func refresh() async {
@@ -477,6 +512,8 @@ final class ControlCenter: ObservableObject {
             relevance.cancel();relevanceModel=suite.relevance
             segmentExtractionModel=suite.segmentExtraction;segmentAggregationModel=suite.segmentAggregation
             textModel = port; modelConfigured = true
+            UserDefaults.standard.set(file.path, forKey: "voiceos.textModelConfigPath.v1")
+            textConfigurationFile = file
             modelSummary = "gpt-6.1-sol · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
             status = "文本模型已就绪 · 只处理你选择并授权的文字"
             // A queued intent may have been restored before the user selected a
@@ -485,6 +522,163 @@ final class ControlCenter: ObservableObject {
             // remains the single-owner gate for concurrent work.
             scheduleProcessing()
         } catch { status = error.localizedDescription }
+    }
+    func chooseFullRecording() {
+        guard !fullRecordingBusy else { return }
+        let panel = NSOpenPanel(); panel.title = "完整整理我的录音或 OBS 视频"; panel.prompt = "选择完整素材"
+        panel.allowedContentTypes = [.audio, .movie, UTType(filenameExtension: "mkv") ?? .data]
+        panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            Task {
+                do {
+                    let media = try await FullRecordingOrganizer.inspect(url)
+                    self.fullRecordingCount = nil; self.fullRecordingStatus = ""
+                    self.fullRecordingOutput = nil
+                    self.fullRecordingInput = FullRecordingInput(url: url, media: media)
+                } catch { self.status = error.localizedDescription }
+            }
+        }
+    }
+    func cancelFullRecording() { fullRecordingWorker?.cancel() }
+    func openFullRecordingOutput() {
+        if let fullRecordingOutput { NSWorkspace.shared.open(fullRecordingOutput.appendingPathComponent("完整任务清单.md")) }
+    }
+    func isCompletelyOrganized(_ record: SourceRecord) -> Bool {
+        if attempts[record.id]?.contains(where: { $0.provider == "organized_import" && $0.state == "completed" && $0.contextState == "current" }) == true { return true }
+        let claimIDs = Set((currentClaimsBySource[record.id] ?? []).filter { $0.validity == "current" }.map(\.id))
+        return actionRecords.contains { claimIDs.contains($0.claimID) && $0.validity == "current" && $0.intent != nil }
+    }
+    func organizeRecording(_ input: FullRecordingInput, track: Int, importCommand: String? = nil, finished: ((Bool) -> Void)? = nil) {
+        guard let store, var speech = speechPort as? LocalQwenSpeechPort, !fullRecordingBusy, worker == nil,
+              understandingWorker == nil, !dictationActive, let configuration = textConfigurationFile,
+              let script = Bundle.main.url(forResource: "organize_podcast", withExtension: "py") else {
+            fullRecordingStatus = "请先配置 Qwen 和文本模型，并等待当前处理结束"; finished?(false); return
+        }
+        fullRecordingBusy = true; fullRecordingCount = nil
+        fullRecordingWorker = Task {
+            let refreshTask = watchFullRecording()
+            var success = false
+            defer { refreshTask.cancel(); fullRecordingBusy = false; fullRecordingWorker = nil; fullRecordingLog = nil; fullRecordingSourceID = nil; finished?(success); scheduleProcessing() }
+            do {
+                let root = await store.root
+                let staging = root.appendingPathComponent("整理/导入-" + UUID().uuidString)
+                try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                let log = staging.appendingPathComponent("处理日志.txt"); fullRecordingLog = log
+                let attrs = try FileManager.default.attributesOfItem(atPath: input.url.path)
+                let identity = input.url.path + ":\(track):" + String(describing: attrs[.size]) + ":" + String(describing: attrs[.modificationDate])
+                let command = importCommand ?? "full-recording:" + identity
+                let id: String
+                if let existing = try await store.importedSourceID(commandID: command) { id = existing }
+                else {
+                    setFullRecordingStatus("正在提取完整本人音轨…")
+                    let audio = staging.appendingPathComponent(input.url.deletingPathExtension().lastPathComponent + "_音轨\(track + 1).wav")
+                    try await FullRecordingOrganizer.extract(input.url, track: track, to: audio, log: log)
+                    try Task.checkCancellation()
+                    let after = try FileManager.default.attributesOfItem(atPath: input.url.path)
+                    guard attrs[.size] as? NSNumber == after[.size] as? NSNumber, attrs[.modificationDate] as? Date == after[.modificationDate] as? Date else { throw VoiceOSError("素材仍在更新，等待文件保存完成后重试") }
+                    id = try await store.importPersonalAudio(audio, commandID: command)
+                }
+                selected = id
+                fullRecordingSourceID = id
+                await refresh()
+                if let record = records.first(where: { $0.id == id }), isCompletelyOrganized(record) {
+                    success = true; setFullRecordingStatus("这份素材已完整整理，未重复调用模型"); return
+                }
+                let policy = try await store.sourcePolicy(sourceID: id)
+                if policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: false) }
+                try JSONSerialization.data(withJSONObject: ["original_media_path": input.url.path, "audio_track": track + 1, "full_duration_seconds": input.media.duration], options: [.prettyPrinted, .sortedKeys]).write(to: staging.appendingPathComponent("原始素材.json"), options: .atomic)
+                if records.first(where: { $0.id == id })?.transcriptionBackend?.hasPrefix("Qwen3-ASR") != true {
+                    try await store.retryTranscription(sourceID: id)
+                    speech.progressLog = log
+                    setFullRecordingStatus("Qwen 正在本地转写完整音轨…")
+                    try await store.processTranscriptions(using: speech, sourceIDs: [id])
+                }
+                try Task.checkCancellation()
+                try await completeFullOrganization(sourceID: id, speech: speech, configuration: configuration, script: script)
+                success = true
+            } catch is CancellationError { setFullRecordingStatus("已停止；原件、逐字稿和已完成整理结果保留") }
+            catch { setFullRecordingStatus(error.localizedDescription) }
+            await refresh()
+        }
+    }
+    func organizeFullTranscript(_ record: SourceRecord) {
+        organizeSavedRecording(sourceID: record.id, transcribeFirst: false)
+    }
+    private func organizeSavedRecording(sourceID: String, transcribeFirst: Bool) {
+        guard let store, var speech = speechPort as? LocalQwenSpeechPort, let configuration = textConfigurationFile,
+              let script = Bundle.main.url(forResource: "organize_podcast", withExtension: "py"),
+              !fullRecordingBusy, worker == nil, understandingWorker == nil else { status = "请先配置模型并等待当前处理结束"; return }
+        fullRecordingBusy = true; fullRecordingCount = nil; fullRecordingOutput = nil
+        fullRecordingSourceID = sourceID
+        fullRecordingWorker = Task {
+            let refreshTask = watchFullRecording()
+            defer { refreshTask.cancel(); fullRecordingBusy = false; fullRecordingWorker = nil; fullRecordingLog = nil; fullRecordingSourceID = nil; scheduleProcessing() }
+            do {
+                let policy = try await store.sourcePolicy(sourceID: sourceID)
+                if policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: sourceID, expectedVersion: policy.version, localOnly: false) }
+                if transcribeFirst {
+                    let root = await store.root
+                    let folder = root.appendingPathComponent("整理/" + sourceID)
+                    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                    let log = folder.appendingPathComponent("Qwen转写日志.txt")
+                    speech.progressLog = log; fullRecordingLog = log
+                    setFullRecordingStatus("Qwen 正在本地转写整段口述…")
+                    try await store.processTranscriptions(using: speech, sourceIDs: [sourceID])
+                    try Task.checkCancellation()
+                }
+                try await completeFullOrganization(sourceID: sourceID, speech: speech, configuration: configuration, script: script)
+            } catch is CancellationError { setFullRecordingStatus("已停止；录音、逐字稿和已完成的整理结果保留") }
+            catch { setFullRecordingStatus(error.localizedDescription) }
+            await refresh()
+        }
+    }
+    private func completeFullOrganization(sourceID: String, speech: LocalQwenSpeechPort, configuration: URL, script: URL) async throws {
+        guard let store, let record = try await store.sources().first(where: { $0.id == sourceID }), let version = record.transcriptVersionID else { throw VoiceOSError("完整转写尚未保存") }
+        let policy = try await store.sourcePolicy(sourceID: sourceID)
+        guard !policy.localOnly else { throw VoiceOSError("这份文字已限制为仅本机，完整整理已停止") }
+        let root = await store.root
+        let base = root.appendingPathComponent("整理/" + sourceID + "/" + version)
+        let folder = base.appendingPathComponent(record.name)
+        _ = try await store.writeOrganizingInput(sourceID: sourceID, to: folder)
+        _ = try await store.writeExistingTaskInput(to: base.appendingPathComponent("已有任务.json"), excludingSourceIDs: [sourceID])
+        let log = base.appendingPathComponent("处理日志.txt"); fullRecordingLog = log
+        setFullRecordingStatus("正在核对转写疑点，再进行意图提取、独立语义复核和任务接续…")
+        try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, configuration: configuration, log: log, qwen: speech)
+        try Task.checkCancellation()
+        let count = try await store.ingestOrganizedPodcast(at: base, allowReminderWrites: reminderAccess?.enabled == true && reminderAccess?.title == "VoiceOS", requireAPIReview: true)
+        fullRecordingCount = count
+        fullRecordingOutput = base
+        await refresh()
+        await automaticReminderRefresh()
+        setFullRecordingStatus("已保存 \(count) 条观点与意图 · 重复提及和进展接回原任务，新的明确待办同步提醒")
+    }
+    private func setFullRecordingStatus(_ message: String) { fullRecordingStatus = message; status = message }
+    private func watchFullRecording() -> Task<Void, Never> {
+        Task {
+            while !Task.isCancelled {
+                await refresh()
+                guard !Task.isCancelled else { return }
+                if let log = fullRecordingLog, let text = try? String(contentsOf: log, encoding: .utf8),
+                   let last = text.split(separator: "\n").last, !last.isEmpty { setFullRecordingStatus(String(last)) }
+                try? await Task.sleep(for: .seconds(2))
+            }
+        }
+    }
+    func chooseOrganizedResult() {
+        guard !fullRecordingBusy, !importing else { return }
+        let panel = NSOpenPanel(); panel.title = "导入已完成的全文整理"; panel.canChooseDirectories = true; panel.canChooseFiles = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url, let store = self.store else { return }
+            Task {
+                self.importing = true; defer { self.importing = false }
+                do {
+                    let count = try await store.ingestOrganizedPodcast(at: url, allowReminderWrites: self.reminderAccess?.enabled == true && self.reminderAccess?.title == "VoiceOS")
+                    await self.refresh(); self.requestReminderRefresh()
+                    self.status = "已导入完整整理 \(count) 个事项；相同清单不会重复创建"
+                } catch { self.status = error.localizedDescription }
+            }
+        }
     }
     func prepareEnglishPractice(current: SourceRecord, priorIDs: [String]) async {
         guard let store, !englishBusy else { return }
@@ -651,7 +845,7 @@ final class ControlCenter: ObservableObject {
         if failures == 0 { status = "导入完成 · 可查看原件和转写状态" }
     }
     private func scheduleProcessing() {
-        guard worker == nil else { return }
+        guard worker == nil, !fullRecordingBusy, !dictationActive else { return }
         // Owned by the application model, not the SwiftUI view task/window lifetime.
         worker = Task {
             await process()
@@ -756,15 +950,37 @@ final class ControlCenter: ObservableObject {
             await refresh()
         } catch { status = error.localizedDescription; await refresh() }
     }
-    func playSpan(_ record: SourceRecord, milliseconds: Int) async {
+    func stopPlayback() {
+        player?.pause()
+        if let playbackBoundary { player?.removeTimeObserver(playbackBoundary); self.playbackBoundary = nil }
+        player = nil
+    }
+    @discardableResult
+    func playSpan(_ record: SourceRecord, milliseconds: Int, endMilliseconds: Int? = nil) async -> Bool {
         do {
-            guard let url = try await store?.playableURL(sourceID: record.id) else { return }
-            player?.pause()
+            guard let url = try await store?.playableURL(sourceID: record.id) else { return false }
+            stopPlayback()
             let playback = AVPlayer(url: url)
             player = playback
             await playback.seek(to: CMTime(value: Int64(milliseconds), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
+            if let end = endMilliseconds, end > milliseconds {
+                playbackBoundary = playback.addBoundaryTimeObserver(forTimes: [NSValue(time: CMTime(value: Int64(end), timescale: 1000))], queue: .main) { [weak playback] in playback?.pause() }
+            }
             playback.play()
-        } catch { status = error.localizedDescription; await refresh() }
+            return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
+    }
+    func playActionOriginal(_ action: ActionRecord) async -> Bool {
+        guard let claim = claims.first(where: { $0.id == action.claimID }), let first = claim.references.first,
+              let record = records.first(where: { $0.id == first.sourceID }), record.transcriptVersionID == first.transcriptVersionID else { status = "原话版本已变化，请先核对出处"; return false }
+        let spans = claim.references.filter { $0.sourceID == record.id && $0.transcriptVersionID == record.transcriptVersionID }
+            .compactMap { ref in record.spans.first(where: { $0.id == ref.spanID }) }.sorted { ($0.startMS ?? 0) < ($1.startMS ?? 0) }
+        guard let start = spans.first?.startMS, var end = spans.first?.endMS else { status = "这份原文没有可回听的录音时间"; return false }
+        for span in spans.dropFirst() {
+            guard let next = span.startMS, next <= end + 1000, let finish = span.endMS else { break }
+            end = max(end, finish)
+        }
+        return await playSpan(record, milliseconds: start, endMilliseconds: end)
     }
     func historyFor(_ record: SourceRecord) async {
         do { history = try await store?.transcriptHistory(sourceID: record.id) ?? [] }
@@ -779,6 +995,10 @@ final class ControlCenter: ObservableObject {
     }
     func changeTextPolicy(_ record: SourceRecord) async {
         guard let store, !changingPolicy else { return }
+        if !record.localOnly {
+            if fullRecordingSourceID == record.id { cancelFullRecording() }
+            if dictationSource == record.id { dictationFullOrganization = false }
+        }
         changingPolicy = true
         defer { changingPolicy = false }
         do {
@@ -820,6 +1040,16 @@ final class ControlCenter: ObservableObject {
             await refresh(); status = "意图已保存到 VoiceOS · 尚未写入提醒事项"; return true
         } catch { status = error.localizedDescription; await refresh(); return false }
     }
+    func confirmTask(_ action: ActionRecord, title: String, commandID: String) async -> Bool {
+        guard let store, !savingAction else { return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            focusedTaskID = try await store.confirmOpportunityAsTask(actionID: action.id, expectedVersion: action.version, title: title, commandID: commandID)
+            await refresh(); await automaticReminderRefresh()
+            status = "已按你的核对保存为明确待办 · " + reminderSyncStatus
+            return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
+    }
     func connectReminders() async {
         guard !remindersBusy else { return }
         remindersBusy = true; defer { remindersBusy = false }
@@ -845,6 +1075,17 @@ final class ControlCenter: ObservableObject {
             await refresh(); requestReminderRefresh()
         } catch { status = error.localizedDescription }
     }
+    func connectVoiceOSCalendar() async {
+        guard !remindersBusy else { return }
+        remindersBusy = true
+        do {
+            let calendar = try await reminders.voiceOSCalendar()
+            if !reminderCalendars.contains(where: { $0.id == calendar.id }) { reminderCalendars.append(calendar) }
+            proposedReminderCalendarID = calendar.id
+            remindersBusy = false
+            await saveReminderConnection()
+        } catch { remindersBusy = false; status = error.localizedDescription }
+    }
     func disconnectReminders() async {
         guard let store, let access = reminderAccess else { return }
         do {
@@ -864,6 +1105,7 @@ final class ControlCenter: ObservableObject {
         guard reminderAccess?.enabled == true else { return }
         reminderRefresh.request()
     }
+    func refreshTaskReminders() async { await automaticReminderRefresh() }
     private func automaticReminderRefresh() async {
         guard let store, let access = reminderAccess, access.enabled else { return }
         if remindersBusy { return }
@@ -904,6 +1146,32 @@ final class ControlCenter: ObservableObject {
             activeActionTitle = action.title
         }
         catch { status = error.localizedDescription }
+    }
+    func focusReminder(_ url: URL) async -> Bool {
+        guard url.scheme == "voiceos", url.host == "task", UUID(uuidString: url.lastPathComponent) != nil else { return false }
+        await refresh()
+        guard let link = reminderLinks.first(where: { $0.id == url.lastPathComponent }),
+              let action = actionRecords.first(where: { $0.id == link.actionID }) else { status = "这条提醒的来源不在当前资料库中"; return false }
+        focusedTaskID = action.id
+        selected = claims.first(where: { $0.id == action.claimID })?.references.first?.sourceID
+        return true
+    }
+    func enrichReminderContexts() async {
+        guard let store, let access = reminderAccess, access.enabled, !remindersBusy else { return }
+        remindersBusy = true; defer { remindersBusy = false; requestReminderRefresh() }
+        var count = 0
+        do {
+            for link in reminderLinks where link.calendarID == access.calendarID && link.state == "linked" {
+                guard let id = link.externalID, let action = actionRecords.first(where: { $0.id == link.actionID }),
+                      action.validity == "current", reminderSourceAllowed(action) else { continue }
+                let context = try await store.reminderContext(actionID: action.id)
+                guard (try await store.reminderAccess())?.version == access.version else { throw VoiceOSError("提醒事项连接已变化，停止补充出处") }
+                try reminders.updateContext(calendarID: access.calendarID, externalID: id, marker: "voiceos-action:" + link.id, context: context)
+                count += 1
+            }
+            status = "已精简 \(count) 条提醒事项；完整原话、时间与说明保留在 VoiceOS"
+        } catch { status = "已精简 \(count) 条提醒；" + error.localizedDescription }
+        await refresh()
     }
     func acceptReminderStatus(_ link: ReminderLink, action: ActionRecord) async {
         guard let store, let access = reminderAccess, access.enabled,
@@ -1032,11 +1300,11 @@ final class ControlCenter: ObservableObject {
         } catch { status = error.localizedDescription }
         await refresh()
     }
-    func saveFeedback(_ action: ActionRecord, kind: ActionFeedbackKind, text: String, commandID: String) async -> Bool {
+    func saveFeedback(_ action: ActionRecord, kind: ActionFeedbackKind, text: String, recordingSourceID: String? = nil, commandID: String) async -> Bool {
         guard let store, !savingFeedback else { return false }
         savingFeedback = true; defer { savingFeedback = false }
         do {
-            selected = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: kind, text: text, commandID: commandID)
+            selected = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: kind, text: text, recordingSourceID: recordingSourceID, commandID: commandID)
             await refresh(); status = "结果或反思已保存并关联原行动 · 未改变完成或证据状态"
             return true
         } catch { status = error.localizedDescription; await refresh(); return false }
@@ -1045,8 +1313,19 @@ final class ControlCenter: ObservableObject {
         guard let store, !savingAction else { return }
         savingAction = true; defer { savingAction = false }
         do {
-            _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state)
-            status = "行动状态已保存 · 观点仍需独立验证"
+            if state != .dismissed, let link = reminderLinks.first(where: { $0.actionID == action.id }), let id = link.externalID {
+                guard let access = reminderAccess, access.enabled, access.calendarID == link.calendarID, !remindersBusy else { throw VoiceOSError("请先恢复提醒事项连接，或在 Apple 提醒事项中更改完成状态") }
+                remindersBusy = true; defer { remindersBusy = false; requestReminderRefresh() }
+                try await reminders.setCompletion(calendarID: link.calendarID, externalID: id, marker: "voiceos-action:" + link.id, completed: state == .completed) {
+                    guard let currentAccess = try await store.reminderAccess(), currentAccess.enabled, currentAccess.version == access.version,
+                          let current = try await store.actions(includeHistory: true).first(where: { $0.id == action.id }), current.validity == "current", current.version == action.version else { throw VoiceOSError("任务或连接已变化，请重新核对") }
+                }
+                try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: reminders, expectedAccessVersion: access.version)
+                status = "完成状态已同步并回读；可以补充实际结果或收获"
+            } else {
+                _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state)
+                status = "行动状态已保存"
+            }
         } catch { status = error.localizedDescription }
         await refresh()
     }
@@ -1188,6 +1467,9 @@ struct CenterView: View {
     @State private var showingQuietFeedback = false
     @State private var showingDiscussion = false
     @State private var showingEnglishPractice = false
+    @State private var showingTasks = false
+    @State private var showingRecordingInbox = false
+    @State private var pendingTaskURL: URL?
     @Environment(\.openWindow) private var openWindow
     private var activeProcessingCount: Int {
         model.processingIntents.filter { [.queued, .running].contains($0.state) }.count + model.recordingRequests.filter { $0.state == "waiting" }.count + model.segmentedBatches.filter { canStopSegmented($0) }.count
@@ -1300,6 +1582,13 @@ struct CenterView: View {
                             Task { if await model.beginDiscussion(record) { showingDiscussion = true } }
                         }.disabled((record.transcript ?? "").isEmpty || !["saved","reference_only"].contains(record.state) || model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
                         VStack(alignment: .leading, spacing: 8) {
+                            if record.origin == "user", record.transcriptionBackend?.hasPrefix("Qwen3-ASR") == true {
+                                HStack {
+                                    Button(model.isCompletelyOrganized(record) ? "已完整整理" : "完整整理全部意图", systemImage: "checklist") { model.organizeFullTranscript(record) }
+                                        .disabled(model.isCompletelyOrganized(record) || !model.modelConfigured || model.fullRecordingBusy || model.understandingSource != nil)
+                                    Text("逐段提取 + 全文漏项复查 · 仅发送文字").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
                             HStack {
                                 Button(model.understandingSource == record.id ? "正在理解…" : record.origin == "user" ? "理解并关联历史" : "理解这份文字", systemImage: "sparkles") { model.understand(record) }
                                     .disabled(!model.modelConfigured || record.localOnly || (record.transcript ?? "").isEmpty || (record.transcript ?? "").unicodeScalars.count > 4000 || model.understandingSource != nil || model.discussionExtracting)
@@ -1313,7 +1602,6 @@ struct CenterView: View {
                             HStack {
                                 Menu("本地转写器") {
                                     Button("启用本地 Qwen…") { model.chooseLocalSpeech() }
-                                    Button("使用 Apple 本地转写") { model.useAppleSpeech() }
                                 }
                                 Text(model.speechSummary).font(.caption).foregroundStyle(.secondary)
                             }
@@ -1398,7 +1686,7 @@ struct CenterView: View {
                                     }
                                 }
                             }
-                            if let player = model.player { VideoPlayer(player: player).frame(height: record.kind == "video" ? 260 : 80) }
+                            if let player = model.player { NativePlayerView(player: player).frame(height: record.kind == "video" ? 260 : 80) }
                         } else { Text(transcriptStatus(record)).foregroundStyle(.secondary) }
                         if let error = record.error { Text(error).foregroundStyle(.orange) }
                         let related = model.currentClaimsBySource[record.id] ?? []
@@ -1595,8 +1883,16 @@ struct CenterView: View {
             } else {
                 Menu("开始我的口述", systemImage: "mic") {
                     Button("录制并本地保存") { Task { await model.startDictation() } }
-                    Button("录制并处理文字（原始音频不上传）") { Task { await model.startDictation(processAfterTranscription: true) } }.disabled(!model.modelConfigured)
-                }.disabled(!model.initialized || model.dictationBusy)
+                    Button("录制并完整整理（文字用于云端）") { Task { await model.startDictation(processAfterTranscription: true) } }.disabled(!model.modelConfigured)
+                }.disabled(!model.initialized || model.dictationBusy || model.fullRecordingBusy || model.importing)
+            }
+            Button("任务", systemImage: "checklist") { showingTasks = true }.disabled(!model.initialized)
+            Button("自动入口", systemImage: "tray.and.arrow.down") { showingRecordingInbox = true }.disabled(!model.initialized)
+            if model.fullRecordingBusy {
+                Button("停止完整整理", systemImage: "stop.circle") { model.cancelFullRecording() }
+            } else {
+                Button("整理我的录音", systemImage: "waveform.badge.plus") { model.chooseFullRecording() }
+                    .disabled(!model.initialized || model.importing || model.dictationActive)
             }
             Button("讨论记录",systemImage:"bubble.left.and.bubble.right") { Task { await model.refreshDiscussion(); showingDiscussion = true } }.disabled(!model.initialized)
             Button("静默回顾", systemImage:"text.bubble") { model.quietAssociationSourceID = nil; showingQuietFeedback = true }.disabled(!model.initialized)
@@ -1608,6 +1904,7 @@ struct CenterView: View {
             Menu("导入文件", systemImage: "square.and.arrow.down") {
                 Button("外部音频或视频…") { model.chooseFiles() }
                 Button("仅含我声音的录音…") { model.chooseFiles(personalAudio: true) }
+                Button("已完成的全文整理…") { model.chooseOrganizedResult() }
             }.disabled(!model.initialized || model.importing)
             Menu {
                 Button("打开已有资料库…",action:chooseLibrary)
@@ -1617,9 +1914,24 @@ struct CenterView: View {
                 Button("导出资料与原件…") { model.export(includeMedia: true) }
             } label: { Label("导出资料", systemImage: "square.and.arrow.up") }.disabled(!model.initialized || model.importing || model.dictationBusy || model.dictationActive)
         }
-        .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("开发预览 · 文本理解与来源核对").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
+        .safeAreaInset(edge: .bottom) { HStack { Text(model.status).font(.caption).lineLimit(2); Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary); Spacer(); Text("音视频仅本机 · 文字按授权处理").font(.caption).foregroundStyle(.secondary) }.padding(10).background(.bar) }
         .focusedSceneValue(\.voiceOSController, model)
         .navigationTitle(model.libraryTitle)
+        .onOpenURL { url in
+            if model.initialized { Task { if await model.focusReminder(url) { showingTasks = true } } }
+            else { pendingTaskURL = url }
+        }
+        .onChange(of: model.initialized) { _, ready in
+            if ready, let url = pendingTaskURL {
+                pendingTaskURL = nil
+                Task { if await model.focusReminder(url) { showingTasks = true } }
+            }
+        }
+        .sheet(isPresented: $showingTasks) { TaskManagerView(model: model) { showingTasks = false } }
+        .sheet(isPresented: $showingRecordingInbox) { RecordingInboxView(inbox: model.recordingInbox, model: model) { showingRecordingInbox = false } }
+        .sheet(item: $model.fullRecordingInput) { input in
+            FullRecordingView(model: model, input: input) { model.fullRecordingInput = nil; showingTasks = true }
+        }
         .sheet(isPresented: $showingSegmentation) { TranscriptSegmentationView(model:model) { showingSegmentation = false } }
         .sheet(isPresented: $showingDiscussion) { DiscussionView(model:model) { showingDiscussion = false } }
         .sheet(isPresented: $searching) { HistorySearchView(model:model) { searching = false } }
@@ -1640,7 +1952,7 @@ struct CenterView: View {
                 ScrollView {
                     ForEach(model.history) { version in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("第 \(version.number) 版 · \(version.reason == "original" ? "本地识别原稿" : "识别文字更正")\(version.isCurrent ? " · 当前" : " · 历史")").font(.headline)
+                            Text("第 \(version.number) 版 · \(version.reason == "original" ? "本地识别原稿" : version.reason.hasPrefix("qwen_audio_review:") ? "Qwen 音频重识别核对" : "识别文字更正")\(version.isCurrent ? " · 当前" : " · 历史")").font(.headline)
                             Text(version.text.isEmpty ? "（空文字）" : version.text).textSelection(.enabled)
                             Divider()
                         }
@@ -1657,6 +1969,7 @@ struct CenterView: View {
                     Text("请选择清单").tag("")
                     ForEach(model.reminderCalendars) { calendar in Text(calendar.title).tag(calendar.id) }
                 }
+                Button("新建并连接 VoiceOS 清单") { Task { await model.connectVoiceOSCalendar() } }.disabled(model.remindersBusy)
                 Text("此清单持续授权保存在本机。重开、变化或唤醒后核对关联任务，并自动发送已提取、文本允许外发的普通明确任务，可随时停止；导出恢复不会携带此权限。").font(.caption)
                 HStack { Button("取消") { model.choosingReminderCalendar = false }; Spacer(); Button("保存连接授权") { Task { await model.saveReminderConnection() } }.disabled(model.proposedReminderCalendarID.isEmpty) }
             }.padding(24).frame(width: 600)
@@ -1678,9 +1991,10 @@ struct CenterView: View {
                     }
                     ForEach(model.feedbackRecords) { feedback in
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("\(feedback.kind == "outcome" ? "结果" : "反思") · 关联第 \(feedback.actionVersion) 版").font(.headline)
+                            Text("\(feedback.label) · 关联第 \(feedback.actionVersion) 版").font(.headline)
                             Text(feedback.text).textSelection(.enabled)
-                            Text("用户记录 · 不自动验证观点").font(.caption).foregroundStyle(.secondary)
+                            Text(feedback.relation == nil ? "用户记录 · 不自动验证观点" : "录音原话 · API 自动关联，不自动验证观点").font(.caption).foregroundStyle(.secondary)
+                            if feedback.sourceState == "frozen" { Text("原话已变化，关联待重新核对").font(.caption).foregroundStyle(.secondary) }
                             if feedback.sourceState == "quarantined" { Text("原件不可用，保留历史文本").font(.caption).foregroundStyle(.secondary) }
                             Button("查看反馈原文") { model.selected = feedback.sourceID; showActionHistory = false }
                             Divider()
@@ -1714,7 +2028,13 @@ struct CenterView: View {
                 HStack { Spacer(); Button("完成") { showClaimHistory = false }.keyboardShortcut(.defaultAction) }
             }.padding(24).frame(width: 660, height: 440)
         }
-        .onChange(of: model.selected) { _, _ in model.player?.pause(); model.player = nil; model.sourceDiscussions=[];Task { await model.refreshSourceDiscussions(); await model.refreshAssociationSelection() } }
+        .onChange(of: model.fullRecordingCount) { _, count in
+            if count != nil, model.fullRecordingInput == nil, let sourceID = model.selected {
+                let ids = Set((model.currentClaimsBySource[sourceID] ?? []).map(\.id))
+                if model.actionRecords.contains(where: { ids.contains($0.claimID) && $0.state == "open" }) { showingTasks = true }
+            }
+        }
+        .onChange(of: model.selected) { _, _ in model.stopPlayback(); model.sourceDiscussions=[];Task { await model.refreshSourceDiscussions(); await model.refreshAssociationSelection() } }
         .frame(minWidth: 840, minHeight: 540)
         .task { await model.start() }
     }
@@ -1923,27 +2243,54 @@ struct ActionFeedbackView: View {
     @State private var saving = false
     @State private var errorText = ""
     @State private var commandID = UUID().uuidString
+    @State private var recordingID: String?
+    @State private var appliedRecording = false
+    private var recording: SourceRecord? { model.records.first { $0.id == recordingID } }
+    private var waitingForVoice: Bool { recordingID != nil && !appliedRecording && (model.dictationActive || model.dictationBusy || ["queued", "running"].contains(recording?.jobState ?? "")) }
+    private func applyTranscription() {
+        guard !appliedRecording, let recording, recording.jobState == "completed", let transcript = recording.transcript else { return }
+        text += (text.isEmpty ? "" : "\n") + transcript
+        appliedRecording = true
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("记录结果或反思").font(.title2)
             Text("关联：" + action.title + " · 第 \(action.version) 版").foregroundStyle(.secondary)
             Picker("类型", selection: $kind) { Text("实际结果").tag("outcome"); Text("我的反思").tag("reflection") }.pickerStyle(.segmented).disabled(saving)
-            TextEditor(text: $text).frame(minHeight: 180).border(.secondary.opacity(0.2)).disabled(saving)
+            HStack {
+                if recordingID != nil, model.dictationActive {
+                    Button("停止并转写") { model.stopDictation() }.disabled(model.dictationBusy)
+                    Text("正在录制这条任务的结果…").foregroundStyle(.secondary)
+                } else if waitingForVoice {
+                    ProgressView().controlSize(.small); Text("Qwen 正在本机转写…").foregroundStyle(.secondary)
+                } else if recordingID == nil {
+                    Button("口述进展或结果", systemImage: "mic") {
+                        Task { recordingID = await model.startFeedbackDictation(); if recordingID == nil { errorText = model.status } }
+                    }.disabled(saving || model.dictationBusy || model.dictationActive || model.fullRecordingBusy)
+                } else {
+                    Text(appliedRecording ? "口述已填入下方，可核对修改。原始录音保留。" : "转写未完成，录音已保留；也可以直接写下结果。")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            TextEditor(text: $text).frame(minHeight: 180).border(.secondary.opacity(0.2)).disabled(saving || waitingForVoice)
             Text("这是可选记录。原文先仅本地保存，保留与原行动的关联；不会自动改变任务状态、认可观点或标记已验证。").font(.caption).foregroundStyle(.secondary)
             if !errorText.isEmpty { Text(errorText).font(.callout).foregroundStyle(.red) }
             HStack {
-                Button("取消", action:dismiss).disabled(saving)
+                Button("取消", action:dismiss).disabled(saving || (recordingID != nil && (model.dictationActive || model.dictationBusy)))
                 Spacer(); Text("\(text.unicodeScalars.count)/4000").font(.caption)
                 Button(saving ? "正在保存…" : "保存反馈") {
                     saving = true; errorText = ""
                     Task {
-                        if await model.saveFeedback(action,kind:ActionFeedbackKind(rawValue:kind)!,text:text,commandID:commandID) { dismiss() }
+                        let savedRecording = recording?.state == "saved" ? recordingID : nil
+                        if await model.saveFeedback(action,kind:ActionFeedbackKind(rawValue:kind)!,text:text,recordingSourceID:savedRecording,commandID:commandID) { dismiss() }
                         else { errorText = model.status }
                         saving = false
                     }
-                }.keyboardShortcut(.defaultAction).disabled(saving || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
+                }.keyboardShortcut(.defaultAction).disabled(saving || waitingForVoice || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
             }
         }.padding(24).frame(width:620)
+            .onChange(of: recording?.transcriptVersionID) { _, _ in applyTranscription() }
+            .interactiveDismissDisabled(saving || (recordingID != nil && model.dictationActive))
     }
 }
 
