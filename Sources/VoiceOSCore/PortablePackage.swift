@@ -82,7 +82,7 @@ private enum PackageLayout {
         case 35: return version35Tables
         case 36: return version36Tables
         case 37: return version37Tables
-        case 38, 39: return version38Tables
+        case 38, 39, 40, 41: return version38Tables
         default: return tables
         }
     }
@@ -119,7 +119,7 @@ extension VoiceOSStore {
         let file = try PackageLayout.safeFile(package, "manifest.json")
         guard let size = try file.resourceValues(forKeys:[.fileSizeKey]).fileSize, size > 0, size <= 1048576 else { throw VoiceOSError("迁移清单过大或为空") }
         let manifest = try JSONDecoder().decode(PackageManifest.self,from:Data(contentsOf:file))
-        guard manifest.format == "VoiceOS-local-package", (1...39).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
+        guard manifest.format == "VoiceOS-local-package", (1...41).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
               let count = manifest.counts["sources"], count >= 0, manifest.counts.values.allSatisfy({ $0 >= 0 && $0 <= 1000000 }) else { throw VoiceOSError("不支持此迁移包格式或记录数量") }
         return PackageSummary(version:manifest.version,createdAt:manifest.createdAt,sourceCount:count,omittedAssetCount:manifest.omittedAssetIDs.count,mediaIncluded:manifest.mediaIncluded)
     }
@@ -169,7 +169,7 @@ extension VoiceOSStore {
                 files.append(verified)
             }
             if includeMedia { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 39, databaseSchema: 39, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 41, databaseSchema: 41, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)
@@ -186,7 +186,7 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("恢复目标必须是新的空目录；现有资料库不会被覆盖") }
         let manifestURL = try PackageLayout.safeFile(package, "manifest.json")
         let manifest = try JSONDecoder().decode(PackageManifest.self, from: Data(contentsOf: manifestURL))
-        guard manifest.format == "VoiceOS-local-package", (1...39).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
+        guard manifest.format == "VoiceOS-local-package", (1...41).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
         guard manifest.version >= 26 || !manifest.files.contains(where: { $0.path == "recording_processing_requests.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带录制处理请求") }
         guard manifest.version >= 27 || !manifest.files.contains(where: { $0.path == "segmented_processing_batches.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带分段批次") }
         guard manifest.version >= 28 || !manifest.files.contains(where: { $0.path == "segmented_extraction_attempts.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带片段尝试") }
@@ -363,7 +363,7 @@ extension VoiceOSStore {
             WHERE v.id IS NULL OR v.transcript_id!=t.id OR v.version_no!=t.version
             UNION ALL
             SELECT t.id FROM transcripts t LEFT JOIN transcript_versions v ON v.transcript_id=t.id AND v.version_no=1
-            WHERE v.id IS NULL OR v.text!=t.text OR v.reason!='original' OR v.actor!='system'
+            WHERE v.id IS NULL OR v.text!=t.text OR v.reason NOT IN ('original','ai_corrected','ai_superseded') OR v.actor!='system'
             UNION ALL
             SELECT t.id FROM transcripts t JOIN transcript_versions v ON v.transcript_id=t.id GROUP BY t.id HAVING COUNT(v.id)!=t.version
             UNION ALL
@@ -371,7 +371,7 @@ extension VoiceOSStore {
             LEFT JOIN transcript_revisions r ON r.to_version_id=v.id
             WHERE v.version_no<1 OR v.version_no>t.version OR (v.version_no>1 AND
             (r.id IS NULL OR v.reason!='transcription_error' OR v.actor!='user') AND
-            NOT (v.actor='system' AND v.reason LIKE 'qwen_audio_review:%'))
+            NOT (v.actor='system' AND (v.reason LIKE 'qwen_audio_review:%' OR v.reason LIKE 'qwen_context_review:%' OR v.reason IN ('ai_corrected','ai_superseded'))))
             UNION ALL
             SELECT r.id FROM transcript_revisions r JOIN transcript_versions f ON f.id=r.from_version_id
             JOIN transcript_versions n ON n.id=r.to_version_id

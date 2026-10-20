@@ -8,6 +8,10 @@ public struct ActionIntentMetadata: Codable, Sendable {
     public let intentType: String
     public let followupState: String
     public let uncertain: Bool
+    public var expressionHistory: [ExpressionActionAdoption]? = nil
+    public var expressionWithdrawal: RecordingExpressionActionDecision? = nil
+    public var expressionWithdrawalVersionID: String? = nil
+    public var expressionWithdrawalResponseIDs: [String]? = nil
 }
 public struct ActionRecord: Identifiable, Sendable {
     public let id: String
@@ -116,6 +120,7 @@ extension VoiceOSStore {
     }
     static func validateStoredActions(_ db: Database) throws {
         for action in try db.query("SELECT a.*,c.review_version AS latest_review,c.validity AS claim_validity,c.ownership AS original_owner FROM actions a JOIN claims c ON c.id=a.claim_id") {
+            _ = try validatedExpressionHistory(db,action:action)
             guard let pinned = action["claim_review_version"].flatMap(Int.init), let latest = action["latest_review"].flatMap(Int.init), pinned >= 0, pinned <= latest,
                   let title = action["title"], !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.unicodeScalars.count <= 2000,
                   (action["note"]?.unicodeScalars.count ?? 2001) <= 2000 else { throw VoiceOSError("迁移行动内容或认知版本不完整") }

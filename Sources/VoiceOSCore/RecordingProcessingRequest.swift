@@ -116,10 +116,11 @@ extension VoiceOSStore {
                 try setRecordingRequest(id, state:"blocked", error:"录音原件不可用"); continue
             }
             guard current.state == "saved", current.jobState == "completed" else { continue }
+            if current.needsTranscriptionReview { continue }
             do {
                 guard !(current.transcript ?? "").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw VoiceOSError("逐字稿为空") }
-                // Only the original local transcription may satisfy the automatic request.
-                guard try db.query("SELECT version_no FROM transcript_versions WHERE id=?", [current.transcriptVersionID]).first?["version_no"] == "1" else { throw VoiceOSError("逐字稿已更正；需重新明确处理") }
+                guard let transcript = try db.query("SELECT version_no,reason FROM transcript_versions WHERE id=?", [current.transcriptVersionID]).first,
+                      transcript["version_no"] == "1" || transcript["reason"] == "ai_corrected" else { throw VoiceOSError("逐字稿已手动更正；需重新明确处理") }
                 if (current.transcript ?? "").unicodeScalars.count>4000 {
                     try reconcileLongRecordingRequest(row,current:current,extraction:segmentExtraction,aggregation:segmentAggregation)
                     continue
