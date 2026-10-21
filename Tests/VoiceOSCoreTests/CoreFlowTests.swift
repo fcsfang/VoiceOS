@@ -934,9 +934,65 @@ final class CoreFlowTests: XCTestCase {
             members.append(id)
         }
         let fixture=FlowRecordingExpressions()
+        let preparedGroupingInput=try await grouped.prepareRecordingExpressions()
+        let nativeGroupingInput=try XCTUnwrap(preparedGroupingInput)
+        let nativeGroupingDraft=try await fixture.group(nativeGroupingInput).0
+        let nativeGroups=try JSONSerialization.jsonObject(with:JSONEncoder().encode(nativeGroupingDraft))
+        func groupingReply(_ id:String,_ output:[String:Any]) throws -> ModelHTTPReply {
+            let text=String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)
+            let message:[String:Any] = ["type":"message","role":"assistant","status":"completed","content":[["type":"output_text","text":text]]]
+            let envelope:[String:Any] = ["id":id,"status":"completed","output":[message]]
+            return .init(status:200,body:try JSONSerialization.data(withJSONObject:envelope))
+        }
+        func nativeGroupingPort(_ transport:FlowFollowupTransport) throws -> ResponsesRecordingExpressionPort {
+            try .init(baseURL:URL(string:"https://api.openai.com/v1")!,apiKey:"fixture",model:"fixture-model",transport:transport)
+        }
+        let wrongGroups=try groupingReply("rejected-groups",["recordings":nativeGroups])
+        let exhaustedGroupingTransport=FlowFollowupTransport([wrongGroups,wrongGroups,wrongGroups])
+        do {
+            _ = try await grouped.connectRecordingExpressions(using:nativeGroupingPort(exhaustedGroupingTransport))
+            XCTFail("格式纠正耗尽后不能接受分组")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("分组格式错误"))
+            XCTAssertTrue(error.localizedDescription.contains("原件和转写保留"))
+        }
+        let exhaustedGroupingRequests=await exhaustedGroupingTransport.requests
+        XCTAssertEqual(exhaustedGroupingRequests.count,3)
+        let unsavedGroups=try await grouped.recordingExpressions()
+        XCTAssertTrue(unsavedGroups.isEmpty)
+        let acceptedGroupingDraft=try groupingReply("accepted-groups-draft",["groups":nativeGroups])
+        let acceptedGroupingReview=try groupingReply("accepted-groups-review",["groups":nativeGroups])
+        let recoveringGroupingTransport=FlowFollowupTransport([wrongGroups,acceptedGroupingDraft,wrongGroups,acceptedGroupingReview])
+        let nativeGrouped=try await grouped.connectRecordingExpressions(using:nativeGroupingPort(recoveringGroupingTransport))
+        XCTAssertEqual(nativeGrouped.count,2)
+        XCTAssertTrue(nativeGrouped.allSatisfy { $0.responseIDs == ["accepted-groups-draft","accepted-groups-review"] })
+        let groupingRequests=await recoveringGroupingTransport.requests
+        XCTAssertEqual(groupingRequests.count,4)
+        for (index,data) in groupingRequests.enumerated() {
+            let body=try XCTUnwrap(JSONSerialization.jsonObject(with:data) as? [String:Any])
+            let messages=try XCTUnwrap(body["input"] as? [[String:Any]])
+            let content=try XCTUnwrap(messages.first?["content"] as? String)
+            let payload=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(content.utf8)) as? [String:Any])
+            let sentInput=try XCTUnwrap(payload["input"] as? [String:Any])
+            let sentContext=try XCTUnwrap(sentInput["context"] as? [String:Any])
+            let sentSources=try XCTUnwrap(sentContext["sources"] as? [[String:Any]])
+            XCTAssertEqual(sentSources.compactMap { $0["text"] as? String },nativeGroupingInput.context.sources.map(\.text))
+            if index == 1 || index == 3 {
+                XCTAssertEqual(payload["rejectedOutput"] as? String,String(decoding:try JSONSerialization.data(withJSONObject:["recordings":nativeGroups],options:[.sortedKeys]),as:UTF8.self))
+                XCTAssertTrue((payload["validationError"] as? String)?.contains("groups") == true)
+            } else {
+                XCTAssertNil(payload["rejectedOutput"])
+            }
+            if index >= 2 {
+                let sentDraft=try XCTUnwrap(payload["draft"] as? [[String:Any]])
+                XCTAssertEqual(try JSONSerialization.data(withJSONObject:sentDraft,options:[.sortedKeys]),try JSONSerialization.data(withJSONObject:nativeGroups,options:[.sortedKeys]))
+            } else {
+                XCTAssertNil(payload["draft"])
+            }
+        }
         let grouping:any RecordingExpressionPort = fixture
         let actionPort:any RecordingExpressionActionPort = fixture
-        let connected=try await grouped.connectRecordingExpressions(using:grouping)
+        let connected=nativeGrouped
         XCTAssertEqual(connected.count,2)
         let report=try XCTUnwrap(connected.first { $0.sourceIDs.contains(members[0]) })
         XCTAssertEqual(report.sourceIDs,Array(members.prefix(2)))
