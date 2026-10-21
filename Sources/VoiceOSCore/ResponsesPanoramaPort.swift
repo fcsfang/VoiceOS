@@ -38,7 +38,10 @@ public struct ResponsesPanoramaPort: PanoramaModelPort {
             let response=try await transport.send(request)
             guard response.status == 200 else { throw VoiceOSError("思考全景 HTTP \(response.status)，完整材料未裁剪，可明确重试") }
             let envelope=try ResponsesEnvelope.parse(response.body, maxResponseBytes: 16_777_216)
-            guard envelope.status == .completed, let text=envelope.text,
+            guard envelope.status == .completed else {
+                throw ModelPortFailure.rejected(envelope.failureSummary ?? "思考全景未获得完成回执，未发布部分结果", inputTokens: envelope.inputTokens, outputTokens: envelope.outputTokens)
+            }
+            guard let text=envelope.text,
                   let root=try JSONSerialization.jsonObject(with: response.body) as? [String:Any], let responseID=root["id"] as? String, !responseID.isEmpty else { throw VoiceOSError("思考全景未获得完成回执，未发布部分结果") }
             do {
                 let result=try JSONDecoder().decode(Output.self, from: Data(text.utf8))
