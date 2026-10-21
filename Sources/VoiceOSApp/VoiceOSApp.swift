@@ -7,6 +7,8 @@ import VoiceOSPlatform
 
 @MainActor
 final class ControlCenter: ObservableObject {
+    let panorama = PanoramaScreenModel()
+    private var panoramaModel: ResponsesPanoramaPort?
     @Published var textCaptureDraft = TextCaptureDraft() {
         didSet { if !textCaptureDraft.hasSameContents(as: oldValue) { scheduleDraftSave() } }
     }
@@ -608,6 +610,7 @@ final class ControlCenter: ObservableObject {
     }
     private func reloadWorkspace() async {
         guard let store else { return }
+        await panorama.refresh(store: store, port: panoramaModel)
         do {
             let snapshot = try await store.workspaceSnapshot()
             // Publish together, without awaits between related data sets.
@@ -683,6 +686,8 @@ final class ControlCenter: ObservableObject {
             // transport and 600-second window. Its versioned identity prevents
             // queued non-streaming attempts from being silently replayed.
             let suite=try LocalTextModel.loadSuite(from:file,segmentRequestTimeout:600,segmentStreaming:true),port=suite.cognition
+            panoramaModel=suite.panorama
+            Task { await panorama.refresh(store: store, port: panoramaModel) }
             discussionModel=suite.discussion;outcomeModel=suite.outcome
             recordingTitleModel=suite.recordingTitles
             topicModel=suite.topics; topicAttemptDigest=nil
@@ -2396,6 +2401,23 @@ extension ControlCenter {
             discussionStatus="已打开讨论历史；没有自动发送。"
             await refreshDiscussion(); return true
         } catch { discussionStatus=error.localizedDescription; return false }
+    }
+    func retryPanorama() { panorama.retry(store: store, port: panoramaModel) }
+    func beginPanoramaDiscussion(snapshotID: String, selection: PanoramaSelection) async -> String? {
+        guard let store, !discussionSaving, !discussionSending, !discussionExtracting, !dictationActive else { return nil }
+        discussionSaving = true
+        defer { discussionSaving = false }
+        do {
+            let result = try await store.beginPanoramaConversation(snapshotID: snapshotID, selection: selection)
+            discussionSession = result.conversation; discussionRecordingID = nil
+            discussionStatus = "AI 候选草稿尚未发送，可编辑后保存并发送。已带入相关完整表达与节目原文。"
+            await refreshDiscussion()
+            return result.draft
+        } catch {
+            status = error.localizedDescription
+            await panorama.refresh(store: store, port: panoramaModel)
+            return nil
+        }
     }
     func beginDiscussion(_ record:SourceRecord) async -> Bool {
         guard let store,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return false }

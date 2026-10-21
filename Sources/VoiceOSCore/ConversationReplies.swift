@@ -197,8 +197,7 @@ extension VoiceOSStore {
                 for source in saved.sources where !historicalSources.contains(where: { $0.sourceID == source.sourceID }) { historicalSources.append(source) }
             }
             guard try relevanceJSON(historicalSources) == relevanceJSON(s.context.sources) else { throw VoiceOSError("讨论实际文本与回合来源不符") }
-            var ids = s.input.historySourceIDs
-            for ref in s.input.userTurns where !ids.contains(ref.sourceID) { ids.append(ref.sourceID) }
+            let ids = historicalSources.map(\.sourceID)
             guard s.context.sources.map(\.sourceID) == ids,
                   s.input.destination == .local || s.context.sources.allSatisfy({ !$0.localOnly }),
                   Set(s.priorReplies.map(\.attemptID)).count == s.priorReplies.count else { throw VoiceOSError("讨论实际来源或衍生限制不符") }

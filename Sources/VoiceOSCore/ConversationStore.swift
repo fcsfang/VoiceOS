@@ -61,7 +61,7 @@ public struct ConversationThoughtFocus: Codable, Sendable {
 extension VoiceOSStore {
     /// Size the complete selected evidence once; no unrelated source scan or text truncation.
     func prepareFullDiscussionContext(sourceIDs: [String], minimumBudget: Int = 1, replyCharacters: Int = 0) throws -> LocalTranscriptContext {
-        let expandedIDs=try recordingContextSourceIDs(sourceIDs:sourceIDs)
+        let expandedIDs=try completeConversationSourceIDs(sourceIDs)
         let full = try prepareLocalTranscriptContext(sourceIDs:expandedIDs,scalarBudget:Int.max)
         let size = full.sources.reduce(0) { $0 + $1.text.unicodeScalars.count } + replyCharacters
         return LocalTranscriptContext(sources:full.sources,scalarBudget:max(minimumBudget,size),contentDigest:full.contentDigest,recordingContexts:full.recordingContexts)
@@ -86,7 +86,7 @@ extension VoiceOSStore {
         }
         if let old = try db.query("SELECT * FROM conversations WHERE entry_command_id=?", [commandID]).first {
             let snapshot = try storedConversationContext(old["entry_context_id"]!)
-            guard snapshot.sources.map(\.sourceID) == (try recordingContextSourceIDs(sourceIDs:sourceIDs)) else { throw VoiceOSError("同一进入命令不能更换讨论来源") }
+            guard snapshot.sources.map(\.sourceID) == (try completeConversationSourceIDs(sourceIDs)) else { throw VoiceOSError("同一进入命令不能更换讨论来源") }
             return old["id"]!
         }
         let snapshot = try prepareFullDiscussionContext(sourceIDs:sourceIDs)
@@ -210,7 +210,10 @@ extension VoiceOSStore {
         if row["validity"] == "current" {
             let contextIDs = [row["entry_context_id"]!] + (try db.query("SELECT context_id FROM conversation_user_turns WHERE conversation_id=? ORDER BY ordinal",[id])).compactMap { $0["context_id"] }
             for contextID in contextIDs {
-                do { _ = try localContext(id:contextID) }
+                do {
+                    let context = try localContext(id:contextID)
+                    guard try completeConversationSourceIDs(context.sources.map(\.sourceID)) == context.sources.map(\.sourceID) else { throw VoiceOSError("完整表达的成员已变化") }
+                }
                 catch { try db.execute("UPDATE conversations SET validity='frozen' WHERE id=?",[id]); break }
             }
             if let focus = try storedConversationContext(row["entry_context_id"]!).reflectionFocus {
@@ -252,7 +255,7 @@ extension VoiceOSStore {
         _ = try conversation(id:conversationID)
         return try db.query("SELECT * FROM conversation_user_turns WHERE conversation_id=? ORDER BY ordinal",[conversationID]).map { row in
             let snapshot = try storedConversationContext(row["context_id"]!)
-            guard let source = snapshot.sources.first, snapshot.sources.count == 1, source.sourceID == row["source_id"],
+            guard let source = snapshot.sources.first, source.sourceID == row["source_id"],
                   source.origin == "user", source.speaker == "user" else { throw VoiceOSError("讨论发言出处不一致") }
             return ConversationUserTurn(id:row["id"]!,ordinal:Int(row["ordinal"]!)!,sourceID:source.sourceID,
                                         transcriptVersionID:source.transcriptVersionID,text:source.text,contextID:row["context_id"]!)
@@ -282,12 +285,14 @@ extension VoiceOSStore {
         guard session.state == "active", session.validity == "current", session.version == expectedVersion else { throw VoiceOSError("讨论已经结束或版本、来源已变化") }
         let entry = try storedConversationContext(session.entryContextID)
         let history = entry.sources.map(\.sourceID)
-        guard try recordingContextSourceIDs(sourceIDs:history) == history else { throw VoiceOSError("讨论依据已增加节目上下文，请从当前材料重新进入") }
+        guard try completeConversationSourceIDs(history) == history else { throw VoiceOSError("讨论依据已增加节目上下文，请从当前材料重新进入") }
         try validateLocalTranscriptContext(entry)
         let turns = try conversationUserTurns(conversationID:id)
         guard !turns.isEmpty else { throw VoiceOSError("请先保存一轮个人发言") }
         var ids = history
-        for turn in turns where !ids.contains(turn.sourceID) { ids.append(turn.sourceID) }
+        for turn in turns {
+            for source in try storedConversationContext(turn.contextID).sources where !ids.contains(source.sourceID) { ids.append(source.sourceID) }
+        }
         try requireReviewedTranscriptions(sourceIDs:ids,destination:destination)
         if let focus = entry.conversationFocus { try validateConversationThoughtFocus(focus) }
         if let focus = entry.reflectionFocus { try validateReflectionFocus(focus) }
@@ -307,26 +312,42 @@ extension VoiceOSStore {
               try db.query("SELECT destination FROM contexts WHERE id=?",[input.contextID]).first?["destination"] == input.destination.rawValue else { throw VoiceOSError("讨论输入已失效或处理目的不符") }
         let entry = try storedConversationContext(session.entryContextID)
         let history = entry.sources.map(\.sourceID)
-        guard try recordingContextSourceIDs(sourceIDs:history) == history else { throw VoiceOSError("讨论依据已增加节目上下文，请从当前材料重新进入") }
+        guard try completeConversationSourceIDs(history) == history else { throw VoiceOSError("讨论依据已增加节目上下文，请从当前材料重新进入") }
         try validateLocalTranscriptContext(entry)
         let turns = try conversationUserTurns(conversationID:input.conversationID)
         let refs = turns.map { ConversationTurnReference(turnID:$0.id,sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID) }
         guard history == input.historySourceIDs, refs == input.userTurns else { throw VoiceOSError("讨论历史或发言身份不一致") }
         var ids = history
-        for turn in turns where !ids.contains(turn.sourceID) { ids.append(turn.sourceID) }
+        for turn in turns {
+            for source in try storedConversationContext(turn.contextID).sources where !ids.contains(source.sourceID) { ids.append(source.sourceID) }
+        }
         try requireReviewedTranscriptions(sourceIDs:ids,destination:input.destination)
         let snapshot = try localContext(id:input.contextID)
         if let focus = snapshot.conversationFocus { try validateConversationThoughtFocus(focus) }
         if let focus = snapshot.reflectionFocus { try validateReflectionFocus(focus) }
         guard try Self.relevanceJSON(snapshot.conversationFocus) == Self.relevanceJSON(entry.conversationFocus) else { throw VoiceOSError("讨论焦点与入口不一致") }
         guard try Self.relevanceJSON(snapshot.reflectionFocus) == Self.relevanceJSON(entry.reflectionFocus) else { throw VoiceOSError("完整讨论范围与入口不一致") }
-        guard snapshot.sources.map(\.sourceID) == ids else { throw VoiceOSError("实际讨论输入缺少来源或混入未选择历史") }
+        guard snapshot.sources.map(\.sourceID) == (try completeConversationSourceIDs(ids)) else { throw VoiceOSError("实际讨论输入缺少来源或混入未选择历史") }
         return snapshot
     }
     func conversationHistoryContext(_ conversationID: String) throws -> LocalTranscriptContext {
         try storedConversationContext(conversation(id: conversationID).entryContextID)
     }
-    private func storedConversationContext(_ id:String) throws -> LocalTranscriptContext {
+    func completeConversationSourceIDs(_ sourceIDs: [String]) throws -> [String] {
+        let expressions = try recordingExpressions()
+        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        var ids = sourceIDs
+        for id in sourceIDs {
+            let expression = expressions.first(where: { $0.sourceIDs.contains(id) })
+            guard catalog[id]?.presentation?.expression == nil || expression != nil else { throw VoiceOSError("完整表达的成员或许可已变化，请重新整理") }
+            if let expression {
+                guard expression.state == "completed" else { throw VoiceOSError("完整表达仍在整理，请完成后讨论") }
+                for member in expression.sourceIDs where !ids.contains(member) { ids.append(member) }
+            }
+        }
+        return try recordingContextSourceIDs(sourceIDs: ids)
+    }
+    func storedConversationContext(_ id:String) throws -> LocalTranscriptContext {
         guard let row = try db.query("SELECT snapshot_json FROM contexts WHERE id=?",[id]).first else { throw VoiceOSError("讨论缺少原始上下文") }
         return try JSONDecoder().decode(LocalTranscriptContext.self,from:Data(row["snapshot_json"]!.utf8))
     }
@@ -364,7 +385,7 @@ extension VoiceOSStore {
                 let (snapshot,turnState) = try checkedContext(turn["context_id"], frozen: row["validity"] == "frozen")
                 guard turn["ordinal"] == String(index+1), turn["speaker"] == "user", !(turn["command_id"] ?? "").isEmpty,
                       row["validity"] != "current" || turnState == "current" else { throw VoiceOSError("讨论发言版本或上下文不一致") }
-                guard snapshot.sources.count == 1, let source = snapshot.sources.first, source.sourceID == turn["source_id"],
+                guard let source = snapshot.sources.first, source.sourceID == turn["source_id"],
                       source.origin == "user", source.speaker == "user", !source.text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,
                       let original = try db.query("SELECT origin,speaker FROM sources WHERE id=?",[turn["source_id"]]).first,
                       original["origin"] == "user", original["speaker"] == "user" else { throw VoiceOSError("讨论个人发言身份不一致") }

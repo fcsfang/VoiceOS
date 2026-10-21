@@ -355,7 +355,7 @@ struct WorkspaceSourceView: View {
     private func quote(_ span:TranscriptSpan,text:String) -> String { let s=Array(text.unicodeScalars);guard span.textStart>=0,span.textEnd<=s.count else { return "原文范围已变化" };return String(String.UnicodeScalarView(s[span.textStart..<span.textEnd])) }
     private func time(_ ms:Int)->String { String(format:"%02d:%02d",ms/60000,ms/1000%60) }
 }
-private struct WorkspaceTranscriptEditor:View {
+struct WorkspaceTranscriptEditor:View {
     @ObservedObject var model:ControlCenter
     let source:SourceRecord
     let close:()->Void

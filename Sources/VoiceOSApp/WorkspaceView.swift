@@ -68,7 +68,8 @@ struct WorkspaceView: View {
     @State private var discussionDraftSessionID: String?
     @State private var discussionDrafts: [String: String] = [:]
     @State private var pendingURL: URL?
-    @State private var homeTab = "为你精选"
+    @State private var panoramaSourceEditor: SourceRecord?
+    @State private var panoramaClaimEditor: CandidateClaim?
     @State private var materialFilter = "日常材料"
     @State private var actionFilter = "全部"
     @State private var query = ""
@@ -96,10 +97,7 @@ struct WorkspaceView: View {
         return model.actionRecords.filter { ids.contains($0.id) && $0.validity == "current" && $0.state != "dismissed" }
     }
     private var deliveries: [AssistantExecutionRecord] { model.assistantExecutions.filter { $0.validity == "current" && $0.state == "completed" }.sorted { $0.updatedAt > $1.updatedAt } }
-    private var currentReviews: [KnowledgeReviewRecord] { model.knowledgeReviews.filter { $0.validity == "current" && $0.state == "completed" && !$0.issues.isEmpty }.sorted { $0.createdAt > $1.createdAt } }
     private var activeMaterials: [SourceRecord] { model.records.filter { !$0.isArchived && !$0.isTrashed } }
-    private var highlightedSources: [SourceRecord] { (model.workspaceBriefing?.result.highlightSourceIDs ?? []).compactMap { id in activeMaterials.first { $0.id == id } } }
-    private var allUpdates: Bool { homeTab == "全部动态" }
     private var section: String {
         switch page {
         case .themes: "主题"
@@ -189,6 +187,12 @@ struct WorkspaceView: View {
                 Button("取消") { model.choosingReminderCalendar=false }
             }.padding(24).frame(width:440)
         }
+        .sheet(item: $panoramaSourceEditor) { source in
+            WorkspaceTranscriptEditor(model: model, source: source) { panoramaSourceEditor = nil }
+        }
+        .sheet(item: $panoramaClaimEditor) { claim in
+            ClaimCorrectionView(claim: claim, model: model) { panoramaClaimEditor = nil }
+        }
         .sheet(item:$model.pendingScheduleEffect) { effect in ReminderScheduleConfirmationView(effect:effect,model:model) { model.pendingScheduleEffect=nil } }
     }
     private var topicLoadKey: String {
@@ -255,7 +259,15 @@ struct WorkspaceView: View {
     }
     @ViewBuilder private var pageContent: some View {
         switch page {
-        case .home: scrolled { home }
+        case .home:
+            PanoramaHome(screen: model.panorama, retry: model.retryPanorama, chooseTextModel: model.chooseTextModel,
+                openMaterials: { go(.materials) }, openSource: { go(.source($0)) }, correctSource: { id in
+                    panoramaSourceEditor = model.records.first { $0.id == id }
+                }, correctClaim: { id in
+                    panoramaClaimEditor = model.claims.first { $0.id == id }
+                }, discuss: { snapshot, selection in
+                    Task { await openPanoramaDiscussion(snapshotID: snapshot, selection: selection) }
+                })
         case .themes: scrolled { themes }.id((topicID ?? "all-topics") + ":" + topicTab)
         case .materials: scrolled { materials }
         case .actions: scrolled { actions }
@@ -298,72 +310,6 @@ struct WorkspaceView: View {
         ScrollView { content().frame(maxWidth:860,alignment:.leading).padding(30).frame(maxWidth:.infinity,alignment:.top) }
     }
     private func unavailable(_ title:String,description:String) -> some View { ContentUnavailableView(title,systemImage:"leaf",description:Text(description)).frame(maxWidth:.infinity) }
-    private var home: some View {
-        LazyVStack(alignment:.leading,spacing:30) {
-            WorkspaceHeading(eyebrow:Date().formatted(.dateTime.month().day().weekday()),title:"首页动态",subtitle:"先看值得关注的进展，再回到你关心的主题。")
-            WorkspaceTabs(selection:$homeTab,titles:["为你精选","全部动态"])
-            if let briefing=model.workspaceBriefing {
-                WorkspaceSection(title:"最近值得关注",subtitle:"AI 综合 · " + dateLabel(briefing.createdAt),icon:"sparkles") {
-                    WorkspaceExpandableText(text:briefing.result.briefing,label:"完整简报").padding(.top,10)
-                }
-            } else if model.records.isEmpty {
-                VStack(alignment:.leading,spacing:15) {
-                    Text("从一段表达开始，让想法有后续。").font(.title3)
-                    Text("说出想法、导入材料，VoiceOS 会在授权范围内自动整理，连接主题并推进明确委托。").foregroundStyle(.secondary)
-                    Button("记录第一段想法") { go(.capture) }.buttonStyle(.borderedProminent)
-                }.padding(24).background(palette.surface,in:RoundedRectangle(cornerRadius:11))
-            } else {
-                Text(model.organizingTopics ? "AI 正在从完整材料中连接主题，整理好后会出现在这里。" : "资料已保留。完成模型连接与文字授权后，VoiceOS 会自动连接主题、形成简报。")
-                    .foregroundStyle(.secondary)
-            }
-            if !deliveries.isEmpty {
-                WorkspaceSection(title:"AI 已交付",subtitle:"可以直接阅读和使用的成果",icon:"checkmark.seal",count:deliveries.count,actionTitle:"全部交付",action:{ actionFilter="AI 助理";go(.actions) }) {
-                    ForEach(allUpdates ? deliveries : Array(deliveries.prefix(1))) { execution in
-                        WorkspaceRow(title:execution.title,subtitle:execution.questionID.flatMap { id in model.workspaceTopics.first { $0.id == id }?.title }.map { "已回流到「\($0)」" } ?? "成果已就绪，可继续讨论",icon:"doc.text",trailing:"阅读结果") { go(.delivery(execution.id)) }
-                        if allUpdates, execution.id != deliveries.last?.id { Divider() }
-                    }
-                }
-            }
-            if !currentReviews.isEmpty {
-                WorkspaceSection(title:"值得留意的理解",subtitle:"回到原话，看看需要补充的条件与边界",icon:"lightbulb",count:currentReviews.count) {
-                    ForEach(allUpdates ? currentReviews : Array(currentReviews.prefix(1))) { review in
-                        WorkspaceRow(title:review.issues.first?.betterUnderstanding ?? "理解有了新的适用边界",subtitle:model.records.first { $0.id == review.sourceID }?.workspaceTitle ?? "知识核查",icon:"lightbulb") { go(.source(review.sourceID)) }
-                        if allUpdates, review.id != currentReviews.last?.id { Divider() }
-                    }
-                }
-            }
-            if !allUpdates && !highlightedSources.isEmpty {
-                WorkspaceSection(title:"值得接着看的材料",subtitle:"从这些原始表达与资料继续深入",icon:"books.vertical",count:highlightedSources.count) {
-                    ForEach(distinctExpressions(highlightedSources)) { source in
-                        sourceRow(source)
-                        if source.id != highlightedSources.last?.id { Divider() }
-                    }
-                }
-            }
-            if !model.workspaceTopics.isEmpty {
-                WorkspaceSection(title:"继续关心的主题",subtitle:"跨周、跨月延续的学习与探索",icon:"circle.hexagongrid",count:model.workspaceTopics.count,actionTitle:"全部主题",action:{ go(.themes);topicID=nil }) {
-                    let topics=allUpdates ? model.workspaceTopics : Array(model.workspaceTopics.prefix(3))
-                    ForEach(topics) { topic in
-                        WorkspaceRow(title:topic.title,subtitle:topic.organization?.summary ?? "查看这个主题跨时间的材料、理解与行动",icon:"circle.hexagongrid",trailing:dateLabel(topic.updatedAt)) { selectTopic(topic.id) }
-                        if topic.id != topics.last?.id { Divider() }
-                    }
-                }
-            }
-            if allUpdates {
-                WorkspaceSection(title:"所有材料与动态",subtitle:"日常材料与当前处理情况；归档和回收站在材料页查看",icon:"tray.full",count:activeMaterials.count) {
-                    ForEach(activeMaterials) { source in
-                        sourceRow(source)
-                        if source.id != model.records.last?.id { Divider() }
-                    }
-                    processingIssues
-                }
-            }
-            if !model.topicOrganizationStatus.isEmpty, !model.organizingTopics, model.workspaceBriefing == nil {
-                Text(model.topicOrganizationStatus).font(.caption).foregroundStyle(.secondary)
-                Button("重试主题整理") { model.queueTopicOrganization(retry:true) }.disabled(!model.modelConfigured)
-            }
-        }
-    }
     private func distinctExpressions(_ sources:[SourceRecord]) -> [SourceRecord] {
         let catalog=Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })
         let attachedContextIDs=Set(sources.compactMap { contextSourceID($0,catalog:catalog) })
@@ -678,6 +624,14 @@ struct WorkspaceView: View {
         discussionDraft = prompt.isEmpty || savedDraft == prompt ? savedDraft : savedDraft.isEmpty ? prompt : savedDraft + "\n\n" + prompt
         showingDiscussion = true
     }
+    private func openPanoramaDiscussion(snapshotID: String, selection: PanoramaSelection) async {
+        let key = discussionKey
+        guard let draft = await model.beginPanoramaDiscussion(snapshotID: snapshotID, selection: selection) else {
+            if key == discussionKey { error = model.status }
+            return
+        }
+        presentDiscussion(for: key, prompt: draft)
+    }
     private func openSavedDiscussion(_ id: String) async {
         let key = discussionKey
         guard await model.openDiscussion(id) else { if key == discussionKey { error = model.discussionStatus }; return }
@@ -702,6 +656,13 @@ struct WorkspaceView: View {
         }
         let opened:Bool
         switch page {
+        case .home:
+            guard let snapshot = model.panorama.state?.snapshot, let selection = model.panorama.selection else {
+                error = "请先选择全景中的问题或联系，再沿线讨论。"
+                return
+            }
+            await openPanoramaDiscussion(snapshotID: snapshot.id, selection: selection)
+            return
         case .source(let id): opened = if let source=model.records.first(where: { $0.id == id }) { await model.beginDiscussion(source) } else { false }
         case .task(let id): opened = if let action=model.actionRecords.first(where: { $0.id == id }) { await model.beginActionDiscussion(action) } else { false }
         case .delivery(let id): opened = if let execution=model.assistantExecutions.first(where: { $0.id == id }) { await model.beginAssistantDiscussion(execution) } else { false }

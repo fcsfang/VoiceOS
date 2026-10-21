@@ -24,6 +24,42 @@ private actor FlowModel: ModelPort {
         return ModelResponse(status: .completed, claims: [ClaimProposal(statement: source.origin == "external" ? "作者认为检索需要评估。" : source.text, ownership: source.origin == "external" ? .external : .userTentative, references: [reference], action: action)])
     }
 }
+private actor FlowPanorama: PanoramaModelPort {
+    var generations=0
+    var reviews=0
+    var repairs=0
+    var receivedRejection=false
+    func generate(_ input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt) {
+        generations += 1
+        let questions=input.sources.prefix(2).enumerated().map { index, value in
+            PanoramaQuestion(id: "q"+String(index), regionID: "r", title: "如何核对检索理解？", summary: "保留待核对问题", evidence: [.init(sourceID: value.id, transcriptVersionID: value.transcript.transcriptVersionID, start: 5, end: 6, quote: value.transcript.text, claimIDs: input.claims.filter { $0.references.contains { $0.sourceID == value.id } }.map(\.id))])
+        }
+        let represented=Set(questions.flatMap(\.evidence).flatMap(\.claimIDs))
+        let proposal=PanoramaProposal(regions: [.init(id: "r", title: "检索研究", summary: "跨材料的探索")], questions: questions,
+            relations: [.init(id: "e", from: "q0", to: "q1", label: "补充检索条件", explanation: "AI 候选，需核对双方条件", fromEvidence: questions[0].evidence, toEvidence: questions[1].evidence)],
+            unrepresentedSources: input.sources.dropFirst(2).map { .init(id: $0.id, reason: "本轮未归入具体问题，仍可打开全文") },
+            unrepresentedClaims: input.claims.filter { !represented.contains($0.id) }.map { .init(id: $0.id, reason: "保留在认识入口") })
+        return (proposal, .init(responseID: "generation", model: "fixture", createdAt: "2026-10-21T00:00:00Z"))
+    }
+    func verify(_ proposal: PanoramaProposal, input: PanoramaInput, priorRejection: PanoramaRejection?) async throws -> (PanoramaReview, PanoramaReceipt) {
+        reviews += 1
+        if let priorRejection { receivedRejection = priorRejection.review.questions.contains { !$0.accepted } && priorRejection.proposal.questions.first?.summary == "保留待核对问题" }
+        return (.init(questions: proposal.questions.map { .init(id: $0.id, accepted: reviews > 1, reason: reviews > 1 ? "合成依据对应" : "问题归纳需要保留否定条件") }, relations: proposal.relations.map { .init(id: $0.id, accepted: true, reason: "合成双侧依据对应") }, coverageAccepted: true, reason: "全量输入与未表达项均核对"), .init(responseID: "verification-"+String(reviews), model: "fixture", createdAt: "2026-10-21T00:00:01Z"))
+    }
+    func repair(_ proposal: PanoramaProposal, input: PanoramaInput, review: PanoramaReview) async throws -> (PanoramaProposal, PanoramaReceipt) {
+        repairs += 1
+        let questions=proposal.questions.map { PanoramaQuestion(id: $0.id, regionID: $0.regionID, title: $0.title, summary: $0.summary+"，保留否定条件", evidence: $0.evidence) }
+        return (.init(regions: proposal.regions, questions: questions, relations: proposal.relations, unrepresentedSources: proposal.unrepresentedSources, unrepresentedClaims: proposal.unrepresentedClaims), .init(responseID: "repair", model: "fixture", createdAt: "2026-10-21T00:00:01Z"))
+    }
+}
+private actor FlowCompleteDiscussion: DiscussionModelPort {
+    let configuration=flowConfiguration
+    var snapshots: [DiscussionSnapshot]=[]
+    func reply(_ request: DiscussionModelRequest) async throws -> DiscussionModelResponse {
+        snapshots.append(request.snapshot)
+        return .init(status: .completed, parts: [.init(kind: .aiSuggestion, text: "这是合成的待核对分析。")])
+    }
+}
 private struct FlowSpeech: SpeechPort {
     let backendIdentity = "Qwen3-ASR-flow-fixture"
     var text = "我认为检索质量比记忆容量更值得研究。"
@@ -1257,6 +1293,63 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertTrue(requestText.contains("discussion_focus"))
         let grouped = try await store.latestCandidateClaimsBySource()
         XCTAssertEqual(grouped[oldID]?.map(\.id), claims.map(\.id))
+        var corpus: [String]=[]
+        for index in 0..<4 {
+            let source=try await store.recordUserExpression(String(repeating: "合成检索资料需要完整保留。", count: 240)+String(index))
+            _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: 1, localOnly: false)
+            corpus.append(source)
+        }
+        let full=try await store.prepareLocalTranscriptContext(sourceIDs: corpus, scalarBudget: Int.max)
+        _ = try await store.importOrganizedClaims(context: full, proposals: [], commandID: "complete-zero-claims")
+        let panorama=FlowPanorama()
+        let eligible=try await store.panoramaInput()
+        XCTAssertEqual(Set(eligible.manifest.sourceIDs), Set(corpus))
+        XCTAssertEqual(eligible.claims.count, 0)
+        XCTAssertGreaterThan(eligible.sources.reduce(0) { $0+$1.transcript.text.unicodeScalars.count }, 12000)
+        try await store.generatePanorama(using: panorama)
+        try await store.generatePanorama(using: panorama)
+        let state=try await store.panoramaState(), snapshot=try XCTUnwrap(state.snapshot)
+        XCTAssertEqual(snapshot.coverage.submittedSourceIDs.count, 4)
+        XCTAssertEqual(snapshot.coverage.representedSourceIDs.count, 2)
+        XCTAssertEqual(snapshot.coverage.unrepresentedSources.count, 2)
+        let generationCount=await panorama.generations, reviewCount=await panorama.reviews, repairCount=await panorama.repairs
+        XCTAssertEqual(generationCount, 1); XCTAssertEqual(reviewCount, 2); XCTAssertEqual(repairCount, 1)
+        let receivedRejection=await panorama.receivedRejection
+        XCTAssertTrue(receivedRejection)
+        XCTAssertEqual(snapshot.proposal.questions.first?.evidence.first?.start, 0)
+        XCTAssertEqual(snapshot.generation.responseID, "repair")
+        let repeated=eligible.sources[0]
+        let ambiguous=PanoramaEvidence(sourceID: repeated.id, transcriptVersionID: repeated.transcript.transcriptVersionID, start: -1, end: -1, quote: "合成检索资料需要完整保留。", claimIDs: [])
+        let ambiguousProposal=PanoramaProposal(regions: snapshot.proposal.regions, questions: [.init(id: "ambiguous", regionID: "r", title: "重复原话", summary: "不能猜测位置", evidence: [ambiguous])], relations: [], unrepresentedSources: [], unrepresentedClaims: [])
+        XCTAssertThrowsError(try VoiceOSStore.locatePanoramaQuotes(ambiguousProposal, input: eligible))
+        let entry=try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .relation("e"))
+        XCTAssertTrue(entry.draft.contains("AI 全景候选"))
+        let noTurns=try await store.conversationUserTurns(conversationID: entry.conversation.id)
+        XCTAssertTrue(noTurns.isEmpty)
+        try await store.endConversation(id: entry.conversation.id, expectedVersion: 1)
+        let reopened=try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .relation("e"))
+        XCTAssertNotEqual(reopened.conversation.id, entry.conversation.id)
+        XCTAssertEqual(reopened.conversation.state, "active")
+        let conversation=try await store.beginConversation(sourceIDs: corpus)
+        let discussion=FlowCompleteDiscussion()
+        for ordinal in 1...2 {
+            let turn=try await store.recordUserExpression("请核对合成资料第\(ordinal)轮。")
+            _ = try await store.appendConversationUserSource(conversationID: conversation, sourceID: turn, expectedVersion: ordinal)
+            let input=try await store.prepareConversationInput(id: conversation, expectedVersion: ordinal+1, destination: .local)
+            _ = try await store.performConversationReply(input, using: discussion)
+        }
+        let sent=await discussion.snapshots
+        XCTAssertEqual(sent[1].priorReplies.count, 1)
+        XCTAssertEqual(sent[1].context.sources.count, 6)
+        XCTAssertGreaterThan(sent[1].context.scalarBudget, 12000)
+        try await store.endConversation(id: conversation, expectedVersion: 3)
+        let outcome=try await store.prepareConversationOutcome(id: conversation, expectedVersion: 4, destination: .local)
+        XCTAssertEqual(outcome.replies.count, 2)
+        XCTAssertGreaterThan(outcome.context.scalarBudget, 12000)
+        _ = try await store.setSourceLocalOnly(sourceID: corpus[0], expectedVersion: 2, localOnly: true)
+        let invalidated=try await store.panoramaState()
+        XCTAssertNil(invalidated.snapshot)
+        do { _ = try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .relation("e")); XCTFail("旧图不能继续讨论") } catch {}
     }
 
     func testPeriodReflectionKeepsKnowledgeActionsResultsAndCompleteEvidence() async throws {
@@ -1667,6 +1760,7 @@ final class CoreFlowTests: XCTestCase {
         if let path = ProcessInfo.processInfo.environment["VOICEOS_QUESTION_DEMO_EXPORT"] {
             try await store.exportPackage(to: URL(fileURLWithPath: path), includeMedia: true)
         }
+
     }
 
     func testCorrectionPreservesHistoryAndRefreshesUnderstanding() async throws {

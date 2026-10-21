@@ -16,6 +16,7 @@ public actor VoiceOSStore {
     var segmentAggregationActive = false
     var activeReminderLinks: Set<String> = []
     var activeEnglishAttempts: Set<String> = []
+    var activePanoramaDigests: Set<String> = []
     var assistantExecutionActive = false
     var assistantDiscoveryActive = false
     var activeAssistantRequests: [String: @Sendable () -> Void] = [:]
@@ -46,6 +47,7 @@ public actor VoiceOSStore {
         try db.execute("UPDATE expression_association_attempts SET state='unknown',error='进程退出前关联结果未登记；不自动重发' WHERE state='reserved'")
         try db.execute("UPDATE assistant_executions SET state='failed',error='执行因应用退出中断，可手动重试' WHERE state='running'")
         try db.execute("UPDATE assistant_assessments SET state='failed',error='评估因应用退出中断' WHERE state='running'")
+        try db.execute("UPDATE panorama_attempts SET state='unknown',error='进程退出前结果未登记，不自动重发' WHERE state='running'")
         try recoverRecordingFollowups()
         try recoverKnowledgeReviews()
         for row in try db.query("SELECT * FROM sources ORDER BY created_at") {

@@ -52,9 +52,11 @@ extension VoiceOSStore {
         let history=try conversationHistorySources(conversationID:id).map(\.sourceID),turns=try conversationUserTurns(conversationID:id)
         guard !turns.isEmpty else { throw VoiceOSError("讨论没有个人发言，不提取成果") }
         var ids=history
-        for turn in turns where !ids.contains(turn.sourceID) { ids.append(turn.sourceID) }
+        for turn in turns {
+            for source in try storedConversationContext(turn.contextID).sources where !ids.contains(source.sourceID) { ids.append(source.sourceID) }
+        }
         let entry = try conversationHistoryContext(id)
-        guard try recordingContextSourceIDs(sourceIDs:history) == history else { throw VoiceOSError("讨论成果依据已增加节目上下文，请从当前材料继续") }
+        guard try completeConversationSourceIDs(history) == history else { throw VoiceOSError("讨论成果依据已增加节目上下文，请从当前材料继续") }
         try validateLocalTranscriptContext(entry)
         let replies=try outcomeReplies(id,destination:destination)
         if let focus = entry.conversationFocus { try validateConversationThoughtFocus(focus) }
@@ -80,14 +82,16 @@ extension VoiceOSStore {
         if let focus = current.conversationFocus { try validateConversationThoughtFocus(focus) }
         if let focus = current.reflectionFocus { try validateReflectionFocus(focus) }
         let entry = try conversationHistoryContext(input.conversationID)
-        guard try recordingContextSourceIDs(sourceIDs:history) == history else { throw VoiceOSError("讨论成果缺少当前配对的节目来源") }
+        guard try completeConversationSourceIDs(history) == history else { throw VoiceOSError("讨论成果缺少当前配对的节目来源") }
         try validateLocalTranscriptContext(entry)
         guard try Self.relevanceJSON(current.conversationFocus) == Self.relevanceJSON(entry.conversationFocus) else { throw VoiceOSError("讨论成果焦点与入口不一致") }
         guard try Self.relevanceJSON(current.reflectionFocus) == Self.relevanceJSON(entry.reflectionFocus) else { throw VoiceOSError("讨论成果范围与入口不一致") }
         let refs=turns.map { ConversationTurnReference(turnID:$0.id,sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID) }
         var ids=history
-        for turn in turns where !ids.contains(turn.sourceID) { ids.append(turn.sourceID) }
-        guard history == input.historySourceIDs,refs == input.userTurns,current.sources.map(\.sourceID) == ids,
+        for turn in turns {
+            for source in try storedConversationContext(turn.contextID).sources where !ids.contains(source.sourceID) { ids.append(source.sourceID) }
+        }
+        guard history == input.historySourceIDs,refs == input.userTurns,current.sources.map(\.sourceID) == (try completeConversationSourceIDs(ids)),
               try Self.relevanceJSON(current) == Self.relevanceJSON(snapshot.context),
               try Self.relevanceJSON(outcomeReplies(input.conversationID,destination:input.destination)) == Self.relevanceJSON(snapshot.replies),
               input.destination != .cloud || current.sources.allSatisfy({ !$0.localOnly }) else { throw VoiceOSError("讨论成果实际输入、角色或许可不符") }
