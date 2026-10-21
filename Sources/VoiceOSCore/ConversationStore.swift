@@ -214,7 +214,7 @@ extension VoiceOSStore {
                     let context = try localContext(id:contextID)
                     guard try completeConversationSourceIDs(context.sources.map(\.sourceID)) == context.sources.map(\.sourceID) else { throw VoiceOSError("完整表达的成员已变化") }
                 }
-                catch { try db.execute("UPDATE conversations SET validity='frozen' WHERE id=?",[id]); break }
+                catch { try db.transaction { try freezeContext(contextID) }; break }
             }
             if let focus = try storedConversationContext(row["entry_context_id"]!).reflectionFocus {
                 do { try validateReflectionFocus(focus) }

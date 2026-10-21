@@ -313,7 +313,7 @@ private struct FlowReviewedActions: RecordingExpressionActionPort {
 }
 private func verifyScopedExpressionActionReview(at root:URL) async throws {
     let storeRoot=root.appendingPathComponent("scoped-review"),package=root.appendingPathComponent("scoped-package")
-    let clearID:String,retainedID:String,uncertainID:String,candidateID:String
+    let clearID:String,retainedID:String,uncertainID:String,candidateID:String,discussionID:String
     do {
         let store=try VoiceOSStore(root:storeRoot,inspector:NativeMediaInspector())
         try await store.recover()
@@ -330,6 +330,11 @@ private func verifyScopedExpressionActionReview(at root:URL) async throws {
             .init(statement:"报告交付物待核对",ownership:.userTentative,references:refs,action:.init(title:"报告交付物待核对",kind:.opportunity,quote:context.sources[0].text))
         ],commandID:"scoped-before")
         try await store.finishRecordingExpression(initial,using:FlowReviewedActions(decisions:[]))
+        discussionID = try await store.beginConversation(sourceIDs: [first])
+        let question = try await store.recordUserExpression("请核对报告需要保留哪些条件。")
+        _ = try await store.appendConversationUserSource(conversationID: discussionID, sourceID: question, expectedVersion: 1)
+        let discussionInput = try await store.prepareConversationInput(id: discussionID, expectedVersion: 2, destination: .local)
+        _ = try await store.performConversationReply(discussionInput, using: FlowCompleteDiscussion())
         let old=try await store.actions()
         let report=try XCTUnwrap(old.first { $0.title == "整理报告" }),label=try XCTUnwrap(old.first { $0.title == "整改标签" })
         let possible=try XCTUnwrap(old.first { $0.kind == "opportunity" })
@@ -342,6 +347,10 @@ private func verifyScopedExpressionActionReview(at root:URL) async throws {
         _ = try await store.setSourceLocalOnly(sourceID:next,expectedVersion:1,localOnly:false)
         try await store.registerAutomaticRecording(sourceID:next,inbox:"fixture",recordedAt:"2026-10-20T01:01:00Z")
         let extended=try await store.connectRecordingExpressions(using:FlowRecordingExpressions())
+        let frozenDiscussion = try await store.conversation(id: discussionID)
+        XCTAssertEqual(frozenDiscussion.validity, "frozen")
+        let frozenReplies = try await store.discussionAttempts(conversationID: discussionID)
+        XCTAssertEqual(frozenReplies.first?.validity, "frozen")
         let expression=try XCTUnwrap(extended.first)
         let current=try await store.prepareLocalTranscriptContext(sourceIDs:expression.sourceIDs)
         let currentRefs=current.sources.map { ClaimReference(sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID,spanID:$0.spans[0].id) }
@@ -401,6 +410,8 @@ private func verifyScopedExpressionActionReview(at root:URL) async throws {
     }
     let reopened=try VoiceOSStore(root:storeRoot,inspector:NativeMediaInspector())
     try await reopened.recover()
+    let recoveredDiscussion = try await reopened.conversation(id: discussionID)
+    XCTAssertEqual(recoveredDiscussion.validity, "frozen")
     let reopenedExpressions=try await reopened.recordingExpressions()
     XCTAssertFalse(try XCTUnwrap(reopenedExpressions.first).requiresActionReview(actionID:clearID))
     let restoredRoot=root.appendingPathComponent("scoped-restored")
