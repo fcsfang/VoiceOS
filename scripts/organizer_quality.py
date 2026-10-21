@@ -5,6 +5,45 @@ import shutil
 CONTEXT_REVIEW_VERSION = 3
 
 
+class _TranscriptCorrectionError(ValueError):
+    pass
+
+
+def _locate_transcript_edits(original, result):
+    spans = {s["id"]: s for s in original["spans"]}
+    edits = []
+    for number, edit in enumerate(result["edits"], 1):
+        label = f"第 {number} 项修正（片段 {edit['span_id']}）"
+        span = spans.get(edit["span_id"])
+        if span is None:
+            raise _TranscriptCorrectionError(f"{label}引用了不存在的片段")
+        if not edit["before"] or not edit["after"]:
+            raise _TranscriptCorrectionError(f"{label}的 before 和 after 必须非空")
+        if edit["before"] == edit["after"]:
+            raise _TranscriptCorrectionError(f"{label}的 before 和 after 相同，未保留实际修正")
+        part = original["text"][span["textStart"]:span["textEnd"]]
+        count = 0
+        position = part.find(edit["before"])
+        while position >= 0:
+            count += 1
+            position = part.find(edit["before"], position + 1)
+        if count == 0:
+            raise _TranscriptCorrectionError(f"{label}的 before 在原始片段中出现 0 次，未找到逐字匹配：{edit['before']!r}")
+        if count != 1:
+            raise _TranscriptCorrectionError(f"{label}的 before 在原始片段中重复出现 {count} 次，无法唯一定位：{edit['before']!r}")
+        begin = span["textStart"] + part.index(edit["before"])
+        edits.append(dict(edit, start=begin, end=begin + len(edit["before"]), number=number))
+    edits.sort(key=lambda e: e["start"])
+    for first, second in zip(edits, edits[1:]):
+        if first["end"] > second["start"]:
+            raise _TranscriptCorrectionError(
+                f"第 {first['number']} 项修正（片段 {first['span_id']}）与第 {second['number']} 项修正（片段 {second['span_id']}）重叠")
+    for number, issue in enumerate(result["remaining_issues"], 1):
+        if issue["span_id"] not in spans:
+            raise _TranscriptCorrectionError(f"第 {number} 项疑义引用了不存在的片段 {issue['span_id']}")
+    return edits
+
+
 def reviewed_transcript(folder):
     checked = folder / "Qwen核对逐字稿.json"
     return json.loads((checked if checked.exists() else folder / "Qwen完整逐字稿.json").read_text())
@@ -51,22 +90,33 @@ def review_transcript(folder, ask, obj, render_only=False):
     passages = [{"id": s["id"], "text": original["text"][s["textStart"]:s["textEnd"]],
                  "start_ms": s.get("startMS"), "end_ms": s.get("endMS")} for s in original["spans"]]
     result = ask({"complete_ordered_transcript": passages}, prompt, receipt, schema, max_output_tokens=65536, read_only=render_only)
-    spans = {s["id"]: s for s in original["spans"]}
-    edits = []
-    for edit in result["edits"]:
-        span = spans.get(edit["span_id"])
-        if not span or not edit["before"] or not edit["after"]:
-            raise ValueError("AI correction did not identify an original passage")
-        part = original["text"][span["textStart"]:span["textEnd"]]
-        if part.count(edit["before"]) != 1:
-            raise ValueError("AI correction could not locate its quoted original passage")
-        begin = span["textStart"] + part.index(edit["before"])
-        edits.append(dict(edit, start=begin, end=begin + len(edit["before"])))
-    edits.sort(key=lambda e: e["start"])
-    if any(a["end"] > b["start"] for a, b in zip(edits, edits[1:])):
-        raise ValueError("AI corrections overlap; original transcript preserved")
-    if any(issue["span_id"] not in spans for issue in result["remaining_issues"]):
-        raise ValueError("AI correction cited an unknown passage")
+    initial_result = result
+    response_ids = []
+    for attempt in range(3):
+        response_ids.append(json.loads(receipt.read_text())["response_id"])
+        try:
+            for field, label in (("edits", "修正"), ("remaining_issues", "疑义")):
+                if len(result[field]) != len(initial_result[field]):
+                    raise _TranscriptCorrectionError(
+                        f"定位修复必须保留初稿全部{label}，应有 {len(initial_result[field])} 项，实际 {len(result[field])} 项")
+            edits = _locate_transcript_edits(original, result)
+            break
+        except _TranscriptCorrectionError as error:
+            if attempt == 2:
+                raise ValueError(f"AI 全文校正经过 2 轮定位修复仍未通过，原稿和来源记录保持不变。最后反馈：{error}") from error
+            receipt = receipt.parent / f"定位修复{attempt + 1}.json"
+            if render_only and not receipt.exists():
+                raise ValueError(f"全文校正定位未通过，缺少已完成的定位修复缓存 {receipt.name}；请先运行校正再渲染。具体反馈：{error}") from error
+            print(f"AI 全文校正正在修复引用定位（第 {attempt + 1}/2 轮）…", flush=True)
+            result = ask({"complete_ordered_transcript": passages, "initial_review": initial_result,
+                          "previous_review": result, "validation_feedback": str(error)},
+                         prompt + "\n上一轮建议未通过原文引用定位校验。只修复定位格式与逐字引用，不重新校正全文。"
+                         "保留 initial_review 的全部修正和全部疑义，保持数组数量及顺序，不得删除、遗漏、合并或新增建议。"
+                         "根据 validation_feedback 核对原始片段；before 必须逐字匹配且只出现一次。"
+                         "遇到重复短语只扩大该处连续原文的上下文，after 同步保留扩大部分的原文，仅实施原有修正。"
+                         "不得擅取第一次出现，不得整段重写。所有 before 均引用原始 passages，不引用已经修正的文字。"
+                         "引用片段不存在时改用原始 passages 中正确的 id；重叠引用需缩小或调整边界以使修正互不重叠。",
+                         receipt, schema, max_output_tokens=65536, read_only=render_only)
     issues = list(result["remaining_issues"])
     if user_corrected:
         issues += [{"span_id": edit["span_id"], "reason": "用户更正原文保持不变；模型建议需结合原话核对：" + edit["reason"]} for edit in edits]
@@ -77,10 +127,9 @@ def review_transcript(folder, ask, obj, render_only=False):
     def offset(position):
         return position + sum(len(e["after"]) - len(e["before"]) for e in edits if e["end"] <= position)
     checked = dict(original, text=text, spans=[dict(s, textStart=offset(s["textStart"]), textEnd=offset(s["textEnd"])) for s in original["spans"]])
-    response_id = json.loads(receipt.read_text())["response_id"]
     checked["transcription_review"] = {"completed": True, "changed": text != original["text"], "original_digest": digest,
         "context_review_version": CONTEXT_REVIEW_VERSION, "review_method": "direct_ai", "scope": "complete_expression_knowledge_and_intent",
-        "full_text_independent_passes": 1, "response_id": response_id, "response_ids": [response_id],
+        "full_text_independent_passes": 1, "response_id": response_ids[-1], "response_ids": response_ids,
         "correction_count": len(edits),
         "unresolved_issues": issues, "unresolved_span_ids": sorted({i["span_id"] for i in issues})}
     adopt_transcript(folder, original, checked)
