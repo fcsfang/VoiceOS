@@ -114,7 +114,9 @@ extension VoiceOSStore {
     }
     private static func panoramaFailure(_ error: Error) -> String {
         if let error=error as? VoiceOSError { return error.message }
+        if case ModelPortFailure.rejected(let reason, _, _) = error { return reason }
         if error is CancellationError { return "全景生成已停止，可明确重试" }
+        if let error=error as? URLError { return "全景网络请求失败（错误码 \(error.code.rawValue)）；材料保留，请明确重试" }
         return "全景请求未完成或结果格式无效；材料保留，请明确重试"
     }
     private func requirePanoramaManifest(_ manifest: PanoramaManifest) throws {

@@ -52,6 +52,11 @@ private actor FlowPanorama: PanoramaModelPort {
         return (.init(regions: proposal.regions, questions: questions, relations: proposal.relations, unrepresentedSources: proposal.unrepresentedSources, unrepresentedClaims: proposal.unrepresentedClaims), .init(responseID: "repair", model: "fixture", createdAt: "2026-10-21T00:00:01Z"))
     }
 }
+private struct FlowPanoramaFailureTransport: ModelHTTPTransport {
+    func send(_ request: URLRequest) async throws -> ModelHTTPReply {
+        throw URLError(.timedOut, userInfo: [NSURLErrorFailingURLErrorKey: URL(string: "https://fixture.invalid/private?key=fixture-secret")!])
+    }
+}
 private actor FlowCompleteDiscussion: DiscussionModelPort, ConversationOutcomePort {
     let configuration=flowConfiguration
     var snapshots: [DiscussionSnapshot]=[]
@@ -807,7 +812,32 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(Set(eligible.manifest.sourceIDs), Set(corpus))
         XCTAssertEqual(eligible.claims.count, 0)
         XCTAssertGreaterThan(eligible.sources.reduce(0) { $0+$1.transcript.text.unicodeScalars.count }, 12000)
-        try await store.generatePanorama(using: panorama)
+        let largeSummary=String(repeating: "完整合成解释。", count: 16000)
+        let largeProposal=PanoramaProposal(regions: [.init(id: "r", title: "检索研究", summary: largeSummary)], questions: [], relations: [], unrepresentedSources: eligible.sources.map { .init(id: $0.id, reason: "保留全文入口") }, unrepresentedClaims: [])
+        let text=String(decoding: try JSONEncoder().encode(largeProposal), as: UTF8.self)
+        let envelope=try JSONSerialization.data(withJSONObject: ["id":"large-panorama", "status":"completed", "usage":["input_tokens":120, "output_tokens":100], "output":[["type":"message", "role":"assistant", "status":"completed", "content":[["type":"output_text", "text":text]]]]])
+        XCTAssertGreaterThan(envelope.count, 262144)
+        XCTAssertThrowsError(try ResponsesEnvelope.parse(envelope))
+        let largePort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([.init(status: 200, body: envelope)]))
+        let (decoded, receipt)=try await largePort.generate(eligible)
+        XCTAssertEqual(decoded.regions.first?.summary, largeSummary)
+        XCTAssertEqual(receipt.responseID, "large-panorama")
+        XCTAssertEqual(receipt.inputTokens, 120)
+        XCTAssertEqual(receipt.outputTokens, 100)
+        let invalid=try JSONSerialization.data(withJSONObject: ["status":"completed", "output":[["type":"unsupported"]]])
+        let rejectedPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([.init(status: 200, body: invalid)]))
+        do { try await store.generatePanorama(using: rejectedPort); XCTFail("无效响应不能发布") } catch {}
+        let rejected=try await store.panoramaState()
+        XCTAssertEqual(rejected.status, "failed")
+        XCTAssertEqual(rejected.error, "响应包含不支持的输出项")
+        XCTAssertNil(rejected.snapshot)
+        let timedOutPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowPanoramaFailureTransport())
+        do { try await store.generatePanorama(using: timedOutPort, retry: true); XCTFail("网络失败不能发布") } catch {}
+        let timedOut=try await store.panoramaState()
+        XCTAssertEqual(timedOut.status, "failed")
+        XCTAssertEqual(timedOut.error, "全景网络请求失败（错误码 -1001）；材料保留，请明确重试")
+        XCTAssertNil(timedOut.snapshot)
+        try await store.generatePanorama(using: panorama, retry: true)
         try await store.generatePanorama(using: panorama)
         let state=try await store.panoramaState(), snapshot=try XCTUnwrap(state.snapshot)
         XCTAssertEqual(snapshot.coverage.submittedSourceIDs.count, 4)

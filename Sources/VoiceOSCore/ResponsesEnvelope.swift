@@ -6,10 +6,11 @@ struct ResponsesEnvelope {
     let text: String?
     let inputTokens: Int?
     let outputTokens: Int?
-    static func parse(_ data: Data) throws -> ResponsesEnvelope {
+    static func parse(_ data: Data, maxResponseBytes: Int = 262144) throws -> ResponsesEnvelope {
         var knownInput: Int?, knownOutput: Int?
         do {
-            guard data.count <= 262144, let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            guard data.count <= maxResponseBytes else { throw ModelPortFailure.rejected("响应超过 \(maxResponseBytes) 字节限制") }
+            guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let status = root["status"] as? String else { throw ModelPortFailure.rejected("响应外层格式无效") }
             let usage = root["usage"] as? [String: Any]
             func token(_ field: String) throws -> Int? {
