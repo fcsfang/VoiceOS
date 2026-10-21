@@ -87,17 +87,18 @@ extension VoiceOSStore {
             try db.execute("UPDATE panorama_attempts SET generation_receipt=? WHERE id=?", [try Self.relevanceJSON(generated.1),id])
             var proposal=try Self.locatePanoramaQuotes(generated.0, input: input), generation=generated.1
             var coverage=try Self.validatePanorama(proposal, input: input)
-            var (review,verification)=try await port.verify(proposal, input: input)
+            var (review,verification)=try await port.verify(proposal, input: input, priorRejection: nil)
             try requirePanoramaManifest(input.manifest)
             try db.execute("UPDATE panorama_attempts SET verification_receipt=? WHERE id=?", [try Self.relevanceJSON(verification),id])
             do { try Self.validatePanoramaReview(review, proposal: proposal, generation: generation, verification: verification) }
             catch {
+                let rejection=PanoramaRejection(proposal: proposal, review: review)
                 let repaired=try await port.repair(proposal, input: input, review: review)
                 try requirePanoramaManifest(input.manifest)
                 try db.execute("UPDATE panorama_attempts SET generation_receipt=? WHERE id=?", [try Self.relevanceJSON(repaired.1),id])
                 proposal=try Self.locatePanoramaQuotes(repaired.0, input: input); generation=repaired.1
                 coverage=try Self.validatePanorama(proposal, input: input)
-                (review,verification)=try await port.verify(proposal, input: input)
+                (review,verification)=try await port.verify(proposal, input: input, priorRejection: rejection)
                 try requirePanoramaManifest(input.manifest)
                 try db.execute("UPDATE panorama_attempts SET verification_receipt=? WHERE id=?", [try Self.relevanceJSON(verification),id])
             }
@@ -132,7 +133,7 @@ extension VoiceOSStore {
             evidence=relation.fromEvidence + relation.toEvidence; explanation=relation.label + "\n" + relation.explanation; key="relation:"+id
         }
         let sourceIDs=Array(Set(evidence.map(\.sourceID))).sorted()
-        let id=try beginConversation(sourceIDs: sourceIDs, commandID: "panorama:"+snapshotID+":"+key)
+        let id=try beginConversation(sourceIDs: sourceIDs, commandID: "panorama:"+snapshotID+":"+key+":"+UUID().uuidString)
         return .init(conversation: try conversation(id: id), draft: "以下是 AI 全景候选解释，尚未得到我认可：\n\(explanation)\n\n请结合双方完整原文核对这条线索，说明支持、差异和仍不确定之处。")
     }
 }

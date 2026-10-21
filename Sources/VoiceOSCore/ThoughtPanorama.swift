@@ -100,6 +100,10 @@ public struct PanoramaReview: Codable, Sendable {
     public let coverageAccepted: Bool
     public let reason: String
 }
+public struct PanoramaRejection: Codable, Sendable {
+    public let proposal: PanoramaProposal
+    public let review: PanoramaReview
+}
 public struct PanoramaCoverage: Codable, Sendable {
     public let submittedSourceIDs: [String]
     public let submittedClaimIDs: [String]
@@ -135,7 +139,7 @@ public struct PanoramaDiscussion: Sendable {
 public protocol PanoramaModelPort: Sendable {
     func generate(_ input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt)
     func repair(_ proposal: PanoramaProposal, input: PanoramaInput, review: PanoramaReview) async throws -> (PanoramaProposal, PanoramaReceipt)
-    func verify(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> (PanoramaReview, PanoramaReceipt)
+    func verify(_ proposal: PanoramaProposal, input: PanoramaInput, priorRejection: PanoramaRejection?) async throws -> (PanoramaReview, PanoramaReceipt)
 }
 
 extension VoiceOSStore {

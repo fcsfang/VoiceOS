@@ -28,6 +28,7 @@ private actor FlowPanorama: PanoramaModelPort {
     var generations=0
     var reviews=0
     var repairs=0
+    var receivedRejection=false
     func generate(_ input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt) {
         generations += 1
         let questions=input.sources.prefix(2).enumerated().map { index, value in
@@ -40,8 +41,9 @@ private actor FlowPanorama: PanoramaModelPort {
             unrepresentedClaims: input.claims.filter { !represented.contains($0.id) }.map { .init(id: $0.id, reason: "保留在认识入口") })
         return (proposal, .init(responseID: "generation", model: "fixture", createdAt: "2026-10-21T00:00:00Z"))
     }
-    func verify(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> (PanoramaReview, PanoramaReceipt) {
+    func verify(_ proposal: PanoramaProposal, input: PanoramaInput, priorRejection: PanoramaRejection?) async throws -> (PanoramaReview, PanoramaReceipt) {
         reviews += 1
+        if let priorRejection { receivedRejection = priorRejection.review.questions.contains { !$0.accepted } && priorRejection.proposal.questions.first?.summary == "保留待核对问题" }
         return (.init(questions: proposal.questions.map { .init(id: $0.id, accepted: reviews > 1, reason: reviews > 1 ? "合成依据对应" : "问题归纳需要保留否定条件") }, relations: proposal.relations.map { .init(id: $0.id, accepted: true, reason: "合成双侧依据对应") }, coverageAccepted: true, reason: "全量输入与未表达项均核对"), .init(responseID: "verification-"+String(reviews), model: "fixture", createdAt: "2026-10-21T00:00:01Z"))
     }
     func repair(_ proposal: PanoramaProposal, input: PanoramaInput, review: PanoramaReview) async throws -> (PanoramaProposal, PanoramaReceipt) {
@@ -780,6 +782,8 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(snapshot.coverage.unrepresentedSources.count, 2)
         let generationCount=await panorama.generations, reviewCount=await panorama.reviews, repairCount=await panorama.repairs
         XCTAssertEqual(generationCount, 1); XCTAssertEqual(reviewCount, 2); XCTAssertEqual(repairCount, 1)
+        let receivedRejection=await panorama.receivedRejection
+        XCTAssertTrue(receivedRejection)
         XCTAssertEqual(snapshot.proposal.questions.first?.evidence.first?.start, 0)
         XCTAssertEqual(snapshot.generation.responseID, "repair")
         let repeated=eligible.sources[0]
@@ -790,6 +794,10 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertTrue(entry.draft.contains("AI 全景候选"))
         let noTurns=try await store.conversationUserTurns(conversationID: entry.conversation.id)
         XCTAssertTrue(noTurns.isEmpty)
+        try await store.endConversation(id: entry.conversation.id, expectedVersion: 1)
+        let reopened=try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .relation("e"))
+        XCTAssertNotEqual(reopened.conversation.id, entry.conversation.id)
+        XCTAssertEqual(reopened.conversation.state, "active")
         let conversation=try await store.beginConversation(sourceIDs: corpus)
         let discussion=FlowCompleteDiscussion()
         for ordinal in 1...2 {
