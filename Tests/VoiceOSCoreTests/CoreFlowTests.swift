@@ -52,12 +52,17 @@ private actor FlowPanorama: PanoramaModelPort {
         return (.init(regions: proposal.regions, questions: questions, relations: proposal.relations, unrepresentedSources: proposal.unrepresentedSources, unrepresentedClaims: proposal.unrepresentedClaims), .init(responseID: "repair", model: "fixture", createdAt: "2026-10-21T00:00:01Z"))
     }
 }
-private actor FlowCompleteDiscussion: DiscussionModelPort {
+private actor FlowCompleteDiscussion: DiscussionModelPort, ConversationOutcomePort {
     let configuration=flowConfiguration
     var snapshots: [DiscussionSnapshot]=[]
     func reply(_ request: DiscussionModelRequest) async throws -> DiscussionModelResponse {
         snapshots.append(request.snapshot)
         return .init(status: .completed, parts: [.init(kind: .aiSuggestion, text: "这是合成的待核对分析。")])
+    }
+    func extract(_ request: ConversationOutcomeRequest) async throws -> ConversationOutcomeResponse {
+        let source=request.snapshot.context.sources.last!
+        let reference=ClaimReference(sourceID:source.sourceID,transcriptVersionID:source.transcriptVersionID,spanID:source.spans[0].id)
+        return .init(status:.completed,proposals:[.init(statement:"这是合成的成果候选。",ownership:.aiCandidate,sourceEvidence:[.init(reference:reference,quote:source.text)])])
     }
 }
 private struct FlowSpeech: SpeechPort {
@@ -594,12 +599,35 @@ final class CoreFlowTests: XCTestCase {
         for task in originalActions where task.id != completed.id {
             try await grouped.sendTaskToReminders(actionID:task.id,expectedVersion:task.version,calendarID:access.calendarID,using:groupedReminders,expectedAccessVersion:access.version)
         }
+        let reportConversation=try await grouped.beginConversation(sourceIDs:[members[0]])
+        let reportQuestion=try await grouped.recordUserExpression("这份方案报告还有哪些待核对的问题？")
+        _ = try await grouped.appendConversationUserSource(conversationID:reportConversation,sourceID:reportQuestion,expectedVersion:1)
+        let reportInput=try await grouped.prepareConversationInput(id:reportConversation,expectedVersion:2,destination:.local)
+        let reportReply=try await grouped.performConversationReply(reportInput,using:FlowCompleteDiscussion())
+        try await grouped.endConversation(id:reportConversation,expectedVersion:2)
+        let reportOutcome=try await grouped.prepareConversationOutcome(id:reportConversation,expectedVersion:3,destination:.local)
+        let reportOutcomeClaims=try await grouped.performConversationOutcome(reportOutcome,using:FlowCompleteDiscussion())
+        let independentSource=try await grouped.recordUserExpression("独立讨论如何核对既有成果。")
+        let reusedConversation=try await grouped.beginConversation(sourceIDs:[independentSource])
+        _ = try await grouped.appendConversationUserSource(conversationID:reusedConversation,sourceID:reportQuestion,expectedVersion:1)
+        try await grouped.endConversation(id:reusedConversation,expectedVersion:2)
+        let reusedOutcome=try await grouped.prepareReusableConversationOutcome(id:reusedConversation,expectedVersion:3,destination:.local)
+        XCTAssertEqual(reusedOutcome.reusePlan?.priorResults.flatMap(\.claimIDs),reportOutcomeClaims)
+        let reusedClaims=try await grouped.performConversationOutcome(reusedOutcome,using:FlowCompleteDiscussion())
         let late=try await grouped.recordUserExpression("补充刚才那份方案报告：不要采用方案A了，改成方案B，仍然只要一份对比准确性和速度的报告。背景笔记已经整理完了。也取消给同事发送方案A，不用发送。")
         _ = try await grouped.setSourceLocalOnly(sourceID:late,expectedVersion:1,localOnly:false)
         try await grouped.registerAutomaticRecording(sourceID:late,inbox:"synthetic-inbox",recordedAt:"2026-10-16T02:05:00Z")
         let extended=try await grouped.connectRecordingExpressions(using:grouping)
         let whole=try XCTUnwrap(extended.first { $0.id == report.id })
         XCTAssertEqual(whole.sourceIDs,report.sourceIDs+[late])
+        let frozenReportConversation=try await grouped.conversation(id:reportConversation)
+        let frozenReportReplies=try await grouped.discussionAttempts(conversationID:reportConversation)
+        XCTAssertEqual(frozenReportConversation.validity,"frozen")
+        XCTAssertEqual(frozenReportReplies.first { $0.id == reportReply }?.validity,"frozen")
+        let frozenReusedOutcome=try await grouped.conversationOutcomes(conversationID:reusedConversation)
+        let frozenReusedClaims=try await grouped.candidateClaims(includeFrozen:true)
+        XCTAssertEqual(frozenReusedOutcome.first?.validity,"frozen")
+        XCTAssertEqual(frozenReusedClaims.first { reusedClaims.contains($0.id) }?.validity,"frozen")
         let wholeContext=try await grouped.prepareLocalTranscriptContext(sourceIDs:whole.sourceIDs,scalarBudget:10000)
         let wholeRefs=wholeContext.sources.map { ClaimReference(sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID,spanID:$0.spans[0].id) }
         _ = try await grouped.importOrganizedClaims(context:wholeContext,proposals:[
@@ -631,6 +659,11 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(restoredMembers.first { $0.id == members[0] }?.presentation?.expression?.sourceIDs,whole.sourceIDs)
         let restoredActions=try await groupRestored.actions(includeHistory:true)
         XCTAssertEqual(restoredActions.first { $0.id == completed.id }?.state,"completed")
+        let restoredReportReplies=try await groupRestored.discussionAttempts(conversationID:reportConversation)
+        XCTAssertEqual(restoredReportReplies.first { $0.id == reportReply }?.validity,"frozen")
+        XCTAssertEqual(restoredReportReplies.first { $0.id == reportReply }?.parts.first?.text,"这是合成的待核对分析。")
+        let restoredReusedOutcome=try await groupRestored.conversationOutcomes(conversationID:reusedConversation)
+        XCTAssertEqual(restoredReusedOutcome.first?.validity,"frozen")
         let dual=try VoiceOSStore(root:root.appendingPathComponent("dual-recording"),inspector:NativeMediaInspector())
         try await dual.recover()
         let personalText="嘉宾说应完全自主，我认为还需要可靠验证。我会做一次界面验证。"
