@@ -147,6 +147,7 @@ extension VoiceOSStore {
         }
     }
     func freezeConversationOutcomes() throws {
+        try db.execute("UPDATE contexts SET state='stale' WHERE id IN (SELECT m.context_id FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id JOIN conversations c ON c.id=o.conversation_id WHERE c.validity='frozen')")
         for row in try db.query("SELECT o.snapshot_json,m.context_id FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id ORDER BY m.producer_sequence") {
             let snapshot=try JSONDecoder().decode(ConversationOutcomeSnapshot.self,from:Data(row["snapshot_json"]!.utf8))
             if let plan=snapshot.reusePlan {
@@ -155,7 +156,6 @@ extension VoiceOSStore {
                 }
             }
         }
-        try db.execute("UPDATE contexts SET state='stale' WHERE id IN (SELECT m.context_id FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id JOIN conversations c ON c.id=o.conversation_id WHERE c.validity='frozen')")
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT o.id FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id JOIN contexts c ON c.id=m.context_id WHERE c.state='stale')")
         try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT c.id FROM claims c JOIN conversation_outcome_attempts o ON o.id=c.attempt_id WHERE c.validity='frozen')")
     }
