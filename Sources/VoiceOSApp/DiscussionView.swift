@@ -156,6 +156,9 @@ struct DiscussionView: View {
                 ContentUnavailableView("还没有选择讨论",systemImage:"bubble.left.and.bubble.right",description:Text("在资料详情点击“继续讨论”建立新的讨论，或选择已保存历史。"))
             }
         }.padding(24).frame(width:760,height:780)
+        .onAppear {
+            if !model.discussionDraft.isEmpty { text = model.discussionDraft; model.discussionDraft = "" }
+        }
         .sheet(item:$referencePreview) { preview in
             VStack(alignment:.leading,spacing:12) {
                 Text("当时引用的原文版本").font(.title2)
