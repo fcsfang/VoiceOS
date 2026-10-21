@@ -21,8 +21,8 @@ public struct ResponsesDiscussionPort: DiscussionModelPort {
         let s=request.snapshot,c=request.configuration
         guard c.provider == configuration.provider,c.model == configuration.model,c.promptVersion == configuration.promptVersion,c.schemaVersion == configuration.schemaVersion,
               c.destination == .cloud,s.input.destination == .cloud,UUID(uuidString:request.attemptID) != nil,
-              !s.input.userTurns.isEmpty,s.input.userTurns.count <= 40,s.input.conversationVersion == s.input.userTurns.count+1,
-              (1...12000).contains(s.context.scalarBudget),!s.context.sources.isEmpty,s.context.sources.allSatisfy({ !$0.localOnly }),
+              !s.input.userTurns.isEmpty,s.input.conversationVersion == s.input.userTurns.count+1,
+              s.context.scalarBudget > 0,!s.context.sources.isEmpty,s.context.sources.allSatisfy({ !$0.localOnly }),
               Set(s.context.sources.map(\.sourceID)).count == s.context.sources.count else { throw ModelPortFailure.rejected("讨论请求身份、授权或预算不符") }
         let encoder=JSONEncoder();encoder.outputFormatting=[.sortedKeys]
         guard s.context.contentDigest == VoiceOSStore.relevanceHash(try encoder.encode(s.context.sources)) else { throw ModelPortFailure.rejected("讨论请求输入摘要不符") }
@@ -47,7 +47,7 @@ public struct ResponsesDiscussionPort: DiscussionModelPort {
             }
         }
         let priorOrder=s.input.userTurns.dropLast().compactMap { turn in s.priorReplies.first(where: { $0.replyToTurnID == turn.turnID })?.attemptID }
-        guard expectedSourceIDs == s.context.sources.map(\.sourceID),Set(s.input.historySourceIDs).count == s.input.historySourceIDs.count,
+        guard Set(expectedSourceIDs).isSubset(of: Set(s.context.sources.map(\.sourceID))),Set(s.input.historySourceIDs).count == s.input.historySourceIDs.count,
               priorOrder == s.priorReplies.map(\.attemptID),Set(priorOrder).count == priorOrder.count else { throw ModelPortFailure.rejected("讨论历史顺序或来源不符") }
         let reference:[String:Any] = ["type":"object","properties":["sourceID":["type":"string"],"transcriptVersionID":["type":"string"],"spanID":["type":"string"]],"required":["sourceID","transcriptVersionID","spanID"],"additionalProperties":false]
         let part:[String:Any] = ["type":"object","properties":["kind":["type":"string","enum":["quotation","ai_suggestion"]],"text":["type":"string"],"references":["type":"array","items":reference]],"required":["kind","text","references"],"additionalProperties":false]
@@ -55,8 +55,7 @@ public struct ResponsesDiscussionPort: DiscussionModelPort {
         let payload:[String:Any] = ["model":configuration.model,"store":false,"reasoning":["effort":"low"],"max_output_tokens":2048,"truncation":"disabled",
             "instructions":Self.instructions,"input":messages,"text":["format":["type":"json_schema","name":"voiceos_discussion","strict":true,"schema":schema]]]
         let data=try JSONSerialization.data(withJSONObject:payload,options:[.sortedKeys])
-        guard data.count <= 160000 else { throw ModelPortFailure.rejected("完整讨论请求超过字节预算") }
-        var http=URLRequest(url:endpoint,timeoutInterval:60);http.httpMethod="POST";http.httpBody=data
+        var http=URLRequest(url:endpoint,timeoutInterval:600);http.httpMethod="POST";http.httpBody=data
         http.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization");http.setValue("application/json",forHTTPHeaderField:"Content-Type")
         return http
     }
