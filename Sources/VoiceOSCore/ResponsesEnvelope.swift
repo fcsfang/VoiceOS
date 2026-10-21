@@ -55,7 +55,7 @@ struct ResponsesEnvelope {
         var details=["status="+(knownStatuses.contains(status) ? status : "unknown")]
         if let error=root["error"] as? [String:Any] {
             let code=error["code"] as? String ?? "unknown"
-            let knownCodes=["server_error","rate_limit_exceeded","invalid_prompt","context_length_exceeded","insufficient_quota","model_not_found","invalid_api_key"]
+            let knownCodes=["server_error","upstream_error","rate_limit_exceeded","invalid_prompt","context_length_exceeded","insufficient_quota","model_not_found","invalid_api_key"]
             details.append("error.code="+(knownCodes.contains(code) ? code : "unknown"))
         }
         if status == "incomplete" {

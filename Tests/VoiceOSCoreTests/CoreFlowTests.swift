@@ -1344,6 +1344,7 @@ final class CoreFlowTests: XCTestCase {
         let privateDetail="https://fixture.invalid/private?key=fixture-secret"
         let terminalFailures: [([String:Any],String)]=[
             (["status":"failed", "error":["code":"server_error", "message":privateDetail]], "响应未完成（status=failed；error.code=server_error）；未接纳部分结果"),
+            (["status":"failed", "error":["code":"upstream_error", "message":privateDetail]], "响应未完成（status=failed；error.code=upstream_error）；未接纳部分结果"),
             (["status":"failed", "error":["code":privateDetail, "message":privateDetail]], "响应未完成（status=failed；error.code=unknown）；未接纳部分结果"),
             (["status":"completed"], "响应已完成但 output 缺失或格式无效（status=completed）"),
             (["status":"incomplete", "incomplete_details":["reason":"max_output_tokens"]], "响应未完成（status=incomplete；incomplete_details.reason=max_output_tokens）；未接纳部分结果"),
