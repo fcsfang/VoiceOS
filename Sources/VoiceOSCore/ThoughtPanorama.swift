@@ -112,6 +112,27 @@ public struct PanoramaCoverage: Codable, Sendable {
     public let unrepresentedSources: [PanoramaUnrepresented]
     public let unrepresentedClaims: [PanoramaUnrepresented]
 }
+public enum PanoramaPhase: String, Codable, Sendable {
+    case units, synthesis, evidence, coverage, consistency, completed
+}
+public struct PanoramaStepReceipt: Codable, Sendable {
+    public let stage: String
+    public let scopeID: String
+    public let receipt: PanoramaReceipt
+}
+public struct PanoramaWorkflow: Codable, Sendable {
+    public let phase: PanoramaPhase
+    public let verifiedUnitIDs: [String]
+    public let totalUnitCount: Int
+    public let receipts: [PanoramaStepReceipt]
+    public var isComplete: Bool { phase == .completed }
+}
+public struct PanoramaProgress: Sendable {
+    public let phase: PanoramaPhase
+    public let verifiedUnitCount: Int
+    public let totalUnitCount: Int
+    public let activeStage: String?
+}
 public struct PanoramaSnapshot: Codable, Sendable, Identifiable {
     public let id: String
     public let createdAt: String
@@ -121,6 +142,13 @@ public struct PanoramaSnapshot: Codable, Sendable, Identifiable {
     public let generation: PanoramaReceipt
     public let verification: PanoramaReceipt
     public let review: PanoramaReview
+    public let workflow: PanoramaWorkflow?
+    public var isPartial: Bool { workflow.map { !$0.isComplete } ?? false }
+    public init(id: String, createdAt: String, input: PanoramaInput, proposal: PanoramaProposal, coverage: PanoramaCoverage,
+                generation: PanoramaReceipt, verification: PanoramaReceipt, review: PanoramaReview, workflow: PanoramaWorkflow? = nil) {
+        self.id=id; self.createdAt=createdAt; self.input=input; self.proposal=proposal; self.coverage=coverage
+        self.generation=generation; self.verification=verification; self.review=review; self.workflow=workflow
+    }
 }
 public enum PanoramaSelection: Hashable, Sendable {
     case question(String), relation(String)
@@ -130,6 +158,10 @@ public struct PanoramaState: Sendable {
     public let snapshot: PanoramaSnapshot?
     public let status: String
     public let error: String?
+    public let progress: PanoramaProgress?
+    public init(input: PanoramaInput, snapshot: PanoramaSnapshot?, status: String, error: String?, progress: PanoramaProgress? = nil) {
+        self.input=input; self.snapshot=snapshot; self.status=status; self.error=error; self.progress=progress
+    }
     public var canGenerate: Bool { !input.units.isEmpty && !["completed", "running", "failed", "unknown"].contains(status) }
 }
 public struct PanoramaDiscussion: Sendable {
@@ -137,9 +169,14 @@ public struct PanoramaDiscussion: Sendable {
     public let draft: String
 }
 public protocol PanoramaModelPort: Sendable {
+    var configurationIdentity: String { get }
     func generate(_ input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt)
     func repair(_ proposal: PanoramaProposal, input: PanoramaInput, review: PanoramaReview) async throws -> (PanoramaProposal, PanoramaReceipt)
     func verify(_ proposal: PanoramaProposal, input: PanoramaInput, priorRejection: PanoramaRejection?) async throws -> (PanoramaReview, PanoramaReceipt)
+}
+
+extension PanoramaModelPort {
+    public var configurationIdentity: String { String(reflecting: Self.self) }
 }
 
 extension VoiceOSStore {

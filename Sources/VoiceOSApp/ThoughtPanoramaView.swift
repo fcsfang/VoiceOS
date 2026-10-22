@@ -31,7 +31,7 @@ struct ThoughtPanoramaView: View {
                         graph(snapshot)
                         HStack(spacing: 16) {
                             Label("AI 归纳的问题", systemImage: "circle")
-                            Label("虚线 · AI 候选联系，待核对", systemImage: "line.diagonal")
+                            if !snapshot.isPartial { Label("虚线 · AI 候选联系，待核对", systemImage: "line.diagonal") }
                             Spacer()
                             Button { zoom = max(0.5, zoom - 0.15) } label: { Image(systemName: "minus.magnifyingglass") }
                             Button("\(Int(zoom * 100))%") { zoom = 1 }
@@ -59,6 +59,9 @@ struct ThoughtPanoramaView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("思考全景").font(.system(size: 28, weight: .semibold))
                     Text(message).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    if let snapshot=state?.snapshot, snapshot.isPartial {
+                        Text("已核对 \(snapshot.workflow?.verifiedUnitIDs.count ?? 0)/\(snapshot.workflow?.totalUnitCount ?? 0) 个完整单元 · 仅显示已核对区域，跨材料联系与全局覆盖尚未完成").font(.caption).foregroundStyle(.orange)
+                    }
                 }
                 Spacer()
                 Picker("时间高亮", selection: $recent) { Text("近期高亮").tag(true); Text("全部").tag(false) }.pickerStyle(.segmented).frame(width: 170)
@@ -70,7 +73,7 @@ struct ThoughtPanoramaView: View {
                 if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
                 if isGenerating { ProgressView().controlSize(.small) }
                 else if !modelConfigured { Button("连接文本模型", action: chooseTextModel) }
-                else if let state, ["failed", "unknown"].contains(state.status) { Button("重新生成", action: retry) }
+                else if let state, ["failed", "unknown"].contains(state.status) { Button("继续核对", action: retry) }
             }.padding(9).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 9))
         }.padding(22)
     }
@@ -239,9 +242,12 @@ struct ThoughtPanoramaView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if let state {
+                        if let snapshot=state.snapshot, snapshot.isPartial {
+                            Text("这是已核对区域。其余完整单元、跨单元联系与全局覆盖尚未完成；当前结果不代表本人认可。").foregroundStyle(.orange)
+                        }
                         Text("输入不按近期或条数裁剪。仅完整整理、当前版本与许可均有效的材料入选；节目依赖单独计数。AI 未归入项仍保留完整入口。")
                         ForEach(state.input.sources) { source in
-                            HStack { Text(source.title); Spacer(); Text(state.snapshot == nil ? "等待全景核对" : state.snapshot?.coverage.representedSourceIDs.contains(source.id) == true ? "已表达" : "未归入具体问题").foregroundStyle(.secondary); Button("全文") { showCoverage = false; openSource(source.id) } }
+                            HStack { Text(source.title); Spacer(); Text(state.snapshot?.coverage.submittedSourceIDs.contains(source.id) != true ? "尚未核对" : state.snapshot?.coverage.representedSourceIDs.contains(source.id) == true ? "已核对并表达" : "已核对，未归入具体问题").foregroundStyle(.secondary); Button("全文") { showCoverage = false; openSource(source.id) } }
                             if let reason = state.snapshot?.coverage.unrepresentedSources.first(where: { $0.id == source.id })?.reason { Text(reason).font(.caption).foregroundStyle(.secondary) }
                         }
                         ForEach(state.snapshot?.coverage.unrepresentedClaims ?? [], id: \.id) { item in
@@ -253,8 +259,16 @@ struct ThoughtPanoramaView: View {
                         Divider(); Text("尚未合格的材料").font(.headline)
                         ForEach(state.input.exclusions) { item in HStack { VStack(alignment: .leading) { Text(item.title); Text(item.reason).font(.caption).foregroundStyle(.secondary) }; Spacer(); Button("材料") { showCoverage = false; openSource(item.id) } } }
                         if let snapshot = state.snapshot {
-                            Divider(); Text("生成回执 · " + snapshot.generation.responseID).font(.caption).textSelection(.enabled)
-                            Text("独立核对回执 · " + snapshot.verification.responseID).font(.caption).textSelection(.enabled)
+                            Divider()
+                            if let workflow=snapshot.workflow {
+                                Text(snapshot.isPartial ? "以下回执分别对应已核对单元；全局核对尚未完成。" : "分阶段生成与独立核对回执").font(.caption)
+                                ForEach(Array(workflow.receipts.enumerated()), id: \.offset) { _, item in
+                                    Text(item.stage + " · " + item.receipt.responseID).font(.caption).textSelection(.enabled)
+                                }
+                            } else {
+                                Text("生成回执 · " + snapshot.generation.responseID).font(.caption).textSelection(.enabled)
+                                Text("独立核对回执 · " + snapshot.verification.responseID).font(.caption).textSelection(.enabled)
+                            }
                             Text("输入摘要 · " + snapshot.input.manifest.digest).font(.caption).textSelection(.enabled)
                         }
                     }

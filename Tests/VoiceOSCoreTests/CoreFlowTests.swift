@@ -36,10 +36,10 @@ private actor FlowPanorama: PanoramaModelPort {
         }
         let represented=Set(questions.flatMap(\.evidence).flatMap(\.claimIDs))
         let proposal=PanoramaProposal(regions: [.init(id: "r", title: "检索研究", summary: "跨材料的探索")], questions: questions,
-            relations: [.init(id: "e", from: "q0", to: "q1", label: "补充检索条件", explanation: "AI 候选，需核对双方条件", fromEvidence: questions[0].evidence, toEvidence: questions[1].evidence)],
+            relations: questions.count > 1 ? [.init(id: "e", from: "q0", to: "q1", label: "补充检索条件", explanation: "AI 候选，需核对双方条件", fromEvidence: questions[0].evidence, toEvidence: questions[1].evidence)] : [],
             unrepresentedSources: input.sources.dropFirst(2).map { .init(id: $0.id, reason: "本轮未归入具体问题，仍可打开全文") },
             unrepresentedClaims: input.claims.filter { !represented.contains($0.id) }.map { .init(id: $0.id, reason: "保留在认识入口") })
-        return (proposal, .init(responseID: "generation", model: "fixture", createdAt: "2026-10-21T00:00:00Z"))
+        return (proposal, .init(responseID: "generation-"+String(generations), model: "fixture", createdAt: "2026-10-21T00:00:00Z"))
     }
     func verify(_ proposal: PanoramaProposal, input: PanoramaInput, priorRejection: PanoramaRejection?) async throws -> (PanoramaReview, PanoramaReceipt) {
         reviews += 1
@@ -1514,28 +1514,36 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(timedOut.status, "failed")
         XCTAssertEqual(timedOut.error, "全景网络请求失败（错误码 -1001）；材料保留，请明确重试")
         XCTAssertNil(timedOut.snapshot)
-        try await store.generatePanorama(using: panorama, retry: true)
+        do { try await store.generatePanorama(using: panorama, retry: true); XCTFail("全局核对尚未完成不能完成全景") }
+        catch { XCTAssertEqual((error as? VoiceOSError)?.message, "所有完整单元已独立核对；跨单元归纳与全局核对尚未完成") }
         try await store.generatePanorama(using: panorama)
         let state=try await store.panoramaState(), snapshot=try XCTUnwrap(state.snapshot)
         XCTAssertEqual(snapshot.coverage.submittedSourceIDs.count, 4)
-        XCTAssertEqual(snapshot.coverage.representedSourceIDs.count, 2)
-        XCTAssertEqual(snapshot.coverage.unrepresentedSources.count, 2)
+        XCTAssertEqual(snapshot.coverage.representedSourceIDs.count, 4)
+        XCTAssertEqual(snapshot.coverage.unrepresentedSources.count, 0)
+        XCTAssertTrue(snapshot.isPartial)
+        XCTAssertEqual(snapshot.workflow?.verifiedUnitIDs.count, 4)
+        XCTAssertEqual(state.status, "failed")
+        XCTAssertTrue(snapshot.proposal.relations.isEmpty)
         let generationCount=await panorama.generations, reviewCount=await panorama.reviews, repairCount=await panorama.repairs
-        XCTAssertEqual(generationCount, 1); XCTAssertEqual(reviewCount, 2); XCTAssertEqual(repairCount, 1)
+        XCTAssertEqual(generationCount, 4); XCTAssertEqual(reviewCount, 5); XCTAssertEqual(repairCount, 1)
         let receivedRejection=await panorama.receivedRejection
         XCTAssertTrue(receivedRejection)
         XCTAssertEqual(snapshot.proposal.questions.first?.evidence.first?.start, 0)
-        XCTAssertEqual(snapshot.generation.responseID, "repair")
+        XCTAssertEqual(snapshot.generation.responseID, "generation-4")
+        do { try await store.generatePanorama(using: panorama, retry: true) } catch {}
+        let resumedGenerationCount=await panorama.generations
+        XCTAssertEqual(resumedGenerationCount, generationCount)
         let repeated=eligible.sources[0]
         let ambiguous=PanoramaEvidence(sourceID: repeated.id, transcriptVersionID: repeated.transcript.transcriptVersionID, start: -1, end: -1, quote: "合成检索资料需要完整保留。", claimIDs: [])
         let ambiguousProposal=PanoramaProposal(regions: snapshot.proposal.regions, questions: [.init(id: "ambiguous", regionID: "r", title: "重复原话", summary: "不能猜测位置", evidence: [ambiguous])], relations: [], unrepresentedSources: [], unrepresentedClaims: [])
         XCTAssertThrowsError(try VoiceOSStore.locatePanoramaQuotes(ambiguousProposal, input: eligible))
-        let entry=try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .relation("e"))
+        let entry=try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .question(snapshot.proposal.questions[0].id))
         XCTAssertTrue(entry.draft.contains("AI 全景候选"))
         let noTurns=try await store.conversationUserTurns(conversationID: entry.conversation.id)
         XCTAssertTrue(noTurns.isEmpty)
         try await store.endConversation(id: entry.conversation.id, expectedVersion: 1)
-        let reopened=try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .relation("e"))
+        let reopened=try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .question(snapshot.proposal.questions[0].id))
         XCTAssertNotEqual(reopened.conversation.id, entry.conversation.id)
         XCTAssertEqual(reopened.conversation.state, "active")
         let conversation=try await store.beginConversation(sourceIDs: corpus)
@@ -1557,7 +1565,7 @@ final class CoreFlowTests: XCTestCase {
         _ = try await store.setSourceLocalOnly(sourceID: corpus[0], expectedVersion: 2, localOnly: true)
         let invalidated=try await store.panoramaState()
         XCTAssertNil(invalidated.snapshot)
-        do { _ = try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .relation("e")); XCTFail("旧图不能继续讨论") } catch {}
+        do { _ = try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .question(snapshot.proposal.questions[0].id)); XCTFail("旧图不能继续讨论") } catch {}
     }
 
     func testPeriodReflectionKeepsKnowledgeActionsResultsAndCompleteEvidence() async throws {

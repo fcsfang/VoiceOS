@@ -9,6 +9,9 @@ public struct ResponsesPanoramaPort: PanoramaModelPort {
         _ = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model)
         endpoint=baseURL.appendingPathComponent("responses"); self.apiKey=apiKey; self.model=model; self.transport=transport
     }
+    public var configurationIdentity: String {
+        endpoint.absoluteString + "|" + model + "|high|panorama-staged-v1"
+    }
     public func generate(_ input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt) {
         let wire = try PanoramaModelInput(input)
         let (proposal, receipt): (PanoramaProposal, PanoramaReceipt) = try await call(wire.payload, instructions: Self.generationInstructions, schema: Self.proposalSchema, name: "voiceos_panorama")
