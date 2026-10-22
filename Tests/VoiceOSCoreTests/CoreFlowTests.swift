@@ -1323,7 +1323,7 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(eligible.claims.count, 0)
         XCTAssertGreaterThan(eligible.sources.reduce(0) { $0+$1.transcript.text.unicodeScalars.count }, 12000)
         let largeSummary=String(repeating: "完整合成解释。", count: 16000)
-        let largeProposal=PanoramaProposal(regions: [.init(id: "r", title: "检索研究", summary: largeSummary)], questions: [], relations: [], unrepresentedSources: eligible.sources.map { .init(id: $0.id, reason: "保留全文入口") }, unrepresentedClaims: [])
+        let largeProposal=PanoramaProposal(regions: [.init(id: "r", title: "检索研究", summary: largeSummary)], questions: [], relations: [], unrepresentedSources: eligible.sources.indices.map { .init(id: "s"+String($0+1), reason: "保留全文入口") }, unrepresentedClaims: [])
         let text=String(decoding: try JSONEncoder().encode(largeProposal), as: UTF8.self)
         let envelope=try JSONSerialization.data(withJSONObject: ["id":"large-panorama", "status":"completed", "usage":["input_tokens":120, "output_tokens":100], "output":[["type":"message", "role":"assistant", "status":"completed", "content":[["type":"output_text", "text":text]]]]])
         XCTAssertGreaterThan(envelope.count, 262144)
@@ -1334,6 +1334,146 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(receipt.responseID, "large-panorama")
         XCTAssertEqual(receipt.inputTokens, 120)
         XCTAssertEqual(receipt.outputTokens, 100)
+        XCTAssertEqual(decoded.unrepresentedSources.map(\.id), eligible.sources.map(\.id))
+
+        let prefix = "👩‍💻e\u{301} s1 t1 c1。", repeatedQuote = "重复原话。"
+        let unicodeText = prefix + repeatedQuote + repeatedQuote
+        let repeatedStart = (prefix + repeatedQuote).unicodeScalars.count
+        let firstSpan = TranscriptSpan(textStart: 0, textEnd: repeatedStart)
+        let repeatedSpan = TranscriptSpan(textStart: repeatedStart, textEnd: unicodeText.unicodeScalars.count)
+        let externalText = "外部节目关于检索。"
+        let externalSpan = TranscriptSpan(textStart: 0, textEnd: externalText.unicodeScalars.count)
+        let literalReason = "s1 t1 c1 和真实身份 s2、c2 只是原话，不得替换。"
+        let transcriptReview = TranscriptionReview(completed: true, changed: true, response_id: "private-review-receipt", response_ids: ["private-review-receipt"], context_review_version: 3,
+            corrections: [.init(span_id: firstSpan.id, before: "旧词", after: "新词", context_quote: prefix, reason: literalReason, independent_reason: "保留独立核对理由 c1")],
+            unresolved_issues: [.init(span_id: repeatedSpan.id, reason: literalReason)], transcriptVersionID: "t2")
+        let wireSources: [PanoramaSource] = [
+            .init(transcript: .init(sourceID: "s2", sourceVersionID: "original-source-version", transcriptVersionID: "t2", origin: "user", speaker: "self", localOnly: false, text: unicodeText, spans: [firstSpan, repeatedSpan], transcriptionReview: transcriptReview), title: "完整 Unicode 原文", occurredAt: "2026-10-22T01:00:00Z", policyVersion: 1),
+            .init(transcript: .init(sourceID: "external-source", sourceVersionID: "external-source-version", transcriptVersionID: "external-version", origin: "external", speaker: "external", localOnly: false, text: externalText, spans: [externalSpan]), title: "完整节目", occurredAt: "2026-10-21T01:00:00Z", policyVersion: 2)
+        ]
+        let wireClaims: [PanoramaClaim] = [
+            .init(id: "c2", statement: literalReason, ownership: "user_tentative", reviewVersion: 1, references: [.init(sourceID: "s2", transcriptVersionID: "t2", spanID: repeatedSpan.id), .init(sourceID: "external-source", transcriptVersionID: "external-version", spanID: externalSpan.id)]),
+            .init(id: "other-claim", statement: "保留全部当前观点", ownership: "unresolved", reviewVersion: 2, references: [.init(sourceID: "s2", transcriptVersionID: "t2", spanID: firstSpan.id)])
+        ]
+        let wireInput = PanoramaInput(manifest: .init(digest: "local-manifest", sourceIDs: wireSources.map(\.id), claimIDs: wireClaims.map(\.id), unitIDs: ["expression"]),
+            units: [.init(id: "expression", sourceIDs: ["s2"], dependencyIDs: ["external-source"], producerID: "private-producer", completionDigest: "private-completion")],
+            sources: wireSources, claims: wireClaims, exclusions: [.init(id: "excluded-private-source", title: "不应发送", reason: "本机资料")])
+        let modelEvidence = PanoramaEvidence(sourceID: "s1", transcriptVersionID: "t1", start: repeatedStart, end: unicodeText.unicodeScalars.count, quote: repeatedQuote, claimIDs: ["c1"])
+        let unicodeEvidence = PanoramaEvidence(sourceID: "s1", transcriptVersionID: "t1", start: 0, end: prefix.unicodeScalars.count, quote: prefix, claimIDs: [])
+        let modelProposal = PanoramaProposal(regions: [.init(id: "t1", title: "原话研究", summary: literalReason)],
+            questions: [.init(id: "s1", regionID: "t1", title: "如何理解原话？", summary: literalReason, evidence: [modelEvidence]), .init(id: "c1", regionID: "t1", title: "哪些条件尚待核对？", summary: literalReason, evidence: [unicodeEvidence])],
+            relations: [.init(id: "s2", from: "s1", to: "c1", label: literalReason, explanation: literalReason, fromEvidence: [modelEvidence], toEvidence: [unicodeEvidence])],
+            unrepresentedSources: [.init(id: "s2", reason: literalReason)], unrepresentedClaims: [.init(id: "c2", reason: literalReason)])
+        let modelReview = PanoramaReview(questions: modelProposal.questions.map { .init(id: $0.id, accepted: true, reason: literalReason) }, relations: [.init(id: "s2", accepted: false, reason: literalReason)], coverageAccepted: true, reason: literalReason)
+        func modelEnvelope<T: Encodable>(_ value: T) throws -> ModelHTTPReply {
+            let encoded = try JSONEncoder().encode(value)
+            let content: [String: Any] = ["type": "output_text", "text": String(decoding: encoded, as: UTF8.self)]
+            let message: [String: Any] = ["type": "message", "role": "assistant", "status": "completed", "content": [content]]
+            let envelope: [String: Any] = ["id": "compact-fixture", "status": "completed", "output": [message]]
+            return .init(status: 200, body: try JSONSerialization.data(withJSONObject: envelope))
+        }
+        let compactTransport = FlowFollowupTransport(try [modelEnvelope(modelProposal), modelEnvelope(modelReview), modelEnvelope(modelProposal), modelEnvelope(modelReview)])
+        let compactPort = try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: compactTransport)
+        let (canonical, _) = try await compactPort.generate(wireInput)
+        _ = try VoiceOSStore.validatePanorama(canonical, input: wireInput)
+        XCTAssertEqual(canonical.questions.map(\.id), ["s1", "c1"])
+        XCTAssertEqual(canonical.relations.first?.id, "s2")
+        XCTAssertEqual(canonical.questions.first?.evidence.first?.sourceID, "s2")
+        XCTAssertEqual(canonical.questions.first?.evidence.first?.transcriptVersionID, "t2")
+        XCTAssertEqual(canonical.questions.first?.evidence.first?.claimIDs, ["c2"])
+        XCTAssertEqual(canonical.questions.first?.evidence.first?.start, repeatedStart)
+        XCTAssertEqual(canonical.questions.first?.evidence.first?.quote, repeatedQuote)
+        XCTAssertEqual(canonical.questions[1].evidence[0].quote, prefix)
+        XCTAssertEqual(canonical.questions[1].evidence[0].end, prefix.unicodeScalars.count)
+        XCTAssertEqual(canonical.unrepresentedSources.first?.id, "external-source")
+        XCTAssertEqual(canonical.unrepresentedClaims.first?.id, "other-claim")
+        XCTAssertEqual(canonical.relations.first?.explanation, literalReason)
+        let (rejectionReview, _) = try await compactPort.verify(canonical, input: wireInput)
+        let (repaired, _) = try await compactPort.repair(canonical, input: wireInput, review: rejectionReview)
+        let orderedEncoder = JSONEncoder()
+        orderedEncoder.outputFormatting = [.sortedKeys]
+        XCTAssertEqual(try orderedEncoder.encode(repaired), try orderedEncoder.encode(canonical))
+        _ = try await compactPort.verify(repaired, input: wireInput, priorRejection: .init(proposal: canonical, review: rejectionReview))
+        let compactRequests = await compactTransport.requests
+        func content(_ request: Data) throws -> [String: Any] {
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: request) as? [String: Any])
+            let messages = try XCTUnwrap(body["input"] as? [[String: Any]])
+            let text = try XCTUnwrap(messages.first?["content"] as? String)
+            return try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])
+        }
+        let generationContent = try content(compactRequests[0])
+        XCTAssertEqual(Set(generationContent.keys), ["units", "sources", "claims"])
+        let sentSources = try XCTUnwrap(generationContent["sources"] as? [[String: Any]])
+        XCTAssertEqual(sentSources.count, wireSources.count)
+        XCTAssertEqual(sentSources.compactMap { $0["text"] as? String }, [unicodeText, externalText])
+        XCTAssertEqual(sentSources.compactMap { $0["title"] as? String }, wireSources.map(\.title))
+        XCTAssertEqual(sentSources.compactMap { $0["occurredAt"] as? String }, wireSources.map(\.occurredAt))
+        XCTAssertEqual(sentSources.compactMap { $0["origin"] as? String }, ["user", "external"])
+        XCTAssertEqual(sentSources.compactMap { $0["speaker"] as? String }, ["self", "external"])
+        XCTAssertNil(sentSources[0]["spans"])
+        let sentReview = try XCTUnwrap(sentSources[0]["transcriptionReview"] as? [String: Any])
+        let sentIssues = try XCTUnwrap(sentReview["unresolvedIssues"] as? [[String: Any]])
+        XCTAssertEqual(sentReview["transcriptVersionID"] as? String, "t1")
+        XCTAssertEqual(sentIssues.count, 1)
+        XCTAssertEqual(sentIssues[0]["start"] as? Int, repeatedStart)
+        XCTAssertEqual(sentIssues[0]["end"] as? Int, unicodeText.unicodeScalars.count)
+        XCTAssertEqual(sentIssues[0]["reason"] as? String, literalReason)
+        let sentCorrections = try XCTUnwrap(sentReview["corrections"] as? [[String: Any]])
+        XCTAssertEqual(sentCorrections.count, 1)
+        XCTAssertEqual(sentCorrections[0]["start"] as? Int, 0)
+        XCTAssertEqual(sentCorrections[0]["end"] as? Int, repeatedStart)
+        XCTAssertEqual(sentCorrections[0]["before"] as? String, "旧词")
+        XCTAssertEqual(sentCorrections[0]["after"] as? String, "新词")
+        XCTAssertEqual(sentCorrections[0]["context_quote"] as? String, prefix)
+        XCTAssertEqual(sentCorrections[0]["reason"] as? String, literalReason)
+        XCTAssertEqual(sentCorrections[0]["independent_reason"] as? String, "保留独立核对理由 c1")
+        let sentClaims = try XCTUnwrap(generationContent["claims"] as? [[String: Any]])
+        XCTAssertEqual(sentClaims.count, wireClaims.count)
+        XCTAssertEqual(sentClaims.compactMap { $0["statement"] as? String }, wireClaims.map(\.statement))
+        XCTAssertEqual(sentClaims.compactMap { $0["ownership"] as? String }, wireClaims.map(\.ownership))
+        let sentReferences = try sentClaims.map { try XCTUnwrap($0["references"] as? [[String: Any]]) }
+        XCTAssertEqual(sentReferences.map(\.count), [2, 1])
+        XCTAssertEqual(sentReferences[0].compactMap { $0["sourceID"] as? String }, ["s1", "s2"])
+        XCTAssertEqual(sentReferences[0].compactMap { $0["transcriptVersionID"] as? String }, ["t1", "t2"])
+        XCTAssertEqual(sentReferences[0].compactMap { $0["start"] as? Int }, [repeatedStart, 0])
+        XCTAssertEqual(sentReferences[0].compactMap { $0["end"] as? Int }, [unicodeText.unicodeScalars.count, externalText.unicodeScalars.count])
+        XCTAssertEqual(sentReferences[1][0]["start"] as? Int, 0)
+        XCTAssertEqual(sentReferences[1][0]["end"] as? Int, repeatedStart)
+        let sentUnits = try XCTUnwrap(generationContent["units"] as? [[String: Any]])
+        XCTAssertEqual(sentUnits[0]["sourceIDs"] as? [String], ["s1"])
+        XCTAssertEqual(sentUnits[0]["dependencyIDs"] as? [String], ["s2"])
+        let expectedProposal = try orderedEncoder.encode(modelProposal)
+        let expectedReview = try orderedEncoder.encode(modelReview)
+        for index in 1...3 {
+            let sent = try content(compactRequests[index])
+            let sentProposal = try XCTUnwrap(sent["proposal"] as? [String: Any])
+            XCTAssertEqual(try JSONSerialization.data(withJSONObject: sentProposal, options: .sortedKeys), expectedProposal)
+            XCTAssertEqual(try JSONSerialization.data(withJSONObject: sent["input"] as Any, options: .sortedKeys), try JSONSerialization.data(withJSONObject: generationContent, options: .sortedKeys))
+        }
+        let prior = try XCTUnwrap(try content(compactRequests[3])["priorRejection"] as? [String: Any])
+        XCTAssertEqual(try JSONSerialization.data(withJSONObject: prior["proposal"] as Any, options: .sortedKeys), expectedProposal)
+        XCTAssertEqual(try JSONSerialization.data(withJSONObject: prior["review"] as Any, options: .sortedKeys), expectedReview)
+        let wireBytes = try JSONSerialization.data(withJSONObject: generationContent, options: .sortedKeys).count
+        let canonicalBytes = try JSONEncoder().encode(wireInput).count
+        XCTAssertLessThan(wireBytes, canonicalBytes)
+        print("Panorama synthetic transport fixture canonical=\(canonicalBytes) bytes compact=\(wireBytes) bytes; complete text, 2 sources, 2 claims, 3 references")
+
+        let unknownProposal = PanoramaProposal(regions: [], questions: [], relations: [], unrepresentedSources: [.init(id: "unknown-alias", reason: literalReason)], unrepresentedClaims: [])
+        let unknownPort = try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([try modelEnvelope(unknownProposal)]))
+        do { _ = try await unknownPort.generate(wireInput); XCTFail("未知短身份不能返回资料库") } catch {}
+        let wrongVersion = PanoramaProposal(regions: modelProposal.regions, questions: [.init(id: "s1", regionID: "t1", title: "版本错误", summary: literalReason, evidence: [.init(sourceID: "s1", transcriptVersionID: "t2", start: repeatedStart, end: unicodeText.unicodeScalars.count, quote: repeatedQuote, claimIDs: ["c1"])])], relations: [], unrepresentedSources: [], unrepresentedClaims: [])
+        let wrongVersionPort = try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([try modelEnvelope(wrongVersion)]))
+        do { _ = try await wrongVersionPort.generate(wireInput); XCTFail("短身份存在也不能串用来源和版本") } catch {}
+        var missingIssueTranscript = wireSources[0].transcript
+        missingIssueTranscript.transcriptionReview = .init(completed: true, changed: false, response_id: "fixture", response_ids: nil, context_review_version: nil, unresolved_issues: [.init(span_id: "missing-span", reason: literalReason)], transcriptVersionID: "t2")
+        let missingIssueInput = PanoramaInput(manifest: wireInput.manifest, units: wireInput.units, sources: [.init(transcript: missingIssueTranscript, title: wireSources[0].title, occurredAt: wireSources[0].occurredAt, policyVersion: 1), wireSources[1]], claims: wireClaims, exclusions: [])
+        let missingTransport = FlowFollowupTransport([])
+        let missingPort = try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: missingTransport)
+        do { _ = try await missingPort.generate(missingIssueInput); XCTFail("无法定位的待核对项不能丢弃") } catch {}
+        let missingReferenceInput = PanoramaInput(manifest: wireInput.manifest, units: wireInput.units, sources: wireSources, claims: [.init(id: "c2", statement: literalReason, ownership: "unresolved", reviewVersion: 1, references: [.init(sourceID: "s2", transcriptVersionID: "t2", spanID: "missing-span")])], exclusions: [])
+        do { _ = try await missingPort.generate(missingReferenceInput); XCTFail("无法定位的观点引用不能丢弃") } catch {}
+        let missingRequests = await missingTransport.requests
+        XCTAssertTrue(missingRequests.isEmpty)
         let invalid=try JSONSerialization.data(withJSONObject: ["status":"completed", "output":[["type":"unsupported"]]])
         let rejectedPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([.init(status: 200, body: invalid)]))
         do { try await store.generatePanorama(using: rejectedPort); XCTFail("无效响应不能发布") } catch {}
