@@ -802,6 +802,22 @@ final class Database {
             }
         }
 
+        if try query("PRAGMA user_version").first?["user_version"] == "42" {
+            try transaction {
+                try execute("""
+                CREATE TABLE panorama_steps (
+                    id TEXT PRIMARY KEY,attempt_id TEXT NOT NULL REFERENCES panorama_attempts(id),
+                    stage TEXT NOT NULL,scope_id TEXT NOT NULL,input_digest TEXT NOT NULL,
+                    state TEXT NOT NULL CHECK(state IN ('running','completed','failed','unknown')),
+                    input_json TEXT NOT NULL,result_json TEXT,receipt_json TEXT,error TEXT,
+                    created_at TEXT NOT NULL,finished_at TEXT
+                )
+                """)
+                try execute("CREATE INDEX panorama_step_reuse ON panorama_steps(attempt_id,stage,scope_id,input_digest,state)")
+                try execute("PRAGMA user_version=43")
+            }
+        }
+
     }
     /// Only called for pre-sequence schemas/packages. Retrospective order is a baseline,
     /// not evidence of the original wall-clock order; all new producers follow it.

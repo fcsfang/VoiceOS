@@ -69,48 +69,117 @@ extension VoiceOSStore {
         let input=try panoramaInput()
         let row=try db.query("SELECT * FROM panorama_attempts WHERE digest=? ORDER BY rowid DESC LIMIT 1", [input.manifest.digest]).first
         let snapshot=try row?["snapshot_json"].map { try JSONDecoder().decode(PanoramaSnapshot.self, from: Data($0.utf8)) }
-        return .init(input: input, snapshot: snapshot, status: row?["state"] ?? (input.units.isEmpty ? "empty" : "pending"), error: row?["error"])
+        var progress: PanoramaProgress?
+        if let id=row?["id"] {
+            let steps=try db.query("SELECT stage,scope_id,state FROM panorama_steps WHERE attempt_id=? ORDER BY rowid", [id])
+            let verified=Set(snapshot?.workflow?.verifiedUnitIDs ?? [])
+            progress = .init(phase: snapshot?.workflow?.phase ?? .units, verifiedUnitCount: verified.count,
+                             totalUnitCount: input.units.count, activeStage: steps.last(where: { $0["state"] == "running" })?["stage"])
+        }
+        return .init(input: input, snapshot: snapshot, status: row?["state"] ?? (input.units.isEmpty ? "empty" : "pending"), error: row?["error"], progress: progress)
     }
     public func generatePanorama(using port: any PanoramaModelPort, retry: Bool = false) async throws {
         let input=try panoramaInput(), digest=input.manifest.digest
         guard !input.units.isEmpty, !activePanoramaDigests.contains(digest) else { return }
-        if let row=try db.query("SELECT state FROM panorama_attempts WHERE digest=? ORDER BY rowid DESC LIMIT 1", [digest]).first {
-            guard retry && row["state"] != "completed" && row["state"] != "running" else { return }
+        let previous=try db.query("SELECT * FROM panorama_attempts WHERE digest=? ORDER BY rowid DESC LIMIT 1", [digest]).first
+        if let previous {
+            guard retry && previous["state"] != "completed" && previous["state"] != "running" else { return }
         }
-        let id=UUID().uuidString
-        try db.execute("INSERT INTO panorama_attempts(id,digest,state,input_json,created_at) VALUES(?,?,'running',?,?)", [id,digest,try Self.relevanceJSON(input),Self.now()])
+        let id=previous?["id"] ?? UUID().uuidString
+        if previous == nil {
+            try db.execute("INSERT INTO panorama_attempts(id,digest,state,input_json,created_at) VALUES(?,?,'running',?,?)", [id,digest,try Self.relevanceJSON(input),Self.now()])
+        } else {
+            try db.execute("UPDATE panorama_attempts SET state='running',error=NULL WHERE id=?", [id])
+        }
         activePanoramaDigests.insert(digest)
         defer { activePanoramaDigests.remove(digest) }
         do {
-            let generated=try await port.generate(input)
-            try requirePanoramaManifest(input.manifest)
-            try db.execute("UPDATE panorama_attempts SET generation_receipt=? WHERE id=?", [try Self.relevanceJSON(generated.1),id])
-            var proposal=try Self.locatePanoramaQuotes(generated.0, input: input), generation=generated.1
-            var coverage=try Self.validatePanorama(proposal, input: input)
-            var (review,verification)=try await port.verify(proposal, input: input, priorRejection: nil)
-            try requirePanoramaManifest(input.manifest)
-            try db.execute("UPDATE panorama_attempts SET verification_receipt=? WHERE id=?", [try Self.relevanceJSON(verification),id])
-            do { try Self.validatePanoramaReview(review, proposal: proposal, generation: generation, verification: verification) }
-            catch {
-                let rejection=PanoramaRejection(proposal: proposal, review: review)
-                let repaired=try await port.repair(proposal, input: input, review: review)
-                try requirePanoramaManifest(input.manifest)
-                try db.execute("UPDATE panorama_attempts SET generation_receipt=? WHERE id=?", [try Self.relevanceJSON(repaired.1),id])
-                proposal=try Self.locatePanoramaQuotes(repaired.0, input: input); generation=repaired.1
-                coverage=try Self.validatePanorama(proposal, input: input)
-                (review,verification)=try await port.verify(proposal, input: input, priorRejection: rejection)
-                try requirePanoramaManifest(input.manifest)
-                try db.execute("UPDATE panorama_attempts SET verification_receipt=? WHERE id=?", [try Self.relevanceJSON(verification),id])
+            var verified: [VerifiedPanoramaUnit]=[]
+            var scheduled: [(unit: PanoramaUnit, input: PanoramaInput, size: Int)]=[]
+            for unit in input.units {
+                let sourceIDs=Set(unit.sourceIDs + unit.dependencyIDs)
+                let scope=try Self.panoramaScope(input, sourceIDs: sourceIDs)
+                let size=scope.sources.reduce(0) { $0 + $1.transcript.text.unicodeScalars.count }
+                scheduled.append((unit,scope,size))
             }
-            try Self.validatePanoramaReview(review, proposal: proposal, generation: generation, verification: verification)
-            let snapshot=PanoramaSnapshot(id: id, createdAt: Self.now(), input: input, proposal: proposal, coverage: coverage, generation: generation, verification: verification, review: review)
-            try db.transaction {
-                try db.execute("UPDATE panorama_attempts SET state='completed',snapshot_json=?,verification_receipt=?,error=NULL WHERE id=?", [try Self.relevanceJSON(snapshot),try Self.relevanceJSON(verification),id])
+            scheduled.sort { left, right in
+                if left.size == right.size { return left.unit.id < right.unit.id }
+                return left.size < right.size
             }
+            for (unit,scoped,_) in scheduled {
+                let result=try await verifyPanoramaUnit(unit.id, input: scoped, whole: input, attemptID: id, port: port)
+                verified.append(result)
+                try requirePanoramaManifest(input.manifest)
+                let partial=try Self.partialPanorama(verified, input: input, id: id, phase: .units)
+                try db.execute("UPDATE panorama_attempts SET snapshot_json=?,generation_receipt=?,verification_receipt=? WHERE id=?", [try Self.relevanceJSON(partial),try Self.relevanceJSON(result.generation),try Self.relevanceJSON(result.verification),id])
+            }
+            try await finishPanorama(verified, input: input, attemptID: id, port: port)
         } catch {
             try db.execute("UPDATE panorama_attempts SET state='failed',error=? WHERE id=?", [Self.panoramaFailure(error),id])
             throw error
         }
+    }
+    private func verifyPanoramaUnit(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, attemptID: String, port: any PanoramaModelPort) async throws -> VerifiedPanoramaUnit {
+        var generated: (PanoramaProposal, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "unit.generate", scopeID: unitID,
+            input: input, whole: whole, identity: port.configurationIdentity, operation: { try await port.generate(input) }, validate: { proposal, _ in
+                _ = try Self.validatePanorama(proposal, input: input)
+            }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+        let first: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "unit.review", scopeID: unitID,
+            input: PanoramaProposalInput(input: input, proposal: generated.0), whole: whole, identity: port.configurationIdentity,
+            operation: { try await port.verify(generated.0, input: input, priorRejection: nil) }, validate: { _, _ in })
+        var review=first
+        do { try Self.validatePanoramaReview(first.0, proposal: generated.0, generation: generated.1, verification: first.1) }
+        catch {
+            let rejection=PanoramaRejection(proposal: generated.0, review: first.0)
+            let original=generated.0
+            generated=try await panoramaStep(attemptID: attemptID, stage: "unit.repair", scopeID: unitID,
+                input: PanoramaRepairInput(input: input, rejection: rejection), whole: whole, identity: port.configurationIdentity,
+                operation: { try await port.repair(original, input: input, review: first.0) }, validate: { proposal, _ in
+                    _ = try Self.validatePanorama(proposal, input: input)
+                }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+            review=try await panoramaStep(attemptID: attemptID, stage: "unit.review-repair", scopeID: unitID,
+                input: PanoramaRepairInput(input: input, rejection: .init(proposal: generated.0, review: first.0)), whole: whole, identity: port.configurationIdentity,
+                operation: { try await port.verify(generated.0, input: input, priorRejection: rejection) }, validate: { value, receipt in
+                    try Self.validatePanoramaReview(value, proposal: generated.0, generation: generated.1, verification: receipt)
+                })
+        }
+        try Self.validatePanoramaReview(review.0, proposal: generated.0, generation: generated.1, verification: review.1)
+        return .init(unitID: unitID, input: input, proposal: Self.namespacePanorama(generated.0, unitID: unitID), generation: generated.1, review: review.0, verification: review.1)
+    }
+    private func panoramaStep<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, input: Input,
+        whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
+        validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }) async throws -> (Result, PanoramaReceipt) {
+        try Task.checkCancellation()
+        try requirePanoramaManifest(whole.manifest)
+        let json=try Self.relevanceJSON(input)
+        let digest=Self.relevanceHash(Data(("panorama-staged-v1|"+identity+"|"+json).utf8))
+        if let row=try db.query("SELECT result_json,receipt_json FROM panorama_steps WHERE attempt_id=? AND stage=? AND scope_id=? AND input_digest=? AND state='completed' ORDER BY rowid DESC LIMIT 1", [attemptID,stage,scopeID,digest]).first,
+           let result=row["result_json"], let receipt=row["receipt_json"] {
+            let decoded=try JSONDecoder().decode(Result.self, from: Data(result.utf8))
+            let savedReceipt=try JSONDecoder().decode(PanoramaReceipt.self, from: Data(receipt.utf8))
+            try validate(decoded,savedReceipt)
+            return (decoded,savedReceipt)
+        }
+        let id=UUID().uuidString
+        try db.execute("INSERT INTO panorama_steps(id,attempt_id,stage,scope_id,input_digest,state,input_json,created_at) VALUES(?,?,?,?,?,'running',?,?)", [id,attemptID,stage,scopeID,digest,json,Self.now()])
+        do {
+            let (raw,receipt)=try await operation()
+            try Task.checkCancellation()
+            try requirePanoramaManifest(whole.manifest)
+            guard !receipt.responseID.isEmpty, !receipt.model.isEmpty else { throw VoiceOSError("全景步骤缺少真实完成回执") }
+            let result=try normalize(raw)
+            try validate(result,receipt)
+            try db.execute("UPDATE panorama_steps SET state='completed',result_json=?,receipt_json=?,finished_at=? WHERE id=?", [try Self.relevanceJSON(result),try Self.relevanceJSON(receipt),Self.now(),id])
+            return (result,receipt)
+        } catch {
+            try db.execute("UPDATE panorama_steps SET state='failed',error=?,finished_at=? WHERE id=?", [Self.panoramaFailure(error),Self.now(),id])
+            throw error
+        }
+    }
+    private func finishPanorama(_ units: [VerifiedPanoramaUnit], input: PanoramaInput, attemptID: String, port: any PanoramaModelPort) async throws {
+        let partial=try Self.partialPanorama(units, input: input, id: attemptID, phase: .synthesis)
+        try db.execute("UPDATE panorama_attempts SET snapshot_json=? WHERE id=?", [try Self.relevanceJSON(partial),attemptID])
+        throw VoiceOSError("所有完整单元已独立核对；跨单元归纳与全局核对尚未完成")
     }
     private static func panoramaFailure(_ error: Error) -> String {
         if let error=error as? VoiceOSError { return error.message }
