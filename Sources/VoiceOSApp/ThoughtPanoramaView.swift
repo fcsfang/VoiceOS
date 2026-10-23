@@ -25,21 +25,20 @@ struct ThoughtPanoramaView: View {
             header
             Divider()
             GeometryReader { geometry in
-                if geometry.size.width >= 980 {
-                    HStack(spacing: 0) {
-                        panorama
-                        if let snapshot = state?.snapshot, let selection {
-                            Divider()
-                            inspector(snapshot, selection: selection).frame(width: 310)
-                        }
+                let hasSideReader = geometry.size.width >= 740
+                HStack(spacing: 0) {
+                    panorama
+                    if hasSideReader, let snapshot = state?.snapshot, let selection {
+                        Divider()
+                        inspector(snapshot, selection: selection).frame(width: 310)
                     }
-                } else {
-                    VStack(spacing: 0) {
-                        panorama
-                        if let snapshot = state?.snapshot, let selection {
-                            Divider()
-                            inspector(snapshot, selection: selection).frame(height: min(320, geometry.size.height * 0.48))
-                        }
+                }
+                .sheet(isPresented: Binding(
+                    get: { !hasSideReader && state?.snapshot != nil && selection != nil },
+                    set: { if !$0 && !hasSideReader { selection = nil } }
+                )) {
+                    if let snapshot = state?.snapshot, let selection {
+                        inspector(snapshot, selection: selection).frame(minWidth: 540, minHeight: 480)
                     }
                 }
             }
