@@ -111,7 +111,12 @@ extension VoiceOSStore {
                 verified.append(result)
                 try requirePanoramaManifest(input.manifest)
                 let partial=try Self.partialPanorama(verified, input: input, id: id, phase: .units)
-                try db.execute("UPDATE panorama_attempts SET snapshot_json=?,generation_receipt=?,verification_receipt=? WHERE id=?", [try Self.relevanceJSON(partial),try Self.relevanceJSON(result.generation),try Self.relevanceJSON(result.verification),id])
+                let saved=try db.query("SELECT snapshot_json FROM panorama_attempts WHERE id=?", [id]).first?["snapshot_json"]
+                let visible=try saved.map { try JSONDecoder().decode(PanoramaSnapshot.self, from: Data($0.utf8)) }
+                let visibleUnits=Set(visible?.workflow?.verifiedUnitIDs ?? [])
+                if visibleUnits.isSubset(of: Set(verified.map(\.unitID))) {
+                    try db.execute("UPDATE panorama_attempts SET snapshot_json=?,generation_receipt=?,verification_receipt=? WHERE id=?", [try Self.relevanceJSON(partial),try Self.relevanceJSON(result.generation),try Self.relevanceJSON(result.verification),id])
+                }
             }
             try await finishPanorama(verified, input: input, attemptID: id, port: port)
         } catch {
@@ -128,9 +133,11 @@ extension VoiceOSStore {
             input: PanoramaProposalInput(input: input, proposal: generated.0), whole: whole, identity: port.configurationIdentity,
             operation: { try await port.verify(generated.0, input: input, priorRejection: nil) }, validate: { _, _ in })
         var review=first
+        var priorRejection: PanoramaRejection?
         do { try Self.validatePanoramaReview(first.0, proposal: generated.0, generation: generated.1, verification: first.1) }
         catch {
             let rejection=PanoramaRejection(proposal: generated.0, review: first.0)
+            priorRejection=Self.panoramaRejection(rejection, unitID: unitID)
             let original=generated.0
             generated=try await panoramaStep(attemptID: attemptID, stage: "unit.repair", scopeID: unitID,
                 input: PanoramaRepairInput(input: input, rejection: rejection), whole: whole, identity: port.configurationIdentity,
@@ -144,11 +151,11 @@ extension VoiceOSStore {
                 })
         }
         try Self.validatePanoramaReview(review.0, proposal: generated.0, generation: generated.1, verification: review.1)
-        return .init(unitID: unitID, input: input, proposal: Self.namespacePanorama(generated.0, unitID: unitID), generation: generated.1, review: review.0, verification: review.1)
+        return .init(unitID: unitID, input: input, proposal: Self.namespacePanorama(generated.0, unitID: unitID), generation: generated.1, review: review.0, verification: review.1, rejection: priorRejection)
     }
     private func panoramaStep<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, input: Input,
         whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
-        validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }) async throws -> (Result, PanoramaReceipt) {
+        validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }, retainSemanticRejection: Bool = false) async throws -> (Result, PanoramaReceipt) {
         try Task.checkCancellation()
         try requirePanoramaManifest(whole.manifest)
         let json=try Self.relevanceJSON(input)
@@ -162,27 +169,138 @@ extension VoiceOSStore {
         }
         let id=UUID().uuidString
         try db.execute("INSERT INTO panorama_steps(id,attempt_id,stage,scope_id,input_digest,state,input_json,created_at) VALUES(?,?,?,?,?,'running',?,?)", [id,attemptID,stage,scopeID,digest,json,Self.now()])
+        var receivedResult: String?, receivedReceipt: String?
         do {
             let (raw,receipt)=try await operation()
             try Task.checkCancellation()
             try requirePanoramaManifest(whole.manifest)
             guard !receipt.responseID.isEmpty, !receipt.model.isEmpty else { throw VoiceOSError("全景步骤缺少真实完成回执") }
             let result=try normalize(raw)
+            receivedResult=try Self.relevanceJSON(result)
+            receivedReceipt=try Self.relevanceJSON(receipt)
             try validate(result,receipt)
             try db.execute("UPDATE panorama_steps SET state='completed',result_json=?,receipt_json=?,finished_at=? WHERE id=?", [try Self.relevanceJSON(result),try Self.relevanceJSON(receipt),Self.now(),id])
             return (result,receipt)
         } catch {
-            try db.execute("UPDATE panorama_steps SET state='failed',error=?,finished_at=? WHERE id=?", [Self.panoramaFailure(error),Self.now(),id])
+            let state=retainSemanticRejection && error is PanoramaSemanticIssue ? "completed" : "failed"
+            try db.execute("UPDATE panorama_steps SET state=?,result_json=?,receipt_json=?,error=?,finished_at=? WHERE id=?", [state,receivedResult,receivedReceipt,Self.panoramaFailure(error),Self.now(),id])
             throw error
         }
     }
     private func finishPanorama(_ units: [VerifiedPanoramaUnit], input: PanoramaInput, attemptID: String, port: any PanoramaModelPort) async throws {
-        let partial=try Self.partialPanorama(units, input: input, id: attemptID, phase: .synthesis)
+        let proposals=units.map { PanoramaUnitProposal(unitID: $0.unitID, proposal: $0.proposal) }
+        try publishPanoramaPhase(.synthesis, units: units, input: input, attemptID: attemptID)
+        let generated: (PanoramaProposal, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.synthesize", scopeID: "all",
+            input: PanoramaSynthesisInput(input: input, proposals: proposals), whole: input, identity: port.configurationIdentity,
+            operation: { try await port.synthesize(proposals, input: input) }, validate: { proposal, _ in
+                _ = try Self.validatePanorama(proposal, input: input)
+            }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+        var candidate=generated
+        var issues: [PanoramaSemanticIssue]=[]
+        let validation: PanoramaGlobalValidation
+        do {
+            validation=try await reviewPanoramaCandidate(candidate.0, generation: candidate.1, units: units, input: input, attemptID: attemptID, port: port, issues: issues)
+        } catch let issue as PanoramaSemanticIssue {
+            issues.append(issue)
+            let original=candidate.0
+            candidate=try await panoramaStep(attemptID: attemptID, stage: "global.repair", scopeID: "all",
+                input: PanoramaGlobalRepairInput(input: input, proposal: original, issue: issue), whole: input, identity: port.configurationIdentity,
+                operation: { try await port.repairSynthesis(original, input: input, context: issue.input, rejection: issue.rejection) }, validate: { proposal, _ in
+                    _ = try Self.validatePanorama(proposal, input: input)
+                }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+            validation=try await reviewPanoramaCandidate(candidate.0, generation: candidate.1, units: units, input: input, attemptID: attemptID, port: port, issues: issues)
+        }
+        let proposal=candidate.0
+        let final=(validation.finalReview,validation.finalReceipt), reviews=validation.reviews
+        try Task.checkCancellation()
+        try requirePanoramaManifest(input.manifest)
+        let coverage=try Self.validatePanorama(proposal, input: input)
+        let unitReceipts=units.flatMap { [PanoramaStepReceipt(stage: "unit.generate", scopeID: $0.unitID, receipt: $0.generation), PanoramaStepReceipt(stage: "unit.verify", scopeID: $0.unitID, receipt: $0.verification)] }
+        let receipts=unitReceipts + [.init(stage: "global.synthesize", scopeID: "all", receipt: generated.1)]
+            + (issues.isEmpty ? [] : [PanoramaStepReceipt(stage: "global.repair", scopeID: "all", receipt: candidate.1)])
+            + reviews.map { PanoramaStepReceipt(stage: $0.stage, scopeID: $0.scopeID, receipt: $0.receipt) }
+            + [.init(stage: "global.consistency", scopeID: "all", receipt: final.1)]
+        let snapshot=PanoramaSnapshot(id: attemptID, createdAt: Self.now(), input: input, proposal: proposal, coverage: coverage,
+            generation: candidate.1, verification: final.1, review: final.0,
+            workflow: .init(phase: .completed, verifiedUnitIDs: units.map(\.unitID), totalUnitCount: input.units.count, receipts: receipts))
+        try db.execute("UPDATE panorama_attempts SET state='completed',snapshot_json=?,generation_receipt=?,verification_receipt=?,error=NULL WHERE id=?", [try Self.relevanceJSON(snapshot),try Self.relevanceJSON(candidate.1),try Self.relevanceJSON(final.1),attemptID])
+    }
+    private func reviewPanoramaCandidate(_ proposal: PanoramaProposal, generation: PanoramaReceipt, units: [VerifiedPanoramaUnit], input: PanoramaInput,
+        attemptID: String, port: any PanoramaModelPort, issues: [PanoramaSemanticIssue]) async throws -> PanoramaGlobalValidation {
+        let proposals=units.map { PanoramaUnitProposal(unitID: $0.unitID, proposal: $0.proposal) }
+        let rejections=units.compactMap(\.rejection) + issues.map(\.rejection)
+        var reviews: [PanoramaScopedReview]=[]
+        try publishPanoramaPhase(.evidence, units: units, input: input, attemptID: attemptID)
+        for question in proposal.questions {
+            let scoped=try Self.panoramaScope(input, sourceIDs: Set(question.evidence.map(\.sourceID)))
+            let selected=Self.panoramaProjection(proposal, input: scoped, questionIDs: [question.id], relationIDs: [])
+            let result: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.question", scopeID: question.id,
+                input: PanoramaProposalInput(input: scoped, proposal: selected), whole: input, identity: port.configurationIdentity,
+                operation: { try await port.verifyEvidence(selected, input: scoped) }, validate: { review, receipt in
+                    _ = try Self.validatePanorama(selected, input: scoped)
+                    try Self.validatePanoramaStageReview(review, proposal: selected, input: scoped, generation: generation, verification: receipt)
+                }, retainSemanticRejection: issues.isEmpty)
+            reviews.append(.init(stage: "global.question", scopeID: question.id, review: result.0, receipt: result.1))
+        }
+        for relation in proposal.relations {
+            let endpointIDs=Set([relation.from,relation.to])
+            let evidence=proposal.questions.filter { endpointIDs.contains($0.id) }.flatMap(\.evidence) + relation.fromEvidence + relation.toEvidence
+            let scoped=try Self.panoramaScope(input, sourceIDs: Set(evidence.map(\.sourceID)))
+            let selected=Self.panoramaProjection(proposal, input: scoped, questionIDs: endpointIDs, relationIDs: [relation.id])
+            let result: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.relation", scopeID: relation.id,
+                input: PanoramaProposalInput(input: scoped, proposal: selected), whole: input, identity: port.configurationIdentity,
+                operation: { try await port.verifyEvidence(selected, input: scoped) }, validate: { review, receipt in
+                    _ = try Self.validatePanorama(selected, input: scoped)
+                    try Self.validatePanoramaStageReview(review, proposal: selected, input: scoped, generation: generation, verification: receipt)
+                }, retainSemanticRejection: issues.isEmpty)
+            reviews.append(.init(stage: "global.relation", scopeID: relation.id, review: result.0, receipt: result.1))
+        }
+        try publishPanoramaPhase(.coverage, units: units, input: input, attemptID: attemptID)
+        for unit in units {
+            let sourceIDs=Set(unit.input.manifest.sourceIDs), claimIDs=Set(unit.input.manifest.claimIDs)
+            func relevant(_ evidence: [PanoramaEvidence]) -> Bool {
+                evidence.contains { sourceIDs.contains($0.sourceID) || !claimIDs.isDisjoint(with: $0.claimIDs) }
+            }
+            let questionIDs=Set(proposal.questions.filter { relevant($0.evidence) }.map(\.id))
+            let relationIDs=Set(proposal.relations.filter { relevant($0.fromEvidence + $0.toEvidence) }.map(\.id))
+            let endpointIDs=Set(proposal.relations.filter { relationIDs.contains($0.id) }.flatMap { [$0.from,$0.to] })
+            let evidence=proposal.questions.filter { questionIDs.union(endpointIDs).contains($0.id) }.flatMap(\.evidence)
+                + proposal.relations.filter { relationIDs.contains($0.id) }.flatMap { $0.fromEvidence + $0.toEvidence }
+            let relatedIssues=issues.filter { issue in
+                !sourceIDs.isDisjoint(with: issue.input.manifest.sourceIDs) || !claimIDs.isDisjoint(with: issue.input.manifest.claimIDs)
+            }
+            let rejectedSourceIDs=relatedIssues.flatMap { $0.input.manifest.sourceIDs }
+            let contextSourceIDs=sourceIDs.union(evidence.map(\.sourceID)).union(rejectedSourceIDs)
+            let scoped=try Self.panoramaScope(input, sourceIDs: contextSourceIDs)
+            let selected=Self.panoramaProjection(proposal, input: scoped, questionIDs: questionIDs, relationIDs: relationIDs)
+            let target=PanoramaCoverageTarget(sourceIDs: unit.input.manifest.sourceIDs, claimIDs: unit.input.manifest.claimIDs)
+            let relevantRejections=(unit.rejection.map { [$0] } ?? []) + relatedIssues.map(\.rejection)
+            let request=PanoramaCoverageInput(input: scoped, proposal: selected, target: target, rejections: relevantRejections)
+            let result: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.coverage", scopeID: unit.unitID,
+                input: request, whole: input, identity: port.configurationIdentity,
+                operation: { try await port.verifyCoverage(selected, input: scoped, target: target, rejections: relevantRejections) }, validate: { review, receipt in
+                    _ = try Self.validatePanorama(selected, input: scoped)
+                    try Self.validatePanoramaStageReview(review, proposal: selected, input: scoped, generation: generation, verification: receipt)
+                }, retainSemanticRejection: issues.isEmpty)
+            reviews.append(.init(stage: "global.coverage", scopeID: unit.unitID, review: result.0, receipt: result.1, target: target))
+        }
+        try publishPanoramaPhase(.consistency, units: units, input: input, attemptID: attemptID)
+        let request=PanoramaConsistencyInput(input: input, proposal: proposal, unitProposals: proposals, reviews: reviews, rejections: rejections)
+        let final: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.consistency", scopeID: "all",
+            input: request, whole: input, identity: port.configurationIdentity,
+            operation: { try await port.verifyConsistency(proposal, input: input, unitProposals: proposals, reviews: reviews, rejections: rejections) }, validate: { review, receipt in
+                try Self.validatePanoramaStageReview(review, proposal: proposal, input: input, generation: generation, verification: receipt)
+            }, retainSemanticRejection: issues.isEmpty)
+        return .init(reviews: reviews, finalReview: final.0, finalReceipt: final.1)
+    }
+    private func publishPanoramaPhase(_ phase: PanoramaPhase, units: [VerifiedPanoramaUnit], input: PanoramaInput, attemptID: String) throws {
+        try requirePanoramaManifest(input.manifest)
+        let partial=try Self.partialPanorama(units, input: input, id: attemptID, phase: phase)
         try db.execute("UPDATE panorama_attempts SET snapshot_json=? WHERE id=?", [try Self.relevanceJSON(partial),attemptID])
-        throw VoiceOSError("所有完整单元已独立核对；跨单元归纳与全局核对尚未完成")
     }
     private static func panoramaFailure(_ error: Error) -> String {
         if let error=error as? VoiceOSError { return error.message }
+        if let issue=error as? PanoramaSemanticIssue { return "全景独立语义核对未通过：" + issue.rejection.review.reason + "；已核对区域保留，可明确重试" }
         if case ModelPortFailure.rejected(let reason, _, _) = error { return reason }
         if error is CancellationError { return "全景生成已停止，可明确重试" }
         if let error=error as? URLError { return "全景网络请求失败（错误码 \(error.code.rawValue)）；材料保留，请明确重试" }
@@ -203,7 +321,7 @@ extension VoiceOSStore {
             guard let relation=snapshot.proposal.relations.first(where: { $0.id == id }) else { throw VoiceOSError("全景联系不存在") }
             evidence=relation.fromEvidence + relation.toEvidence; explanation=relation.label + "\n" + relation.explanation; key="relation:"+id
         }
-        let sourceIDs=Array(Set(evidence.map(\.sourceID))).sorted()
+        let sourceIDs=try Self.panoramaScope(state.input, sourceIDs: Set(evidence.map(\.sourceID))).manifest.sourceIDs
         let id=try beginConversation(sourceIDs: sourceIDs, commandID: "panorama:"+snapshotID+":"+key+":"+UUID().uuidString)
         return .init(conversation: try conversation(id: id), draft: "以下是 AI 全景候选解释，尚未得到我认可：\n\(explanation)\n\n请结合双方完整原文核对这条线索，说明支持、差异和仍不确定之处。")
     }

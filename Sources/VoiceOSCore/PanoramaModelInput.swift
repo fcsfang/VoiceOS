@@ -85,6 +85,7 @@ struct PanoramaModelInput {
     private let versions: Identities
     private let claims: Identities
     private let sourceVersions: [String: String]
+    private let unitIdentities: Identities
 
     init(_ input: PanoramaInput) throws {
         let sources = try Identities(input.sources.map(\.id), prefix: "s")
@@ -141,6 +142,7 @@ struct PanoramaModelInput {
         let wireUnits = try input.units.map { unit in
             try Unit(id: units.alias(unit.id), sourceIDs: unit.sourceIDs.map(sources.alias), dependencyIDs: unit.dependencyIDs.map(sources.alias))
         }
+        self.unitIdentities = units
         self.sources = sources
         self.versions = versions
         self.claims = claims
@@ -184,5 +186,30 @@ struct PanoramaModelInput {
         }, unrepresentedClaims: proposal.unrepresentedClaims.map {
             try .init(id: identity($0.id, claims), reason: $0.reason)
         })
+    }
+}
+
+extension PanoramaModelInput {
+    func coverageForModel(_ target: PanoramaCoverageTarget) throws -> PanoramaCoverageTarget {
+        try .init(sourceIDs: target.sourceIDs.map(sources.alias), claimIDs: target.claimIDs.map(claims.alias))
+    }
+}
+
+extension PanoramaModelInput {
+    func payloadForScope(_ input: PanoramaInput) throws -> Payload {
+        let sourceIDs=Set(try input.manifest.sourceIDs.map(sources.alias))
+        let claimIDs=Set(try input.manifest.claimIDs.map(claims.alias))
+        return .init(units: payload.units.filter { Set($0.sourceIDs + $0.dependencyIDs).isSubset(of: sourceIDs) },
+            sources: payload.sources.filter { sourceIDs.contains($0.sourceID) }, claims: payload.claims.filter { claimIDs.contains($0.id) })
+    }
+}
+
+extension PanoramaModelInput {
+    func unitProposalForModel(_ value: PanoramaUnitProposal) throws -> PanoramaUnitProposal {
+        try .init(unitID: unitIdentities.alias(value.unitID), proposal: proposalForModel(value.proposal))
+    }
+    func scopedReviewForModel(_ value: PanoramaScopedReview) throws -> PanoramaScopedReview {
+        let scope=value.stage == "global.coverage" ? try unitIdentities.alias(value.scopeID) : value.scopeID
+        return try .init(stage: value.stage, scopeID: scope, review: value.review, receipt: value.receipt, target: value.target.map(coverageForModel))
     }
 }

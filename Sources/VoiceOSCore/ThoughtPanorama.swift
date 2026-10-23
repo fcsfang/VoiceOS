@@ -120,6 +120,24 @@ public struct PanoramaStepReceipt: Codable, Sendable {
     public let scopeID: String
     public let receipt: PanoramaReceipt
 }
+public struct PanoramaUnitProposal: Codable, Sendable {
+    public let unitID: String
+    public let proposal: PanoramaProposal
+}
+public struct PanoramaScopedReview: Codable, Sendable {
+    public let stage: String
+    public let scopeID: String
+    public let review: PanoramaReview
+    public let receipt: PanoramaReceipt
+    public let target: PanoramaCoverageTarget?
+    public init(stage: String, scopeID: String, review: PanoramaReview, receipt: PanoramaReceipt, target: PanoramaCoverageTarget? = nil) {
+        self.stage=stage; self.scopeID=scopeID; self.review=review; self.receipt=receipt; self.target=target
+    }
+}
+public struct PanoramaCoverageTarget: Codable, Sendable {
+    public let sourceIDs: [String]
+    public let claimIDs: [String]
+}
 public struct PanoramaWorkflow: Codable, Sendable {
     public let phase: PanoramaPhase
     public let verifiedUnitIDs: [String]
@@ -171,12 +189,32 @@ public struct PanoramaDiscussion: Sendable {
 public protocol PanoramaModelPort: Sendable {
     var configurationIdentity: String { get }
     func generate(_ input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt)
+    func synthesize(_ proposals: [PanoramaUnitProposal], input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt)
+    func repairSynthesis(_ proposal: PanoramaProposal, input: PanoramaInput, context: PanoramaInput, rejection: PanoramaRejection) async throws -> (PanoramaProposal, PanoramaReceipt)
+    func verifyEvidence(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> (PanoramaReview, PanoramaReceipt)
+    func verifyCoverage(_ proposal: PanoramaProposal, input: PanoramaInput, target: PanoramaCoverageTarget, rejections: [PanoramaRejection]) async throws -> (PanoramaReview, PanoramaReceipt)
+    func verifyConsistency(_ proposal: PanoramaProposal, input: PanoramaInput, unitProposals: [PanoramaUnitProposal], reviews: [PanoramaScopedReview], rejections: [PanoramaRejection]) async throws -> (PanoramaReview, PanoramaReceipt)
     func repair(_ proposal: PanoramaProposal, input: PanoramaInput, review: PanoramaReview) async throws -> (PanoramaProposal, PanoramaReceipt)
     func verify(_ proposal: PanoramaProposal, input: PanoramaInput, priorRejection: PanoramaRejection?) async throws -> (PanoramaReview, PanoramaReceipt)
 }
 
 extension PanoramaModelPort {
     public var configurationIdentity: String { String(reflecting: Self.self) }
+    public func synthesize(_ proposals: [PanoramaUnitProposal], input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt) {
+        throw VoiceOSError("当前模型端口尚不支持跨单元全景核对，已核对区域保留")
+    }
+    public func repairSynthesis(_ proposal: PanoramaProposal, input: PanoramaInput, context: PanoramaInput, rejection: PanoramaRejection) async throws -> (PanoramaProposal, PanoramaReceipt) {
+        throw VoiceOSError("当前模型端口尚不支持全景语义修复，已核对区域保留")
+    }
+    public func verifyEvidence(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> (PanoramaReview, PanoramaReceipt) {
+        throw VoiceOSError("当前模型端口尚不支持逐问题与联系核对，已核对区域保留")
+    }
+    public func verifyCoverage(_ proposal: PanoramaProposal, input: PanoramaInput, target: PanoramaCoverageTarget, rejections: [PanoramaRejection]) async throws -> (PanoramaReview, PanoramaReceipt) {
+        throw VoiceOSError("当前模型端口尚不支持逐单元全局覆盖核对，已核对区域保留")
+    }
+    public func verifyConsistency(_ proposal: PanoramaProposal, input: PanoramaInput, unitProposals: [PanoramaUnitProposal], reviews: [PanoramaScopedReview], rejections: [PanoramaRejection]) async throws -> (PanoramaReview, PanoramaReceipt) {
+        throw VoiceOSError("当前模型端口尚不支持全景一致性核对，已核对区域保留")
+    }
 }
 
 extension VoiceOSStore {

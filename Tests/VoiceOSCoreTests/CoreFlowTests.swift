@@ -784,6 +784,7 @@ final class CoreFlowTests: XCTestCase {
     func testIdeaFindsHistoryWithoutCreatingTask() async throws {
         try assertPanoramaDatabaseReopens()
         try await assertPanoramaSchemaRepair()
+        try await assertPanoramaProgressiveRecovery(root: root)
         let store = try await openStore(), model = FlowModel()
         let oldID = try await expression(store, text: "记忆系统需要关注检索质量。", model: model)
         let previous = try await store.retrieve("检索质量", using: NativeRetrieval())
@@ -1007,7 +1008,7 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(timedOut.error, "全景网络请求失败（错误码 -1001）；材料保留，请明确重试")
         XCTAssertNil(timedOut.snapshot)
         do { try await store.generatePanorama(using: panorama, retry: true); XCTFail("全局核对尚未完成不能完成全景") }
-        catch { XCTAssertEqual((error as? VoiceOSError)?.message, "所有完整单元已独立核对；跨单元归纳与全局核对尚未完成") }
+        catch { XCTAssertEqual((error as? VoiceOSError)?.message, "当前模型端口尚不支持跨单元全景核对，已核对区域保留") }
         try await store.generatePanorama(using: panorama)
         let state=try await store.panoramaState(), snapshot=try XCTUnwrap(state.snapshot)
         XCTAssertEqual(snapshot.coverage.submittedSourceIDs.count, 4)
