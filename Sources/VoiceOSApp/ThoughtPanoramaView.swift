@@ -18,6 +18,7 @@ struct ThoughtPanoramaView: View {
     @State private var recent = true
     @State private var focusedRegionID: String?
     @State private var showCoverage = false
+    @State private var pendingReaderAction: (() -> Void)?
     private let palette: [Color] = [.green, .blue, .orange, .purple, .teal, .pink]
 
     var body: some View {
@@ -36,9 +37,16 @@ struct ThoughtPanoramaView: View {
                 .sheet(isPresented: Binding(
                     get: { !hasSideReader && state?.snapshot != nil && selection != nil },
                     set: { if !$0 && !hasSideReader { selection = nil } }
-                )) {
+                ), onDismiss: {
+                    let action = pendingReaderAction
+                    pendingReaderAction = nil
+                    action?()
+                }) {
                     if let snapshot = state?.snapshot, let selection {
-                        inspector(snapshot, selection: selection).frame(minWidth: 540, minHeight: 480)
+                        inspector(snapshot, selection: selection, performAction: { action in
+                            pendingReaderAction = action
+                            self.selection = nil
+                        }).frame(minWidth: 540, minHeight: 480)
                     }
                 }
             }
@@ -291,7 +299,7 @@ struct ThoughtPanoramaView: View {
             }.frame(maxHeight: 160)
         }.padding(.horizontal, 18).padding(.vertical, 12)
     }
-    private func inspector(_ snapshot: PanoramaSnapshot, selection: PanoramaSelection) -> some View {
+    private func inspector(_ snapshot: PanoramaSnapshot, selection: PanoramaSelection, performAction: @escaping (@escaping () -> Void) -> Void = { $0() }) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack { Text("核对这条线索").font(.headline); Spacer(); Button { self.selection = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }
@@ -301,7 +309,7 @@ struct ThoughtPanoramaView: View {
                         Text(question.title).font(.title3.weight(.semibold))
                         Text("AI 归纳 · 未表示本人认可").font(.caption).foregroundStyle(.secondary)
                         Text(question.summary)
-                        evidenceList(question.evidence, snapshot: snapshot)
+                        evidenceList(question.evidence, snapshot: snapshot, performAction: performAction)
                         ForEach(snapshot.proposal.relations.filter { $0.from == id || $0.to == id }) { relation in
                             Button("候选联系 · " + relation.label) { self.selection = .relation(relation.id) }
                         }
@@ -315,18 +323,18 @@ struct ThoughtPanoramaView: View {
                             Button(question.title) { self.selection = .question(question.id) }
                         }
                         Text("一侧原话").font(.headline)
-                        evidenceList(relation.fromEvidence, snapshot: snapshot)
+                        evidenceList(relation.fromEvidence, snapshot: snapshot, performAction: performAction)
                         Text("另一侧原话").font(.headline)
-                        evidenceList(relation.toEvidence, snapshot: snapshot)
+                        evidenceList(relation.toEvidence, snapshot: snapshot, performAction: performAction)
                         Text("对联系有异议，可沿线讨论。原话与理解更正分别返回材料的正式更正入口。").font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                Button { discuss(snapshot.id, selection) } label: { HStack { Text("沿这条线索继续"); Spacer(); Image(systemName: "arrow.right") }.padding(8) }.buttonStyle(.borderedProminent)
+                Button { performAction { discuss(snapshot.id, selection) } } label: { HStack { Text("沿这条线索继续"); Spacer(); Image(systemName: "arrow.right") }.padding(8) }.buttonStyle(.borderedProminent)
                 Text("带入相关完整表达与节目原文，先打开可编辑的 AI 候选草稿；点击发送后才成为你的提问。").font(.caption).foregroundStyle(.secondary)
             }.padding(20)
         }
     }
-    private func evidenceList(_ evidence: [PanoramaEvidence], snapshot: PanoramaSnapshot) -> some View {
+    private func evidenceList(_ evidence: [PanoramaEvidence], snapshot: PanoramaSnapshot, performAction: @escaping (@escaping () -> Void) -> Void) -> some View {
         ForEach(Array(evidence.enumerated()), id: \.offset) { _, item in
             if let source = snapshot.input.sources.first(where: { $0.id == item.sourceID }) {
                 VStack(alignment: .leading, spacing: 9) {
@@ -334,8 +342,8 @@ struct ThoughtPanoramaView: View {
                     Text("“" + item.quote + "”").textSelection(.enabled)
                     Text(source.occurredAt + " · " + source.title).font(.caption).foregroundStyle(.secondary)
                     Text(evidenceTime(item, source: source) + " · 当前原文第 \(item.start)–\(item.end) 字符").font(.caption2).foregroundStyle(.secondary)
-                    HStack { Button("完整原文") { openSource(item.sourceID) }; Button("更正原文") { correctSource(item.sourceID) } }
-                    ForEach(item.claimIDs, id: \.self) { id in Button("更正这条理解或归属") { correctClaim(id) } }
+                    HStack { Button("完整原文") { performAction { openSource(item.sourceID) } }; Button("更正原文") { performAction { correctSource(item.sourceID) } } }
+                    ForEach(item.claimIDs, id: \.self) { id in Button("更正这条理解或归属") { performAction { correctClaim(id) } } }
                 }.padding(13).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 13))
             }
         }
