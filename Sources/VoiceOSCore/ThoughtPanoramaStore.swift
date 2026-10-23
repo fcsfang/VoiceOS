@@ -156,6 +156,22 @@ extension VoiceOSStore {
     private func panoramaStep<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, input: Input,
         whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
         validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }, retainSemanticRejection: Bool = false) async throws -> (Result, PanoramaReceipt) {
+        var retries=0
+        while true {
+            do {
+                return try await panoramaStepAttempt(attemptID: attemptID,stage: stage,scopeID: scopeID,input: input,whole: whole,identity: identity,
+                    operation: operation,validate: validate,normalize: normalize,retainSemanticRejection: retainSemanticRejection)
+            } catch {
+                guard retries < 2, let network=error as? URLError,
+                      [.networkConnectionLost,.timedOut,.notConnectedToInternet].contains(network.code) else { throw error }
+                retries += 1
+                try await Task.sleep(for: .seconds(retries))
+            }
+        }
+    }
+    private func panoramaStepAttempt<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, input: Input,
+        whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
+        validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }, retainSemanticRejection: Bool = false) async throws -> (Result, PanoramaReceipt) {
         try Task.checkCancellation()
         try requirePanoramaManifest(whole.manifest)
         let json=try Self.relevanceJSON(input)
