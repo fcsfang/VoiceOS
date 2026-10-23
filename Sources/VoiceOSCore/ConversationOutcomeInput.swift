@@ -45,16 +45,19 @@ public struct ConversationOutcomeProposal:Codable,Sendable {
 }
 extension VoiceOSStore {
     /// Local preparation only. No model, endorsement, candidate or action side effects.
-    public func prepareConversationOutcome(id:String,expectedVersion:Int,destination:ModelDestination,scalarBudget:Int=8000,commandID:String=UUID().uuidString) throws -> ConversationOutcomeSnapshot {
-        guard ready,!commandID.isEmpty,(1...12000).contains(scalarBudget) else { throw VoiceOSError("讨论成果准备命令无效") }
+    public func prepareConversationOutcome(id:String,expectedVersion:Int,destination:ModelDestination,scalarBudget:Int=Int.max,commandID:String=UUID().uuidString) throws -> ConversationOutcomeSnapshot {
+        guard ready,!commandID.isEmpty,scalarBudget > 0 else { throw VoiceOSError("讨论成果准备命令无效") }
         let session=try conversation(id:id)
         guard session.validity == "current",session.version == expectedVersion else { throw VoiceOSError("讨论成果版本或来源已变化") }
         let history=try conversationHistorySources(conversationID:id).map(\.sourceID),turns=try conversationUserTurns(conversationID:id)
         guard !turns.isEmpty else { throw VoiceOSError("讨论没有个人发言，不提取成果") }
         var ids=history
-        for turn in turns where !ids.contains(turn.sourceID) { ids.append(turn.sourceID) }
-        let context=try prepareLocalTranscriptContext(sourceIDs:ids,scalarBudget:scalarBudget)
+        for turn in turns {
+            for source in try storedConversationContext(turn.contextID).sources where !ids.contains(source.sourceID) { ids.append(source.sourceID) }
+        }
         let replies=try outcomeReplies(id,destination:destination)
+        let replySize=replies.reduce(0) { $0 + $1.parts.reduce(0) { $0 + $1.text.unicodeScalars.count } }
+        let context=try prepareCompleteConversationContext(sourceIDs:ids,scalarBudget:scalarBudget,replyScalars:replySize)
         try Self.validateOutcomeBudget(context,replies)
         let contextID=try persistLocalContext(context,commandID:"discussion-outcome:"+commandID,destination:destination)
         let input=PreparedConversationInput(conversationID:id,conversationVersion:session.version,contextID:contextID,historySourceIDs:history,userTurns:turns.map { ConversationTurnReference(turnID:$0.id,sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID) },destination:destination)
@@ -71,8 +74,10 @@ extension VoiceOSStore {
         let current=try localContext(id:input.contextID),history=try conversationHistorySources(conversationID:input.conversationID).map(\.sourceID),turns=try conversationUserTurns(conversationID:input.conversationID)
         let refs=turns.map { ConversationTurnReference(turnID:$0.id,sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID) }
         var ids=history
-        for turn in turns where !ids.contains(turn.sourceID) { ids.append(turn.sourceID) }
-        guard history == input.historySourceIDs,refs == input.userTurns,current.sources.map(\.sourceID) == ids,
+        for turn in turns {
+            for source in try storedConversationContext(turn.contextID).sources where !ids.contains(source.sourceID) { ids.append(source.sourceID) }
+        }
+        guard history == input.historySourceIDs,refs == input.userTurns,current.sources.map(\.sourceID) == (try completeConversationSourceIDs(ids)),
               try Self.relevanceJSON(current) == Self.relevanceJSON(snapshot.context),
               try Self.relevanceJSON(outcomeReplies(input.conversationID,destination:input.destination)) == Self.relevanceJSON(snapshot.replies),
               input.destination != .cloud || current.sources.allSatisfy({ !$0.localOnly }) else { throw VoiceOSError("讨论成果实际输入、角色或许可不符") }
@@ -91,7 +96,7 @@ extension VoiceOSStore {
     }
     static func validateOutcomeBudget(_ context:LocalTranscriptContext,_ replies:[ConversationOutcomeReply]) throws {
         let size=context.sources.reduce(0) { $0+$1.text.unicodeScalars.count }+replies.reduce(0) { $0+$1.parts.reduce(0) { $0+$1.text.unicodeScalars.count } }
-        guard (1...12000).contains(context.scalarBudget),size <= context.scalarBudget,size <= 12000 else { throw VoiceOSError("完整讨论成果输入超过预算，不静默删减历史") }
+        guard context.scalarBudget > 0,size <= context.scalarBudget else { throw VoiceOSError("完整讨论成果输入超过预算，不静默删减历史") }
     }
     public static func validateConversationOutcomeProposals(_ proposals:[ConversationOutcomeProposal],snapshot:ConversationOutcomeSnapshot) throws {
         for proposal in proposals {

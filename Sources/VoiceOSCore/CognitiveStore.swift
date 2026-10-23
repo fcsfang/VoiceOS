@@ -81,13 +81,14 @@ extension VoiceOSStore {
         try validateLocalTranscriptContext(context)
         if destination == .cloud, context.sources.contains(where: \.localOnly) { throw VoiceOSError("仅本地来源不能用于云端处理") }
         let id = UUID().uuidString
-        try db.transaction {
-            try db.execute("INSERT INTO contexts(id,command_id,snapshot_json,digest,state,created_at,destination) VALUES(?,?,?,?,'current',?,?)", [id,commandID,snapshot,context.contentDigest,timestamp(),destination.rawValue])
-            for input in context.sources {
-                try db.execute("INSERT INTO context_inputs(id,context_id,source_id,transcript_version_id,policy_version) VALUES(?,?,?,?,?)", [UUID().uuidString,id,input.sourceID,input.transcriptVersionID,try db.query("SELECT policy_version FROM sources WHERE id=?", [input.sourceID]).first?["policy_version"]])
-            }
-        }
+        try db.transaction { try insertValidatedLocalContext(context, id: id, commandID: commandID, destination: destination) }
         return id
+    }
+    func insertValidatedLocalContext(_ context: LocalTranscriptContext, id: String, commandID: String, destination: ModelDestination) throws {
+        try db.execute("INSERT INTO contexts(id,command_id,snapshot_json,digest,state,created_at,destination) VALUES(?,?,?,?,'current',?,?)", [id,commandID,try json(context),context.contentDigest,timestamp(),destination.rawValue])
+        for input in context.sources {
+            try db.execute("INSERT INTO context_inputs(id,context_id,source_id,transcript_version_id,policy_version) VALUES(?,?,?,?,?)", [UUID().uuidString,id,input.sourceID,input.transcriptVersionID,try db.query("SELECT policy_version FROM sources WHERE id=?", [input.sourceID]).first?["policy_version"]])
+        }
     }
     public func localContext(id: String) throws -> LocalTranscriptContext {
         guard let row = try db.query("SELECT * FROM contexts WHERE id=? AND state='current'", [id]).first else { throw VoiceOSError("上下文已失效或不存在") }

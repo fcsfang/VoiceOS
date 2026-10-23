@@ -136,7 +136,7 @@ extension VoiceOSStore {
         // Whole transcript texts are included once; role references do not duplicate their content.
         let count = snapshot.context.sources.reduce(0) { $0+$1.text.unicodeScalars.count }
                     + snapshot.priorReplies.reduce(0) { $0+$1.parts.reduce(0) { $0+$1.text.unicodeScalars.count } }
-        guard count <= snapshot.context.scalarBudget, count <= 12000 else { throw VoiceOSError("完整讨论输入超过预算；请缩小范围，不会静默丢弃早期历史") }
+        guard count <= snapshot.context.scalarBudget else { throw VoiceOSError("完整讨论输入超过预算；请缩小范围，不会静默丢弃早期历史") }
     }
     static func validateDiscussionParts(_ parts:[DiscussionPart],context:LocalTranscriptContext) throws {
         guard (1...8).contains(parts.count), parts.reduce(0, { $0+$1.text.unicodeScalars.count }) <= 4000 else { throw VoiceOSError("讨论响应为空或超过范围") }
@@ -196,8 +196,7 @@ extension VoiceOSStore {
                 for source in saved.sources where !historicalSources.contains(where: { $0.sourceID == source.sourceID }) { historicalSources.append(source) }
             }
             guard try relevanceJSON(historicalSources) == relevanceJSON(s.context.sources) else { throw VoiceOSError("讨论实际文本与回合来源不符") }
-            var ids = s.input.historySourceIDs
-            for ref in s.input.userTurns where !ids.contains(ref.sourceID) { ids.append(ref.sourceID) }
+            let ids = historicalSources.map(\.sourceID)
             guard s.context.sources.map(\.sourceID) == ids,
                   s.input.destination == .local || s.context.sources.allSatisfy({ !$0.localOnly }),
                   Set(s.priorReplies.map(\.attemptID)).count == s.priorReplies.count else { throw VoiceOSError("讨论实际来源或衍生限制不符") }
