@@ -6,20 +6,22 @@ import VoiceOSPlatform
 private actor ProgressivePanoramaFixture: PanoramaModelPort {
     nonisolated let configurationIdentity: String
     let rejectUnits: Bool
+    let repairUnits: Bool
     let invalidQuote: Bool
     let failGenerationAt: Int?
     let beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)?
     var transientFailures: Int
     var failCoverage: Bool
     var failConsistency: Bool
-    var generations=0, unitReviews=0, syntheses=0, globalRepairs=0, evidenceReviews=0, coverageReviews=0, consistencyReviews=0
+    var generations=0, unitReviews=0, unitRepairs=0, syntheses=0, globalRepairs=0, evidenceReviews=0, coverageReviews=0, consistencyReviews=0
+    var generatedSourceIDs: [[String]]=[]
     var serial=0
     var sawPriorGlobalRejection=false
     var coverageTargets: [PanoramaCoverageTarget]=[]
 
-    init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false, invalidQuote: Bool = false,
+    init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false, repairUnits: Bool = false, invalidQuote: Bool = false,
          failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil) {
-        configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits; self.invalidQuote=invalidQuote
+        configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits; self.repairUnits=repairUnits; self.invalidQuote=invalidQuote
         self.failCoverage=failCoverage; self.failConsistency=failConsistency; self.beforeGenerate=beforeGenerate; self.transientFailures=transientFailures
     }
     private func receipt() -> PanoramaReceipt {
@@ -33,6 +35,7 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     }
     func generate(_ input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt) {
         generations += 1
+        generatedSourceIDs.append(input.sources.map(\.id))
         if transientFailures > 0 { transientFailures -= 1; throw URLError(.networkConnectionLost) }
         if generations == failGenerationAt { throw VoiceOSError("模拟后续单元暂停") }
         try await beforeGenerate?(input)
@@ -47,10 +50,11 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     }
     func verify(_ proposal: PanoramaProposal, input: PanoramaInput, priorRejection: PanoramaRejection?) async throws -> (PanoramaReview, PanoramaReceipt) {
         unitReviews += 1
-        return (review(proposal,accepted: !rejectUnits),receipt())
+        return (review(proposal,accepted: !rejectUnits && (!repairUnits || priorRejection != nil)),receipt())
     }
     func repair(_ proposal: PanoramaProposal, input: PanoramaInput, review: PanoramaReview) async throws -> (PanoramaProposal, PanoramaReceipt) {
-        (proposal,receipt())
+        unitRepairs += 1
+        return (proposal,receipt())
     }
     func synthesize(_ proposals: [PanoramaUnitProposal], input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt) {
         syntheses += 1
@@ -147,6 +151,7 @@ extension CoreFlowTests {
         do { _ = try await store.beginPanoramaConversation(snapshotID: snapshot.id,selection: .relation("global-edge")); XCTFail("许可变化应撤下旧全景") } catch {}
         try await assertPanoramaRejectsUnverified(root: root)
         try await assertPanoramaConfigurationReuse(root: root)
+        try await assertPanoramaCompleteUnitReuse(root: root)
         try await assertPanoramaManifestDuringAwait(root: root)
         try await assertPanoramaUnknownRecovery(root: root)
         try await assertPanoramaStagedWire()
@@ -174,6 +179,11 @@ extension CoreFlowTests {
         XCTAssertNil(state.snapshot)
         let unitReviews=await port.unitReviews
         XCTAssertEqual(unitReviews,2)
+        _ = try await appendPanoramaFixture(store,text: String(repeating: "新增独立材料仍须完整核对。",count: 30))
+        do { try await store.generatePanorama(using: port); XCTFail("旧单元的拒绝结果不能跨全景发布") } catch {}
+        let rejectedAgain=try await store.panoramaState(), rejectedGenerations=await port.generations
+        XCTAssertNil(rejectedAgain.snapshot)
+        XCTAssertEqual(rejectedGenerations,2)
         let directory=root.appendingPathComponent("invalid-quote")
         let invalid=try await panoramaFixtureStore(directory,count: 1)
         let invalidPort=ProgressivePanoramaFixture(identity: "invalid-quote-fixture",invalidQuote: true)
@@ -202,6 +212,65 @@ extension CoreFlowTests {
         XCTAssertEqual(generations,2)
         let state=try await store.panoramaState(), snapshot=try XCTUnwrap(state.snapshot)
         XCTAssertTrue(snapshot.workflow?.receipts.filter { $0.stage == "unit.generate" }.allSatisfy { $0.receipt.model == "second-model" } == true)
+    }
+    private func appendPanoramaFixture(_ store: VoiceOSStore, text: String) async throws -> String {
+        let id=try await store.recordUserExpression(text)
+        _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+        let context=try await store.prepareLocalTranscriptContext(sourceIDs: [id], scalarBudget: Int.max)
+        _ = try await store.importOrganizedClaims(context: context, proposals: [], commandID: UUID().uuidString)
+        return id
+    }
+    private func assertPanoramaCompleteUnitReuse(root: URL) async throws {
+        let directory=root.appendingPathComponent("complete-unit-reuse")
+        let store=try await panoramaFixtureStore(directory, count: 1)
+        let originalInput=try await store.panoramaInput(), source=try XCTUnwrap(originalInput.sources.first)
+        let context=try await store.prepareLocalTranscriptContext(sourceIDs: [source.id], scalarBudget: Int.max)
+        let claimIDs=try await store.importOrganizedClaims(context: context, proposals: [.init(statement: source.transcript.text, ownership: .unresolved,
+            references: [.init(sourceID: source.id, transcriptVersionID: source.transcript.transcriptVersionID, spanID: source.transcript.spans[0].id)])], commandID: "reuse-claim")
+        let port=ProgressivePanoramaFixture(repairUnits: true, failConsistency: true)
+        do { try await store.generatePanorama(using: port); XCTFail("全局未完成应保留已修复单元") } catch {}
+        let first=try await store.panoramaState(), prior=try XCTUnwrap(first.snapshot)
+        let originalReceipt=try XCTUnwrap(prior.workflow?.receipts.first { $0.stage == "unit.generate" && $0.scopeID == source.id })
+        XCTAssertEqual(originalReceipt.receipt.responseID,"progressive-fixture-response-3")
+        let added=try await appendPanoramaFixture(store,text: "新增独立材料，保留不同的检索条件。")
+        try await store.generatePanorama(using: port)
+        let second=try await store.panoramaState(), snapshot=try XCTUnwrap(second.snapshot)
+        XCTAssertEqual(second.status,"completed")
+        XCTAssertNotEqual(snapshot.input.manifest.digest,prior.input.manifest.digest)
+        let counts=await (port.generations,port.unitReviews,port.unitRepairs,port.syntheses,port.consistencyReviews)
+        XCTAssertEqual(counts.0,2); XCTAssertEqual(counts.1,4); XCTAssertEqual(counts.2,2)
+        XCTAssertEqual(counts.3,2); XCTAssertEqual(counts.4,2)
+        let generatedSources=await port.generatedSourceIDs
+        XCTAssertEqual(generatedSources,[[source.id],[added]])
+        let reusedReceipt=try XCTUnwrap(snapshot.workflow?.receipts.first { $0.stage == "unit.generate" && $0.scopeID == source.id })
+        XCTAssertEqual(reusedReceipt.receipt.responseID,originalReceipt.receipt.responseID)
+        let database=try Database(directory.appendingPathComponent("voiceos.sqlite"))
+        XCTAssertTrue(try database.query("SELECT id FROM panorama_steps WHERE attempt_id=? AND scope_id=? AND stage LIKE 'unit.%'",[snapshot.id,source.id]).isEmpty)
+        XCTAssertFalse(try database.query("SELECT id FROM panorama_steps WHERE attempt_id=? AND stage='global.synthesize'",[snapshot.id]).isEmpty)
+        _ = try await store.reviewClaim(claimID: claimIDs[0],expectedVersion: 0,action: .correct,statement: "检索条件已更正，必须重新核对。",note: "核对原意")
+        try await store.generatePanorama(using: port)
+        let afterClaim=await port.generatedSourceIDs
+        XCTAssertEqual(afterClaim,[[source.id],[added],[source.id]])
+        _ = try await store.correctTranscript(sourceID: source.id,expectedVersionID: source.transcript.transcriptVersionID,text: source.transcript.text + "保留新增的否定条件。")
+        let changed=try await store.prepareLocalTranscriptContext(sourceIDs: [source.id],scalarBudget: Int.max)
+        _ = try await store.importOrganizedClaims(context: changed,proposals: [],commandID: "changed-source")
+        try await store.generatePanorama(using: port)
+        let afterSource=await port.generatedSourceIDs
+        XCTAssertEqual(afterSource.last,[source.id]); XCTAssertEqual(afterSource.count,4)
+        let policy=try await store.sourcePolicy(sourceID: source.id)
+        let revoked=try await store.setSourceLocalOnly(sourceID: source.id,expectedVersion: policy.version,localOnly: true)
+        _ = try await store.setSourceLocalOnly(sourceID: source.id,expectedVersion: revoked,localOnly: false)
+        let allowed=try await store.prepareLocalTranscriptContext(sourceIDs: [source.id],scalarBudget: Int.max)
+        _ = try await store.importOrganizedClaims(context: allowed,proposals: [],commandID: "changed-policy")
+        try await store.generatePanorama(using: port)
+        let afterPolicy=await port.generatedSourceIDs
+        XCTAssertEqual(afterPolicy.last,[source.id]); XCTAssertEqual(afterPolicy.count,5)
+        _ = try await appendPanoramaFixture(store,text: "第三份独立材料，配置改变后重新理解。")
+        let changedPort=ProgressivePanoramaFixture(identity: "changed-config")
+        try await store.generatePanorama(using: changedPort)
+        let changedCalls=await changedPort.generations
+        XCTAssertEqual(changedCalls,3)
+        print("Panorama complete-unit reuse preserved accepted repair receipt, skipped unchanged unit calls, reran global synthesis, and invalidated claim/source/policy/config changes")
     }
     private func assertPanoramaManifestDuringAwait(root: URL) async throws {
         let store=try await panoramaFixtureStore(root.appendingPathComponent("invalidation"),count: 1)
