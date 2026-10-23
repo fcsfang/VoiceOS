@@ -1277,6 +1277,8 @@ final class CoreFlowTests: XCTestCase {
     }
 
     func testIdeaFindsHistoryWithoutCreatingTask() async throws {
+        try assertPanoramaDatabaseReopens()
+        try await assertPanoramaSchemaRepair()
         let store = try await openStore(), model = FlowModel()
         let oldID = try await expression(store, text: "记忆系统需要关注检索质量。", model: model)
         let previous = try await store.retrieve("检索质量", using: NativeRetrieval())
@@ -1566,6 +1568,47 @@ final class CoreFlowTests: XCTestCase {
         let invalidated=try await store.panoramaState()
         XCTAssertNil(invalidated.snapshot)
         do { _ = try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .question(snapshot.proposal.questions[0].id)); XCTFail("旧图不能继续讨论") } catch {}
+    }
+
+    private func assertPanoramaDatabaseReopens() throws {
+        let url=root.appendingPathComponent("panorama-schema.sqlite")
+        var created: Database?=try Database(url)
+        XCTAssertEqual(try created?.query("PRAGMA user_version").first?["user_version"], "49")
+        created=nil
+        let reopened=try Database(url)
+        XCTAssertEqual(try reopened.query("PRAGMA table_info(panorama_steps)").filter { $0["name"] == "receipt_json" }.count, 1)
+    }
+    private func assertPanoramaSchemaRepair() async throws {
+        let text="格式核对需要完整原文。"
+        let transcript=ContextTranscript(sourceID: "format-source", sourceVersionID: "format-source-version", transcriptVersionID: "format-version", origin: "user", speaker: "user", localOnly: false,
+            text: text, spans: [.init(textStart: 0, textEnd: text.unicodeScalars.count)])
+        let input=PanoramaInput(manifest: .init(digest: "format-fixture", sourceIDs: [transcript.sourceID], claimIDs: [], unitIDs: ["format-unit"]),
+            units: [.init(id: "format-unit", sourceIDs: [transcript.sourceID], dependencyIDs: [], producerID: "format-producer", completionDigest: "format-complete")],
+            sources: [.init(transcript: transcript, title: "格式回放", occurredAt: "2026-10-23", policyVersion: 1)], claims: [], exclusions: [])
+        let evidence: [String: Any]=["sourceID":"s1","transcriptVersionID":"t1","start":0,"end":text.unicodeScalars.count,"quote":text,"claimIDs":[]]
+        let nestedQuestion: [String: Any]=["id":"q","title":"如何核对格式？","summary":"保留原话","evidence":[evidence]]
+        let bad: [String: Any]=["regions":[["id":"r","title":"格式核对","summary":"保留原话","questions":[nestedQuestion]]], "relations":[], "unrepresentedSources":[], "unrepresentedClaims":[]]
+        var flatQuestion=nestedQuestion; flatQuestion["regionID"]="r"
+        let valid: [String: Any]=["regions":[["id":"r","title":"格式核对","summary":"保留原话"]], "questions":[flatQuestion], "relations":[], "unrepresentedSources":[], "unrepresentedClaims":[]]
+        func reply(_ object: [String: Any], id: String) throws -> ModelHTTPReply {
+            let content=String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+            return .init(status: 200, body: try JSONSerialization.data(withJSONObject: ["id":id,"status":"completed","output":[["type":"message","role":"assistant","status":"completed","content":[["type":"output_text","text":content]]]]]))
+        }
+        let transport=FlowFollowupTransport(try [reply(bad,id: "nested-fixture"),reply(valid,id: "flat-fixture")])
+        let port=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: transport)
+        let (proposal,receipt)=try await port.generate(input)
+        _ = try VoiceOSStore.validatePanorama(proposal, input: input)
+        XCTAssertEqual(receipt.responseID,"flat-fixture")
+        XCTAssertEqual(proposal.questions.first?.regionID,"r")
+        let requests=await transport.requests
+        XCTAssertEqual(requests.count,2)
+        let body=try XCTUnwrap(JSONSerialization.jsonObject(with: requests[1]) as? [String: Any])
+        let messages=try XCTUnwrap(body["input"] as? [[String: Any]])
+        let instruction=try XCTUnwrap(messages.last?["content"] as? String)
+        XCTAssertTrue(instruction.contains("keyNotFound"))
+        XCTAssertTrue(instruction.contains("$.questions"))
+        XCTAssertTrue(instruction.contains("regionID"))
+        XCTAssertTrue(instruction.contains("绝不嵌套 questions"))
     }
 
     func testPeriodReflectionKeepsKnowledgeActionsResultsAndCompleteEvidence() async throws {
