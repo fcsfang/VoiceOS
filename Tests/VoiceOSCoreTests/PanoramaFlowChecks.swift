@@ -8,6 +8,7 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     let rejectUnits: Bool
     let failGenerationAt: Int?
     let beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)?
+    var transientFailures: Int
     var failCoverage: Bool
     var failConsistency: Bool
     var generations=0, unitReviews=0, syntheses=0, globalRepairs=0, evidenceReviews=0, coverageReviews=0, consistencyReviews=0
@@ -16,9 +17,9 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     var coverageTargets: [PanoramaCoverageTarget]=[]
 
     init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false,
-         failCoverage: Bool = false, failConsistency: Bool = false, beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil) {
+         failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil) {
         configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits
-        self.failCoverage=failCoverage; self.failConsistency=failConsistency; self.beforeGenerate=beforeGenerate
+        self.failCoverage=failCoverage; self.failConsistency=failConsistency; self.beforeGenerate=beforeGenerate; self.transientFailures=transientFailures
     }
     private func receipt() -> PanoramaReceipt {
         serial += 1
@@ -31,7 +32,8 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     }
     func generate(_ input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt) {
         generations += 1
-        if generations == failGenerationAt { throw URLError(.timedOut) }
+        if transientFailures > 0 { transientFailures -= 1; throw URLError(.networkConnectionLost) }
+        if generations == failGenerationAt { throw VoiceOSError("模拟后续单元暂停") }
         try await beforeGenerate?(input)
         let questions=input.sources.enumerated().map { index, source in
             PanoramaQuestion(id: "q"+String(index), regionID: "r", title: "如何保留完整检索条件？", summary: source.title,
@@ -78,7 +80,7 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     }
     func verifyCoverage(_ proposal: PanoramaProposal, input: PanoramaInput, target: PanoramaCoverageTarget, rejections: [PanoramaRejection]) async throws -> (PanoramaReview, PanoramaReceipt) {
         coverageReviews += 1
-        if failCoverage { failCoverage=false; throw URLError(.timedOut) }
+        if failCoverage { failCoverage=false; throw VoiceOSError("模拟全局覆盖暂停") }
         XCTAssertTrue(Set(target.sourceIDs).isSubset(of: Set(input.manifest.sourceIDs)))
         XCTAssertTrue(Set(target.claimIDs).isSubset(of: Set(input.manifest.claimIDs)))
         coverageTargets.append(target)
@@ -86,7 +88,7 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     }
     func verifyConsistency(_ proposal: PanoramaProposal, input: PanoramaInput, unitProposals: [PanoramaUnitProposal], reviews: [PanoramaScopedReview], rejections: [PanoramaRejection]) async throws -> (PanoramaReview, PanoramaReceipt) {
         consistencyReviews += 1
-        if failConsistency { failConsistency=false; throw URLError(.timedOut) }
+        if failConsistency { failConsistency=false; throw VoiceOSError("模拟最后一致性暂停") }
         sawPriorGlobalRejection=rejections.contains { $0.review.relations.contains { !$0.accepted } }
         XCTAssertEqual(Set(unitProposals.map(\.unitID)),Set(input.manifest.unitIDs))
         XCTAssertEqual(Set(reviews.filter { $0.stage == "global.question" }.map(\.scopeID)),Set(proposal.questions.map(\.id)))
@@ -147,6 +149,7 @@ extension CoreFlowTests {
         try await assertPanoramaManifestDuringAwait(root: root)
         try await assertPanoramaUnknownRecovery(root: root)
         try await assertPanoramaStagedWire()
+        try await assertPanoramaTransientRetry(root: root)
     }
     private func panoramaFixtureStore(_ root: URL, count: Int) async throws -> VoiceOSStore {
         let store=try VoiceOSStore(root: root,inspector: NativeMediaInspector())
@@ -191,6 +194,34 @@ extension CoreFlowTests {
         do { try await store.generatePanorama(using: port); XCTFail("请求期间授权变化不能发布") } catch {}
         let invalidated=try await store.panoramaState()
         XCTAssertNil(invalidated.snapshot)
+    }
+    private func assertPanoramaTransientRetry(root: URL) async throws {
+        let directory=root.appendingPathComponent("transient-retry")
+        let store=try await panoramaFixtureStore(directory,count: 1)
+        let port=ProgressivePanoramaFixture(transientFailures: 2)
+        try await store.generatePanorama(using: port)
+        let state=try await store.panoramaState(), generations=await port.generations
+        XCTAssertEqual(state.status,"completed")
+        XCTAssertEqual(generations,3)
+        let database=try Database(directory.appendingPathComponent("voiceos.sqlite"))
+        let steps=try database.query("SELECT state,receipt_json FROM panorama_steps WHERE stage='unit.generate' ORDER BY rowid")
+        XCTAssertEqual(steps.compactMap { $0["state"] },["failed","failed","completed"])
+        XCTAssertNil(steps[0]["receipt_json"])
+        XCTAssertNotNil(steps[2]["receipt_json"])
+        let exhausted=try await panoramaFixtureStore(root.appendingPathComponent("retry-exhausted"),count: 1)
+        let exhaustedPort=ProgressivePanoramaFixture(transientFailures: 3)
+        do { try await exhausted.generatePanorama(using: exhaustedPort); XCTFail("瞬时重试预算用尽应停止") } catch {}
+        let failed=try await exhausted.panoramaState(), failedCalls=await exhaustedPort.generations
+        XCTAssertEqual(failed.status,"failed")
+        XCTAssertNil(failed.snapshot)
+        XCTAssertEqual(failedCalls,3)
+        try await exhausted.generatePanorama(using: exhaustedPort)
+        let unchangedCalls=await exhaustedPort.generations
+        XCTAssertEqual(unchangedCalls,3)
+        try await exhausted.generatePanorama(using: exhaustedPort,retry: true)
+        let resumed=try await exhausted.panoramaState(), resumedCalls=await exhaustedPort.generations
+        XCTAssertEqual(resumed.status,"completed")
+        XCTAssertEqual(resumedCalls,4)
     }
     private func assertPanoramaUnknownRecovery(root: URL) async throws {
         let directory=root.appendingPathComponent("unknown")
