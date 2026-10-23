@@ -125,11 +125,35 @@ extension VoiceOSStore {
         }
     }
     private func verifyPanoramaUnit(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, attemptID: String, port: any PanoramaModelPort) async throws -> VerifiedPanoramaUnit {
-        var generated: (PanoramaProposal, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "unit.generate", scopeID: unitID,
+        try Task.checkCancellation()
+        try requirePanoramaManifest(whole.manifest)
+        let candidates=try db.query("SELECT attempt_id,input_json FROM panorama_steps WHERE stage='unit.generate' AND scope_id=? AND state='completed' AND attempt_id!=? ORDER BY rowid DESC", [unitID,attemptID])
+        for candidate in candidates {
+            var reused: VerifiedPanoramaUnit?
+            do {
+                let saved=try JSONDecoder().decode(PanoramaInput.self, from: Data(candidate["input_json"]!.utf8))
+                let current=PanoramaInput(manifest: .init(digest: saved.manifest.digest, sourceIDs: input.manifest.sourceIDs, claimIDs: input.manifest.claimIDs, unitIDs: input.manifest.unitIDs),
+                    units: input.units, sources: input.sources, claims: input.claims, exclusions: input.exclusions)
+                if try Self.relevanceJSON(current) == Self.relevanceJSON(saved) {
+                    reused=try await verifyPanoramaUnitStages(unitID, input: saved, whole: whole, attemptID: candidate["attempt_id"]!, port: port, replayOnly: true)
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch {}
+            try Task.checkCancellation()
+            try requirePanoramaManifest(whole.manifest)
+            if let reused {
+                return .init(unitID: unitID, input: input, proposal: reused.proposal, generation: reused.generation,
+                    review: reused.review, verification: reused.verification, rejection: reused.rejection)
+            }
+        }
+        return try await verifyPanoramaUnitStages(unitID, input: input, whole: whole, attemptID: attemptID, port: port)
+    }
+    private func verifyPanoramaUnitStages(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, attemptID: String, port: any PanoramaModelPort, replayOnly: Bool = false) async throws -> VerifiedPanoramaUnit {
+        var generated: (PanoramaProposal, PanoramaReceipt)=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.generate", scopeID: unitID, replayOnly: replayOnly,
             input: input, whole: whole, identity: port.configurationIdentity, operation: { try await port.generate(input) }, validate: { proposal, _ in
                 _ = try Self.validatePanorama(proposal, input: input)
             }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
-        let first: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "unit.review", scopeID: unitID,
+        let first: (PanoramaReview, PanoramaReceipt)=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.review", scopeID: unitID, replayOnly: replayOnly,
             input: PanoramaProposalInput(input: input, proposal: generated.0), whole: whole, identity: port.configurationIdentity,
             operation: { try await port.verify(generated.0, input: input, priorRejection: nil) }, validate: { _, _ in })
         var review=first
@@ -139,12 +163,12 @@ extension VoiceOSStore {
             let rejection=PanoramaRejection(proposal: generated.0, review: first.0)
             priorRejection=Self.panoramaRejection(rejection, unitID: unitID)
             let original=generated.0
-            generated=try await panoramaStep(attemptID: attemptID, stage: "unit.repair", scopeID: unitID,
+            generated=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.repair", scopeID: unitID, replayOnly: replayOnly,
                 input: PanoramaRepairInput(input: input, rejection: rejection), whole: whole, identity: port.configurationIdentity,
                 operation: { try await port.repair(original, input: input, review: first.0) }, validate: { proposal, _ in
                     _ = try Self.validatePanorama(proposal, input: input)
                 }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
-            review=try await panoramaStep(attemptID: attemptID, stage: "unit.review-repair", scopeID: unitID,
+            review=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.review-repair", scopeID: unitID, replayOnly: replayOnly,
                 input: PanoramaRepairInput(input: input, rejection: .init(proposal: generated.0, review: first.0)), whole: whole, identity: port.configurationIdentity,
                 operation: { try await port.verify(generated.0, input: input, priorRejection: rejection) }, validate: { value, receipt in
                     try Self.validatePanoramaReview(value, proposal: generated.0, generation: generated.1, verification: receipt)
@@ -152,6 +176,28 @@ extension VoiceOSStore {
         }
         try Self.validatePanoramaReview(review.0, proposal: generated.0, generation: generated.1, verification: review.1)
         return .init(unitID: unitID, input: input, proposal: Self.namespacePanorama(generated.0, unitID: unitID), generation: generated.1, review: review.0, verification: review.1, rejection: priorRejection)
+    }
+    private func panoramaUnitStep<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, replayOnly: Bool,
+        input: Input, whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
+        validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }) async throws -> (Result, PanoramaReceipt) {
+        guard replayOnly else {
+            return try await panoramaStep(attemptID: attemptID, stage: stage, scopeID: scopeID, input: input, whole: whole, identity: identity,
+                operation: operation, validate: validate, normalize: normalize)
+        }
+        let json=try Self.relevanceJSON(input)
+        let digest=Self.panoramaStepDigest(json,identity: identity)
+        guard let row=try db.query("SELECT input_digest,input_json,result_json,receipt_json FROM panorama_steps WHERE attempt_id=? AND stage=? AND scope_id=? AND input_digest=? AND state='completed' ORDER BY rowid DESC LIMIT 1", [attemptID,stage,scopeID,digest]).first,
+              let saved=row["input_json"], saved == json,
+              Self.panoramaStepDigest(saved,identity: identity) == row["input_digest"],
+              let result=row["result_json"], let receipt=row["receipt_json"] else { throw VoiceOSError("完整单元的历史核对链不可复用") }
+        let decoded=try normalize(JSONDecoder().decode(Result.self, from: Data(result.utf8)))
+        let savedReceipt=try JSONDecoder().decode(PanoramaReceipt.self, from: Data(receipt.utf8))
+        guard !savedReceipt.responseID.isEmpty, !savedReceipt.model.isEmpty else { throw VoiceOSError("全景步骤缺少真实完成回执") }
+        try validate(decoded,savedReceipt)
+        return (decoded,savedReceipt)
+    }
+    private static func panoramaStepDigest(_ json: String, identity: String) -> String {
+        relevanceHash(Data(("panorama-staged-v1|"+identity+"|"+json).utf8))
     }
     private func panoramaStep<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, input: Input,
         whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
@@ -175,7 +221,7 @@ extension VoiceOSStore {
         try Task.checkCancellation()
         try requirePanoramaManifest(whole.manifest)
         let json=try Self.relevanceJSON(input)
-        let digest=Self.relevanceHash(Data(("panorama-staged-v1|"+identity+"|"+json).utf8))
+        let digest=Self.panoramaStepDigest(json,identity: identity)
         if let row=try db.query("SELECT result_json,receipt_json FROM panorama_steps WHERE attempt_id=? AND stage=? AND scope_id=? AND input_digest=? AND state='completed' ORDER BY rowid DESC LIMIT 1", [attemptID,stage,scopeID,digest]).first,
            let result=row["result_json"], let receipt=row["receipt_json"] {
             let decoded=try JSONDecoder().decode(Result.self, from: Data(result.utf8))
