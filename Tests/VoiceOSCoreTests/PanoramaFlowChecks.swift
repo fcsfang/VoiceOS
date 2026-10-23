@@ -6,6 +6,7 @@ import VoiceOSPlatform
 private actor ProgressivePanoramaFixture: PanoramaModelPort {
     nonisolated let configurationIdentity: String
     let rejectUnits: Bool
+    let invalidQuote: Bool
     let failGenerationAt: Int?
     let beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)?
     var transientFailures: Int
@@ -16,9 +17,9 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     var sawPriorGlobalRejection=false
     var coverageTargets: [PanoramaCoverageTarget]=[]
 
-    init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false,
+    init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false, invalidQuote: Bool = false,
          failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil) {
-        configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits
+        configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits; self.invalidQuote=invalidQuote
         self.failCoverage=failCoverage; self.failConsistency=failConsistency; self.beforeGenerate=beforeGenerate; self.transientFailures=transientFailures
     }
     private func receipt() -> PanoramaReceipt {
@@ -38,7 +39,7 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
         let questions=input.sources.enumerated().map { index, source in
             PanoramaQuestion(id: "q"+String(index), regionID: "r", title: "如何保留完整检索条件？", summary: source.title,
                 evidence: [.init(sourceID: source.id, transcriptVersionID: source.transcript.transcriptVersionID, start: 0,
-                    end: source.transcript.text.unicodeScalars.count, quote: source.transcript.text,
+                    end: source.transcript.text.unicodeScalars.count, quote: invalidQuote ? "原文不存在的合成引文。" : source.transcript.text,
                     claimIDs: input.claims.filter { claim in claim.references.contains { $0.sourceID == source.id } }.map(\.id))])
         }
         return (.init(regions: [.init(id: "r", title: "检索条件", summary: "完整材料的条件核对")], questions: questions,
@@ -173,6 +174,23 @@ extension CoreFlowTests {
         XCTAssertNil(state.snapshot)
         let unitReviews=await port.unitReviews
         XCTAssertEqual(unitReviews,2)
+        let directory=root.appendingPathComponent("invalid-quote")
+        let invalid=try await panoramaFixtureStore(directory,count: 1)
+        let invalidPort=ProgressivePanoramaFixture(identity: "invalid-quote-fixture",invalidQuote: true)
+        do { try await invalid.generatePanorama(using: invalidPort); XCTFail("非逐字引文不能发布") } catch {}
+        let invalidState=try await invalid.panoramaState()
+        XCTAssertEqual(invalidState.status,"failed")
+        XCTAssertNil(invalidState.snapshot)
+        let database=try Database(directory.appendingPathComponent("voiceos.sqlite"))
+        let step=try XCTUnwrap(database.query("SELECT state,result_json,receipt_json FROM panorama_steps WHERE stage='unit.generate'").first)
+        XCTAssertEqual(step["state"],"failed")
+        let raw=try XCTUnwrap(step["result_json"]), receipt=try XCTUnwrap(step["receipt_json"])
+        let proposal=try JSONDecoder().decode(PanoramaProposal.self,from: Data(raw.utf8))
+        XCTAssertEqual(proposal.questions.first?.evidence.first?.quote,"原文不存在的合成引文。")
+        let actualReceipt=try JSONDecoder().decode(PanoramaReceipt.self,from: Data(receipt.utf8))
+        XCTAssertEqual(actualReceipt.responseID,"invalid-quote-fixture-response-1")
+        XCTAssertEqual(actualReceipt.model,"invalid-quote-fixture")
+        XCTAssertEqual(actualReceipt.createdAt,"2026-10-23T00:00:00Z")
     }
     private func assertPanoramaConfigurationReuse(root: URL) async throws {
         let store=try await panoramaFixtureStore(root.appendingPathComponent("configuration"),count: 2)

@@ -191,9 +191,10 @@ extension VoiceOSStore {
             try Task.checkCancellation()
             try requirePanoramaManifest(whole.manifest)
             guard !receipt.responseID.isEmpty, !receipt.model.isEmpty else { throw VoiceOSError("全景步骤缺少真实完成回执") }
+            receivedResult=try Self.relevanceJSON(raw)
+            receivedReceipt=try Self.relevanceJSON(receipt)
             let result=try normalize(raw)
             receivedResult=try Self.relevanceJSON(result)
-            receivedReceipt=try Self.relevanceJSON(receipt)
             try validate(result,receipt)
             try db.execute("UPDATE panorama_steps SET state='completed',result_json=?,receipt_json=?,finished_at=? WHERE id=?", [try Self.relevanceJSON(result),try Self.relevanceJSON(receipt),Self.now(),id])
             return (result,receipt)
