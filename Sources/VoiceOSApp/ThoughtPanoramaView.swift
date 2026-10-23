@@ -31,7 +31,10 @@ struct ThoughtPanoramaView: View {
                     panorama
                     if hasSideReader, let snapshot = state?.snapshot, let selection {
                         Divider()
-                        inspector(snapshot, selection: selection).frame(width: 310)
+                        inspector(snapshot, selection: selection, performAction: { action in
+                            self.selection = nil
+                            action()
+                        }).frame(width: 310)
                     }
                 }
                 .sheet(isPresented: Binding(
@@ -299,7 +302,7 @@ struct ThoughtPanoramaView: View {
             }.frame(maxHeight: 160)
         }.padding(.horizontal, 18).padding(.vertical, 12)
     }
-    private func inspector(_ snapshot: PanoramaSnapshot, selection: PanoramaSelection, performAction: @escaping (@escaping () -> Void) -> Void = { $0() }) -> some View {
+    private func inspector(_ snapshot: PanoramaSnapshot, selection: PanoramaSelection, performAction: @escaping (@escaping () -> Void) -> Void) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack { Text("核对这条线索").font(.headline); Spacer(); Button { self.selection = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }
