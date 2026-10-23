@@ -16,8 +16,7 @@ struct ThoughtPanoramaView: View {
     let discuss: (String, PanoramaSelection) -> Void
     @State private var query = ""
     @State private var recent = true
-    @State private var zoom = 1.0
-    @State private var gestureZoom = 1.0
+    @State private var focusedRegionID: String?
     @State private var showCoverage = false
     private let palette: [Color] = [.green, .blue, .orange, .purple, .teal, .pink]
 
@@ -25,52 +24,60 @@ struct ThoughtPanoramaView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 0) {
-                    if let snapshot = state?.snapshot, !snapshot.proposal.questions.isEmpty {
-                        graph(snapshot)
-                        HStack(spacing: 16) {
-                            Label("AI 归纳的问题", systemImage: "circle")
-                            if !snapshot.isPartial { Label("虚线 · AI 候选联系，待核对", systemImage: "line.diagonal") }
-                            Spacer()
-                            Button { zoom = max(0.5, zoom - 0.15) } label: { Image(systemName: "minus.magnifyingglass") }
-                            Button("\(Int(zoom * 100))%") { zoom = 1 }
-                            Button { zoom = min(2, zoom + 0.15) } label: { Image(systemName: "plus.magnifyingglass") }
-                        }.font(.caption).foregroundStyle(.secondary).padding(16)
-                        accessibleOutline(snapshot)
-                    } else {
-                        emptyState
+            GeometryReader { geometry in
+                if geometry.size.width >= 980 {
+                    HStack(spacing: 0) {
+                        panorama
+                        if let snapshot = state?.snapshot, let selection {
+                            Divider()
+                            inspector(snapshot, selection: selection).frame(width: 310)
+                        }
                     }
-                    Divider()
-                    coverageButton
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                if let snapshot = state?.snapshot, let selection {
-                    Divider()
-                    inspector(snapshot, selection: selection).frame(width: 310)
+                } else {
+                    VStack(spacing: 0) {
+                        panorama
+                        if let snapshot = state?.snapshot, let selection {
+                            Divider()
+                            inspector(snapshot, selection: selection).frame(height: min(320, geometry.size.height * 0.48))
+                        }
+                    }
                 }
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
         .sheet(isPresented: $showCoverage) { coverage.frame(minWidth: 620, minHeight: 480) }
+        .onAppear { reconcileNavigation() }
+        .onChange(of: navigationIDs) { _, _ in reconcileNavigation() }
+        .onChange(of: selection) { _, _ in focusSelection() }
+    }
+    private var panorama: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let snapshot = state?.snapshot, !snapshot.proposal.questions.isEmpty {
+                graph(snapshot)
+                accessibleOutline(snapshot)
+            } else {
+                emptyState
+            }
+            Divider()
+            coverageButton
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("思考全景").font(.system(size: 28, weight: .semibold))
-                    Text(message).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    if let snapshot=state?.snapshot, snapshot.isPartial {
-                        Text("已核对 \(snapshot.workflow?.verifiedUnitIDs.count ?? 0)/\(snapshot.workflow?.totalUnitCount ?? 0) 个完整单元 · 仅显示已核对区域，跨材料联系与全局覆盖尚未完成").font(.caption).foregroundStyle(.orange)
-                    }
-                }
+                Text("思考全景").font(.system(size: 28, weight: .semibold))
                 Spacer()
                 Picker("时间高亮", selection: $recent) { Text("近期高亮").tag(true); Text("全部").tag(false) }.pickerStyle(.segmented).frame(width: 170)
                 Button("材料", systemImage: "doc.on.doc", action: openMaterials)
             }
+            Text(message).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let snapshot = state?.snapshot, snapshot.isPartial {
+                Text("已核对 \(snapshot.workflow?.verifiedUnitIDs.count ?? 0)/\(snapshot.workflow?.totalUnitCount ?? 0) 个完整单元 · 仅显示已核对区域，跨材料联系与全局覆盖尚未完成").font(.system(size: 13)).foregroundStyle(.orange)
+            }
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("查找问题与联系，长期节点始终保留", text: $query).textFieldStyle(.plain)
-                if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain) }
+                if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("清除查找") }
                 if isGenerating { ProgressView().controlSize(.small) }
                 else if !modelConfigured { Button("连接文本模型", action: chooseTextModel) }
                 else if let state, ["failed", "unknown"].contains(state.status) { Button("继续核对", action: retry) }
@@ -90,69 +97,182 @@ struct ThoughtPanoramaView: View {
         }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private func graph(_ snapshot: PanoramaSnapshot) -> some View {
-        let layout = PanoramaLayout(snapshot.proposal)
-        return ScrollView([.horizontal, .vertical]) {
-            ZStack(alignment: .topLeading) {
-                ForEach(Array(snapshot.proposal.regions.enumerated()), id: \.element.id) { index, region in
-                    let frame = layout.regions[region.id]!
-                    let color = palette[index % palette.count]
-                    RoundedRectangle(cornerRadius: 95).fill(color.opacity(0.055))
-                        .overlay { RoundedRectangle(cornerRadius: 95).stroke(color.opacity(0.06), lineWidth: 1) }
-                        .frame(width: frame.width, height: frame.height).position(x: frame.midX, y: frame.midY)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(region.title).font(.title3.weight(.semibold)).foregroundStyle(color)
-                        Text(region.summary).font(.callout).foregroundStyle(.secondary).lineLimit(2).help(region.summary)
-                    }.frame(width: frame.width - 70, alignment: .leading).position(x: frame.midX, y: frame.minY + 50)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                if focusedRegionID != nil {
+                    Button { focusedRegionID = nil; selection = nil } label: { Label("全部区域", systemImage: "arrow.left") }
                 }
-                Canvas { context, _ in
-                    for relation in snapshot.proposal.relations {
-                        guard let a = layout.questions[relation.from], let b = layout.questions[relation.to], let label = layout.relationLabels[relation.id] else { continue }
-                        var path = Path(); path.move(to: a)
-                        path.addQuadCurve(to: b, control: CGPoint(x: label.x * 2 - (a.x+b.x)/2, y: label.y * 2 - (a.y+b.y)/2))
-                        context.stroke(path, with: .color(selection == .relation(relation.id) ? .accentColor : .secondary.opacity(0.45)), style: StrokeStyle(lineWidth: selection == .relation(relation.id) ? 2.5 : 1.5, dash: [6,5]))
-                    }
-                }.frame(width: layout.size.width, height: layout.size.height).allowsHitTesting(false)
-                ForEach(snapshot.proposal.relations) { relation in
-                    if let point = layout.relationLabels[relation.id] {
-                        Button { selection = .relation(relation.id) } label: {
-                            Text(relation.label).font(.caption.weight(.medium)).lineLimit(2).frame(width: 200, height: 34).padding(.horizontal, 8).padding(.vertical, 5)
-                                .background(Color(nsColor: .windowBackgroundColor).opacity(0.96), in: Capsule())
-                                .overlay { Capsule().stroke(selection == .relation(relation.id) ? Color.accentColor : .secondary.opacity(0.2)) }
-                        }.buttonStyle(.plain).position(point).help(relation.label)
-                            .opacity(matches(relation.label + relation.explanation) ? 1 : 0.3)
-                            .accessibilityLabel("AI 候选联系：" + relation.label)
-                    }
+                Text(focusedRegionID == nil ? "\(snapshot.proposal.regions.count) 个探索区域 · \(snapshot.proposal.questions.count) 个问题" : "聚焦区域 · 点击问题核对原话")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }.padding(.horizontal, 18).padding(.vertical, 12)
+            if let region = snapshot.proposal.regions.first(where: { $0.id == focusedRegionID }) {
+                regionContext(snapshot)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(region.title).font(.title2.weight(.semibold)).foregroundStyle(regionColor(region.id, snapshot: snapshot))
+                                Text(region.summary).font(.system(size: 14)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 12)], spacing: 12) {
+                            ForEach(snapshot.proposal.questions.filter { $0.regionID == region.id }) { question in
+                                questionNode(question, snapshot: snapshot)
+                            }
+                        }
+                        relationContacts(snapshot, regionID: region.id)
+                    }.padding(18)
+                }.id(region.id)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 148, maximum: 210), spacing: 8)], spacing: 8) {
+                            ForEach(snapshot.proposal.regions) { region in regionNode(region, snapshot: snapshot) }
+                        }
+                        relationContacts(snapshot, regionID: nil)
+                    }.padding(18)
                 }
-                ForEach(snapshot.proposal.questions) { question in
-                    if let point = layout.questions[question.id] {
-                        questionNode(question, snapshot: snapshot).position(point)
-                    }
+            }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    private func regionNode(_ region: PanoramaRegion, snapshot: PanoramaSnapshot) -> some View {
+        let questions = snapshot.proposal.questions.filter { $0.regionID == region.id }
+        let questionIDs = Set(questions.map(\.id))
+        let color = regionColor(region.id, snapshot: snapshot)
+        let highlighted = recent && questions.contains { isRecent($0, snapshot: snapshot) }
+        let matching = matches(region.title + region.summary) || questions.contains { matches($0.title + $0.summary) }
+            || snapshot.proposal.relations.contains {
+                (questionIDs.contains($0.from) || questionIDs.contains($0.to)) && matches($0.label + $0.explanation)
+            }
+        return Button { focusRegion(region.id) } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 5) {
+                    Circle().fill(color).frame(width: 7, height: 7)
+                    Text("\(questions.count) 个问题").foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    if highlighted { Circle().fill(Color.accentColor).frame(width: 6, height: 6).accessibilityLabel("近期有表达") }
+                }.font(.system(size: 13))
+                Text(region.title).font(.system(size: 14, weight: .semibold)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(11).frame(maxWidth: .infinity, minHeight: 84, alignment: .topLeading)
+            .background(color.opacity(highlighted ? 0.11 : 0.055), in: RoundedRectangle(cornerRadius: 22))
+            .overlay { RoundedRectangle(cornerRadius: 22).stroke(color.opacity(highlighted ? 0.4 : 0.2)) }
+        }.buttonStyle(.plain).opacity(matching ? 1 : 0.3).help(region.title)
+            .accessibilityLabel("探索区域：\(region.title)，\(questions.count) 个问题，点击展开")
+    }
+    private func regionContext(_ snapshot: PanoramaSnapshot) -> some View {
+        ScrollView(.horizontal) {
+            HStack(spacing: 8) {
+                ForEach(snapshot.proposal.regions) { region in
+                    Button { focusRegion(region.id) } label: {
+                        HStack(spacing: 6) {
+                            Circle().fill(regionColor(region.id, snapshot: snapshot)).frame(width: 7, height: 7)
+                            Text(region.title).lineLimit(1)
+                            Text("\(snapshot.proposal.questions.filter { $0.regionID == region.id }.count)").foregroundStyle(.secondary)
+                        }.font(.system(size: 13)).padding(.horizontal, 11).padding(.vertical, 8)
+                            .background(focusedRegionID == region.id ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.06), in: Capsule())
+                            .overlay { Capsule().stroke(focusedRegionID == region.id ? Color.accentColor.opacity(0.5) : .clear) }
+                    }.buttonStyle(.plain).help(region.title)
                 }
-            }.frame(width: layout.size.width, height: layout.size.height)
-                .scaleEffect(zoom * gestureZoom, anchor: .topLeading)
-                .frame(width: layout.size.width * zoom * gestureZoom, height: layout.size.height * zoom * gestureZoom, alignment: .topLeading)
-                .padding(18)
-        }.gesture(MagnifyGesture().onChanged { gestureZoom = $0.magnification }.onEnded { zoom = min(2,max(0.5,zoom * $0.magnification)); gestureZoom = 1 })
+            }.padding(.horizontal, 18)
+        }.padding(.bottom, 8)
+    }
+    private func relationContacts(_ snapshot: PanoramaSnapshot, regionID: String?) -> some View {
+        let questions = Dictionary(uniqueKeysWithValues: snapshot.proposal.questions.map { ($0.id, $0) })
+        let relations = snapshot.proposal.relations.filter { relation in
+            guard let from = questions[relation.from], let to = questions[relation.to] else { return false }
+            return regionID.map { from.regionID == $0 || to.regionID == $0 } ?? (from.regionID != to.regionID)
+        }
+        return VStack(alignment: .leading, spacing: 10) {
+            if !relations.isEmpty {
+                Text(regionID == nil ? "区域之间的候选联系" : "与这些问题相连").font(.system(size: 14, weight: .semibold))
+                ForEach(relations) { relation in
+                    Button { selection = .relation(relation.id) } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .top, spacing: 6) {
+                                Text(contactTitle(questions[relation.from], snapshot: snapshot, regionID: regionID))
+                                Image(systemName: "arrow.left.arrow.right").foregroundStyle(.secondary)
+                                Text(contactTitle(questions[relation.to], snapshot: snapshot, regionID: regionID))
+                            }.font(.system(size: 13)).foregroundStyle(.secondary)
+                            Text(relation.label).font(.system(size: 14, weight: .medium))
+                        }.frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+                            .overlay { RoundedRectangle(cornerRadius: 12).stroke(selection == .relation(relation.id) ? Color.accentColor : .secondary.opacity(0.2), style: StrokeStyle(dash: [5, 4])) }
+                    }.buttonStyle(.plain).opacity(matches(relation.label + relation.explanation) ? 1 : 0.3)
+                        .accessibilityLabel("AI 候选联系：" + relation.label)
+                }
+                Text("虚线 · AI 候选联系，尚待核对").font(.system(size: 13)).foregroundStyle(.secondary)
+            } else {
+                Text(snapshot.isPartial ? "跨材料联系尚未完成；当前只展示已核对区域。" : regionID == nil ? "当前没有已核对的跨区域候选联系。" : "当前区域尚无候选联系。")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private func contactTitle(_ question: PanoramaQuestion?, snapshot: PanoramaSnapshot, regionID: String?) -> String {
+        guard let question else { return "" }
+        if regionID != nil { return question.title }
+        return snapshot.proposal.regions.first(where: { $0.id == question.regionID })?.title ?? question.title
     }
     private func questionNode(_ question: PanoramaQuestion, snapshot: PanoramaSnapshot) -> some View {
-        let index = snapshot.proposal.regions.firstIndex { $0.id == question.regionID } ?? 0
-        let color = palette[index % palette.count]
+        let color = regionColor(question.regionID, snapshot: snapshot)
         let selected = selection == .question(question.id)
         let highlighted = recent && isRecent(question, snapshot: snapshot)
         return Button { selection = .question(question.id) } label: {
-            HStack(alignment: .top, spacing: 10) {
-                Circle().fill(color.opacity(0.8)).frame(width: 9, height: 9).padding(.top, 5)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(question.title).font(.system(size: 14, weight: .semibold)).lineLimit(3)
-                    Text(question.summary).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Circle().fill(color).frame(width: 7, height: 7)
+                    Text(highlighted ? "近期有表达" : "AI 归纳问题").font(.system(size: 13)).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor) }
                 }
-            }.padding(16).frame(width: 225, alignment: .leading).frame(minHeight: 92)
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.96), in: RoundedRectangle(cornerRadius: 24))
-                .overlay { RoundedRectangle(cornerRadius: 24).stroke(selected ? Color.accentColor : color.opacity(0.22), lineWidth: selected ? 2 : 1) }
-                .shadow(color: selected ? Color.accentColor.opacity(0.18) : color.opacity(highlighted ? 0.15 : 0.04), radius: selected ? 16 : 10)
-                .padding(6).background(selected ? Color.accentColor.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 29))
+                Text(question.title).font(.system(size: 15, weight: .semibold)).fixedSize(horizontal: false, vertical: true)
+                Text("\(question.evidence.count) 处原话").font(.system(size: 13)).foregroundStyle(.secondary)
+            }.padding(15).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 16))
+                .overlay { RoundedRectangle(cornerRadius: 16).stroke(selected ? Color.accentColor : color.opacity(highlighted ? 0.5 : 0.22), lineWidth: selected ? 2 : 1) }
         }.buttonStyle(.plain).opacity(matches(question.title + question.summary) ? 1 : 0.25)
             .accessibilityLabel("AI 归纳问题：" + question.title)
+    }
+    private func regionColor(_ id: String, snapshot: PanoramaSnapshot) -> Color {
+        palette[(snapshot.proposal.regions.firstIndex { $0.id == id } ?? 0) % palette.count]
+    }
+    private func focusRegion(_ id: String) {
+        focusedRegionID = id
+        selection = nil
+    }
+    private var navigationIDs: [[String]] {
+        guard let snapshot = state?.snapshot else { return [] }
+        return [[snapshot.id], snapshot.proposal.regions.map(\.id),
+                snapshot.proposal.questions.flatMap { [$0.id, $0.regionID] },
+                snapshot.proposal.relations.flatMap { [$0.id, $0.from, $0.to] }]
+    }
+    private func reconcileNavigation() {
+        guard let snapshot = state?.snapshot else { focusedRegionID = nil; selection = nil; return }
+        if !snapshot.proposal.regions.contains(where: { $0.id == focusedRegionID }) { focusedRegionID = nil }
+        if let selection {
+            switch selection {
+            case .question(let id):
+                if !snapshot.proposal.questions.contains(where: { $0.id == id }) { self.selection = nil }
+            case .relation(let id):
+                if !snapshot.proposal.relations.contains(where: { $0.id == id }) { self.selection = nil }
+            }
+        }
+        focusSelection()
+    }
+    private func focusSelection() {
+        guard let snapshot = state?.snapshot, let selection else { return }
+        switch selection {
+        case .question(let id):
+            focusedRegionID = snapshot.proposal.questions.first(where: { $0.id == id })?.regionID
+        case .relation(let id):
+            guard let relation = snapshot.proposal.relations.first(where: { $0.id == id }) else { return }
+            let endpoints = snapshot.proposal.questions.filter { $0.id == relation.from || $0.id == relation.to }
+            if !endpoints.contains(where: { $0.regionID == focusedRegionID }) {
+                focusedRegionID = snapshot.proposal.questions.first(where: { $0.id == relation.from })?.regionID
+            }
+        }
     }
     private func matches(_ text: String) -> Bool { query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.localizedCaseInsensitiveContains(query.trimmingCharacters(in: .whitespacesAndNewlines)) }
     private func isRecent(_ question: PanoramaQuestion, snapshot: PanoramaSnapshot) -> Bool {
@@ -170,7 +290,7 @@ struct ThoughtPanoramaView: View {
                     ForEach(snapshot.proposal.relations) { relation in Button("AI 候选联系 · " + relation.label) { selection = .relation(relation.id) } }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.frame(maxHeight: 160)
-        }.padding(.horizontal, 18).padding(.bottom, 12)
+        }.padding(.horizontal, 18).padding(.vertical, 12)
     }
     private func inspector(_ snapshot: PanoramaSnapshot, selection: PanoramaSelection) -> some View {
         ScrollView {
@@ -192,6 +312,9 @@ struct ThoughtPanoramaView: View {
                         Text(relation.label).font(.title3.weight(.semibold))
                         Text("AI 候选解释 · 尚待核对").font(.caption).foregroundStyle(.blue)
                         Text(relation.explanation).textSelection(.enabled)
+                        ForEach(snapshot.proposal.questions.filter { $0.id == relation.from || $0.id == relation.to }) { question in
+                            Button(question.title) { self.selection = .question(question.id) }
+                        }
                         Text("一侧原话").font(.headline)
                         evidenceList(relation.fromEvidence, snapshot: snapshot)
                         Text("另一侧原话").font(.headline)
@@ -275,47 +398,6 @@ struct ThoughtPanoramaView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }.padding(24)
-    }
-}
-
-private struct PanoramaLayout {
-    let regions: [String: CGRect]
-    let questions: [String: CGPoint]
-    let relationLabels: [String: CGPoint]
-    let size: CGSize
-    init(_ proposal: PanoramaProposal) {
-        let columns = max(1, Int(ceil(sqrt(Double(proposal.regions.count)))))
-        let width: CGFloat = 570
-        var regions: [String: CGRect] = [:], questions: [String: CGPoint] = [:]
-        var y: CGFloat = 12, maxX: CGFloat = 0
-        for rowStart in stride(from: 0, to: proposal.regions.count, by: columns) {
-            let row = Array(proposal.regions[rowStart..<min(proposal.regions.count, rowStart + columns)])
-            let rowHeight = row.map { region -> CGFloat in
-                let count = proposal.questions.filter { $0.regionID == region.id }.count
-                return max(320, 140 + CGFloat((count + 1) / 2) * 155)
-            }.max() ?? 320
-            for (column, region) in row.enumerated() {
-                let x = CGFloat(column) * (width + 35) + 12
-                regions[region.id] = CGRect(x: x, y: y, width: width, height: rowHeight)
-                let nodes = proposal.questions.filter { $0.regionID == region.id }
-                for (index, question) in nodes.enumerated() {
-                    questions[question.id] = CGPoint(x: x + (index % 2 == 0 ? 150 : 420), y: y + 165 + CGFloat(index / 2) * 155 + (index % 2 == 0 ? 0 : 38))
-                }
-                maxX = max(maxX, x + width)
-            }
-            y += rowHeight + 28
-        }
-        let nodeFrames = questions.values.map { CGRect(x: $0.x - 125, y: $0.y - 75, width: 250, height: 150) }
-        var labelFrames: [CGRect] = [], relationLabels: [String: CGPoint] = [:]
-        for relation in proposal.relations.sorted(by: { $0.id < $1.id }) {
-            guard let a = questions[relation.from], let b = questions[relation.to] else { continue }
-            var frame = CGRect(x: (a.x+b.x)/2 - 110, y: (a.y+b.y)/2 - 24, width: 220, height: 48)
-            while (labelFrames + nodeFrames).contains(where: { $0.intersects(frame) }) { frame.origin.y += 56 }
-            labelFrames.append(frame)
-            relationLabels[relation.id] = CGPoint(x: frame.midX, y: frame.midY)
-        }
-        self.regions = regions; self.questions = questions; self.relationLabels = relationLabels
-        size = CGSize(width: max(600, maxX + 12), height: max(400, y, (labelFrames.map(\.maxY).max() ?? 0) + 24))
     }
 }
 
