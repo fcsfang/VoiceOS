@@ -7,6 +7,7 @@ struct VerifiedPanoramaUnit: Sendable {
     let generation: PanoramaReceipt
     let review: PanoramaReview
     let verification: PanoramaReceipt
+    let rejection: PanoramaRejection?
 }
 struct PanoramaProposalInput: Encodable {
     let input: PanoramaInput
@@ -76,5 +77,78 @@ extension VoiceOSStore {
         return .init(id: id, createdAt: now(), input: input, proposal: proposal, coverage: coverage,
             generation: latest.generation, verification: latest.verification, review: latest.review,
             workflow: .init(phase: phase, verifiedUnitIDs: units.map(\.unitID), totalUnitCount: input.units.count, receipts: receipts))
+    }
+}
+
+struct PanoramaSynthesisInput: Encodable {
+    let input: PanoramaInput
+    let proposals: [PanoramaUnitProposal]
+}
+struct PanoramaCoverageInput: Encodable {
+    let input: PanoramaInput
+    let proposal: PanoramaProposal
+    let target: PanoramaCoverageTarget
+    let rejections: [PanoramaRejection]
+}
+struct PanoramaConsistencyInput: Encodable {
+    let input: PanoramaInput
+    let proposal: PanoramaProposal
+    let unitProposals: [PanoramaUnitProposal]
+    let reviews: [PanoramaScopedReview]
+    let rejections: [PanoramaRejection]
+}
+
+extension VoiceOSStore {
+    static func panoramaProjection(_ proposal: PanoramaProposal, input: PanoramaInput, questionIDs: Set<String>, relationIDs: Set<String>) -> PanoramaProposal {
+        let relations=proposal.relations.filter { relationIDs.contains($0.id) }
+        let included=questionIDs.union(relations.flatMap { [$0.from,$0.to] })
+        let questions=proposal.questions.filter { included.contains($0.id) }
+        let regions=Set(questions.map(\.regionID))
+        let evidence=questions.flatMap(\.evidence) + relations.flatMap { $0.fromEvidence + $0.toEvidence }
+        let sources=Set(evidence.map(\.sourceID)), claims=Set(evidence.flatMap(\.claimIDs))
+        let sourceReasons=Dictionary(uniqueKeysWithValues: proposal.unrepresentedSources.map { ($0.id,$0.reason) })
+        let claimReasons=Dictionary(uniqueKeysWithValues: proposal.unrepresentedClaims.map { ($0.id,$0.reason) })
+        let scopedReason="本次仅核对指定问题、联系或单元；其余内容由对应单元的全局覆盖核对负责"
+        return .init(regions: proposal.regions.filter { regions.contains($0.id) }, questions: questions, relations: relations,
+            unrepresentedSources: input.manifest.sourceIDs.filter { !sources.contains($0) }.map { .init(id: $0, reason: sourceReasons[$0] ?? scopedReason) },
+            unrepresentedClaims: input.manifest.claimIDs.filter { !claims.contains($0) }.map { .init(id: $0, reason: claimReasons[$0] ?? scopedReason) })
+    }
+    static func panoramaRejection(_ rejection: PanoramaRejection, unitID: String) -> PanoramaRejection {
+        let prefix="unit["+unitID+"]/"
+        let review=PanoramaReview(questions: rejection.review.questions.map { .init(id: prefix+$0.id, accepted: $0.accepted, reason: $0.reason) },
+            relations: rejection.review.relations.map { .init(id: prefix+$0.id, accepted: $0.accepted, reason: $0.reason) }, coverageAccepted: rejection.review.coverageAccepted, reason: rejection.review.reason)
+        return .init(proposal: namespacePanorama(rejection.proposal, unitID: unitID), review: review)
+    }
+}
+
+struct PanoramaSemanticIssue: Error, Codable, Sendable {
+    let input: PanoramaInput
+    let rejection: PanoramaRejection
+}
+struct PanoramaGlobalRepairInput: Encodable {
+    let input: PanoramaInput
+    let proposal: PanoramaProposal
+    let issue: PanoramaSemanticIssue
+}
+struct PanoramaGlobalValidation: Sendable {
+    let reviews: [PanoramaScopedReview]
+    let finalReview: PanoramaReview
+    let finalReceipt: PanoramaReceipt
+}
+
+extension VoiceOSStore {
+    static func validatePanoramaStageReview(_ review: PanoramaReview, proposal: PanoramaProposal, input: PanoramaInput,
+        generation: PanoramaReceipt, verification: PanoramaReceipt) throws {
+        do { try validatePanoramaReview(review, proposal: proposal, generation: generation, verification: verification) }
+        catch {
+            let decisions=review.questions + review.relations
+            let identified=Set(review.questions.map(\.id)) == Set(proposal.questions.map(\.id))
+                && Set(review.relations.map(\.id)) == Set(proposal.relations.map(\.id))
+                && review.questions.count == proposal.questions.count && review.relations.count == proposal.relations.count
+            guard identified, !review.reason.isEmpty, decisions.allSatisfy({ !$0.reason.isEmpty }),
+                  !verification.responseID.isEmpty, verification.responseID != generation.responseID,
+                  !verification.model.isEmpty, !review.coverageAccepted || decisions.contains(where: { !$0.accepted }) else { throw error }
+            throw PanoramaSemanticIssue(input: input, rejection: .init(proposal: proposal, review: review))
+        }
     }
 }
