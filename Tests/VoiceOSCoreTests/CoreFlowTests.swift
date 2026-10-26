@@ -131,6 +131,108 @@ private actor FlowReminders: RemindersPort {
     }
     func complete() { items = items.map { .init(id: $0.id, title: $0.title, completed: true, marker: $0.marker) } }
 }
+private struct FlowReviewedActions: RecordingExpressionActionPort {
+    let decisions:[RecordingExpressionActionDecision]
+    func reconcile(_ input:RecordingExpressionActionInput) async throws -> ([RecordingExpressionActionDecision],[String]) {
+        (decisions,["scoped-draft","scoped-independent"])
+    }
+}
+private func verifyScopedExpressionActionReview(at root:URL) async throws {
+    let storeRoot=root.appendingPathComponent("scoped-review"),package=root.appendingPathComponent("scoped-package")
+    let clearID:String,retainedID:String,uncertainID:String,candidateID:String
+    do {
+        let store=try VoiceOSStore(root:storeRoot,inspector:NativeMediaInspector())
+        try await store.recover()
+        let first=try await store.recordUserExpression("整理报告，还要整改标签。报告的具体交付物仍有歧义。")
+        _ = try await store.setSourceLocalOnly(sourceID:first,expectedVersion:1,localOnly:false)
+        try await store.registerAutomaticRecording(sourceID:first,inbox:"fixture",recordedAt:"2026-10-20T01:00:00Z")
+        let groups=try await store.connectRecordingExpressions(using:FlowRecordingExpressions())
+        let initial=try XCTUnwrap(groups.first)
+        let context=try await store.prepareLocalTranscriptContext(sourceIDs:[first])
+        let refs=context.sources.map { ClaimReference(sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID,spanID:$0.spans[0].id) }
+        _ = try await store.importOrganizedClaims(context:context,proposals:[
+            .init(statement:"整理报告",ownership:.userTentative,references:refs,action:.init(title:"整理报告",kind:.task,quote:context.sources[0].text)),
+            .init(statement:"整改标签",ownership:.userTentative,references:refs,action:.init(title:"整改标签",kind:.task,quote:context.sources[0].text)),
+            .init(statement:"报告交付物待核对",ownership:.userTentative,references:refs,action:.init(title:"报告交付物待核对",kind:.opportunity,quote:context.sources[0].text))
+        ],commandID:"scoped-before")
+        try await store.finishRecordingExpression(initial,using:FlowReviewedActions(decisions:[]))
+        let old=try await store.actions()
+        let report=try XCTUnwrap(old.first { $0.title == "整理报告" }),label=try XCTUnwrap(old.first { $0.title == "整改标签" })
+        let possible=try XCTUnwrap(old.first { $0.kind == "opportunity" })
+        let reminders=FlowReminders()
+        let access=try await store.setReminderAccess(calendarID:"scoped-calendar",title:"VoiceOS",enabled:true,expectedVersion:0)
+        for task in [report,label] {
+            try await store.sendTaskToReminders(actionID:task.id,expectedVersion:task.version,calendarID:access.calendarID,using:reminders,expectedAccessVersion:access.version)
+        }
+        let next=try await store.recordUserExpression("接着报告，报告仍需整理，标签的具体操作待核对。另确认购买备份盘。")
+        _ = try await store.setSourceLocalOnly(sourceID:next,expectedVersion:1,localOnly:false)
+        try await store.registerAutomaticRecording(sourceID:next,inbox:"fixture",recordedAt:"2026-10-20T01:01:00Z")
+        let extended=try await store.connectRecordingExpressions(using:FlowRecordingExpressions())
+        let expression=try XCTUnwrap(extended.first)
+        let current=try await store.prepareLocalTranscriptContext(sourceIDs:expression.sourceIDs)
+        let currentRefs=current.sources.map { ClaimReference(sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID,spanID:$0.spans[0].id) }
+        let quote=try XCTUnwrap(current.sources.last).text
+        _ = try await store.importOrganizedClaims(context:current,proposals:[
+            .init(statement:"整理当前报告",ownership:.userTentative,references:currentRefs,action:.init(title:"整理当前报告",kind:.task,quote:quote)),
+            .init(statement:"核对标签操作",ownership:.userTentative,references:currentRefs,action:.init(title:"核对标签操作",kind:.task,quote:quote)),
+            .init(statement:"购买备份盘",ownership:.userTentative,references:currentRefs,action:.init(title:"购买备份盘",kind:.task,quote:quote))
+        ],commandID:"scoped-after")
+        let input=try await store.prepareExpressionActionReview(expression)
+        let newReport=try XCTUnwrap(input.newActions.first { $0.title == "整理当前报告" })
+        let newLabel=try XCTUnwrap(input.newActions.first { $0.title == "核对标签操作" })
+        let clear=try XCTUnwrap(input.newActions.first { $0.title == "购买备份盘" })
+        let reviewed:[RecordingExpressionActionDecision] = [
+            .init(oldID:report.id,newID:newReport.id,relation:"same",sourceID:next,quote:quote,possibleNewIDs:[]),
+            .init(oldID:label.id,newID:"",relation:"uncertain",sourceID:next,quote:quote,possibleNewIDs:[newLabel.id]),
+            .init(oldID:possible.id,newID:"",relation:"uncertain",sourceID:next,quote:quote,possibleNewIDs:[newReport.id])
+        ]
+        try await store.finishRecordingExpression(expression,using:FlowReviewedActions(decisions:reviewed))
+        let saved=try await store.recordingExpressions()
+        let completed=try XCTUnwrap(saved.first)
+        XCTAssertTrue(completed.requiresActionReview(actionID:report.id))
+        XCTAssertTrue(completed.requiresActionReview(actionID:label.id))
+        XCTAssertTrue(completed.requiresActionReview(actionID:newLabel.id))
+        XCTAssertFalse(completed.requiresActionReview(actionID:clear.id))
+        let currentActions=try await store.actions()
+        let retained=try XCTUnwrap(currentActions.first { $0.id == report.id })
+        let backup=try XCTUnwrap(currentActions.first { $0.id == clear.id })
+        let candidate=try XCTUnwrap(currentActions.first { $0.id == newLabel.id })
+        let allowed=try await store.reminderSourceAllowed(backup),blocked=try await store.reminderSourceAllowed(retained)
+        XCTAssertTrue(allowed);XCTAssertFalse(blocked)
+        try await store.sendTaskToReminders(actionID:retained.id,expectedVersion:retained.version,calendarID:access.calendarID,using:reminders,expectedAccessVersion:access.version)
+        let retainedRemote=await reminders.items
+        XCTAssertEqual(retainedRemote.count,2)
+        XCTAssertTrue(retainedRemote.contains { $0.title == "整理报告" })
+        do {
+            try await store.sendTaskToReminders(actionID:candidate.id,expectedVersion:candidate.version,calendarID:access.calendarID,using:reminders,expectedAccessVersion:access.version)
+            XCTFail("尚未关联且可能重复的新任务不得写入提醒事项")
+        } catch {}
+        try await store.sendTaskToReminders(actionID:backup.id,expectedVersion:backup.version,calendarID:access.calendarID,using:reminders,expectedAccessVersion:access.version)
+        let links=try await store.reminderLinks(),remote=await reminders.items
+        XCTAssertEqual(links.count,3);XCTAssertEqual(remote.count,3)
+        XCTAssertTrue(links.contains { $0.actionID == label.id })
+        var legacy=completed;legacy.actionReviewDecisions=nil
+        XCTAssertTrue(legacy.requiresActionReview(actionID:clear.id))
+        var missing=completed
+        missing.actionReviewDecisions=reviewed.map { value in var value=value;if value.relation == "uncertain" { value.possibleNewIDs=nil };return value }
+        XCTAssertTrue(missing.requiresActionReview(actionID:clear.id))
+        try await store.exportPackage(to:package,includeMedia:true)
+        clearID=clear.id;retainedID=report.id;uncertainID=label.id;candidateID=newLabel.id
+    }
+    let reopened=try VoiceOSStore(root:storeRoot,inspector:NativeMediaInspector())
+    try await reopened.recover()
+    let reopenedExpressions=try await reopened.recordingExpressions()
+    XCTAssertFalse(try XCTUnwrap(reopenedExpressions.first).requiresActionReview(actionID:clearID))
+    let restoredRoot=root.appendingPathComponent("scoped-restored")
+    try await VoiceOSStore.restorePackage(from:package,to:restoredRoot,inspector:NativeMediaInspector())
+    let restored=try VoiceOSStore(root:restoredRoot,inspector:NativeMediaInspector())
+    try await restored.recover()
+    let restoredExpressions=try await restored.recordingExpressions()
+    let expression=try XCTUnwrap(restoredExpressions.first)
+    XCTAssertEqual(expression.actionReviewDecisions?.count,3)
+    XCTAssertFalse(expression.requiresActionReview(actionID:clearID))
+    for id in [retainedID,uncertainID,candidateID] { XCTAssertTrue(expression.requiresActionReview(actionID:id)) }
+}
 private struct FlowEnglish: EnglishPracticeModelPort {
     let configuration = ModelConfiguration(provider: "fixture", model: "english", promptVersion: "english-practice-v1", schemaVersion: "english-feedback-v1", destination: .cloud)
     let response: EnglishPracticeResponse
@@ -580,9 +682,65 @@ final class CoreFlowTests: XCTestCase {
             members.append(id)
         }
         let fixture=FlowRecordingExpressions()
+        let preparedGroupingInput=try await grouped.prepareRecordingExpressions()
+        let nativeGroupingInput=try XCTUnwrap(preparedGroupingInput)
+        let nativeGroupingDraft=try await fixture.group(nativeGroupingInput).0
+        let nativeGroups=try JSONSerialization.jsonObject(with:JSONEncoder().encode(nativeGroupingDraft))
+        func groupingReply(_ id:String,_ output:[String:Any]) throws -> ModelHTTPReply {
+            let text=String(decoding:try JSONSerialization.data(withJSONObject:output,options:[.sortedKeys]),as:UTF8.self)
+            let message:[String:Any] = ["type":"message","role":"assistant","status":"completed","content":[["type":"output_text","text":text]]]
+            let envelope:[String:Any] = ["id":id,"status":"completed","output":[message]]
+            return .init(status:200,body:try JSONSerialization.data(withJSONObject:envelope))
+        }
+        func nativeGroupingPort(_ transport:FlowFollowupTransport) throws -> ResponsesRecordingExpressionPort {
+            try .init(baseURL:URL(string:"https://api.openai.com/v1")!,apiKey:"fixture",model:"fixture-model",transport:transport)
+        }
+        let wrongGroups=try groupingReply("rejected-groups",["recordings":nativeGroups])
+        let exhaustedGroupingTransport=FlowFollowupTransport([wrongGroups,wrongGroups,wrongGroups])
+        do {
+            _ = try await grouped.connectRecordingExpressions(using:nativeGroupingPort(exhaustedGroupingTransport))
+            XCTFail("格式纠正耗尽后不能接受分组")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("分组格式错误"))
+            XCTAssertTrue(error.localizedDescription.contains("原件和转写保留"))
+        }
+        let exhaustedGroupingRequests=await exhaustedGroupingTransport.requests
+        XCTAssertEqual(exhaustedGroupingRequests.count,3)
+        let unsavedGroups=try await grouped.recordingExpressions()
+        XCTAssertTrue(unsavedGroups.isEmpty)
+        let acceptedGroupingDraft=try groupingReply("accepted-groups-draft",["groups":nativeGroups])
+        let acceptedGroupingReview=try groupingReply("accepted-groups-review",["groups":nativeGroups])
+        let recoveringGroupingTransport=FlowFollowupTransport([wrongGroups,acceptedGroupingDraft,wrongGroups,acceptedGroupingReview])
+        let nativeGrouped=try await grouped.connectRecordingExpressions(using:nativeGroupingPort(recoveringGroupingTransport))
+        XCTAssertEqual(nativeGrouped.count,2)
+        XCTAssertTrue(nativeGrouped.allSatisfy { $0.responseIDs == ["accepted-groups-draft","accepted-groups-review"] })
+        let groupingRequests=await recoveringGroupingTransport.requests
+        XCTAssertEqual(groupingRequests.count,4)
+        for (index,data) in groupingRequests.enumerated() {
+            let body=try XCTUnwrap(JSONSerialization.jsonObject(with:data) as? [String:Any])
+            let messages=try XCTUnwrap(body["input"] as? [[String:Any]])
+            let content=try XCTUnwrap(messages.first?["content"] as? String)
+            let payload=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(content.utf8)) as? [String:Any])
+            let sentInput=try XCTUnwrap(payload["input"] as? [String:Any])
+            let sentContext=try XCTUnwrap(sentInput["context"] as? [String:Any])
+            let sentSources=try XCTUnwrap(sentContext["sources"] as? [[String:Any]])
+            XCTAssertEqual(sentSources.compactMap { $0["text"] as? String },nativeGroupingInput.context.sources.map(\.text))
+            if index == 1 || index == 3 {
+                XCTAssertEqual(payload["rejectedOutput"] as? String,String(decoding:try JSONSerialization.data(withJSONObject:["recordings":nativeGroups],options:[.sortedKeys]),as:UTF8.self))
+                XCTAssertTrue((payload["validationError"] as? String)?.contains("groups") == true)
+            } else {
+                XCTAssertNil(payload["rejectedOutput"])
+            }
+            if index >= 2 {
+                let sentDraft=try XCTUnwrap(payload["draft"] as? [[String:Any]])
+                XCTAssertEqual(try JSONSerialization.data(withJSONObject:sentDraft,options:[.sortedKeys]),try JSONSerialization.data(withJSONObject:nativeGroups,options:[.sortedKeys]))
+            } else {
+                XCTAssertNil(payload["draft"])
+            }
+        }
         let grouping:any RecordingExpressionPort = fixture
         let actionPort:any RecordingExpressionActionPort = fixture
-        let connected=try await grouped.connectRecordingExpressions(using:grouping)
+        let connected=nativeGrouped
         XCTAssertEqual(connected.count,2)
         let report=try XCTUnwrap(connected.first { $0.sourceIDs.contains(members[0]) })
         XCTAssertEqual(report.sourceIDs,Array(members.prefix(2)))
@@ -639,7 +797,56 @@ final class CoreFlowTests: XCTestCase {
             .init(statement:"整理方案B对比报告",ownership:.userTentative,references:wholeRefs,action:.init(title:"整理方案B对比报告",kind:.task,quote:wholeContext.sources.last!.text)),
             .init(statement:"整理背景笔记",ownership:.userTentative,references:wholeRefs,action:.init(title:"整理背景笔记",kind:.task,quote:wholeContext.sources.last!.text))
         ],commandID:"whole-expression")
-        try await grouped.finishRecordingExpression(whole,using:actionPort)
+        let actionInput=try await grouped.prepareExpressionActionReview(whole)
+        let accepted=try await fixture.reconcile(actionInput).0.map { decision in
+            var reviewed=decision;reviewed.possibleNewIDs=[];return reviewed
+        }
+        let reportDecision=try XCTUnwrap(accepted.first { $0.relation == "same" && $0.oldID != completed.id })
+        let duplicate=accepted.map { decision in
+            decision.oldID == completed.id ? RecordingExpressionActionDecision(oldID:decision.oldID,newID:reportDecision.newID,relation:"same",sourceID:decision.sourceID,quote:decision.quote,possibleNewIDs:[]) : decision
+        }
+        XCTAssertThrowsError(try VoiceOSStore.validateExpressionActionReview(duplicate,input:actionInput)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("被多个旧行动沿用"))
+        }
+        func actionReply(_ id:String,_ decisions:[RecordingExpressionActionDecision],text:String? = nil) throws -> ModelHTTPReply {
+            let text=try text ?? String(decoding:JSONEncoder().encode(["decisions":decisions]),as:UTF8.self)
+            let content:[String:String] = ["type":"output_text","text":text]
+            let message:[String:Any] = ["type":"message","role":"assistant","status":"completed","content":[content]]
+            let envelope:[String:Any] = ["id":id,"status":"completed","output":[message]]
+            return .init(status:200,body:try JSONSerialization.data(withJSONObject:envelope))
+        }
+        let malformed="{\"actions\":[]}"
+        let actionTransport=FlowFollowupTransport(try [actionReply("malformed-draft",duplicate,text:malformed),actionReply("invalid-draft",duplicate),actionReply("malformed-review",duplicate,text:malformed),actionReply("invalid-review",duplicate),actionReply("repaired-draft",accepted),actionReply("repaired-review",accepted)])
+        let repairingPort=try ResponsesRecordingExpressionPort(baseURL:URL(string:"https://api.openai.com/v1")!,apiKey:"fixture",model:"flow",transport:actionTransport)
+        try await grouped.finishRecordingExpression(whole,using:repairingPort)
+        let actionRequests=await actionTransport.requests
+        XCTAssertEqual(actionRequests.count,6)
+        for index in [1,3] {
+            let body=try XCTUnwrap(JSONSerialization.jsonObject(with:actionRequests[index]) as? [String:Any])
+            let content=try XCTUnwrap((body["input"] as? [[String:Any]])?.first?["content"] as? String)
+            let payload=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(content.utf8)) as? [String:Any])
+            XCTAssertEqual(payload["rejectedOutput"] as? String,malformed)
+            XCTAssertTrue((payload["validationError"] as? String)?.contains("decisions") == true)
+            XCTAssertEqual(payload["draft"] != nil,index == 3)
+        }
+        let repairBody=try XCTUnwrap(JSONSerialization.jsonObject(with:actionRequests[4]) as? [String:Any])
+        let repairInput=try XCTUnwrap((repairBody["input"] as? [[String:Any]])?.first?["content"] as? String)
+        let repairPayload=try XCTUnwrap(JSONSerialization.jsonObject(with:Data(repairInput.utf8)) as? [String:Any])
+        XCTAssertTrue((repairPayload["validationError"] as? String)?.contains(reportDecision.newID) == true)
+        let repairedExpressions=try await grouped.recordingExpressions()
+        let repairedExpression=try XCTUnwrap(repairedExpressions.first { $0.id == whole.id })
+        XCTAssertEqual(repairedExpression.actionReviewResponseIDs,["repaired-draft","repaired-review"])
+        let malformedTransport=FlowFollowupTransport(try (0..<3).map { try actionReply("malformed-\($0)",accepted,text:malformed) })
+        let malformedPort=try ResponsesRecordingExpressionPort(baseURL:URL(string:"https://api.openai.com/v1")!,apiKey:"fixture",model:"flow",transport:malformedTransport)
+        do {
+            _ = try await malformedPort.reconcile(actionInput)
+            XCTFail("Repeated malformed action output must fail without accepting a review")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("decisions"))
+            XCTAssertFalse(error.localizedDescription.contains(malformed))
+        }
+        let malformedRequests=await malformedTransport.requests
+        XCTAssertEqual(malformedRequests.count,3)
         let finalActions=try await grouped.actions(includeHistory:true)
         let current=finalActions.filter { $0.validity == "current" && $0.state != "dismissed" }
         XCTAssertEqual(current.count,2)
@@ -669,6 +876,7 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(restoredReportReplies.first { $0.id == reportReply }?.parts.first?.text,"这是合成的待核对分析。")
         let restoredReusedOutcome=try await groupRestored.conversationOutcomes(conversationID:reusedConversation)
         XCTAssertEqual(restoredReusedOutcome.first?.validity,"frozen")
+        try await verifyScopedExpressionActionReview(at:root)
         let dual=try VoiceOSStore(root:root.appendingPathComponent("dual-recording"),inspector:NativeMediaInspector())
         try await dual.recover()
         let personalText="嘉宾说应完全自主，我认为还需要可靠验证。我会做一次界面验证。"

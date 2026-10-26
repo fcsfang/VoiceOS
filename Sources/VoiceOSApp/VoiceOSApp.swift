@@ -311,9 +311,16 @@ final class ControlCenter: ObservableObject {
     @Published var choosingReminderCalendar = false
     private let reminders = NativeReminders()
     var reminderCalendarTitle: String { reminderCalendars.first { $0.id == reminderCalendarID }?.title ?? (reminderAccess?.enabled == true ? reminderAccess!.title : "未选择清单") }
+    func recordingActionRequiresReview(_ action:ActionRecord) -> Bool {
+        let sourceIDs=Set(claims.first(where: { $0.id == action.claimID })?.references.map(\.sourceID) ?? [])
+        return records.contains { source in
+            guard let expression=source.presentation?.expression else { return false }
+            return (sourceIDs.contains(source.id) || expression.previousActionIDs.contains(action.id)) && expression.requiresActionReview(actionID:action.id)
+        }
+    }
     func reminderSourceAllowed(_ action: ActionRecord) -> Bool {
         guard let claim = claims.first(where: { $0.id == action.claimID }) else { return false }
-        return !claim.references.isEmpty && claim.references.allSatisfy { ref in records.contains { $0.id == ref.sourceID && !$0.localOnly } }
+        return !recordingActionRequiresReview(action) && !claim.references.isEmpty && claim.references.allSatisfy { ref in records.contains { $0.id == ref.sourceID && !$0.localOnly } }
     }
     private let rootOverride: URL?
     var libraryTitle: String { rootOverride == nil ? "VoiceOS" : "独立资料库 · " + rootOverride!.lastPathComponent }
@@ -2281,7 +2288,7 @@ struct CenterView: View {
                                         } else if action.kind == "task" {
                                             Text("当前只同步任务标题，不设置期限或提醒时间。").font(.caption).foregroundStyle(.secondary)
                                             Text("目标清单：" + model.reminderCalendarTitle).font(.caption).foregroundStyle(.secondary)
-                                            if !model.reminderSourceAllowed(action) { Text("依据包含仅本地资料，不可外发").font(.caption).foregroundStyle(.secondary) }
+                                            if !model.reminderSourceAllowed(action) { Text(model.recordingActionRequiresReview(action) ? "连续表达的行动关系待核对，暂不同步" : "依据包含仅本地资料，不可外发").font(.caption).foregroundStyle(.secondary) }
                                             Button("发送到所选提醒事项清单") { Task { await model.sendReminder(action) } }
                                                 .disabled(model.remindersBusy || model.reminderCalendarID.isEmpty || action.validity == "frozen" || action.state != "open" || !model.reminderSourceAllowed(action))
                                         }
