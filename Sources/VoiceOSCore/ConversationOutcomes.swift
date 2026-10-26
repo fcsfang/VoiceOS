@@ -147,6 +147,7 @@ extension VoiceOSStore {
         }
     }
     func freezeConversationOutcomes() throws {
+        try db.execute("UPDATE contexts SET state='stale' WHERE id IN (SELECT m.context_id FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id JOIN conversations c ON c.id=o.conversation_id WHERE c.validity='frozen')")
         for row in try db.query("SELECT o.snapshot_json,m.context_id FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id ORDER BY m.producer_sequence") {
             let snapshot=try JSONDecoder().decode(ConversationOutcomeSnapshot.self,from:Data(row["snapshot_json"]!.utf8))
             if let plan=snapshot.reusePlan {
@@ -155,7 +156,6 @@ extension VoiceOSStore {
                 }
             }
         }
-        try db.execute("UPDATE contexts SET state='stale' WHERE id IN (SELECT m.context_id FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id JOIN conversations c ON c.id=o.conversation_id WHERE c.validity='frozen')")
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT o.id FROM conversation_outcome_attempts o JOIN model_attempts m ON m.id=o.id JOIN contexts c ON c.id=m.context_id WHERE c.state='stale')")
         try db.execute("UPDATE actions SET validity='frozen' WHERE claim_id IN (SELECT c.id FROM claims c JOIN conversation_outcome_attempts o ON o.id=c.attempt_id WHERE c.validity='frozen')")
     }
@@ -185,16 +185,16 @@ extension VoiceOSStore {
             guard !expectedTurns.isEmpty,input.userTurns == expectedTurns,
                   let entry=try db.query("SELECT snapshot_json FROM contexts WHERE id=?",[session["entry_context_id"]]).first?["snapshot_json"] else { throw VoiceOSError("成果个人回合目录缺少历史") }
             let history=try JSONDecoder().decode(LocalTranscriptContext.self,from:Data(entry.utf8)).sources
-            var ids=history.map(\.sourceID)
-            for turn in expectedTurns where !ids.contains(turn.sourceID) { ids.append(turn.sourceID) }
+            var originals=history
+            for turn in turns {
+                guard let json=try db.query("SELECT snapshot_json FROM contexts WHERE id=?", [turn["context_id"]]).first?["snapshot_json"] else { throw VoiceOSError("成果个人回合缺少完整上下文") }
+                let saved=try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(json.utf8))
+                for source in saved.sources where !originals.contains(where: { $0.sourceID == source.sourceID }) { originals.append(source) }
+            }
+            let ids=originals.map(\.sourceID)
             guard input.historySourceIDs == history.map(\.sourceID),snapshot.context.sources.map(\.sourceID) == ids else { throw VoiceOSError("成果遗漏或混入实际来源") }
             for source in snapshot.context.sources {
-                let original:ContextTranscript
-                if let old=history.first(where: { $0.sourceID == source.sourceID }) { original=old }
-                else {
-                    guard let turn=turns.first(where: { $0["source_id"] == source.sourceID }),let c=try db.query("SELECT snapshot_json FROM contexts WHERE id=?",[turn["context_id"]]).first?["snapshot_json"] else { throw VoiceOSError("成果来源没有对应回合") }
-                    original=try JSONDecoder().decode(LocalTranscriptContext.self,from:Data(c.utf8)).sources[0]
-                }
+                guard let original=originals.first(where: { $0.sourceID == source.sourceID }) else { throw VoiceOSError("成果来源没有对应完整回合") }
                 guard try relevanceJSON(original) == relevanceJSON(source) else { throw VoiceOSError("成果实际原文或身份不符") }
             }
             let replies=try db.query("SELECT a.* FROM discussion_attempts a JOIN conversation_user_turns t ON t.id=a.reply_to_turn_id WHERE a.conversation_id=? ORDER BY t.ordinal",[input.conversationID])

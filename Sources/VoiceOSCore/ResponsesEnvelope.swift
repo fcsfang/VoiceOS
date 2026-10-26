@@ -6,10 +6,12 @@ struct ResponsesEnvelope {
     let text: String?
     let inputTokens: Int?
     let outputTokens: Int?
-    static func parse(_ data: Data) throws -> ResponsesEnvelope {
+    var failureSummary: String? = nil
+    static func parse(_ data: Data, maxResponseBytes: Int = 262144) throws -> ResponsesEnvelope {
         var knownInput: Int?, knownOutput: Int?
         do {
-            guard data.count <= 262144, let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+            guard data.count <= maxResponseBytes else { throw ModelPortFailure.rejected("响应超过 \(maxResponseBytes) 字节限制") }
+            guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let status = root["status"] as? String else { throw ModelPortFailure.rejected("响应外层格式无效") }
             let usage = root["usage"] as? [String: Any]
             func token(_ field: String) throws -> Int? {
@@ -24,8 +26,12 @@ struct ResponsesEnvelope {
             do { knownOutput=try token("output_tokens") } catch { invalidUsage=true }
             guard !invalidUsage else { throw ModelPortFailure.rejected("响应用量格式无效") }
             let input=knownInput,output=knownOutput
-            if status == "incomplete" { return ResponsesEnvelope(status: .incomplete, text: nil, inputTokens: input, outputTokens: output) }
-            guard status == "completed", let items = root["output"] as? [[String: Any]] else { throw ModelPortFailure.rejected("响应未处于可接纳的完成状态") }
+            if status != "completed" {
+                let summary=terminalFailureSummary(root, status: status)
+                if status == "incomplete" { return ResponsesEnvelope(status: .incomplete, text: nil, inputTokens: input, outputTokens: output, failureSummary: summary) }
+                throw ModelPortFailure.rejected(summary)
+            }
+            guard let items = root["output"] as? [[String: Any]] else { throw ModelPortFailure.rejected("响应已完成但 output 缺失或格式无效（status=completed）") }
             var texts: [String] = []; var refused = false
             for item in items {
                 if item["type"] as? String == "reasoning" { continue }
@@ -43,5 +49,19 @@ struct ResponsesEnvelope {
         } catch ModelPortFailure.rejected(let reason, _, _) {
             throw ModelPortFailure.rejected(reason, inputTokens: knownInput, outputTokens: knownOutput)
         } catch { throw ModelPortFailure.rejected("模型响应无法解析", inputTokens: knownInput, outputTokens: knownOutput) }
+    }
+    private static func terminalFailureSummary(_ root: [String:Any], status: String) -> String {
+        let knownStatuses=["failed","incomplete","cancelled","in_progress","queued"]
+        var details=["status="+(knownStatuses.contains(status) ? status : "unknown")]
+        if let error=root["error"] as? [String:Any] {
+            let code=error["code"] as? String ?? "unknown"
+            let knownCodes=["server_error","upstream_error","rate_limit_exceeded","invalid_prompt","context_length_exceeded","insufficient_quota","model_not_found","invalid_api_key"]
+            details.append("error.code="+(knownCodes.contains(code) ? code : "unknown"))
+        }
+        if status == "incomplete" {
+            let reason=(root["incomplete_details"] as? [String:Any])?["reason"] as? String ?? "unknown"
+            details.append("incomplete_details.reason="+(["max_output_tokens","content_filter"].contains(reason) ? reason : "unknown"))
+        }
+        return "响应未完成（"+details.joined(separator:"；")+"）；未接纳部分结果"
     }
 }
