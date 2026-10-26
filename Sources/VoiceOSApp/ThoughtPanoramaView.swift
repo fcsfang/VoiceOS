@@ -107,7 +107,8 @@ struct ThoughtPanoramaView: View {
         }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     private func graph(_ snapshot: PanoramaSnapshot) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let chronology = PanoramaChronology(snapshot)
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 if focusedRegionID != nil {
                     Button { focusedRegionID = nil; selection = nil } label: { Label("全部区域", systemImage: "arrow.left") }
@@ -128,7 +129,7 @@ struct ThoughtPanoramaView: View {
                             Spacer(minLength: 0)
                         }
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 12)], spacing: 12) {
-                            ForEach(snapshot.proposal.questions.filter { $0.regionID == region.id }) { question in
+                            ForEach(chronology.questions.filter { $0.regionID == region.id }) { question in
                                 questionNode(question, snapshot: snapshot)
                             }
                         }
@@ -139,7 +140,7 @@ struct ThoughtPanoramaView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 148, maximum: 210), spacing: 8)], spacing: 8) {
-                            ForEach(snapshot.proposal.regions) { region in regionNode(region, snapshot: snapshot) }
+                            ForEach(chronology.regions) { region in regionNode(region, snapshot: snapshot) }
                         }
                         relationContacts(snapshot, regionID: nil)
                     }.padding(18)
@@ -173,9 +174,10 @@ struct ThoughtPanoramaView: View {
             .accessibilityLabel("探索区域：\(region.title)，\(questions.count) 个问题，点击展开")
     }
     private func regionContext(_ snapshot: PanoramaSnapshot) -> some View {
-        ScrollView(.horizontal) {
+        let chronology = PanoramaChronology(snapshot)
+        return ScrollView(.horizontal) {
             HStack(spacing: 8) {
-                ForEach(snapshot.proposal.regions) { region in
+                ForEach(chronology.regions) { region in
                     Button { focusRegion(region.id) } label: {
                         HStack(spacing: 6) {
                             Circle().fill(regionColor(region.id, snapshot: snapshot)).frame(width: 7, height: 7)
@@ -296,7 +298,7 @@ struct ThoughtPanoramaView: View {
         DisclosureGroup("问题与联系列表 · 键盘与辅助阅读") {
             ScrollView {
                 VStack(alignment: .leading) {
-                    ForEach(snapshot.proposal.questions) { question in Button(question.title) { selection = .question(question.id) } }
+                    ForEach(PanoramaChronology(snapshot).questions) { question in Button(question.title) { selection = .question(question.id) } }
                     ForEach(snapshot.proposal.relations) { relation in Button("AI 候选联系 · " + relation.label) { selection = .relation(relation.id) } }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.frame(maxHeight: 160)
@@ -422,5 +424,36 @@ struct PanoramaHome: View {
     let discuss: (String, PanoramaSelection) -> Void
     var body: some View {
         ThoughtPanoramaView(state: screen.state, message: screen.message, isGenerating: screen.isGenerating, modelConfigured: screen.modelConfigured, selection: $screen.selection, retry: retry, chooseTextModel: chooseTextModel, openMaterials: openMaterials, openSource: openSource, correctSource: correctSource, correctClaim: correctClaim, discuss: discuss)
+    }
+}
+
+private struct PanoramaChronology {
+    let regions: [PanoramaRegion]
+    let questions: [PanoramaQuestion]
+
+    init(_ snapshot: PanoramaSnapshot) {
+        let formatter = ISO8601DateFormatter()
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let sourceDates = Dictionary(uniqueKeysWithValues: snapshot.input.sources.map { source in
+            (source.id, formatter.date(from: source.occurredAt)
+                ?? fractionalFormatter.date(from: source.occurredAt) ?? .distantPast)
+        })
+        let questionDates = Dictionary(uniqueKeysWithValues: snapshot.proposal.questions.map { question in
+            (question.id, question.evidence.compactMap { sourceDates[$0.sourceID] }.max() ?? .distantPast)
+        })
+        let regionDates = Dictionary(grouping: snapshot.proposal.questions, by: \.regionID).mapValues { questions in
+            questions.compactMap { questionDates[$0.id] }.max() ?? .distantPast
+        }
+        questions = snapshot.proposal.questions.enumerated().sorted { lhs, rhs in
+            let left = questionDates[lhs.element.id] ?? .distantPast
+            let right = questionDates[rhs.element.id] ?? .distantPast
+            return left == right ? lhs.offset < rhs.offset : left > right
+        }.map(\.element)
+        regions = snapshot.proposal.regions.enumerated().sorted { lhs, rhs in
+            let left = regionDates[lhs.element.id] ?? .distantPast
+            let right = regionDates[rhs.element.id] ?? .distantPast
+            return left == right ? lhs.offset < rhs.offset : left > right
+        }.map(\.element)
     }
 }
