@@ -17,6 +17,7 @@ struct TaskManagerView: View {
 
     private func category(_ action: ActionRecord) -> String {
         if action.state == "completed" { return "completed" }
+        if model.recordingActionRequiresReview(action) { return "review" }
         if action.validity != "current" { return "review" }
         if let intent = action.intent {
             if intent.uncertain || intent.followupState == "needs_review" || intent.intentType == "uncertain" { return "review" }
@@ -166,6 +167,7 @@ struct TaskManagerView: View {
                     .foregroundStyle(action.state == "completed" ? .green : .secondary)
                 Text(action.title).font(.body).textSelection(.enabled)
                 Spacer()
+                if model.recordingActionRequiresReview(action) { Text("待核对，暂不同步").font(.caption).foregroundStyle(.secondary) }
                 if feedbackCount(action) > 0 { Text("\(feedbackCount(action)) 条记录").font(.caption).foregroundStyle(.secondary) }
             }
         }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
