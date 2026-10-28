@@ -8,6 +8,12 @@ import VoiceOSCore
 enum WorkspacePage: Equatable {
     case home, themes, materials, actions, source(String), delivery(String), task(String), settings, capture, search, tool(String)
 }
+private struct WorkspaceNavigationEntry {
+    let page: WorkspacePage
+    let topicID: String?
+    let topicTab: String
+    let topicReadingMode: String
+}
 extension SourceRecord {
     var workspaceTitle: String {
         guard kind == "user_text",contentTitle == nil,let text=transcript,!text.isEmpty else { return displayTitle }
@@ -58,7 +64,7 @@ struct WorkspaceView: View {
     @AppStorage("voiceos.workspaceAppearance") private var appearance = WorkspaceAppearance.system
     private var palette: WorkspacePalette { WorkspacePalette(theme: theme) }
     @State private var page: WorkspacePage = .home
-    @State private var path: [WorkspacePage] = []
+    @State private var path: [WorkspaceNavigationEntry] = []
     @State private var topicID: String?
     @State private var topicTab = "概览"
     @State private var topicReadingMode = "卡片"
@@ -114,7 +120,7 @@ struct WorkspaceView: View {
     private var sourceOpenedFromTheme: Bool {
         // Keep the material page in the navigation path it was opened from.
         for previous in path.reversed() {
-            switch previous {
+            switch previous.page {
             case .themes: return true
             case .home, .materials, .actions, .search, .capture, .settings: return false
             default: continue
@@ -221,7 +227,7 @@ struct WorkspaceView: View {
         }.padding(.horizontal,13).padding(.vertical,28).frame(width:172).background(palette.sidebar)
     }
     private func nav(_ title:String,icon:String,target:WorkspacePage) -> some View {
-        Button { path=[];page=target;error="" } label: {
+        Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
             Label(title,systemImage:icon).font(.system(size:15,weight:section == title ? .semibold : .regular))
                 .frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,12).padding(.vertical,11)
                 .background(section == title ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:8))
@@ -368,7 +374,7 @@ struct WorkspaceView: View {
     private var themes: some View {
         LazyVStack(alignment:.leading,spacing:24) {
             if let topic {
-                HStack { Button("所有主题",systemImage:"arrow.left") { topicID=nil;topicFocus=nil };Spacer(); Menu("调整主题") { Button("修改主题名称") { newTopicTitle=topic.title;creatingTopic=true };Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) } } }
+                HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil } };Spacer(); Menu("调整主题") { Button("修改主题名称") { newTopicTitle=topic.title;creatingTopic=true };Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) } } }
                 WorkspaceHeading(eyebrow:topic.isAIOrganized == true ? "AI 自动归组 · 持续演化" : "主题 · 持续演化",title:topic.title,subtitle:"\(topicSources.count) 份材料 · 跨时间连接理解、行动与结果")
                 WorkspaceTabs(selection:$topicTab,titles:["概览","认识与问题","行动与结果","材料"])
                 topicContent(topic)
@@ -598,9 +604,18 @@ struct WorkspaceView: View {
     private func actionRow(_ action:ActionRecord) -> some View { WorkspaceRow(title:action.title,subtitle:model.workspaceActionStatus(action),icon:action.state == "completed" ? "checkmark.circle" : "circle") { go(.task(action.id)) } }
     private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
-    private func go(_ next:WorkspacePage) { if page != next { path.append(page);page=next };error="" }
-    private func back() { page=path.popLast() ?? .home;error="" }
-    private func selectTopic(_ id:String) { topicID=id;topicTab="概览";topicReadingMode="卡片";go(.themes) }
+    private var navigationEntry: WorkspaceNavigationEntry { .init(page:page,topicID:topicID,topicTab:topicTab,topicReadingMode:topicReadingMode) }
+    private func go(_ next:WorkspacePage) { if page != next { path.append(navigationEntry);page=next };error="" }
+    private func back() {
+        if let entry=path.popLast() {
+            topicID=entry.topicID;topicTab=entry.topicTab;topicReadingMode=entry.topicReadingMode;page=entry.page
+        } else { page = .home }
+        topicFocus=nil;error=""
+    }
+    private func selectTopic(_ id:String) {
+        if page == .themes { path.append(navigationEntry) }
+        go(.themes);topicID=id;topicTab="概览";topicReadingMode="卡片";topicFocus=nil
+    }
     private func saveTopic() async {
         do {
             if let topic, creatingTopic, !newTopicTitle.isEmpty { try await model.renameReflectionQuestion(topic.id,title:newTopicTitle,allowCloud:true) }
