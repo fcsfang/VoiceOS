@@ -9,3 +9,4 @@
 - PR #29 Agent 工作框架。任务记录、工作流和文档职责表进入 main。验证：链接检查、模板检查、CI test。
 - PR #30 项目管理看板和 CI 快速路径。TODO、STATUS、PROGRESS 和任务 CHECKPOINTS 进入 main；非 Swift 改动跳过 Swift 测试。验证：链接检查、YAML 检查、完整 CI test 14 分 40 秒。
 - PR #32 拆分 CoreFlowTests。测试文件从 1 个拆成 5 个，7 项测试不变。托管 runner 的 CI test 从 14 分 40 秒降到 11 分 34 秒。验证：本地 7 项 0 失败，独立核对无问题，CI test 11 分 34 秒。
+- 移除自动 CI。删除 GitHub Actions workflow；自托管 runner 尝试后放弃，仓库恢复公开。验证改为本地 `swift build`、`swift test` 和真实应用。
