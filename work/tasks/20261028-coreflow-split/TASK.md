@@ -1,5 +1,5 @@
 ---
-status: in_review
+status: done
 started: 2026-10-28
 updated: 2026-10-28
 branch: codex/coreflow-split-20261028
@@ -37,19 +37,21 @@ owner: main session
 
 ## 当前状态
 
-PR #32 已开，CI 运行中。本地 `swift test -j 4` 7 项通过，从零构建 284.61 秒。
+PR #32 已合并到 main（70a9608）。托管 runner 的 CI test 用了 11 分 34 秒。
 
 ## 下一步
 
-CI 通过后合并；合并后开关闭 PR 写 `done` 和 `PROGRESS`。
+无；CI 提速继续用自托管 runner，见 `work/STATUS.md`。
 
 ## 验证
 
 - 本地 `swift test -j 4`：7 项，0 失败。
 - 从零构建 284.61 秒，测试 19.66 秒。
 - 五个文件的内容范围和原文逐段比对一致。
+- PR #32 的 CI test 通过，11 分 34 秒（托管 runner）。
 
 ## 链接
 
-- PR: #32
+- PR: #32（已合并，70a9608）
 - 基线: CI test 14 分 40 秒，`CoreFlowTests.swift` 编译 11 分 17 秒。
+- 后续: 自托管 runner。

@@ -1,17 +1,17 @@
 # 项目状态
 
-更新：2026-10-28T15:00:47Z
+更新：2026-10-28T15:37:15Z
 
 ## 当前基线
 
-- `main` ab3710c，与 origin/main 一致。
+- `main` 70a9608，与 origin/main 一致。
 - SQLite schema 43。
 - `swift build` 通过，`swift test` 7 项通过。
-- CI `test` 对 Swift 改动约 14 分钟。14 分 39 秒的构建里，`CoreFlowTests.swift` 编译占 11 分 17 秒，测试本身 25 秒。
+- CI `test` 对 Swift 改动 11 分 34 秒（拆分后，托管 runner）。文档改动走快速路径，约 20 秒。
 
 ## 进行中
 
-- 管理文档去重和 #30 关闭记录。分支 `codex/management-cleanup-20261028`，PR 待开，状态 `in_progress`。
+- 自托管 runner 安装。仓库已改为私有，runner 压缩包下载中。任务卡待建。
 
 ## 阻塞
 
@@ -19,10 +19,10 @@
 
 ## 下一步
 
-提交、开 PR，走文档快速路径；合并后刷新基线。
+下载并注册 runner，把 workflow 改到 self-hosted，用一个 PR 验证。
 
 ## 风险
 
-- Swift 改动仍跑完整测试，`CoreFlowTests.swift` 编译占 11 分 17 秒；拆分在进行中。
-- 文档改动已走快速路径，本 PR 实测耗时。
+- Swift 改动在托管 runner 上仍需 11 分 34 秒；自托管 runner 装好后应显著下降。
+- 文档改动已走快速路径。
 - 既有功能没有统一的历史索引，暂时以 README、git log 和 PR 为准。
