@@ -1,5 +1,7 @@
 # VoiceOS 实施路线图 v0.1
 
+> 历史文档（2026-10-10）。当前实现以[根 README](../../README.md)和 `main` 代码为准；文中的 schema 版本、里程碑状态和“未实现”判断已经过期。
+
 日期：2026-10-10。状态：可审查实施计划；第五文档阶段交付，工程 M0 验证与 M1 文件输入子集已推进，里程碑均未整体完成。依据：[PRD](../product/prd.md)、[架构](../architecture/system-architecture.md)、[数据模型](../architecture/data-model.md)、[状态机](../architecture/state-machines.md)、[ADR](../adr/README.md)。配套：[详细测试计划](../testing/test-plan.md)。
 
 ## 1. 推进方法与当前基线

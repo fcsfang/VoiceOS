@@ -1,5 +1,7 @@
 # VoiceOS 状态机与恢复 v0.1
 
+> 历史文档（2026-10-10）。当前实现以[根 README](../../README.md)和 `main` 代码为准；文中的 schema 版本、里程碑状态和“未实现”判断已经过期。
+
 日期：2026-10-10。状态：工程草稿，未实现。适配器和数据库候选见[架构](system-architecture.md)及[ADR](../adr/README.md)，字段见[数据模型](data-model.md)。
 
 ## 1. 状态分层
