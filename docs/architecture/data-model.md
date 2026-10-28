@@ -1,5 +1,7 @@
 # VoiceOS 数据模型 v0.1
 
+> 历史文档（2026-10-10）。当前实现以[根 README](../../README.md)和 `main` 代码为准；文中的 schema 版本、里程碑状态和“未实现”判断已经过期。
+
 日期：2026-10-10。状态：工程草稿；完整概念模型尚未冻结；Source/Asset/Job/Transcript 输入子集已有版本化 SQLite 实现，见[实施记录](../engineering/m1-file-input.md)。依据：[PRD](../product/prd.md)；配套：[架构](system-architecture.md)、[状态机](state-machines.md)、[ADR](../adr/README.md)。
 
 ## 1. 身份、版本与时间
