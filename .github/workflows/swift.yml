@@ -14,5 +14,26 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for Swift changes
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git rev-parse --verify "$base^{commit}" >/dev/null 2>&1; then
+            echo "swift=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "$base" HEAD | grep -Eq '^(Sources/|Tests/|Package\.swift|Package\.resolved|\.github/workflows/)'; then
+            echo "swift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "swift=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Build and run local tests
+        if: steps.changes.outputs.swift == 'true'
         run: swift test -j 4
+      - name: Skip build and tests
+        if: steps.changes.outputs.swift == 'false'
+        run: echo "No Swift or workflow changes; build and tests skipped."
