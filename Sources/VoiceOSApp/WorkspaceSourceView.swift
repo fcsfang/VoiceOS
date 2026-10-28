@@ -1,6 +1,9 @@
 import SwiftUI
 import VoiceOSCore
 
+private enum SourceHistoryState {
+    case idle, loading, loaded([TranscriptVersion]), failed(String)
+}
 struct WorkspaceSourceView: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model:ControlCenter
@@ -38,7 +41,8 @@ struct WorkspaceSourceView: View {
     @State private var naming:SourceRecord?
     @State private var claimEditor:CandidateClaim?
     @State private var showAllThoughts=false
-    @State private var loadedHistory: [TranscriptVersion] = []
+    @State private var historyState = SourceHistoryState.idle
+    @State private var historyTask: Task<Void, Never>?
     @State private var historyClaimID: String?
     @State private var loadedClaimHistory: [ClaimReviewVersion] = []
     @State private var loadedDiscussions: [ConversationRecord] = []
@@ -46,6 +50,43 @@ struct WorkspaceSourceView: View {
     @State private var showingOriginal = false
     @State private var requestedOrganization = false
     @State private var error=""
+    private var sourceStatus: String {
+        if source.transcript == nil { return source.jobState == "failed" ? "转写失败 · 原件已保存" : "尚未完成转写 · 原件已保存" }
+        if source.localOnly { return "仅本机保存" }
+        if processing { return "AI 正在整理" }
+        return thoughts.isEmpty ? "原文已保存 · 整理尚未完成" : "已整理 · 原话可追溯"
+    }
+    private var sourceStatusIcon: String {
+        if source.transcript == nil { return "exclamationmark.circle" }
+        return source.localOnly ? "internaldrive" : processing ? "sparkles" : "checkmark.circle"
+    }
+    @ViewBuilder private var historyVersions: some View {
+        switch historyState {
+        case .idle: EmptyView()
+        case .loading: ProgressView("正在读取原文版本…")
+        case .loaded(let versions):
+            if versions.isEmpty { Text("尚无原文版本。请先完成转写；原始录音仍已保存。").foregroundStyle(.secondary) }
+            ForEach(versions) { version in
+                DisclosureGroup("第 \(version.number) 版 · " + version.createdAt) { Text(version.text).textSelection(.enabled) }
+            }
+        case .failed(let message): Text("原文版本读取失败：" + message).foregroundStyle(.orange).textSelection(.enabled)
+        }
+    }
+    private func loadHistory() {
+        historyTask?.cancel()
+        guard source.transcript != nil else { historyState = .loaded([]); return }
+        guard let store=model.store else { historyState = .failed("资料库尚未打开"); return }
+        historyState = .loading
+        let id=source.id
+        historyTask=Task {
+            do {
+                let versions=try await store.transcriptHistory(sourceID:id)
+                try Task.checkCancellation()
+                historyState = .loaded(versions)
+            } catch is CancellationError {}
+            catch { if !Task.isCancelled { historyState = .failed(error.localizedDescription) } }
+        }
+    }
     private var thoughts:[CandidateClaim] {
         var seen=Set<String>()
         return expressionIDs.sorted().flatMap { model.currentClaimsBySource[$0] ?? [] }.filter { $0.validity == "current" && $0.reviewState != "rejected" && seen.insert($0.id).inserted }
@@ -65,7 +106,7 @@ struct WorkspaceSourceView: View {
     private var automaticallyUpdating:Bool { pendingUnderstanding && model.fullRecordingBusy }
     private var pausedThoughts: [CandidateClaim] { (model.currentClaimsBySource[source.id] ?? []).filter { $0.validity != "current" } }
     private var pausedActions: [ActionRecord] { actions.filter { model.workspaceTaskRequiresReview($0) } }
-    var body:some View {
+    private var readingContent:some View {
         ScrollView {
             LazyVStack(alignment:.leading,spacing:30) {
                 WorkspaceHeading(eyebrow:(source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + " · " + source.recordingSubtitle,title:(expression?.sourceIDs.count ?? 0) > 1 ? expression!.title : source.workspaceTitle)
@@ -112,14 +153,20 @@ struct WorkspaceSourceView: View {
                     }
                 }
                 HStack(spacing:12) {
-                    Label(source.localOnly ? "仅本机保存" : processing ? "AI 正在整理" : thoughts.isEmpty ? "完整原文已保存" : "已整理 · 原话可追溯",systemImage:source.localOnly ? "internaldrive" : processing ? "sparkles" : "checkmark.circle").font(.system(size:13)).foregroundStyle(.secondary)
+                    Label(sourceStatus,systemImage:sourceStatusIcon).font(.system(size:13)).foregroundStyle(.secondary)
                     Spacer()
                     Button("更正原文",systemImage:"pencil") { editing=source }.disabled(source.transcript == nil)
                     Menu("更多") {
                         Button("修改标题") { naming=source }
                         Button("更正原文") { editing=source }.disabled(source.transcript == nil)
                         Button(source.localOnly ? "允许这份文字用于云端并整理" : "改为仅本地") { Task { await model.changeTextPolicy(source);if source.localOnly { organize() } } }
-                        Button("重新整理当前文字",action:organize).disabled(source.localOnly || !model.modelConfigured)
+                        Button("重新整理当前文字",action:organize).disabled(source.transcript == nil || source.localOnly || !model.modelConfigured)
+                    }
+                }
+                if source.transcript == nil {
+                    Text(source.error ?? "转写尚未完成，理解与待办识别还未开始。").foregroundStyle(.secondary).textSelection(.enabled)
+                    if ["failed","blocked"].contains(source.jobState ?? "") {
+                        Button("重试本地转写") { Task { await model.retry(source) } }.buttonStyle(.borderedProminent)
                     }
                 }
                 VStack(alignment:.leading,spacing:10) {
@@ -256,14 +303,12 @@ struct WorkspaceSourceView: View {
                                 Text("转写校正已保存，原始版本可追溯。").font(.callout)
                                 ForEach(Array((review.unresolved_issues ?? []).enumerated()),id:\.offset) { _,issue in Text(issue.reason).font(.caption).foregroundStyle(.orange) }
                             }
-                            Button("查看全部原文版本") { Task { await model.historyFor(source); loadedHistory=model.history } }
-                            ForEach(loadedHistory) { version in
-                                DisclosureGroup("第 \(version.number) 版 · " + version.createdAt) { Text(version.text).textSelection(.enabled) }
-                            }
+                            Button("查看全部原文版本", action:loadHistory)
+                            historyVersions
                             ForEach(model.attempts[source.id] ?? []) { attempt in
                                 Text((attempt.state == "completed" ? "理解已完成" : "理解：" + attempt.state) + (attempt.contextState == "stale" ? " · 历史依据已变化" : "")).font(.caption).foregroundStyle(.secondary)
                             }
-                            Button("更正文字") { editing=source }
+                            Button("更正文字") { editing=source }.disabled(source.transcript == nil)
                             ForEach(loadedDiscussions) { session in Button("打开讨论 · " + String(session.id.prefix(8))) { openDiscussion(session.id) } }
                         }.padding(.top,12)
                     }.padding(.vertical,16)
@@ -274,8 +319,7 @@ struct WorkspaceSourceView: View {
                                 let linked=model.workspaceTopicSources[topic.id]?.contains(source.id) == true
                                 Toggle(topic.title,isOn:Binding(get:{linked},set:{ value in Task { do { try await model.linkReflectionQuestionSource(questionID:topic.id,sourceID:source.id,linked:value);await model.refresh() } catch { self.error=error.localizedDescription } } }))
                             }
-                            if !source.localOnly { Button("重新整理当前内容",action:organize).disabled(model.fullRecordingBusy || model.understandingSource != nil) }
-                            if ["failed","blocked"].contains(source.jobState ?? "") { Button("重试本地转写") { Task { await model.retry(source) } } }
+                            if !source.localOnly { Button("重新整理当前内容",action:organize).disabled(source.transcript == nil || model.fullRecordingBusy || model.understandingSource != nil) }
                             ForEach(model.segmentedBatches.filter { $0.scope.plan.source.sourceID == source.id }) { batch in
                                 HStack { Text(batch.state.rawValue).font(.caption);if batch.state == .queued { Button("停止后续处理") { model.cancelSegmented(batch.id) } } }
                                 if let error=batch.error { Text(error).font(.caption).foregroundStyle(.secondary) }
@@ -288,7 +332,10 @@ struct WorkspaceSourceView: View {
                 }
                 if !error.isEmpty { Text(error).foregroundStyle(.orange) }
             }.frame(maxWidth:820,alignment:.leading).padding(30).frame(maxWidth:.infinity,alignment:.top)
-        }
+        }.onDisappear { historyTask?.cancel() }
+    }
+    var body:some View {
+        readingContent
         .sheet(item:$editing) { source in WorkspaceTranscriptEditor(model:model,source:source) { editing=nil } }
         .sheet(item:$naming) { source in RecordingTitleEditor(record:source,model:model) { naming=nil } }
         .sheet(item:$claimEditor) { claim in ClaimCorrectionView(claim:claim,model:model) { claimEditor=nil } }
@@ -300,6 +347,7 @@ struct WorkspaceSourceView: View {
             }.padding(24).frame(width:650,height:520)
         }
         .task(id: source.id + pausedThoughts.map(\.id).joined() + (source.transcriptVersionID ?? "")) {
+            historyTask?.cancel(); historyState = .idle
             guard !pausedThoughts.isEmpty,let store=model.store else { return }
             do { pauseExplanation = try await store.understandingPauseExplanation(sourceID:source.id) }
             catch { pauseExplanation = "暂时无法读取暂停原因：" + error.localizedDescription }
