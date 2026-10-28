@@ -57,7 +57,7 @@ public struct LocalQwenSpeechPort: SpeechPort {
         catch is CancellationError { throw CancellationError() }
         catch {
             let detail = (try? String(contentsOf: logURL, encoding: .utf8))?.split(separator: "\n").last.map(String.init)
-            throw VoiceOSError(String((detail ?? "本地 Qwen 转写未完成").prefix(600)) + "；原件与可用进度保留")
+            throw VoiceOSError(String((detail ?? "本地 Qwen 转写未完成").prefix(600)) + "；原件保留，可重试转写")
         }
         struct Response: Decodable { let backend: String; let text: String; let spans: [TranscriptSpan]; let audio_uploaded: Bool }
         let data=try Data(contentsOf:output)
