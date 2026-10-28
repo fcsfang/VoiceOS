@@ -10,8 +10,10 @@
 
 ## Verification
 
+## Open items
+
 ## Task record
 
-`work/active/...` or `work/completed/...`
+`work/tasks/...`
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)

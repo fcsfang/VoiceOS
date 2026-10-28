@@ -6,7 +6,7 @@
 
 1. [AGENTS.md](../../AGENTS.md)。规则、授权边界和交付方式。
 2. 本文件。任务生命周期、记录格式和交接要求。
-3. 接手已有任务时，读 `work/active/<task>/TASK.md` 和 `PROGRESS.md`。
+3. 接手已有任务时，读 `work/tasks/<task>/TASK.md` 和 `PROGRESS.md`。
 4. 按 [文档职责表](DOCUMENT-MAP.md) 只读当前问题需要的文档，不通读 `docs/`。
 5. 读与改动直接相关的代码，以及 `.claude/skills/` 中对应的验证配方。
 
@@ -14,36 +14,36 @@
 
 ## 任务记录
 
-进行中的任务放在 `work/active/<YYYYMMDD>-<slug>/`，每个任务两个文件。
+每个任务放在 `work/tasks/<YYYYMMDD>-<slug>/`，两个文件。
 
 - `TASK.md` 是任务卡，记录目标、范围、改动、非目标、决策、当前状态、下一步、验证和链接。
 - `PROGRESS.md` 是检查点日志，只追加，不改写历史。
 
-`owner` 写当前负责的会话或 agent 名称，不写人名。
+`status` 字段区分进行中、已完成和已放弃的任务。任务卡不移动目录，完成记录留在原处。
 
-任务合并前，在 PR 的最后一个提交把整个目录移到 `work/completed/<YYYYMMDD>-<slug>/`。归档记录不可修改。后续任务新建目录，并在 `## 链接` 中引用旧记录。
+`owner` 写当前负责的会话或 agent 名称，不写人名。
 
 `work/` 记录开发任务，不记录产品里的任务数据、录音、原始日志或生成产物。
 
 ## 生命周期
 
 1. **对齐。** 用户给出目标和范围后，从 `work/TASK-TEMPLATE.md` 和 `work/PROGRESS-TEMPLATE.md` 建任务目录，状态设为 `planning`。范围不清时先完成只读调查，不按假设实现。
-2. **开始。** 从最新 `main` 切 `codex/<slug>-<YYYYMMDD>` 分支。任务卡填 `branch`，状态改为 `in_progress`，追加第一条检查点。
+2. **开始。** 从最新 `main` 或明确的父 PR 分支切 `codex/<slug>-<YYYYMMDD>`。任务卡填 `branch` 和父分支；状态改为 `in_progress`，追加第一条检查点。
 3. **推进。** 每完成一个可验证单元就提交代码和任务记录，并追加检查点。任务卡的 `## 当前状态` 和 `## 下一步` 随时保持可交接。
 4. **审查。** 开 PR 后状态改为 `in_review`，在任务卡填 `pr`。PR 描述链接任务目录，按 [PR 模板](../../.github/pull_request_template.md) 写。
-5. **合并。** PR 的最后一个提交把任务目录移到 `work/completed/`，状态改为 `done`，填入 PR 链接；CI 和验证通过后再合并。归档记录随合并进入 `main`。
-6. **放弃。** 状态改为 `abandoned`，写清原因，目录移到 `work/completed/`。不删除记录。
+5. **合并。** PR 的最后一个提交把状态改为 `done`，填入 PR 链接。CI 和验证通过后合并。卡片随合并进入 `main`；如果 PR 没有合并，卡片只留在分支，不会在 `main` 留下已完成的假记录。
+6. **放弃。** 状态改为 `abandoned`，写清原因。已有 PR 时把记录随 PR 合并；没有 PR 时把任务卡提交在分支上，并在下一个任务的 `## 链接` 里引用。不要为了归档单独开 PR。
 
 ## 状态
 
 | 状态 | 含义 | 可以转到 |
 |---|---|---|
-| `planning` | 正在对齐目标、范围或方案 | `in_progress`、`abandoned` |
+| `planning` | 正在对齐目标、范围或方案 | `in_progress`、`blocked`、`abandoned` |
 | `in_progress` | 正在实现或验证 | `blocked`、`in_review`、`abandoned` |
-| `blocked` | 等待用户决定、权限或外部条件 | `in_progress`、`abandoned` |
-| `in_review` | PR 已开，等待检查和合并 | `in_progress`、`done`、`abandoned` |
-| `done` | 已合并并归档 | 无 |
-| `abandoned` | 已停止并归档 | 无 |
+| `blocked` | 等待用户决定、权限或外部条件 | `planning`、`in_progress`、`in_review`、`abandoned` |
+| `in_review` | PR 已开，等待检查和合并 | `in_progress`、`blocked`、`done`、`abandoned` |
+| `done` | PR 已合并 | 无 |
+| `abandoned` | 已停止 | 无 |
 
 `blocked` 必须在 `## 下一步` 写清需要谁做什么决定。不要只写“等待确认”。
 
@@ -66,31 +66,33 @@
 1. 更新任务卡 frontmatter 的 `status`、`updated`、`branch`、`pr`、`owner`。
 2. 重写 `## 当前状态`，让没有聊天上下文的人能读懂。
 3. 写一个具体的 `## 下一步`。如果被阻塞，写明需要的决定。
-4. 追加一条检查点，列出完成、证据、下一步和阻塞，然后提交并推送分支。
+4. 追加一条检查点，列出完成、证据、下一步和阻塞，然后提交。
 
-下一个 agent 读任务卡和最后一条检查点就能继续。不要要求对方读聊天记录。
+如果 PR 已经存在，推送分支并更新 PR。只是会话暂停且还没有 PR 时，按 pstack 的 Pause safely 处理，不为了暂停新开 PR 或推送。把任务卡写成 `wip:` 提交，留下恢复点。下一个 agent 在同一台机器上，或同一个 worktree 里，可以继续读。
 
-## 并行 agent
+## 并行可见性
 
-- 每个写 Agent 使用独立分支和 worktree，遵守 [AGENTS.md](../../AGENTS.md) 的交付规则。
-- 一个任务只有一个任务目录。不要编辑其他任务目录。
-- 不设共享的任务索引文件。用下面的命令列出任务，避免所有人改同一个文件。
-- 只读 Agent 可以共享当前 checkout。写 Agent 不共享脏工作区。
-- 两个 Agent 改了同一个任务记录时，停下，由一个 owner 合并，不各自继续写。
+任务卡随任务分支提交。未合并的任务只存在于该分支或 worktree，不在当前 checkout。
 
-列出进行中的任务。
+- 同一工作区先看 `git worktree list` 和 `git branch -a`，确认有哪些任务在并行。
+- 读另一个分支的任务卡用 `git show <branch>:work/tasks/<date>-<slug>/TASK.md`。
+- 跨机器或跨会话交接时，先开 PR 再推送，让任务卡随 PR 可见。没有 PR 时按 Pause safely 处理，不要假设对方能读到本地分支。
 
-```bash
-rg -n '^(status|updated|branch|pr):' work/active/*/TASK.md
-```
+## 查找任务
 
-查已完成任务和功能改动记录。
+列出所有任务。
 
 ```bash
-rg -n '^(status|started|branch|pr):' work/completed/*/TASK.md
+rg -n '^(status|updated|branch|pr):' work/tasks/*/TASK.md 2>/dev/null || true
 ```
 
-任务卡的 `## 改动` 写用户可见的变化，`## 链接` 指向 PR。历史改动先看这里，再看 git log。
+只列进行中的任务。
+
+```bash
+rg -n '^status: (planning|in_progress|blocked|in_review)$' work/tasks/*/TASK.md 2>/dev/null || true
+```
+
+任务卡的 `## 改动` 写用户可见的变化，`## 链接` 指向 PR。历史改动先看这里，再看 git log。这个索引从本框架启用后开始累积，既有功能仍以 README 和 git 历史为准。
 
 ## 与其他记录的关系
 

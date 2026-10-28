@@ -4,23 +4,22 @@
 
 ## 结构
 
-- `active/<YYYYMMDD>-<slug>/` 进行中的任务。
-- `completed/<YYYYMMDD>-<slug>/` 已完成或放弃的任务。
+- `tasks/<YYYYMMDD>-<slug>/` 每个任务的目录，目录里是 `TASK.md` 和 `PROGRESS.md`。
 - `TASK-TEMPLATE.md` 任务卡模板。
 - `PROGRESS-TEMPLATE.md` 检查点模板。
 
-新任务复制两个模板到 `active/<date>-<slug>/`，改名为 `TASK.md` 和 `PROGRESS.md`，然后按 [Agent 工作流](../docs/agents/WORKFLOW.md) 推进。
+新任务复制两个模板到 `tasks/<date>-<slug>/`，改名为 `TASK.md` 和 `PROGRESS.md`，然后按 [Agent 工作流](../docs/agents/WORKFLOW.md) 推进。任务完成后不移动目录，只把 `status` 改为 `done` 或 `abandoned`。
 
-## 列出进行中的任务
+## 查找任务
 
 ```bash
-rg -n '^(status|updated|branch|pr):' work/active/*/TASK.md
-rg -n '^(status|started|branch|pr):' work/completed/*/TASK.md
+rg -n '^(status|updated|branch|pr):' work/tasks/*/TASK.md 2>/dev/null || true
+rg -n '^status: (planning|in_progress|blocked|in_review)$' work/tasks/*/TASK.md 2>/dev/null || true
 ```
 
 ## 规则
 
 - 任务卡随任务更新，检查点只追加。
 - 一个任务一个目录，不设共享索引。
-- 合并前把目录移到 `completed/`，状态改为 `done`。
+- PR 的最后一个提交把状态改为 `done`；CI 和验证通过后合并。
 - 不提交密钥、个人资料、原始日志和生成产物。
