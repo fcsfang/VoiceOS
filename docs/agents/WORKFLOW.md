@@ -70,7 +70,7 @@
 
 ## 并行可见性
 
-项目级三个文件是共享状态，只有主会话写。任务 agent 改自己的任务目录，避免几个人同时改 `TODO.md`、`STATUS.md` 或 `PROGRESS.md`。
+并行时，任务 agent 只改自己的任务目录，不碰项目级文件。需要改时把一行状态交给主会话。
 
 任务卡随任务分支提交。未合并的任务只存在于该分支或 worktree，不在当前 checkout。
 
@@ -78,11 +78,7 @@
 - 读另一个分支的任务卡用 `git show <branch>:work/tasks/<date>-<slug>/TASK.md`。
 - 跨机器或跨会话交接时，先开 PR 再推送，让任务卡随 PR 可见。没有 PR 时按 Pause safely 处理，不要假设对方能读到本地分支。
 
-## 查找
-
-- 接下来做什么看 `work/TODO.md`。
-- 现在到哪了看 `work/STATUS.md`。
-- 最近合并了什么看 `work/PROGRESS.md`。
+## 查找任务
 
 列出所有任务。
 

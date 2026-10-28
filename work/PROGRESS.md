@@ -1,7 +1,5 @@
 # 项目进展
 
-只追加。每条记录一次合并或一个里程碑。
-
 ## 2026-10-28
 
 - PR #26 ASR runner 打包。验证：CI test 通过。
@@ -9,3 +7,4 @@
 - 分支整理。删除 29 个本地分支、19 个远端分支和 10 个 worktree，保留 5 个 archive 标签。验证：本地和远端只剩 main，archive 标签已推送。
 - PR #28 验证技能和文档状态。两个验证技能进入仓库，2026-10-10 设计文档标注为历史。验证：TLA+ 模型检查、CLI 导入和恢复 proof、CI test。
 - PR #29 Agent 工作框架。任务记录、工作流和文档职责表进入 main。验证：链接检查、模板检查、CI test。
+- PR #30 项目管理看板和 CI 快速路径。TODO、STATUS、PROGRESS 和任务 CHECKPOINTS 进入 main；非 Swift 改动跳过 Swift 测试。验证：链接检查、YAML 检查、完整 CI test 14 分 40 秒。

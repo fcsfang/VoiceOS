@@ -31,10 +31,10 @@
 
 ## Agent 工作框架
 
-- 开发任务开始前先读 `work/TODO.md`、`work/STATUS.md` 和 `work/PROGRESS.md` 的最近记录，再按 [docs/agents/WORKFLOW.md](docs/agents/WORKFLOW.md) 在 `work/tasks/` 建立任务卡和检查点。任务 PR 以 `in_review` 合并后，用一个只改 `work/` 的关闭 PR 把 `status` 改为 `done` 或 `abandoned`。
-- 项目待办、当前状态和已合并进展分别写 `work/TODO.md`、`work/STATUS.md`、`work/PROGRESS.md`；只有主会话更新这三个文件。
-- 任务卡记录目标、范围、改动、决策、当前状态和下一步。交接时更新任务卡和 `CHECKPOINTS.md`，下一个 agent 不依赖聊天记录。
-- 文档职责见 [docs/agents/DOCUMENT-MAP.md](docs/agents/DOCUMENT-MAP.md)。任务细节写 `work/`，稳定行为写 README，技术决策写 ADR，历史资料保持历史标注。
+- 开工前读 `work/TODO.md`、`work/STATUS.md` 和 `work/PROGRESS.md` 的最近记录，再按 [Agent 工作流](docs/agents/WORKFLOW.md) 建任务卡。
+- 项目级文件只由主会话写，任务目录由任务 owner 写。
+- 任务 PR 以 `in_review` 合并；合并后用只改 `work/` 的关闭 PR 写 `done` 和 `PROGRESS`。
+- 文档职责见 [文档职责表](docs/agents/DOCUMENT-MAP.md)。稳定行为写 README，技术决策写 ADR，历史资料保持历史标注。
 
 ## 默认简单
 
