@@ -25,12 +25,16 @@ public struct LocalQwenSpeechPort: SpeechPort {
         return try .init(python:URL(fileURLWithPath:config.python),runner:URL(fileURLWithPath:config.runner),model:URL(fileURLWithPath:config.model))
     }
     public init(python: URL, runner: URL, model: URL) throws {
+        let runner = Bundle.main.url(forResource: "qwen-local", withExtension: "py") ?? runner
         guard FileManager.default.isExecutableFile(atPath:python.path),
               FileManager.default.fileExists(atPath:runner.path),
               FileManager.default.fileExists(atPath:model.appendingPathComponent("model.safetensors").path) else {
             throw VoiceOSError("本地 Qwen 转写环境或权重不可用；不会下载或切换云端")
         }
         self.python=python; self.runner=runner; self.model=model
+        guard try String(contentsOf: runner, encoding: .utf8).contains("IDENTITY = \"" + backendIdentity + "\"") else {
+            throw VoiceOSError("本地转写脚本与应用版本不一致，请更新应用；不会采用不兼容的转写结果")
+        }
     }
     public func transcribe(_ url: URL, locale: String) async throws -> SpeechText {
         guard ["zh_CN","en_US"].contains(locale) else { throw VoiceOSError("本地 Qwen 候选尚未启用该语言") }
@@ -43,14 +47,18 @@ public struct LocalQwenSpeechPort: SpeechPort {
         process.arguments=[runner.path,"--audio",url.path,"--model",model.path,"--output",output.path,"--locale",locale]
         // Do not inherit gateway/API credentials or Python path overrides.
         process.environment=["PATH":"/opt/homebrew/bin:/usr/bin:/bin","HF_HUB_OFFLINE":"1","HF_HUB_DISABLE_TELEMETRY":"1"]
-        let log = try progressLog.map { url -> FileHandle in
-            FileManager.default.createFile(atPath: url.path, contents: nil)
-            return try FileHandle(forWritingTo: url)
-        }
-        defer { try? log?.close() }
-        process.standardOutput=log ?? FileHandle.nullDevice;process.standardError=log ?? FileHandle.nullDevice
+        let logURL = progressLog ?? directory.appendingPathComponent("runner.log")
+        FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        let log = try FileHandle(forWritingTo: logURL)
+        defer { try? log.close() }
+        process.standardOutput=log; process.standardError=log
         let wait = LocalProcessWait(process, failure: "本地 Qwen 转写未完成；保留原件，不自动切换服务")
-        try await wait.run()
+        do { try await wait.run() }
+        catch is CancellationError { throw CancellationError() }
+        catch {
+            let detail = (try? String(contentsOf: logURL, encoding: .utf8))?.split(separator: "\n").last.map(String.init)
+            throw VoiceOSError(String((detail ?? "本地 Qwen 转写未完成").prefix(600)) + "；原件保留，可重试转写")
+        }
         struct Response: Decodable { let backend: String; let text: String; let spans: [TranscriptSpan]; let audio_uploaded: Bool }
         let data=try Data(contentsOf:output)
         guard data.count<=16_000_000 else { throw VoiceOSError("本地转写结果超过预算") }
