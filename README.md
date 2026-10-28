@@ -8,6 +8,10 @@ VoiceOS 将自然表达连接到有来源的知识、行动和结果反馈。产
 
 日常开发从最新 `main` 切出 `codex/` 分支，经 PR 合入。旧开发线保存在 `archive/` 标签中，不再作为分支维护：`archive/pre-migration-runtime-20261028`、`archive/voiceos-lite-20261013`、`archive/followup-recovery-20261020`、`archive/migration-snapshot-20261020`。
 
+## Agent 协作
+
+开发任务在 `work/tasks/` 记录，`status` 区分进行中和已完成。完成记录从本框架启用后开始累积，既有功能以 README、git log 和 PR 历史为准。工作流见 [docs/agents/WORKFLOW.md](docs/agents/WORKFLOW.md)，文档职责见 [docs/agents/DOCUMENT-MAP.md](docs/agents/DOCUMENT-MAP.md)。
+
 ## 思考全景
 
 首页从当前已授权、完成完整理解的全部材料及节目依赖生成长期问题全景，近期只高亮。每个问题和 AI 候选联系保留当前原话版本、精确范围、来源入口及材料和观点覆盖清单。唯一逐字引文可由应用定位，重复引文必须已有正确范围。生成和独立语义核对取得不同回执后才发布，语义拒绝最多针对性修复一次并重新独立核对。原话、归属、许可、完成状态或当前观点变化后旧图停止展示。失败与结果未知需明确重试，重开不会静默重发。
