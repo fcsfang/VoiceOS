@@ -26,7 +26,7 @@ jobs:
           fi
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git rev-parse --verify "$base^{commit}" >/dev/null 2>&1; then
             echo "swift=true" >> "$GITHUB_OUTPUT"
-          elif git diff --name-only "$base" HEAD | grep -Eq '^(Sources/|Tests/|Package\.swift|Package\.resolved|\.github/workflows/)'; then
+          elif git diff --name-only "$base" HEAD | grep -Eq '^(Sources/|Tests/|Plugins/|Package\.swift|Package@swift-[^/]+\.swift|Package\.resolved|\.github/workflows/)'; then
             echo "swift=true" >> "$GITHUB_OUTPUT"
           else
             echo "swift=false" >> "$GITHUB_OUTPUT"

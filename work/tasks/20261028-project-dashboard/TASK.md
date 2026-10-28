@@ -1,9 +1,9 @@
 ---
-status: in_progress
+status: in_review
 started: 2026-10-28
 updated: 2026-10-28
 branch: codex/project-dashboard-20261028
-pr: -
+pr: 30
 owner: main session
 ---
 # 项目管理看板与 CI 快速路径
@@ -38,20 +38,21 @@ owner: main session
 
 ## 当前状态
 
-项目级看板、工作流更新和 CI 快速路径已写入。本地链接、YAML 和模板检查通过；等待 CI。
+PR #30 已开，等待 CI 和合并。实现和本地检查已完成。
 
 ## 下一步
 
-提交、开 PR，CI 通过后合并。
+CI 通过后合并；合并后开一个只改 `work/` 的关闭 PR，把状态改为 `done`，并在 `work/PROGRESS.md` 追加记录。
 
 ## 验证
 
 - 14 个文件的相对链接检查，0 缺失。
 - YAML 解析通过；快速路径匹配测试通过，文档改动为 false，`Sources/`、`Tests/`、`Package.swift` 和 workflow 为 true。
-- CI 对本 PR 的 workflow 改动跑完整测试；后续文档改动走快速路径。
+- CI 结果见 PR #30。合并后关闭 PR 会实测文档快速路径。
 
 ## 链接
 
-- PR: 待开
+- PR: #30
 - 工作流: `docs/agents/WORKFLOW.md`
 - 文档职责: `docs/agents/DOCUMENT-MAP.md`
+- 后续: 拆分 `CoreFlowTests.swift`，当前编译占 CI 11 分 17 秒。
