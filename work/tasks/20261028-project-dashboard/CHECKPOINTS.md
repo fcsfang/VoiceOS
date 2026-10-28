@@ -22,3 +22,10 @@
 - 证据：https://github.com/fcsfang/VoiceOS/pull/30；链接、YAML 和快速路径匹配测试通过。
 - 下一步：CI 通过后合并；合并后开一个只改 `work/` 的关闭 PR，把状态改为 `done` 并在 `work/PROGRESS.md` 追加记录。
 - 阻塞：无。
+
+## 2026-10-28T14:59:59Z
+
+- 完成：PR #30 已合并到 main（ab3710c）。任务状态改为 `done`，项目进展追加 #30。
+- 证据：https://github.com/fcsfang/VoiceOS/pull/30；`git log -1` 显示 ab3710c；CI test 14 分 40 秒。
+- 下一步：无；后续见 `work/TODO.md`。
+- 阻塞：无。

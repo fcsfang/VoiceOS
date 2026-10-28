@@ -1,5 +1,5 @@
 ---
-status: in_review
+status: done
 started: 2026-10-28
 updated: 2026-10-28
 branch: codex/project-dashboard-20261028
@@ -38,21 +38,21 @@ owner: main session
 
 ## 当前状态
 
-PR #30 已开，等待 CI 和合并。实现和本地检查已完成。
+PR #30 已合并到 main（ab3710c）。
 
 ## 下一步
 
-CI 通过后合并；合并后开一个只改 `work/` 的关闭 PR，把状态改为 `done`，并在 `work/PROGRESS.md` 追加记录。
+无；后续工作见 `work/TODO.md`。
 
 ## 验证
 
+- PR #30 的 CI test 通过，14 分 40 秒。
 - 14 个文件的相对链接检查，0 缺失。
 - YAML 解析通过；快速路径匹配测试通过，文档改动为 false，`Sources/`、`Tests/`、`Package.swift` 和 workflow 为 true。
-- CI 结果见 PR #30。合并后关闭 PR 会实测文档快速路径。
 
 ## 链接
 
-- PR: #30
+- PR: #30（已合并，ab3710c）
 - 工作流: `docs/agents/WORKFLOW.md`
 - 文档职责: `docs/agents/DOCUMENT-MAP.md`
 - 后续: 拆分 `CoreFlowTests.swift`，当前编译占 CI 11 分 17 秒。
