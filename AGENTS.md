@@ -31,9 +31,10 @@
 
 ## Agent 工作框架
 
-- 开发任务开始前，按 [docs/agents/WORKFLOW.md](docs/agents/WORKFLOW.md) 在 `work/tasks/` 建立任务卡和进展日志；完成后把 `status` 改为 `done` 或 `abandoned`。
-- 任务卡记录目标、范围、改动、决策、当前状态和下一步。交接时更新任务卡并追加检查点，下一个 agent 不依赖聊天记录。
-- 文档职责见 [docs/agents/DOCUMENT-MAP.md](docs/agents/DOCUMENT-MAP.md)。任务进展写 `work/`，稳定行为写 README，技术决策写 ADR，历史资料保持历史标注。
+- 开发任务开始前先读 `work/TODO.md` 和 `work/STATUS.md`，再按 [docs/agents/WORKFLOW.md](docs/agents/WORKFLOW.md) 在 `work/tasks/` 建立任务卡和检查点；完成后把 `status` 改为 `done` 或 `abandoned`。
+- 项目待办、状态和进展分别写 `work/TODO.md`、`work/STATUS.md`、`work/PROGRESS.md`；只有主会话更新这三个文件。
+- 任务卡记录目标、范围、改动、决策、当前状态和下一步。交接时更新任务卡和 `CHECKPOINTS.md`，下一个 agent 不依赖聊天记录。
+- 文档职责见 [docs/agents/DOCUMENT-MAP.md](docs/agents/DOCUMENT-MAP.md)。任务细节写 `work/`，稳定行为写 README，技术决策写 ADR，历史资料保持历史标注。
 
 ## 默认简单
 

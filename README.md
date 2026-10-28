@@ -10,7 +10,7 @@ VoiceOS 将自然表达连接到有来源的知识、行动和结果反馈。产
 
 ## Agent 协作
 
-开发任务在 `work/tasks/` 记录，`status` 区分进行中和已完成。完成记录从本框架启用后开始累积，既有功能以 README、git log 和 PR 历史为准。工作流见 [docs/agents/WORKFLOW.md](docs/agents/WORKFLOW.md)，文档职责见 [docs/agents/DOCUMENT-MAP.md](docs/agents/DOCUMENT-MAP.md)。
+项目待办、状态和进展在 `work/TODO.md`、`work/STATUS.md`、`work/PROGRESS.md`，每个任务的细节在 `work/tasks/`。完成记录从本框架启用后开始累积，既有功能以 README、git log 和 PR 历史为准。工作流见 [docs/agents/WORKFLOW.md](docs/agents/WORKFLOW.md)，文档职责见 [docs/agents/DOCUMENT-MAP.md](docs/agents/DOCUMENT-MAP.md)。
 
 ## 思考全景
 
