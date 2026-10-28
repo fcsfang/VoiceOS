@@ -103,7 +103,7 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     }
 }
 
-extension CoreFlowTests {
+extension PanoramaFlowTests {
     func assertPanoramaProgressiveRecovery(root: URL) async throws {
         let store=try await panoramaFixtureStore(root.appendingPathComponent("progressive"), count: 3)
         let port=ProgressivePanoramaFixture(failGenerationAt: 2, failCoverage: true, failConsistency: true)
@@ -337,7 +337,7 @@ private actor PanoramaWireTransport: ModelHTTPTransport {
     }
 }
 
-extension CoreFlowTests {
+extension PanoramaFlowTests {
     private func assertPanoramaStagedWire() async throws {
         let texts=["👩‍💻 s1 t1 c1 是原话，不应替换。","外部作者认为检索需要保留条件。"]
         let sources=texts.enumerated().map { index,text in
