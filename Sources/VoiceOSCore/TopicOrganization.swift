@@ -105,7 +105,7 @@ extension VoiceOSStore {
         let budget = max(1, catalog.reduce(0) { $0 + ($1.transcript?.unicodeScalars.count ?? 0) })
         let context = try prepareLocalTranscriptContext(sourceIDs: ids, scalarBudget: budget)
         let policies = Dictionary(uniqueKeysWithValues: catalog.map { ($0.id,$0.policyVersion) })
-        let questions = try reflectionQuestions()
+        let questions = try reflectionQuestions(includeSummaries: false)
         let links = try reflectionQuestionSources()
         let topics = questions.filter { allowed.contains($0.sourceID) }.map { question in
             TopicCatalogItem(id: question.id, title: question.title, sourceIDs: (links[question.id] ?? []).filter { allowed.contains($0) }.sorted())
@@ -133,9 +133,7 @@ extension VoiceOSStore {
         return .init(context: context, policyVersions: policies, sourceDates:Dictionary(uniqueKeysWithValues:catalog.map { ($0.id,$0.expressedDate?.ISO8601Format() ?? $0.createdAt) }), topics: topics, tasks: tasks, discussionReplies:replies, digest: digest,knowledge:knowledge)
     }
 
-    func topicSummaryIsCurrent(_ summary: TopicOrganizationSummary, questionID: String) throws -> Bool {
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) })
-        let linked = Set(try reflectionQuestionSourceIDs(questionID:questionID))
+    func topicSummaryIsCurrent(_ summary: TopicOrganizationSummary, catalog: [String: SourceRecord], linked: Set<String>) throws -> Bool {
         for (id,version) in summary.claimVersions ?? [:] {
             guard let claim=try db.query("SELECT review_version,validity FROM claims WHERE id=?",[id]).first,
                   claim["validity"] == "current",claim["review_version"] == String(version) else { return false }

@@ -96,17 +96,21 @@ extension VoiceOSStore {
         return row
     }
 
-    private func reflectionQuestionRecord(_ row: [String: String]) -> ReflectionQuestion {
+    private func reflectionQuestionRecord(_ row: [String: String], catalog: [String: SourceRecord], linkedSourceIDs: [String]) -> ReflectionQuestion {
         var question = ReflectionQuestion(id: row["id"]!, title: row["title"]!, sourceID: row["title_source_id"]!, createdAt: row["created_at"]!, updatedAt: row["updated_at"]!)
         question.isAIOrganized = row["ai_named"] == "1"
-        if let json = row["organization_json"], let summary = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(json.utf8)),
-           (try? topicSummaryIsCurrent(summary, questionID: question.id)) == true { question.organization = summary }
+        if !catalog.isEmpty, let json = row["organization_json"], let summary = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(json.utf8)),
+           (try? topicSummaryIsCurrent(summary, catalog: catalog, linked: Set(linkedSourceIDs))) == true { question.organization = summary }
         return question
     }
 
-    public func reflectionQuestions() throws -> [ReflectionQuestion] {
+    public func reflectionQuestions(includeSummaries: Bool = true) throws -> [ReflectionQuestion] {
         try requireReflectionQuestionsReady()
-        return try db.query("SELECT * FROM reflection_questions ORDER BY updated_at DESC,id").map(reflectionQuestionRecord)
+        let rows = try db.query("SELECT * FROM reflection_questions ORDER BY updated_at DESC,id")
+        guard !rows.isEmpty else { return [] }
+        let catalog: [String: SourceRecord] = includeSummaries ? Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) }) : [:]
+        let links = includeSummaries ? try reflectionQuestionSources() : [:]
+        return rows.map { reflectionQuestionRecord($0, catalog: catalog, linkedSourceIDs: links[$0["id"]!] ?? []) }
     }
 
     @discardableResult
@@ -119,7 +123,7 @@ extension VoiceOSStore {
             try db.execute("INSERT INTO reflection_questions(id,title,title_source_id,created_at,updated_at) VALUES(?,?,?,?,?)", [id,title,sourceID,now,now])
             try db.execute("INSERT INTO reflection_question_sources(id,question_id,source_id) VALUES(?,?,?)", [UUID().uuidString,id,sourceID])
         }
-        return reflectionQuestionRecord(try reflectionQuestionRow(id))
+        return reflectionQuestionRecord(try reflectionQuestionRow(id), catalog: [:], linkedSourceIDs: [sourceID])
     }
 
     public func renameReflectionQuestion(id: String, title: String) throws {
