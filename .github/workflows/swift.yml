@@ -10,12 +10,14 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
-    runs-on: macos-26
+    runs-on: [self-hosted, macOS, ARM64, voiceos-local]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Show Swift version
+        run: swift --version
       - name: Check for Swift changes
         id: changes
         run: |
