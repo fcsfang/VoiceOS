@@ -48,12 +48,15 @@ extension VoiceOSStore {
         return try recordExpression(text, commandID: commandID, feedback: FeedbackIntent(actionID: actionID, actionVersion: expectedVersion, kind: kind, recordingSourceID: recordingSourceID))
     }
     public func actionFeedback(actionID: String) throws -> [ActionFeedbackRecord] {
-        let claims = Dictionary(uniqueKeysWithValues: try candidateClaims(includeFrozen: true).map { ($0.id, $0) })
-        return try db.query("""
+        let rows = try db.query("""
         SELECT f.*,s.state AS source_state,s.feedback_json,v.text FROM action_feedback f JOIN sources s ON s.id=f.source_id
         JOIN transcripts t ON t.source_id=s.id JOIN transcript_versions v ON v.id=t.current_version_id
         WHERE f.action_id=? ORDER BY f.sequence
-        """, [actionID]).map {
+        """, [actionID])
+        let claimIDs = Set(try rows.compactMap { try Self.feedbackIntent($0["feedback_json"])?.organizedClaimID })
+        var claims: [String: CandidateClaim] = [:]
+        for id in claimIDs { claims[id] = try candidateClaim(id: id, includeFrozen: true) }
+        return try rows.map {
             let intent = try Self.feedbackIntent($0["feedback_json"])
             let stale = intent?.organizedClaimID.map { claims[$0]?.validity != "current" } ?? false
             return ActionFeedbackRecord(id:$0["id"]!, actionID:$0["action_id"]!, actionVersion:Int($0["action_version"]!)!, sourceID:$0["source_id"]!, kind:$0["kind"]!, text:$0["text"]!, sourceState:stale ? "frozen" : $0["source_state"]!, createdAt:$0["created_at"]!, recordingSourceID:intent?.recordingSourceID, relation:intent?.relation)

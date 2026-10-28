@@ -180,8 +180,8 @@ extension VoiceOSStore {
         try candidateClaimRows(includeFrozen: includeFrozen).map(decodeCandidateClaim)
     }
 
-    func candidateClaim(id: String) throws -> CandidateClaim? {
-        try candidateClaimRows(includeFrozen: false, claimID: id).first.map(decodeCandidateClaim)
+    func candidateClaim(id: String, includeFrozen: Bool = false) throws -> CandidateClaim? {
+        try candidateClaimRows(includeFrozen: includeFrozen, claimID: id).first.map(decodeCandidateClaim)
     }
 
     private func candidateClaimRows(includeFrozen: Bool, attemptID: String? = nil, claimID: String? = nil) throws -> [[String: String]] {
