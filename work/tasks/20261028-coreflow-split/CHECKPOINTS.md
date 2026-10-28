@@ -15,3 +15,10 @@
 - 证据：https://github.com/fcsfang/VoiceOS/pull/32；本地 `swift test -j 4` 7 项 0 失败。
 - 下一步：CI 通过后合并；合并后开关闭 PR。
 - 阻塞：无。
+
+## 2026-10-28T15:37:15Z
+
+- 完成：PR #32 已合并到 main（70a9608）。任务状态改为 `done`。
+- 证据：https://github.com/fcsfang/VoiceOS/pull/32；CI test 11 分 34 秒。
+- 下一步：无；CI 提速继续用自托管 runner。
+- 阻塞：无。
