@@ -36,6 +36,7 @@ organizer = app / 'Contents' / 'Resources' / 'organize_podcast.py'
 organizer.parent.mkdir(parents=True, exist_ok=True)
 shutil.copy2(ROOT / 'scripts' / 'organize_podcast.py', organizer)
 shutil.copy2(ROOT / 'scripts' / 'organizer_quality.py', organizer.with_name('organizer_quality.py'))
+shutil.copy2(ROOT / 'scripts' / 'asr' / 'qwen-local.py', organizer.with_name('qwen-local.py'))
 bytecode = organizer.parent / '__pycache__'
 if bytecode.exists(): shutil.rmtree(bytecode)  # Generated Python cache must not alter the signed app.
 resources = app / 'Contents' / 'Resources' / 'BGE'
