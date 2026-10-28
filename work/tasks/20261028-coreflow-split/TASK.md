@@ -1,9 +1,9 @@
 ---
-status: in_progress
+status: in_review
 started: 2026-10-28
 updated: 2026-10-28
 branch: codex/coreflow-split-20261028
-pr: -
+pr: 32
 owner: main session
 ---
 # 拆分 CoreFlowTests 提速 CI
@@ -37,11 +37,11 @@ owner: main session
 
 ## 当前状态
 
-拆分完成，已 rebase 到 ab3710c。本地 `swift test -j 4` 7 项通过，从零构建 284.61 秒。
+PR #32 已开，CI 运行中。本地 `swift test -j 4` 7 项通过，从零构建 284.61 秒。
 
 ## 下一步
 
-开 PR，让 CI 跑完整测试并测出新的编译时间。
+CI 通过后合并；合并后开关闭 PR 写 `done` 和 `PROGRESS`。
 
 ## 验证
 
@@ -51,5 +51,5 @@ owner: main session
 
 ## 链接
 
-- PR: 待开
+- PR: #32
 - 基线: CI test 14 分 40 秒，`CoreFlowTests.swift` 编译 11 分 17 秒。
