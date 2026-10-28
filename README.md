@@ -27,6 +27,8 @@ swift build -j 4
 swift test -j 4
 ```
 
+CI 每次推送只跑 `swift build`。完整 `swift test` 在 PR 加 `full-test` 标签或合并到 main 后运行。
+
 测试使用合成资料和模拟模型、提醒事项端口。通过测试不代表真实录音质量或真实 Apple 提醒事项已验收。
 
 ## 本地命令行

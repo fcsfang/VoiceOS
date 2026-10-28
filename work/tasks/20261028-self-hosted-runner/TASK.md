@@ -17,6 +17,7 @@ owner: main session
 - 仓库改为私有，避免公开仓库的 fork PR 在 runner 上执行本机命令。
 - 安装 actions runner v2.338.2 到 `~/actions-runner-voiceos`，作为 LaunchAgent 常驻。
 - workflow 的 `runs-on` 改用 self-hosted 标签。
+- CI 快慢分离：每次推送只跑 `swift build`，完整 `swift test` 用 `full-test` 标签或 main 推送。
 - 首次运行验证 Swift 工具链和测试。
 
 ## 改动
@@ -34,14 +35,15 @@ owner: main session
 - 仓库改私有，公开 Issue 不再对外可见；现有 Issue 保留。
 - 用 LaunchAgent 常驻，Mac 登录后自动上线。
 - 用具体标签 `self-hosted, macOS, ARM64, voiceos-local`，避免误用其他 runner。
+- 完整测试不再阻塞每次推送。日常迭代用 `swift build` 和真实应用，完整测试按需运行。
 
 ## 当前状态
 
-runner 已注册并在线，等待本 PR 的 CI 在它上面跑通。
+runner 在线。第一次完整测试正在跑。workflow 已改为每次推送只跑 `swift build`，完整测试用 `full-test` 标签或 main 推送。
 
 ## 下一步
 
-推送本 PR，确认 CI 使用 `voiceos-mac`，测试通过后合并。
+第一次完整测试结束后推送新 workflow，更新分支保护为 `build`，给本 PR 加 `full-test` 标签验证完整测试。
 
 ## 验证
 

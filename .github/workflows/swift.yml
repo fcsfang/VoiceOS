@@ -1,15 +1,18 @@
 name: Swift
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [main]
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
   group: swift-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  test:
+  build:
+    if: github.event_name == 'pull_request'
     runs-on: [self-hosted, macOS, ARM64, voiceos-local]
     timeout-minutes: 20
     steps:
@@ -21,11 +24,7 @@ jobs:
       - name: Check for Swift changes
         id: changes
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="${{ github.event.pull_request.base.sha }}"
-          else
-            base="${{ github.event.before }}"
-          fi
+          base="${{ github.event.pull_request.base.sha }}"
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git rev-parse --verify "$base^{commit}" >/dev/null 2>&1; then
             echo "swift=true" >> "$GITHUB_OUTPUT"
           elif git diff --name-only "$base" HEAD | grep -Eq '^(Sources/|Tests/|Plugins/|Package\.swift|Package@swift-[^/]+\.swift|Package\.resolved|\.github/workflows/)'; then
@@ -33,9 +32,19 @@ jobs:
           else
             echo "swift=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Build and run local tests
+      - name: Build
         if: steps.changes.outputs.swift == 'true'
-        run: swift test -j 4
-      - name: Skip build and tests
+        run: swift build -j 4
+      - name: Skip build
         if: steps.changes.outputs.swift == 'false'
-        run: echo "No Swift or workflow changes; build and tests skipped."
+        run: echo "No Swift or workflow changes; build skipped."
+  test:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'full-test'))
+    runs-on: [self-hosted, macOS, ARM64, voiceos-local]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Swift version
+        run: swift --version
+      - name: Run tests
+        run: swift test -j 4
