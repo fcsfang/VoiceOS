@@ -23,3 +23,5 @@ dist/
 *.db-shm
 .build/
 .swiftpm/
+
+.claude/skills/verify-voiceos/evidence/
