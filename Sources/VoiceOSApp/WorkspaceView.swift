@@ -281,7 +281,7 @@ struct WorkspaceView: View {
             if let source=model.records.first(where: { $0.id == id }) {
                 if source.isTrashed { TrashedMaterialView(model:model,source:source) }
                 else {
-                    WorkspaceSourceView(model:model,source:source,openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },openDiscussion:{ id in Task { await openSavedDiscussion(id) } },openSource:{ go(.source($0)) })
+                    WorkspaceSourceView(model:model,source:source,openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },openDiscussion:{ id in Task { await openSavedDiscussion(id) } },openSource:{ go(.source($0)) },openFollowups:{ go(.tool("思想与下一步")) })
                         .id(id)
                 }
             } else { unavailable("这份材料暂时不可用",description:"可以搜索其他材料，或回到主题。") }
@@ -552,6 +552,10 @@ struct WorkspaceView: View {
             sectionTitle("资料与历史")
             HStack { Button("导出结构化资料") { model.export(includeMedia:false) };Button("导出资料与原件") { model.export(includeMedia:true) } }
             HStack { Button("打开已有资料库") { chooseLibrary() };Button("从迁移包恢复") { go(.tool("恢复资料")) } }
+            sectionTitle("回顾与查找")
+            WorkspaceRow(title:"静默回顾",subtitle:"不要求回应；看到与当前表达相关的原文",icon:"text.bubble") { go(.tool("静默回顾")) }
+            WorkspaceRow(title:"查找历史文字",subtitle:"按关键词或按意思找回原话",icon:"text.magnifyingglass") { go(.tool("查找历史文字")) }
+            WorkspaceRow(title:"英文表达反馈",subtitle:"选择一份我的英文原话，获取表达建议",icon:"character.book.closed") { go(.tool("英文表达反馈")) }
             DisclosureGroup("其他工作与维护") {
                 VStack(alignment:.leading,spacing:15) {
                     Button("思想关联、目标下一步与英语反馈") { go(.tool("思想与下一步")) }
@@ -581,6 +585,9 @@ struct WorkspaceView: View {
         case "自动入口": RecordingInboxView(inbox:model.recordingInbox,model:model,embedded:true,dismiss:back)
         case "思想与下一步": RecordingFollowupView(model:model,embedded:true,dismiss:openSelectedSource)
         case "纠错影响": CorrectionImpactView(model:model,embedded:true,dismiss:openSelectedSource)
+        case "静默回顾": CognitiveFeedbackView(model:model,embedded:true,dismiss:back).task { model.quietAssociationSourceID=nil; await model.refreshQuietFeedback() }
+        case "查找历史文字": HistorySearchView(model:model,embedded:true,dismiss:back)
+        case "英文表达反馈": EnglishPracticeView(model:model,embedded:true,dismiss:back)
         case "恢复资料": PackageRestoreView(dismiss:back).frame(maxWidth:.infinity,maxHeight:.infinity)
         default: WorkspaceProcessingView(model:model,inbox:model.recordingInbox,openSource:{ go(.source($0)) },openSettings:{ go(.settings) },openInbox:{ go(.tool("自动入口")) })
         }

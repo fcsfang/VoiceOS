@@ -322,6 +322,11 @@ final class ControlCenter: ObservableObject {
     private var segmentExtractionModel: ResponsesSegmentExtractionPort?
     private var segmentAggregationModel: ResponsesSegmentAggregationPort?
     private var textModel: ResponsesModelPort?
+    private var englishModel: ResponsesEnglishPracticePort?
+    @Published var englishSnapshot: EnglishPracticeSnapshot?
+    @Published var englishAttempts: [EnglishFeedbackAttemptRecord] = []
+    @Published var englishBusy = false
+    @Published var englishStatus = "选择一份我的英文原话，再明确发送文本反馈。"
     private var followupModel: ResponsesRecordingFollowupPort?
     private var assistantModel: ResponsesAssistantPort?
     private var knowledgeReviewModel: ResponsesKnowledgeReviewPort?
@@ -644,6 +649,7 @@ final class ControlCenter: ObservableObject {
             workspaceBriefing = snapshot.briefing
             recordingFollowups = snapshot.recordingFollowups
             followupValidity = snapshot.followupValidity
+            englishAttempts = try await store.englishFeedbackAttempts()
             attempts = snapshot.attempts
             processingIntents = snapshot.processingIntents
             recordingRequests = snapshot.recordingRequests
@@ -693,7 +699,7 @@ final class ControlCenter: ObservableObject {
             topicModel=suite.topics; topicAttemptDigest=nil
             recordingExpressionModel=suite.recordingExpressions
             assistantModel=suite.assistant
-            followupModel=suite.followup;associationModel=suite.association;reminderFieldModel=suite.reminderFields
+            followupModel=suite.followup;englishModel=suite.english;associationModel=suite.association;reminderFieldModel=suite.reminderFields
             knowledgeReviewModel=suite.knowledgeReview
             relevance.cancel();relevanceModel=suite.relevance
             segmentExtractionModel=suite.segmentExtraction;segmentAggregationModel=suite.segmentAggregation
@@ -1195,6 +1201,25 @@ final class ControlCenter: ObservableObject {
             do { _ = try await store?.enqueueRecordingFollowup(sourceID: sourceID, retry: true); await refresh(); resumeRecordingFollowups() }
             catch { followupStatus = error.localizedDescription }
         }
+    }
+    func prepareEnglishPractice(current: SourceRecord, priorIDs: [String]) async {
+        guard let store, !englishBusy else { return }
+        englishBusy = true
+        defer { englishBusy = false }
+        do {
+            englishSnapshot = try await store.prepareEnglishPractice(currentSourceID: current.id, priorSourceIDs: priorIDs, destination: .cloud)
+            englishStatus = "已准备 \(priorIDs.count) 份旧练习；发送前仍会再次核对文字版本和授权。"
+        } catch { englishSnapshot = nil; englishStatus = error.localizedDescription }
+    }
+    func performEnglishPractice() async {
+        guard let store, let port = englishModel, let snapshot = englishSnapshot, !englishBusy else { return }
+        englishBusy = true; englishStatus = "正在发送选定文字；不上传原始音频，不自动重试。"
+        do {
+            let record = try await store.performEnglishFeedback(snapshot, using: port)
+            englishStatus = record.state == "completed" ? "反馈已保存；建议仍只属于英文练习记录，不进入认知或行动。" : "反馈结果未知；不会自动重发。"
+        } catch { englishStatus = error.localizedDescription }
+        englishAttempts = (try? await store.englishFeedbackAttempts()) ?? englishAttempts
+        englishBusy = false
     }
     func showTask(_ id: String) {
         focusedTaskID = id; taskPresentation += 1
@@ -2207,6 +2232,7 @@ extension FocusedValues {
 
 struct CognitiveFeedbackView: View {
     @ObservedObject var model: ControlCenter
+    var embedded = false
     let dismiss: () -> Void
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
@@ -2253,13 +2279,14 @@ struct CognitiveFeedbackView: View {
                     }
                 }.frame(maxWidth:.infinity,alignment:.leading)
             }
-            HStack { Spacer(); Button("完成",action:dismiss).keyboardShortcut(.cancelAction) }
-        }.padding(24).frame(width:720,height:560).task { await model.refreshQuietFeedback() }
+            HStack { Spacer(); if !embedded { Button("完成",action:dismiss).keyboardShortcut(.cancelAction) } }
+        }.padding(24).frame(width: embedded ? nil : 720, height: embedded ? nil : 560).task { await model.refreshQuietFeedback() }
     }
 }
 
 struct HistorySearchView: View {
     @ObservedObject var model: ControlCenter
+    var embedded = false
     let dismiss: () -> Void
     @State private var query = ""
     @State private var question = ""
@@ -2297,8 +2324,8 @@ struct HistorySearchView: View {
                     }
                 }
             }
-            Button("完成",action:dismiss)
-        }.padding(24).frame(width:720,height:740)
+            if !embedded { Button("完成",action:dismiss) }
+        }.padding(24).frame(width: embedded ? nil : 720, height: embedded ? nil : 740)
         .onChange(of:query) { selectedIDs = []; model.cancelHistorySearch() }
         .onChange(of:selectedIDs) { model.relevance.cancel() }
         .onChange(of:question) { model.relevance.cancel() }

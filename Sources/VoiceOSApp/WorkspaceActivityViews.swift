@@ -116,6 +116,7 @@ struct WorkspaceTaskView: View {
     @State private var confirming = false
     @State private var settings: ReminderSnapshot?
     @State private var showingSettings = false
+    @State private var scheduleAction: ActionRecord?
     @State private var replacementTitle = ""
     private var correctedClaim: CandidateClaim? {
         model.claims.first { $0.id == action.claimID && $0.validity == "current" && $0.reviewState != "rejected" && $0.reviewVersion > action.claimReviewVersion }
@@ -234,6 +235,7 @@ struct WorkspaceTaskView: View {
                                     Button("日期、提醒与优先级") { Task { if let snapshot = await model.loadReminderSettings(action) { settings = snapshot; showingSettings = true } else { error = model.status } } }.disabled(model.remindersBusy)
                                 }
                             }
+                            scheduleSection
                         }.padding(.top, 10)
                     }.padding(.vertical,16)
                 }
@@ -243,11 +245,59 @@ struct WorkspaceTaskView: View {
         .task(id: action.id + String(action.version) + String(model.recentOutcomes.count)) { await loadFeedback() }
         .sheet(isPresented: $confirming) { ConfirmTaskView(action: action, model: model) { confirming = false } }
         .sheet(isPresented: $showingSettings) { if let settings { ReminderSettingsView(action: action, snapshot: settings, model: model) { showingSettings = false } } }
+        .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
         .sheet(isPresented: $showingFeedback, onDismiss: { Task { await loadFeedback() } }) { ActionFeedbackView(action: action, model: model) { showingFeedback = false } }
         .onDisappear { model.stopPlayback() }
         .onAppear { replacementTitle = action.title }
     }
     @State private var showingFeedback = false
+    @ViewBuilder private var scheduleSection: some View {
+        if action.kind == "task" {
+            Button("设置本地期限选择") { scheduleAction = action }
+                .disabled(model.savingAction || model.remindersBusy || action.validity != "current" || action.state != "open")
+            if let schedule = model.scheduleIntents.first(where: { $0.actionID == action.id }) {
+                Text((schedule.authority == .userCommitment ? "用户明确期限：" : "AI 弹性安排：") + schedule.due.summary).font(.caption)
+                Text(schedule.baseOperationID != nil ? "外部期限基线：已应答并回读的 AI 弹性安排" : (schedule.baseAuthority == .externalManual ? "外部期限基线：人工或未确认归属，改动需具体确认" : (schedule.baseAuthority == .userCommitment ? "外部期限基线：明确承诺" : "外部期限基线：初始无期限或尚未绑定"))).font(.caption).foregroundStyle(.secondary)
+                if let operation = model.scheduleOperations.first(where: { $0.intentID == schedule.id }) {
+                    Text("排期操作：" + operation.state.summary).font(.caption)
+                    Text(operation.reason).font(.caption).foregroundStyle(.secondary)
+                    if operation.validity == "frozen" {
+                        Text("迁移历史已冻结，不恢复外部操作。").font(.caption).foregroundStyle(.secondary)
+                    } else if operation.attempted, operation.state == .unknown || operation.state == .conflict {
+                        Button("只读核对改期结果") { Task { await model.reconcileSchedule(operation) } }
+                            .disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
+                    }
+                } else {
+                    Text(schedule.eligibleForPlanning ? "本地排期意图，尚未执行外部改期。" : "排期保留为历史，当前暂停执行。").font(.caption).foregroundStyle(.secondary)
+                    if let preview = model.schedulePreviews[schedule.id] {
+                        Text("基于上次回读：" + preview.reason).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if model.schedulePreviews[schedule.id]?.disposition == .writeFlexible,
+                       let target = model.reminderLinks.first(where: { $0.actionID == action.id }), target.state == "linked" {
+                        Button("执行普通弹性安排") { Task { await model.executeSchedule(schedule, link: target) } }
+                            .disabled(model.remindersBusy || model.reminderAccess?.enabled != true || model.reminderCalendarID != target.calendarID)
+                    }
+                }
+                if let grant = model.scheduleGrants.first(where: { $0.intentID == schedule.id }) {
+                    Text(grant.revoked ? "本次改期确认已撤回" : (grant.validity == "frozen" ? "迁移确认仅作历史保留" : "已确认本次具体改期")).font(.caption).foregroundStyle(.secondary)
+                    if grant.eligibleForExecution, let target = model.reminderLinks.first(where: { $0.actionID == action.id }) {
+                        Button("执行已确认改期") { Task { await model.executeSchedule(schedule, link: target, grantID: grant.id) } }.disabled(model.remindersBusy)
+                    }
+                    if !grant.revoked, grant.validity == "current" {
+                        Button("撤回本次改期确认") { Task { await model.revokeScheduleGrant(grant) } }
+                    }
+                } else if model.schedulePreviews[schedule.id]?.disposition == .requiresConfirmation,
+                          let target = model.reminderLinks.first(where: { $0.actionID == action.id }),
+                          !model.scheduleOperations.contains(where: { $0.intentID == schedule.id }) {
+                    Button("查看具体改期并确认") { Task { await model.prepareScheduleEffect(schedule, link: target) } }.disabled(model.remindersBusy)
+                }
+                DisclosureGroup("排期依据") {
+                    Text(schedule.rawExpression).font(.caption)
+                    Text("表达时刻：" + schedule.anchorSummary).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
     private func saveReplacement(_ claim: CandidateClaim) {
         guard let store=model.store else { return }
         saving=true

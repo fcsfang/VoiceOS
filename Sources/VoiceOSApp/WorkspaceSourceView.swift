@@ -12,6 +12,7 @@ struct WorkspaceSourceView: View {
     let openDelivery:(String)->Void
     let openDiscussion:(String)->Void
     var openSource:(String)->Void = { _ in }
+    var openFollowups:()->Void = {}
     private var expression:RecordingExpression? {
         let catalog=Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })
         return source.recordingExpression(in:catalog)
@@ -40,6 +41,8 @@ struct WorkspaceSourceView: View {
     @State private var editing:SourceRecord?
     @State private var naming:SourceRecord?
     @State private var claimEditor:CandidateClaim?
+    @State private var actionClaim:CandidateClaim?
+    @State private var showingSegmentation=false
     @State private var showAllThoughts=false
     @State private var historyState = SourceHistoryState.idle
     @State private var historyTask: Task<Void, Never>?
@@ -204,6 +207,9 @@ struct WorkspaceSourceView: View {
                         Text(source.transcriptionBackend?.hasPrefix("Qwen3-ASR") == true ? model.fullRecordingStatus : model.status).font(.callout).textSelection(.enabled)
                     }
                 }
+                if let followup = model.recordingFollowups.last(where: { expressionIDs.contains($0.sourceID) }) {
+                    RecordingFollowupSummary(receipt: followup, model: model, open: openFollowups)
+                }
                 if pausedThoughts.isEmpty && !pausedActions.isEmpty {
                     WorkspaceSection(title:"观点已更正，关联待办需要重新确认",subtitle:"打开任务即可看到更正后的观点，并填写准确的待办；之前的任务记录保留。",icon:"pause.circle",count:pausedActions.count) {
                         ForEach(pausedActions) { action in WorkspaceRow(title:action.title,subtitle:model.workspaceActionStatus(action),trailing:"查看与处理") { openTask(action.id) } }
@@ -225,6 +231,7 @@ struct WorkspaceSourceView: View {
                                     HStack {
                                         Button("更正理解或归属",systemImage:"pencil") { claimEditor=thought }
                                         Button("停止使用") { Task { _=await model.review(thought,action:.reject) } }
+                                        Button("记录行动意图") { actionClaim=thought }.disabled(thought.validity == "frozen" || thought.reviewState == "rejected")
                                     }.font(.caption).disabled(model.reviewingClaim)
                                     DisclosureGroup("原话依据与调整") {
                                         VStack(alignment:.leading,spacing:10) {
@@ -305,6 +312,7 @@ struct WorkspaceSourceView: View {
                             }
                             Button("查看全部原文版本", action:loadHistory)
                             historyVersions
+                            if source.transcript != nil { Button("查看原话分段") { Task { showingSegmentation = await model.previewSegmentation(source) } } }
                             ForEach(model.attempts[source.id] ?? []) { attempt in
                                 Text((attempt.state == "completed" ? "理解已完成" : "理解：" + attempt.state) + (attempt.contextState == "stale" ? " · 历史依据已变化" : "")).font(.caption).foregroundStyle(.secondary)
                             }
@@ -339,6 +347,8 @@ struct WorkspaceSourceView: View {
         .sheet(item:$editing) { source in WorkspaceTranscriptEditor(model:model,source:source) { editing=nil } }
         .sheet(item:$naming) { source in RecordingTitleEditor(record:source,model:model) { naming=nil } }
         .sheet(item:$claimEditor) { claim in ClaimCorrectionView(claim:claim,model:model) { claimEditor=nil } }
+        .sheet(item:$actionClaim) { claim in ActionCreationView(claim:claim,model:model) { actionClaim=nil } }
+        .sheet(isPresented:$showingSegmentation) { TranscriptSegmentationView(model:model) { showingSegmentation=false } }
         .sheet(isPresented:$showingOriginal) {
             VStack(alignment:.leading,spacing:16) {
                 Text("完整文字").font(.title2)
