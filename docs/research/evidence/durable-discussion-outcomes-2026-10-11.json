@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-11",
+  "schema": 18,
+  "package_version": 17,
+  "synthetic_only": true,
+  "process_crashes": [
+    {
+      "checkpoint": "outcomeReserved",
+      "state": "unknown",
+      "single_attempt_after_reopen_and_replay": true,
+      "partial_claims_or_actions": false
+    },
+    {
+      "checkpoint": "outcomeUncommitted",
+      "state": "unknown",
+      "single_attempt_after_reopen_and_replay": true,
+      "partial_claims_or_actions": false
+    },
+    {
+      "checkpoint": "outcomeCommitted",
+      "state": "completed",
+      "single_attempt_after_reopen_and_replay": true,
+      "partial_claims_or_actions": false
+    }
+  ],
+  "portable_round_trips": 2,
+  "cloud_calls": 0,
+  "microphone_calls": 0,
+  "external_task_writes": 0,
+  "tests_passed": 226,
+  "old_package_versions_verified": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16
+  ],
+  "vision_files_unchanged": 23,
+  "regression_process_crashes": 12,
+  "ui_history_verified": true,
+  "ui_original_source_and_ai_previews_verified": true,
+  "ui_candidate_return_verified": true,
+  "ui_exact_ai_paragraph_reuse_verified": true,
+  "ui_package_identity_and_frozen_restore": true,
+  "new_portable_round_trips_total": 4,
+  "signed_build_with_semantic_resources": true,
+  "production_driver_connected": false,
+  "scope": "ended discussion first durable extraction; existing personal understanding/standalone AI candidates block new extraction pending shared identity support",
+  "synthetic_completed_task_feedback_chain_verified": true,
+  "feedback_default_local_only": true,
+  "task_completed_does_not_verify_claims": true,
+  "feedback_identity_chain_restored": true
+}

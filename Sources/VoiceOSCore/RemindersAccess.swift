@@ -27,7 +27,7 @@ extension VoiceOSStore {
         guard let access = try reminderAccess(), access.enabled, access.calendarID == calendarID, access.version == expectedVersion else { throw VoiceOSError("提醒事项持续授权已变化，停止旧请求") }
     }
     /// Ordinary extracted tasks only. Durable links still prohibit repeat creation.
-    public func activateExtractedTasks(expectedAccessVersion: Int, using port: any RemindersPort) async throws {
+    public func activateExtractedTasks(expectedAccessVersion: Int, using port: any RemindersPort, requireReviewedFields: Bool = false) async throws {
         guard let access = try reminderAccess() else { throw VoiceOSError("尚未授权提醒事项清单") }
         try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
         let linked = Set(try reminderLinks().map(\.actionID))
@@ -36,11 +36,7 @@ extension VoiceOSStore {
         // newest completed producer for each source may create new external
         // tasks.  Otherwise an old, previously unlinked task could reappear
         // after reprocessing and become a duplicate reminder.
-        let sourceIDs = try db.query("SELECT id FROM sources").compactMap { $0["id"] }
-        var currentClaimIDs = Set<String>()
-        for sourceID in sourceIDs {
-            currentClaimIDs.formUnion(try latestCandidateClaims(for: sourceID).map(\.id))
-        }
+        let currentClaimIDs = Set(try latestCandidateClaimsBySource().values.flatMap { $0.map(\.id) })
         // A fresh understanding of the same source may add distinct task
         // identities. Keep a title barrier only within that source; identical
         // titles in separate recordings remain independent user tasks.
@@ -52,6 +48,7 @@ extension VoiceOSStore {
         }
         let pending = try actions().filter { action in
             guard action.kind == "task", action.intentActor == "user", !linked.contains(action.id), currentClaimIDs.contains(action.claimID), let claim = claims[action.claimID] else { return false }
+            guard !requireReviewedFields || action.intent?.reminderFields?.desired != nil else { return false }
             guard !claim.references.contains(where: { linkedTitleSources.contains(action.title + "|" + $0.sourceID) }) else { return false }
             // P01 grants the assistant autonomy for user-owned task actions.
             // The model may conservatively set autoSend=false; that flag is
@@ -89,9 +86,9 @@ extension VoiceOSStore {
     }
     /// A failed new create must not prevent completion readback for existing
     /// links. Cancellation and revoked scope still stop before reconciliation.
-    public func refreshAuthorizedReminders(expectedAccessVersion: Int, using port: any RemindersPort) async throws {
+    public func refreshAuthorizedReminders(expectedAccessVersion: Int, using port: any RemindersPort, requireReviewedFields: Bool = false) async throws {
         var activationFailed=false
-        do { try await activateExtractedTasks(expectedAccessVersion:expectedAccessVersion,using:port) }
+        do { try await activateExtractedTasks(expectedAccessVersion:expectedAccessVersion,using:port,requireReviewedFields:requireReviewedFields) }
         catch is CancellationError { throw CancellationError() }
         catch { activationFailed=true }
         try Task.checkCancellation()

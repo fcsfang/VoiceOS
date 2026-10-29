@@ -1,0 +1,31 @@
+{
+  "baseline": "352524e",
+  "date": "2026-10-12",
+  "schema": 28,
+  "verification": {
+    "full_regression_tests": 422,
+    "failures": 0,
+    "new_local_validation_tests": 7,
+    "persisted_receipt_integration": "complete durable segments accepted for local structural review; cancelled batch refused; no product entities",
+    "fixture_budget_check": "7 targeted tests passed using supported 4000-scalar evidence budget",
+    "signed_build": "passed",
+    "strict_codesign": "passed",
+    "new_persistence_boundary": false
+  },
+  "coverage": [
+    "exact evidence and possibleAction identity coverage",
+    "matching batch and ledger digest",
+    "nonempty bounded explanation and valid original evidence support",
+    "source-ordered normalization",
+    "duplicate chains terminate at retained item; cycles/self/invalid roots refused",
+    "unresolved sentence boundary blocked",
+    "empty evidence remains structurally valid"
+  ],
+  "limits": [
+    "No real aggregation model invocation or cloud request",
+    "No natural semantic scoring",
+    "No durable aggregation receipt or final cognitive commit",
+    "No claims/actions/reminders created",
+    "No new native UI entry or runtime UI validation"
+  ]
+}

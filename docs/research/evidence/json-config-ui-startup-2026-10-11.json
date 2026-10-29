@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-11",
+  "scope": "OpenCode-style JSON model configuration",
+  "config_shape": "provider.openai.options.baseURL + apiKey",
+  "credential_output": "credential value omitted from this evidence; earlier never-printed claim withdrawn",
+  "app_command": "VOICEOS_MODEL_CONFIG_FILE=docs/模型api 配置.md scripts/app/run.py --data-dir runtime/json-config-ui-validation-20261011",
+  "observed": {
+    "application_started": true,
+    "schema_version": 20,
+    "sources": 0,
+    "cloud_requests": 0,
+    "microphone_requests": 0,
+    "reminder_writes": 0
+  },
+  "limitations": [
+    "This historical probe established process/database startup only; JSON configuration loading and UI rendering were not established.",
+    "The launcher overwrote the explicit config environment variable with .env, and the launch preceded the rebuilt JSON-support bundle.",
+    "Standalone config-check evidence validates JSON separately without a cloud request.",
+    "The API key value is absent from this evidence."
+  ],
+  "review_correction": "2026-10-11: configuration-loading assertion withdrawn after code and launch-order audit"
+}

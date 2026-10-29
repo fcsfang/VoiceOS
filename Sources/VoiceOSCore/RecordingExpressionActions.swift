@@ -130,12 +130,15 @@ extension VoiceOSStore {
                 guard let original=try db.query("SELECT * FROM actions WHERE id=?",[decision.oldID]).first else { throw VoiceOSError("原任务缺失") }
                 let prior=try original["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self,from:Data($0.utf8)) }
                 var metadata=try generated["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self,from:Data($0.utf8)) } ?? ActionIntentMetadata(intentType:next.kind == "task" ? "task" : "idea",followupState:"pending",uncertain:false)
+                metadata.goalID=metadata.goalID ?? prior?.goalID
                 metadata.expressionHistory=(prior?.expressionHistory ?? []) + [.init(fromClaimID:original["claim_id"]!,fromReviewVersion:Int(original["claim_review_version"]!)!,fromTitle:original["title"]!,fromNote:original["note"]!,fromKind:original["kind"]!,fromAutoSend:original["auto_send"] == "1",toClaimID:next.claimID,replacedActionID:next.id,responseIDs:responseIDs)]
+                // Keep the identity, completion, reminder link and real feedback. The old claim remains history.
                 try db.execute("UPDATE actions SET claim_id=?,claim_review_version=?,title=?,note=?,intent_json=?,validity='current' WHERE id=?",[next.claimID,String(next.claimReviewVersion),next.title,next.note,try Self.relevanceJSON(metadata),decision.oldID])
                 try dismissExpressionAction(next,note:"补录整体理解已接回原任务："+decision.oldID)
                 try db.execute("UPDATE actions SET validity='frozen' WHERE id=?",[next.id])
                 adopted.insert(next.id)
             } else {
+                // Withdrawal and uncertainty are never a successful real-world completion.
                 if decision.relation == "withdraw",let prior=input.oldActions.first(where: { $0.id == decision.oldID }) {
                     let original=try db.query("SELECT intent_json FROM actions WHERE id=?",[prior.id]).first
                     var metadata=try original?["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self,from:Data($0.utf8)) } ?? ActionIntentMetadata(intentType:"task",followupState:"pending",uncertain:false)
@@ -147,10 +150,13 @@ extension VoiceOSStore {
                 try db.execute("UPDATE actions SET validity='frozen' WHERE id=?",[decision.oldID])
             }
         }
+        // Latest whole-expression claims replace prior partial extractions; the source audio/text is untouched.
         let oldClaimIDs=Set(input.oldActions.map(\.claimID)),retained=Set(input.newActions.map(\.claimID))
         for id in oldClaimIDs.subtracting(retained) { try db.execute("UPDATE claims SET validity='frozen' WHERE id=?",[id]) }
         return adopted
     }
+    // The original extraction stays immutable. Every later interpretation must
+    // link to another real extraction and the two independent model receipts.
     static func validatedExpressionHistory(_ database:Database,action:[String:String]) throws -> [ExpressionActionAdoption] {
         guard let raw=action["intent_json"],let history=try JSONDecoder().decode(ActionIntentMetadata.self,from:Data(raw.utf8)).expressionHistory,!history.isEmpty else { return [] }
         var prior:String?,seen=Set<String>()

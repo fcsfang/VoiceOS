@@ -202,6 +202,8 @@ extension VoiceOSStore {
                 try updateProcessing(id, state: terminal, phase: .cognition, error: "理解阶段状态为 \(cognition.state)，不会自动重发")
                 return try processingIntent(id: id)
             }
+            // A result is both a task receipt and a new personal expression.
+            // Follow-up sees its saved knowledge; association failure cannot hide it.
             if try db.query("SELECT id FROM sources WHERE id=? AND feedback_json IS NOT NULL AND local_only=0", [snapshot.context.sources[0].sourceID]).first != nil {
                 _ = try enqueueRecordingFollowup(sourceID: snapshot.context.sources[0].sourceID)
             }

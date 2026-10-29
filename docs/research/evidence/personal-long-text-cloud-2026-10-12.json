@@ -1,0 +1,29 @@
+{
+  "aggregation_state": "not_reserved",
+  "aggregation_usage": {},
+  "audio_uploaded": false,
+  "batch_id": "8B15F43A-17DE-49E1-874F-D9A83AD9F9AE",
+  "billing_state": "unknown",
+  "claim_count": 0,
+  "cognition_saved": false,
+  "elapsed_seconds": 61.136818051338196,
+  "external_task_writes": 0,
+  "fragment_errors": [
+    "片段结果未登记；费用未知，不自动重发"
+  ],
+  "fragment_states": [
+    "unknown"
+  ],
+  "fragment_usage": [
+    {}
+  ],
+  "integrity": true,
+  "microphone_calls": 0,
+  "natural_semantic_quality_reviewed": false,
+  "parent_error": "片段结果未登记；费用未知，不自动重发",
+  "parent_state": "unknown",
+  "policy_version": 2,
+  "segments": 2,
+  "source_id": "16E2A677-E57C-4766-B586-FC531B8E3229",
+  "source_scalars": 5280
+}

@@ -8,11 +8,13 @@ extension VoiceOSStore {
             && version["text"] == "" && version["spans_json"] == "[]"
     }
 
+    // Automatic correction replaces the current text; it does not create a second full draft.
     @discardableResult
     public func applyReviewedQwenTranscript(sourceID: String, expectedVersionID: String, speech: SpeechText, responseID: String) throws -> String {
         guard !responseID.isEmpty else { throw VoiceOSError("转写核对缺少回执") }
         return try db.transaction {
             let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            // A failed import can retry after the transcript was already saved.
             if let current = try db.query("SELECT v.* FROM transcript_versions v JOIN transcripts t ON t.current_version_id=v.id WHERE t.source_id=?", [sourceID]).first,
                current["reason"] == "ai_corrected", current["text"] == speech.text,
                try db.query("SELECT id FROM transcript_versions WHERE id=? AND transcript_id=? AND reason='ai_superseded'", [expectedVersionID,current["transcript_id"]]).first != nil,
@@ -28,6 +30,7 @@ extension VoiceOSStore {
             let spans = String(decoding: try JSONEncoder().encode(speech.spans), as: UTF8.self)
             let id = UUID().uuidString, next = Int(row["version"]!)! + 1
             try db.execute("INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at) VALUES(?,?,?,?,?,'ai_corrected','system',?)", [id,row["id"],String(next),speech.text,spans,Self.now()])
+            // Keep only an identity placeholder for old references, not a second full transcript.
             try db.execute("UPDATE transcript_versions SET text='',spans_json='[]',reason='ai_superseded',actor='system' WHERE id=?", [expectedVersionID])
             if row["version"] == "1" { try db.execute("UPDATE transcripts SET text='' WHERE id=?", [row["id"]]) }
             try db.execute("UPDATE transcripts SET current_version_id=?,version=? WHERE id=?", [id,String(next),row["id"]])

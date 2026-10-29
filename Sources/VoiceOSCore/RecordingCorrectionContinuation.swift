@@ -57,6 +57,8 @@ extension VoiceOSStore {
             let lhs = catalog[$0]!, rhs = catalog[$1]!
             return (lhs.expressedDate?.ISO8601Format() ?? lhs.createdAt, lhs.id) < (rhs.expressedDate?.ISO8601Format() ?? rhs.createdAt, rhs.id)
         }
+        // Validate all physical companions before changing any membership. A
+        // correction is never authority to restore a revoked text permission.
         for id in ordered {
             if let pair = catalog[id]?.presentation?.recordingContext {
                 guard let external = catalog[pair.externalSourceID], external.origin == "external", external.speaker != "user",
@@ -83,6 +85,9 @@ extension VoiceOSStore {
                 priorVersion = revision["from_version_id"]
             }
             if let priorVersion {
+                // Permission revocation froze all claims. Recover only identities
+                // from the latest actual task extraction for that saved text,
+                // rather than every historical task ever citing this recording.
                 let rows = try db.query("""
                     SELECT a.id FROM actions a JOIN claims c ON c.id=a.claim_id
                     WHERE c.attempt_id=(
@@ -95,6 +100,8 @@ extension VoiceOSStore {
                 latestActionIDs.formUnion(rows.compactMap { $0["id"] })
             }
         }
+        // Source matching is mandatory even when the caller supplies a broader
+        // pre-correction snapshot. It cannot reassign another recording's task.
         let retained = actions.filter { action in
             guard candidates.contains(action.id), let claim = claims[action.claimID] else { return false }
             guard action.validity == "current" || durable.contains(action.id) || latestActionIDs.contains(action.id) else { return false }

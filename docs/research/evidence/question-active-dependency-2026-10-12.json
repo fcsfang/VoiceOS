@@ -1,0 +1,107 @@
+{
+  "date": "2026-10-12",
+  "synthetic_only": true,
+  "tests": 327,
+  "schema": 24,
+  "package": 23,
+  "cloud_calls": 0,
+  "microphone_calls": 0,
+  "external_task_writes": 0,
+  "active_dependency": "latest resolution only when current status is resolved",
+  "repair_requires": "explicit user reopen; unchanged valid seed; local current record",
+  "cannot_repair": [
+    "changed question seed",
+    "migrated frozen history"
+  ],
+  "ui_observed": [
+    "frozen active answer exposes explicit reopen",
+    "reason required",
+    "resolved v2 to open v3 restores current usability",
+    "unendorsed unverified cognition unchanged"
+  ],
+  "crashes": {
+    "synthetic_only": true,
+    "process_kills": 6,
+    "portable_round_trips": 6,
+    "checks": [
+      {
+        "checkpoint": "claimsUncommitted",
+        "recovered_counts": {
+          "claims": 0,
+          "questions": 0,
+          "revisions": 0
+        },
+        "restored_counts": {
+          "claims": 0,
+          "questions": 0,
+          "revisions": 0
+        },
+        "restored_history_frozen": true
+      },
+      {
+        "checkpoint": "claimsCommitted",
+        "recovered_counts": {
+          "claims": 1,
+          "questions": 1,
+          "revisions": 0
+        },
+        "restored_counts": {
+          "claims": 1,
+          "questions": 1,
+          "revisions": 0
+        },
+        "restored_history_frozen": true
+      },
+      {
+        "checkpoint": "questionUncommitted",
+        "recovered_counts": {
+          "claims": 1,
+          "questions": 1,
+          "revisions": 1
+        },
+        "restored_counts": {
+          "claims": 1,
+          "questions": 1,
+          "revisions": 1
+        },
+        "restored_history_frozen": true
+      },
+      {
+        "checkpoint": "questionCommitted",
+        "recovered_counts": {
+          "claims": 1,
+          "questions": 1,
+          "revisions": 1
+        },
+        "restored_counts": {
+          "claims": 1,
+          "questions": 1,
+          "revisions": 1
+        },
+        "restored_history_frozen": true
+      },
+      {
+        "checkpoint": "repair-questionUncommitted",
+        "after_kill_version": 2,
+        "reopened_version": 3,
+        "history_revisions": 2,
+        "restored_history_frozen": true
+      },
+      {
+        "checkpoint": "repair-questionCommitted",
+        "after_kill_version": 3,
+        "reopened_version": 3,
+        "history_revisions": 2,
+        "restored_history_frozen": true
+      }
+    ],
+    "cloud_calls": 0,
+    "microphone_calls": 0,
+    "external_task_writes": 0
+  },
+  "logs": [
+    "runtime/question-active-dependency-tests-20261012.log",
+    "runtime/question-active-dependency-build-20261012.log"
+  ],
+  "natural_quality_accepted": false
+}

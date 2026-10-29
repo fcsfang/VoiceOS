@@ -17,6 +17,8 @@ extension VoiceOSStore {
               try db.query("SELECT id FROM transcript_versions WHERE id=? AND reason='transcription_error' AND actor='user'", [version]).first != nil else {
             throw VoiceOSError("没有需要继续处理的当前原文更正")
         }
+        // The grouped recording route must retain all companions and reconcile prior
+        // tasks before any external writes. Do not flatten it into one short expression.
         guard source.presentation?.expression == nil, source.presentation?.automaticInput == nil else {
             throw VoiceOSError("这份录音需要按完整录音上下文继续整理")
         }
@@ -31,7 +33,9 @@ extension VoiceOSStore {
     public func continueSourceUnderstanding(sourceID: String, using port: any ModelPort) async throws -> SourceUnderstandingContinuation {
         try Task.checkCancellation()
         try requireReviewedTranscriptions(sourceIDs:[sourceID],destination:port.configuration.destination)
-        let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID])
+        let source = try sources().first { $0.id == sourceID }
+        let budget = source?.kind == "external_text" ? max(1, source?.transcript?.unicodeScalars.count ?? 0) : 4000
+        let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: budget)
         let policy = try sourcePolicy(sourceID: sourceID)
         if let attempt = try db.query("""
             SELECT a.id,a.state,c.state AS context_state FROM model_attempts a

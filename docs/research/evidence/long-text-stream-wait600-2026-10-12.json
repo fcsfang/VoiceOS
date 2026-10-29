@@ -1,0 +1,49 @@
+{
+  "aggregation_state" : "rejected",
+  "aggregation_usage" : {
+    "input_tokens" : 15963,
+    "output_tokens" : 8262
+  },
+  "aggregation_version" : "segment-aggregation-v2-wait600-stream",
+  "audio_uploaded" : false,
+  "batch_id" : "10CCF2DC-D13F-4D35-908E-2EADF1466CD2",
+  "billing_state" : "unknown",
+  "claim_count" : 0,
+  "compact_input" : false,
+  "elapsed_seconds" : 277.5776299238205,
+  "external_task_writes" : 0,
+  "extraction_version" : "segment-extraction-v2-wait600-stream",
+  "fragment_states" : [
+    "completed",
+    "completed"
+  ],
+  "fragment_usage" : [
+    {
+      "input_tokens" : 3401,
+      "output_tokens" : 2119
+    },
+    {
+      "input_tokens" : 1726,
+      "output_tokens" : 2077
+    }
+  ],
+  "full_natural_case_A_complete" : false,
+  "integrity" : true,
+  "model" : "gpt-6.1-sol",
+  "parent_error" : "认知候选引用了未选入或错误版本的来源片段",
+  "parent_state" : "rejected",
+  "personal_text_sent" : false,
+  "provider" : "responses:api.chiyi.cc",
+  "request_deadline_seconds" : 600,
+  "segment_scalars" : [
+    3962,
+    1579
+  ],
+  "source_id" : "7A05E255-2AF2-4BAB-861A-3E5178FBCE9D",
+  "source_scalars" : 5541,
+  "streaming" : true,
+  "synthetic_only" : true,
+  "transport_timings" : [
+
+  ]
+}

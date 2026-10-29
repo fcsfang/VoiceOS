@@ -1,0 +1,99 @@
+{
+  "date": "2026-10-12",
+  "baseline_commit": "525292a",
+  "stage": "durable staged segment extraction",
+  "schema": 28,
+  "swift_tests": 415,
+  "failures": 0,
+  "new_tests": 11,
+  "signed_build": true,
+  "strict_codesign": true,
+  "actual_sigkill_windows": 3,
+  "real_source_fixture": {
+    "duration_seconds": 2400,
+    "transcript_scalars": 5280,
+    "adapter": "local fixture returns empty proposals; no semantic evaluation",
+    "before_migration": {
+      "action_count": 0,
+      "batches": [
+        {
+          "attempts": [
+            {
+              "id": "35A26FDF-B98E-4E76-A5A4-E1689F4D61E4",
+              "segment_id": "2339e97c5a602fdb7843aec219dd6cf2bbd8fb330282f269f25e5d798a127056",
+              "sequence": 1,
+              "state": "completed",
+              "validity": "current"
+            },
+            {
+              "id": "138681FC-3C0B-45C5-AB4E-C9E3837C9E17",
+              "segment_id": "b0a183c133abde78b08dd446edd4e8604a953b256b31a1c0edf0230e7fc395bf",
+              "sequence": 2,
+              "state": "completed",
+              "validity": "current"
+            }
+          ],
+          "evidence_ready": true,
+          "id": "D27543DA-9703-4D78-A56E-A05B680E66AD",
+          "ledger_digest": "d738ca09e0d918492d4d5b490c04b8ee6d60a35aa7a5c047837bf3c55c26a80b",
+          "segment_count": 2,
+          "state": "queued"
+        }
+      ],
+      "claim_count": 0,
+      "integrity": true,
+      "old_model_count": 0
+    },
+    "after_migration": {
+      "action_count": 0,
+      "batches": [
+        {
+          "attempts": [
+            {
+              "id": "35A26FDF-B98E-4E76-A5A4-E1689F4D61E4",
+              "segment_id": "2339e97c5a602fdb7843aec219dd6cf2bbd8fb330282f269f25e5d798a127056",
+              "sequence": 1,
+              "state": "completed",
+              "validity": "frozen"
+            },
+            {
+              "id": "138681FC-3C0B-45C5-AB4E-C9E3837C9E17",
+              "segment_id": "b0a183c133abde78b08dd446edd4e8604a953b256b31a1c0edf0230e7fc395bf",
+              "sequence": 2,
+              "state": "completed",
+              "validity": "frozen"
+            }
+          ],
+          "evidence_ready": false,
+          "id": "D27543DA-9703-4D78-A56E-A05B680E66AD",
+          "ledger_digest": "",
+          "segment_count": 2,
+          "state": "frozen"
+        }
+      ],
+      "claim_count": 0,
+      "integrity": true,
+      "old_model_count": 0
+    },
+    "package_version": 28
+  },
+  "verified": [
+    "no automatic resend of unknown/refused/invalid responses",
+    "completed fragment reused after restart",
+    "late cancellation/correction/revocation/task cancellation frozen",
+    "known usage retained after transaction exception",
+    "deep migration tampering rejected",
+    "global producer order shared with original model attempts",
+    "no accepted claims or actions from fragment proposals"
+  ],
+  "limits": {
+    "actual_cloud_driver": false,
+    "aggregate_execution": false,
+    "native_segment_queue_entry": false,
+    "natural_semantic_quality_scored": false,
+    "full_mvp_accepted": false
+  },
+  "cloud_calls": 0,
+  "audio_upload": false,
+  "reminder_writes": 0
+}

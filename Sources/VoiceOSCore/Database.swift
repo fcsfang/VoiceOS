@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...43).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...49).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -779,6 +779,7 @@ final class Database {
         }
         if try query("PRAGMA user_version").first?["user_version"] == "39" {
             try transaction {
+                // Three product follow-ups share one recording-owned JSON history.
                 try execute("ALTER TABLE sources ADD COLUMN followup_json TEXT")
                 try execute("PRAGMA user_version=40")
             }
@@ -792,17 +793,112 @@ final class Database {
         if try query("PRAGMA user_version").first?["user_version"] == "41" {
             try transaction {
                 try execute("""
+                CREATE TABLE IF NOT EXISTS reflection_questions(
+                  id TEXT PRIMARY KEY,title TEXT NOT NULL,title_source_id TEXT NOT NULL REFERENCES sources(id),
+                  version INTEGER NOT NULL DEFAULT 1 CHECK(version>=1),created_at TEXT NOT NULL,updated_at TEXT NOT NULL)
+                """)
+                try execute("""
+                CREATE TABLE IF NOT EXISTS reflection_question_entries(
+                  id TEXT PRIMARY KEY,question_id TEXT NOT NULL REFERENCES reflection_questions(id),
+                  kind TEXT NOT NULL CHECK(kind IN ('observation','change','experiment','result')),text TEXT NOT NULL,
+                  source_id TEXT NOT NULL REFERENCES sources(id),source_ids_json TEXT NOT NULL,
+                  note_version_id TEXT NOT NULL,evidence_versions_json TEXT NOT NULL,
+                  sequence INTEGER NOT NULL CHECK(sequence>=1),created_at TEXT NOT NULL,
+                  state TEXT NOT NULL DEFAULT 'active' CHECK(state IN ('active','inactive')),UNIQUE(question_id,sequence))
+                """)
+                try execute("""
+                CREATE TABLE IF NOT EXISTS reflection_question_sources(
+                  id TEXT NOT NULL UNIQUE,question_id TEXT NOT NULL REFERENCES reflection_questions(id),
+                  source_id TEXT NOT NULL REFERENCES sources(id),PRIMARY KEY(question_id,source_id))
+                """)
+                try execute("PRAGMA user_version=42")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "42" {
+            try transaction {
+                try execute("""
+                CREATE TABLE assistant_executions (
+                  id TEXT PRIMARY KEY,action_id TEXT NOT NULL REFERENCES actions(id),action_version INTEGER NOT NULL,
+                  input_json TEXT NOT NULL,sequence INTEGER NOT NULL UNIQUE CHECK(sequence>=1),instruction_source_id TEXT REFERENCES sources(id),question_id TEXT REFERENCES reflection_questions(id),
+                  state TEXT NOT NULL CHECK(state IN ('queued','running','completed','failed','cancelled')),
+                  validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),assessment_json TEXT,result_json TEXT,
+                  result_source_id TEXT UNIQUE REFERENCES sources(id),error TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL)
+                """)
+                try execute("""
+                CREATE TABLE assistant_assessments (
+                  id TEXT PRIMARY KEY,action_id TEXT NOT NULL REFERENCES actions(id),action_version INTEGER NOT NULL,
+                  input_json TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('running','completed','failed')),
+                  assessment_json TEXT,error TEXT,created_at TEXT NOT NULL,UNIQUE(action_id,action_version))
+                """)
+                try execute("PRAGMA user_version=43")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "43" {
+            try transaction {
+                try execute("""
+                CREATE TABLE reflection_topic_feedback(
+                  id TEXT PRIMARY KEY,question_id TEXT NOT NULL UNIQUE REFERENCES reflection_questions(id),
+                  mode TEXT NOT NULL DEFAULT 'normal' CHECK(mode IN ('normal','reduced','paused')),
+                  snoozed_until TEXT,reviewed_at TEXT)
+                """)
+                try execute("PRAGMA user_version=44")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "44" {
+            try transaction {
+                try execute("""
+                CREATE TABLE knowledge_reviews(
+                  id TEXT PRIMARY KEY,source_id TEXT NOT NULL REFERENCES sources(id),input_digest TEXT NOT NULL,input_json TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('queued','running','completed','failed','frozen')),
+                  result_json TEXT,response_ids_json TEXT NOT NULL,error TEXT,created_at TEXT NOT NULL)
+                """)
+                try execute("PRAGMA user_version=45")
+            }
+        }
+            if try query("PRAGMA user_version").first?["user_version"] == "45" {
+            try transaction {
+                try execute("ALTER TABLE reflection_questions ADD COLUMN organization_json TEXT")
+                try execute("ALTER TABLE reflection_questions ADD COLUMN ai_named INTEGER NOT NULL DEFAULT 0")
+                try execute("CREATE TABLE workspace_briefing(id TEXT PRIMARY KEY,context_id TEXT NOT NULL REFERENCES contexts(id),result_json TEXT NOT NULL)")
+                try execute("PRAGMA user_version=46")
+            }
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "46" {
+            guard var revised = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"], revised.contains("'reference_only'"),
+                  let nameRange = revised.range(of: #"(?i)^CREATE TABLE\s+"?sources"?"#,options:.regularExpression) else { throw VoiceOSError("来源表无法升级回收站") }
+            revised.replaceSubrange(nameRange,with:"CREATE TABLE sources_next")
+            revised = revised.replacingOccurrences(of: "'reference_only'", with: "'reference_only','trashed'")
+            try execute("PRAGMA foreign_keys=OFF")
+            do {
+                try transaction {
+                    try execute(revised)
+                    try execute("INSERT INTO sources_next SELECT * FROM sources")
+                    try execute("DROP TABLE sources")
+                    try execute("ALTER TABLE sources_next RENAME TO sources")
+                    guard try query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("资料库升级引用校验失败") }
+                    try execute("PRAGMA user_version=47")
+                }
+            } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
+            try execute("PRAGMA foreign_keys=ON")
+        }
+        if try query("PRAGMA user_version").first?["user_version"] == "47" {
+            try transaction {
+                try execute("""
                 CREATE TABLE panorama_attempts (
                     id TEXT PRIMARY KEY,digest TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('running','completed','failed','unknown')),
                     input_json TEXT NOT NULL,snapshot_json TEXT,generation_receipt TEXT,verification_receipt TEXT,error TEXT,created_at TEXT NOT NULL
                 )
                 """)
                 try execute("CREATE INDEX panorama_digest ON panorama_attempts(digest)")
-                try execute("PRAGMA user_version=42")
+                try execute("PRAGMA user_version=48")
             }
         }
+        // Indexes only: older development libraries keep the same data schema.
+        try execute("CREATE INDEX IF NOT EXISTS context_inputs_source_context ON context_inputs(source_id,context_id)")
+        try execute("CREATE INDEX IF NOT EXISTS model_attempts_context_state ON model_attempts(context_id,state,producer_sequence)")
+        try execute("CREATE INDEX IF NOT EXISTS claims_attempt ON claims(attempt_id)")
 
-        if try query("PRAGMA user_version").first?["user_version"] == "42" {
+        if try query("PRAGMA user_version").first?["user_version"] == "48" {
             try transaction {
                 try execute("""
                 CREATE TABLE panorama_steps (
@@ -814,7 +910,7 @@ final class Database {
                 )
                 """)
                 try execute("CREATE INDEX panorama_step_reuse ON panorama_steps(attempt_id,stage,scope_id,input_digest,state)")
-                try execute("PRAGMA user_version=43")
+                try execute("PRAGMA user_version=49")
             }
         }
 

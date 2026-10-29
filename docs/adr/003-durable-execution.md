@@ -17,3 +17,5 @@
 **证据/采用条件。** 合成模型检查过丢回执、延迟、多匹配、编辑和撤销；实际 EventKit 故障与并发未测。按[状态机](../architecture/state-machines.md)和 AC-13/14/15/17/18 注入真实窗口，另核对晚到回调/纠错/删除；通过后采用。若本地流程规模超出维护能力再引入工作流服务，保留身份与外部核对协议。
 
 **M1 采用范围。** 导入原子登记与本地转写持久 job/attempt/token 已采用并做真实进程退出恢复。外部 outbox、跨进程租约/epoch 和纠错删除屏障未实现。 证据与局限见[M1 实施记录](../engineering/m1-file-input.md)。
+
+2026-10-10 读取生命周期增量：EventKit 取消后不再回调，采用单次解析的 continuation 等待器、八秒可取消窗口、原生请求 token 取消与晚到忽略；TaskGroup 竞速不能代替无回调子任务的主动结束。74 项测试与正常原生回读通过；同步原生硬挂起未隔离。见[读取生命周期记录](../engineering/m3-reminders-read-lifecycle.md)。

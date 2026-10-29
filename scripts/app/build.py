@@ -4,6 +4,7 @@ from pathlib import Path
 import argparse, hashlib, json, os, plistlib, shutil, subprocess
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser()
+parser.add_argument('--configuration', choices=['release', 'debug'], default='release', help='daily use defaults to optimized release; debug is opt-in')
 parser.add_argument('--semantic-model', type=Path, help='explicit reviewed local CoreML asset directory; no download')
 parser.add_argument('--signing-identity', help='explicit existing codesigning identity (name or SHA1); no certificate creation')
 parser.add_argument('--adhoc', action='store_true', help='explicit disposable build; privacy grants may not survive rebuilds')
@@ -25,8 +26,8 @@ else:
     signing_identity = candidates[0]
 env = dict(os.environ)
 env.pop('SDKROOT', None)
-subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build', '--product', 'VoiceOS'], cwd=ROOT, env=env, check=True)
-bin_path = Path(subprocess.check_output(['xcrun', '--sdk', 'macosx', 'swift', 'build', '--show-bin-path'], cwd=ROOT, env=env, text=True).strip())
+subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration, '-j', '4', '--product', 'VoiceOS'], cwd=ROOT, env=env, check=True)
+bin_path = Path(subprocess.check_output(['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration, '--show-bin-path'], cwd=ROOT, env=env, text=True).strip())
 app = ROOT / 'dist' / 'VoiceOS.app'
 mac = app / 'Contents' / 'MacOS'
 mac.mkdir(parents=True, exist_ok=True)

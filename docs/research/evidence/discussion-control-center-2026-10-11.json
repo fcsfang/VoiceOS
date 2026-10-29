@@ -1,0 +1,65 @@
+{
+  "date": "2026-10-11",
+  "tests": 191,
+  "failures": 0,
+  "skipped": 0,
+  "signed_build": true,
+  "isolated_synthetic_library": true,
+  "ui_checks": [
+    "restored_history_read_without_send",
+    "immutable_reference_preview",
+    "explicit_entry_without_send",
+    "voice_auto_stop_empty_transcript_not_attached",
+    "save_text_without_send",
+    "successful_reply_displays_identity_and_usage",
+    "same_turn_resend_disabled",
+    "end_while_waiting_rejects_late_result",
+    "reopen_without_send",
+    "synthetic_voice_attach_local_only",
+    "local_only_send_disabled",
+    "ended_read_only_history"
+  ],
+  "ui_cloud_calls": 2,
+  "ui_cloud_states": [
+    "completed",
+    "rejected"
+  ],
+  "ui_cloud_usage": [
+    {
+      "input_tokens": 759,
+      "output_tokens": 393
+    },
+    {
+      "input_tokens": 1339,
+      "output_tokens": 252
+    }
+  ],
+  "actual_billing": "unknown",
+  "local_microphone_tests": 2,
+  "durations_seconds": [
+    10.0,
+    10.0
+  ],
+  "actual_microphone_transcript_scalars": [
+    0,
+    0
+  ],
+  "speech_quality_passed": false,
+  "synthetic_speech_fixture": {
+    "duration_seconds": 0.5,
+    "backend": "synthetic-discussion-speech-fixture-v1",
+    "purpose": "association plumbing only"
+  },
+  "audio_uploads": 0,
+  "external_task_writes": 0,
+  "candidate_claims": 0,
+  "actions": 0,
+  "portable_round_trips": 1,
+  "restored_source_count": 8,
+  "restored_sessions": 3,
+  "restored_attempts": 4,
+  "media_hashes_matched": true,
+  "restored_execution_frozen": true,
+  "schema": 16,
+  "package_version": 15
+}

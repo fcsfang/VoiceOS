@@ -54,6 +54,7 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
             if input.goals.contains(where: { $0.id == actionID }) { goals.insert(actionID) }
         }
         let currentSources = Set(input.current.sources.map(\.sourceID))
+        // A newly stated goal and already linked steps are relevant without a fresh model decision.
         goals.formUnion(input.goals.filter { $0.thought.evidence.contains { currentSources.contains($0.reference.sourceID) } }.map(\.id))
         var changed = true
         while changed {
@@ -71,6 +72,7 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
     private func selectHistory(_ input: RecordingFollowupInput, evidence: inout RunEvidence) async throws -> RelatedHistory {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         func value<T: Encodable>(_ item: T) throws -> Any { try JSONSerialization.jsonObject(with: encoder.encode(item)) }
+        // The directory has every item, without transcript excerpts or item-count cutoffs.
         let payload: [String: Any] = ["current": try value(input.current), "continuousExpression":try input.continuousExpression.map { try value($0) } ?? NSNull(), "currentUnderstanding": input.currentUnderstanding ?? [],
             "thoughts": input.thoughts.map { ["id": $0.id, "statement": $0.statement] },
             "goals": try input.goals.map { goal -> [String: Any] in

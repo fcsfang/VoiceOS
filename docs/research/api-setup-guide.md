@@ -45,3 +45,9 @@ python3 scripts/probes/cloud-text-evaluation.py --execute --model gpt-6.1-sol --
 - `store=false` 是请求参数，不能证明第三方实际不保留数据；官方 OpenAI 的保留政策和价格不能自动套用。仅使用合成文本，原始音频没有上传。
 
 真实费用、服务端模型来源和保留政策目前未核实；超时请求也不能认定零费用。详见[本轮实测报告](api-reminders-validation-2026-10-10.md)。后续先解决服务稳定性，再扩展语义测试与月度成本测量。
+
+## 原生驱动接入进度
+
+2026-10-10：Core 已接入同一配置的文本驱动，开发工具固定使用 `gpt-6.1-sol` 做一次合成验证，约 8.01 秒完成、报告 373 输入/238 输出 tokens；费用未知。控制中心尚未装配云端执行。复现、边界与证据见[真实驱动记录](../engineering/m2-responses-driver.md)。
+
+控制中心现在可通过 `python3 scripts/app/run.py` 使用现有配置，或在应用中选择本地 `.env`；仅显式点击理解选中并授权的文字才发送请求。详见[原生入口](../engineering/m2-control-center-understanding.md)。

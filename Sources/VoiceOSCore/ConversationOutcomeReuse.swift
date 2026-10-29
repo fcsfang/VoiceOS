@@ -22,7 +22,7 @@ public struct ConversationOutcomeReusePlan:Codable,Sendable {
 }
 extension VoiceOSStore {
     /// Explicit preparation for the reusable durable path. Full evidence stays unchanged.
-    public func prepareReusableConversationOutcome(id:String,expectedVersion:Int,destination:ModelDestination,scalarBudget:Int=Int.max,commandID:String=UUID().uuidString) throws -> ConversationOutcomeSnapshot {
+    public func prepareReusableConversationOutcome(id:String,expectedVersion:Int,destination:ModelDestination,scalarBudget:Int=8000,commandID:String=UUID().uuidString) throws -> ConversationOutcomeSnapshot {
         let snapshot=try prepareConversationOutcome(id:id,expectedVersion:expectedVersion,destination:destination,scalarBudget:scalarBudget,commandID:commandID)
         let plan=try conversationOutcomeReusePlan(for:snapshot)
         try validateOutcomeReuseState(plan,snapshot:snapshot)

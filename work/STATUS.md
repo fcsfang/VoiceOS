@@ -1,17 +1,17 @@
 # 项目状态
 
-更新：2026-10-28T15:53:53Z
+更新：2026-10-29T02:21:16Z
 
 ## 当前基线
 
-- `main` 65d83cc，与 origin/main 一致。
-- SQLite schema 43。
-- `swift build` 通过，`swift test` 7 项通过。
-- 无自动 CI；验证在本地运行。
+- 产品基线改为运行时线。工作分支 `codex/runtime-baseline`，合线后 `main` 的树取自这条线。
+- SQLite schema 49，迁移包版本 1 到 47。
+- 运行时线基线 `swift test -j 4` 10 项通过。
+- 仓库不使用自动 CI。日常迭代用 `swift build`，需要完整测试时本地跑 `swift test`，UI 改动构建后实际操作一次。
 
 ## 进行中
 
-- 移除自动 CI 和自托管 runner。仓库已恢复公开。
+- 基线重组：把 main 的独有工作反迁到运行时线，然后合线。决策记录见 [ADR042](../../docs/adr/042-runtime-line-becomes-main.md)。
 
 ## 阻塞
 
@@ -19,10 +19,9 @@
 
 ## 下一步
 
-完成 CI 移除后开始技术访谈闭环的缺口盘点。
+代码移植完成后做 lineage 合并，合并提交上重新构建、测试并在真实资料库副本上验证。
 
 ## 风险
 
-- 没有自动 CI；合并前在本地运行 `swift build`、`swift test` 和真实应用。
-- 自托管 runner 尝试已放弃，仓库公开，runner 服务已移除。
-- 既有功能没有统一的历史索引，暂时以 README、git log 和 PR 为准。
+- 旧 main 的 schema 43 资料库不能用运行时构建打开，会留下 45 的半迁移状态。
+- 合线是大树替换，审查以关键移植文件和真实运行为准。

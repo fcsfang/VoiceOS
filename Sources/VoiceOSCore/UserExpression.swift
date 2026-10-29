@@ -11,7 +11,7 @@ extension VoiceOSStore {
     func recordExpression(_ text: String, commandID: String, feedback: FeedbackIntent?) throws -> String {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
         let data = Data(text.utf8)
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.unicodeScalars.count <= 4000 else { throw VoiceOSError("请填写不超过 4000 字的表达") }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceOSError("请填写表达原文") }
         let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         let fingerprint = try Self.expressionFingerprint(text, feedback: feedback)
         if let old = try db.query("SELECT * FROM sources WHERE command_id=?", [commandID]).first {
@@ -50,7 +50,7 @@ extension VoiceOSStore {
     static func validateStoredUserExpressions(_ db: Database) throws {
         for row in try db.query("SELECT s.*,t.text AS original_text,t.backend,j.config FROM sources s JOIN transcripts t ON t.source_id=s.id JOIN jobs j ON j.id=t.job_id WHERE s.kind='user_text'") {
             guard row["origin"] == "user", row["speaker"] == "user", row["backend"] == "user-authored-text", row["config"] == "user-text-v1",
-                  let text = row["original_text"], !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.unicodeScalars.count <= 4000 else { throw VoiceOSError("表达原文与来源身份不一致") }
+                  let text = row["original_text"], !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceOSError("表达原文与来源身份不一致") }
             let hash = SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
             guard row["expected_hash"] == hash, row["expected_bytes"] == String(Data(text.utf8).count), row["input_fingerprint"] == (try expressionFingerprint(text, feedback: feedbackIntent(row["feedback_json"]))) else { throw VoiceOSError("表达原文与原件摘要不一致") }
         }
@@ -64,8 +64,8 @@ extension VoiceOSStore {
     }
     static func inspectUserText(_ file: URL) throws -> MediaInfo {
         let size = try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size > 0, size <= 16000, let text = String(data: try Data(contentsOf: file), encoding: .utf8),
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.unicodeScalars.count <= 4000 else { throw VoiceOSError("表达原文不是有效的有限 UTF-8 文本") }
+        guard size > 0, let text = String(data: try Data(contentsOf: file), encoding: .utf8),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceOSError("表达原文不是有效的 UTF-8 文本") }
         return MediaInfo(duration: 0, kind: "user_text")
     }
     func commitUserText(_ row: [String: String]) throws {

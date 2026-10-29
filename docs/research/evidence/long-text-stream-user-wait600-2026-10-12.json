@@ -1,0 +1,49 @@
+{
+  "aggregation_state" : "completed",
+  "aggregation_usage" : {
+    "input_tokens" : 14558,
+    "output_tokens" : 8021
+  },
+  "aggregation_version" : "segment-aggregation-v2-wait600-stream",
+  "audio_uploaded" : false,
+  "batch_id" : "BA76CDD1-E69D-4E7A-8C59-54ECD7035ECD",
+  "billing_state" : "unknown",
+  "claim_count" : 8,
+  "compact_input" : false,
+  "elapsed_seconds" : 274.14679002761841,
+  "external_task_writes" : 0,
+  "extraction_version" : "segment-extraction-v2-wait600-stream",
+  "fragment_states" : [
+    "completed",
+    "completed"
+  ],
+  "fragment_usage" : [
+    {
+      "input_tokens" : 3492,
+      "output_tokens" : 2267
+    },
+    {
+      "input_tokens" : 1466,
+      "output_tokens" : 1697
+    }
+  ],
+  "full_natural_case_A_complete" : false,
+  "integrity" : true,
+  "model" : "gpt-6.1-sol",
+  "parent_error" : "",
+  "parent_state" : "queued",
+  "personal_text_sent" : false,
+  "provider" : "responses:api.chiyi.cc",
+  "request_deadline_seconds" : 600,
+  "segment_scalars" : [
+    3996,
+    1209
+  ],
+  "source_id" : "16F70B52-B576-409E-BB32-35591FFBC2DF",
+  "source_scalars" : 5205,
+  "streaming" : true,
+  "synthetic_only" : true,
+  "transport_timings" : [
+
+  ]
+}

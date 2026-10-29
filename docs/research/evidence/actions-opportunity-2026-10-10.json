@@ -1,0 +1,41 @@
+{
+  "date": "2026-10-10",
+  "core_tests": 49,
+  "sigkill_checks": 13,
+  "ui": {
+    "isolated_synthetic_fixture": true,
+    "default_opportunity": true,
+    "explicit_task_completion": true,
+    "history_visible": true,
+    "claim_still_unverified": true,
+    "policy_freezes_actions": true,
+    "completed_fact_preserved": true,
+    "restored_reopened": true
+  },
+  "package": {
+    "format": 6,
+    "schema": 7,
+    "compared_tables": [
+      "contexts",
+      "context_inputs",
+      "model_attempts",
+      "claims",
+      "source_policy_revisions",
+      "claim_reviews",
+      "actions",
+      "action_revisions"
+    ],
+    "exact_roundtrip": true,
+    "legacy_formats_restored": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ]
+  },
+  "network_calls": 0,
+  "external_reminders": 0,
+  "vision_files_unchanged": 23,
+  "agents_unchanged": true
+}

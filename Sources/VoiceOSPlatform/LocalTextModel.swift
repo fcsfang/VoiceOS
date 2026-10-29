@@ -5,9 +5,13 @@ import VoiceOSCore
 public enum LocalTextModel {
     public struct Suite {
         public let panorama: ResponsesPanoramaPort
-        public let followup: ResponsesRecordingFollowupPort
         public let recordingExpressions: ResponsesRecordingExpressionPort
+        public let topics: ResponsesTopicOrganizationPort
         public let recordingTitles: ResponsesRecordingTitlePort
+        public let reminderFields: ResponsesReminderFieldPort
+        public let followup:ResponsesRecordingFollowupPort
+        public let assistant:ResponsesAssistantPort
+        public let knowledgeReview:ResponsesKnowledgeReviewPort
         public let cognition:ResponsesModelPort
         public let relevance:ResponsesRelevancePort
         public let discussion:ResponsesDiscussionPort
@@ -22,7 +26,7 @@ public enum LocalTextModel {
         let (address,key)=try settings(from:file)
         do {
             let chosenTransport: any ModelHTTPTransport = segmentStreaming ? DirectStreamingModelHTTPTransport() : segmentTransport
-            return Suite(panorama: try ResponsesPanoramaPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),followup: try ResponsesRecordingFollowupPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),recordingExpressions: try ResponsesRecordingExpressionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),recordingTitles: try ResponsesRecordingTitlePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),english:try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),association:try ResponsesExpressionAssociationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),segmentExtraction:try ResponsesSegmentExtractionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol",transport:chosenTransport,compactInput:compactSegmentExtraction,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,expandAmbiguousQuotes:expandAmbiguousQuotes),segmentAggregation:try ResponsesSegmentAggregationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol",transport:chosenTransport,compactInput:compactSegmentAggregation,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,strictProvenance:strictSegmentAggregation))
+            return Suite(panorama: try ResponsesPanoramaPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),recordingExpressions: try ResponsesRecordingExpressionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),topics: try ResponsesTopicOrganizationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),recordingTitles: try ResponsesRecordingTitlePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),reminderFields: try ResponsesReminderFieldPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),followup:try ResponsesRecordingFollowupPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),assistant:try ResponsesAssistantPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),knowledgeReview:try ResponsesKnowledgeReviewPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),english:try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),association:try ResponsesExpressionAssociationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),segmentExtraction:try ResponsesSegmentExtractionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol",transport:chosenTransport,compactInput:compactSegmentExtraction,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,expandAmbiguousQuotes:expandAmbiguousQuotes),segmentAggregation:try ResponsesSegmentAggregationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol",transport:chosenTransport,compactInput:compactSegmentAggregation,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,strictProvenance:strictSegmentAggregation))
         } catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
     public static func load(from file: URL) throws -> ResponsesModelPort {

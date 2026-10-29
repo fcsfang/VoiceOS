@@ -136,13 +136,12 @@ extension VoiceOSStore {
         // Whole transcript texts are included once; role references do not duplicate their content.
         let count = snapshot.context.sources.reduce(0) { $0+$1.text.unicodeScalars.count }
                     + snapshot.priorReplies.reduce(0) { $0+$1.parts.reduce(0) { $0+$1.text.unicodeScalars.count } }
-        guard count <= snapshot.context.scalarBudget else { throw VoiceOSError("完整讨论输入超过预算；请缩小范围，不会静默丢弃早期历史") }
+        guard count <= snapshot.context.scalarBudget else { throw VoiceOSError("完整讨论输入超过预算；不会静默丢弃早期历史") }
     }
     static func validateDiscussionParts(_ parts:[DiscussionPart],context:LocalTranscriptContext) throws {
-        guard (1...8).contains(parts.count), parts.reduce(0, { $0+$1.text.unicodeScalars.count }) <= 4000 else { throw VoiceOSError("讨论响应为空或超过范围") }
+        guard !parts.isEmpty else { throw VoiceOSError("讨论响应为空") }
         for part in parts {
-            guard !part.text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty, part.text.unicodeScalars.count <= 1500,
-                  part.references.count <= 8 else { throw VoiceOSError("讨论段落无效") }
+            guard !part.text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw VoiceOSError("讨论段落无效") }
             var seen:Set<String> = []
             for ref in part.references {
                 guard seen.insert(ref.sourceID+":"+ref.transcriptVersionID+":"+ref.spanID).inserted,
@@ -169,7 +168,7 @@ extension VoiceOSStore {
     }
     static func validateStoredDiscussionAttempts(_ db:Database) throws {
         for row in try db.query("SELECT * FROM discussion_attempts") {
-            guard let json = row["snapshot_json"], json.utf8.count <= 200000,
+            guard let json = row["snapshot_json"], json.utf8.count <= 4000000,
                   row["snapshot_digest"] == relevanceHash(Data(json.utf8)) else { throw VoiceOSError("讨论调用快照不一致") }
             let s = try JSONDecoder().decode(DiscussionSnapshot.self,from:Data(json.utf8))
             guard s.input.conversationID == row["conversation_id"], s.input.userTurns.last?.turnID == row["reply_to_turn_id"],
@@ -190,6 +189,8 @@ extension VoiceOSStore {
                 guard turn["id"] == ref.turnID, turn["source_id"] == ref.sourceID, text.sources.first?.transcriptVersionID == ref.transcriptVersionID else { throw VoiceOSError("讨论调用个人回合顺序不符") }
             }
             let entryContext = try JSONDecoder().decode(LocalTranscriptContext.self,from:Data(entry["snapshot_json"]!.utf8))
+            guard try relevanceJSON(entryContext.conversationFocus) == relevanceJSON(s.context.conversationFocus) else { throw VoiceOSError("讨论焦点与保存入口不一致") }
+            guard try relevanceJSON(entryContext.reflectionFocus) == relevanceJSON(s.context.reflectionFocus) else { throw VoiceOSError("周期回顾与保存入口不一致") }
             var historicalSources = entryContext.sources
             for turn in turns.prefix(s.input.userTurns.count) {
                 let saved = try JSONDecoder().decode(LocalTranscriptContext.self,from:Data(turn["snapshot_json"]!.utf8))

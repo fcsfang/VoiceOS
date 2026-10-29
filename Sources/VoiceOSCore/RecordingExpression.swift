@@ -1,11 +1,5 @@
 import Foundation
 
-public struct TopicReadingEvidence: Codable, Sendable {
-    public let sourceID: String
-    public let quote: String
-    public init(sourceID: String, quote: String) { self.sourceID = sourceID; self.quote = quote }
-}
-
 public struct AutomaticRecordingInput: Codable, Sendable {
     public let inbox: String
     public let recordedAt: String?
@@ -117,6 +111,8 @@ extension VoiceOSStore {
               try modelAttempts(sourceID:id).contains(where: { $0.provider == "organized_import" && $0.state == "completed" && $0.contextState == "current" }),
               let source=try sources().first(where: { $0.id == id }),
               source.presentation?.automaticInput?.inbox == "previous-automatic-intake" else { return false }
+        // No context was added: preserve the existing complete understanding and
+        // its task states instead of extracting the same recording a second time.
         var completed=expression;completed.state="completed"
         var presentation=source.presentation!;presentation.expression=completed
         try saveExpressionPresentation(presentation,sourceID:id)
@@ -130,6 +126,7 @@ extension VoiceOSStore {
         var seen=Set<String>()
         return catalog.values.compactMap { source in
             guard let expression=source.presentation?.expression,seen.insert(expression.id).inserted else { return nil }
+            // An old group is never a route around a changed source or permission.
             guard expression.sourceIDs.allSatisfy({ id in
                 guard let member=catalog[id] else { return false }
                 return member.presentation?.expression?.id == expression.id && member.transcriptVersionID == expression.versions[id] && member.policyVersion == expression.policies[id] && !member.localOnly && member.state == "saved"
@@ -146,6 +143,8 @@ extension VoiceOSStore {
         }.sorted { $0.id < $1.id }
     }
     public func prepareRecordingExpressions() throws -> RecordingExpressionInput? {
+        // The inbox records provenance, not a semantic boundary: phone sync and
+        // a watched folder can deliver parts of the same expression.
         let catalog=try sources().filter { $0.origin == "user" && $0.speaker == "user" && $0.presentation?.automaticInput != nil && !$0.localOnly && $0.state == "saved" && $0.jobState == "completed" && !$0.needsTranscriptionReview && !($0.transcript ?? "").isEmpty }
         let allowed=Set(catalog.map(\.id))
         let existing=try recordingExpressions().filter { Set($0.sourceIDs).isSubset(of:allowed) }
@@ -185,6 +184,7 @@ extension VoiceOSStore {
                 cited.insert(evidence.sourceID)
             }
             guard cited == members else { throw VoiceOSError("连续表达需要逐段保留合并依据") }
+            // Trust actual recording timestamps, never a model-invented chronology.
             let known=proposal.sourceIDs.compactMap { input.dates[$0]?.recordedAt }
             guard known == known.sorted() else { throw VoiceOSError("连续表达的录音顺序与已知时间不符") }
             seen.formUnion(members)
@@ -248,6 +248,8 @@ extension VoiceOSStore {
         completed.taskReviewPending=decisions.contains { $0.relation == "uncertain" }
         completed.actionReviewDecisions=decisions
         let latest=try latestCandidateClaimsBySource()
+        // The organizing attempt also owns separately attributed programme claims.
+        // Keep its current cited companions when retiring older personal results.
         let keep=Set(input.context.sources.flatMap { latest[$0.sourceID] ?? [] }.map(\.id))
         var replaced=Set<String>()
         for id in expression.sourceIDs {

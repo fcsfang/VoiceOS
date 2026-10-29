@@ -28,7 +28,7 @@ enum RecordingInboxOutcome {
 
 struct RecordingInboxItem: Codable, Identifiable {
     enum State: String, Codable { case processing, retryScheduled, needsAttention }
-    var id: String
+    var id: String // Content hash is also the organizer import identity.
     var folderID: String
     var path: String
     var state: State
@@ -230,6 +230,8 @@ final class RecordingInbox: ObservableObject {
         var failure: Error?
         let iterator = FileManager.default.enumerator(at: directory, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey], options: [.skipsHiddenFiles], errorHandler: { _, error in failure = error; return false })
         while let url = iterator?.nextObject() as? URL {
+            // Voice Memos creates composedAsset previews inside subdirectories.
+            // Only its original recording files at this level are input material.
             if voiceMemos && url.deletingLastPathComponent().standardizedFileURL != directory.standardizedFileURL { continue }
             guard extensions.contains(url.pathExtension.lowercased()) else { continue }
             let value = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey])
@@ -257,6 +259,7 @@ final class RecordingInbox: ObservableObject {
                     let url = URL(fileURLWithPath: path)
                     let digest: String
                     if let pending = items.values.first(where: { $0.folderID == folder.id && $0.path == path && $0.fileStamp == stamp }) {
+                        // This file was already hashed when its durable intake was saved.
                         digest = pending.id
                     } else if let cached = contentDigests[path], cached.stamp == stamp { digest = cached.digest }
                     else { digest = try await Task.detached(priority: .utility) {

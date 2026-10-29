@@ -119,6 +119,8 @@ extension VoiceOSStore {
             if current.needsTranscriptionReview { continue }
             do {
                 guard !(current.transcript ?? "").trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { throw VoiceOSError("逐字稿为空") }
+                // Audio-backed automatic quality revisions remain within the
+                // original text processing consent. Manual edits need a new choice.
                 guard let transcript = try db.query("SELECT version_no,reason FROM transcript_versions WHERE id=?", [current.transcriptVersionID]).first,
                       transcript["version_no"] == "1" || transcript["reason"] == "ai_corrected" else { throw VoiceOSError("逐字稿已手动更正；需重新明确处理") }
                 if (current.transcript ?? "").unicodeScalars.count>4000 {

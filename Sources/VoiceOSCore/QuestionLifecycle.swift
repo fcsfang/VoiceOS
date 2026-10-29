@@ -27,7 +27,7 @@ public struct QuestionTransitionSnapshot: Codable, Sendable {
 extension VoiceOSStore {
     /// Read-only; this never classifies punctuation, writes a question or invokes a model.
     public func prepareQuestionSeed(claimID: String, expectedReviewVersion: Int, original: OutcomeSourceEvidence, scalarBudget: Int = 8000) throws -> QuestionSeedSnapshot {
-        guard ready, (1...12000).contains(scalarBudget), let claim = try candidateClaims().first(where: { $0.id == claimID }),
+        guard ready, (1...12000).contains(scalarBudget), let claim = try candidateClaim(id: claimID),
               claim.reviewVersion == expectedReviewVersion, claim.reviewState != "rejected",
               claim.references.contains(where: { $0.sourceID == original.reference.sourceID && $0.transcriptVersionID == original.reference.transcriptVersionID && $0.spanID == original.reference.spanID }) else { throw VoiceOSError("问题候选的认知版本或出处已变化") }
         let ids = Array(Set(claim.references.map(\.sourceID))).sorted()

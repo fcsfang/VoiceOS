@@ -1,0 +1,44 @@
+{
+  "actions": 0,
+  "audio_uploaded": false,
+  "billing_state": "unknown",
+  "claims": 4,
+  "elapsed_seconds": 38.235827922821045,
+  "external_task_writes": 0,
+  "integrity": true,
+  "model_states": [
+    "completed"
+  ],
+  "model_usage": [
+    {
+      "input_tokens": 938,
+      "output_tokens": 652
+    }
+  ],
+  "natural_semantic_quality_reviewed": true,
+  "queue_id": "09666816-5B11-43CE-A8BE-BEFD785601B2",
+  "queue_state": "completed",
+  "source_id": "24194115-FE15-4923-BEEC-785E5F3F0BA6",
+  "source_scalars": 193,
+  "part": 1,
+  "track_number": 2,
+  "offset_seconds": 120,
+  "duration_seconds": 45,
+  "reviewer": "assistant engineering consistency review against current local transcript",
+  "review": {
+    "statements": 3,
+    "questions": 1,
+    "all_user_tentative": true,
+    "all_unverified": true,
+    "all_references_original_source": true,
+    "no_action_added_to_discussion": true,
+    "typed_question_count": 1,
+    "association_attempts": 0
+  },
+  "limitations": [
+    "No independent audio reference transcript or ASR accuracy score",
+    "No actionable intent in this short recording; no external task created",
+    "No authorized history in this fresh library; association ended without candidates",
+    "Not complete natural case A or complete MVP"
+  ]
+}

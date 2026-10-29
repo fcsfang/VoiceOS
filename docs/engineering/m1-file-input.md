@@ -1,7 +1,5 @@
 # M1 文件输入切片实施记录
 
-> 历史文档（2026-10-10）。当前实现以[根 README](../../README.md)和 `main` 代码为准；文中的 schema 版本、里程碑状态和“未实现”判断已经过期。
-
 日期：2026-10-10。状态：开发预览已实现并实测；M1 整体未完成。依据：[路线图](../planning/implementation-roadmap.md)、[PRD](../product/prd.md)、[数据模型](../architecture/data-model.md)。操作与复现见[开发指南](development-guide.md)。
 
 ## 交付范围

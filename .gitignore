@@ -24,6 +24,4 @@ dist/
 .build/
 .swiftpm/
 
-# pstack verification artifacts
 .claude/skills/verify-voiceos/evidence/
-.claude/skills/verify-voiceos-reminder-schedule/spec/states/

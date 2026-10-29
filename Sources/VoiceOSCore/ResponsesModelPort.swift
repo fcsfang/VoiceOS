@@ -70,6 +70,8 @@ public struct DirectStreamingModelHTTPTransport: ModelHTTPTransport {
         streamed.timeoutInterval = deadline
         let settings = URLSessionConfiguration.ephemeral
         settings.timeoutIntervalForRequest = streamed.timeoutInterval
+        // Request timeout measures inactivity. A live reasoning stream may
+        // legitimately run for many minutes; do not cut it off at 300/600s.
         settings.httpCookieStorage = nil; settings.urlCredentialStorage = nil; settings.urlCache = nil
         let session = URLSession(configuration: settings, delegate: NoModelRedirect(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
@@ -79,6 +81,7 @@ public struct DirectStreamingModelHTTPTransport: ModelHTTPTransport {
         var line = Data()
         for try await byte in bytes {
             if byte == 10 {
+                // Completion is the boundary, not the gateway closing its socket.
                 if let final = try Self.terminalResponse(line) { return .init(status: http.statusCode, body: final) }
                 line.removeAll(keepingCapacity: true)
             } else { line.append(byte) }

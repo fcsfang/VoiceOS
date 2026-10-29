@@ -7,8 +7,9 @@ public struct ReminderSnapshot: Sendable, Codable, Equatable {
     public let completed: Bool
     public let marker: String
     public let dueDate: ReminderDueDate?
-    public init(id: String, title: String, completed: Bool, marker: String, dueDate: ReminderDueDate? = nil) {
-        self.id = id; self.title = title; self.completed = completed; self.marker = marker; self.dueDate = dueDate
+    public let fields: ReminderFields?
+    public init(id: String, title: String, completed: Bool, marker: String, dueDate: ReminderDueDate? = nil, fields: ReminderFields? = nil) {
+        self.id = id; self.title = title; self.completed = completed; self.marker = marker; self.dueDate = dueDate; self.fields = fields
     }
 }
 public protocol RemindersPort: Sendable {
@@ -32,7 +33,7 @@ public struct ReminderLink: Identifiable, Sendable {
 extension VoiceOSStore {
     public func reminderContext(actionID: String) throws -> String {
         guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
-              action.validity == "current", let claim = try candidateClaims().first(where: { $0.id == action.claimID }) else { throw VoiceOSError("任务出处不可用或已变化") }
+              action.validity == "current", let claim = try candidateClaim(id: action.claimID) else { throw VoiceOSError("任务出处不可用或已变化") }
         var lines: [String] = []
         for sourceID in Set(claim.references.map(\.sourceID)).sorted() {
             guard let name = try db.query("SELECT name FROM sources WHERE id=?", [sourceID]).first?["name"] else { continue }
@@ -94,7 +95,15 @@ extension VoiceOSStore {
             if expectedAccessVersion != nil {
                 guard try reminderCognitionIsLatest(current) else { throw VoiceOSError("发送前认知批次已更新，停止历史任务外写") }
             }
-            try await port.create(calendarID: calendarID, title: action.title, marker: marker, context: reminderContext(actionID: actionID))
+            if let fields = current.intent?.reminderFields?.desired {
+                for (sourceID, version) in current.intent?.reminderFields?.sourceVersions ?? [:] {
+                    guard try sources().first(where: { $0.id == sourceID })?.transcriptVersionID == version else { throw VoiceOSError("提醒字段的原话已变化，请重新核对") }
+                }
+                guard let fieldsPort = port as? any RemindersFieldsPort else { throw VoiceOSError("当前连接不支持日期、通知和优先级") }
+                try await fieldsPort.create(calendarID: calendarID, title: action.title, marker: marker, context: reminderContext(actionID: actionID), fields: fields)
+            } else {
+                try await port.create(calendarID: calendarID, title: action.title, marker: marker, context: reminderContext(actionID: actionID))
+            }
             try checkpoint(.reminderSaved)
             // Save return is not readback evidence. Record ambiguity before the next await.
             try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=?", [id])
@@ -104,6 +113,9 @@ extension VoiceOSStore {
             try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
             try Task.checkCancellation()
             try applyReminder(matches, linkID: id)
+            if let desired = current.intent?.reminderFields?.desired {
+                guard matches.count == 1, matches[0].fields == desired else { throw VoiceOSError("提醒字段未完成回读核对") }
+            }
         } catch {
             try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=? AND state='reserved'", [id])
             // Preserve cancellation for the refresh orchestrator: stopping a
@@ -114,7 +126,7 @@ extension VoiceOSStore {
         }
     }
     func reminderSourceAllowed(_ action: ActionRecord) throws -> Bool {
-        guard let claim = try candidateClaims().first(where: { $0.id == action.claimID }), !claim.references.isEmpty else { return false }
+        guard let claim = try candidateClaim(id: action.claimID), !claim.references.isEmpty else { return false }
         return try claim.references.allSatisfy { ref in
             guard let source=try db.query("SELECT local_only,presentation_json FROM sources WHERE id=?", [ref.sourceID]).first,source["local_only"] == "0" else { return false }
             if let raw=source["presentation_json"],let expression=try JSONDecoder().decode(RecordingPresentation.self,from:Data(raw.utf8)).expression,
@@ -125,7 +137,7 @@ extension VoiceOSStore {
     /// A source may be reprocessed while the connector's preflight is awaiting.
     /// Only new writes use this barrier; existing links still reconcile history.
     func reminderCognitionIsLatest(_ action: ActionRecord) throws -> Bool {
-        guard let claim = try candidateClaims().first(where: { $0.id == action.claimID }), !claim.references.isEmpty else { return false }
+        guard let claim = try candidateClaim(id: action.claimID), !claim.references.isEmpty else { return false }
         for sourceID in Set(claim.references.map(\.sourceID)) {
             guard try latestCandidateClaims(for: sourceID).contains(where: { $0.id == claim.id }) else { return false }
         }
@@ -160,6 +172,7 @@ extension VoiceOSStore {
         }
         guard !remote.id.isEmpty, remote.id.utf8.count <= 4096, remote.title.unicodeScalars.count <= 10000, remote.marker.utf8.count <= 4096 else { throw VoiceOSError("提醒事项字段无效或过长") }
         try remote.dueDate?.validate()
+        try remote.fields?.validate()
         let action = try actions(includeHistory: true).first { $0.id == link["action_id"] }
         let validMarker = remote.marker == link["marker"]
         // Once identified, a copied marker on a replacement is a conflict,
@@ -173,6 +186,7 @@ extension VoiceOSStore {
         var confirmedScheduleOperations: [String] = []
         var confirmedCompensations: [String] = []
         try db.transaction {
+            if validMarker, stableIdentity, let action, let fields = remote.fields { try observeReminderFields(actionID: action.id, fields: fields) }
             if validMarker, stableIdentity, let action, action.validity == "current" {
                 if remote.completed && action.state == "open" && action.version == baseline {
                     let revisionID = UUID().uuidString
@@ -209,12 +223,19 @@ extension VoiceOSStore {
         for _ in confirmedCompensations { try checkpoint(.compensationOperationCommitted) }
     }
     static func validateStoredReminders(_ db: Database) throws {
-        for link in try db.query("SELECT l.*,a.kind,a.title,a.intent_json,a.version AS latest_version FROM reminder_links l JOIN actions a ON a.id=l.action_id") {
+        for link in try db.query("SELECT l.*,a.kind,a.title,a.state AS action_state,a.intent_json,a.version AS latest_version FROM reminder_links l JOIN actions a ON a.id=l.action_id") {
             let metadata=try link["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self,from:Data($0.utf8)) }
             let historicTitle=metadata?.expressionHistory?.contains { $0.fromTitle == link["desired_title"] } == true
+            var withdrawn=false
+            if let decision=metadata?.expressionWithdrawal,let version=metadata?.expressionWithdrawalVersionID,
+               decision.oldID == link["action_id"],decision.relation == "withdraw",!decision.quote.isEmpty,
+               let receipts=metadata?.expressionWithdrawalResponseIDs,receipts.count >= 2,Set(receipts).count == receipts.count,
+               let original=try db.query("SELECT v.text,v.reason FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id WHERE v.id=? AND t.source_id=?",[version,decision.sourceID]).first {
+                withdrawn=link["action_state"] == "dismissed" && link["desired_title"] == "已撤回 · "+(link["title"] ?? "") && (original["text"]?.contains(decision.quote) == true || original["reason"] == "ai_superseded")
+            }
             guard link["kind"] == "task", link["marker"] == "voiceos-action:" + link["id"]!,
                   let pin = link["action_version"].flatMap(Int.init), let latest = link["latest_version"].flatMap(Int.init), pin <= latest,
-                  (link["desired_title"] == link["title"] || historicTitle), !(link["calendar_id"] ?? "").isEmpty else { throw VoiceOSError("迁移提醒事项身份或行动版本不一致") }
+                  (link["desired_title"] == link["title"] || historicTitle || withdrawn), !(link["calendar_id"] ?? "").isEmpty else { throw VoiceOSError("迁移提醒事项身份或行动版本不一致") }
             if pin > 1 { guard try db.query("SELECT id FROM action_revisions WHERE action_id=? AND version=?", [link["action_id"],String(pin)]).count == 1 else { throw VoiceOSError("迁移提醒事项缺少行动版本") } }
             let observations = try db.query("SELECT sequence FROM reminder_observations WHERE link_id=? ORDER BY sequence", [link["id"]])
             for (i, row) in observations.enumerated() { guard row["sequence"] == String(i+1) else { throw VoiceOSError("迁移提醒事项回读历史不连续") } }

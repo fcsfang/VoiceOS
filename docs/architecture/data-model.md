@@ -1,7 +1,5 @@
 # VoiceOS 数据模型 v0.1
 
-> 历史文档（2026-10-10）。当前实现以[根 README](../../README.md)和 `main` 代码为准；文中的 schema 版本、里程碑状态和“未实现”判断已经过期。
-
 日期：2026-10-10。状态：工程草稿；完整概念模型尚未冻结；Source/Asset/Job/Transcript 输入子集已有版本化 SQLite 实现，见[实施记录](../engineering/m1-file-input.md)。依据：[PRD](../product/prd.md)；配套：[架构](system-architecture.md)、[状态机](state-machines.md)、[ADR](../adr/README.md)。
 
 ## 1. 身份、版本与时间
@@ -119,3 +117,66 @@ Task.business_state=`planned/active/completed/cancelled/deferred`。本地请求
 默认不删除外部笔记/提醒事项；必要时只保留不含被删内容的最小解除关联记录。当前受管数据清理与外部/用户备份副本分开报告，不承诺擦除所有磁盘残留。删除后的 tombstone、技术故障记录只留必要非内容元数据；其保留期也需验证。
 
 Core 持有这些身份/版本契约；未来完整应用、思源或不同任务系统作为适配器使用它们。模型、UI、索引改变不会重新给历史分配 ID；派生重分析保留新模型/提示版本及来源。正式 schema 与升级工具在路线图阶段安排，实现前按[审查表](review.md)检查本稿的约束能否执行。
+
+2026-10-10 开发切片增量：schema 10/逻辑包 9 已实现显式用户文字 origin=user/speaker=user、保留原文资产与文字版本；user_tentative 归属和 nullable action 提案与行动同事务提交，auto_send 默认 0，普通明确提取任务经本机连接/来源权限核对有限激活。外部完成仍独立反馈，不认可观点。恢复原提取/行动关系、旧格式 1–8 和旧 schema 9 已核对；完整目标、语音身份与长期闭环未完成。实际字段/边界见[表达行动记录](../engineering/m3-expression-actions.md)与[ADR-007](../adr/007-expression-action-extraction.md)。
+
+## 2026-10-11 已实现的相关性调用增量
+
+存储 schema 12 / 迁移包 v11 新增 `relevance_attempts` 与 `relevance_inputs`，独立于生成观点的模型调用。前者保存查询、完整有界快照、模型/提示/结构版本、调用状态、输入有效性、最多三个候选 ID、用量与摘要；后者按 ordinal 引用每个来源、文字版本及权限版本。
+
+调用结果状态 reserved/completed/rejected/unknown 与输入有效性 current/frozen 分离。来源更正、权限变化及隔离冻结完整输入；恢复包时所有记录 frozen，未完成调用 unknown。历史权限按策略修订链核验，历史文字按不可变版本核验，不能用当前文字替换旧出处。完整性摘要不代替来源和引用校验。该切片不产生 Relation/Claim/Action，实际云端相关性适配器仍待实现；见[ADR-010](../adr/010-durable-relevance-attempts.md)。
+
+## 静默反馈实施增量（2026-10-11）
+
+Schema13/迁移v12新增`cognitive_feedback_ignores`（原调用、候选及查询/原文稳定指纹）和`cognitive_feedback_preferences`（顺序版本、normal/reduced/paused与命令身份）。卡片内容从有效相关性回执投影，不复制原文、不改变观点/证据/行动；读取与打开均复核全部输入。忽略不代表放弃兴趣，关闭不代表认可。恢复保留偏好及忽略、冻结回执；详见[ADR-012](../adr/012-quiet-relevance-feedback.md)。
+
+## 口述来源语义增量（2026-10-11）
+
+Schema14/迁移v13保留21表，但新增`microphone-v1:<sourceID>`个人口述身份语义。用户声明本人表达，origin/speaker为user，第三方材料继续external导入。bytes0/零摘要仅允许未封存receiving/interrupted，无资产/任务；封存后按同一来源、原件及输入版本持久保存。元数据迁移提示暂存片段未包含，带媒体导出阻止遗漏未封存片段。旧读者拒绝此版本；详见[ADR-013](../adr/013-durable-personal-dictation.md)。
+
+## 2026-10-11 会话基础实施边界
+
+W17新增conversations和conversation_user_turns，格式v14/schema15；每个个人回合引用受管来源及持久上下文，不复制原件。会话版本仅计用户回合与显式结束；当前尚无AI回合，后续AI历史/调用必须补充独立契约，不能用本表冒充已实现。原子冻结、上下文预算、恢复限制与证据见[实施记录](../engineering/m4-conversation-foundation.md)和[ADR-014](../adr/014-local-conversation-history.md)。
+
+2026-10-12 问题实际存储：schema24/v23包中claims.content_kind为nullable版本化类型，旧nil保留旧摘要；questions独立固定ID连接claim，保存原始seed及摘要、当前状态/版本，question_revisions保存用户命令、前后状态和版本、有界原话/答案上下文及权限epoch。同事务新建typed问题与claim；不回填旧未分类。迁移保留修订并冻结操作；出处关联卡片投影问题当前记录，AI相似提案不成为问题等价或解决依据。细节见[生命周期契约](../engineering/m4-question-lifecycle-contract.md)。
+
+问题状态依赖修订（2026-10-12）：当前resolved引用最新解决修订的答案；明确重开后旧答案仅属历史，不再使open/exploring/closed冻结。canReopen为读取时的能力投影，不保存新权限；仅答案失效且原问题仍有效时可显式重开。所有历史出处和版本仍保留并核对，恢复包不恢复该能力。
+
+2026-10-12 讨论类型增量：成果proposal新增可选contentKind，实时v2响应必填；旧nil编码省略，result摘要和旧身份不变。typed question沿用独立questions登记，AI reply-only context_anchor只定位，实际依据仍在成果replyEvidence。seed固定原scalarBudget（最大12000），旧8000不改；revision提交核对seed的原引文、上下文和权限身份。表及包仍schema24/v23，334项测试与三处成果/六处状态强退恢复通过。
+
+## W14 状态冲突恢复实施增量（2026-10-13）
+
+schema32 新增 `reminder_status_resolutions`，不可变记录 link、observation、action_revision、恢复前同步基线、恢复后行动版本、授权版本及命令摘要。`reminder_links.action_version` 保留创建时值，不改写历史观测校验；最新恢复版本作为后续完成同步基线。恢复只改变本地状态，用户修订、记录及 link 状态同事务。含恢复记录的包 v32 校验历史基线和观测/修订绑定，恢复不带连接权限；其他库按既有内容选择兼容包版本。见 [ADR033](../adr/033-reminder-status-resolution.md)。时间字段与完整三方调和仍待实现。
+
+## W14 时间回读实施增量（2026-10-13）
+
+schema33 `reminder_time_observations(id,due_json)` 引用不可变外部观测，记录类型化 `none/dateOnly/instant`。没有行表示该观测的期限未知；旧历史不回填。时间单独变化同样生成新观测并与时间行原子保存。含时间行包 v33 保留当地日期与明确时区，验证日期/引用；恢复仍不携带连接授权。`ReminderScheduleProposal` 和 `ReminderScheduleMerge` 为内存提案/纯决策，不是已实现的 ScheduleRevision 或 Operation；安全外写仍待实现。见 [ADR034](../adr/034-reminder-time-observation-and-merge.md)。
+
+## W14 本地排期实施增量（2026-10-13）
+
+schema34 `action_schedule_intents` 追加独立排期链：固定 action_version/schedule_version、due、用户承诺/AI 弹性归属、actor、表达/规划文本、固定 anchor_event_time/anchor_time_zone、可选 base_observation_id 与重推的 base_authority、历史 access_version、validity 与命令摘要。与行动状态版本分开，来源/状态变化阻止旧意图执行。含排期包 v34 校验连续历史、承诺保护、观测依据与基线归属，恢复全部 frozen，不恢复实时连接。它是实际本地 desired，区别于已执行 Operation 或完整 PlanRevision。见 [ADR035](../adr/035-durable-action-schedule-intents.md)。
+
+schema35 `reminder_schedule_operations` 绑定唯一 intent、link、expected observation、历史 access version、before/desired、命令摘要；保存 reserved/unknown/confirmed/observed/conflict/blocked、attempted、save acknowledgement、可选结果 observation、validity 和核对时刻。派发前持久 unknown，已尝试意图不可重发；观察到目标日期不自动证明 AI 作者。含操作包 v35 核验意图/基线/尝试边界/结果引用，恢复 frozen，不恢复授权；不修改行动状态版本。普通弹性排期已接条件保存与回读，重要效果确认和字段所有权仍待实现。见 [ADR036](../adr/036-safe-reminder-schedule-operations.md)。
+
+
+## W14 具体效果许可实施增量（2026-10-13）
+
+schema36新增 `reminder_schedule_grants`（唯一intent、link、observation、access_version、before/desired、effect_digest、user actor、命令指纹与validity）、`reminder_schedule_grant_revocations`（唯一grant、user actor、原因与命令指纹）；操作增加可空 `grant_id`。许可绑定一次实际效果，不改变行动/认知状态；撤回不删除许可或已派发历史。校验按意图→许可→操作，重要操作不能移除grant绕过确认。有许可包v36，恢复全部frozen且不恢复外部授权；旧格式拒绝许可表/非空grant_id。仅普通操作仍v35。本地期限编辑保存user commitment与控制中心来源，外部变更另行具体确认。见[ADR037](../adr/037-effect-bound-schedule-confirmation.md)。字段所有权待接，不根据成功回执直接赋予后续自由改期权。
+
+
+## W14 字段归属实施增量（2026-10-13）
+
+schema37新增 `reminder_schedule_bases`（id、唯一intent_id、authority、可选operation_id），与新意图同事务保存；其归属依据为历史证据，不是独立授权。confirmed/保存应答＋唯一匹配观测及连续未变due支持AI弹性；observed/unknown不支持，明确承诺不降级。初始无期限与人工移除/未知后无期限分开。当前预览再核对归属，变化须新意图。历史保守归属不因迟到核对改写；旧无basis按原规则验证。有basis包v37按v36表后追加basis；恢复仍冻结意图/操作且不恢复授权。见[ADR038](../adr/038-reminder-due-provenance.md)。
+
+
+## W16 纠错行动影响投影（2026-10-13）
+
+`CorrectionActionImpact`从已有claim_reviews、transcript_revisions/实际claim引用、冻结action、link/observation及schedule operation投影，不引入新持久实体或授权。根限明确correction/transcription_error且版本晚于绑定；普通主题关系、隐私/迁移冻结不冒充错误。当前digest包含根/行动/外部观测/操作及清单授权，迁移可重建清单而不恢复执行。此投影不代表具体补偿计划或执行回执，后续持久补偿单独设计。见[ADR039](../adr/039-correction-action-impact-projection.md)。
+
+
+## W16 期限补偿实施增量（2026-10-13）
+
+schema38新增`reminder_compensation_plans`（行动/排期版本、link/observation/access、纠错根/原操作链、before/desired及唯一effect_digest）、`reminder_compensation_grants`（唯一plan与用户具体效果）、`reminder_compensation_revocations`（不可变撤回）、`reminder_compensation_operations`（唯一plan、grant、状态/尝试/应答/结果观测）。不修改行动状态版本或解冻认知。恢复目标重推自连续已确认AI期限链，不能仅凭hash替换目标。有计划包v38按四表依赖顺序导入，计划/许可/操作frozen，不恢复清单授权；旧格式拒绝补偿文件。影响digest补充当前claim review、来源policy/state/文字版本/hash。见[ADR040](../adr/040-corrective-reminder-due-compensation.md)。
+
+
+W16依赖覆盖（2026-10-13）：纠错行动根从原model_attempt的context_inputs及conversation_outcome snapshot.reusePlan.priorResults逐级追溯，按producer身份去重；完整输入区别于claim refs/context_anchor。影响摘要覆盖全依赖来源的当前状态/权限/文字版本/hash，补偿迁移共用真实根校验。无新表或包版本，不从同主题/后续会话发言反推依赖。见[ADR041](../adr/041-correction-processing-dependencies.md)。

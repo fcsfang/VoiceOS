@@ -1,0 +1,39 @@
+{
+  "date": "2026-10-11",
+  "automated_tests": 128,
+  "failures": 0,
+  "ui_synthetic_cloud_calls": 1,
+  "ui_input_tokens": 604,
+  "ui_output_tokens": 70,
+  "billing_state": "unknown",
+  "native_screenshot_reviewed": true,
+  "native_checks": [
+    "keyword search returns three current originals",
+    "three manually selected inputs; explicit bounded preview",
+    "one expected original selected",
+    "citation button opens correct original",
+    "local-only source blocked before dispatch",
+    "keyword edits clear selection and result",
+    "question edit disables prepared send",
+    "closing sheet and reopening do not dispatch"
+  ],
+  "mock_checks": [
+    "late canceled callback cannot overwrite new query",
+    "completed snapshot consumed and not resent",
+    "empty result invalidates on excluded-input correction",
+    "local-only preview has no attempt"
+  ],
+  "stable_reopen": true,
+  "history_attempts": 2,
+  "preexisting_restored_attempts": 1,
+  "all_history_frozen_after_source_permission_change": true,
+  "history_inputs": 6,
+  "export_restore_passed": true,
+  "claims_created": 0,
+  "actions_created": 0,
+  "external_writes": 0,
+  "personal_history_sent": false,
+  "raw_audio_sent": false,
+  "vision_files_unchanged": 23,
+  "automatic_semantic_recall_enabled": false
+}

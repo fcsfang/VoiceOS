@@ -1,0 +1,61 @@
+{
+  "date": "2026-10-10",
+  "core_tests": 59,
+  "sigkill_checks": {
+    "cognition_actions": 13,
+    "reminders_simulator": 4
+  },
+  "live": {
+    "scope": "VoiceOS 验证 2026-10-10",
+    "app_permission_observed": true,
+    "synthetic_external_tasks_created": 1,
+    "link_id": "70229B74-E51E-4F1D-B1F6-61D2929CB0C5",
+    "external_id": "648B8A38-19E6-4520-834B-516943AA8C1B",
+    "unique_marker_readback": true,
+    "external_title_edit_preserved": true,
+    "external_completion_recorded": true,
+    "feedback_actor": "external",
+    "local_action_version": 2,
+    "claim_evidence_still_unverified": true,
+    "synthetic_fixture_retained": true,
+    "restored_reopened_without_auto_read_or_create": true,
+    "scope_reselected_before_live_read": true,
+    "repeated_read_added_no_state_revision": true
+  },
+  "package": {
+    "format": 7,
+    "schema": 8,
+    "exact_roundtrip_tables": [
+      "contexts",
+      "context_inputs",
+      "model_attempts",
+      "claims",
+      "source_policy_revisions",
+      "claim_reviews",
+      "actions",
+      "action_revisions",
+      "reminder_links",
+      "reminder_observations"
+    ],
+    "legacy_formats_restored": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "schema7_copy_upgrade_preserved_eight_tables": true
+  },
+  "new_model_calls": 0,
+  "raw_audio_uploads": 0,
+  "vision_files_unchanged": 23,
+  "agents_unchanged": true,
+  "not_tested_live": [
+    "permission revocation",
+    "iCloud identity changes/offline delivery",
+    "EventKit hard crash around save",
+    "notification/wake/background reconciliation",
+    "outbound edits/completion/deletion"
+  ]
+}

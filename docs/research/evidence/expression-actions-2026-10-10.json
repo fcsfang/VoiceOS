@@ -1,0 +1,152 @@
+{
+  "date": "2026-10-10",
+  "automated_tests": 69,
+  "tests_passed": true,
+  "sigkill_checks": 25,
+  "vision_baseline_files": 23,
+  "agents_unchanged": true,
+  "new_model_requests": 2,
+  "provider": "existing authorized Responses-compatible configuration",
+  "model": "gpt-6.1-sol",
+  "total_input_tokens": 1432,
+  "total_output_tokens": 1047,
+  "billing_state": "unknown",
+  "positive_fixture": {
+    "actions": [
+      {
+        "autoSend": false,
+        "kind": "opportunity",
+        "title": "以后也许研究检索"
+      },
+      {
+        "autoSend": true,
+        "kind": "task",
+        "title": "整理开发验证素材"
+      }
+    ],
+    "billing_state": "unknown",
+    "claims": 3,
+    "external_writes": 0,
+    "model": "gpt-6.1-sol",
+    "ownerships": [
+      "user_tentative",
+      "user_tentative",
+      "user_tentative"
+    ],
+    "synthetic": true,
+    "usage": {
+      "input_tokens": 587,
+      "output_tokens": 391
+    }
+  },
+  "boundary_fixture": {
+    "billing_state": "unknown",
+    "cases": [
+      {
+        "actions": [],
+        "case": 1,
+        "claims": [
+          {
+            "ownership": "unresolved",
+            "statement": "嘉宾说会跑步；这只是转述，不是用户的计划。"
+          }
+        ],
+        "passed": true
+      },
+      {
+        "actions": [
+          {
+            "autoSend": false,
+            "kind": "opportunity",
+            "quote": "如果将来换电脑，也许可以学习剪辑",
+            "title": "如果将来换电脑，也许可以学习剪辑"
+          }
+        ],
+        "case": 2,
+        "claims": [
+          {
+            "ownership": "user_tentative",
+            "statement": "如果将来换电脑，用户也许可以学习剪辑。"
+          },
+          {
+            "ownership": "user_tentative",
+            "statement": "用户现在不打算报名课程。"
+          }
+        ],
+        "passed": true
+      },
+      {
+        "actions": [
+          {
+            "autoSend": false,
+            "kind": "task",
+            "quote": "周五之前我必须交开发测试报告。",
+            "title": "周五之前必须交开发测试报告"
+          }
+        ],
+        "case": 3,
+        "claims": [
+          {
+            "ownership": "user_tentative",
+            "statement": "用户要求保留明确期限，不要替其安排弹性提醒。"
+          },
+          {
+            "ownership": "user_tentative",
+            "statement": "用户必须在周五之前交开发测试报告。"
+          }
+        ],
+        "passed": true
+      }
+    ],
+    "external_writes": 0,
+    "passed": true,
+    "synthetic": true,
+    "usage": {
+      "input_tokens": 845,
+      "output_tokens": 656
+    }
+  },
+  "native_ui": {
+    "isolated_root": true,
+    "synthetic_text_save": true,
+    "saved_text_default_local_only": true,
+    "existing_test_list_only": true,
+    "autonomous_task_create_without_send_button": true,
+    "external_complete_automatic_readback_without_read_button": true,
+    "new_synthetic_tasks": 1,
+    "external_completion_history": 1,
+    "action_version": 2,
+    "opportunity_state": "open",
+    "claims_remain_unverified": true,
+    "connection_paused": true,
+    "deleted_tasks": 0
+  },
+  "migration": {
+    "format": 9,
+    "schema": 10,
+    "identical_roundtrip_tables": 16,
+    "legacy_formats": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "schema9_original_tables_preserved": 17,
+    "grant_restored": false
+  },
+  "build_passed": true,
+  "development_signature_verified": true,
+  "raw_media_cloud_uploads": 0,
+  "limitations": [
+    "small synthetic sample set, not full quality benchmark",
+    "text input, not native recording or multi-speaker identity",
+    "no deadline or alarm writes",
+    "no full goal/project breakdown",
+    "sleep/wake and OS revocation not tested",
+    "no full product acceptance"
+  ]
+}

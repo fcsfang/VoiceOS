@@ -13,6 +13,24 @@ final class StoreLock {
     deinit { flock(fd, LOCK_UN); close(fd) }
 }
 enum DurableFiles {
+    struct Fingerprint: Equatable {
+        let device: dev_t
+        let inode: ino_t
+        let bytes: off_t
+        let modifiedSeconds: Int
+        let modifiedNanoseconds: Int
+        let changedSeconds: Int
+        let changedNanoseconds: Int
+    }
+    static func fingerprint(_ url: URL) throws -> Fingerprint {
+        var info = stat()
+        guard url.withUnsafeFileSystemRepresentation({ fstatat(AT_FDCWD, $0!, &info, 0) }) == 0 else {
+            throw VoiceOSError("无法读取原件状态")
+        }
+        return .init(device: info.st_dev, inode: info.st_ino, bytes: info.st_size,
+                     modifiedSeconds: info.st_mtimespec.tv_sec, modifiedNanoseconds: info.st_mtimespec.tv_nsec,
+                     changedSeconds: info.st_ctimespec.tv_sec, changedNanoseconds: info.st_ctimespec.tv_nsec)
+    }
     static func hash(_ url: URL) throws -> (Int64, String) {
         let file = try FileHandle(forReadingFrom: url)
         defer { try? file.close() }

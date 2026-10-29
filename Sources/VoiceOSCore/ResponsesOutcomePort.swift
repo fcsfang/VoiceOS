@@ -42,7 +42,7 @@ public struct ResponsesOutcomePort:ConversationOutcomePort {
                 timeline.append(["role":reply.state == "completed" ? "assistant":"reply_status","attemptID":reply.attemptID,"replyToTurnID":reply.replyToTurnID,"state":reply.state,"parts":parts])
             }
         }
-        guard Set(expected).isSubset(of: Set(s.context.sources.map(\.sourceID))),Set(s.input.historySourceIDs).count == s.input.historySourceIDs.count,
+        guard expected == s.context.sources.map(\.sourceID),Set(s.input.historySourceIDs).count == s.input.historySourceIDs.count,
               s.input.userTurns.compactMap({ turn in s.replies.first(where: { $0.replyToTurnID == turn.turnID })?.attemptID }) == s.replies.map(\.attemptID),
               Set(s.replies.map(\.attemptID)).count == s.replies.count else { throw ModelPortFailure.rejected("成果遗漏最后AI或混入回合/来源") }
         let sources=s.context.sources.map { source -> [String:Any] in
@@ -62,9 +62,10 @@ public struct ResponsesOutcomePort:ConversationOutcomePort {
         let input:[String:Any]=["sources":sources,"historySourceIDs":s.input.historySourceIDs,"timeline":timeline,
             "newPersonalTargets":try JSONSerialization.jsonObject(with:encoder.encode(plan.personalTargets)),"existingResultIdentities":prior,"alreadyRetainedAIParagraphs":retained]
         let content=String(decoding:try JSONSerialization.data(withJSONObject:input,options:[.sortedKeys]),as:UTF8.self)
-        let payload:[String:Any]=["model":configuration.model,"store":false,"reasoning":["effort":"low"],"max_output_tokens":2048,"truncation":"disabled","instructions":Self.instructions,
+        let payload:[String:Any]=["model":configuration.model,"store":false,"reasoning":["effort":"low"],"max_output_tokens":8192,"truncation":"disabled","instructions":Self.instructions,
             "input":[["role":"user","content":content]],"text":["format":["type":"json_schema","name":"voiceos_discussion_outcomes","strict":true,"schema":Self.schema]]]
         let data=try JSONSerialization.data(withJSONObject:payload,options:[.sortedKeys])
+        guard data.count <= 4000000 else { throw ModelPortFailure.rejected("完整成果请求超过字节预算") }
         var http=URLRequest(url:endpoint,timeoutInterval:600);http.httpMethod="POST";http.httpBody=data
         http.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization");http.setValue("application/json",forHTTPHeaderField:"Content-Type");return http
     }

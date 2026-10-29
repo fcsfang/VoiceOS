@@ -1,0 +1,33 @@
+{
+  "commit": "1b6d5a6",
+  "verification": "native CUA and isolated database readback",
+  "checks": {
+    "unconfigured_record_and_process_disabled": true,
+    "unconfigured_save_and_process_disabled": true,
+    "ordinary_save_local_only": true,
+    "queued_segment_menu_visible": true,
+    "segment_cancel_terminal_visible": true,
+    "model_calls_during_ui": 0,
+    "daily_library_restored": true,
+    "daily_reminders_permission": "unavailable; automatic readback paused"
+  },
+  "isolated_database": {
+    "schema": 31,
+    "batch_states": [
+      "cancelled"
+    ],
+    "model_attempt_count": 0,
+    "fragment_attempt_count": 0,
+    "aggregation_attempt_count": 0,
+    "association_attempt_count": 0,
+    "processing_intent_count": 0,
+    "integrity": "ok"
+  },
+  "not_verified": [
+    "configured cloud dispatch",
+    "long recording live microphone",
+    "cancel after cognition while cloud in flight",
+    "natural semantic quality",
+    "complete case A"
+  ]
+}

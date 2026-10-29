@@ -1,0 +1,95 @@
+{
+  "date": "2026-10-10",
+  "scope": "explicit claim endorsement/rejection/correction; synthetic UI simulation only",
+  "database_schema": 6,
+  "package_format": 5,
+  "core_tests": {
+    "count": 45,
+    "failures": 0
+  },
+  "process_fault_checks": {
+    "date": "2026-10-10",
+    "synthetic_local_proposals": true,
+    "count": 9,
+    "sigkill_count": 9,
+    "passed": true,
+    "cases": [
+      {
+        "checkpoint": "modelReserved",
+        "passed": true,
+        "stable_reopen": true
+      },
+      {
+        "checkpoint": "claimsUncommitted",
+        "passed": true,
+        "stable_reopen": true
+      },
+      {
+        "checkpoint": "claimsCommitted",
+        "passed": true,
+        "stable_reopen": true
+      },
+      {
+        "checkpoint": "correctionUncommitted",
+        "passed": true,
+        "stable_reopen": true
+      },
+      {
+        "checkpoint": "correctionCommitted",
+        "passed": true,
+        "stable_reopen": true
+      },
+      {
+        "checkpoint": "policyUncommitted",
+        "passed": true,
+        "stable_reopen": true
+      },
+      {
+        "checkpoint": "policyCommitted",
+        "passed": true,
+        "stable_reopen": true
+      },
+      {
+        "checkpoint": "reviewUncommitted",
+        "passed": true,
+        "stable_reopen": true
+      },
+      {
+        "checkpoint": "reviewCommitted",
+        "passed": true,
+        "stable_reopen": true
+      }
+    ],
+    "network_calls": 0,
+    "external_actions": 0
+  },
+  "ui_checks": {
+    "endorsement_preserves_external_ownership_and_unverified": true,
+    "correction_returns_to_pending": true,
+    "rejection_shown_as_historical_not_current": true,
+    "four_version_history_rendered": true,
+    "test_operations_are_not_actual_user_endorsement": true,
+    "reopened_restored_review_state_observed": true
+  },
+  "migration": {
+    "review_and_cognitive_tables_equal_after_restore": true,
+    "foreign_keys_valid": true,
+    "legacy_package_formats_restored": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "populated_schema5_original_fields_preserved": true
+  },
+  "new_network_calls": 0,
+  "audio_uploaded": false,
+  "external_actions": 0,
+  "vision_files_unchanged": 23,
+  "full_product_acceptance_complete": false,
+  "limitations": [
+    "full claim-derived dependency graph not implemented",
+    "evidence update and true user viewpoint evolution pending",
+    "action/feedback loop pending"
+  ]
+}

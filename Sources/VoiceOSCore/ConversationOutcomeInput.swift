@@ -45,8 +45,8 @@ public struct ConversationOutcomeProposal:Codable,Sendable {
 }
 extension VoiceOSStore {
     /// Local preparation only. No model, endorsement, candidate or action side effects.
-    public func prepareConversationOutcome(id:String,expectedVersion:Int,destination:ModelDestination,scalarBudget:Int=Int.max,commandID:String=UUID().uuidString) throws -> ConversationOutcomeSnapshot {
-        guard ready,!commandID.isEmpty,scalarBudget > 0 else { throw VoiceOSError("讨论成果准备命令无效") }
+    public func prepareConversationOutcome(id:String,expectedVersion:Int,destination:ModelDestination,scalarBudget:Int=8000,commandID:String=UUID().uuidString) throws -> ConversationOutcomeSnapshot {
+        guard ready,!commandID.isEmpty,(1...12000).contains(scalarBudget) else { throw VoiceOSError("讨论成果准备命令无效") }
         let session=try conversation(id:id)
         guard session.validity == "current",session.version == expectedVersion else { throw VoiceOSError("讨论成果版本或来源已变化") }
         let history=try conversationHistorySources(conversationID:id).map(\.sourceID),turns=try conversationUserTurns(conversationID:id)
@@ -55,9 +55,16 @@ extension VoiceOSStore {
         for turn in turns {
             for source in try storedConversationContext(turn.contextID).sources where !ids.contains(source.sourceID) { ids.append(source.sourceID) }
         }
+        let entry = try conversationHistoryContext(id)
+        guard try completeConversationSourceIDs(history) == history else { throw VoiceOSError("讨论成果依据已增加节目上下文，请从当前材料继续") }
+        try validateLocalTranscriptContext(entry)
         let replies=try outcomeReplies(id,destination:destination)
-        let replySize=replies.reduce(0) { $0 + $1.parts.reduce(0) { $0 + $1.text.unicodeScalars.count } }
-        let context=try prepareCompleteConversationContext(sourceIDs:ids,scalarBudget:scalarBudget,replyScalars:replySize)
+        if let focus = entry.conversationFocus { try validateConversationThoughtFocus(focus) }
+        if let focus = entry.reflectionFocus { try validateReflectionFocus(focus) }
+        let replyCharacters = replies.reduce(0) { $0 + $1.parts.reduce(0) { $0 + $1.text.unicodeScalars.count } }
+        var context = try prepareFullDiscussionContext(sourceIDs:ids,minimumBudget:scalarBudget,replyCharacters:replyCharacters)
+        context.conversationFocus = entry.conversationFocus
+        context.reflectionFocus = entry.reflectionFocus
         try Self.validateOutcomeBudget(context,replies)
         let contextID=try persistLocalContext(context,commandID:"discussion-outcome:"+commandID,destination:destination)
         let input=PreparedConversationInput(conversationID:id,conversationVersion:session.version,contextID:contextID,historySourceIDs:history,userTurns:turns.map { ConversationTurnReference(turnID:$0.id,sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID) },destination:destination)
@@ -72,6 +79,13 @@ extension VoiceOSStore {
         guard ready,session.validity == "current",session.state == snapshot.sessionState,session.version == input.conversationVersion,
               try db.query("SELECT destination FROM contexts WHERE id=?",[input.contextID]).first?["destination"] == input.destination.rawValue else { throw VoiceOSError("讨论成果输入状态或目的地已变化") }
         let current=try localContext(id:input.contextID),history=try conversationHistorySources(conversationID:input.conversationID).map(\.sourceID),turns=try conversationUserTurns(conversationID:input.conversationID)
+        if let focus = current.conversationFocus { try validateConversationThoughtFocus(focus) }
+        if let focus = current.reflectionFocus { try validateReflectionFocus(focus) }
+        let entry = try conversationHistoryContext(input.conversationID)
+        guard try completeConversationSourceIDs(history) == history else { throw VoiceOSError("讨论成果缺少当前配对的节目来源") }
+        try validateLocalTranscriptContext(entry)
+        guard try Self.relevanceJSON(current.conversationFocus) == Self.relevanceJSON(entry.conversationFocus) else { throw VoiceOSError("讨论成果焦点与入口不一致") }
+        guard try Self.relevanceJSON(current.reflectionFocus) == Self.relevanceJSON(entry.reflectionFocus) else { throw VoiceOSError("讨论成果范围与入口不一致") }
         let refs=turns.map { ConversationTurnReference(turnID:$0.id,sourceID:$0.sourceID,transcriptVersionID:$0.transcriptVersionID) }
         var ids=history
         for turn in turns {

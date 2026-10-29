@@ -1,0 +1,35 @@
+{
+  "date": "2026-10-12",
+  "tests_passed": 376,
+  "recording_request_tests": 11,
+  "database_schema": 26,
+  "native_ui_checks": [
+    "separate local-save and record-process choices",
+    "record-process disabled without model",
+    "waiting request visible after restart",
+    "cancel waiting request",
+    "cancelled request remains cancelled after restart",
+    "Chinese cancelled status on latest signed build"
+  ],
+  "ui_library": "/Users/joey/01 Projects/VoiceOS/runtime/queue-fixes-20261012/record-request-ui-library",
+  "ui_request_rows": [
+    {
+      "id": "6922D115-66B3-4916-A3AA-FB94C9A5A745",
+      "source_id": "86535401-8953-407C-A864-E0823ACA9285",
+      "state": "cancelled",
+      "processing_intent_id": null
+    }
+  ],
+  "ui_queue_count": 0,
+  "ui_model_count": 0,
+  "ui_association_count": 0,
+  "sigkill_probe": "recording-processing-recovery-2026-10-12.json",
+  "sigkill_boundaries_passed": 7,
+  "signed_build_verified": true,
+  "microphone_used": false,
+  "raw_media_uploaded": false,
+  "cloud_requests": 0,
+  "reminders_written": 0,
+  "natural_semantic_quality_verified": false,
+  "real_device_record_and_process_verified": false
+}

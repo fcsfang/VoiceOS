@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-13",
+  "scope": "W14 status recovery and time observation plus pure merge policy",
+  "source_commit_before_time": "9a972bb",
+  "schema": 33,
+  "package_with_time_observations": 33,
+  "package_with_only_status_resolutions": 32,
+  "tests": {
+    "full": {
+      "count": 487,
+      "failures": 0,
+      "log": "/tmp/voiceos-reminder-time-regression.log"
+    },
+    "targeted": {
+      "count": 21,
+      "failures": 0,
+      "log": "/tmp/voiceos-reminder-time-targeted.log"
+    }
+  },
+  "build": {
+    "stable_development_signed": true,
+    "semantic_model_bundled": true,
+    "strict_codesign_verified": true,
+    "log": "/tmp/voiceos-reminder-time-signing.log"
+  },
+  "checks": [
+    "git diff --check",
+    "known-none distinct from unknown",
+    "date-only not converted to UTC midnight",
+    "explicit timezone for timed observation",
+    "DST gap and fold unknown",
+    "changed due has independent observation",
+    "unchanged due deduplicates",
+    "status adoption rechecks entire observation",
+    "package preserves temporal history without live authorization",
+    "commitment and manual base cannot be downgraded by flexible proposal"
+  ],
+  "real_external_task_writes": 0,
+  "cloud_requests": 0,
+  "microphone_captures": 0,
+  "native_runtime_ui_verified": false,
+  "merge_execution_integrated": false,
+  "m3_status": "partial",
+  "ac15_status": "partial",
+  "natural_case_A": "partial",
+  "remaining": [
+    "persistent local scheduling intent and field base",
+    "effect-bound confirmation",
+    "durable update Operation and fresh preflight",
+    "EventKit update and verified readback",
+    "W16 compensation",
+    "native UI focused verification",
+    "real user action outcome and subsequent expression"
+  ]
+}

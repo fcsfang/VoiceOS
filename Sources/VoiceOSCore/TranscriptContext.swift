@@ -7,6 +7,8 @@ public struct LocalTranscriptContext: Codable, Sendable {
     public let sources: [ContextTranscript]
     public let scalarBudget: Int
     public let contentDigest: String
+    public var conversationFocus: ConversationThoughtFocus? = nil
+    public var reflectionFocus: ConversationReflectionFocus? = nil
     public var recordingContexts: [RecordingContext]? = nil
 }
 public struct ContextTranscript: Codable, Sendable {
@@ -36,6 +38,7 @@ extension VoiceOSStore {
             JOIN transcript_versions v ON v.id=t.current_version_id AND v.transcript_id=t.id
             WHERE s.id=? AND s.state IN ('saved','reference_only') AND t.input_version_id=s.version_id
             """, [id]).first else { throw VoiceOSError("来源没有可用的当前逐字稿") }
+            if row["kind"] == "ai_text" { try validateAssistantResultBasis(sourceID: id) }
             if row["state"] == "saved" { _ = try playableURL(sourceID: id) }
             let text = row["text"]!
             let spans = try JSONDecoder().decode([TranscriptSpan].self, from: Data(row["spans_json"]!.utf8))

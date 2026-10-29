@@ -3,6 +3,7 @@ import AVKit
 import VoiceOSCore
 
 struct TaskManagerView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
     @State private var section = "tasks"
@@ -13,6 +14,11 @@ struct TaskManagerView: View {
     @State private var confirmingAction: ActionRecord?
     @State private var playbackActionID: String?
     @State private var expandedActions: Set<String> = []
+    @State private var settingsAction: ActionRecord?
+    @State private var settingsSnapshot: ReminderSnapshot?
+    @State private var showingDiscussion = false
+    @State private var delegatingAction: ActionRecord?
+    @State private var assistantSelection: AssistantSheetSelection?
     private let sections = [("tasks", "待跟进"), ("review", "待核对"), ("ideas", "问题与目标"), ("completed", "已完成"), ("activities", "录音活动")]
 
     private func category(_ action: ActionRecord) -> String {
@@ -56,7 +62,7 @@ struct TaskManagerView: View {
                 else { ranges.append((start, end)) }
             }
             func time(_ ms: Int) -> String { let sec = ms / 1000; return String(format: "%02d:%02d:%02d", sec / 3600, sec / 60 % 60, sec % 60) }
-            return record.name + (ranges.isEmpty ? "" : " · " + ranges.map { time($0.0) + "–" + time($0.1) }.joined(separator: "；"))
+            return record.displayTitle + (ranges.isEmpty ? "" : " · " + ranges.map { time($0.0) + "–" + time($0.1) }.joined(separator: "；"))
         }.joined(separator: "\n")
     }
     private func feedbackCount(_ action: ActionRecord) -> Int {
@@ -70,6 +76,7 @@ struct TaskManagerView: View {
                     Text("从原话接续行动，完成后留下一句结果或收获。").foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button("AI 助理 · \(model.assistantExecutions.filter { $0.state != "cancelled" }.count)") { assistantSelection = AssistantSheetSelection(executionID: nil) }
                 Button("同步提醒事项") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
                 Button("精简提醒显示") { Task { await model.enrichReminderContexts() } }.disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
             }
@@ -113,6 +120,12 @@ struct TaskManagerView: View {
         .onDisappear { if playbackActionID != nil { model.stopPlayback() } }
         .sheet(item: $confirmingAction) { action in ConfirmTaskView(action: action, model: model) { confirmingAction = nil } }
         .sheet(item: $feedbackAction) { action in ActionFeedbackView(action: action, model: model) { feedbackAction = nil } }
+        .sheet(isPresented: $showingDiscussion) { DiscussionView(model: model) { showingDiscussion = false } }
+        .sheet(item: $delegatingAction) { action in AssistantDelegationView(action: action, model: model) { delegatingAction = nil } }
+        .sheet(item: $assistantSelection) { selection in AssistantExecutionView(model: model, initialExecutionID: selection.executionID) { assistantSelection = nil } }
+        .sheet(item: $settingsAction) { action in
+            if let snapshot = settingsSnapshot { ReminderSettingsView(action: action, snapshot: snapshot, model: model) { settingsAction = nil; settingsSnapshot = nil } }
+        }
         .sheet(item: $historyAction) { action in
             VStack(alignment: .leading, spacing: 16) {
                 Text(action.title).font(.title2)
@@ -145,11 +158,21 @@ struct TaskManagerView: View {
                     Text(detail).foregroundStyle(.secondary).textSelection(.enabled)
                 }
             }
+            if let receipt = action.intent?.reminderFields {
+                let fields = receipt.observed ?? receipt.desired
+                if let fields, !fields.summary.isEmpty { Text(fields.summary).font(.callout) }
+                if !receipt.reviewNote.isEmpty { Text("时间与重要性待核对：" + receipt.reviewNote).font(.caption).foregroundStyle(.orange) }
+                if let desired = receipt.desired, let observed = receipt.observed, desired != observed {
+                    Text("当前使用提醒事项中的设置；本地选择与回读不同，可打开设置核对。").font(.caption).foregroundStyle(.secondary)
+                }
+            }
             HStack {
                 Button("查看出处") {
                     if let id = model.claims.first(where: { $0.id == action.claimID })?.references.first?.sourceID { model.selected = id; dismiss() }
                 }
                 Button("回听原话") { Task { if await model.playActionOriginal(action) { playbackActionID = action.id } } }.disabled(action.validity != "current")
+                Button("继续思考") { Task { if await model.beginActionDiscussion(action) { showingDiscussion = true } } }
+                    .disabled(action.validity != "current" || action.intentActor != "user" || model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
                 Button(action.state == "completed" ? "记录结果或收获" : "记录进展") { feedbackAction = action }.disabled(model.savingFeedback || action.validity != "current")
                 if feedbackCount(action) > 0 { Button("查看接续记录") { Task { await model.actionHistory(action); historyAction = action } } }
                 Spacer()
@@ -157,9 +180,26 @@ struct TaskManagerView: View {
                     Button("核对为待办") { confirmingAction = action }.disabled(model.savingAction)
                 }
                 if action.kind == "task", action.validity == "current" {
+                    if action.state == "open" {
+                        Button("日期、提醒与优先级") {
+                            Task {
+                                if let snapshot = await model.loadReminderSettings(action) { settingsSnapshot = snapshot; settingsAction = action }
+                            }
+                        }.disabled(model.remindersBusy || model.reminderFieldEditing)
+                    }
                     Button(action.state == "completed" ? "重新跟进" : "标记已完成") { Task { await model.changeAction(action, state: action.state == "completed" ? .open : .completed) } }.disabled(model.savingAction || model.remindersBusy)
                 }
             }.buttonStyle(.bordered)
+            if action.validity == "current", action.state == "open", action.intentActor == "user" {
+                HStack {
+                    Button("交给 AI") { delegatingAction = action }.buttonStyle(.bordered)
+                    Text("调研、比较或起草，编辑要求后由助理代办。").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if let execution = model.assistantExecutions.first(where: { $0.actionID == action.id }) {
+                        Button("查看 AI 代办") { assistantSelection = AssistantSheetSelection(executionID: execution.id) }
+                    }
+                }
+            }
         }.padding(.top, 8)
         } label: {
             HStack {
@@ -167,8 +207,16 @@ struct TaskManagerView: View {
                     .foregroundStyle(action.state == "completed" ? .green : .secondary)
                 Text(action.title).font(.body).textSelection(.enabled)
                 Spacer()
+                if let fields = action.intent?.reminderFields?.observed ?? action.intent?.reminderFields?.desired {
+                    if fields.priority > 0 { Text(fields.priority <= 4 ? "!!!" : fields.priority == 5 ? "!!" : "!").foregroundStyle(.orange).font(.caption.bold()) }
+                    if fields.due != .none { Image(systemName: "calendar").foregroundStyle(.secondary) }
+                    if !fields.alerts.isEmpty { Image(systemName: "bell").foregroundStyle(.secondary) }
+                }
                 if model.recordingActionRequiresReview(action) { Text("待核对，暂不同步").font(.caption).foregroundStyle(.secondary) }
                 if feedbackCount(action) > 0 { Text("\(feedbackCount(action)) 条记录").font(.caption).foregroundStyle(.secondary) }
+                if let execution = model.assistantExecutions.first(where: { $0.actionID == action.id }) {
+                    Text(assistantExecutionLabel(execution)).font(.caption).foregroundStyle(palette.accent)
+                }
             }
         }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
             .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
@@ -176,7 +224,7 @@ struct TaskManagerView: View {
     }
 }
 
-private struct ConfirmTaskView: View {
+struct ConfirmTaskView: View {
     let action: ActionRecord
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void

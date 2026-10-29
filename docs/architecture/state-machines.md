@@ -1,7 +1,5 @@
 # VoiceOS 状态机与恢复 v0.1
 
-> 历史文档（2026-10-10）。当前实现以[根 README](../../README.md)和 `main` 代码为准；文中的 schema 版本、里程碑状态和“未实现”判断已经过期。
-
 日期：2026-10-10。状态：工程草稿，未实现。适配器和数据库候选见[架构](system-architecture.md)及[ADR](../adr/README.md)，字段见[数据模型](data-model.md)。
 
 ## 1. 状态分层
@@ -83,6 +81,8 @@ stateDiagram-v2
 
 外部系统不能接收 Core 的租约 fencing token。过期内部租约不代表旧外部请求已停止；接管 sending 一律核对，不能让新 worker 再发同一创建。仅凭租约和内部唯一键不能承诺外部 exactly-once。
 
+当前 W14 普通弹性排期采用上述契约的有界子集：schema35 独立操作 `reserved`（新鲜写前核对）→ `unknown`（派发边界已持久）→ `confirmed`（保存应答＋匹配回读）或 `observed`（只有目标值回读，来源未确认）；不匹配保留 conflict。reserved 退出后 blocked，已尝试意图不可重发。Observation、mapping、可能的真实完成回流与排期结果回执同事务保存；普通定时回读复用同一事务只读恢复 unknown。具体效果许可随后已按ADR037接入；字段归属随后按ADR038接入；补偿仍缺，不能只凭目标日期相同推断为AI所有。见 [ADR036](../adr/036-safe-reminder-schedule-operations.md)。
+
 核对使用已知外部 ID、操作标记、scope 和预期字段；标题只作字段比较。零匹配可能是延迟、删除或标记变更；多匹配是歧义。若无法证明是否创建，保留 unknown 与可见原因，提供重新读取和具体处理入口；不让 AI 根据猜测自动重复创建。
 
 ## 5. 提醒事项三方比较
@@ -125,3 +125,26 @@ Task 候选状态：planned、active、completed、cancelled、deferred；Opport
 | 唤醒且仍离线/无权限 | 条件状态 + 最后观测 | 保留等待，不显示最新完成 | AC-13/15/16 |
 
 此表是实现/故障验证契约，软件案例均未执行。合成探针的成功不替代真实录制、应用签名、权限、服务和并发验证。
+
+
+## W14 具体效果确认与撤回（2026-10-13）
+
+重要差异：只读prepare→用户确认不可变grant→复用reserved/unknown/confirmed/observed/conflict/blocked操作链。AI不可确认；所有异步前后及Native保存屏障重验grant。效果/版本/授权变化停止旧写；撤回独立记录且不可复活，重新规划须新intent。保存后撤回保留unknown，核对只读，不称为外部撤销。迁移grant/operation frozen，重连不恢复许可。本地期限编辑先保存desired，再由用户主动查看差异确认，不自动外写或弹窗。见[ADR037](../adr/037-effect-bound-schedule-confirmation.md)。
+
+
+## W14 连续期限归属（2026-10-13）
+
+新意图固定历史basis（归属＋先前confirmed操作）；保存应答/匹配观测与连续未变due才支持后续自主调整。人工变更/未知间隔破坏连续依据；规划后变化返回replanKeepingRemote，需新版本。单字段改名保留due依据，但执行仍比较完整当前快照。observed不成为AI归属；迁移basis仅历史、意图/操作frozen。见[ADR038](../adr/038-reminder-due-provenance.md)。
+
+
+## W16 影响核对第一切片（2026-10-13）
+
+明确纠错修订先冻结→从实际版本引用重建受影响行动→区分无外部关联/未授权现状未知/改期未知/身份不明/真实完成事实/待核对未完成任务。控制中心入口只读，复用外部回读权限屏障；冻结不转为“已撤销”，不借完成标记实现取消，也不造Outcome。认可/隐私限制/迁移冻结不构成错误根。具体补偿操作尚未接，见[ADR039](../adr/039-correction-action-impact-projection.md)。
+
+
+## W16 具体期限补偿（2026-10-13）
+
+明确纠错冻结→影响核对→推导连续confirmed AI排期链之前due→持久plan→用户具体grant→reserved/fresh read→持久unknown→Native最终授权/仅改due→应答＋唯一观测同事务→confirmed或observed。变化/撤回/取消阻止旧写；reserved退出blocked，unknown只读恢复，conflict保留外部值。保存后撤回不假装撤销已发生效果；同一计划不可重发。迁移plan/grant/operation frozen，不恢复执行。原行动始终冻结，不生成Outcome、不标记完成或取消任务。见[ADR040](../adr/040-corrective-reminder-due-compensation.md)。
+
+
+W16依赖追溯（2026-10-13）：既有冻结屏障不变；当前影响/补偿许可从原处理及不可变复用producer输入重建错误根。来源更正需晚于实际输入，早期回复不因未来发言更正而被误归因；全依赖来源变化使旧效果不再live，恢复仍冻结。见[ADR041](../adr/041-correction-processing-dependencies.md)。

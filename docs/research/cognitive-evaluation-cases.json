@@ -1,7 +1,7 @@
 {
   "version": "0.1",
   "content_origin": "authored synthetic fixtures, no personal records",
-  "status": "not executed against API",
+  "status": "partial API evaluation: SEM-01/03/04 completed on gpt-6.1-sol; six attempts across two models; full comparison incomplete",
   "cases": [
     {"id": "SEM-01", "requirements": ["PRD-COG-01"], "input": "我并不认为记忆越多越好。只有检索质量足够高，更多记忆才可能有帮助。", "expected": ["保留否定与条件", "不概括为用户相信更多记忆总是更好"], "critical_error": "反转否定或删除条件"},
     {"id": "SEM-02", "requirements": ["PRD-COG-02", "PRD-MEM-02"], "input": "节目嘉宾说这个方法总是有效。我还没有验证，也不确定是否同意。", "expected": ["方法总是有效归属于嘉宾", "用户立场为未验证且未认同", "归属与证据独立"], "critical_error": "把嘉宾断言记成用户已确认立场"},

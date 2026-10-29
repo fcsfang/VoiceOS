@@ -1,7 +1,5 @@
 # VoiceOS 系统架构 v0.1
 
-> 历史文档（2026-10-10）。当前实现以[根 README](../../README.md)和 `main` 代码为准；文中的 schema 版本、里程碑状态和“未实现”判断已经过期。
-
 日期：2026-10-10。状态：可审查工程草稿；第三阶段验证继续进行，技术栈与部署方案未冻结，已实现 M1 输入子集，完整架构尚未实现。
 
 依据：[愿景 v1.1](../VoiceOS：产品愿景与概念设计文档%20v1.1/VoiceOS_产品愿景与概念设计文档_v1.1.md)、[PRD](../product/prd.md)。配套：[数据模型](data-model.md)、[状态机与恢复](state-machines.md)、[架构审查与需求映射](review.md)、[ADR 索引](../adr/README.md)。
@@ -78,7 +76,7 @@ flowchart TD
 
 ### 3.3 模式 B 与英语
 
-只有用户显式命令才能创建 active Conversation；通知点击可以打开记录，不自动开始对话。推荐首版文字对话承载基本 B，按回合语音作为 H03 候选，不承诺全双工。每次发言有 speaker、source 与 event 关联；用户新表达和 AI 建议仍经过统一理解/归属流程，结束 B 不代表认可所有回答。
+只有用户显式命令才能创建 active Conversation；通知点击可以打开记录，不自动开始对话。P07 已确认首版逐轮语音＋文字：主动录制先保存、本地转写后发送，AI 先以文字回复；不承诺全双工。GPT-Live 保留为后续可替换适配，独立访问条件见[官方核查](../research/gpt-live-subscription-access-2026-10-11.md)。每次发言有 speaker、source 与 event 关联；用户新表达和 AI 建议仍经过统一理解/归属流程，结束 B 不代表认可所有回答。
 
 英文原文、修正稿与 ExpressionFeedback 分开存；比较相似表达错误时引用两次片段。当前没有发音评估后端，首版不从文字输出发音分数。用户的本地英语模型资源及真实样本表现仍需验证，不能因本地缺少英语而删掉案例 C。
 
@@ -120,3 +118,5 @@ flowchart TD
 ## 7. 审查门槛
 
 本稿能解释机制，不证明它已实现。进入实施基线前，按[审查表](review.md)补足录制边界、模型与检索质量、稳定应用身份、恢复/权限/冲突、备份与删除的实测。无法满足 PRD 时提出证据和产品影响，不悄悄删掉基础 B、英语或完整闭环。
+
+2026-10-10 开发切片增量：schema 10/逻辑包 9 已实现显式用户文字 origin=user/speaker=user、保留原文资产与文字版本；user_tentative 归属和 nullable action 提案与行动同事务提交，auto_send 默认 0，普通明确提取任务经本机连接/来源权限核对有限激活。外部完成仍独立反馈，不认可观点。恢复原提取/行动关系、旧格式 1–8 和旧 schema 9 已核对；完整目标、语音身份与长期闭环未完成。实际字段/边界见[表达行动记录](../engineering/m3-expression-actions.md)与[ADR-007](../adr/007-expression-action-extraction.md)。

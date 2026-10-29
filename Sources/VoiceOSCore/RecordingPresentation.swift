@@ -11,6 +11,8 @@ public struct RecordingTitleInput: Codable, Sendable {
     public let policies: [String: Int]
 }
 public struct RecordingPresentation: Codable, Sendable {
+    public var archived: Bool?
+    public var stateBeforeTrash: String?
     public var manualTitle: String?
     public var automatic: RecordingTitleProposal?
     public var transcriptVersionID: String?
@@ -99,7 +101,7 @@ public extension SourceRecord {
                     timeZone: TimeZone(identifier: timeZone) ?? .current, isLenient: false).parse(String(name[range]))
             }
         }
-        return name.hasPrefix("我的口述") || ["user_text", "external_text", "ai_text"].contains(kind) ? recordingDate(createdAt) : nil
+        return name.hasPrefix("我的口述") || ["user_text", "external_text", "ai_text"].contains(kind) ? ConversationReflectionFocus.date(createdAt) : nil
     }
     var displayTitle: String {
         if let contentTitle { return contentTitle }
@@ -107,7 +109,7 @@ public extension SourceRecord {
     }
     var recordingDateLabel: String {
         let expressed = expressedDate
-        let date = expressed ?? recordingDate(createdAt)
+        let date = expressed ?? ConversationReflectionFocus.date(createdAt)
         guard let date else { return "时间待核对" }
         let style = Date.VerbatimFormatStyle(
             format: "\(month: .defaultDigits)月\(day: .defaultDigits)日 \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits)",
@@ -187,8 +189,4 @@ extension VoiceOSStore {
         }
         return proposals.count
     }
-}
-
-private func recordingDate(_ text: String) -> Date? {
-    try? Date.ISO8601FormatStyle(includingFractionalSeconds: text.utf8.contains(46)).parse(text)
 }

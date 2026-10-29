@@ -38,12 +38,16 @@ public struct SourcePolicy: Sendable {
     public let version: Int
 }
 extension VoiceOSStore {
+    /// Cloud cognition must wait for the recording's full audio/context review.
+    /// Local reading and local models remain available while that review is pending.
     func requireReviewedTranscriptions(sourceIDs: [String], destination: ModelDestination) throws {
         guard destination == .cloud else { return }
         let ids = Set(sourceIDs)
         let pending = try sources().filter { ids.contains($0.id) && $0.needsTranscriptionReview }
         guard !pending.isEmpty else { return }
         for source in pending {
+            // Completed cloud derivations from the unchecked transcript remain
+            // historical evidence, never a current route around the new barrier.
             for row in try db.query("SELECT DISTINCT c.id FROM contexts c JOIN context_inputs i ON i.context_id=c.id WHERE i.source_id=? AND c.destination='cloud' AND c.state='current'",[source.id]) {
                 try freezeContext(row["id"]!)
             }
@@ -57,6 +61,9 @@ extension VoiceOSStore {
     }
     @discardableResult
     public func setSourceLocalOnly(sourceID: String, expectedVersion: Int, localOnly: Bool, commandID: String = UUID().uuidString) throws -> Int {
+        if !localOnly {
+            guard try db.query("SELECT state FROM sources WHERE id=?", [sourceID]).first?["state"] != "trashed" else { throw VoiceOSError("请先从回收站恢复材料，再允许云端处理") }
+        }
         let fingerprint = SHA256.hash(data: try JSONSerialization.data(withJSONObject: [sourceID,String(expectedVersion),String(localOnly)])).map { String(format: "%02x", $0) }.joined()
         if let receipt = try db.query("SELECT * FROM source_policy_revisions WHERE command_id=?", [commandID]).first {
             guard receipt["input_fingerprint"] == fingerprint else { throw VoiceOSError("同一授权命令不能改变内容") }
@@ -166,7 +173,9 @@ extension VoiceOSStore {
 // New source text or policy permits new work; reopening a window never resends old work.
 extension VoiceOSStore {
     public func understandSource(sourceID: String, using port: any ModelPort) async throws -> [String] {
-        let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID])
+        let source = try sources().first { $0.id == sourceID }
+        let budget = source?.kind == "external_text" ? max(1, source?.transcript?.unicodeScalars.count ?? 0) : 4000
+        let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: budget)
         guard try db.query("""
         SELECT o.id FROM conversation_outcome_attempts o JOIN conversation_user_turns t ON t.conversation_id=o.conversation_id
         JOIN context_inputs i ON i.context_id=t.context_id

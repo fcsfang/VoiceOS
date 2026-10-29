@@ -1,0 +1,40 @@
+{
+  "date": "2026-10-11",
+  "tests": 196,
+  "failures": 0,
+  "skipped": 0,
+  "new_integration_tests": 5,
+  "signed_build": true,
+  "synthetic_only": true,
+  "ui_cloud_calls": 1,
+  "model": "gpt-6.1-sol",
+  "model_state": "completed",
+  "usage": {
+    "input_tokens": 597,
+    "output_tokens": 491
+  },
+  "actual_billing": "unknown",
+  "input_scope": "one selected personal turn only",
+  "candidate_claims": 3,
+  "claims_ownership": [
+    "user_tentative"
+  ],
+  "claims_evidence_state": "unverified",
+  "claims_review_state": "pending",
+  "ordinary_actions": 1,
+  "action_state": "completed",
+  "action_version": 2,
+  "negative_learning_intent_not_action": true,
+  "local_only_outcome_feedback": 1,
+  "feedback_action_version": 2,
+  "source_to_conversation_ui_backlink": true,
+  "same_turn_reprocessing_ui_disabled": true,
+  "microphone_calls": 0,
+  "audio_uploads": 0,
+  "external_task_writes": 0,
+  "portable_round_trip": true,
+  "all_chain_ids_and_media_hashes_matched": true,
+  "restored_conversation_frozen": true,
+  "schema": 16,
+  "package_version": 15
+}

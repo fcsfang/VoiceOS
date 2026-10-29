@@ -81,20 +81,20 @@ extension VoiceOSStore {
         try validateLocalTranscriptContext(context)
         if destination == .cloud, context.sources.contains(where: \.localOnly) { throw VoiceOSError("仅本地来源不能用于云端处理") }
         let id = UUID().uuidString
-        try db.transaction { try insertValidatedLocalContext(context, id: id, commandID: commandID, destination: destination) }
-        return id
-    }
-    func insertValidatedLocalContext(_ context: LocalTranscriptContext, id: String, commandID: String, destination: ModelDestination) throws {
-        try db.execute("INSERT INTO contexts(id,command_id,snapshot_json,digest,state,created_at,destination) VALUES(?,?,?,?,'current',?,?)", [id,commandID,try json(context),context.contentDigest,timestamp(),destination.rawValue])
-        for input in context.sources {
-            try db.execute("INSERT INTO context_inputs(id,context_id,source_id,transcript_version_id,policy_version) VALUES(?,?,?,?,?)", [UUID().uuidString,id,input.sourceID,input.transcriptVersionID,try db.query("SELECT policy_version FROM sources WHERE id=?", [input.sourceID]).first?["policy_version"]])
+        try db.transaction {
+            try db.execute("INSERT INTO contexts(id,command_id,snapshot_json,digest,state,created_at,destination) VALUES(?,?,?,?,'current',?,?)", [id,commandID,snapshot,context.contentDigest,timestamp(),destination.rawValue])
+            for input in context.sources {
+                try db.execute("INSERT INTO context_inputs(id,context_id,source_id,transcript_version_id,policy_version) VALUES(?,?,?,?,?)", [UUID().uuidString,id,input.sourceID,input.transcriptVersionID,try db.query("SELECT policy_version FROM sources WHERE id=?", [input.sourceID]).first?["policy_version"]])
+            }
         }
+        return id
     }
     public func localContext(id: String) throws -> LocalTranscriptContext {
         guard let row = try db.query("SELECT * FROM contexts WHERE id=? AND state='current'", [id]).first else { throw VoiceOSError("上下文已失效或不存在") }
         let context = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(row["snapshot_json"]!.utf8))
         do {
             try validateLocalTranscriptContext(context)
+            if let focus = context.reflectionFocus { try validateReflectionBasis(focus) }
             guard try db.query("SELECT i.id FROM context_inputs i JOIN sources s ON s.id=i.source_id WHERE i.context_id=? AND i.policy_version!=s.policy_version", [id]).isEmpty else { throw VoiceOSError("来源授权版本已变化") }
         }
         catch { try db.transaction { try freezeContext(id) }; throw error }
@@ -188,6 +188,8 @@ extension VoiceOSStore {
         let selection = (attemptID == nil ? "" : " AND a.id=?") + (claimID == nil ? "" : " AND c.id=?")
         let arguments = [attemptID, claimID].compactMap { $0 }
         // Dynamic read checks are a second barrier in addition to atomic invalidation.
+        // A detail read checks its own producers; it must not decode and validate
+        // the whole library for each claim or recording.
         for row in try db.query("SELECT DISTINCT x.id FROM contexts x JOIN model_attempts a ON a.context_id=x.id JOIN claims c ON c.attempt_id=a.id WHERE x.state='current'\(selection)", arguments) {
             do { _ = try localContext(id: row["id"]!) } catch { try db.transaction { try freezeContext(row["id"]!) } }
         }
@@ -199,6 +201,8 @@ extension VoiceOSStore {
         CandidateClaim(contentKind: row["reviewed_statement"] != nil && row["reviewed_statement"] != row["statement"] ? nil : row["content_kind"].flatMap(CognitiveContentKind.init(rawValue:)), id: row["id"]!, statement: row["reviewed_statement"] ?? row["statement"]!, ownership: row["reviewed_ownership"] ?? row["ownership"]!, evidenceState: row["evidence_state"]!, validity: row["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data(row["refs_json"]!.utf8)), reviewVersion: Int(row["review_version"]!)!, reviewState: row["review_state"] ?? "pending")
     }
 
+    /// Batch source-facing view for the library: validate contexts and read claims
+    /// once, rather than repeating both operations for every recording.
     public func latestCandidateClaimsBySource(includeFrozen: Bool = false) throws -> [String: [CandidateClaim]] {
         var latestAttemptBySource: [String: String] = [:]
         for row in try db.query("""

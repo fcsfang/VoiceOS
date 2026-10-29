@@ -83,6 +83,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     if allowReminderWrites {
         guard let access = try reminderAccess(), access.enabled, access.title == "VoiceOS" else { throw VoiceOSError("请先在应用中连接正式 VoiceOS 清单") }
     }
+    // Check every recording before replacing any saved transcript or creating tasks.
     let inputs = try tasks.source_folders.map { path in
         let folder = URL(fileURLWithPath: path)
         let original = try JSONDecoder().decode(CompletedQwenTranscript.self, from: Data(contentsOf: folder.appendingPathComponent("Qwen完整逐字稿.json")))
@@ -98,11 +99,13 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     }
     let manifestPersonalIDs=Set(inputs.compactMap { $0.3.voiceos_source_id })
     guard (tasks.recording_contexts ?? []).allSatisfy({ manifestPersonalIDs.contains($0.pairing.personalSourceID) }) else { throw VoiceOSError("节目配对不属于本次本人录音输入") }
+    // Reject stale programme text/permissions before touching any personal transcript.
     for snapshot in tasks.recording_contexts ?? [] {
         try validateLocalTranscriptContext(snapshot.context)
         guard let current=try prepareRecordingContext(sourceID:snapshot.pairing.personalSourceID),
               try Self.relevanceJSON(current) == Self.relevanceJSON(snapshot) else { throw VoiceOSError("节目来源、原话或许可已变化，旧双轨整理未接入") }
     }
+    // AI spelling repair must not recreate already connected tasks whose spoken instruction is unchanged.
     let previousClaims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
     let previousActions = try actions(includeHistory: true).filter { $0.validity == "current" }
     var reusedActions: [Int: ActionRecord] = [:]
@@ -147,6 +150,8 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
         sourceIDs[name] = id
         budget += transcript.text.unicodeScalars.count
     }
+    // Full-text correction may have advanced only the personal version. Rebind
+    // the same physical session after verifying programme and both permissions.
     for snapshot in tasks.recording_contexts ?? [] {
         let pairing=snapshot.pairing
         guard let personal=try sources().first(where: { $0.id == pairing.personalSourceID }),
@@ -279,7 +284,8 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     try db.transaction {
         for (index, task) in tasks.items.enumerated() where proposals[index].action != nil {
             guard let actionID = actionIDs[index] else { throw VoiceOSError("整理事项缺少对应任务") }
-            let metadata = ActionIntentMetadata(intentType: task.intent_type, followupState: task.followup_state, uncertain: task.uncertain)
+            var metadata = ActionIntentMetadata(intentType: task.intent_type, followupState: task.followup_state, uncertain: task.uncertain)
+            metadata.reminderFields = try self.actions(includeHistory: true).first(where: { $0.id == actionID })?.intent?.reminderFields
             try db.execute("UPDATE actions SET intent_json=? WHERE id=?", [String(decoding: try encoder.encode(metadata), as: UTF8.self), actionID])
         }
     }
@@ -310,6 +316,7 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
     return ids.count
 }
 private func finishTranscriptImport(folders: [String], writeReadableCopy: Bool = true) throws {
+    // Replace the organizer input and discard temporary re-recognition files.
     for path in folders {
         let folder = URL(fileURLWithPath: path), reviewed = folder.appendingPathComponent("Qwen核对逐字稿.json")
         let transcriptURL = folder.appendingPathComponent("Qwen完整逐字稿.json")

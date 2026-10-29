@@ -1,3 +1,4 @@
+"""Direct AI correction replaces the draft with one canonical transcript."""
 import hashlib
 import json
 import shutil
@@ -50,6 +51,8 @@ def reviewed_transcript(folder):
 
 
 def adopt_transcript(folder, original, checked):
+    # Commit provenance before replacing the draft, so an interrupted native
+    # adoption can validate its input without retaining another full transcript.
     manifest_path = folder / "source.json"
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     if original != checked:
@@ -62,6 +65,8 @@ def adopt_transcript(folder, original, checked):
     temporary.write_text(json.dumps(checked, ensure_ascii=False, indent=2))
     temporary.replace(target)
     (folder / "Qwen核对逐字稿.json").unlink(missing_ok=True)
+    # Successful adoption is also the recovery path after a crash between commit
+    # and cleanup. No correction response needs to outlive its canonical result.
     temporary_results = folder / "全文AI校正"
     if temporary_results.exists(): shutil.rmtree(temporary_results)
     return checked
@@ -87,6 +92,8 @@ def review_transcript(folder, ask, obj, render_only=False):
     if user_corrected:
         prompt += "\n本稿由用户明确更正，是当前权威原文，不是待替换的ASR初稿。逐段完整核对但不得改写、润色、补词或覆盖用户更正；edits必须为空。真正影响理解且不能确定的疑点仅列remaining_issues。没有音频精确对齐时不猜测时间。"
     print("AI 正在直接校正完整逐字稿，保留原意与音频时间；无需本地重识别…", flush=True)
+    # Give the model each actual passage, rather than asking it to count
+    # thousands of characters to resolve offsets in a separate full-text field.
     passages = [{"id": s["id"], "text": original["text"][s["textStart"]:s["textEnd"]],
                  "start_ms": s.get("startMS"), "end_ms": s.get("endMS")} for s in original["spans"]]
     result = ask({"complete_ordered_transcript": passages}, prompt, receipt, schema, max_output_tokens=65536, read_only=render_only)
@@ -119,6 +126,8 @@ def review_transcript(folder, ask, obj, render_only=False):
                          receipt, schema, max_output_tokens=65536, read_only=render_only)
     issues = list(result["remaining_issues"])
     if user_corrected:
+        # A model suggestion cannot override a user-authored correction. Preserve
+        # the suggestion as uncertainty, with its real receipt, without rewriting.
         issues += [{"span_id": edit["span_id"], "reason": "用户更正原文保持不变；模型建议需结合原话核对：" + edit["reason"]} for edit in edits]
         edits = []
     text = original["text"]

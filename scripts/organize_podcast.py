@@ -37,6 +37,7 @@ RECORDING_CONTEXTS = []
 
 
 def quality_directory(base, items, folders, render_only=False):
+    # Added candidates need their own downstream receipts; keep older completed reviews intact.
     context = [{"transcript": reviewed_transcript(folder), "source": json.loads((folder / "source.json").read_text())} for folder in folders]
     digest = hashlib.sha256(json.dumps([items, context, EXPRESSION_CONTEXT], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     directory = base / "质量核对-v7" / digest[:16]
@@ -198,6 +199,7 @@ def ask(payload, instructions, cache, schema=SCHEMA, max_output_tokens=65536, re
             preserve_rejected(cache, content, error)
             discard_response_copies(cache)
     address, key = settings()
+    # Keep Responses as the production default; the gateway comparison did not establish full-pipeline superiority.
     body = {"model": "gpt-6.1-sol", "store": False, "stream": True, "truncation": "disabled",
             "reasoning": {"effort": "high"}, "max_output_tokens": max(65536, max_output_tokens),
             "instructions": instructions + "\nReturn only JSON matching this exact schema; include every required field and no additional fields:\n" + json.dumps(schema, ensure_ascii=False, sort_keys=True), "input": json.dumps(payload, ensure_ascii=False),
@@ -238,6 +240,8 @@ def ask(payload, instructions, cache, schema=SCHEMA, max_output_tokens=65536, re
         record({"event": "request_sent", "unix_time": time.time(), "model": body["model"], "input_digest": identity,
                 "max_output_tokens": body["max_output_tokens"], "reasoning": body["reasoning"]})
         try:
+            # Socket inactivity timeout. Active reasoning may legitimately take
+            # longer than ten minutes; heartbeats never impose a total deadline.
             with opener.open(request, timeout=600) as response:
                 record({"event": "http_headers", "status": response.status, "request_id": response.headers.get("x-request-id")})
                 for raw in response:
@@ -410,6 +414,8 @@ def organize(folder):
     starts = [0] if untimed else range(0, math.ceil(duration), 600)
     for index, start in enumerate(starts, 1):
         end = duration if untimed else min(start + 600, duration)
+        # Manual text edits invalidate audio alignment. Read the entire text once;
+        # a fabricated window must never omit an untimed paragraph.
         relevant = spans if untimed else [s for s in spans if s["endMS"] > max(0, start - 60) * 1000 and s["startMS"] < (end + 60) * 1000]
         if not relevant:
             windows.append({"start_seconds": start, "end_seconds": end, "status": "no_transcribed_speech"})
@@ -514,6 +520,8 @@ explanation解释双方具体关系和关键条件，不写夸张结论，不虚
     try:
         validate_links(draft)
     except ValueError as error:
+        # Repair the rejected association with the full original input. Never
+        # substitute an ID or quote locally, or silently drop a rejected link.
         request = dict(payload, rejected_links=draft, validation_error=str(error))
         instructions = prompt + "\n程序拒绝了上轮关联，validation_error给出原因。重新阅读全部原话，修正所有关联的来源编号与逐字引用，保留有依据的关系，不能以文件夹名代替sourceID。不得凭空补承诺。"
         identity = hashlib.sha256(json.dumps([request, instructions, link_schema], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -572,6 +580,7 @@ def merge(folders, items, base, render_only=False):
         state = group["followup_state"]
         if state in ["recorded_activity", "withdrawn"] and not status_evidence: state = "needs_review"
         if status_evidence and state in ["recorded_activity", "withdrawn"]:
+            # Keep the later correction as actual provenance, not only as model notes.
             recording = status_evidence["recording"]
             spans = [s for s in reviewed_transcript(next(p for p in folders if p.name == recording))["spans"]
                      if s["textEnd"] > status_evidence["text_start"] and s["textStart"] < status_evidence["text_end"]]
@@ -650,6 +659,7 @@ def main():
     if expression_file.exists():
         EXPRESSION_CONTEXT = {"expression": json.loads(expression_file.read_text()), "ordered_recordings": [
             {"recording": p.name, "text": reviewed_transcript(p)["text"]} for p in args.folders]}
+        # Every extraction receives the whole expression; quoted audio locations stay clip-local.
         PROMPT += "\n这些录音经AI双轮判断属于一次连续表达，按ordered_recordings顺序整体理解。当前窗口仅是提取定位，不是理解边界。结合其他分段解决指代、补充、条件与后文自我修正；不要把被后文撤回的原计划再次当作有效待办。引用必须来自当前recording，跨段条件在notes完整保留；不截断任何分段。最终核对会再次通读全部分段。"
     if RECORDING_CONTEXTS:
         if EXPRESSION_CONTEXT is None:
@@ -665,6 +675,7 @@ def main():
                 raise ValueError("Complete AI transcript correction is required before rendering; run normal processing to finish it")
             checked = previous
         else:
+            # Reuse the complete ASR; correction is text-only.
             checked = review_transcript(folder.resolve(), ask, obj, args.render_only)
         if args.review_transcript_only:
             continue

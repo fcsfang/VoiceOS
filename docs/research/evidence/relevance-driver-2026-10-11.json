@@ -1,0 +1,34 @@
+{
+  "actions": 0,
+  "billing_state": "unknown",
+  "claims": 0,
+  "cloud_attempts": 1,
+  "expected_source_ids": [
+    "22ECACFC-45C9-4C6D-A0B1-C966246C0701"
+  ],
+  "external_writes": 0,
+  "model": "gpt-6.1-sol",
+  "prompt_version": "relevance-single-v1",
+  "quality_check_passed": true,
+  "selected_source_ids": [
+    "22ECACFC-45C9-4C6D-A0B1-C966246C0701"
+  ],
+  "state": "completed",
+  "synthetic": true,
+  "usage": {
+    "input_tokens": 604,
+    "output_tokens": 70
+  },
+  "date": "2026-10-11",
+  "automated_tests": 124,
+  "automated_failures": 0,
+  "stable_reopen_without_calls": true,
+  "actual_receipt_restore_frozen": true,
+  "all_three_inputs_preserved": true,
+  "app_build_and_signature_verified": true,
+  "vision_baseline_files_unchanged": 23,
+  "raw_audio_sent": false,
+  "personal_history_sent": false,
+  "semantic_ui_enabled": false,
+  "official_reference": "https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses"
+}

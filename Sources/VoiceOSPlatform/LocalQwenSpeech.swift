@@ -1,9 +1,10 @@
 import Foundation
+import CryptoKit
 import VoiceOSCore
 
 /// Explicit local candidate. No fallback, download, shell, cloud, or old-graft overwrite.
 public struct LocalQwenSpeechPort: SpeechPort {
-    public let backendIdentity = "Qwen3-ASR-1.7B-8bit@a8379a2 MLXAudio0.5.8 chunk30-v1"
+    public let backendIdentity = "Qwen3-ASR-1.7B-8bit@a8379a2 MLXAudio0.5.8 chunk30-pause-v2"
     private let python: URL
     private let runner: URL
     private let model: URL
@@ -38,9 +39,12 @@ public struct LocalQwenSpeechPort: SpeechPort {
     }
     public func transcribe(_ url: URL, locale: String) async throws -> SpeechText {
         guard ["zh_CN","en_US"].contains(locale) else { throw VoiceOSError("本地 Qwen 候选尚未启用该语言") }
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("voiceos-qwen-"+UUID().uuidString)
+        // Keep chunk checkpoints beside the library, including on failure/cancel.
+        // A retry of this asset and configuration resumes the same output.
+        let key = SHA256.hash(data: Data((backendIdentity + "\n" + locale + "\n" + model.path + "\n" + runner.path).utf8)).map { String(format: "%02x", $0) }.joined()
+        let directory = url.deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("转写进度/" + url.deletingPathExtension().lastPathComponent + "/" + key)
         try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
-        defer { try? FileManager.default.removeItem(at:directory) }
         let output=directory.appendingPathComponent("result.json")
         let process=Process()
         process.executableURL=python
@@ -57,7 +61,7 @@ public struct LocalQwenSpeechPort: SpeechPort {
         catch is CancellationError { throw CancellationError() }
         catch {
             let detail = (try? String(contentsOf: logURL, encoding: .utf8))?.split(separator: "\n").last.map(String.init)
-            throw VoiceOSError(String((detail ?? "本地 Qwen 转写未完成").prefix(600)) + "；原件保留，可重试转写")
+            throw VoiceOSError((detail ?? "本地 Qwen 转写未完成") + "；已保存的分段进度保留，重试将继续")
         }
         struct Response: Decodable { let backend: String; let text: String; let spans: [TranscriptSpan]; let audio_uploaded: Bool }
         let data=try Data(contentsOf:output)
@@ -67,6 +71,7 @@ public struct LocalQwenSpeechPort: SpeechPort {
         let media=try await NativeMediaInspector().inspect(url)
         let speech=SpeechText(text:result.text,spans:result.spans)
         try speech.validate(duration:media.duration)
+        try? FileManager.default.removeItem(at:directory)
         return speech
     }
 }
