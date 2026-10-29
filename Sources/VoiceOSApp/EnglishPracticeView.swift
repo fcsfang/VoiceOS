@@ -61,7 +61,7 @@ struct EnglishPracticeView: View {
             }.frame(maxHeight: model.englishAttempts.isEmpty ? 210 : 110)
             Text(model.englishStatus).font(.caption).foregroundStyle(.secondary)
             HStack {
-                Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)); showingInput = model.englishSnapshot != nil } } }
+                Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)) } } }
                     .disabled(current == nil || model.englishBusy)
                 Button(model.englishBusy ? "正在发送…" : "发送文本反馈") { Task { await model.performEnglishPractice() } }
                     .disabled(model.englishSnapshot == nil || model.englishBusy || !model.modelConfigured)
