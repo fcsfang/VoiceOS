@@ -1,9 +1,9 @@
 ---
-status: in_progress
+status: done
 started: 2026-10-29T02:21:16Z
-updated: 2026-10-29T02:21:16Z
-branch: codex/runtime-baseline
-pr:
+updated: 2026-10-29T03:39:21Z
+branch: main
+pr: https://github.com/fcsfang/VoiceOS/pull/37
 owner: 主会话
 ---
 
@@ -38,11 +38,11 @@ owner: 主会话
 
 ## 当前状态
 
-代码移植进行中：实现 owner 在工作区恢复入口，流程资产已入库。
+已完成。PR #37 合入 main，旧 main 保存为标签，本地与远端只剩 `main`。
 
 ## 下一步
 
-移植完成后合线，重新构建、测试并在真实资料库副本上验证。
+无。
 
 ## 验证
 
