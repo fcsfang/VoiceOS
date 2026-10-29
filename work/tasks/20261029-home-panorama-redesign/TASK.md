@@ -1,9 +1,9 @@
 ---
-status: in_review
+status: done
 started: 2026-10-28T16:08:46Z
-updated: 2026-10-28T18:23:13Z
-branch: codex/home-panorama-redesign
-pr: https://github.com/fcsfang/VoiceOS/pull/36
+updated: 2026-10-29T03:39:21Z
+branch: main
+pr: https://github.com/fcsfang/VoiceOS/pull/37
 owner: 主会话
 ---
 
