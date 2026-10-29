@@ -76,3 +76,5 @@
 - [ADR040：明确纠错后的期限补偿](040-corrective-reminder-due-compensation.md) — schema38/补偿包v38；连续已确认AI链恢复、具体效果许可/撤回、一次尝试及unknown只读核对；原生验收仍待完成。
 
 - [ADR041：完整处理与成果复用输入的纠错追溯](041-correction-processing-dependencies.md) — 共用错误根解析、不可变处理依赖、未引用背景与多级复用、全依赖来源绑定；schema38不变。
+
+- [ADR042：运行时线成为产品基线](042-runtime-line-becomes-main.md) — 运行时线 schema 49 成为 main；旧 main 保存为 `archive/main-migration-20261028`；两条线不再并行。

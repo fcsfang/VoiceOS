@@ -3,10 +3,21 @@
 让自然表达被忠实理解、长期记住、恰当唤起，并与现实行动形成持续循环。
 产品定义见[愿景 v1.1](docs/VoiceOS：产品愿景与概念设计文档%20v1.1/VoiceOS_产品愿景与概念设计文档_v1.1.md)，开发方式见 [AGENTS.md](AGENTS.md)。
 
-当前以本地 `main` 推进功能，优先跑顺一次技术访谈的完整闭环：
+当前以远端 `main` 为开发基线，优先跑顺一次技术访谈的完整闭环：
 录音 → 转写 → 理解 → 观点和任务 → Apple 提醒事项 → 结果回流。
 
+## 当前基线
+
+运行时线在 2026-10-29 成为产品基线，`main` 的树取自这条线。SQLite schema 49，迁移包版本 1 到 47。旧迁移线保存在 `archive/main-migration-20261028`，运行时线本身另有归档标签 `archive/pre-migration-runtime-20261028`。两条线为什么合并、schema 43 为什么有两种含义，见 [ADR042](docs/adr/042-runtime-line-becomes-main.md)。
+
+项目状态和任务记录在 `work/`，流程见 [Agent 工作流](docs/agents/WORKFLOW.md)。仓库不使用自动 CI。日常迭代用 `swift build`，需要完整测试时本地跑 `swift test`，UI 改动构建后实际操作一次。
+
 ## 构建和运行
+
+```bash
+swift build -j 4
+swift test -j 4
+```
 
 ```bash
 python3 scripts/app/build.py --semantic-model runtime/bge-coreml-2026-10-11
