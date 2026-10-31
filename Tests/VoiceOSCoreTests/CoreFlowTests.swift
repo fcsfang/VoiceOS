@@ -2289,7 +2289,10 @@ final class CoreFlowTests: XCTestCase {
         _ = try await store.setReminderAccess(calendarID: "fixture", title: "VoiceOS", enabled: true, expectedVersion: 0)
         try await store.sendTaskToReminders(actionID: taskID, expectedVersion: task.version, calendarID: "fixture", using: reminders, expectedAccessVersion: 1)
         let linked = try await store.processRecordingFollowup(sourceID: currentID, using: fixture)
-        XCTAssertEqual(linked.result?.goalPlans.first?.nextStep.existingTaskID, taskID)
+        let linkedStep = try XCTUnwrap(linked.result?.goalPlans.first?.nextStep)
+        XCTAssertEqual(linkedStep.existingTaskID, taskID)
+        let linkedTaskID = try await store.activateGoalStep(receiptID: linked.id, goalID: goalID, step: linkedStep)
+        XCTAssertEqual(linkedTaskID, taskID)
         await reminders.complete()
         try await store.refreshAuthorizedReminders(expectedAccessVersion: 1, using: reminders)
         let linkedValidity = try await store.recordingFollowupValidity(linked)
@@ -2524,6 +2527,15 @@ final class CoreFlowTests: XCTestCase {
         let separateTasks = try await isolated.actions(includeHistory: true)
         XCTAssertEqual(separateTasks.first { $0.id == firstGoalTask }?.intent?.goalID, separatePlans[0].goalID)
         XCTAssertEqual(separateTasks.first { $0.id == secondGoalTask }?.intent?.goalID, separatePlans[1].goalID)
+        let crossInput = try await isolated.prepareRecordingFollowup(sourceID: practiceC)
+        let crossStep = GoalStep(title: separatePlans[1].nextStep.title, condition: "同一条件下继续", existingTaskID: secondGoalTask)
+        let crossPlan = GoalPlan(goalID: separatePlans[0].goalID, summary: "跨目标步骤必须被拒绝", adjustment: "核对任务归属", phases: [.init(title: "归属核对", steps: [crossStep])], nextStep: crossStep)
+        let crossResult = RecordingFollowupResult(thoughtUpdates: [], goalPlans: [crossPlan], english: .init(isPractice: false, evidenceQuote: "", suggestions: [], comparisons: [], nextExercise: ""))
+        let crossTask = try XCTUnwrap(crossInput.tasks.first { $0.id == secondGoalTask })
+        XCTAssertEqual(crossTask.goalID, separatePlans[1].goalID)
+        XCTAssertNotEqual(crossTask.goalID, crossPlan.goalID)
+        do { try VoiceOSStore.validateFollowupResult(crossResult, input: crossInput); XCTFail("跨目标任务不能成为下一步") }
+        catch { XCTAssertEqual(error.localizedDescription, "下一步应沿用同一目标的未完成任务") }
 
     }
 }
