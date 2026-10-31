@@ -1,9 +1,9 @@
 ---
-status: in_progress
+status: done
 started: 2026-10-31T13:06:21Z
-updated: 2026-10-31T13:06:21Z
-branch: codex/panorama-recovery
-pr:
+updated: 2026-11-01T01:12+08
+branch: main
+pr: https://github.com/fcsfang/VoiceOS/pull/46, https://github.com/fcsfang/VoiceOS/pull/53
 owner: 主会话
 ---
 
@@ -27,11 +27,11 @@ owner: 主会话
 
 ## 当前状态
 
-实现中，测试先行。
+已完成并合入。恢复能力在生产重试中得到验证：终止性失败自动重试、失败单元隔离后继续、24/25 单元核验。最后一个单元 CE3C1904 受服务端 600 秒流上限阻塞，直连对照相同，另开 #55。
 
 ## 下一步
 
-测试先行提交，再实现修复，构建与测试通过后开 PR。
+无。剩余的分块生成见 #55。
 
 ## 验证
 
