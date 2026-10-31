@@ -688,6 +688,78 @@ final class CoreFlowTests: XCTestCase {
         _ = try await reopened.reviewClaim(claimID: action.claimID, expectedVersion: 2, action: .endorse)
         let rejectedTask = try await reopened.actions(includeHistory: true).first { $0.id == action.id }
         XCTAssertEqual(rejectedTask?.validity, "frozen")
+        // The advertised claim schema and the local parser must agree. Rejections
+        // name the claim index and the failing condition, never the personal text.
+        let fixtureTexts = ["空陈述。", "空白陈述。", "空引用。", "正常陈述。"]
+        var fixtureSources: [String] = [], fixtureReferences: [[String: Any]] = []
+        for text in fixtureTexts {
+            let id = try await reopened.recordUserExpression(text)
+            _ = try await reopened.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+            let context = try await reopened.prepareLocalTranscriptContext(sourceIDs: [id])
+            let source = try XCTUnwrap(context.sources.first)
+            fixtureReferences.append(["sourceID": source.sourceID, "transcriptVersionID": source.transcriptVersionID, "spanID": source.spans[0].id])
+            fixtureSources.append(id)
+        }
+        func claim(_ statement: String, _ references: [[String: Any]]) -> [String: Any] {
+            ["statement": statement, "ownership": "user_tentative", "references": references, "contentKind": "statement", "action": NSNull()]
+        }
+        func understandingReply(_ claims: [[String: Any]], id: String) throws -> ModelHTTPReply {
+            let text = String(decoding: try JSONSerialization.data(withJSONObject: ["claims": claims], options: [.sortedKeys]), as: UTF8.self)
+            let envelope: [String: Any] = ["id": id, "status": "completed", "output": [["type": "message", "role": "assistant", "status": "completed", "content": [["type": "output_text", "text": text]]]]]
+            return .init(status: 200, body: try JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys]))
+        }
+        let rejectedReplies = [
+            try understandingReply([claim("", [fixtureReferences[0]])], id: "empty-statement"),
+            try understandingReply([claim("   ", [fixtureReferences[1]])], id: "whitespace-statement"),
+            try understandingReply([claim("引用不能为空。", [])], id: "empty-references")
+        ]
+        let validReply = try understandingReply([claim("检索质量需要验证。", [fixtureReferences[3]])], id: "valid-claim")
+        let understandingTransport = FlowFollowupTransport(rejectedReplies + [validReply])
+        let understandingPort = try ResponsesModelPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture-model", transport: understandingTransport)
+        let expectedReasons = [
+            "陈述字段无效（claim 0：statement 缺失、为空或超过 2000 字符）",
+            "陈述字段无效（claim 0：statement 缺失、为空或超过 2000 字符）",
+            "陈述字段无效（claim 0：references 为空）"
+        ]
+        for (index, expectedReason) in expectedReasons.enumerated() {
+            do {
+                _ = try await reopened.continueSourceUnderstanding(sourceID: fixtureSources[index], using: understandingPort)
+                XCTFail("schema-valid wiring must still reject the invalid claim")
+            } catch let error as VoiceOSError {
+                XCTAssertTrue(error.message.contains(expectedReason), error.message)
+            }
+            let database = await reopened.db
+            let attempt = try XCTUnwrap(database.query("SELECT a.state,a.error FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id WHERE i.source_id=? ORDER BY a.producer_sequence DESC LIMIT 1", [fixtureSources[index]]).first)
+            XCTAssertEqual(attempt["state"], "rejected")
+            XCTAssertEqual(attempt["error"], expectedReason)
+        }
+        let rejectedSource = try await reopened.sources().first { $0.id == fixtureSources[0] }
+        XCTAssertEqual(rejectedSource?.state, "saved")
+        let completedUnderstanding = try await reopened.continueSourceUnderstanding(sourceID: fixtureSources[3], using: understandingPort)
+        XCTAssertEqual(completedUnderstanding.state, "completed")
+        XCTAssertEqual(completedUnderstanding.claimIDs.count, 1)
+        let understoodClaims = try await reopened.candidateClaims()
+        XCTAssertTrue(understoodClaims.contains { $0.statement == "检索质量需要验证。" })
+        let understandingRequests = await understandingTransport.requests
+        XCTAssertEqual(understandingRequests.count, 4)
+        let firstRequest = try XCTUnwrap(JSONSerialization.jsonObject(with: understandingRequests[0]) as? [String: Any])
+        let format = try XCTUnwrap((firstRequest["text"] as? [String: Any])?["format"] as? [String: Any])
+        let schema = try XCTUnwrap(format["schema"] as? [String: Any])
+        let claimSchema = try XCTUnwrap(((schema["properties"] as? [String: Any])?["claims"] as? [String: Any])?["items"] as? [String: Any])
+        let properties = try XCTUnwrap(claimSchema["properties"] as? [String: Any])
+        func assertBoundedText(_ key: String, in fields: [String: Any]) throws {
+            let value = try XCTUnwrap(fields[key] as? [String: Any])
+            XCTAssertEqual(value["minLength"] as? Int, 1)
+            XCTAssertEqual(value["maxLength"] as? Int, 2000)
+            XCTAssertEqual(value["pattern"] as? String, "\\S")
+        }
+        try assertBoundedText("statement", in: properties)
+        XCTAssertEqual((properties["references"] as? [String: Any])?["minItems"] as? Int, 1)
+        let actionSchema = try XCTUnwrap((properties["action"] as? [String: Any])?["anyOf"] as? [[String: Any]])
+        let actionObject = try XCTUnwrap(actionSchema.first { $0["type"] as? String == "object" })
+        let actionProperties = try XCTUnwrap(actionObject["properties"] as? [String: Any])
+        try assertBoundedText("title", in: actionProperties)
+        try assertBoundedText("quote", in: actionProperties)
     }
 
     func testRecordingRunsTranscriptionUnderstandingAndAssociation() async throws {
