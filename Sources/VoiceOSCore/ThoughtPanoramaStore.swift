@@ -235,8 +235,9 @@ extension VoiceOSStore {
             } catch {
                 let retryable: Bool
                 if let network=error as? URLError { retryable=[.networkConnectionLost,.timedOut,.notConnectedToInternet].contains(network.code) }
-                else { retryable=error is PanoramaTransientFailure }
-                guard retries < 2, retryable else { throw error }
+                else { retryable=error is PanoramaTransientFailure || error is PanoramaQuoteLocationFailure }
+                let limit = error is PanoramaQuoteLocationFailure ? 1 : 2
+                guard retries < limit, retryable else { throw error }
                 retries += 1
                 try await Task.sleep(for: .seconds(retries))
             }

@@ -1,5 +1,11 @@
 import Foundation
 
+/// A model quote that cannot be located in the current transcript. Unlike schema
+/// errors this is stochastic: the same input can produce a locatable quote on a retry.
+public struct PanoramaQuoteLocationFailure: Error, Sendable, LocalizedError {
+    public let reason: String
+    public var errorDescription: String? { reason }
+}
 public struct PanoramaSource: Codable, Sendable, Identifiable {
     public var id: String { transcript.sourceID }
     public let transcript: ContextTranscript
@@ -223,18 +229,18 @@ extension VoiceOSStore {
         func locate(_ evidence: [PanoramaEvidence]) throws -> [PanoramaEvidence] {
             try evidence.map { item in
                 guard let source = sources[item.sourceID], source.transcriptVersionID == item.transcriptVersionID,
-                      !item.quote.isEmpty else { throw VoiceOSError("全景引用来源、版本或原话无效") }
+                      !item.quote.isEmpty else { throw PanoramaQuoteLocationFailure(reason: "全景引用来源、版本或原话无效") }
                 let scalars = Array(source.text.unicodeScalars)
                 if item.start >= 0, item.end > item.start, item.end <= scalars.count,
                    String(String.UnicodeScalarView(scalars[item.start..<item.end])) == item.quote { return item }
-                guard let range = source.text.range(of: item.quote, options: .literal) else { throw VoiceOSError("全景引文不在当前完整原文中") }
+                guard let range = source.text.range(of: item.quote, options: .literal) else { throw PanoramaQuoteLocationFailure(reason: "全景引文不在当前完整原文中") }
                 let next = source.text.unicodeScalars.index(after: range.lowerBound)
                 guard source.text.range(of: item.quote, options: .literal, range: next..<source.text.endIndex) == nil else {
-                    throw VoiceOSError("全景原话重复出现，必须给出有效的精确范围")
+                    throw PanoramaQuoteLocationFailure(reason: "全景原话重复出现，必须给出有效的精确范围")
                 }
                 let start = source.text.unicodeScalars.distance(from: source.text.startIndex, to: range.lowerBound)
                 let end = source.text.unicodeScalars.distance(from: source.text.startIndex, to: range.upperBound)
-                guard String(String.UnicodeScalarView(scalars[start..<end])) == item.quote else { throw VoiceOSError("全景引文不能逐字定位") }
+                guard String(String.UnicodeScalarView(scalars[start..<end])) == item.quote else { throw PanoramaQuoteLocationFailure(reason: "全景引文不能逐字定位") }
                 return .init(sourceID: item.sourceID, transcriptVersionID: item.transcriptVersionID, start: start, end: end, quote: item.quote, claimIDs: item.claimIDs)
             }
         }
