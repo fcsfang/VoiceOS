@@ -404,7 +404,7 @@ extension VoiceOSStore {
                   plan.phases.flatMap(\.steps).contains(where: { $0.title == plan.nextStep.title && $0.condition == plan.nextStep.condition && $0.existingTaskID == plan.nextStep.existingTaskID }) else { throw VoiceOSError("目标没有可执行的阶段和下一步") }
             for step in plan.phases.flatMap(\.steps) {
                 guard !step.title.isEmpty, step.title.unicodeScalars.count <= 2000 else { throw VoiceOSError("目标步骤为空或过长") }
-                if !step.existingTaskID.isEmpty { guard let task = tasks[step.existingTaskID], task.state == "open", task.title == step.title else { throw VoiceOSError("下一步应沿用未完成任务的真实标题") } }
+                if !step.existingTaskID.isEmpty { guard let task = tasks[step.existingTaskID], task.state == "open", task.title == step.title, task.goalID == plan.goalID else { throw VoiceOSError("下一步应沿用同一目标的未完成任务") } }
             }
         }
         let english = result.english

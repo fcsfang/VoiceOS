@@ -345,10 +345,11 @@ extension VoiceOSStore {
                   try database.query("SELECT claim_id FROM actions WHERE id=?", [input.actionID]).first?["claim_id"] == input.claimID,
                   input.policyVersions.keys.sorted() == input.context.sources.map(\.sourceID).sorted() else { throw VoiceOSError("助理委托的输入身份不一致") }
             for source in input.context.sources {
-                guard let stored = try database.query("SELECT s.version_id,s.origin,s.speaker,s.policy_version,v.text,v.spans_json,t.source_id FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [source.transcriptVersionID]).first,
-                      stored["source_id"] == source.sourceID,stored["version_id"] == source.sourceVersionID,stored["origin"] == source.origin,stored["speaker"] == source.speaker,stored["text"] == source.text,
+                guard let stored = try database.query("SELECT v.*,t.current_version_id,s.version_id,s.origin,s.speaker,s.policy_version,t.source_id FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id JOIN sources s ON s.id=t.source_id WHERE v.id=?", [source.transcriptVersionID]).first,
+                      stored["source_id"] == source.sourceID,stored["version_id"] == source.sourceVersionID,stored["origin"] == source.origin,stored["speaker"] == source.speaker,
                       let policy = input.policyVersions[source.sourceID],policy >= 1,policy <= (stored["policy_version"].flatMap(Int.init) ?? 0),
-                      try relevanceJSON(JSONDecoder().decode([TranscriptSpan].self, from: Data((stored["spans_json"] ?? "").utf8))) == relevanceJSON(source.spans) else { throw VoiceOSError("助理委托原话与真实版本不一致") }
+                      try isPrunedHistoricalTranscript(stored, historical: row["validity"] == "frozen") ||
+                        (stored["text"] == source.text && relevanceJSON(JSONDecoder().decode([TranscriptSpan].self, from: Data((stored["spans_json"] ?? "").utf8))) == relevanceJSON(source.spans)) else { throw VoiceOSError("助理委托原话与真实版本不一致") }
             }
             guard input.context.contentDigest == relevanceHash(Data(try relevanceJSON(input.context.sources).utf8)),
                   !input.references.isEmpty,input.references.allSatisfy({ ref in input.context.sources.contains(where: { $0.sourceID == ref.sourceID && $0.transcriptVersionID == ref.transcriptVersionID && $0.origin == "user" && $0.speaker == "user" && $0.spans.contains(where: { $0.id == ref.spanID }) }) }) else { throw VoiceOSError("助理委托摘要或个人原话引用不一致") }
