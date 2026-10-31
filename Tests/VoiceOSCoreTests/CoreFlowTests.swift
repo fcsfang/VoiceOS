@@ -490,6 +490,19 @@ private extension VoiceOSStore {
         receipts[index].retryAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-1))
         try db.execute("UPDATE sources SET followup_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(receipts.filter { $0.sourceID == receipts[index].sourceID }), as: UTF8.self), receipts[index].sourceID])
     }
+    func corruptFlowFollowupPath() throws {
+        guard let row = try db.query("SELECT id,followup_json FROM sources WHERE followup_json IS NOT NULL LIMIT 1").first,
+              let raw = row["followup_json"], var receipts = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [[String: Any]],
+              var receipt = receipts.first, var input = receipt["input"] as? [String: Any],
+              var current = input["current"] as? [String: Any], var sources = current["sources"] as? [[String: Any]],
+              !sources.isEmpty else { throw VoiceOSError("fixture follow-up JSON missing") }
+        sources[0]["text"] = 42
+        current["sources"] = sources
+        input["current"] = current
+        receipt["input"] = input
+        receipts[0] = receipt
+        try db.execute("UPDATE sources SET followup_json=? WHERE id=?", [String(decoding: try JSONSerialization.data(withJSONObject: receipts), as: UTF8.self), row["id"]!])
+    }
     func dateFlowExpression(_ id: String, at date: Date) throws {
         try db.execute("UPDATE sources SET created_at=? WHERE id=?", [ISO8601DateFormatter().string(from: date), id])
     }
@@ -2666,6 +2679,11 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertNotEqual(crossTask.goalID, crossPlan.goalID)
         do { try VoiceOSStore.validateFollowupResult(crossResult, input: crossInput); XCTFail("跨目标任务不能成为下一步") }
         catch { XCTAssertEqual(error.localizedDescription, "下一步应沿用同一目标的未完成任务") }
-
+        try await store.corruptFlowFollowupPath()
+        do { _ = try await store.recordingFollowups(); XCTFail("Malformed stored follow-up must fail") }
+        catch {
+            XCTAssertTrue(error.localizedDescription.contains("跟进回执解码失败"))
+            XCTAssertTrue(error.localizedDescription.contains("[0].input.current.sources[0].text"))
+        }
     }
 }

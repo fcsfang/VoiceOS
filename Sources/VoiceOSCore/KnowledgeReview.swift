@@ -112,12 +112,12 @@ extension VoiceOSStore {
         let rows = try db.query("SELECT * FROM knowledge_reviews \(sourceID == nil ? "" : "WHERE source_id=?") ORDER BY created_at DESC,id",sourceID.map { [$0] } ?? [])
         return try rows.map { row in
             var state = row["state"]!
-            let input = try JSONDecoder().decode(KnowledgeReviewInput.self,from:Data(row["input_json"]!.utf8))
+            let input = try decodeWithPath(KnowledgeReviewInput.self,from:Data(row["input_json"]!.utf8),label:"知识核查输入")
             if state != "frozen",(try? validateKnowledgeReviewInput(input,destination:.local)) == nil {
                 state="frozen";try db.execute("UPDATE knowledge_reviews SET state='frozen',error='原话、理解或授权已变化；保留历史核查' WHERE id=?",[row["id"]])
             }
-            let progress = try row["result_json"].map { try JSONDecoder().decode(KnowledgeReviewProgress.self,from:Data($0.utf8)) }
-            let ids = try JSONDecoder().decode([String].self,from:Data((row["response_ids_json"] ?? "[]").utf8))
+            let progress = try row["result_json"].map { try decodeWithPath(KnowledgeReviewProgress.self,from:Data($0.utf8),label:"知识核查进度") }
+            let ids = try decodeWithPath([String].self,from:Data((row["response_ids_json"] ?? "[]").utf8),label:"知识核查回执")
             return .init(id:row["id"]!,sourceID:row["source_id"]!,inputDigest:row["input_digest"]!,state:state,issues:progress?.issues ?? [],responseIDs:ids,error:state == "frozen" ? "原话、理解或授权已变化；保留历史核查" : row["error"],createdAt:row["created_at"]!)
         }
     }
@@ -130,9 +130,9 @@ extension VoiceOSStore {
         let record = try enqueueKnowledgeReview(sourceID:sourceID,retry:retry)
         guard record.state == "queued" else { return record }
         guard let row = try db.query("SELECT * FROM knowledge_reviews WHERE id=? AND state='queued'",[record.id]).first else { throw VoiceOSError("这份知识核查已开始") }
-        let input = try JSONDecoder().decode(KnowledgeReviewInput.self,from:Data(row["input_json"]!.utf8))
-        var progress = try row["result_json"].map { try JSONDecoder().decode(KnowledgeReviewProgress.self,from:Data($0.utf8)) } ?? KnowledgeReviewProgress()
-        var responseIDs = try JSONDecoder().decode([String].self,from:Data((row["response_ids_json"] ?? "[]").utf8))
+        let input = try decodeWithPath(KnowledgeReviewInput.self,from:Data(row["input_json"]!.utf8),label:"知识核查输入")
+        var progress = try row["result_json"].map { try decodeWithPath(KnowledgeReviewProgress.self,from:Data($0.utf8),label:"知识核查进度") } ?? KnowledgeReviewProgress()
+        var responseIDs = try decodeWithPath([String].self,from:Data((row["response_ids_json"] ?? "[]").utf8),label:"知识核查回执")
         try db.execute("UPDATE knowledge_reviews SET state='running',error=NULL WHERE id=?",[record.id])
         do {
             try validateKnowledgeReviewInput(input,destination:port.configuration.destination)
