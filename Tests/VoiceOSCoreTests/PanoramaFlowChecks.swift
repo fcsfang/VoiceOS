@@ -539,6 +539,22 @@ extension CoreFlowTests {
         let repairedRelation=try XCTUnwrap(repaired.0.relations.first)
         XCTAssertEqual(evidenceKeys(repairedRelation.fromEvidence),evidenceKeys(proposal.questions[0].evidence))
         _ = try VoiceOSStore.validatePanorama(repaired.0,input: input)
+        var wrongCoverage=compactSynthesisBody(questionRefs: (first: ["q0"],second: ["q0"]),fromRefs: ["q0"],toRefs: ["q0"])
+        wrongCoverage["unrepresentedSources"]=[["id":"s1","reason":"模型误报已覆盖来源"],["id":"s2","reason":"该来源仅作上下文"]]
+        let correctedPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!,apiKey: "fixture",model: "fixture",
+            transport: PanoramaWireTransport([try compactReply(wrongCoverage,index: 10)]))
+        let corrected=try await correctedPort.synthesize(unitOutputs,input: input)
+        XCTAssertEqual(corrected.0.unrepresentedSources.map(\.id),[sources[1].id])
+        XCTAssertEqual(corrected.0.unrepresentedSources.first?.reason,"该来源仅作上下文")
+        XCTAssertTrue(corrected.0.unrepresentedClaims.isEmpty)
+        _ = try VoiceOSStore.validatePanorama(corrected.0,input: input)
+        var silentCoverage=compactSynthesisBody(questionRefs: (first: ["q0"],second: ["q0"]),fromRefs: ["q0"],toRefs: ["q0"])
+        silentCoverage["unrepresentedSources"]=[]
+        let silentPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!,apiKey: "fixture",model: "fixture",
+            transport: PanoramaWireTransport([try compactReply(silentCoverage,index: 11)]))
+        let silent=try await silentPort.synthesize(unitOutputs,input: input)
+        XCTAssertEqual(silent.0.unrepresentedSources.first?.reason,"综合未把该材料归入具体问题；完整原文与认识入口保留")
+        _ = try VoiceOSStore.validatePanorama(silent.0,input: input)
         _ = try await port.verifyEvidence(proposal,input: closure)
         _ = try await port.verifyCoverage(proposal,input: closure,target: coverageTarget,rejections: [rejection])
         _ = try await port.verifyConsistency(proposal,input: input,unitProposals: unitOutputs,reviews: [independent],rejections: [rejection])

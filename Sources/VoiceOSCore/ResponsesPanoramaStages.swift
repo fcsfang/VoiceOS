@@ -6,7 +6,7 @@ extension ResponsesPanoramaPort {
         let request=PanoramaMergeRequest(index: try PanoramaIndex(wire.payload), unitProposals: try proposals.map(wire.unitProposalForModel))
         let result: (PanoramaCompactProposal, PanoramaReceipt)=try await call(request, instructions: Self.synthesisInstructions,
             schema: Self.compactProposalSchema, name: "voiceos_panorama_merge_refs", shape: Self.compactShapeInstructions)
-        return (try Self.expandedProposal(result.0, evidence: try Self.compactEvidence(proposals.flatMap { $0.proposal.questions }), wire: wire), result.1)
+        return (try Self.expandedProposal(result.0, evidence: try Self.compactEvidence(proposals.flatMap { $0.proposal.questions }), wire: wire, whole: input), result.1)
     }
     public func repairSynthesis(_ proposal: PanoramaProposal, input: PanoramaInput, context: PanoramaInput, rejection: PanoramaRejection) async throws -> (PanoramaProposal, PanoramaReceipt) {
         let wire=try PanoramaModelInput(input)
@@ -15,7 +15,7 @@ extension ResponsesPanoramaPort {
             proposal: try wire.proposalForModel(proposal), priorRejection: previous)
         let result: (PanoramaCompactProposal, PanoramaReceipt)=try await call(request, instructions: Self.synthesisInstructions + Self.compactRepairInstructions,
             schema: Self.compactProposalSchema, name: "voiceos_panorama_global_repair_refs", shape: Self.compactShapeInstructions)
-        return (try Self.expandedProposal(result.0, evidence: try Self.compactEvidence(proposal.questions), wire: wire), result.1)
+        return (try Self.expandedProposal(result.0, evidence: try Self.compactEvidence(proposal.questions), wire: wire, whole: input), result.1)
     }
     private static func compactEvidence(_ questions: [PanoramaQuestion]) throws -> [String:[PanoramaEvidence]] {
         var result:[String:[PanoramaEvidence]]=[:]
@@ -26,7 +26,7 @@ extension ResponsesPanoramaPort {
         return result
     }
     private static func expandedProposal(_ compact: PanoramaCompactProposal, evidence: [String:[PanoramaEvidence]],
-        wire: PanoramaModelInput) throws -> PanoramaProposal {
+        wire: PanoramaModelInput, whole: PanoramaInput) throws -> PanoramaProposal {
         let refs=Dictionary(compact.questions.map { ($0.id,$0.evidenceRefs) }, uniquingKeysWith: { first,_ in first })
         func expand(_ refs: [String], role: String) throws -> [PanoramaEvidence] {
             guard !refs.isEmpty else { throw PanoramaSynthesisReferenceFailure(reason: role + "缺少证据引用") }
@@ -59,9 +59,30 @@ extension ResponsesPanoramaPort {
                 fromEvidence: try expand(relation.fromEvidenceRefs, role: "联系 \(relation.id) 的起点"),
                 toEvidence: try expand(relation.toEvidenceRefs, role: "联系 \(relation.id) 的终点"))
         }
+        // The model cites questions, not evidence, so it cannot know which claims
+        // the expansion represents. Recompute the exact complement here; its own
+        // list only contributes reasons.
+        let representedEvidence=questions.flatMap(\.evidence)+relations.flatMap { $0.fromEvidence+$0.toEvidence }
+        let representedSources=Set(representedEvidence.map(\.sourceID))
+        let representedClaims=Set(representedEvidence.flatMap(\.claimIDs))
+        func reasons(_ values: [PanoramaUnrepresented]) -> [String:String] {
+            var result:[String:String]=[:]
+            for value in values where result[value.id] == nil {
+                let reason=value.reason.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !reason.isEmpty { result[value.id]=value.reason }
+            }
+            return result
+        }
+        let sourceReasons=reasons(try wire.pendingFromModel(compact.unrepresentedSources, claim: false))
+        let claimReasons=reasons(try wire.pendingFromModel(compact.unrepresentedClaims, claim: true))
+        func pending(_ submitted: [String], _ represented: Set<String>, _ reasons: [String:String], fixed: String) -> [PanoramaUnrepresented] {
+            submitted.sorted().filter { !represented.contains($0) }.map { .init(id: $0, reason: reasons[$0] ?? fixed) }
+        }
         return .init(regions: compact.regions, questions: questions, relations: relations,
-            unrepresentedSources: try wire.pendingFromModel(compact.unrepresentedSources, claim: false),
-            unrepresentedClaims: try wire.pendingFromModel(compact.unrepresentedClaims, claim: true))
+            unrepresentedSources: pending(whole.manifest.sourceIDs, representedSources, sourceReasons,
+                fixed: "综合未把该材料归入具体问题；完整原文与认识入口保留"),
+            unrepresentedClaims: pending(whole.manifest.claimIDs, representedClaims, claimReasons,
+                fixed: "综合未把该观点归入具体问题；完整原文与认识入口保留"))
     }
     public func verifyEvidence(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> (PanoramaReview, PanoramaReceipt) {
         let wire=try PanoramaModelInput(input)
