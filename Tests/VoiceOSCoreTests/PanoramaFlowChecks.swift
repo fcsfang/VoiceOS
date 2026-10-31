@@ -423,3 +423,22 @@ extension CoreFlowTests {
         XCTAssertEqual(sentTarget["claimIDs"] as? [String],["c1"])
     }
 }
+
+
+extension CoreFlowTests {
+    func assertPanoramaTitleChangeContinues(root: URL) async throws {
+        let store=try await panoramaFixtureStore(root.appendingPathComponent("title-change"), count: 2)
+        let input=try await store.panoramaInput(), sourceID=try XCTUnwrap(input.sources.first?.id)
+        let port=ProgressivePanoramaFixture(beforeGenerate: { _ in
+            try await store.renameRecording(sourceID: sourceID, title: "更名后的检索材料")
+        })
+        try await store.generatePanorama(using: port)
+        let completed=try await store.panoramaState()
+        XCTAssertEqual(completed.status,"completed")
+        XCTAssertNotNil(completed.snapshot)
+        try await store.renameRecording(sourceID: sourceID, title: "完成后再更名")
+        let visible=try await store.panoramaState()
+        XCTAssertEqual(visible.status,"completed")
+        XCTAssertNotNil(visible.snapshot)
+    }
+}

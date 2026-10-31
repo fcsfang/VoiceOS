@@ -77,7 +77,8 @@ extension VoiceOSStore {
     }
     public func panoramaState() throws -> PanoramaState {
         let input=try panoramaInput()
-        let row=try db.query("SELECT * FROM panorama_attempts WHERE digest=? ORDER BY rowid DESC LIMIT 1", [input.manifest.digest]).first
+        var row=try db.query("SELECT * FROM panorama_attempts WHERE digest=? ORDER BY rowid DESC LIMIT 1", [input.manifest.digest]).first
+        if row == nil { row=try latestPanoramaAttemptMatchingEvidence(input) }
         let snapshot=try row?["snapshot_json"].map { try JSONDecoder().decode(PanoramaSnapshot.self, from: Data($0.utf8)) }
         var progress: PanoramaProgress?
         if let id=row?["id"] {
@@ -118,19 +119,19 @@ extension VoiceOSStore {
             }
             var failures: [(unitID: String, reason: String)]=[]
             for (unit,scoped,_) in scheduled {
-                try requirePanoramaManifest(input.manifest)
+                try requirePanoramaManifest(input)
                 let result: VerifiedPanoramaUnit
                 do {
                     result=try await verifyPanoramaUnit(unit.id, input: scoped, whole: input, attemptID: id, port: port)
                 } catch let error as CancellationError {
                     throw error
                 } catch {
-                    try requirePanoramaManifest(input.manifest)
+                    try requirePanoramaManifest(input)
                     failures.append((unit.id, Self.panoramaFailure(error)))
                     continue
                 }
                 verified.append(result)
-                try requirePanoramaManifest(input.manifest)
+                try requirePanoramaManifest(input)
                 let partial=try Self.partialPanorama(verified, input: input, id: id, phase: .units)
                 let saved=try db.query("SELECT snapshot_json FROM panorama_attempts WHERE id=?", [id]).first?["snapshot_json"]
                 let visible=try saved.map { try JSONDecoder().decode(PanoramaSnapshot.self, from: Data($0.utf8)) }
@@ -150,7 +151,7 @@ extension VoiceOSStore {
     }
     private func verifyPanoramaUnit(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, attemptID: String, port: any PanoramaModelPort) async throws -> VerifiedPanoramaUnit {
         try Task.checkCancellation()
-        try requirePanoramaManifest(whole.manifest)
+        try requirePanoramaManifest(whole)
         let candidates=try db.query("SELECT attempt_id,input_json FROM panorama_steps WHERE stage='unit.generate' AND scope_id=? AND state='completed' AND attempt_id!=? ORDER BY rowid DESC", [unitID,attemptID])
         for candidate in candidates {
             var reused: VerifiedPanoramaUnit?
@@ -164,7 +165,7 @@ extension VoiceOSStore {
             } catch is CancellationError { throw CancellationError() }
             catch {}
             try Task.checkCancellation()
-            try requirePanoramaManifest(whole.manifest)
+            try requirePanoramaManifest(whole)
             if let reused {
                 return .init(unitID: unitID, input: input, proposal: reused.proposal, generation: reused.generation,
                     review: reused.review, verification: reused.verification, rejection: reused.rejection)
@@ -245,7 +246,7 @@ extension VoiceOSStore {
         whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
         validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }, retainSemanticRejection: Bool = false) async throws -> (Result, PanoramaReceipt) {
         try Task.checkCancellation()
-        try requirePanoramaManifest(whole.manifest)
+        try requirePanoramaManifest(whole)
         let json=try Self.relevanceJSON(input)
         let digest=Self.panoramaStepDigest(json,identity: identity)
         if let row=try db.query("SELECT result_json,receipt_json FROM panorama_steps WHERE attempt_id=? AND stage=? AND scope_id=? AND input_digest=? AND state='completed' ORDER BY rowid DESC LIMIT 1", [attemptID,stage,scopeID,digest]).first,
@@ -261,7 +262,7 @@ extension VoiceOSStore {
         do {
             let (raw,receipt)=try await operation()
             try Task.checkCancellation()
-            try requirePanoramaManifest(whole.manifest)
+            try requirePanoramaManifest(whole)
             guard !receipt.responseID.isEmpty, !receipt.model.isEmpty else { throw VoiceOSError("全景步骤缺少真实完成回执") }
             receivedResult=try Self.relevanceJSON(raw)
             receivedReceipt=try Self.relevanceJSON(receipt)
@@ -302,7 +303,7 @@ extension VoiceOSStore {
         let proposal=candidate.0
         let final=(validation.finalReview,validation.finalReceipt), reviews=validation.reviews
         try Task.checkCancellation()
-        try requirePanoramaManifest(input.manifest)
+        try requirePanoramaManifest(input)
         let coverage=try Self.validatePanorama(proposal, input: input)
         let unitReceipts=units.flatMap { [PanoramaStepReceipt(stage: "unit.generate", scopeID: $0.unitID, receipt: $0.generation), PanoramaStepReceipt(stage: "unit.verify", scopeID: $0.unitID, receipt: $0.verification)] }
         let receipts=unitReceipts + [.init(stage: "global.synthesize", scopeID: "all", receipt: generated.1)]
@@ -383,7 +384,7 @@ extension VoiceOSStore {
         return .init(reviews: reviews, finalReview: final.0, finalReceipt: final.1)
     }
     private func publishPanoramaPhase(_ phase: PanoramaPhase, units: [VerifiedPanoramaUnit], input: PanoramaInput, attemptID: String) throws {
-        try requirePanoramaManifest(input.manifest)
+        try requirePanoramaManifest(input)
         let partial=try Self.partialPanorama(units, input: input, id: attemptID, phase: phase)
         try db.execute("UPDATE panorama_attempts SET snapshot_json=? WHERE id=?", [try Self.relevanceJSON(partial),attemptID])
     }
@@ -397,8 +398,25 @@ extension VoiceOSStore {
         if let error=error as? URLError { return "全景网络请求失败（错误码 \(error.code.rawValue)）；材料保留，请明确重试" }
         return "全景请求未完成或结果格式无效；材料保留，请明确重试"
     }
-    private func requirePanoramaManifest(_ manifest: PanoramaManifest) throws {
-        guard try panoramaInput().manifest.digest == manifest.digest else { throw VoiceOSError("全景依据、授权或完整整理状态已变化，旧结果未发布") }
+    private func latestPanoramaAttemptMatchingEvidence(_ input: PanoramaInput) throws -> [String: String]? {
+        let evidence=try Self.panoramaEvidenceDigest(input)
+        for candidate in try db.query("SELECT * FROM panorama_attempts WHERE input_json IS NOT NULL ORDER BY rowid DESC LIMIT 10") {
+            guard let json=candidate["input_json"], let data=json.data(using:.utf8),
+                  let stored=try? JSONDecoder().decode(PanoramaInput.self, from: data),
+                  (try? Self.panoramaEvidenceDigest(stored)) == evidence else { continue }
+            return candidate
+        }
+        return nil
+    }
+    private func requirePanoramaManifest(_ expected: PanoramaInput) throws {
+        guard try Self.panoramaEvidenceDigest(try panoramaInput()) == Self.panoramaEvidenceDigest(expected) else { throw VoiceOSError("全景依据、授权或完整整理状态已变化，旧结果未发布") }
+    }
+    // Titles and display dates can change while a run is in flight; only evidence fields invalidate it.
+    static func panoramaEvidenceDigest(_ input: PanoramaInput) throws -> String {
+        let sources=input.sources.map { PanoramaEvidenceSource(transcript: $0.transcript, policyVersion: $0.policyVersion) }
+            .sorted { $0.transcript.sourceID < $1.transcript.sourceID }
+        let receipt=PanoramaEvidenceDigestInput(units: input.units.sorted { $0.id < $1.id }, sources: sources, claims: input.claims.sorted { $0.id < $1.id })
+        return Self.relevanceHash(Data(try Self.relevanceJSON(receipt).utf8))
     }
     public func beginPanoramaConversation(snapshotID: String, selection: PanoramaSelection) throws -> PanoramaDiscussion {
         let state=try panoramaState()
@@ -416,6 +434,15 @@ extension VoiceOSStore {
         let id=try beginConversation(sourceIDs: sourceIDs, commandID: "panorama:"+snapshotID+":"+key+":"+UUID().uuidString)
         return .init(conversation: try conversation(id: id), draft: "以下是 AI 全景候选解释，尚未得到我认可：\n\(explanation)\n\n请结合双方完整原文核对这条线索，说明支持、差异和仍不确定之处。")
     }
+}
+private struct PanoramaEvidenceDigestInput: Encodable {
+    let units: [PanoramaUnit]
+    let sources: [PanoramaEvidenceSource]
+    let claims: [PanoramaClaim]
+}
+private struct PanoramaEvidenceSource: Encodable {
+    let transcript: ContextTranscript
+    let policyVersion: Int
 }
 private struct PanoramaDigestInput: Codable {
     let units: [PanoramaUnit]
