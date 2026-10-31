@@ -213,3 +213,37 @@ extension PanoramaModelInput {
         return try .init(stage: value.stage, scopeID: scope, review: value.review, receipt: value.receipt, target: value.target.map(coverageForModel))
     }
 }
+
+struct PanoramaModelFocus: Encodable, Equatable {
+    struct Range: Encodable, Equatable {
+        let sourceID: String
+        let transcriptVersionID: String
+        let start: Int
+        let end: Int
+    }
+    let unitID: String
+    let ordinal: Int
+    let count: Int
+    let ranges: [Range]
+}
+
+extension PanoramaModelInput {
+    /// Focus ranges use the same s/t identities as the payload and stay in
+    /// full-text coordinates; an absent identity or invalid range throws.
+    func focusForModel(_ focus: PanoramaGenerationFocus) throws -> PanoramaModelFocus {
+        guard focus.ordinal >= 1, focus.count >= focus.ordinal, !focus.ranges.isEmpty else { throw VoiceOSError("全景分片聚焦范围无效") }
+        let unit=try unitIdentities.alias(focus.unitID)
+        let byAlias=Dictionary(uniqueKeysWithValues: payload.sources.map { ($0.sourceID,$0) })
+        let ranges=try focus.ranges.map { range -> PanoramaModelFocus.Range in
+            let source=try sources.alias(range.sourceID)
+            guard sourceVersions[range.sourceID] == range.transcriptVersionID else { throw VoiceOSError("全景分片聚焦来源与版本不符") }
+            let version=try versions.alias(range.transcriptVersionID)
+            guard let wire=byAlias[source], wire.transcriptVersionID == version,
+                  range.start >= 0, range.end > range.start, range.end <= wire.text.unicodeScalars.count else {
+                throw VoiceOSError("全景分片聚焦范围无效")
+            }
+            return .init(sourceID: source, transcriptVersionID: version, start: range.start, end: range.end)
+        }
+        return .init(unitID: unit, ordinal: focus.ordinal, count: focus.count, ranges: ranges)
+    }
+}

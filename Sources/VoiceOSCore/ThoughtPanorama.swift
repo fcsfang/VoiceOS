@@ -91,8 +91,14 @@ public struct PanoramaReceipt: Codable, Sendable {
     public let createdAt: String
     public let inputTokens: Int?
     public let outputTokens: Int?
-    public init(responseID: String, model: String, createdAt: String, inputTokens: Int? = nil, outputTokens: Int? = nil) {
+    /// Ordered real provider response IDs a composite receipt is made of.
+    public let sourceResponseIDs: [String]?
+    /// Non-nil only on composite receipts; the identity used to generate them.
+    public let generationIdentity: String?
+    public init(responseID: String, model: String, createdAt: String, inputTokens: Int? = nil, outputTokens: Int? = nil,
+                sourceResponseIDs: [String]? = nil, generationIdentity: String? = nil) {
         self.responseID=responseID; self.model=model; self.createdAt=createdAt; self.inputTokens=inputTokens; self.outputTokens=outputTokens
+        self.sourceResponseIDs=sourceResponseIDs; self.generationIdentity=generationIdentity
     }
 }
 public struct PanoramaDecision: Codable, Sendable {
@@ -195,6 +201,7 @@ public struct PanoramaDiscussion: Sendable {
 public protocol PanoramaModelPort: Sendable {
     var configurationIdentity: String { get }
     func generate(_ input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt)
+    func generate(_ input: PanoramaInput, focus: PanoramaGenerationFocus, target: PanoramaCoverageTarget) async throws -> (PanoramaProposal, PanoramaReceipt)
     func synthesize(_ proposals: [PanoramaUnitProposal], input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt)
     func repairSynthesis(_ proposal: PanoramaProposal, input: PanoramaInput, context: PanoramaInput, rejection: PanoramaRejection) async throws -> (PanoramaProposal, PanoramaReceipt)
     func verifyEvidence(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> (PanoramaReview, PanoramaReceipt)
@@ -206,6 +213,12 @@ public protocol PanoramaModelPort: Sendable {
 
 extension PanoramaModelPort {
     public var configurationIdentity: String { String(reflecting: Self.self) }
+    /// Deliberately separate from the single-request identity so completed
+    /// single-request rows keep replaying byte for byte.
+    public var focusConfigurationIdentity: String { configurationIdentity + "|unit-slices-v1" }
+    public func generate(_ input: PanoramaInput, focus: PanoramaGenerationFocus, target: PanoramaCoverageTarget) async throws -> (PanoramaProposal, PanoramaReceipt) {
+        throw VoiceOSError("当前模型端口尚不支持聚焦分片生成，完整单元未发布")
+    }
     public func synthesize(_ proposals: [PanoramaUnitProposal], input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt) {
         throw VoiceOSError("当前模型端口尚不支持跨单元全景核对，已核对区域保留")
     }
