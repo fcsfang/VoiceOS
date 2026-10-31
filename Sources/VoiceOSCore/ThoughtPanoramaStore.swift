@@ -416,7 +416,10 @@ extension VoiceOSStore {
         var reviews: [PanoramaScopedReview]=[]
         try publishPanoramaPhase(.evidence, units: units, input: input, attemptID: attemptID)
         for question in proposal.questions {
-            let scoped=try Self.panoramaScope(input, sourceIDs: Set(question.evidence.map(\.sourceID)))
+            // A region summary spans every question in its region; the reviewer
+            // must see the whole region's evidence, not just this question's share.
+            let regionSources=Set(proposal.questions.filter { $0.regionID == question.regionID }.flatMap { $0.evidence.map(\.sourceID) })
+            let scoped=try Self.panoramaScope(input, sourceIDs: regionSources)
             let selected=Self.panoramaProjection(proposal, input: scoped, questionIDs: [question.id], relationIDs: [])
             let result: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.question", scopeID: question.id,
                 input: PanoramaProposalInput(input: scoped, proposal: selected), whole: input, identity: port.configurationIdentity,
@@ -428,8 +431,11 @@ extension VoiceOSStore {
         }
         for relation in proposal.relations {
             let endpointIDs=Set([relation.from,relation.to])
-            let evidence=proposal.questions.filter { endpointIDs.contains($0.id) }.flatMap(\.evidence) + relation.fromEvidence + relation.toEvidence
-            let scoped=try Self.panoramaScope(input, sourceIDs: Set(evidence.map(\.sourceID)))
+            let endpointQuestions=proposal.questions.filter { endpointIDs.contains($0.id) }
+            let regionIDs=Set(endpointQuestions.map(\.regionID))
+            let regionSources=Set(proposal.questions.filter { regionIDs.contains($0.regionID) }.flatMap { $0.evidence.map(\.sourceID) })
+            let evidence=endpointQuestions.flatMap(\.evidence) + relation.fromEvidence + relation.toEvidence
+            let scoped=try Self.panoramaScope(input, sourceIDs: regionSources.union(evidence.map(\.sourceID)))
             let selected=Self.panoramaProjection(proposal, input: scoped, questionIDs: endpointIDs, relationIDs: [relation.id])
             let result: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.relation", scopeID: relation.id,
                 input: PanoramaProposalInput(input: scoped, proposal: selected), whole: input, identity: port.configurationIdentity,
