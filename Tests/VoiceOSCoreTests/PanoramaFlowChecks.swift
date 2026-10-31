@@ -154,7 +154,7 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
         XCTAssertTrue(rejection.review.relations.contains { !$0.accepted })
         let required=Set(rejection.proposal.questions.flatMap(\.evidence).map(\.sourceID))
         XCTAssertTrue(required.isSubset(of: Set(context.manifest.sourceIDs)))
-        let relations=proposal.relations.map { PanoramaRelation(id: $0.id, from: $0.from, to: $0.to, label: "限定检索条件", explanation: "保留双方完整原文的否定条件",
+        let relations=proposal.relations.map { PanoramaRelation(id: $0.id, from: $0.from, to: $0.to, label: "限定检索条件", explanation: "保留双方完整原文的否定条件（第\(globalRepairs)轮修复）",
             fromEvidence: $0.fromEvidence, toEvidence: $0.toEvidence) }
         return (.init(regions: proposal.regions, questions: proposal.questions, relations: relations,
             unrepresentedSources: proposal.unrepresentedSources, unrepresentedClaims: proposal.unrepresentedClaims),receipt())
@@ -952,6 +952,8 @@ extension CoreFlowTests {
         let rows=try Database(root.appendingPathComponent("voiceos.sqlite")).query("SELECT input_json FROM panorama_steps WHERE stage='global.repair' ORDER BY rowid")
         XCTAssertEqual(rows.count,2)
         XCTAssertNotEqual(rows[0]["input_json"],rows[1]["input_json"],"第二次修复必须作用于修复后的提案")
+        let retained=try Database(root.appendingPathComponent("voiceos.sqlite")).query("SELECT count(*) n FROM panorama_steps WHERE stage='global.relation' AND state='completed' AND result_json LIKE '%\"accepted\":false%'")
+        XCTAssertEqual(retained.first?["n"],"2","每次语义拒绝都必须保留为可重放的完成行")
     }
 
     private func assertPanoramaSameAttemptReuse(root: URL) async throws {

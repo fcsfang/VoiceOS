@@ -423,7 +423,7 @@ extension VoiceOSStore {
                 operation: { try await port.verifyEvidence(selected, input: scoped) }, validate: { review, receipt in
                     _ = try Self.validatePanorama(selected, input: scoped)
                     try Self.validatePanoramaStageReview(review, proposal: selected, input: scoped, generation: generation, verification: receipt)
-                }, retainSemanticRejection: issues.isEmpty)
+                }, retainSemanticRejection: true)
             reviews.append(.init(stage: "global.question", scopeID: question.id, review: result.0, receipt: result.1))
         }
         for relation in proposal.relations {
@@ -436,7 +436,7 @@ extension VoiceOSStore {
                 operation: { try await port.verifyEvidence(selected, input: scoped) }, validate: { review, receipt in
                     _ = try Self.validatePanorama(selected, input: scoped)
                     try Self.validatePanoramaStageReview(review, proposal: selected, input: scoped, generation: generation, verification: receipt)
-                }, retainSemanticRejection: issues.isEmpty)
+                }, retainSemanticRejection: true)
             reviews.append(.init(stage: "global.relation", scopeID: relation.id, review: result.0, receipt: result.1))
         }
         try publishPanoramaPhase(.coverage, units: units, input: input, attemptID: attemptID)
@@ -465,7 +465,7 @@ extension VoiceOSStore {
                 operation: { try await port.verifyCoverage(selected, input: scoped, target: target, rejections: relevantRejections) }, validate: { review, receipt in
                     _ = try Self.validatePanorama(selected, input: scoped)
                     try Self.validatePanoramaStageReview(review, proposal: selected, input: scoped, generation: generation, verification: receipt)
-                }, retainSemanticRejection: issues.isEmpty)
+                }, retainSemanticRejection: true)
             reviews.append(.init(stage: "global.coverage", scopeID: unit.unitID, review: result.0, receipt: result.1, target: target))
         }
         try publishPanoramaPhase(.consistency, units: units, input: input, attemptID: attemptID)
@@ -474,7 +474,7 @@ extension VoiceOSStore {
             input: request, whole: input, identity: port.configurationIdentity,
             operation: { try await port.verifyConsistency(proposal, input: input, unitProposals: proposals, reviews: reviews, rejections: rejections) }, validate: { review, receipt in
                 try Self.validatePanoramaStageReview(review, proposal: proposal, input: input, generation: generation, verification: receipt)
-            }, retainSemanticRejection: issues.isEmpty)
+            }, retainSemanticRejection: true)
         return .init(reviews: reviews, finalReview: final.0, finalReceipt: final.1)
     }
     private func publishPanoramaPhase(_ phase: PanoramaPhase, units: [VerifiedPanoramaUnit], input: PanoramaInput, attemptID: String) throws {
