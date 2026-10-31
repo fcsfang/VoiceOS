@@ -158,10 +158,11 @@ public struct ResponsesModelPort: ModelPort {
     }
     static var schema: [String: Any] {
         let string: [String: Any] = ["type": "string"]
+        let boundedText: [String: Any] = ["type": "string", "minLength": 1, "maxLength": 2000, "pattern": "\\S"]
         return object(["claims": ["type": "array", "items": object([
-            "statement": string, "contentKind": ["type": "string", "enum": ["statement", "question", "hypothesis", "reflection", "unclassified"]], "ownership": ["type": "string", "enum": ["external", "ai_candidate", "unresolved", "user_tentative"]],
-            "references": ["type": "array", "items": object(["sourceID": string, "transcriptVersionID": string, "spanID": string])],
-            "action": ["anyOf": [["type": "null"], object(["title": string, "kind": ["type": "string", "enum": ["task", "opportunity", "ai_suggestion"]], "quote": string, "autoSend": ["type": "boolean"]])]]
+            "statement": boundedText, "contentKind": ["type": "string", "enum": ["statement", "question", "hypothesis", "reflection", "unclassified"]], "ownership": ["type": "string", "enum": ["external", "ai_candidate", "unresolved", "user_tentative"]],
+            "references": ["type": "array", "minItems": 1, "items": object(["sourceID": string, "transcriptVersionID": string, "spanID": string])],
+            "action": ["anyOf": [["type": "null"], object(["title": boundedText, "kind": ["type": "string", "enum": ["task", "opportunity", "ai_suggestion"]], "quote": boundedText, "autoSend": ["type": "boolean"]])]]
         ])]])
     }
     static func parse(_ data: Data, requireContentKind: Bool = false) throws -> ModelResponse {
@@ -175,24 +176,59 @@ public struct ResponsesModelPort: ModelPort {
             guard texts.count == 1, let body = texts.first?.data(using: .utf8),
                   let object = try JSONSerialization.jsonObject(with: body) as? [String: Any], Set(object.keys) == ["claims"],
                   let claims = object["claims"] as? [[String: Any]] else { throw ModelPortFailure.rejected("结构化陈述格式无效") }
-            for claim in claims {
-                guard Set(["statement", "ownership", "references"]).isSubset(of: Set(claim.keys)) && Set(claim.keys).isSubset(of: ["statement", "ownership", "references", "action", "contentKind"]), let text = claim["statement"] as? String,
-                      !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.unicodeScalars.count <= 2000,
-                      let owner = claim["ownership"] as? String, CandidateOwnership(rawValue: owner) != nil,
-                      let refs = claim["references"] as? [[String: Any]], !refs.isEmpty else { throw ModelPortFailure.rejected("陈述字段无效") }
+            for (index, claim) in claims.enumerated() {
+                let keys = Set(claim.keys)
+                guard Set(["statement", "ownership", "references"]).isSubset(of: keys) else {
+                    throw ModelPortFailure.rejected("陈述字段无效（claim \(index)：缺少 statement、ownership 或 references）")
+                }
+                guard keys.isSubset(of: ["statement", "ownership", "references", "action", "contentKind"]) else {
+                    throw ModelPortFailure.rejected("陈述字段无效（claim \(index)：包含未知字段）")
+                }
+                guard let text = claim["statement"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      text.unicodeScalars.count <= 2000 else {
+                    throw ModelPortFailure.rejected("陈述字段无效（claim \(index)：statement 缺失、为空或超过 2000 字符）")
+                }
+                guard let owner = claim["ownership"] as? String, CandidateOwnership(rawValue: owner) != nil else {
+                    throw ModelPortFailure.rejected("陈述字段无效（claim \(index)：ownership 缺失或无效）")
+                }
+                guard let refs = claim["references"] as? [[String: Any]] else {
+                    throw ModelPortFailure.rejected("陈述字段无效（claim \(index)：references 缺失或格式无效）")
+                }
+                guard !refs.isEmpty else {
+                    throw ModelPortFailure.rejected("陈述字段无效（claim \(index)：references 为空）")
+                }
                 if requireContentKind || claim["contentKind"] != nil {
-                    guard let kind = claim["contentKind"] as? String, CognitiveContentKind(rawValue: kind) != nil else { throw ModelPortFailure.rejected("认知内容类型缺失或无效") }
-                    if kind == "question", let action = claim["action"], !(action is NSNull) { throw ModelPortFailure.rejected("问题不能同时创建行动") }
+                    guard let kind = claim["contentKind"] as? String, CognitiveContentKind(rawValue: kind) != nil else {
+                        throw ModelPortFailure.rejected("认知内容类型缺失或无效（claim \(index)：contentKind 缺失、为空或未知）")
+                    }
+                    if kind == "question", let action = claim["action"], !(action is NSNull) {
+                        throw ModelPortFailure.rejected("陈述字段无效（claim \(index)：contentKind 为 question 时不能同时创建行动）")
+                    }
                 }
                 if let action = claim["action"], !(action is NSNull) {
-                    guard let value = action as? [String: Any], Set(value.keys) == ["title","kind","quote","autoSend"],
-                          let title = value["title"] as? String, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.unicodeScalars.count <= 2000,
-                          let quote = value["quote"] as? String, !quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, quote.unicodeScalars.count <= 2000,
-                          let kind = value["kind"] as? String, ActionKind(rawValue: kind) != nil,
-                          let flag = value["autoSend"] as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else { throw ModelPortFailure.rejected("行动提取字段无效") }
+                    guard let value = action as? [String: Any], Set(value.keys) == ["title","kind","quote","autoSend"] else {
+                        throw ModelPortFailure.rejected("行动提取字段无效（claim \(index)：action 字段集合无效）")
+                    }
+                    guard let title = value["title"] as? String, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                          title.unicodeScalars.count <= 2000 else {
+                        throw ModelPortFailure.rejected("行动提取字段无效（claim \(index)：action title 缺失、为空或超过 2000 字符）")
+                    }
+                    guard let quote = value["quote"] as? String, !quote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                          quote.unicodeScalars.count <= 2000 else {
+                        throw ModelPortFailure.rejected("行动提取字段无效（claim \(index)：action quote 缺失、为空或超过 2000 字符）")
+                    }
+                    guard let kind = value["kind"] as? String, ActionKind(rawValue: kind) != nil else {
+                        throw ModelPortFailure.rejected("行动提取字段无效（claim \(index)：action kind 缺失或无效）")
+                    }
+                    guard let flag = value["autoSend"] as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else {
+                        throw ModelPortFailure.rejected("行动提取字段无效（claim \(index)：action autoSend 缺失或不是布尔值）")
+                    }
                 }
-                for ref in refs {
-                    guard Set(ref.keys) == ["sourceID", "transcriptVersionID", "spanID"], ref.values.allSatisfy({ ($0 as? String).flatMap(UUID.init(uuidString:)) != nil }) else { throw ModelPortFailure.rejected("陈述引用格式无效") }
+                for (refIndex, ref) in refs.enumerated() {
+                    guard Set(ref.keys) == ["sourceID", "transcriptVersionID", "spanID"],
+                          ref.values.allSatisfy({ ($0 as? String).flatMap(UUID.init(uuidString:)) != nil }) else {
+                        throw ModelPortFailure.rejected("陈述字段无效（claim \(index)：reference \(refIndex) 身份格式无效）")
+                    }
                 }
             }
             struct Payload: Decodable { let claims: [ClaimProposal] }
