@@ -152,7 +152,7 @@ extension VoiceOSStore {
     private func verifyPanoramaUnit(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, attemptID: String, port: any PanoramaModelPort) async throws -> VerifiedPanoramaUnit {
         try Task.checkCancellation()
         try requirePanoramaManifest(whole)
-        let candidates=try db.query("SELECT attempt_id,input_json FROM panorama_steps WHERE stage='unit.generate' AND scope_id=? AND state='completed' AND attempt_id!=? ORDER BY rowid DESC", [unitID,attemptID])
+        let candidates=try db.query("SELECT attempt_id,input_json FROM panorama_steps WHERE stage='unit.generate' AND scope_id=? AND state='completed' ORDER BY rowid DESC", [unitID])
         for candidate in candidates {
             var reused: VerifiedPanoramaUnit?
             do {
@@ -258,11 +258,17 @@ extension VoiceOSStore {
         let record=PanoramaSlicedRepairRecord(policy: plan.policy, planDigest: plan.digest, input: input, rejection: rejection)
         return try await panoramaUnitStep(attemptID: attemptID, stage: "unit.repair", scopeID: unitID, replayOnly: replayOnly,
             input: record, whole: whole, identity: port.focusConfigurationIdentity, operation: {
-                var proposals: [PanoramaProposal]=[], receipts: [PanoramaReceipt]=[]
-                for slice in plan.slices {
+                let slices=plan.slices.map { slice in
                     let ids=plan.projectionIDs(rejection.proposal, ordinal: slice.focus.ordinal)
                     let projected=Self.panoramaProjection(rejection.proposal, input: slice.scope, questionIDs: ids.questionIDs, relationIDs: ids.relationIDs)
-                    let projectedReview=plan.projectReview(rejection.review, ordinal: slice.focus.ordinal)
+                    return (slice, projected, plan.projectReview(rejection.review, ordinal: slice.focus.ordinal))
+                }
+                let hasRejectedDecision=slices.contains { ($0.2.questions+$0.2.relations).contains { !$0.accepted } }
+                var proposals: [PanoramaProposal]=[], receipts: [PanoramaReceipt]=[]
+                for (slice, projected, projectedReview) in slices {
+                    if hasRejectedDecision, (projectedReview.questions+projectedReview.relations).allSatisfy(\.accepted) {
+                        proposals.append(projected); continue
+                    }
                     let step=PanoramaSliceRepairInput(policy: plan.policy.version, planDigest: plan.digest, unitID: unitID,
                         ordinal: slice.focus.ordinal, count: plan.slices.count, focus: slice.focus, target: slice.target,
                         input: input, proposal: projected, review: projectedReview)
