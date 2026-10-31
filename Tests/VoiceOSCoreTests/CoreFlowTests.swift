@@ -1993,10 +1993,17 @@ final class CoreFlowTests: XCTestCase {
             try await store.exportPackage(to: URL(fileURLWithPath: path), includeMedia: true)
         }
         let delegatedHistory = try await recovered.transcriptHistory(sourceID: delegatedSource)
-        _ = try await recovered.correctTranscript(sourceID: delegatedSource, expectedVersionID: delegatedHistory.last!.id, text: "先不调研，稍后再决定。")
+        let delegatedVersion = delegatedHistory.last!.id
+        _ = try await recovered.correctTranscript(sourceID: delegatedSource, expectedVersionID: delegatedVersion, text: "先不调研，稍后再决定。")
         do { _ = try await recovered.validateConversationInput(resultInput); XCTFail("更正委托后，旧 AI 交付不能继续进入讨论") } catch {}
+        let recoveredDatabase = await recovered.db
+        try recoveredDatabase.execute("UPDATE transcript_versions SET text='',spans_json='[]',reason='ai_superseded',actor='system' WHERE id=?", [delegatedVersion])
+        try recoveredDatabase.execute("UPDATE transcripts SET text='' WHERE source_id=?", [delegatedSource])
+        do { try VoiceOSStore.validateStoredAssistantExecutions(recoveredDatabase); XCTFail("当前委托不能借用已剪除的历史占位") }
+        catch { XCTAssertEqual(error.localizedDescription, "助理委托原话与真实版本不一致") }
         let invalidatedDelivery = try await recovered.assistantExecutions().first { $0.id == delivery.id }
         XCTAssertEqual(invalidatedDelivery?.validity, "frozen")
+        try VoiceOSStore.validateStoredAssistantExecutions(recoveredDatabase)
         try await recovered.stopReflectionQuestionEntry(id: experiment.id)
         do { _ = try await recovered.beginConversationForReflection(focus); XCTFail("撤回验证记录后不能复用旧回顾") } catch {}
         let afterWithdrawal = try await recovered.reflectionForQuestion(questionID: question.id, start: week.start, end: week.end, timeZoneID: zone)
