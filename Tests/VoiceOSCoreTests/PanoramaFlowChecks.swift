@@ -26,16 +26,18 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     var serial=0
     var sawPriorGlobalRejection=false
     var coverageTargets: [PanoramaCoverageTarget]=[]
+    var synthesisReferenceFailures: Int
 
     init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false, repairUnits: Bool = false, invalidQuote: Bool = false,
          failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, unitTransientFailures: [String: Int] = [:], invalidQuoteAttempts: Int = 0,
          invalidFocusAttempts: Int = 0, failFocusAt: Int? = nil, beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil,
-         rejectedDecisionSubstring: String? = nil, rejectCoverageOnly: Bool = false) {
+         rejectedDecisionSubstring: String? = nil, rejectCoverageOnly: Bool = false, synthesisReferenceFailures: Int = 0) {
         configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits; self.repairUnits=repairUnits; self.invalidQuote=invalidQuote
         self.failCoverage=failCoverage; self.failConsistency=failConsistency; self.beforeGenerate=beforeGenerate; self.transientFailures=transientFailures
         self.unitTransientFailures=unitTransientFailures; self.invalidQuoteAttempts=invalidQuoteAttempts
         self.invalidFocusAttempts=invalidFocusAttempts; self.failFocusAt=failFocusAt
         self.rejectedDecisionSubstring=rejectedDecisionSubstring; self.rejectCoverageOnly=rejectCoverageOnly
+        self.synthesisReferenceFailures=synthesisReferenceFailures
     }
     private func receipt() -> PanoramaReceipt {
         serial += 1
@@ -137,6 +139,7 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     }
     func synthesize(_ proposals: [PanoramaUnitProposal], input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt) {
         syntheses += 1
+        if synthesisReferenceFailures > 0 { synthesisReferenceFailures -= 1; throw PanoramaSynthesisReferenceFailure(reason: "模拟综合引用无效") }
         let regions=proposals.flatMap { $0.proposal.regions }, questions=proposals.flatMap { $0.proposal.questions }
         let relations: [PanoramaRelation]
         if questions.count > 1 {
@@ -234,6 +237,7 @@ extension CoreFlowTests {
         try await assertPanoramaManifestDuringAwait(root: root)
         try await assertPanoramaUnknownRecovery(root: root)
         try await assertPanoramaStagedWire()
+        try await assertPanoramaCompactSynthesis(root: root)
         try await assertPanoramaTransientRetry(root: root)
     }
     func panoramaFixtureStore(_ root: URL, count: Int) async throws -> VoiceOSStore {
@@ -403,6 +407,50 @@ extension CoreFlowTests {
         XCTAssertEqual(try reopened.query("SELECT state FROM panorama_attempts").first?["state"],"unknown")
         XCTAssertEqual(try reopened.query("SELECT state FROM panorama_steps").first?["state"],"unknown")
     }
+    private func assertPanoramaCompactSynthesis(root: URL) async throws {
+        let directory=root.appendingPathComponent("synthesis-identity")
+        let store=try await panoramaFixtureStore(directory,count: 2)
+        let port=ProgressivePanoramaFixture(identity: "identity-fixture")
+        try await store.generatePanorama(using: port)
+        let state=try await store.panoramaState(), snapshot=try XCTUnwrap(state.snapshot)
+        XCTAssertEqual(state.status,"completed")
+        let database=try Database(directory.appendingPathComponent("voiceos.sqlite"))
+        func completedStep(_ stage: String, _ scopeID: String) throws -> [String:String] {
+            try XCTUnwrap(database.query("SELECT input_json,input_digest FROM panorama_steps WHERE attempt_id=? AND stage=? AND scope_id=? AND state='completed' ORDER BY rowid DESC LIMIT 1",
+                [snapshot.id,stage,scopeID]).first)
+        }
+        func digest(_ json: String, _ identity: String) -> String {
+            VoiceOSStore.relevanceHash(Data(("panorama-staged-v1|"+identity+"|"+json).utf8))
+        }
+        let synthesize=try completedStep("global.synthesize","all")
+        let synthesizeJSON=try XCTUnwrap(synthesize["input_json"]), synthesizeDigest=try XCTUnwrap(synthesize["input_digest"])
+        XCTAssertEqual(synthesizeDigest,digest(synthesizeJSON,"identity-fixture|compact-synthesis-v1"))
+        XCTAssertNotEqual(synthesizeDigest,digest(synthesizeJSON,"identity-fixture"))
+        let repair=try completedStep("global.repair","all")
+        let repairJSON=try XCTUnwrap(repair["input_json"]), repairDigest=try XCTUnwrap(repair["input_digest"])
+        XCTAssertEqual(repairDigest,digest(repairJSON,"identity-fixture|compact-synthesis-v1"))
+        let unitID=try XCTUnwrap(snapshot.input.units.first?.id)
+        let unit=try completedStep("unit.generate",unitID)
+        let unitJSON=try XCTUnwrap(unit["input_json"]), unitDigest=try XCTUnwrap(unit["input_digest"])
+        XCTAssertEqual(unitDigest,digest(unitJSON,"identity-fixture"))
+        XCTAssertNotEqual(unitDigest,digest(unitJSON,"identity-fixture|compact-synthesis-v1"))
+        let retryDirectory=root.appendingPathComponent("synthesis-reference-retry")
+        let retryStore=try await panoramaFixtureStore(retryDirectory,count: 1)
+        let retryPort=ProgressivePanoramaFixture(identity: "reference-retry-fixture",synthesisReferenceFailures: 1)
+        try await retryStore.generatePanorama(using: retryPort)
+        let retried=try await retryStore.panoramaState(), retryCalls=await retryPort.syntheses
+        XCTAssertEqual(retried.status,"completed")
+        XCTAssertEqual(retryCalls,2)
+        let failedDirectory=root.appendingPathComponent("synthesis-reference-exhausted")
+        let failedStore=try await panoramaFixtureStore(failedDirectory,count: 1)
+        let failedPort=ProgressivePanoramaFixture(identity: "reference-failed-fixture",synthesisReferenceFailures: 2)
+        do { try await failedStore.generatePanorama(using: failedPort); XCTFail("引用失败重试预算用尽应停止") } catch {}
+        let failed=try await failedStore.panoramaState(), failedCalls=await failedPort.syntheses
+        XCTAssertEqual(failed.status,"failed")
+        XCTAssertTrue(failed.error?.contains("全景综合引用无效") == true)
+        XCTAssertEqual(failedCalls,2)
+        print("Panorama compact synthesis expanded refs locally, scoped its identity, and retried invalid references once")
+    }
 }
 
 private actor PanoramaWireTransport: ModelHTTPTransport {
@@ -437,9 +485,11 @@ extension CoreFlowTests {
         XCTAssertEqual(closure.manifest.sourceIDs,sources.map(\.id))
         XCTAssertEqual(closure.sources.map { $0.transcript.text },texts)
         let wire=try PanoramaModelInput(input)
-        let modelProposal=try wire.proposalForModel(proposal)
         let report=PanoramaReview(questions: questions.map { .init(id: $0.id,accepted: true,reason: "完整原文一致") },relations: [.init(id: "e",accepted: true,reason: "双方条件对应")],coverageAccepted: true,reason: "全部指定范围一致")
-        let unitOutputs=units.reversed().map { PanoramaUnitProposal(unitID: $0.id,proposal: proposal) }
+        let unitOutputs=[PanoramaUnitProposal(unitID: units[1].id,
+                proposal: PanoramaProposal(regions: proposal.regions,questions: [questions[1]],relations: [],unrepresentedSources: [],unrepresentedClaims: [])),
+            PanoramaUnitProposal(unitID: units[0].id,
+                proposal: PanoramaProposal(regions: proposal.regions,questions: [questions[0]],relations: [],unrepresentedSources: [],unrepresentedClaims: []))]
         let coverageTarget=PanoramaCoverageTarget(sourceIDs: [sources[1].id],claimIDs: claims.map(\.id))
         let independent=PanoramaScopedReview(stage: "global.coverage",scopeID: units[1].id,review: report,
             receipt: .init(responseID: "independent-fixture",model: "fixture",createdAt: "fixture"),target: coverageTarget)
@@ -449,13 +499,45 @@ extension CoreFlowTests {
             let body: [String: Any]=["id":"wire-response-\(index)","status":"completed","output":[message]]
             return .init(status: 200,body: try JSONSerialization.data(withJSONObject: body))
         }
-        let replies=try [reply(modelProposal,index: 1),reply(modelProposal,index: 2),reply(report,index: 3),reply(report,index: 4),reply(report,index: 5)]
+        func compactReply(_ value: [String:Any],index: Int) throws -> ModelHTTPReply {
+            let text=String(decoding: try JSONSerialization.data(withJSONObject: value),as: UTF8.self)
+            let message: [String: Any]=["type":"message","role":"assistant","status":"completed","content":[["type":"output_text","text":text]]]
+            let body: [String: Any]=["id":"wire-response-\(index)","status":"completed","output":[message]]
+            return .init(status: 200,body: try JSONSerialization.data(withJSONObject: body))
+        }
+        func compactSynthesisBody(questionRefs: (first:[String],second:[String]),fromRefs:[String],toRefs:[String]) -> [String:Any] {
+            ["regions":[["id":"r","title":"检索条件","summary":"保持待核对归属"]],
+             "questions":[["id":"gq0","regionID":"r","title":"跨单元问题一","summary":"引用第一条单元问题","evidenceRefs":questionRefs.first],
+                          ["id":"gq1","regionID":"r","title":"跨单元问题二","summary":"引用第二条单元问题","evidenceRefs":questionRefs.second]],
+             "relations":[["id":"ge","from":"gq0","to":"gq1","label":"限定检索条件","explanation":"引用双方单元问题","fromEvidenceRefs":fromRefs,"toEvidenceRefs":toRefs]],
+             "unrepresentedSources":[],"unrepresentedClaims":[]]
+        }
+        let mergedBody=compactSynthesisBody(questionRefs: (first: ["q0","q0"],second: ["q1"]),fromRefs: ["q0","q0"],toRefs: ["q1"])
+        let repairedBody: [String:Any]=["regions":[["id":"r","title":"检索条件","summary":"保持待核对归属"]],
+            "questions":[["id":"q0","regionID":"r","title":questions[0].title,"summary":questions[0].summary,"evidenceRefs":["q0"]],
+                         ["id":"q1","regionID":"r","title":questions[1].title,"summary":questions[1].summary,"evidenceRefs":["q1"]]],
+            "relations":[["id":"e","from":"q0","to":"q1","label":"限定检索条件","explanation":"保留双方完整原文的否定条件","fromEvidenceRefs":["q0"],"toEvidenceRefs":["q1"]]],
+            "unrepresentedSources":[],"unrepresentedClaims":[]]
+        let replies=try [compactReply(mergedBody,index: 1),compactReply(repairedBody,index: 2),reply(report,index: 3),reply(report,index: 4),reply(report,index: 5)]
         let transport=PanoramaWireTransport(replies)
         let port=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!,apiKey: "fixture",model: "fixture",transport: transport)
         let merged=try await port.synthesize(unitOutputs,input: input)
-        XCTAssertEqual(merged.0.questions[0].summary,texts[0])
+        XCTAssertEqual(merged.0.questions[0].summary,"引用第一条单元问题")
+        func evidenceKeys(_ values: [PanoramaEvidence]) -> [String] {
+            values.map { "\($0.sourceID)|\($0.transcriptVersionID)|\($0.start)|\($0.end)|\($0.quote)|\($0.claimIDs.joined(separator: ","))" }
+        }
+        XCTAssertEqual(evidenceKeys(merged.0.questions[0].evidence),evidenceKeys(questions[0].evidence))
+        XCTAssertEqual(merged.0.questions[0].evidence.count,1)
+        XCTAssertEqual(evidenceKeys(merged.0.questions[1].evidence),evidenceKeys(questions[1].evidence))
+        let mergedRelation=try XCTUnwrap(merged.0.relations.first)
+        XCTAssertEqual(evidenceKeys(mergedRelation.fromEvidence),evidenceKeys(questions[0].evidence))
+        XCTAssertEqual(evidenceKeys(mergedRelation.toEvidence),evidenceKeys(questions[1].evidence))
+        _ = try VoiceOSStore.validatePanorama(merged.0,input: input)
         let rejection=PanoramaRejection(proposal: proposal,review: report)
         let repaired=try await port.repairSynthesis(proposal,input: input,context: closure,rejection: rejection)
+        XCTAssertEqual(evidenceKeys(repaired.0.questions.flatMap { $0.evidence }),evidenceKeys(proposal.questions.flatMap { $0.evidence }))
+        let repairedRelation=try XCTUnwrap(repaired.0.relations.first)
+        XCTAssertEqual(evidenceKeys(repairedRelation.fromEvidence),evidenceKeys(proposal.questions[0].evidence))
         _ = try VoiceOSStore.validatePanorama(repaired.0,input: input)
         _ = try await port.verifyEvidence(proposal,input: closure)
         _ = try await port.verifyCoverage(proposal,input: closure,target: coverageTarget,rejections: [rejection])
@@ -493,6 +575,35 @@ extension CoreFlowTests {
         let sentTarget=try XCTUnwrap(sentReviews.first?["target"] as? [String: Any])
         XCTAssertEqual(sentTarget["sourceIDs"] as? [String],["s2"])
         XCTAssertEqual(sentTarget["claimIDs"] as? [String],["c1"])
+        let mergeBody=try XCTUnwrap(JSONSerialization.jsonObject(with: requests[0]) as? [String:Any])
+        let mergeText=try XCTUnwrap(mergeBody["text"] as? [String:Any])
+        let mergeFormat=try XCTUnwrap(mergeText["format"] as? [String:Any])
+        XCTAssertEqual(mergeFormat["name"] as? String,"voiceos_panorama_merge_refs")
+        let mergeSchema=try XCTUnwrap(mergeFormat["schema"] as? [String:Any])
+        let mergeProperties=try XCTUnwrap(mergeSchema["properties"] as? [String:Any])
+        let mergeQuestionItem=try XCTUnwrap((mergeProperties["questions"] as? [String:Any])?["items"] as? [String:Any])
+        let mergeQuestionProperties=try XCTUnwrap(mergeQuestionItem["properties"] as? [String:Any])
+        XCTAssertNotNil(mergeQuestionProperties["evidenceRefs"])
+        XCTAssertNil(mergeQuestionProperties["evidence"])
+        let mergeRelationItem=try XCTUnwrap((mergeProperties["relations"] as? [String:Any])?["items"] as? [String:Any])
+        let mergeRelationProperties=try XCTUnwrap(mergeRelationItem["properties"] as? [String:Any])
+        XCTAssertNotNil(mergeRelationProperties["fromEvidenceRefs"])
+        XCTAssertNotNil(mergeRelationProperties["toEvidenceRefs"])
+        let repairBody=try XCTUnwrap(JSONSerialization.jsonObject(with: requests[1]) as? [String:Any])
+        let repairText=try XCTUnwrap(repairBody["text"] as? [String:Any])
+        let repairFormat=try XCTUnwrap(repairText["format"] as? [String:Any])
+        XCTAssertEqual(repairFormat["name"] as? String,"voiceos_panorama_global_repair_refs")
+        XCTAssertEqual(try wire.pendingFromModel([.init(id:"s2",reason:"未归入")],claim:false).first?.id,sources[1].id)
+        XCTAssertEqual(try wire.pendingFromModel([.init(id:"c1",reason:"未归入")],claim:true).first?.id,claims[0].id)
+        func expectReferenceFailure(_ body: [String:Any]) async throws {
+            let transport=PanoramaWireTransport([try compactReply(body,index: 9)])
+            let port=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!,apiKey: "fixture",model: "fixture",transport: transport)
+            do { _ = try await port.synthesize(unitOutputs,input: input); XCTFail("无效综合引用必须可重试失败") }
+            catch is PanoramaSynthesisReferenceFailure {}
+        }
+        try await expectReferenceFailure(compactSynthesisBody(questionRefs: (first: ["q-missing"],second: ["q1"]),fromRefs: ["q0"],toRefs: ["q1"]))
+        try await expectReferenceFailure(compactSynthesisBody(questionRefs: (first: ["q0"],second: ["q1"]),fromRefs: ["q1"],toRefs: ["q1"]))
+        try await expectReferenceFailure(compactSynthesisBody(questionRefs: (first: [],second: ["q1"]),fromRefs: ["q0"],toRefs: ["q1"]))
     }
 }
 

@@ -320,8 +320,8 @@ extension VoiceOSStore {
                 let elapsed=Date().timeIntervalSince(started)
                 let retryable: Bool
                 if let network=error as? URLError { retryable=[.networkConnectionLost,.timedOut,.notConnectedToInternet].contains(network.code) }
-                else { retryable=error is PanoramaTransientFailure || error is PanoramaQuoteLocationFailure || error is PanoramaFocusViolation }
-                let limit = (error is PanoramaQuoteLocationFailure || error is PanoramaFocusViolation) ? 1 : 2
+                else { retryable=error is PanoramaTransientFailure || error is PanoramaQuoteLocationFailure || error is PanoramaFocusViolation || error is PanoramaSynthesisReferenceFailure }
+                let limit = (error is PanoramaQuoteLocationFailure || error is PanoramaFocusViolation || error is PanoramaSynthesisReferenceFailure) ? 1 : 2
                 guard retries < limit, retryable, elapsed < 590 else { throw error }
                 retries += 1
                 try await Task.sleep(for: .seconds(retries))
@@ -367,7 +367,7 @@ extension VoiceOSStore {
         let proposals=units.map { PanoramaUnitProposal(unitID: $0.unitID, proposal: $0.proposal) }
         try publishPanoramaPhase(.synthesis, units: units, input: input, attemptID: attemptID)
         let generated: (PanoramaProposal, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.synthesize", scopeID: "all",
-            input: PanoramaSynthesisInput(input: input, proposals: proposals), whole: input, identity: port.configurationIdentity,
+            input: PanoramaSynthesisInput(input: input, proposals: proposals), whole: input, identity: port.synthesisConfigurationIdentity,
             operation: { try await port.synthesize(proposals, input: input) }, validate: { proposal, _ in
                 _ = try Self.validatePanorama(proposal, input: input)
             }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
@@ -380,7 +380,7 @@ extension VoiceOSStore {
             issues.append(issue)
             let original=candidate.0
             candidate=try await panoramaStep(attemptID: attemptID, stage: "global.repair", scopeID: "all",
-                input: PanoramaGlobalRepairInput(input: input, proposal: original, issue: issue), whole: input, identity: port.configurationIdentity,
+                input: PanoramaGlobalRepairInput(input: input, proposal: original, issue: issue), whole: input, identity: port.synthesisConfigurationIdentity,
                 operation: { try await port.repairSynthesis(original, input: input, context: issue.input, rejection: issue.rejection) }, validate: { proposal, _ in
                     _ = try Self.validatePanorama(proposal, input: input)
                 }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
@@ -477,6 +477,7 @@ extension VoiceOSStore {
     private static func panoramaFailure(_ error: Error) -> String {
         if let error=error as? VoiceOSError { return error.message }
         if let violation=error as? PanoramaFocusViolation { return violation.reason }
+        if let failure=error as? PanoramaSynthesisReferenceFailure { return "全景综合引用无效：" + failure.reason + "；已核对单元保留，可明确重试" }
         if let issue=error as? PanoramaSemanticIssue { return "全景独立语义核对未通过：" + issue.rejection.review.reason + "；已核对区域保留，可明确重试" }
         if let failure=error as? PanoramaTransientFailure { return failure.reason }
         if let failure=error as? PanoramaUnitFailures, let message=failure.errorDescription { return message }

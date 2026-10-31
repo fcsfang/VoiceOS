@@ -6,6 +6,12 @@ public struct PanoramaQuoteLocationFailure: Error, Sendable, LocalizedError {
     public let reason: String
     public var errorDescription: String? { reason }
 }
+/// A compact synthesis response that cites a question ID it was not given.
+/// Retryable: the same input can produce valid refs on a retry.
+struct PanoramaSynthesisReferenceFailure: Error, Sendable, LocalizedError {
+    let reason: String
+    var errorDescription: String? { reason }
+}
 public struct PanoramaSource: Codable, Sendable, Identifiable {
     public var id: String { transcript.sourceID }
     public let transcript: ContextTranscript
@@ -216,6 +222,9 @@ extension PanoramaModelPort {
     /// Deliberately separate from the single-request identity so completed
     /// single-request rows keep replaying byte for byte.
     public var focusConfigurationIdentity: String { configurationIdentity + "|unit-slices-v1" }
+    /// Compact global synthesis copies evidence locally, so a shape change
+    /// invalidates only synthesis rows and keeps verified unit receipts.
+    public var synthesisConfigurationIdentity: String { configurationIdentity + "|compact-synthesis-v1" }
     public func generate(_ input: PanoramaInput, focus: PanoramaGenerationFocus, target: PanoramaCoverageTarget) async throws -> (PanoramaProposal, PanoramaReceipt) {
         throw VoiceOSError("当前模型端口尚不支持聚焦分片生成，完整单元未发布")
     }
