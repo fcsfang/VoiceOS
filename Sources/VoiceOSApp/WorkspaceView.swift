@@ -5,10 +5,16 @@ import VoiceOSCore
 
 // One navigation state owns the workspace. Discussion is a sibling, so expanding
 // it never replaces the reading view or its disclosure/scroll state.
-enum WorkspacePage: Equatable {
+enum WorkspacePage: Hashable {
     case home, themes, materials, actions, source(String), delivery(String), task(String), settings, capture, search, tool(String)
+    var isTopLevel: Bool {
+        switch self {
+        case .home, .themes, .materials, .actions, .settings: true
+        default: false
+        }
+    }
 }
-private struct WorkspaceNavigationEntry {
+private struct WorkspaceNavigationEntry: Hashable {
     let page: WorkspacePage
     let topicID: String?
     let topicTab: String
@@ -65,6 +71,7 @@ struct WorkspaceView: View {
     private var palette: WorkspacePalette { WorkspacePalette(theme: theme) }
     @State private var page: WorkspacePage = .home
     @State private var path: [WorkspaceNavigationEntry] = []
+    @State private var scrollPositions: [WorkspaceNavigationEntry: ScrollPosition] = [:]
     @State private var topicID: String?
     @State private var topicTab = "概览"
     @State private var topicReadingMode = "卡片"
@@ -227,7 +234,7 @@ struct WorkspaceView: View {
         }.padding(.horizontal,13).padding(.vertical,28).frame(width:172).background(palette.sidebar)
     }
     private func nav(_ title:String,icon:String,target:WorkspacePage) -> some View {
-        Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
+        Button { path=[];scrollPositions.removeAll();page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
             Label(title,systemImage:icon).font(.system(size:15,weight:section == title ? .semibold : .regular))
                 .frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,12).padding(.vertical,11)
                 .background(section == title ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:8))
@@ -274,7 +281,7 @@ struct WorkspaceView: View {
                 }, discuss: { snapshot, selection in
                     Task { await openPanoramaDiscussion(snapshotID: snapshot, selection: selection) }
                 })
-        case .themes: scrolled { themes }.id((topicID ?? "all-topics") + ":" + topicTab)
+        case .themes: scrolled { themes }.id(navigationEntry)
         case .materials: scrolled { materials }
         case .actions: scrolled { actions }
         case .source(let id):
@@ -314,6 +321,10 @@ struct WorkspaceView: View {
     }
     private func scrolled<Content:View>(@ViewBuilder content: () -> Content) -> some View {
         ScrollView { content().frame(maxWidth:860,alignment:.leading).padding(30).frame(maxWidth:.infinity,alignment:.top) }
+            .scrollPosition(scrollBinding(for: navigationEntry))
+    }
+    private func scrollBinding(for key: WorkspaceNavigationEntry) -> Binding<ScrollPosition> {
+        Binding(get: { scrollPositions[key] ?? ScrollPosition(edge: .top) }, set: { scrollPositions[key] = $0 })
     }
     private func unavailable(_ title:String,description:String) -> some View { ContentUnavailableView(title,systemImage:"leaf",description:Text(description)).frame(maxWidth:.infinity) }
     private func distinctExpressions(_ sources:[SourceRecord]) -> [SourceRecord] {
@@ -612,7 +623,10 @@ struct WorkspaceView: View {
     private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
     private var navigationEntry: WorkspaceNavigationEntry { .init(page:page,topicID:topicID,topicTab:topicTab,topicReadingMode:topicReadingMode) }
-    private func go(_ next:WorkspacePage) { if page != next { path.append(navigationEntry);page=next };error="" }
+    private func go(_ next:WorkspacePage) {
+        if page != next { path.append(navigationEntry);if next.isTopLevel { scrollPositions.removeAll() };page=next }
+        error=""
+    }
     private func back() {
         if let entry=path.popLast() {
             topicID=entry.topicID;topicTab=entry.topicTab;topicReadingMode=entry.topicReadingMode;page=entry.page
