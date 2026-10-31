@@ -19,6 +19,7 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     let failFocusAt: Int?
     let rejectedDecisionSubstring: String?
     let rejectCoverageOnly: Bool
+    var semanticRejections: Int
     var generations=0, unitReviews=0, unitRepairs=0, syntheses=0, globalRepairs=0, evidenceReviews=0, coverageReviews=0, consistencyReviews=0
     var generatedSourceIDs: [[String]]=[]
     var focusCalls: [PanoramaGenerationFocus]=[]
@@ -31,13 +32,13 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false, repairUnits: Bool = false, invalidQuote: Bool = false,
          failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, unitTransientFailures: [String: Int] = [:], invalidQuoteAttempts: Int = 0,
          invalidFocusAttempts: Int = 0, failFocusAt: Int? = nil, beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil,
-         rejectedDecisionSubstring: String? = nil, rejectCoverageOnly: Bool = false, synthesisReferenceFailures: Int = 0) {
+         rejectedDecisionSubstring: String? = nil, rejectCoverageOnly: Bool = false, synthesisReferenceFailures: Int = 0, semanticRejections: Int = 0) {
         configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits; self.repairUnits=repairUnits; self.invalidQuote=invalidQuote
         self.failCoverage=failCoverage; self.failConsistency=failConsistency; self.beforeGenerate=beforeGenerate; self.transientFailures=transientFailures
         self.unitTransientFailures=unitTransientFailures; self.invalidQuoteAttempts=invalidQuoteAttempts
         self.invalidFocusAttempts=invalidFocusAttempts; self.failFocusAt=failFocusAt
         self.rejectedDecisionSubstring=rejectedDecisionSubstring; self.rejectCoverageOnly=rejectCoverageOnly
-        self.synthesisReferenceFailures=synthesisReferenceFailures
+        self.synthesisReferenceFailures=synthesisReferenceFailures; self.semanticRejections=semanticRejections
     }
     private func receipt() -> PanoramaReceipt {
         serial += 1
@@ -160,6 +161,11 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     }
     func verifyEvidence(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> (PanoramaReview, PanoramaReceipt) {
         evidenceReviews += 1
+        if semanticRejections > 0, !proposal.relations.isEmpty {
+            semanticRejections -= 1
+            let report=review(proposal,accepted: false)
+            return (.init(questions: report.questions,relations: report.relations,coverageAccepted: false,reason: "模拟再次拒绝，需要基于修复后的提案继续修复"),receipt())
+        }
         let accepted=proposal.relations.allSatisfy { $0.label != "尚未核对的联系" }
         let report=review(proposal)
         let relations=report.relations.map { PanoramaDecision(id: $0.id,accepted: accepted,reason: accepted ? $0.reason : "双方原文尚不能支持此联系") }
@@ -187,6 +193,7 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
 
 extension CoreFlowTests {
     func assertPanoramaProgressiveRecovery(root: URL) async throws {
+        try await assertPanoramaRepairLoop(root: root.appendingPathComponent("repair-loop"))
         let store=try await panoramaFixtureStore(root.appendingPathComponent("progressive"), count: 3)
         let port=ProgressivePanoramaFixture(failGenerationAt: 2, failCoverage: true, failConsistency: true)
         do { try await store.generatePanorama(using: port); XCTFail("后续单元失败应暂停") } catch {}
@@ -930,6 +937,21 @@ extension CoreFlowTests {
         let slices=try database.query("SELECT state FROM panorama_steps WHERE stage='unit.focus.repair' ORDER BY rowid")
         XCTAssertEqual(slices.compactMap { $0["state"] },["completed","completed","completed"])
         XCTAssertFalse(try database.query("SELECT id FROM panorama_steps WHERE stage='unit.review-repair'").isEmpty)
+    }
+
+    private func assertPanoramaRepairLoop(root: URL) async throws {
+        let store=try await panoramaFixtureStore(root, count: 3)
+        let port=ProgressivePanoramaFixture(semanticRejections: 2)
+        try await store.generatePanorama(using: port)
+        let state=try await store.panoramaState()
+        XCTAssertEqual(state.status,"completed")
+        let repairs=await port.globalRepairs
+        XCTAssertEqual(repairs,2,"修复后被拒必须基于修复后的提案继续修复")
+        let reviews=await port.evidenceReviews
+        XCTAssertTrue(reviews >= 3,"三次审查必须逐轮针对最新提案")
+        let rows=try Database(root.appendingPathComponent("voiceos.sqlite")).query("SELECT input_json FROM panorama_steps WHERE stage='global.repair' ORDER BY rowid")
+        XCTAssertEqual(rows.count,2)
+        XCTAssertNotEqual(rows[0]["input_json"],rows[1]["input_json"],"第二次修复必须作用于修复后的提案")
     }
 
     private func assertPanoramaSameAttemptReuse(root: URL) async throws {
