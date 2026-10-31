@@ -118,13 +118,13 @@ extension CoreFlowTests {
         let first=try await store.panoramaState(), partial=try XCTUnwrap(first.snapshot)
         XCTAssertEqual(first.status,"failed")
         XCTAssertTrue(partial.isPartial)
-        XCTAssertEqual(partial.workflow?.verifiedUnitIDs.count,1)
-        XCTAssertEqual(partial.coverage.submittedSourceIDs.count,1)
+        XCTAssertEqual(partial.workflow?.verifiedUnitIDs.count,2)
+        XCTAssertEqual(partial.coverage.submittedSourceIDs.count,2)
         XCTAssertEqual(partial.input.sources.count,3)
         XCTAssertTrue(partial.proposal.relations.isEmpty)
         try await store.generatePanorama(using: port)
         let unchangedGenerations=await port.generations
-        XCTAssertEqual(unchangedGenerations,2)
+        XCTAssertEqual(unchangedGenerations,3)
         do { try await store.generatePanorama(using: port,retry: true); XCTFail("后续覆盖请求失败应保留单元结果") } catch {}
         let coverageFailure=try await store.panoramaState()
         XCTAssertEqual(coverageFailure.snapshot?.workflow?.verifiedUnitIDs.count,3)
@@ -164,7 +164,7 @@ extension CoreFlowTests {
         try await assertPanoramaStagedWire()
         try await assertPanoramaTransientRetry(root: root)
     }
-    private func panoramaFixtureStore(_ root: URL, count: Int) async throws -> VoiceOSStore {
+    func panoramaFixtureStore(_ root: URL, count: Int) async throws -> VoiceOSStore {
         let store=try VoiceOSStore(root: root,inspector: NativeMediaInspector())
         try await store.recover()
         var ids: [String]=[]
@@ -190,7 +190,7 @@ extension CoreFlowTests {
         do { try await store.generatePanorama(using: port); XCTFail("旧单元的拒绝结果不能跨全景发布") } catch {}
         let rejectedAgain=try await store.panoramaState(), rejectedGenerations=await port.generations
         XCTAssertNil(rejectedAgain.snapshot)
-        XCTAssertEqual(rejectedGenerations,2)
+        XCTAssertEqual(rejectedGenerations,3)
         let directory=root.appendingPathComponent("invalid-quote")
         let invalid=try await panoramaFixtureStore(directory,count: 1)
         let invalidPort=ProgressivePanoramaFixture(identity: "invalid-quote-fixture",invalidQuote: true)

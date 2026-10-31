@@ -1477,45 +1477,49 @@ final class CoreFlowTests: XCTestCase {
         do { _ = try await missingPort.generate(missingReferenceInput); XCTFail("无法定位的观点引用不能丢弃") } catch {}
         let missingRequests = await missingTransport.requests
         XCTAssertTrue(missingRequests.isEmpty)
+        let failureStore=try await panoramaFixtureStore(root.appendingPathComponent("failure-paths"), count: 1)
         let invalid=try JSONSerialization.data(withJSONObject: ["status":"completed", "output":[["type":"unsupported"]]])
         let rejectedPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([.init(status: 200, body: invalid)]))
-        do { try await store.generatePanorama(using: rejectedPort); XCTFail("无效响应不能发布") } catch {}
-        let rejected=try await store.panoramaState()
+        do { try await failureStore.generatePanorama(using: rejectedPort); XCTFail("无效响应不能发布") } catch {}
+        let rejected=try await failureStore.panoramaState()
         XCTAssertEqual(rejected.status, "failed")
-        XCTAssertEqual(rejected.error, "响应包含不支持的输出项")
+        XCTAssertTrue(rejected.error?.contains("响应包含不支持的输出项") == true, "失败信息应保留核对原因：\(rejected.error ?? "nil")")
         XCTAssertNil(rejected.snapshot)
         let privateDetail="https://fixture.invalid/private?key=fixture-secret"
-        let terminalFailures: [([String:Any],String)]=[
-            (["status":"failed", "error":["code":"server_error", "message":privateDetail]], "响应未完成（status=failed；error.code=server_error）；未接纳部分结果"),
-            (["status":"failed", "error":["code":"upstream_error", "message":privateDetail]], "响应未完成（status=failed；error.code=upstream_error）；未接纳部分结果"),
-            (["status":"failed", "error":["code":privateDetail, "message":privateDetail]], "响应未完成（status=failed；error.code=unknown）；未接纳部分结果"),
-            (["status":"completed"], "响应已完成但 output 缺失或格式无效（status=completed）"),
-            (["status":"incomplete", "incomplete_details":["reason":"max_output_tokens"]], "响应未完成（status=incomplete；incomplete_details.reason=max_output_tokens）；未接纳部分结果"),
-            (["status":"incomplete", "incomplete_details":["reason":privateDetail]], "响应未完成（status=incomplete；incomplete_details.reason=unknown）；未接纳部分结果"),
-            (["status":privateDetail], "响应未完成（status=unknown）；未接纳部分结果")
+        let terminalFailures: [([String:Any],String,Bool)]=[
+            (["status":"failed", "error":["code":"server_error", "message":privateDetail]], "响应未完成（status=failed；error.code=server_error）；未接纳部分结果", true),
+            (["status":"failed", "error":["code":"upstream_error", "message":privateDetail]], "响应未完成（status=failed；error.code=upstream_error）；未接纳部分结果", true),
+            (["status":"failed", "error":["code":privateDetail, "message":privateDetail]], "响应未完成（status=failed；error.code=unknown）；未接纳部分结果", false),
+            (["status":"completed"], "响应已完成但 output 缺失或格式无效（status=completed）", false),
+            (["status":"incomplete", "incomplete_details":["reason":"max_output_tokens"]], "响应未完成（status=incomplete；incomplete_details.reason=max_output_tokens）；未接纳部分结果", false),
+            (["status":"incomplete", "incomplete_details":["reason":privateDetail]], "响应未完成（status=incomplete；incomplete_details.reason=unknown）；未接纳部分结果", false),
+            (["status":privateDetail], "响应未完成（status=unknown）；未接纳部分结果", false)
         ]
-        for (var response, expected) in terminalFailures {
+        for (var response, expected, transient) in terminalFailures {
             response["usage"]=["input_tokens":120,"output_tokens":100]
-            let transport=FlowFollowupTransport([.init(status:200,body:try JSONSerialization.data(withJSONObject:response))])
+            let reply=ModelHTTPReply(status:200, body:try JSONSerialization.data(withJSONObject:response))
+            let transport=FlowFollowupTransport(Array(repeating: reply, count: transient ? 3 : 1))
             let port=try ResponsesPanoramaPort(baseURL:URL(string:"https://api.openai.com/v1")!,apiKey:"fixture",model:"fixture",transport:transport)
-            do { try await store.generatePanorama(using:port,retry:true); XCTFail("终态失败不能发布") }
-            catch ModelPortFailure.rejected(let reason,let input,let output) {
-                XCTAssertEqual(reason,expected)
-                XCTAssertEqual(input,120); XCTAssertEqual(output,100)
+            do { try await failureStore.generatePanorama(using:port,retry:true); XCTFail("终态失败不能发布") }
+            catch let failure as PanoramaUnitFailures {
+                XCTAssertEqual(failure.firstReason,expected)
+                XCTAssertEqual(failure.verifiedCount,0)
+                XCTAssertEqual(failure.totalCount,1)
             }
-            let failure=try await store.panoramaState()
+            catch { XCTFail("预期 PanoramaUnitFailures，实际 \(error)") }
+            let failure=try await failureStore.panoramaState()
             XCTAssertEqual(failure.status,"failed")
-            XCTAssertEqual(failure.error,expected)
+            XCTAssertTrue(failure.error?.contains(expected) == true, "失败信息应保留核对原因：\(failure.error ?? "nil")")
             XCTAssertFalse(failure.error?.contains("fixture-secret") ?? true)
             XCTAssertNil(failure.snapshot)
             let requests=await transport.requests
-            XCTAssertEqual(requests.count,1)
+            XCTAssertEqual(requests.count, transient ? 3 : 1)
         }
         let timedOutPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowPanoramaFailureTransport())
-        do { try await store.generatePanorama(using: timedOutPort, retry: true); XCTFail("网络失败不能发布") } catch {}
-        let timedOut=try await store.panoramaState()
+        do { try await failureStore.generatePanorama(using: timedOutPort, retry: true); XCTFail("网络失败不能发布") } catch {}
+        let timedOut=try await failureStore.panoramaState()
         XCTAssertEqual(timedOut.status, "failed")
-        XCTAssertEqual(timedOut.error, "全景网络请求失败（错误码 -1001）；材料保留，请明确重试")
+        XCTAssertTrue(timedOut.error?.contains("全景网络请求失败（错误码 -1001）；材料保留，请明确重试") == true, "失败信息应保留网络原因：\(timedOut.error ?? "nil")")
         XCTAssertNil(timedOut.snapshot)
         let upstreamBody=try JSONSerialization.data(withJSONObject: ["status":"failed", "error":["code":"upstream_error"]])
         let upstreamPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([.init(status: 200, body: upstreamBody)]))

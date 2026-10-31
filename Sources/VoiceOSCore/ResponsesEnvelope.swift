@@ -2,12 +2,13 @@ import Foundation
 
 /// Shared strict Responses envelope; payload validators remain purpose-specific.
 struct ResponsesEnvelope {
+    enum TerminalFailureDelivery { case rejected, typed }
     let status: ModelResponse.Status
     let text: String?
     let inputTokens: Int?
     let outputTokens: Int?
     var failureSummary: String? = nil
-    static func parse(_ data: Data, maxResponseBytes: Int = 262144) throws -> ResponsesEnvelope {
+    static func parse(_ data: Data, maxResponseBytes: Int = 262144, terminalFailureDelivery: TerminalFailureDelivery = .rejected) throws -> ResponsesEnvelope {
         var knownInput: Int?, knownOutput: Int?
         do {
             guard data.count <= maxResponseBytes else { throw ModelPortFailure.rejected("响应超过 \(maxResponseBytes) 字节限制") }
@@ -29,6 +30,14 @@ struct ResponsesEnvelope {
             if status != "completed" {
                 let summary=terminalFailureSummary(root, status: status)
                 if status == "incomplete" { return ResponsesEnvelope(status: .incomplete, text: nil, inputTokens: input, outputTokens: output, failureSummary: summary) }
+                if status == "failed" {
+                    switch terminalFailureDelivery {
+                    case .typed:
+                        throw ResponsesTerminalFailure.failed(summary: summary, code: (root["error"] as? [String:Any])?["code"] as? String, inputTokens: input, outputTokens: output)
+                    case .rejected:
+                        throw ModelPortFailure.rejected(summary, inputTokens: input, outputTokens: output)
+                    }
+                }
                 throw ModelPortFailure.rejected(summary)
             }
             guard let items = root["output"] as? [[String: Any]] else { throw ModelPortFailure.rejected("响应已完成但 output 缺失或格式无效（status=completed）") }
@@ -48,7 +57,8 @@ struct ResponsesEnvelope {
             return ResponsesEnvelope(status: .completed, text: texts[0], inputTokens: input, outputTokens: output)
         } catch ModelPortFailure.rejected(let reason, _, _) {
             throw ModelPortFailure.rejected(reason, inputTokens: knownInput, outputTokens: knownOutput)
-        } catch { throw ModelPortFailure.rejected("模型响应无法解析", inputTokens: knownInput, outputTokens: knownOutput) }
+        } catch let failure as ResponsesTerminalFailure { throw failure }
+        catch { throw ModelPortFailure.rejected("模型响应无法解析", inputTokens: knownInput, outputTokens: knownOutput) }
     }
     private static func terminalFailureSummary(_ root: [String:Any], status: String) -> String {
         let knownStatuses=["failed","incomplete","cancelled","in_progress","queued"]

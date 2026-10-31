@@ -1,5 +1,15 @@
 import Foundation
 
+public struct PanoramaUnitFailures: Error, Sendable, LocalizedError {
+    public let unitIDs: [String]
+    public let verifiedCount: Int
+    public let totalCount: Int
+    public let firstReason: String
+    public var errorDescription: String? {
+        "\(unitIDs.count) 个完整单元未能核对：\(unitIDs.joined(separator: "、"))；已核对 \(verifiedCount)/\(totalCount) 个，可继续核对。原因：\(firstReason)"
+    }
+}
+
 extension VoiceOSStore {
     public func panoramaInput() throws -> PanoramaInput {
         guard ready else { throw VoiceOSError("资料库尚未恢复") }
@@ -106,8 +116,19 @@ extension VoiceOSStore {
                 if left.size == right.size { return left.unit.id < right.unit.id }
                 return left.size < right.size
             }
+            var failures: [(unitID: String, reason: String)]=[]
             for (unit,scoped,_) in scheduled {
-                let result=try await verifyPanoramaUnit(unit.id, input: scoped, whole: input, attemptID: id, port: port)
+                try requirePanoramaManifest(input.manifest)
+                let result: VerifiedPanoramaUnit
+                do {
+                    result=try await verifyPanoramaUnit(unit.id, input: scoped, whole: input, attemptID: id, port: port)
+                } catch let error as CancellationError {
+                    throw error
+                } catch {
+                    try requirePanoramaManifest(input.manifest)
+                    failures.append((unit.id, Self.panoramaFailure(error)))
+                    continue
+                }
                 verified.append(result)
                 try requirePanoramaManifest(input.manifest)
                 let partial=try Self.partialPanorama(verified, input: input, id: id, phase: .units)
@@ -117,6 +138,9 @@ extension VoiceOSStore {
                 if visibleUnits.isSubset(of: Set(verified.map(\.unitID))) {
                     try db.execute("UPDATE panorama_attempts SET snapshot_json=?,generation_receipt=?,verification_receipt=? WHERE id=?", [try Self.relevanceJSON(partial),try Self.relevanceJSON(result.generation),try Self.relevanceJSON(result.verification),id])
                 }
+            }
+            if !failures.isEmpty {
+                throw PanoramaUnitFailures(unitIDs: failures.map { $0.unitID }, verifiedCount: verified.count, totalCount: input.units.count, firstReason: failures[0].reason)
             }
             try await finishPanorama(verified, input: input, attemptID: id, port: port)
         } catch {
@@ -208,8 +232,10 @@ extension VoiceOSStore {
                 return try await panoramaStepAttempt(attemptID: attemptID,stage: stage,scopeID: scopeID,input: input,whole: whole,identity: identity,
                     operation: operation,validate: validate,normalize: normalize,retainSemanticRejection: retainSemanticRejection)
             } catch {
-                guard retries < 2, let network=error as? URLError,
-                      [.networkConnectionLost,.timedOut,.notConnectedToInternet].contains(network.code) else { throw error }
+                let retryable: Bool
+                if let network=error as? URLError { retryable=[.networkConnectionLost,.timedOut,.notConnectedToInternet].contains(network.code) }
+                else { retryable=error is PanoramaTransientFailure }
+                guard retries < 2, retryable else { throw error }
                 retries += 1
                 try await Task.sleep(for: .seconds(retries))
             }
@@ -364,6 +390,8 @@ extension VoiceOSStore {
     private static func panoramaFailure(_ error: Error) -> String {
         if let error=error as? VoiceOSError { return error.message }
         if let issue=error as? PanoramaSemanticIssue { return "全景独立语义核对未通过：" + issue.rejection.review.reason + "；已核对区域保留，可明确重试" }
+        if let failure=error as? PanoramaTransientFailure { return failure.reason }
+        if let failure=error as? PanoramaUnitFailures, let message=failure.errorDescription { return message }
         if case ModelPortFailure.rejected(let reason, _, _) = error { return reason }
         if error is CancellationError { return "全景生成已停止，可明确重试" }
         if let error=error as? URLError { return "全景网络请求失败（错误码 \(error.code.rawValue)）；材料保留，请明确重试" }
