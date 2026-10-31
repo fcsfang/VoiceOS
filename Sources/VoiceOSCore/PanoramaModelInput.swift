@@ -162,6 +162,10 @@ struct PanoramaModelInput {
         try values.map { .init(id: try (claim ? self.claims : sources).original($0.id), reason: $0.reason) }
     }
 
+    func canonicalClaim(_ alias: String) throws -> String {
+        try claims.original(alias)
+    }
+
     private func map(_ proposal: PanoramaProposal, direction: Direction) throws -> PanoramaProposal {
         func identity(_ value: String, _ identities: Identities) throws -> String {
             switch direction {

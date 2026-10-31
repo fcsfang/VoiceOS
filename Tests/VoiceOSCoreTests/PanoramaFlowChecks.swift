@@ -431,16 +431,16 @@ extension CoreFlowTests {
         }
         let synthesize=try completedStep("global.synthesize","all")
         let synthesizeJSON=try XCTUnwrap(synthesize["input_json"]), synthesizeDigest=try XCTUnwrap(synthesize["input_digest"])
-        XCTAssertEqual(synthesizeDigest,digest(synthesizeJSON,"identity-fixture|compact-synthesis-v1"))
+        XCTAssertEqual(synthesizeDigest,digest(synthesizeJSON,"identity-fixture|compact-synthesis-v2"))
         XCTAssertNotEqual(synthesizeDigest,digest(synthesizeJSON,"identity-fixture"))
         let repair=try completedStep("global.repair","all")
         let repairJSON=try XCTUnwrap(repair["input_json"]), repairDigest=try XCTUnwrap(repair["input_digest"])
-        XCTAssertEqual(repairDigest,digest(repairJSON,"identity-fixture|compact-synthesis-v1"))
+        XCTAssertEqual(repairDigest,digest(repairJSON,"identity-fixture|compact-synthesis-v2"))
         let unitID=try XCTUnwrap(snapshot.input.units.first?.id)
         let unit=try completedStep("unit.generate",unitID)
         let unitJSON=try XCTUnwrap(unit["input_json"]), unitDigest=try XCTUnwrap(unit["input_digest"])
         XCTAssertEqual(unitDigest,digest(unitJSON,"identity-fixture"))
-        XCTAssertNotEqual(unitDigest,digest(unitJSON,"identity-fixture|compact-synthesis-v1"))
+        XCTAssertNotEqual(unitDigest,digest(unitJSON,"identity-fixture|compact-synthesis-v2"))
         let retryDirectory=root.appendingPathComponent("synthesis-reference-retry")
         let retryStore=try await panoramaFixtureStore(retryDirectory,count: 1)
         let retryPort=ProgressivePanoramaFixture(identity: "reference-retry-fixture",synthesisReferenceFailures: 1)
@@ -562,6 +562,15 @@ extension CoreFlowTests {
         let silent=try await silentPort.synthesize(unitOutputs,input: input)
         XCTAssertEqual(silent.0.unrepresentedSources.first?.reason,"综合未把该材料归入具体问题；完整原文与认识入口保留")
         _ = try VoiceOSStore.validatePanorama(silent.0,input: input)
+        var claimCoverage=compactSynthesisBody(questionRefs: (first: ["claim:c1"],second: ["q1"]),fromRefs: ["claim:c1"],toRefs: ["q1"])
+        claimCoverage["unrepresentedSources"]=[]
+        let claimPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!,apiKey: "fixture",model: "fixture",
+            transport: PanoramaWireTransport([try compactReply(claimCoverage,index: 12)]))
+        let claimed=try await claimPort.synthesize(unitOutputs,input: input)
+        XCTAssertEqual(claimed.0.questions[0].evidence.count,2)
+        XCTAssertEqual(Set(claimed.0.questions[0].evidence.flatMap(\.claimIDs)),["canonical-claim"])
+        XCTAssertEqual(claimed.0.relations.first?.fromEvidence.count,2)
+        _ = try VoiceOSStore.validatePanorama(claimed.0,input: input)
         _ = try await port.verifyEvidence(proposal,input: closure)
         _ = try await port.verifyCoverage(proposal,input: closure,target: coverageTarget,rejections: [rejection])
         _ = try await port.verifyConsistency(proposal,input: input,unitProposals: unitOutputs,reviews: [independent],rejections: [rejection])
@@ -626,6 +635,7 @@ extension CoreFlowTests {
         }
         try await expectReferenceFailure(compactSynthesisBody(questionRefs: (first: ["q-missing"],second: ["q1"]),fromRefs: ["q0"],toRefs: ["q1"]))
         try await expectReferenceFailure(compactSynthesisBody(questionRefs: (first: ["q0"],second: ["q1"]),fromRefs: ["q1"],toRefs: ["q1"]))
+        try await expectReferenceFailure(compactSynthesisBody(questionRefs: (first: ["claim:c99"],second: ["q1"]),fromRefs: ["q0"],toRefs: ["q1"]))
         try await expectReferenceFailure(compactSynthesisBody(questionRefs: (first: [],second: ["q1"]),fromRefs: ["q0"],toRefs: ["q1"]))
     }
 }
