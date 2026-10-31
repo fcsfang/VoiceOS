@@ -384,11 +384,11 @@ extension VoiceOSStore {
                 break
             } catch let issue as PanoramaSemanticIssue {
                 issues.append(issue)
-                guard repairs < 3 else { throw issue }
+                guard repairs < 5 else { throw issue }
                 repairs += 1
                 let original=candidate.0
                 candidate=try await panoramaStep(attemptID: attemptID, stage: "global.repair", scopeID: "all",
-                    input: PanoramaGlobalRepairInput(input: input, proposal: original, issue: issue), whole: input, identity: port.synthesisConfigurationIdentity,
+                    input: PanoramaGlobalRepairInput(input: input, proposal: original, issue: issue), whole: input, identity: port.repairConfigurationIdentity,
                     operation: { try await port.repairSynthesis(original, input: input, context: issue.input, rejection: issue.rejection) }, validate: { proposal, _ in
                         _ = try Self.validatePanorama(proposal, input: input)
                     }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })

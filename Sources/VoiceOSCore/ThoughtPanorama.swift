@@ -225,6 +225,8 @@ extension PanoramaModelPort {
     /// Compact global synthesis copies evidence locally, so a shape change
     /// invalidates only synthesis rows and keeps verified unit receipts.
     public var synthesisConfigurationIdentity: String { configurationIdentity + "|compact-synthesis-v2" }
+    /// Repair prompts iterate independently of synthesis and review rows.
+    public var repairConfigurationIdentity: String { synthesisConfigurationIdentity + "|repair-v1" }
     public func generate(_ input: PanoramaInput, focus: PanoramaGenerationFocus, target: PanoramaCoverageTarget) async throws -> (PanoramaProposal, PanoramaReceipt) {
         throw VoiceOSError("当前模型端口尚不支持聚焦分片生成，完整单元未发布")
     }

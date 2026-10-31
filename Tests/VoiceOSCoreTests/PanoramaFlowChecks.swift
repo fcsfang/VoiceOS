@@ -435,7 +435,7 @@ extension CoreFlowTests {
         XCTAssertNotEqual(synthesizeDigest,digest(synthesizeJSON,"identity-fixture"))
         let repair=try completedStep("global.repair","all")
         let repairJSON=try XCTUnwrap(repair["input_json"]), repairDigest=try XCTUnwrap(repair["input_digest"])
-        XCTAssertEqual(repairDigest,digest(repairJSON,"identity-fixture|compact-synthesis-v2"))
+        XCTAssertEqual(repairDigest,digest(repairJSON,"identity-fixture|compact-synthesis-v2|repair-v1"))
         let unitID=try XCTUnwrap(snapshot.input.units.first?.id)
         let unit=try completedStep("unit.generate",unitID)
         let unitJSON=try XCTUnwrap(unit["input_json"]), unitDigest=try XCTUnwrap(unit["input_digest"])
