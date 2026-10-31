@@ -271,7 +271,7 @@ extension VoiceOSStore {
     }
 
     public func recordingFollowups() throws -> [RecordingFollowupReceipt] {
-        try db.query("SELECT followup_json FROM sources WHERE followup_json IS NOT NULL ORDER BY created_at").flatMap { try JSONDecoder().decode([RecordingFollowupReceipt].self, from: Data($0["followup_json"]!.utf8)) }.sorted { $0.createdAt < $1.createdAt }
+        try db.query("SELECT followup_json FROM sources WHERE followup_json IS NOT NULL ORDER BY created_at").flatMap { try decodeWithPath([RecordingFollowupReceipt].self, from: Data($0["followup_json"]!.utf8), label: "跟进回执") }.sorted { $0.createdAt < $1.createdAt }
     }
     func recoverRecordingFollowups() throws {
         for var receipt in try recordingFollowups() {
@@ -320,7 +320,7 @@ extension VoiceOSStore {
     }
     private func saveRecordingFollowup(_ value: RecordingFollowupReceipt) throws {
         let receipt = compactFollowup(value)
-        var history = try db.query("SELECT followup_json FROM sources WHERE id=?", [receipt.sourceID]).first?["followup_json"].map { try JSONDecoder().decode([RecordingFollowupReceipt].self, from: Data($0.utf8)) } ?? []
+        var history = try db.query("SELECT followup_json FROM sources WHERE id=?", [receipt.sourceID]).first?["followup_json"].map { try decodeWithPath([RecordingFollowupReceipt].self, from: Data($0.utf8), label: "跟进回执") } ?? []
         if let index = history.firstIndex(where: { $0.id == receipt.id }) { history[index] = receipt } else { history.append(receipt) }
         try db.execute("UPDATE sources SET followup_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(history), as: UTF8.self), receipt.sourceID])
     }
