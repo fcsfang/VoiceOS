@@ -373,18 +373,26 @@ extension VoiceOSStore {
             }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
         var candidate=generated
         var issues: [PanoramaSemanticIssue]=[]
+        var repairs=0
         let validation: PanoramaGlobalValidation
-        do {
-            validation=try await reviewPanoramaCandidate(candidate.0, generation: candidate.1, units: units, input: input, attemptID: attemptID, port: port, issues: issues)
-        } catch let issue as PanoramaSemanticIssue {
-            issues.append(issue)
-            let original=candidate.0
-            candidate=try await panoramaStep(attemptID: attemptID, stage: "global.repair", scopeID: "all",
-                input: PanoramaGlobalRepairInput(input: input, proposal: original, issue: issue), whole: input, identity: port.synthesisConfigurationIdentity,
-                operation: { try await port.repairSynthesis(original, input: input, context: issue.input, rejection: issue.rejection) }, validate: { proposal, _ in
-                    _ = try Self.validatePanorama(proposal, input: input)
-                }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
-            validation=try await reviewPanoramaCandidate(candidate.0, generation: candidate.1, units: units, input: input, attemptID: attemptID, port: port, issues: issues)
+        // A rejection after a repair must feed the next repair with the repaired
+        // proposal; restarting an attempt always replays the original synthesis,
+        // so a single repair round would never see the later rejection.
+        while true {
+            do {
+                validation=try await reviewPanoramaCandidate(candidate.0, generation: candidate.1, units: units, input: input, attemptID: attemptID, port: port, issues: issues)
+                break
+            } catch let issue as PanoramaSemanticIssue {
+                issues.append(issue)
+                guard repairs < 3 else { throw issue }
+                repairs += 1
+                let original=candidate.0
+                candidate=try await panoramaStep(attemptID: attemptID, stage: "global.repair", scopeID: "all",
+                    input: PanoramaGlobalRepairInput(input: input, proposal: original, issue: issue), whole: input, identity: port.synthesisConfigurationIdentity,
+                    operation: { try await port.repairSynthesis(original, input: input, context: issue.input, rejection: issue.rejection) }, validate: { proposal, _ in
+                        _ = try Self.validatePanorama(proposal, input: input)
+                    }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+            }
         }
         let proposal=candidate.0
         let final=(validation.finalReview,validation.finalReceipt), reviews=validation.reviews
