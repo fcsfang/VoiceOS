@@ -46,7 +46,8 @@ public struct ResponsesPanoramaPort: PanoramaModelPort {
         let focus: PanoramaModelFocus
         let target: PanoramaCoverageTarget
     }
-    func call<Input: Encodable, Output: Decodable>(_ input: Input, instructions: String, schema: [String:Any], name: String) async throws -> (Output, PanoramaReceipt) {
+    func call<Input: Encodable, Output: Decodable>(_ input: Input, instructions: String, schema: [String:Any], name: String,
+        shape: String? = nil) async throws -> (Output, PanoramaReceipt) {
         let encoder=JSONEncoder(); encoder.outputFormatting=[.sortedKeys]
         let content=String(decoding: try encoder.encode(input), as: UTF8.self)
         var correction: String?
@@ -56,8 +57,8 @@ public struct ResponsesPanoramaPort: PanoramaModelPort {
             var messages: [[String:Any]]=[["role":"user","content":content]]
             if let correction {
                 messages.append(["role":"assistant","content":correction])
-                let shape = ObjectIdentifier(Output.self) == ObjectIdentifier(PanoramaProposal.self) ? Self.proposalShapeInstructions : Self.reviewShapeInstructions
-                messages.append(["role":"user","content":"上次结构错误：" + (formatIssue ?? "JSON 字段或类型不符") + "。" + shape + "仅修复结构并完整返回同一结果；不删证据，不改变语义，不输出解释。第\(round)次格式修复。"])
+                let failureShape=shape ?? (ObjectIdentifier(Output.self) == ObjectIdentifier(PanoramaProposal.self) ? Self.proposalShapeInstructions : Self.reviewShapeInstructions)
+                messages.append(["role":"user","content":"上次结构错误：" + (formatIssue ?? "JSON 字段或类型不符") + "。" + failureShape + "仅修复结构并完整返回同一结果；不删证据，不改变语义，不输出解释。第\(round)次格式修复。"])
             }
             let body: [String:Any]=["model":model,"store":false,"reasoning":["effort":"high"],"max_output_tokens":65536,"truncation":"disabled","instructions":instructions,"input":messages,"text":["format":["type":"json_schema","name":name,"strict":true,"schema":schema]]]
             var request=URLRequest(url: endpoint, timeoutInterval: 600); request.httpMethod="POST"
@@ -106,7 +107,7 @@ public struct ResponsesPanoramaPort: PanoramaModelPort {
         case .dataCorrupted(let value): context=value; kind="dataCorrupted，JSON 结构无效"
         @unknown default: return "JSON 结构解码失败"
         }
-        let allowed=Set(["regions","questions","relations","unrepresentedSources","unrepresentedClaims","id","title","summary","regionID","evidence","sourceID","transcriptVersionID","start","end","quote","claimIDs","from","to","label","explanation","fromEvidence","toEvidence","reason","accepted","coverageAccepted"])
+        let allowed=Set(["regions","questions","relations","unrepresentedSources","unrepresentedClaims","id","title","summary","regionID","evidence","evidenceRefs","sourceID","transcriptVersionID","start","end","quote","claimIDs","from","to","label","explanation","fromEvidence","toEvidence","fromEvidenceRefs","toEvidenceRefs","reason","accepted","coverageAccepted"])
         var path="$"
         let keys=context.codingPath + (missing.map { [$0] } ?? [])
         for key in keys {
@@ -129,6 +130,14 @@ public struct ResponsesPanoramaPort: PanoramaModelPort {
         return object(["regions":array(object(["id":string,"title":string,"summary":string])),
             "questions":array(object(["id":string,"regionID":string,"title":string,"summary":string,"evidence":array(evidence)])),
             "relations":array(object(["id":string,"from":string,"to":string,"label":string,"explanation":string,"fromEvidence":array(evidence),"toEvidence":array(evidence)])),
+            "unrepresentedSources":array(pending),"unrepresentedClaims":array(pending)])
+    }
+    static var compactProposalSchema: [String:Any] {
+        let string:[String:Any]=["type":"string"]
+        let pending=object(["id":string,"reason":string])
+        return object(["regions":array(object(["id":string,"title":string,"summary":string])),
+            "questions":array(object(["id":string,"regionID":string,"title":string,"summary":string,"evidenceRefs":array(string)])),
+            "relations":array(object(["id":string,"from":string,"to":string,"label":string,"explanation":string,"fromEvidenceRefs":array(string),"toEvidenceRefs":array(string)])),
             "unrepresentedSources":array(pending),"unrepresentedClaims":array(pending)])
     }
     static var reviewSchema: [String:Any] {

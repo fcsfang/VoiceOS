@@ -158,6 +158,10 @@ struct PanoramaModelInput {
         try map(proposal, direction: .toCanonical)
     }
 
+    func pendingFromModel(_ values: [PanoramaUnrepresented], claim: Bool) throws -> [PanoramaUnrepresented] {
+        try values.map { .init(id: try (claim ? self.claims : sources).original($0.id), reason: $0.reason) }
+    }
+
     private func map(_ proposal: PanoramaProposal, direction: Direction) throws -> PanoramaProposal {
         func identity(_ value: String, _ identities: Identities) throws -> String {
             switch direction {
