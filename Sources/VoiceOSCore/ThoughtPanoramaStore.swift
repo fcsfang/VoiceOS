@@ -156,11 +156,12 @@ extension VoiceOSStore {
         for candidate in candidates {
             var reused: VerifiedPanoramaUnit?
             do {
-                let saved=try JSONDecoder().decode(PanoramaInput.self, from: Data(candidate["input_json"]!.utf8))
+                let record=try PanoramaUnitGenerationRecord.decode(Data(candidate["input_json"]!.utf8))
+                let saved=record.input
                 let current=PanoramaInput(manifest: .init(digest: saved.manifest.digest, sourceIDs: input.manifest.sourceIDs, claimIDs: input.manifest.claimIDs, unitIDs: input.manifest.unitIDs),
                     units: input.units, sources: input.sources, claims: input.claims, exclusions: input.exclusions)
                 if try Self.relevanceJSON(current) == Self.relevanceJSON(saved) {
-                    reused=try await verifyPanoramaUnitStages(unitID, input: saved, whole: whole, attemptID: candidate["attempt_id"]!, port: port, replayOnly: true)
+                    reused=try await verifyPanoramaUnitStages(unitID, input: saved, whole: whole, attemptID: candidate["attempt_id"]!, port: port, record: record, replayOnly: true)
                 }
             } catch is CancellationError { throw CancellationError() }
             catch {}
@@ -173,11 +174,31 @@ extension VoiceOSStore {
         }
         return try await verifyPanoramaUnitStages(unitID, input: input, whole: whole, attemptID: attemptID, port: port)
     }
-    private func verifyPanoramaUnitStages(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, attemptID: String, port: any PanoramaModelPort, replayOnly: Bool = false) async throws -> VerifiedPanoramaUnit {
-        var generated: (PanoramaProposal, PanoramaReceipt)=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.generate", scopeID: unitID, replayOnly: replayOnly,
-            input: input, whole: whole, identity: port.configurationIdentity, operation: { try await port.generate(input) }, validate: { proposal, _ in
-                _ = try Self.validatePanorama(proposal, input: input)
-            }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+    private func verifyPanoramaUnitStages(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, attemptID: String,
+        port: any PanoramaModelPort, record: PanoramaUnitGenerationRecord? = nil, replayOnly: Bool = false) async throws -> VerifiedPanoramaUnit {
+        let selected: PanoramaUnitGenerationRecord
+        let plan: PanoramaUnitSlicePlan?
+        if let record {
+            selected=record
+            if case .sliced(let saved)=record {
+                guard let rebuilt=try PanoramaUnitSlicePlan.make(unitID: unitID, input: input, policy: saved.policy),
+                      rebuilt.digest == saved.planDigest else { throw VoiceOSError("完整单元的历史分片计划不可复用") }
+                plan=rebuilt
+            } else { plan=nil }
+        } else if let fresh=try PanoramaUnitSlicePlan.make(unitID: unitID, input: input) {
+            selected = .sliced(.init(policy: fresh.policy, planDigest: fresh.digest, input: input)); plan=fresh
+        } else {
+            selected = .single(input); plan=nil
+        }
+        var generated: (PanoramaProposal, PanoramaReceipt)
+        switch selected {
+        case .single:
+            generated=try await panoramaSingleGeneration(unitID, input: input, whole: whole, attemptID: attemptID, port: port, replayOnly: replayOnly)
+        case .sliced(let slicedRecord):
+            guard let plan else { throw VoiceOSError("完整单元的分片计划缺失") }
+            generated=try await panoramaSlicedGeneration(unitID, input: input, whole: whole, plan: plan, record: slicedRecord,
+                attemptID: attemptID, port: port, replayOnly: replayOnly)
+        }
         let first: (PanoramaReview, PanoramaReceipt)=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.review", scopeID: unitID, replayOnly: replayOnly,
             input: PanoramaProposalInput(input: input, proposal: generated.0), whole: whole, identity: port.configurationIdentity,
             operation: { try await port.verify(generated.0, input: input, priorRejection: nil) }, validate: { _, _ in })
@@ -187,12 +208,17 @@ extension VoiceOSStore {
         catch {
             let rejection=PanoramaRejection(proposal: generated.0, review: first.0)
             priorRejection=Self.panoramaRejection(rejection, unitID: unitID)
-            let original=generated.0
-            generated=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.repair", scopeID: unitID, replayOnly: replayOnly,
-                input: PanoramaRepairInput(input: input, rejection: rejection), whole: whole, identity: port.configurationIdentity,
-                operation: { try await port.repair(original, input: input, review: first.0) }, validate: { proposal, _ in
-                    _ = try Self.validatePanorama(proposal, input: input)
-                }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+            if let plan {
+                generated=try await panoramaSlicedRepair(unitID, input: input, whole: whole, plan: plan, attemptID: attemptID,
+                    port: port, rejection: rejection, replayOnly: replayOnly)
+            } else {
+                let original=generated.0
+                generated=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.repair", scopeID: unitID, replayOnly: replayOnly,
+                    input: PanoramaRepairInput(input: input, rejection: rejection), whole: whole, identity: port.configurationIdentity,
+                    operation: { try await port.repair(original, input: input, review: first.0) }, validate: { proposal, _ in
+                        _ = try Self.validatePanorama(proposal, input: input)
+                    }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+            }
             review=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.review-repair", scopeID: unitID, replayOnly: replayOnly,
                 input: PanoramaRepairInput(input: input, rejection: .init(proposal: generated.0, review: first.0)), whole: whole, identity: port.configurationIdentity,
                 operation: { try await port.verify(generated.0, input: input, priorRejection: rejection) }, validate: { value, receipt in
@@ -201,6 +227,56 @@ extension VoiceOSStore {
         }
         try Self.validatePanoramaReview(review.0, proposal: generated.0, generation: generated.1, verification: review.1)
         return .init(unitID: unitID, input: input, proposal: Self.namespacePanorama(generated.0, unitID: unitID), generation: generated.1, review: review.0, verification: review.1, rejection: priorRejection)
+    }
+    private func panoramaSingleGeneration(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, attemptID: String,
+        port: any PanoramaModelPort, replayOnly: Bool) async throws -> (PanoramaProposal, PanoramaReceipt) {
+        try await panoramaUnitStep(attemptID: attemptID, stage: "unit.generate", scopeID: unitID, replayOnly: replayOnly,
+            input: input, whole: whole, identity: port.configurationIdentity, operation: { try await port.generate(input) }, validate: { proposal, _ in
+                _ = try Self.validatePanorama(proposal, input: input)
+            }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+    }
+    private func panoramaSlicedGeneration(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, plan: PanoramaUnitSlicePlan,
+        record: PanoramaSlicedGenerationRecord, attemptID: String, port: any PanoramaModelPort, replayOnly: Bool) async throws -> (PanoramaProposal, PanoramaReceipt) {
+        try await panoramaUnitStep(attemptID: attemptID, stage: "unit.generate", scopeID: unitID, replayOnly: replayOnly,
+            input: record, whole: whole, identity: port.focusConfigurationIdentity, operation: {
+                var proposals: [PanoramaProposal]=[], receipts: [PanoramaReceipt]=[]
+                for slice in plan.slices {
+                    let result: (PanoramaProposal, PanoramaReceipt)=try await panoramaUnitStep(
+                        attemptID: attemptID, stage: "unit.focus.generate", scopeID: "\(unitID)#slice-\(slice.focus.ordinal)", replayOnly: false,
+                        input: slice.stepInput, whole: whole, identity: port.focusConfigurationIdentity,
+                        operation: { try await port.generate(input, focus: slice.focus, target: slice.target) },
+                        validate: { proposal, _ in _ = try Self.validatePanoramaFocused(proposal, scope: slice.scope, focus: slice.focus) },
+                        normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+                    proposals.append(result.0); receipts.append(result.1)
+                }
+                return (try plan.merge(proposals), try PanoramaReceipt.composite(parts: receipts, identity: port.focusConfigurationIdentity, kind: "generate"))
+            }, validate: { proposal, _ in _ = try Self.validatePanorama(proposal, input: input) },
+            normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+    }
+    private func panoramaSlicedRepair(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, plan: PanoramaUnitSlicePlan,
+        attemptID: String, port: any PanoramaModelPort, rejection: PanoramaRejection, replayOnly: Bool) async throws -> (PanoramaProposal, PanoramaReceipt) {
+        let record=PanoramaSlicedRepairRecord(policy: plan.policy, planDigest: plan.digest, input: input, rejection: rejection)
+        return try await panoramaUnitStep(attemptID: attemptID, stage: "unit.repair", scopeID: unitID, replayOnly: replayOnly,
+            input: record, whole: whole, identity: port.focusConfigurationIdentity, operation: {
+                var proposals: [PanoramaProposal]=[], receipts: [PanoramaReceipt]=[]
+                for slice in plan.slices {
+                    let ids=plan.projectionIDs(rejection.proposal, ordinal: slice.focus.ordinal)
+                    let projected=Self.panoramaProjection(rejection.proposal, input: slice.scope, questionIDs: ids.questionIDs, relationIDs: ids.relationIDs)
+                    let projectedReview=plan.projectReview(rejection.review, ordinal: slice.focus.ordinal)
+                    let step=PanoramaSliceRepairInput(policy: plan.policy.version, planDigest: plan.digest, unitID: unitID,
+                        ordinal: slice.focus.ordinal, count: plan.slices.count, focus: slice.focus, target: slice.target,
+                        input: input, proposal: projected, review: projectedReview)
+                    let result: (PanoramaProposal, PanoramaReceipt)=try await panoramaUnitStep(
+                        attemptID: attemptID, stage: "unit.focus.repair", scopeID: "\(unitID)#slice-\(slice.focus.ordinal)", replayOnly: false,
+                        input: step, whole: whole, identity: port.focusConfigurationIdentity,
+                        operation: { try await port.repair(projected, input: slice.scope, review: projectedReview) },
+                        validate: { proposal, _ in _ = try Self.validatePanoramaFocused(proposal, scope: slice.scope, focus: slice.focus) },
+                        normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+                    proposals.append(result.0); receipts.append(result.1)
+                }
+                return (try plan.merge(proposals), try PanoramaReceipt.composite(parts: receipts, identity: port.focusConfigurationIdentity, kind: "repair"))
+            }, validate: { proposal, _ in _ = try Self.validatePanorama(proposal, input: input) },
+            normalize: { try Self.locatePanoramaQuotes($0, input: input) })
     }
     private func panoramaUnitStep<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, replayOnly: Bool,
         input: Input, whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
@@ -229,15 +305,18 @@ extension VoiceOSStore {
         validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }, retainSemanticRejection: Bool = false) async throws -> (Result, PanoramaReceipt) {
         var retries=0
         while true {
+            let started=Date()
             do {
                 return try await panoramaStepAttempt(attemptID: attemptID,stage: stage,scopeID: scopeID,input: input,whole: whole,identity: identity,
                     operation: operation,validate: validate,normalize: normalize,retainSemanticRejection: retainSemanticRejection)
             } catch {
+                // A request that already spent the whole 600-second window must not be replayed three times.
+                let elapsed=Date().timeIntervalSince(started)
                 let retryable: Bool
                 if let network=error as? URLError { retryable=[.networkConnectionLost,.timedOut,.notConnectedToInternet].contains(network.code) }
-                else { retryable=error is PanoramaTransientFailure || error is PanoramaQuoteLocationFailure }
-                let limit = error is PanoramaQuoteLocationFailure ? 1 : 2
-                guard retries < limit, retryable else { throw error }
+                else { retryable=error is PanoramaTransientFailure || error is PanoramaQuoteLocationFailure || error is PanoramaFocusViolation }
+                let limit = (error is PanoramaQuoteLocationFailure || error is PanoramaFocusViolation) ? 1 : 2
+                guard retries < limit, retryable, elapsed < 590 else { throw error }
                 retries += 1
                 try await Task.sleep(for: .seconds(retries))
             }
@@ -391,12 +470,16 @@ extension VoiceOSStore {
     }
     private static func panoramaFailure(_ error: Error) -> String {
         if let error=error as? VoiceOSError { return error.message }
+        if let violation=error as? PanoramaFocusViolation { return violation.reason }
         if let issue=error as? PanoramaSemanticIssue { return "全景独立语义核对未通过：" + issue.rejection.review.reason + "；已核对区域保留，可明确重试" }
         if let failure=error as? PanoramaTransientFailure { return failure.reason }
         if let failure=error as? PanoramaUnitFailures, let message=failure.errorDescription { return message }
         if case ModelPortFailure.rejected(let reason, _, _) = error { return reason }
         if error is CancellationError { return "全景生成已停止，可明确重试" }
-        if let error=error as? URLError { return "全景网络请求失败（错误码 \(error.code.rawValue)）；材料保留，请明确重试" }
+        if let error=error as? URLError {
+            if error.code == .timedOut { return "全景请求达到单次 600 秒窗口；未发布部分结果，材料保留，可明确重试" }
+            return "全景网络请求失败（错误码 \(error.code.rawValue)）；材料保留，请明确重试"
+        }
         return "全景请求未完成或结果格式无效；材料保留，请明确重试"
     }
     private func latestPanoramaAttemptMatchingEvidence(_ input: PanoramaInput) throws -> [String: String]? {
