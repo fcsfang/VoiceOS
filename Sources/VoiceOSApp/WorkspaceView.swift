@@ -619,7 +619,7 @@ struct WorkspaceView: View {
         let timing=combined ? "连续表达 · \(expression!.sourceIDs.count) 段 · 合计 \(duration/60)分\(duration%60)秒 · "+first.recordingDateLabel : source.recordingSubtitle
         return WorkspaceRow(title:combined ? expression!.title : source.workspaceTitle,subtitle:timing + " · " + (source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料") + (source.localOnly ? " · 仅本地" : "") + originalName,icon:source.kind.contains("text") ? "doc.text" : "waveform") { go(.source(source.id)) }
     }
-    private func actionRow(_ action:ActionRecord) -> some View { WorkspaceRow(title:action.title,subtitle:model.workspaceActionStatus(action),icon:action.state == "completed" ? "checkmark.circle" : "circle") { go(.task(action.id)) } }
+    private func actionRow(_ action:ActionRecord) -> some View { WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),icon:action.state == "completed" ? "checkmark.circle" : "circle") { go(.task(action.id)) } }
     private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
     private var navigationEntry: WorkspaceNavigationEntry { .init(page:page,topicID:topicID,topicTab:topicTab,topicReadingMode:topicReadingMode) }

@@ -55,6 +55,10 @@ extension ControlCenter {
         if action.validity == "current" { return completion + (recordingActionRequiresReview(action) ? " · 行动关系待核对，暂不同步" : "") }
         return completion + (workspaceTaskRequiresReview(action) ? " · AI 提取已暂停" : " · 历史记录")
     }
+    func workspaceExternalCompletionNote(_ action: ActionRecord) -> String? {
+        guard action.validity == "frozen", reminderLinks.contains(where: { $0.actionID == action.id && $0.remoteCompleted == true }) else { return nil }
+        return "提醒事项已标记完成 · " + workspaceActionStatus(action)
+    }
     var workspacePausedTasks: [ActionRecord] { actionRecords.filter { $0.kind == "task" && workspaceTaskRequiresReview($0) } }
     var workspaceFailedFollowups: [RecordingFollowupReceipt] {
         var seen=Set<String>()
