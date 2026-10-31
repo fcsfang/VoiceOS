@@ -8,6 +8,7 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     let rejectUnits: Bool
     let repairUnits: Bool
     let invalidQuote: Bool
+    var invalidQuoteAttempts: Int
     let failGenerationAt: Int?
     let beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)?
     var transientFailures: Int
@@ -21,11 +22,11 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     var coverageTargets: [PanoramaCoverageTarget]=[]
 
     init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false, repairUnits: Bool = false, invalidQuote: Bool = false,
-         failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, unitTransientFailures: [String: Int] = [:],
+         failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, unitTransientFailures: [String: Int] = [:], invalidQuoteAttempts: Int = 0,
          beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil) {
         configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits; self.repairUnits=repairUnits; self.invalidQuote=invalidQuote
         self.failCoverage=failCoverage; self.failConsistency=failConsistency; self.beforeGenerate=beforeGenerate; self.transientFailures=transientFailures
-        self.unitTransientFailures=unitTransientFailures
+        self.unitTransientFailures=unitTransientFailures; self.invalidQuoteAttempts=invalidQuoteAttempts
     }
     private func receipt() -> PanoramaReceipt {
         serial += 1
@@ -46,10 +47,12 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
         if transientFailures > 0 { transientFailures -= 1; throw URLError(.networkConnectionLost) }
         if generations == failGenerationAt { throw VoiceOSError("模拟后续单元暂停") }
         try await beforeGenerate?(input)
+        let useInvalidQuote=invalidQuote || invalidQuoteAttempts > 0
+        if invalidQuoteAttempts > 0 { invalidQuoteAttempts -= 1 }
         let questions=input.sources.enumerated().map { index, source in
             PanoramaQuestion(id: "q"+String(index), regionID: "r", title: "如何保留完整检索条件？", summary: source.title,
                 evidence: [.init(sourceID: source.id, transcriptVersionID: source.transcript.transcriptVersionID, start: 0,
-                    end: source.transcript.text.unicodeScalars.count, quote: invalidQuote ? "原文不存在的合成引文。" : source.transcript.text,
+                    end: source.transcript.text.unicodeScalars.count, quote: useInvalidQuote ? "原文不存在的合成引文。" : source.transcript.text,
                     claimIDs: input.claims.filter { claim in claim.references.contains { $0.sourceID == source.id } }.map(\.id))])
         }
         return (.init(regions: [.init(id: "r", title: "检索条件", summary: "完整材料的条件核对")], questions: questions,
@@ -440,5 +443,19 @@ extension CoreFlowTests {
         let visible=try await store.panoramaState()
         XCTAssertEqual(visible.status,"completed")
         XCTAssertNotNil(visible.snapshot)
+    }
+}
+
+
+extension CoreFlowTests {
+    func assertPanoramaQuoteRetry(root: URL) async throws {
+        let store=try await panoramaFixtureStore(root.appendingPathComponent("quote-retry"), count: 1)
+        let port=ProgressivePanoramaFixture(invalidQuoteAttempts: 1)
+        try await store.generatePanorama(using: port)
+        let generations=await port.generations
+        XCTAssertEqual(generations,2)
+        let state=try await store.panoramaState()
+        XCTAssertEqual(state.status,"completed")
+        XCTAssertNotNil(state.snapshot)
     }
 }

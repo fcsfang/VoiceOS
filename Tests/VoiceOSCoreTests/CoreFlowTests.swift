@@ -1353,6 +1353,7 @@ final class CoreFlowTests: XCTestCase {
         try await assertPanoramaSchemaRepair()
         try await assertPanoramaProgressiveRecovery(root: root)
         try await assertPanoramaTitleChangeContinues(root: root)
+        try await assertPanoramaQuoteRetry(root: root)
         let store = try await openStore(), model = FlowModel()
         let oldID = try await expression(store, text: "记忆系统需要关注检索质量。", model: model)
         let previous = try await store.retrieve("检索质量", using: NativeRetrieval())
