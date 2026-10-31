@@ -3,7 +3,7 @@ import XCTest
 @testable import VoiceOSCore
 import VoiceOSPlatform
 
-private actor ProgressivePanoramaFixture: PanoramaModelPort {
+actor ProgressivePanoramaFixture: PanoramaModelPort {
     nonisolated let configurationIdentity: String
     let rejectUnits: Bool
     let repairUnits: Bool
@@ -11,6 +11,7 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     let failGenerationAt: Int?
     let beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)?
     var transientFailures: Int
+    var unitTransientFailures: [String: Int]
     var failCoverage: Bool
     var failConsistency: Bool
     var generations=0, unitReviews=0, unitRepairs=0, syntheses=0, globalRepairs=0, evidenceReviews=0, coverageReviews=0, consistencyReviews=0
@@ -20,9 +21,11 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     var coverageTargets: [PanoramaCoverageTarget]=[]
 
     init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false, repairUnits: Bool = false, invalidQuote: Bool = false,
-         failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil) {
+         failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, unitTransientFailures: [String: Int] = [:],
+         beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil) {
         configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits; self.repairUnits=repairUnits; self.invalidQuote=invalidQuote
         self.failCoverage=failCoverage; self.failConsistency=failConsistency; self.beforeGenerate=beforeGenerate; self.transientFailures=transientFailures
+        self.unitTransientFailures=unitTransientFailures
     }
     private func receipt() -> PanoramaReceipt {
         serial += 1
@@ -36,6 +39,10 @@ private actor ProgressivePanoramaFixture: PanoramaModelPort {
     func generate(_ input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt) {
         generations += 1
         generatedSourceIDs.append(input.sources.map(\.id))
+        if let failedSource=input.sources.map(\.id).first(where: { unitTransientFailures[$0, default: 0] > 0 }) {
+            unitTransientFailures[failedSource, default: 0] -= 1
+            throw PanoramaTransientFailure(reason: "模拟上游服务暂时失败")
+        }
         if transientFailures > 0 { transientFailures -= 1; throw URLError(.networkConnectionLost) }
         if generations == failGenerationAt { throw VoiceOSError("模拟后续单元暂停") }
         try await beforeGenerate?(input)

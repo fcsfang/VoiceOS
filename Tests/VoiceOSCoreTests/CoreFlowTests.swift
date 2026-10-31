@@ -1517,6 +1517,59 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(timedOut.status, "failed")
         XCTAssertEqual(timedOut.error, "全景网络请求失败（错误码 -1001）；材料保留，请明确重试")
         XCTAssertNil(timedOut.snapshot)
+        let upstreamBody=try JSONSerialization.data(withJSONObject: ["status":"failed", "error":["code":"upstream_error"]])
+        let upstreamPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([.init(status: 200, body: upstreamBody)]))
+        do { _ = try await upstreamPort.generate(wireInput); XCTFail("上游失败应归类为可重试的瞬时失败") }
+        catch is PanoramaTransientFailure {}
+        catch { XCTFail("预期 PanoramaTransientFailure，实际 \(error)") }
+        let authBody=try JSONSerialization.data(withJSONObject: ["status":"failed", "error":["code":"invalid_api_key"]])
+        let authPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([.init(status: 200, body: authBody)]))
+        do { _ = try await authPort.generate(wireInput); XCTFail("认证失败必须保持终态拒绝") }
+        catch ModelPortFailure.rejected(let reason,_,_) { XCTAssertTrue(reason.contains("error.code=invalid_api_key")) }
+        catch { XCTFail("预期 ModelPortFailure.rejected，实际 \(error)") }
+        let starvationDirectory=root.appendingPathComponent("panorama-unit-failure")
+        let starvationStore=try VoiceOSStore(root: starvationDirectory, inspector: NativeMediaInspector())
+        try await starvationStore.recover()
+        var starvationIDs: [String]=[]
+        for (index, repetitions) in [40, 120, 260].enumerated() {
+            let id=try await starvationStore.recordUserExpression(String(repeating: "单元失败隔离材料第\(index)项。", count: repetitions))
+            _ = try await starvationStore.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+            starvationIDs.append(id)
+        }
+        let starvationContext=try await starvationStore.prepareLocalTranscriptContext(sourceIDs: starvationIDs, scalarBudget: Int.max)
+        _ = try await starvationStore.importOrganizedClaims(context: starvationContext, proposals: [], commandID: "unit-failure-fixture")
+        let starvationPort=ProgressivePanoramaFixture(unitTransientFailures: [starvationIDs[1]: 3])
+        do { try await starvationStore.generatePanorama(using: starvationPort); XCTFail("单元失败后整次尝试仍应汇总失败") } catch {}
+        let starvationState=try await starvationStore.panoramaState()
+        XCTAssertEqual(starvationState.status, "failed")
+        let starvationCalls=await starvationPort.generatedSourceIDs
+        XCTAssertTrue(starvationCalls.contains { $0.contains(starvationIDs[2]) }, "后续单元必须继续尝试；实际调用：\(starvationCalls)")
+        XCTAssertEqual(Set(starvationState.snapshot?.workflow?.verifiedUnitIDs ?? []), Set([starvationIDs[0], starvationIDs[2]]), "部分快照应保留已核对单元")
+        XCTAssertTrue(starvationState.error?.contains(starvationIDs[1]) == true, "失败信息应点名失败单元：\(starvationState.error ?? "nil")")
+        XCTAssertTrue(starvationState.error?.contains("已核对 2/3 个") == true, "失败信息应带核对进度：\(starvationState.error ?? "nil")")
+        let starvationSteps=try Database(starvationDirectory.appendingPathComponent("voiceos.sqlite")).query("SELECT state FROM panorama_steps WHERE stage='unit.generate' AND scope_id=? ORDER BY rowid", [starvationIDs[1]])
+        XCTAssertFalse(starvationSteps.isEmpty)
+        XCTAssertTrue(starvationSteps.allSatisfy { $0["state"] == "failed" }, "失败单元的生成步骤应记录为失败")
+        do { try await starvationStore.generatePanorama(using: starvationPort, retry: true) }
+        catch { XCTFail("明确重试应继续失败单元：\(error)") }
+        let starvationRecovered=try await starvationStore.panoramaState()
+        XCTAssertEqual(starvationRecovered.status, "completed")
+        let transientDirectory=root.appendingPathComponent("panorama-transient-unit")
+        let transientStore=try VoiceOSStore(root: transientDirectory, inspector: NativeMediaInspector())
+        try await transientStore.recover()
+        let transientID=try await transientStore.recordUserExpression("瞬时上游失败重试后仍须完成完整核对。")
+        _ = try await transientStore.setSourceLocalOnly(sourceID: transientID, expectedVersion: 1, localOnly: false)
+        let transientContext=try await transientStore.prepareLocalTranscriptContext(sourceIDs: [transientID], scalarBudget: Int.max)
+        _ = try await transientStore.importOrganizedClaims(context: transientContext, proposals: [], commandID: "transient-fixture")
+        let transientPort=ProgressivePanoramaFixture(unitTransientFailures: [transientID: 2])
+        do { try await transientStore.generatePanorama(using: transientPort) }
+        catch { XCTFail("瞬时上游失败应在重试后完成：\(error)") }
+        let transientState=try await transientStore.panoramaState()
+        XCTAssertEqual(transientState.status, "completed")
+        let transientGenerations=await transientPort.generations
+        XCTAssertEqual(transientGenerations, 3, "单元生成应经历两次重试后成功")
+        let transientSteps=try Database(transientDirectory.appendingPathComponent("voiceos.sqlite")).query("SELECT state FROM panorama_steps WHERE stage='unit.generate' ORDER BY rowid")
+        XCTAssertEqual(transientSteps.compactMap { $0["state"] }, ["failed", "failed", "completed"])
         do { try await store.generatePanorama(using: panorama, retry: true); XCTFail("全局核对尚未完成不能完成全景") }
         catch { XCTAssertEqual((error as? VoiceOSError)?.message, "当前模型端口尚不支持跨单元全景核对，已核对区域保留") }
         try await store.generatePanorama(using: panorama)

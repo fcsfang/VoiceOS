@@ -1,5 +1,10 @@
 import Foundation
 
+public struct PanoramaTransientFailure: Error, Sendable, LocalizedError {
+    public let reason: String
+    public var errorDescription: String? { reason }
+}
+
 public struct ResponsesPanoramaPort: PanoramaModelPort {
     private let endpoint: URL
     private let apiKey: String
