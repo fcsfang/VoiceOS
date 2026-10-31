@@ -15,18 +15,23 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     var unitTransientFailures: [String: Int]
     var failCoverage: Bool
     var failConsistency: Bool
+    var invalidFocusAttempts: Int
+    let failFocusAt: Int?
     var generations=0, unitReviews=0, unitRepairs=0, syntheses=0, globalRepairs=0, evidenceReviews=0, coverageReviews=0, consistencyReviews=0
     var generatedSourceIDs: [[String]]=[]
+    var focusCalls: [PanoramaGenerationFocus]=[]
+    var focusTargets: [PanoramaCoverageTarget]=[]
     var serial=0
     var sawPriorGlobalRejection=false
     var coverageTargets: [PanoramaCoverageTarget]=[]
 
     init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false, repairUnits: Bool = false, invalidQuote: Bool = false,
          failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, unitTransientFailures: [String: Int] = [:], invalidQuoteAttempts: Int = 0,
-         beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil) {
+         invalidFocusAttempts: Int = 0, failFocusAt: Int? = nil, beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil) {
         configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits; self.repairUnits=repairUnits; self.invalidQuote=invalidQuote
         self.failCoverage=failCoverage; self.failConsistency=failConsistency; self.beforeGenerate=beforeGenerate; self.transientFailures=transientFailures
         self.unitTransientFailures=unitTransientFailures; self.invalidQuoteAttempts=invalidQuoteAttempts
+        self.invalidFocusAttempts=invalidFocusAttempts; self.failFocusAt=failFocusAt
     }
     private func receipt() -> PanoramaReceipt {
         serial += 1
@@ -40,6 +45,11 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     func generate(_ input: PanoramaInput) async throws -> (PanoramaProposal, PanoramaReceipt) {
         generations += 1
         generatedSourceIDs.append(input.sources.map(\.id))
+        // Models the measured failure this change exists to remove: one response
+        // cannot finish an oversized unit inside the service's 600-second stream.
+        if input.sources.reduce(0, { $0+$1.transcript.text.unicodeScalars.count }) > 16_000 {
+            throw VoiceOSError("模拟单请求超出服务端 600 秒窗口")
+        }
         if let failedSource=input.sources.map(\.id).first(where: { unitTransientFailures[$0, default: 0] > 0 }) {
             unitTransientFailures[failedSource, default: 0] -= 1
             throw PanoramaTransientFailure(reason: "模拟上游服务暂时失败")
@@ -57,6 +67,53 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
         }
         return (.init(regions: [.init(id: "r", title: "检索条件", summary: "完整材料的条件核对")], questions: questions,
             relations: [], unrepresentedSources: [], unrepresentedClaims: []),receipt())
+    }
+    func generate(_ input: PanoramaInput, focus: PanoramaGenerationFocus, target: PanoramaCoverageTarget) async throws -> (PanoramaProposal, PanoramaReceipt) {
+        focusCalls.append(focus)
+        focusTargets.append(target)
+        if let failFocusAt, focusCalls.count == failFocusAt { throw VoiceOSError("模拟聚焦分片暂停") }
+        let regionID="r"
+        let claimsByID=Dictionary(uniqueKeysWithValues: input.claims.map { ($0.id,$0) })
+        let sourceByID=Dictionary(uniqueKeysWithValues: input.sources.map { ($0.id,$0) })
+        func scalars(_ range: PanoramaFocusRange) throws -> (PanoramaSource, [Unicode.Scalar]) {
+            guard let source=sourceByID[range.sourceID] else { throw VoiceOSError("聚焦分片来源缺失") }
+            return (source, Array(source.transcript.text.unicodeScalars))
+        }
+        func overlappingClaims(_ range: PanoramaFocusRange, source: PanoramaSource) -> [String] {
+            target.claimIDs.filter { id in
+                claimsByID[id]?.references.contains { ref in
+                    ref.sourceID == range.sourceID && ref.transcriptVersionID == range.transcriptVersionID &&
+                    source.transcript.spans.contains { $0.id == ref.spanID && $0.textEnd > range.start && $0.textStart < range.end }
+                } == true
+            }
+        }
+        var questions: [PanoramaQuestion]=[]
+        for (index, range) in focus.ranges.enumerated() {
+            let (source, text)=try scalars(range)
+            let quote=String(String.UnicodeScalarView(text[range.start..<range.end]))
+            questions.append(.init(id: "q\(index)", regionID: regionID, title: "分片聚焦问题", summary: source.title,
+                evidence: [.init(sourceID: range.sourceID, transcriptVersionID: range.transcriptVersionID, start: range.start, end: range.end,
+                                 quote: quote, claimIDs: overlappingClaims(range, source: source))]))
+        }
+        if invalidFocusAttempts > 0, let first=focus.ranges.first {
+            invalidFocusAttempts -= 1
+            let (_, text)=try scalars(first)
+            let start = first.end+2 <= text.count ? first.end : first.start-2
+            if start >= 0, start+2 <= text.count {
+                let quote=String(String.UnicodeScalarView(text[start..<(start+2)]))
+                let extra=PanoramaEvidence(sourceID: first.sourceID, transcriptVersionID: first.transcriptVersionID,
+                    start: start, end: start+2, quote: quote, claimIDs: [])
+                questions[0] = .init(id: questions[0].id, regionID: questions[0].regionID, title: questions[0].title,
+                    summary: questions[0].summary, evidence: questions[0].evidence+[extra])
+            }
+        }
+        let representedSources=Set(questions.flatMap(\.evidence).map(\.sourceID))
+        let representedClaims=Set(questions.flatMap(\.evidence).flatMap(\.claimIDs))
+        let proposal=PanoramaProposal(regions: [.init(id: regionID, title: "分片聚焦区域", summary: "只依据本片全文范围")],
+            questions: questions, relations: [],
+            unrepresentedSources: target.sourceIDs.filter { !representedSources.contains($0) }.map { .init(id: $0, reason: "聚焦范围未覆盖该来源") },
+            unrepresentedClaims: target.claimIDs.filter { !representedClaims.contains($0) }.map { .init(id: $0, reason: "聚焦范围未涉及该观点") })
+        return (proposal,receipt())
     }
     func verify(_ proposal: PanoramaProposal, input: PanoramaInput, priorRejection: PanoramaRejection?) async throws -> (PanoramaReview, PanoramaReceipt) {
         unitReviews += 1
@@ -457,5 +514,346 @@ extension CoreFlowTests {
         let state=try await store.panoramaState()
         XCTAssertEqual(state.status,"completed")
         XCTAssertNotNil(state.snapshot)
+    }
+}
+
+extension CoreFlowTests {
+    func assertPanoramaSlicedGeneration(root: URL) async throws {
+        try assertPanoramaSlicingPlanAndMerge()
+        try await assertPanoramaFocusedGeneration(root: root.appendingPathComponent("focused-generation"))
+        try await assertPanoramaFocusViolationRetry(root: root.appendingPathComponent("focused-violation"))
+        try await assertPanoramaSliceFailureReuse(root: root.appendingPathComponent("focused-failure"))
+        try await assertPanoramaLegacyGenerationReplay(root: root.appendingPathComponent("focused-legacy"))
+        try await assertPanoramaSlicedRepair(root: root.appendingPathComponent("focused-repair"))
+        try await assertPanoramaFocusedWire()
+        print("Panorama sliced generation planned, merged, reused failed slices, replayed legacy rows, and repaired per slice")
+    }
+
+    private func slicingSource(_ id: String, text: String, spanSize: Int) -> PanoramaSource {
+        var spans: [TranscriptSpan]=[], start=0
+        let count=text.unicodeScalars.count
+        while start < count {
+            let end=min(count, start+spanSize)
+            spans.append(.init(textStart: start, textEnd: end))
+            start=end
+        }
+        return PanoramaSource(transcript: .init(sourceID: id, sourceVersionID: id+"-version", transcriptVersionID: id+"-text",
+            origin: "user", speaker: "user", localOnly: false, text: text, spans: spans), title: id, occurredAt: "2026-11-01", policyVersion: 1)
+    }
+
+    private func slicingInput(_ sources: [PanoramaSource], claims: [PanoramaClaim]=[], unitID: String) -> PanoramaInput {
+        let unit=PanoramaUnit(id: unitID, sourceIDs: [sources[0].id], dependencyIDs: sources.dropFirst().map(\.id),
+            producerID: "fixture", completionDigest: "complete")
+        return PanoramaInput(manifest: .init(digest: "slicing-fixture", sourceIDs: sources.map(\.id), claimIDs: claims.map(\.id), unitIDs: [unitID]),
+            units: [unit], sources: sources, claims: claims, exclusions: [])
+    }
+
+    private func assertPanoramaSlicingPlanAndMerge() throws {
+        let policy=PanoramaUnitSlicePolicy.current
+        XCTAssertEqual(policy.version,"panorama-unit-slices-v1")
+        XCTAssertEqual(policy.unitScalarThreshold,16_000)
+        XCTAssertEqual(policy.focusScalarBudget,8_000)
+
+        let main=slicingSource("a-main",text: String(repeating: "字",count: 26_868),spanSize: 1_000)
+        let dependencyText=String(repeating: "依赖",count: 16)
+        let dependency=slicingSource("b-dep",text: dependencyText,spanSize: dependencyText.unicodeScalars.count)
+        let claimMain=PanoramaClaim(id: "claim-main",statement: "检索条件需要保留。",ownership: "unresolved",reviewVersion: 1,
+            references: [.init(sourceID: main.id,transcriptVersionID: main.transcript.transcriptVersionID,spanID: main.transcript.spans[0].id)])
+        let claimDependency=PanoramaClaim(id: "claim-dependency",statement: "依赖来源仍需完整阅读。",ownership: "unresolved",reviewVersion: 1,
+            references: [.init(sourceID: dependency.id,transcriptVersionID: dependency.transcript.transcriptVersionID,spanID: dependency.transcript.spans[0].id)])
+        let input=slicingInput([main,dependency],claims: [claimMain,claimDependency],unitID: "big-unit")
+        let plan=try XCTUnwrap(try PanoramaUnitSlicePlan.make(unitID: "big-unit",input: input))
+        XCTAssertEqual(plan.slices.count,4)
+        XCTAssertEqual(plan.slices.map { $0.focus.ranges.reduce(0) { $0+$1.end-$1.start } },[8_000,8_000,8_000,2_900])
+        XCTAssertEqual(plan.slices.map(\.focus.ordinal),[1,2,3,4])
+        XCTAssertEqual(plan.slices.map(\.focus.count),[4,4,4,4])
+        XCTAssertEqual(plan.slices.last?.focus.ranges.last?.sourceID,dependency.id)
+        XCTAssertTrue(plan.slices[0].target.claimIDs.contains(claimMain.id))
+        XCTAssertFalse(plan.slices[0].target.claimIDs.contains(claimDependency.id))
+        XCTAssertTrue(plan.slices[3].target.claimIDs.contains(claimDependency.id))
+        XCTAssertFalse(plan.slices[3].target.claimIDs.contains(claimMain.id))
+        XCTAssertTrue(plan.slices[1].target.claimIDs.isEmpty)
+        let spanEnds=Set(main.transcript.spans.map(\.textEnd))
+        for range in plan.slices.flatMap(\.focus.ranges) where range.sourceID == main.id {
+            XCTAssertTrue(range.start == 0 || spanEnds.contains(range.start))
+            XCTAssertTrue(spanEnds.contains(range.end))
+        }
+        let again=try XCTUnwrap(try PanoramaUnitSlicePlan.make(unitID: "big-unit",input: input))
+        XCTAssertEqual(again.digest,plan.digest)
+        XCTAssertEqual(again.slices.map(\.focus),plan.slices.map(\.focus))
+
+        let smallInput=slicingInput([slicingSource("small",text: String(repeating: "字",count: 7_184),spanSize: 1_000)],unitID: "small-unit")
+        XCTAssertNil(try PanoramaUnitSlicePlan.make(unitID: "small-unit",input: smallInput))
+
+        let emoji=slicingSource("emoji",text: String(repeating: "👩‍💻",count: 10_000),spanSize: 30_000)
+        let emojiPlan=try XCTUnwrap(try PanoramaUnitSlicePlan.make(unitID: "emoji-unit",input: slicingInput([emoji],unitID: "emoji-unit")))
+        let emojiRanges=emojiPlan.slices.flatMap(\.focus.ranges)
+        XCTAssertEqual(emojiRanges.map { $0.end-$0.start },[7_998,7_998,7_998,6_006])
+        XCTAssertEqual(emojiRanges.first?.start,0)
+        XCTAssertEqual(emojiRanges.last?.end,30_000)
+        for range in emojiRanges {
+            let index=emoji.transcript.text.unicodeScalars.index(emoji.transcript.text.startIndex,offsetBy: range.end)
+            // `indices` is half-open, so a cut at the end of the text is safe but not contained.
+            XCTAssertTrue(index == emoji.transcript.text.endIndex || emoji.transcript.text.indices.contains(index))
+        }
+
+        func overlappingClaimIDs(_ range: PanoramaFocusRange) -> [String] {
+            let spans = range.sourceID == main.id ? main.transcript.spans : dependency.transcript.spans
+            return input.claims.filter { claim in
+                claim.references.contains { ref in
+                    ref.sourceID == range.sourceID && ref.transcriptVersionID == range.transcriptVersionID &&
+                    spans.contains { $0.id == ref.spanID && $0.textEnd > range.start && $0.textStart < range.end }
+                }
+            }.map(\.id)
+        }
+        func sliceEvidence(_ range: PanoramaFocusRange) -> PanoramaEvidence {
+            let source = range.sourceID == main.id ? main : dependency
+            let text=Array(source.transcript.text.unicodeScalars)
+            return .init(sourceID: range.sourceID,transcriptVersionID: range.transcriptVersionID,start: range.start,end: range.end,
+                quote: String(String.UnicodeScalarView(text[range.start..<range.end])),claimIDs: overlappingClaimIDs(range))
+        }
+        var proposals: [PanoramaProposal]=[]
+        for (index, slice) in plan.slices.enumerated() {
+            var ranges=slice.focus.ranges
+            var sources: [PanoramaUnrepresented]=[], claims: [PanoramaUnrepresented]=[]
+            if index == 3 {
+                ranges=ranges.filter { $0.sourceID == main.id }
+                sources=[.init(id: dependency.id,reason: "依赖只在上下文中出现")]
+                claims=[.init(id: claimDependency.id,reason: "观点只作上下文")]
+            }
+            let questions=ranges.enumerated().map { offset, range in
+                PanoramaQuestion(id: "q\(offset)",regionID: "r",title: "如何保留检索条件？",summary: "完整材料的条件核对",evidence: [sliceEvidence(range)])
+            }
+            proposals.append(.init(regions: [.init(id: "r",title: "检索条件",summary: "完整材料的条件核对")],
+                questions: questions,relations: [],unrepresentedSources: sources,unrepresentedClaims: claims))
+        }
+        let merged=try plan.merge(proposals)
+        XCTAssertEqual(Set(merged.regions.map(\.id)).count,merged.regions.count)
+        XCTAssertTrue(merged.regions.allSatisfy { $0.id.hasPrefix("part[") })
+        XCTAssertEqual(merged.questions.map(\.id),["part[1]/q0","part[2]/q0","part[3]/q0","part[4]/q0"])
+        XCTAssertEqual(merged.unrepresentedSources.map(\.id),[dependency.id])
+        XCTAssertEqual(merged.unrepresentedSources.first?.reason,"依赖只在上下文中出现")
+        XCTAssertEqual(merged.unrepresentedClaims.map(\.id),[claimDependency.id])
+        XCTAssertEqual(merged.unrepresentedClaims.first?.reason,"观点只作上下文")
+        _ = try VoiceOSStore.validatePanorama(merged,input: input)
+
+        let duplicate=sliceEvidence(plan.slices[0].focus.ranges[0])
+        var withOverlap=proposals
+        withOverlap[1] = .init(regions: [.init(id: "r-overlap",title: "重叠证据",summary: "重叠证据仍可合并")],
+            questions: [.init(id: "q0",regionID: "r-overlap",title: "重叠证据",summary: "重叠证据仍可合并",
+                evidence: [duplicate,duplicate])],relations: [],unrepresentedSources: [],unrepresentedClaims: [])
+        let mergedOverlap=try plan.merge(withOverlap)
+        XCTAssertEqual(mergedOverlap.questions.first { $0.id == "part[2]/q0" }?.evidence.count,2)
+
+        var prefixed=proposals
+        prefixed[0] = .init(regions: proposals[0].regions.map { .init(id: "part[1]/"+$0.id,title: $0.title,summary: $0.summary) },
+            questions: proposals[0].questions.map { .init(id: "part[1]/"+$0.id,regionID: "part[1]/"+$0.regionID,title: $0.title,
+                summary: $0.summary,evidence: $0.evidence) },relations: [],unrepresentedSources: [],unrepresentedClaims: [])
+        XCTAssertEqual(try plan.merge(prefixed).regions.first?.id,"part[1]/r")
+    }
+
+    private func assertPanoramaFocusedGeneration(root: URL) async throws {
+        let long=String(repeating: "长文",count: 9_000), small="短材料，保留完整检索条件。"
+        let store=try await panoramaFixtureStore(root,texts: [small,long])
+        let port=ProgressivePanoramaFixture(identity: "focused-fixture")
+        try await store.generatePanorama(using: port)
+        let state=try await store.panoramaState()
+        XCTAssertEqual(state.status,"completed")
+        let snapshot=try XCTUnwrap(state.snapshot)
+        XCTAssertEqual(snapshot.workflow?.verifiedUnitIDs.count,2)
+        let calls=await port.focusCalls, targets=await port.focusTargets, generations=await port.generations
+        XCTAssertEqual(calls.count,3)
+        XCTAssertEqual(calls.map(\.ordinal),[1,2,3])
+        XCTAssertEqual(Set(calls.map(\.count)),Set([3]))
+        XCTAssertEqual(generations,1)
+        XCTAssertTrue(targets.allSatisfy { !$0.sourceIDs.isEmpty })
+        let source=try XCTUnwrap(snapshot.input.sources.first { $0.transcript.text == long })
+        let unit=try XCTUnwrap(snapshot.input.units.first { $0.sourceIDs.contains(source.id) })
+        let database=try Database(root.appendingPathComponent("voiceos.sqlite"))
+        let slices=try database.query("SELECT state,scope_id FROM panorama_steps WHERE stage='unit.focus.generate' ORDER BY rowid")
+        XCTAssertEqual(slices.compactMap { $0["state"] },["completed","completed","completed"])
+        XCTAssertEqual(slices.compactMap { $0["scope_id"] },(1...3).map { "\(unit.id)#slice-\($0)" })
+        let row=try XCTUnwrap(database.query("SELECT input_json,result_json,receipt_json FROM panorama_steps WHERE stage='unit.generate' AND scope_id=?",[unit.id]).first)
+        let record=try PanoramaUnitGenerationRecord.decode(Data(try XCTUnwrap(row["input_json"]).utf8))
+        guard case .sliced(let sliced)=record else { return XCTFail("超大单元应写入自描述分片记录") }
+        XCTAssertEqual(sliced.policy.version,"panorama-unit-slices-v1")
+        let receipt=try JSONDecoder().decode(PanoramaReceipt.self,from:Data(try XCTUnwrap(row["receipt_json"]).utf8))
+        XCTAssertTrue(receipt.responseID.hasPrefix("panorama-slices-v1:generate:"))
+        XCTAssertEqual(receipt.sourceResponseIDs?.count,3)
+        XCTAssertEqual(receipt.generationIdentity,"focused-fixture|unit-slices-v1")
+        let merged=try JSONDecoder().decode(PanoramaProposal.self,from:Data(try XCTUnwrap(row["result_json"]).utf8))
+        XCTAssertTrue(merged.regions.allSatisfy { $0.id.hasPrefix("part[") })
+        let workflowReceipt=snapshot.workflow?.receipts.first { $0.stage == "unit.generate" && $0.scopeID == unit.id }
+        XCTAssertEqual(workflowReceipt?.receipt.responseID,receipt.responseID)
+    }
+
+    private func assertPanoramaFocusViolationRetry(root: URL) async throws {
+        let store=try await panoramaFixtureStore(root,texts: [String(repeating: "长文",count: 9_000)])
+        let port=ProgressivePanoramaFixture(identity: "focus-violation-fixture",invalidFocusAttempts: 1)
+        try await store.generatePanorama(using: port)
+        let state=try await store.panoramaState(), calls=await port.focusCalls
+        XCTAssertEqual(state.status,"completed")
+        XCTAssertEqual(calls.count,4)
+        XCTAssertEqual(calls.filter { $0.ordinal == 1 }.count,2)
+        let database=try Database(root.appendingPathComponent("voiceos.sqlite"))
+        let rows=try database.query("SELECT state FROM panorama_steps WHERE stage='unit.focus.generate' AND scope_id LIKE '%#slice-1' ORDER BY rowid")
+        XCTAssertEqual(rows.compactMap { $0["state"] },["failed","completed"])
+    }
+
+    private func assertPanoramaSliceFailureReuse(root: URL) async throws {
+        let store=try await panoramaFixtureStore(root,texts: [String(repeating: "长文",count: 9_000)])
+        let port=ProgressivePanoramaFixture(identity: "focus-failure-fixture",failFocusAt: 2)
+        do { try await store.generatePanorama(using: port); XCTFail("聚焦分片失败应让该单元失败") }
+        catch let failure as PanoramaUnitFailures {
+            XCTAssertEqual(failure.unitIDs.count,1)
+            XCTAssertFalse(failure.errorDescription?.contains("#slice") == true)
+        }
+        let first=try await store.panoramaState()
+        XCTAssertEqual(first.status,"failed")
+        XCTAssertFalse(first.error?.contains("#slice") == true)
+        let current=try await store.panoramaInput()
+        let unitID=try XCTUnwrap(current.units.first?.id)
+        let database=try Database(root.appendingPathComponent("voiceos.sqlite"))
+        var rows=try database.query("SELECT state FROM panorama_steps WHERE stage='unit.focus.generate' ORDER BY rowid")
+        XCTAssertEqual(rows.compactMap { $0["state"] },["completed","failed"])
+        let firstOrdinals=await port.focusCalls.map(\.ordinal)
+        XCTAssertEqual(firstOrdinals,[1,2])
+        try await store.generatePanorama(using: port,retry: true)
+        let resumed=try await store.panoramaState()
+        XCTAssertEqual(resumed.status,"completed")
+        let resumedOrdinals=await port.focusCalls.map(\.ordinal)
+        XCTAssertEqual(resumedOrdinals,[1,2,2,3])
+        rows=try database.query("SELECT state FROM panorama_steps WHERE stage='unit.focus.generate' ORDER BY rowid")
+        XCTAssertEqual(rows.compactMap { $0["state"] },["completed","failed","completed","completed"])
+        let sliceTwo=try database.query("SELECT state FROM panorama_steps WHERE stage='unit.focus.generate' AND scope_id=? ORDER BY rowid",["\(unitID)#slice-2"])
+        XCTAssertEqual(sliceTwo.compactMap { $0["state"] },["failed","completed"])
+    }
+
+    private func assertPanoramaLegacyGenerationReplay(root: URL) async throws {
+        let store=try await panoramaFixtureStore(root,texts: [String(repeating: "长文",count: 9_000)])
+        let whole=try await store.panoramaInput()
+        let unit=try XCTUnwrap(whole.units.first)
+        let scoped=try VoiceOSStore.panoramaScope(whole,sourceIDs: Set(unit.sourceIDs+unit.dependencyIDs))
+        let source=try XCTUnwrap(scoped.sources.first)
+        let proposal=PanoramaProposal(regions: [.init(id: "r",title: "检索条件",summary: "完整材料的条件核对")],
+            questions: [.init(id: "q",regionID: "r",title: "如何保留检索条件？",summary: "完整材料",
+                evidence: [.init(sourceID: source.id,transcriptVersionID: source.transcript.transcriptVersionID,start: 0,
+                    end: source.transcript.text.unicodeScalars.count,quote: source.transcript.text,claimIDs: [])])],
+            relations: [],
+            unrepresentedSources: scoped.manifest.sourceIDs.filter { $0 != source.id }.map { .init(id: $0,reason: "本轮未归入具体问题") },
+            unrepresentedClaims: [])
+        let review=PanoramaReview(questions: [.init(id: "q",accepted: true,reason: "完整原话一致")],relations: [],
+            coverageAccepted: true,reason: "本次指定范围全部核对")
+        let generation=PanoramaReceipt(responseID: "legacy-raw-response",model: "progressive-fixture",createdAt: "2026-10-23T00:00:00Z")
+        let verification=PanoramaReceipt(responseID: "legacy-review-response",model: "progressive-fixture",createdAt: "2026-10-23T00:00:00Z")
+        let attempt="legacy-attempt-"+UUID().uuidString
+        let database=try Database(root.appendingPathComponent("voiceos.sqlite"))
+        try database.execute("INSERT INTO panorama_attempts(id,digest,state,input_json,created_at) VALUES(?,?,'completed','{}','fixture')",[attempt,"legacy-fixture-digest"])
+        func insertStep(_ stage: String, _ input: String, _ result: String, _ receipt: String) throws {
+            let digest=VoiceOSStore.relevanceHash(Data(("panorama-staged-v1|progressive-fixture|"+input).utf8))
+            try database.execute("INSERT INTO panorama_steps(id,attempt_id,stage,scope_id,input_digest,state,input_json,result_json,receipt_json,created_at,finished_at) VALUES(?,?,?,?,?,'completed',?,?,?,'fixture','fixture')",
+                [UUID().uuidString,attempt,stage,unit.id,digest,input,result,receipt])
+        }
+        try insertStep("unit.generate",VoiceOSStore.relevanceJSON(scoped),VoiceOSStore.relevanceJSON(proposal),VoiceOSStore.relevanceJSON(generation))
+        try insertStep("unit.review",VoiceOSStore.relevanceJSON(PanoramaProposalInput(input: scoped,proposal: proposal)),
+            VoiceOSStore.relevanceJSON(review),VoiceOSStore.relevanceJSON(verification))
+        let port=ProgressivePanoramaFixture(identity: "progressive-fixture")
+        try await store.generatePanorama(using: port)
+        let state=try await store.panoramaState()
+        XCTAssertEqual(state.status,"completed")
+        let snapshot=try XCTUnwrap(state.snapshot)
+        let reused=snapshot.workflow?.receipts.first { $0.stage == "unit.generate" && $0.scopeID == unit.id }
+        XCTAssertEqual(reused?.receipt.responseID,"legacy-raw-response")
+        let focusCalls=await port.focusCalls, generations=await port.generations
+        XCTAssertTrue(focusCalls.isEmpty)
+        XCTAssertEqual(generations,0)
+    }
+
+    private func assertPanoramaSlicedRepair(root: URL) async throws {
+        let store=try await panoramaFixtureStore(root,texts: [String(repeating: "长文",count: 9_000)])
+        let port=ProgressivePanoramaFixture(identity: "sliced-repair-fixture",repairUnits: true)
+        try await store.generatePanorama(using: port)
+        let state=try await store.panoramaState()
+        XCTAssertEqual(state.status,"completed")
+        let repairs=await port.unitRepairs, reviews=await port.unitReviews
+        XCTAssertEqual(repairs,3)
+        XCTAssertEqual(reviews,2)
+        let unit=try XCTUnwrap(state.snapshot?.input.units.first)
+        let database=try Database(root.appendingPathComponent("voiceos.sqlite"))
+        let row=try XCTUnwrap(database.query("SELECT input_json,receipt_json FROM panorama_steps WHERE stage='unit.repair' AND scope_id=?",[unit.id]).first)
+        let record=try JSONDecoder().decode(PanoramaSlicedRepairRecord.self,from:Data(try XCTUnwrap(row["input_json"]).utf8))
+        XCTAssertEqual(record.kind,"panorama-unit-slices-v1")
+        let receipt=try JSONDecoder().decode(PanoramaReceipt.self,from:Data(try XCTUnwrap(row["receipt_json"]).utf8))
+        XCTAssertTrue(receipt.responseID.hasPrefix("panorama-slices-v1:repair:"))
+        XCTAssertEqual(receipt.sourceResponseIDs?.count,3)
+        let slices=try database.query("SELECT state FROM panorama_steps WHERE stage='unit.focus.repair' ORDER BY rowid")
+        XCTAssertEqual(slices.compactMap { $0["state"] },["completed","completed","completed"])
+        XCTAssertFalse(try database.query("SELECT id FROM panorama_steps WHERE stage='unit.review-repair'").isEmpty)
+    }
+
+    private func assertPanoramaFocusedWire() async throws {
+        let texts=["聚焦分片仍须读取完整原文。","另一来源只作上下文。"]
+        let sources=texts.enumerated().map { index, text in
+            PanoramaSource(transcript: .init(sourceID: "canonical-source-\(index)",sourceVersionID: "canonical-source-version-\(index)",
+                transcriptVersionID: "canonical-text-\(index)",origin: "user",speaker: "user",localOnly: false,text: text,
+                spans: [.init(textStart: 0,textEnd: text.unicodeScalars.count)]),title: "完整来源\(index)",occurredAt: "2026-11-01",policyVersion: 1)
+        }
+        let unit=PanoramaUnit(id: "canonical-unit",sourceIDs: [sources[0].id],dependencyIDs: [sources[1].id],producerID: "fixture",completionDigest: "complete")
+        let claim=PanoramaClaim(id: "canonical-claim",statement: "聚焦分片需要完整上下文。",ownership: "unresolved",reviewVersion: 1,
+            references: [.init(sourceID: sources[0].id,transcriptVersionID: sources[0].transcript.transcriptVersionID,spanID: sources[0].transcript.spans[0].id)])
+        let input=PanoramaInput(manifest: .init(digest: "focus-wire",sourceIDs: sources.map(\.id),claimIDs: [claim.id],unitIDs: [unit.id]),
+            units: [unit],sources: sources,claims: [claim],exclusions: [])
+        let focus=PanoramaGenerationFocus(unitID: unit.id,ordinal: 1,count: 1,ranges: [
+            .init(sourceID: sources[0].id,transcriptVersionID: sources[0].transcript.transcriptVersionID,start: 0,
+                  end: sources[0].transcript.text.unicodeScalars.count)])
+        let target=PanoramaCoverageTarget(sourceIDs: [sources[0].id],claimIDs: [claim.id])
+        let proposal=PanoramaProposal(regions: [],questions: [],relations: [],unrepresentedSources: [],unrepresentedClaims: [])
+        let replyText=String(decoding: try JSONEncoder().encode(proposal),as: UTF8.self)
+        let message: [String:Any]=["type":"message","role":"assistant","status":"completed","content":[["type":"output_text","text":replyText]]]
+        let reply=ModelHTTPReply(status: 200,body: try JSONSerialization.data(withJSONObject: ["id":"focus-wire-response","status":"completed","output": [message]]))
+        let transport=PanoramaWireTransport([reply])
+        let port=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!,apiKey: "fixture",model: "fixture",transport: transport)
+        let result=try await port.generate(input,focus: focus,target: target)
+        XCTAssertEqual(result.1.responseID,"focus-wire-response")
+        let requests=await transport.requests
+        let body=try XCTUnwrap(JSONSerialization.jsonObject(with: try XCTUnwrap(requests.first)) as? [String:Any])
+        let messages=try XCTUnwrap(body["input"] as? [[String:Any]])
+        let content=try XCTUnwrap(messages.first?["content"] as? String)
+        let request=try XCTUnwrap(JSONSerialization.jsonObject(with: Data(content.utf8)) as? [String:Any])
+        let sentInput=try XCTUnwrap(request["input"] as? [String:Any])
+        let sentSources=try XCTUnwrap(sentInput["sources"] as? [[String:Any]])
+        XCTAssertEqual(sentSources.compactMap { $0["text"] as? String },texts)
+        let sentFocus=try XCTUnwrap(request["focus"] as? [String:Any])
+        XCTAssertEqual(sentFocus["unitID"] as? String,"u1")
+        XCTAssertEqual(sentFocus["ordinal"] as? Int,1)
+        let ranges=try XCTUnwrap(sentFocus["ranges"] as? [[String:Any]])
+        XCTAssertEqual(ranges.first?["sourceID"] as? String,"s1")
+        XCTAssertEqual(ranges.first?["transcriptVersionID"] as? String,"t1")
+        XCTAssertEqual(ranges.first?["start"] as? Int,0)
+        XCTAssertEqual(ranges.first?["end"] as? Int,texts[0].unicodeScalars.count)
+        let sentTarget=try XCTUnwrap(request["target"] as? [String:Any])
+        XCTAssertEqual(sentTarget["sourceIDs"] as? [String],["s1"])
+        XCTAssertEqual(sentTarget["claimIDs"] as? [String],["c1"])
+        let format=try XCTUnwrap((body["text"] as? [String:Any])?["format"] as? [String:Any])
+        XCTAssertEqual(format["name"] as? String,"voiceos_panorama_focus")
+        let instructions=try XCTUnwrap(body["instructions"] as? String)
+        XCTAssertTrue(instructions.contains("聚焦分片"))
+        XCTAssertTrue(instructions.contains("全文坐标"))
+        XCTAssertThrowsError(try PanoramaModelInput(input).focusForModel(.init(unitID: unit.id,ordinal: 1,count: 1,
+            ranges: [.init(sourceID: sources[0].id,transcriptVersionID: "wrong-version",start: 0,end: 1)])))
+    }
+
+    private func panoramaFixtureStore(_ root: URL, texts: [String]) async throws -> VoiceOSStore {
+        let store=try VoiceOSStore(root: root,inspector: NativeMediaInspector())
+        try await store.recover()
+        var ids: [String]=[]
+        for text in texts {
+            let id=try await store.recordUserExpression(text)
+            _ = try await store.setSourceLocalOnly(sourceID: id,expectedVersion: 1,localOnly: false)
+            ids.append(id)
+        }
+        let context=try await store.prepareLocalTranscriptContext(sourceIDs: ids,scalarBudget: Int.max)
+        _ = try await store.importOrganizedClaims(context: context,proposals: [],commandID: "slices-fixture")
+        return store
     }
 }

@@ -1367,6 +1367,7 @@ final class CoreFlowTests: XCTestCase {
         try await assertPanoramaProgressiveRecovery(root: root)
         try await assertPanoramaTitleChangeContinues(root: root)
         try await assertPanoramaQuoteRetry(root: root)
+        try await assertPanoramaSlicedGeneration(root: root)
         let store = try await openStore(), model = FlowModel()
         let oldID = try await expression(store, text: "记忆系统需要关注检索质量。", model: model)
         let previous = try await store.retrieve("检索质量", using: NativeRetrieval())
@@ -1606,7 +1607,7 @@ final class CoreFlowTests: XCTestCase {
         do { try await failureStore.generatePanorama(using: timedOutPort, retry: true); XCTFail("网络失败不能发布") } catch {}
         let timedOut=try await failureStore.panoramaState()
         XCTAssertEqual(timedOut.status, "failed")
-        XCTAssertTrue(timedOut.error?.contains("全景网络请求失败（错误码 -1001）；材料保留，请明确重试") == true, "失败信息应保留网络原因：\(timedOut.error ?? "nil")")
+        XCTAssertTrue(timedOut.error?.contains("全景请求达到单次 600 秒窗口；未发布部分结果，材料保留，可明确重试") == true, "失败信息应保留网络原因：\(timedOut.error ?? "nil")")
         XCTAssertNil(timedOut.snapshot)
         let upstreamBody=try JSONSerialization.data(withJSONObject: ["status":"failed", "error":["code":"upstream_error"]])
         let upstreamPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([.init(status: 200, body: upstreamBody)]))
