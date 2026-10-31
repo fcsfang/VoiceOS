@@ -1280,6 +1280,7 @@ final class CoreFlowTests: XCTestCase {
         try assertPanoramaDatabaseReopens()
         try await assertPanoramaSchemaRepair()
         try await assertPanoramaProgressiveRecovery(root: root)
+        try await assertPanoramaTitleChangeContinues(root: root)
         let store = try await openStore(), model = FlowModel()
         let oldID = try await expression(store, text: "记忆系统需要关注检索质量。", model: model)
         let previous = try await store.retrieve("检索质量", using: NativeRetrieval())
@@ -1477,46 +1478,103 @@ final class CoreFlowTests: XCTestCase {
         do { _ = try await missingPort.generate(missingReferenceInput); XCTFail("无法定位的观点引用不能丢弃") } catch {}
         let missingRequests = await missingTransport.requests
         XCTAssertTrue(missingRequests.isEmpty)
+        let failureStore=try await panoramaFixtureStore(root.appendingPathComponent("failure-paths"), count: 1)
         let invalid=try JSONSerialization.data(withJSONObject: ["status":"completed", "output":[["type":"unsupported"]]])
         let rejectedPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([.init(status: 200, body: invalid)]))
-        do { try await store.generatePanorama(using: rejectedPort); XCTFail("无效响应不能发布") } catch {}
-        let rejected=try await store.panoramaState()
+        do { try await failureStore.generatePanorama(using: rejectedPort); XCTFail("无效响应不能发布") } catch {}
+        let rejected=try await failureStore.panoramaState()
         XCTAssertEqual(rejected.status, "failed")
-        XCTAssertEqual(rejected.error, "响应包含不支持的输出项")
+        XCTAssertTrue(rejected.error?.contains("响应包含不支持的输出项") == true, "失败信息应保留核对原因：\(rejected.error ?? "nil")")
         XCTAssertNil(rejected.snapshot)
         let privateDetail="https://fixture.invalid/private?key=fixture-secret"
-        let terminalFailures: [([String:Any],String)]=[
-            (["status":"failed", "error":["code":"server_error", "message":privateDetail]], "响应未完成（status=failed；error.code=server_error）；未接纳部分结果"),
-            (["status":"failed", "error":["code":"upstream_error", "message":privateDetail]], "响应未完成（status=failed；error.code=upstream_error）；未接纳部分结果"),
-            (["status":"failed", "error":["code":privateDetail, "message":privateDetail]], "响应未完成（status=failed；error.code=unknown）；未接纳部分结果"),
-            (["status":"completed"], "响应已完成但 output 缺失或格式无效（status=completed）"),
-            (["status":"incomplete", "incomplete_details":["reason":"max_output_tokens"]], "响应未完成（status=incomplete；incomplete_details.reason=max_output_tokens）；未接纳部分结果"),
-            (["status":"incomplete", "incomplete_details":["reason":privateDetail]], "响应未完成（status=incomplete；incomplete_details.reason=unknown）；未接纳部分结果"),
-            (["status":privateDetail], "响应未完成（status=unknown）；未接纳部分结果")
+        let terminalFailures: [([String:Any],String,Bool)]=[
+            (["status":"failed", "error":["code":"server_error", "message":privateDetail]], "响应未完成（status=failed；error.code=server_error）；未接纳部分结果", true),
+            (["status":"failed", "error":["code":"upstream_error", "message":privateDetail]], "响应未完成（status=failed；error.code=upstream_error）；未接纳部分结果", true),
+            (["status":"failed", "error":["code":privateDetail, "message":privateDetail]], "响应未完成（status=failed；error.code=unknown）；未接纳部分结果", false),
+            (["status":"completed"], "响应已完成但 output 缺失或格式无效（status=completed）", false),
+            (["status":"incomplete", "incomplete_details":["reason":"max_output_tokens"]], "响应未完成（status=incomplete；incomplete_details.reason=max_output_tokens）；未接纳部分结果", false),
+            (["status":"incomplete", "incomplete_details":["reason":privateDetail]], "响应未完成（status=incomplete；incomplete_details.reason=unknown）；未接纳部分结果", false),
+            (["status":privateDetail], "响应未完成（status=unknown）；未接纳部分结果", false)
         ]
-        for (var response, expected) in terminalFailures {
+        for (var response, expected, transient) in terminalFailures {
             response["usage"]=["input_tokens":120,"output_tokens":100]
-            let transport=FlowFollowupTransport([.init(status:200,body:try JSONSerialization.data(withJSONObject:response))])
+            let reply=ModelHTTPReply(status:200, body:try JSONSerialization.data(withJSONObject:response))
+            let transport=FlowFollowupTransport(Array(repeating: reply, count: transient ? 3 : 1))
             let port=try ResponsesPanoramaPort(baseURL:URL(string:"https://api.openai.com/v1")!,apiKey:"fixture",model:"fixture",transport:transport)
-            do { try await store.generatePanorama(using:port,retry:true); XCTFail("终态失败不能发布") }
-            catch ModelPortFailure.rejected(let reason,let input,let output) {
-                XCTAssertEqual(reason,expected)
-                XCTAssertEqual(input,120); XCTAssertEqual(output,100)
+            do { try await failureStore.generatePanorama(using:port,retry:true); XCTFail("终态失败不能发布") }
+            catch let failure as PanoramaUnitFailures {
+                XCTAssertEqual(failure.firstReason,expected)
+                XCTAssertEqual(failure.verifiedCount,0)
+                XCTAssertEqual(failure.totalCount,1)
             }
-            let failure=try await store.panoramaState()
+            catch { XCTFail("预期 PanoramaUnitFailures，实际 \(error)") }
+            let failure=try await failureStore.panoramaState()
             XCTAssertEqual(failure.status,"failed")
-            XCTAssertEqual(failure.error,expected)
+            XCTAssertTrue(failure.error?.contains(expected) == true, "失败信息应保留核对原因：\(failure.error ?? "nil")")
             XCTAssertFalse(failure.error?.contains("fixture-secret") ?? true)
             XCTAssertNil(failure.snapshot)
             let requests=await transport.requests
-            XCTAssertEqual(requests.count,1)
+            XCTAssertEqual(requests.count, transient ? 3 : 1)
         }
         let timedOutPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowPanoramaFailureTransport())
-        do { try await store.generatePanorama(using: timedOutPort, retry: true); XCTFail("网络失败不能发布") } catch {}
-        let timedOut=try await store.panoramaState()
+        do { try await failureStore.generatePanorama(using: timedOutPort, retry: true); XCTFail("网络失败不能发布") } catch {}
+        let timedOut=try await failureStore.panoramaState()
         XCTAssertEqual(timedOut.status, "failed")
-        XCTAssertEqual(timedOut.error, "全景网络请求失败（错误码 -1001）；材料保留，请明确重试")
+        XCTAssertTrue(timedOut.error?.contains("全景网络请求失败（错误码 -1001）；材料保留，请明确重试") == true, "失败信息应保留网络原因：\(timedOut.error ?? "nil")")
         XCTAssertNil(timedOut.snapshot)
+        let upstreamBody=try JSONSerialization.data(withJSONObject: ["status":"failed", "error":["code":"upstream_error"]])
+        let upstreamPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([.init(status: 200, body: upstreamBody)]))
+        do { _ = try await upstreamPort.generate(wireInput); XCTFail("上游失败应归类为可重试的瞬时失败") }
+        catch is PanoramaTransientFailure {}
+        catch { XCTFail("预期 PanoramaTransientFailure，实际 \(error)") }
+        let authBody=try JSONSerialization.data(withJSONObject: ["status":"failed", "error":["code":"invalid_api_key"]])
+        let authPort=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: FlowFollowupTransport([.init(status: 200, body: authBody)]))
+        do { _ = try await authPort.generate(wireInput); XCTFail("认证失败必须保持终态拒绝") }
+        catch ModelPortFailure.rejected(let reason,_,_) { XCTAssertTrue(reason.contains("error.code=invalid_api_key")) }
+        catch { XCTFail("预期 ModelPortFailure.rejected，实际 \(error)") }
+        let starvationDirectory=root.appendingPathComponent("panorama-unit-failure")
+        let starvationStore=try VoiceOSStore(root: starvationDirectory, inspector: NativeMediaInspector())
+        try await starvationStore.recover()
+        var starvationIDs: [String]=[]
+        for (index, repetitions) in [40, 120, 260].enumerated() {
+            let id=try await starvationStore.recordUserExpression(String(repeating: "单元失败隔离材料第\(index)项。", count: repetitions))
+            _ = try await starvationStore.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+            starvationIDs.append(id)
+        }
+        let starvationContext=try await starvationStore.prepareLocalTranscriptContext(sourceIDs: starvationIDs, scalarBudget: Int.max)
+        _ = try await starvationStore.importOrganizedClaims(context: starvationContext, proposals: [], commandID: "unit-failure-fixture")
+        let starvationPort=ProgressivePanoramaFixture(unitTransientFailures: [starvationIDs[1]: 3])
+        do { try await starvationStore.generatePanorama(using: starvationPort); XCTFail("单元失败后整次尝试仍应汇总失败") } catch {}
+        let starvationState=try await starvationStore.panoramaState()
+        XCTAssertEqual(starvationState.status, "failed")
+        let starvationCalls=await starvationPort.generatedSourceIDs
+        XCTAssertTrue(starvationCalls.contains { $0.contains(starvationIDs[2]) }, "后续单元必须继续尝试；实际调用：\(starvationCalls)")
+        XCTAssertEqual(Set(starvationState.snapshot?.workflow?.verifiedUnitIDs ?? []), Set([starvationIDs[0], starvationIDs[2]]), "部分快照应保留已核对单元")
+        XCTAssertTrue(starvationState.error?.contains(starvationIDs[1]) == true, "失败信息应点名失败单元：\(starvationState.error ?? "nil")")
+        XCTAssertTrue(starvationState.error?.contains("已核对 2/3 个") == true, "失败信息应带核对进度：\(starvationState.error ?? "nil")")
+        let starvationSteps=try Database(starvationDirectory.appendingPathComponent("voiceos.sqlite")).query("SELECT state FROM panorama_steps WHERE stage='unit.generate' AND scope_id=? ORDER BY rowid", [starvationIDs[1]])
+        XCTAssertFalse(starvationSteps.isEmpty)
+        XCTAssertTrue(starvationSteps.allSatisfy { $0["state"] == "failed" }, "失败单元的生成步骤应记录为失败")
+        do { try await starvationStore.generatePanorama(using: starvationPort, retry: true) }
+        catch { XCTFail("明确重试应继续失败单元：\(error)") }
+        let starvationRecovered=try await starvationStore.panoramaState()
+        XCTAssertEqual(starvationRecovered.status, "completed")
+        let transientDirectory=root.appendingPathComponent("panorama-transient-unit")
+        let transientStore=try VoiceOSStore(root: transientDirectory, inspector: NativeMediaInspector())
+        try await transientStore.recover()
+        let transientID=try await transientStore.recordUserExpression("瞬时上游失败重试后仍须完成完整核对。")
+        _ = try await transientStore.setSourceLocalOnly(sourceID: transientID, expectedVersion: 1, localOnly: false)
+        let transientContext=try await transientStore.prepareLocalTranscriptContext(sourceIDs: [transientID], scalarBudget: Int.max)
+        _ = try await transientStore.importOrganizedClaims(context: transientContext, proposals: [], commandID: "transient-fixture")
+        let transientPort=ProgressivePanoramaFixture(unitTransientFailures: [transientID: 2])
+        do { try await transientStore.generatePanorama(using: transientPort) }
+        catch { XCTFail("瞬时上游失败应在重试后完成：\(error)") }
+        let transientState=try await transientStore.panoramaState()
+        XCTAssertEqual(transientState.status, "completed")
+        let transientGenerations=await transientPort.generations
+        XCTAssertEqual(transientGenerations, 3, "单元生成应经历两次重试后成功")
+        let transientSteps=try Database(transientDirectory.appendingPathComponent("voiceos.sqlite")).query("SELECT state FROM panorama_steps WHERE stage='unit.generate' ORDER BY rowid")
+        XCTAssertEqual(transientSteps.compactMap { $0["state"] }, ["failed", "failed", "completed"])
         do { try await store.generatePanorama(using: panorama, retry: true); XCTFail("全局核对尚未完成不能完成全景") }
         catch { XCTAssertEqual((error as? VoiceOSError)?.message, "当前模型端口尚不支持跨单元全景核对，已核对区域保留") }
         try await store.generatePanorama(using: panorama)

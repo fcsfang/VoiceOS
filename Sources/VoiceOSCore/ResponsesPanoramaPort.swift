@@ -1,5 +1,10 @@
 import Foundation
 
+public struct PanoramaTransientFailure: Error, Sendable, LocalizedError {
+    public let reason: String
+    public var errorDescription: String? { reason }
+}
+
 public struct ResponsesPanoramaPort: PanoramaModelPort {
     private let endpoint: URL
     private let apiKey: String
@@ -46,9 +51,23 @@ public struct ResponsesPanoramaPort: PanoramaModelPort {
             var request=URLRequest(url: endpoint, timeoutInterval: 600); request.httpMethod="POST"
             request.httpBody=try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
             request.setValue("Bearer "+apiKey, forHTTPHeaderField:"Authorization"); request.setValue("application/json", forHTTPHeaderField:"Content-Type")
-            let response=try await transport.send(request)
-            guard response.status == 200 else { throw VoiceOSError("思考全景 HTTP \(response.status)，完整材料未裁剪，可明确重试") }
-            let envelope=try ResponsesEnvelope.parse(response.body, maxResponseBytes: 16_777_216)
+            let response: ModelHTTPReply
+            let envelope: ResponsesEnvelope
+            do {
+                response=try await transport.send(request)
+                guard response.status == 200 else { throw VoiceOSError("思考全景 HTTP \(response.status)，完整材料未裁剪，可明确重试") }
+                envelope=try ResponsesEnvelope.parse(response.body, maxResponseBytes: 16_777_216, terminalFailureDelivery: .typed)
+            } catch let failure as ResponsesTerminalFailure {
+                switch failure {
+                case .streamError:
+                    throw PanoramaTransientFailure(reason: failure.errorDescription ?? "流式模型返回失败事件")
+                case .failed(let summary, let code, let input, let output):
+                    guard code == nil || ["upstream_error","server_error"].contains(code ?? "") else {
+                        throw ModelPortFailure.rejected(summary, inputTokens: input, outputTokens: output)
+                    }
+                    throw PanoramaTransientFailure(reason: summary)
+                }
+            }
             guard envelope.status == .completed else {
                 throw ModelPortFailure.rejected(envelope.failureSummary ?? "思考全景未获得完成回执，未发布部分结果", inputTokens: envelope.inputTokens, outputTokens: envelope.outputTokens)
             }

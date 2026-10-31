@@ -1,5 +1,16 @@
 import Foundation
 
+public enum ResponsesTerminalFailure: Error, Sendable, LocalizedError {
+    case streamError
+    case failed(summary: String, code: String?, inputTokens: Int?, outputTokens: Int?)
+    public var errorDescription: String? {
+        switch self {
+        case .streamError: return "流式模型返回失败事件"
+        case .failed(let summary, _, _, _): return summary
+        }
+    }
+}
+
 /// Only sanitized classifications are persisted; response bodies and headers are never errors.
 public enum ModelPortFailure: Error, Sendable {
     case rejected(String, inputTokens: Int? = nil, outputTokens: Int? = nil)
@@ -95,7 +106,7 @@ public struct DirectStreamingModelHTTPTransport: ModelHTTPTransport {
               let data = text.dropFirst(5).trimmingCharacters(in: .whitespaces).data(using: .utf8),
               let event = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = event["type"] as? String else { return nil }
-        if type == "error" { throw VoiceOSError("流式模型返回失败事件") }
+        if type == "error" { throw ResponsesTerminalFailure.streamError }
         guard ["response.completed", "response.incomplete", "response.failed"].contains(type),
               let response = event["response"] as? [String: Any] else { return nil }
         let result = try JSONSerialization.data(withJSONObject: response, options: [.sortedKeys])
