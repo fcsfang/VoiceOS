@@ -5,6 +5,10 @@ import UniformTypeIdentifiers
 import VoiceOSCore
 import VoiceOSPlatform
 
+enum WorkspaceErrorRetry {
+    case localSpeech, textModel, export(includeMedia: Bool)
+}
+
 @MainActor
 final class ControlCenter: ObservableObject {
     let panorama = PanoramaScreenModel()
@@ -260,6 +264,9 @@ final class ControlCenter: ObservableObject {
         query.isEmpty ? records : records.filter { $0.displayTitle.localizedCaseInsensitiveContains(query) || $0.name.localizedCaseInsensitiveContains(query) || ($0.transcript?.localizedCaseInsensitiveContains(query) ?? false) }
     }
     @Published var status = "正在检查资料库…"
+    @Published var workspaceLastError: String?
+    @Published var workspaceLastErrorRetry: WorkspaceErrorRetry?
+    @Published var exporting = false
     @Published var importing = false
     @Published var fullRecordingInput: FullRecordingInput?
     @Published var fullRecordingBusy = false
@@ -317,7 +324,11 @@ final class ControlCenter: ObservableObject {
             try installSpeechSelection(.init(configuration:Data(contentsOf:url)),persist:true)
             status="Qwen 转写选择已保存，重启后继续使用；已有逐字稿保持原版本"
             scheduleProcessing()
-        } catch { status="无法启用本地 Qwen，请核对配置与模型；保留当前转写器" }
+        } catch {
+            let message="无法启用本地 Qwen，请核对配置与模型；保留当前转写器"
+            status=message
+            reportWorkspaceError(message,retry:.localSpeech)
+        }
     }
     @Published var attempts: [String: [ModelAttemptRecord]] = [:]
     @Published var processingIntents: [ExpressionProcessingIntentRecord] = []
@@ -727,7 +738,10 @@ final class ControlCenter: ObservableObject {
             resumeAssistantExecutions()
             resumeKnowledgeReviews()
             queueTopicOrganization()
-        } catch { status = error.localizedDescription }
+        } catch {
+            status = error.localizedDescription
+            reportWorkspaceError(error.localizedDescription,retry:.textModel)
+        }
     }
     func chooseFullRecording() {
         guard !fullRecordingBusy else { return }
@@ -1412,17 +1426,41 @@ final class ControlCenter: ObservableObject {
         }
     }
     func export(includeMedia: Bool) {
+        guard !exporting else { return }
         let panel = NSSavePanel()
         panel.title = includeMedia ? "导出资料与原件" : "导出结构化资料"
         panel.nameFieldStringValue = "VoiceOS-导出-" + ISO8601DateFormatter().string(from: Date()).prefix(10)
         panel.prompt = "导出"
         panel.begin { response in
             guard response == .OK, let url = panel.url, let store = self.store else { return }
+            self.exporting = true
             Task {
+                defer { self.exporting = false }
                 do { try await store.exportPackage(to: url, includeMedia: includeMedia); self.status = "已导出资料" + (includeMedia ? "和完整原件" : "；原件未包含，可另选打包") }
-                catch { self.status = error.localizedDescription }
+                catch {
+                    self.status = error.localizedDescription
+                    self.reportWorkspaceError(error.localizedDescription,retry:.export(includeMedia: includeMedia))
+                }
             }
         }
+    }
+    func clearWorkspaceError() {
+        workspaceLastError = nil
+        workspaceLastErrorRetry = nil
+    }
+    func retryWorkspaceError() {
+        let retry = workspaceLastErrorRetry
+        clearWorkspaceError()
+        switch retry {
+        case .localSpeech: chooseLocalSpeech()
+        case .textModel: chooseTextModel()
+        case .export(let includeMedia): export(includeMedia: includeMedia)
+        case nil: break
+        }
+    }
+    private func reportWorkspaceError(_ message: String, retry: WorkspaceErrorRetry) {
+        workspaceLastError = message
+        workspaceLastErrorRetry = retry
     }
     func chooseFiles(personalAudio: Bool = false) {
         let panel = NSOpenPanel()

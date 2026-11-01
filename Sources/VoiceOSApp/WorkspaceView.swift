@@ -19,6 +19,7 @@ private struct WorkspaceNavigationEntry: Hashable {
     let topicID: String?
     let topicTab: String
     let topicReadingMode: String
+    var listFilter: String = ""
 }
 extension SourceRecord {
     var workspaceTitle: String {
@@ -72,6 +73,7 @@ struct WorkspaceView: View {
     @State private var page: WorkspacePage = .home
     @State private var path: [WorkspaceNavigationEntry] = []
     @State private var scrollPositions: [WorkspaceNavigationEntry: ScrollPosition] = [:]
+    @State private var sourceScrollPositions: [String: ScrollPosition] = [:]
     @State private var topicID: String?
     @State private var topicTab = "概览"
     @State private var topicReadingMode = "卡片"
@@ -143,6 +145,15 @@ struct WorkspaceView: View {
             VStack(spacing:0) {
                 header
                 Divider()
+                if let message = model.workspaceLastError {
+                    HStack(alignment:.firstTextBaseline,spacing:12) {
+                        Label(message,systemImage:"exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange).textSelection(.enabled)
+                        Spacer(minLength:8)
+                        if model.workspaceLastErrorRetry != nil { Button("重试") { model.retryWorkspaceError() } }
+                        Button { model.clearWorkspaceError() } label: { Image(systemName:"xmark").font(.caption) }
+                            .buttonStyle(.plain).accessibilityLabel("关闭错误提示")
+                    }.padding(.horizontal,20).padding(.vertical,10).background(palette.surface)
+                }
                 Group {
                     if !model.startupIssue.isEmpty {
                         ContentUnavailableView {
@@ -299,7 +310,7 @@ struct WorkspaceView: View {
             if let source=model.records.first(where: { $0.id == id }) {
                 if source.isTrashed { TrashedMaterialView(model:model,source:source) }
                 else {
-                    WorkspaceSourceView(model:model,source:source,openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },openDiscussion:{ id in Task { await openSavedDiscussion(id) } },openSource:{ go(.source($0)) },openFollowups:{ go(.tool("思想与下一步")) })
+                    WorkspaceSourceView(model:model,source:source,openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },openDiscussion:{ id in Task { await openSavedDiscussion(id) } },openSource:{ go(.source($0)) },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id))
                         .id(id)
                 }
             } else { unavailable("这份材料暂时不可用",description:"可以搜索其他材料，或回到主题。") }
@@ -341,10 +352,23 @@ struct WorkspaceView: View {
     }
     private func scrolled<Content:View>(@ViewBuilder content: () -> Content) -> some View {
         ScrollView { content().frame(maxWidth:860,alignment:.leading).padding(30).frame(maxWidth:.infinity,alignment:.top) }
-            .scrollPosition(scrollBinding(for: navigationEntry))
+            .scrollPosition(scrollBinding(for: scrollKey))
     }
     private func scrollBinding(for key: WorkspaceNavigationEntry) -> Binding<ScrollPosition> {
         Binding(get: { scrollPositions[key] ?? ScrollPosition(edge: .top) }, set: { scrollPositions[key] = $0 })
+    }
+    private var scrollKey: WorkspaceNavigationEntry {
+        // A filter switches the visible list, so it must not inherit another list's offset.
+        var entry = navigationEntry
+        switch page {
+        case .materials: entry.listFilter = materialFilter
+        case .actions: entry.listFilter = actionFilter
+        default: break
+        }
+        return entry
+    }
+    private func sourceScrollBinding(_ id:String) -> Binding<ScrollPosition> {
+        Binding(get: { sourceScrollPositions[id] ?? ScrollPosition(edge: .top) }, set: { sourceScrollPositions[id] = $0 })
     }
     private func unavailable(_ title:String,description:String) -> some View { ContentUnavailableView(title,systemImage:"leaf",description:Text(description)).frame(maxWidth:.infinity) }
     private func distinctExpressions(_ sources:[SourceRecord]) -> [SourceRecord] {
@@ -383,8 +407,10 @@ struct WorkspaceView: View {
         return external.id
     }
     private var materials: some View {
-        LazyVStack(alignment:.leading,spacing:24) {
-            WorkspaceHeading(eyebrow:"材料 · \(readingMaterials.count) 份",title:"按材料查看",subtitle:"最近加入的材料在前。连续录音由 AI 自动合为一次表达，原始分段在详情中保留。")
+        let rows = readingMaterials
+        let catalog = recordCatalog
+        return LazyVStack(alignment:.leading,spacing:24) {
+            WorkspaceHeading(eyebrow:"材料 · \(rows.count) 份",title:"按材料查看",subtitle:"最近加入的材料在前。连续录音由 AI 自动合为一次表达，原始分段在详情中保留。")
             WorkspaceTabs(selection:$materialFilter,titles:["日常材料","已归档","回收站"])
             if materialFilter != "日常材料" {
                 Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留，不用于当前理解；恢复后仅本机保存。Apple 提醒事项未被删除或取消。").font(.callout).foregroundStyle(.secondary)
@@ -393,17 +419,18 @@ struct WorkspaceView: View {
                 Text("还没有材料。可以先记录想法，或导入一段录音、视频。").foregroundStyle(.secondary)
                 Button("添加材料") { go(.capture) }.buttonStyle(.borderedProminent)
             } else {
-                ForEach(readingMaterials) { source in
-                    sourceRow(source,showOriginalName:true)
+                ForEach(rows) { source in
+                    sourceRow(source,catalog:catalog,showOriginalName:true)
                     MaterialManagementControls(model:model,source:source).font(.caption)
-                    if source.id != readingMaterials.last?.id { Divider() }
+                    if source.id != rows.last?.id { Divider() }
                 }
-                if readingMaterials.isEmpty { Text("这里暂时没有材料。").foregroundStyle(.secondary) }
+                if rows.isEmpty { Text("这里暂时没有材料。").foregroundStyle(.secondary) }
             }
         }
     }
     private var themes: some View {
-        LazyVStack(alignment:.leading,spacing:24) {
+        let catalog = recordCatalog
+        return LazyVStack(alignment:.leading,spacing:24) {
             if let topic {
                 HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil } };Spacer(); Menu("调整主题") { Button("修改主题名称") { newTopicTitle=topic.title;creatingTopic=true };Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) } } }
                 WorkspaceHeading(eyebrow:topic.isAIOrganized == true ? "AI 自动归组 · 持续演化" : "主题 · 持续演化",title:topic.title,subtitle:"\(topicSources.count) 份材料 · 跨时间连接理解、行动与结果")
@@ -424,7 +451,7 @@ struct WorkspaceView: View {
                 let linked=Set(model.workspaceTopicSources.values.flatMap { $0 })
                 let unlinked=activeMaterials.filter { !linked.contains($0.id) }
                 if !unlinked.isEmpty {
-                    DisclosureGroup("尚未归入主题的材料（\(unlinked.count)）") { ForEach(distinctExpressions(unlinked)) { sourceRow($0) } }
+                    DisclosureGroup("尚未归入主题的材料（\(unlinked.count)）") { ForEach(distinctExpressions(unlinked)) { sourceRow($0,catalog:catalog) } }
                 }
             }
             if creatingTopic {
@@ -441,8 +468,10 @@ struct WorkspaceView: View {
     @ViewBuilder private func topicContent(_ topic:ReflectionQuestion) -> some View {
         switch topicTab {
         case "材料":
+            let catalog = recordCatalog
+            let expressions = distinctExpressions(topicSources)
             WorkspaceSection(title:"主题材料",subtitle:"完整原话与资料，按时间延续",icon:"books.vertical",count:topicSources.count) {
-                ForEach(distinctExpressions(topicSources)) { source in sourceRow(source);if source.id != distinctExpressions(topicSources).last?.id { Divider() } }
+                ForEach(expressions) { source in sourceRow(source,catalog:catalog);if source.id != expressions.last?.id { Divider() } }
             }
             DisclosureGroup("关联其他材料") {
                 ForEach(model.records.filter { !sourceIDs.contains($0.id) && !($0.transcript ?? "").isEmpty }) { source in
@@ -477,7 +506,8 @@ struct WorkspaceView: View {
             Text("放在完整主题的脉络里，看这段时间的变化。").font(.callout).foregroundStyle(.secondary)
             let interval=reviewPeriod.interval(containing:reviewAnchor)
             let sources=topicSources.filter { interval.contains($0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt) ?? .distantPast) }
-            ForEach(distinctExpressions(sources)) { sourceRow($0);Divider() }
+            let catalog=recordCatalog
+            ForEach(distinctExpressions(sources)) { sourceRow($0,catalog:catalog);Divider() }
             let actionIDs=Set(topicActions.map(\.id))
             let outcomes=(topicFocus?.outcomes ?? []).filter { actionIDs.contains($0.actionID) && ConversationReflectionFocus.date($0.createdAt).map { interval.contains($0) } == true }
             ForEach(outcomes) { outcome in WorkspaceRow(title:outcome.text,subtitle:"实际结果 · " + dateLabel(outcome.createdAt),icon:"leaf") { go(.task(outcome.actionID)) } }
@@ -555,7 +585,8 @@ struct WorkspaceView: View {
             ForEach(matchingClaims) { thoughtRow($0) }
             let sources=model.records.filter { !$0.isTrashed && (term.isEmpty || ($0.workspaceTitle+"\n"+$0.name+"\n"+($0.transcript ?? "")).localizedCaseInsensitiveContains(term)) }
             if !sources.isEmpty { sectionTitle("材料与原话 · \(sources.count)") }
-            ForEach(sources) { sourceRow($0);Divider() }
+            let catalog=recordCatalog
+            ForEach(sources) { sourceRow($0,catalog:catalog);Divider() }
             if sources.isEmpty && matchingActions.isEmpty && matchingClaims.isEmpty { Text("没有找到相关内容。").foregroundStyle(.secondary) }
         }
     }
@@ -581,7 +612,11 @@ struct WorkspaceView: View {
             WorkspaceRow(title:"Apple 提醒事项",subtitle:model.reminderCalendarTitle,icon:"checklist") { Task { await model.connectReminders() } }
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
             sectionTitle("资料与历史")
-            HStack { Button("导出结构化资料") { model.export(includeMedia:false) };Button("导出资料与原件") { model.export(includeMedia:true) } }
+            HStack(spacing:12) {
+                Button("导出结构化资料") { model.export(includeMedia:false) }
+                Button("导出资料与原件") { model.export(includeMedia:true) }
+                if model.exporting { ProgressView().controlSize(.small) }
+            }.disabled(model.exporting)
             HStack { Button("打开已有资料库") { chooseLibrary() };Button("从迁移包恢复") { go(.tool("恢复资料")) } }
             sectionTitle("回顾与查找")
             WorkspaceRow(title:"静默回顾",subtitle:"不要求回应；看到与当前表达相关的原文",icon:"text.bubble") { go(.tool("静默回顾")) }
@@ -599,13 +634,14 @@ struct WorkspaceView: View {
         }
     }
     @ViewBuilder private var processingIssues: some View {
+        let catalog=recordCatalog
         ForEach(model.assistantAssessmentIssues) { issue in
             VStack(alignment:.leading,spacing:8) { Text(issue.title);Text(issue.error).font(.caption).foregroundStyle(.secondary);Button("重新识别 AI 委托") { Task { await model.retryAssistantAssessment(issue) } } }
         }
         ForEach(model.recordingFollowups.filter { $0.state == "failed" }) { receipt in
             VStack(alignment:.leading,spacing:8) { Text(model.records.first { $0.id == receipt.sourceID }?.workspaceTitle ?? "资料跟进");Button("重试思想与下一步") { model.refreshFollowup(receipt.sourceID) } }
         }
-        ForEach(activeMaterials.filter { ["failed","blocked"].contains($0.jobState ?? "") }) { source in sourceRow(source) }
+        ForEach(activeMaterials.filter { ["failed","blocked"].contains($0.jobState ?? "") }) { source in sourceRow(source,catalog:catalog) }
         ForEach(model.processingIntents.filter { [.blocked,.unknown].contains($0.state) }) { intent in
             Text("表达处理：" + intent.state.rawValue).font(.caption).foregroundStyle(.secondary)
         }
@@ -630,12 +666,13 @@ struct WorkspaceView: View {
            let index=expression.sourceIDs.firstIndex(of:id) { return expression.title+" / 第 \(index+1) 段原文" }
         return source.workspaceTitle
     }
-    private func sourceRow(_ source:SourceRecord,showOriginalName:Bool=false) -> some View {
-        let expression=source.recordingExpression(in:Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) }))
+    private var recordCatalog: [String:SourceRecord] { Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) }) }
+    private func sourceRow(_ source:SourceRecord,catalog:[String:SourceRecord],showOriginalName:Bool=false) -> some View {
+        let expression=source.recordingExpression(in:catalog)
         let combined=(expression?.sourceIDs.count ?? 0) > 1
         let originalName = showOriginalName && !combined && source.name != source.workspaceTitle ? " · " + source.name : ""
-        let duration=combined ? Int(model.records.filter { expression?.sourceIDs.contains($0.id) == true }.reduce(0) { $0 + ($1.duration ?? 0) }.rounded()) : 0
-        let first=combined ? model.records.first { $0.id == expression?.sourceIDs.first } ?? source : source
+        let duration=combined ? Int(expression!.sourceIDs.compactMap { catalog[$0]?.duration }.reduce(0,+).rounded()) : 0
+        let first=combined ? expression!.sourceIDs.first.flatMap { catalog[$0] } ?? source : source
         let timing=combined ? "连续表达 · \(expression!.sourceIDs.count) 段 · 合计 \(duration/60)分\(duration%60)秒 · "+first.recordingDateLabel : source.recordingSubtitle
         return WorkspaceRow(title:combined ? expression!.title : source.workspaceTitle,subtitle:timing + " · " + (source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料") + (source.localOnly ? " · 仅本地" : "") + originalName,icon:source.kind.contains("text") ? "doc.text" : "waveform") { go(.source(source.id)) }
     }
