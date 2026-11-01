@@ -17,6 +17,10 @@ struct WorkspaceTopicReadingView: View {
     @State private var showingAllSections = false
     @State private var showingStructure = false
     @State private var correctingClaim: CandidateClaim?
+    @State private var pendingRejection: CandidateClaim?
+    @State private var confirmingRejection = false
+    @State private var hoveredSectionID: String?
+    @State private var hoveredQuestion: String?
 
     private var sections: [TopicReadingSection] { topic.organization?.sections ?? [] }
     private var claimIDs: Set<String> { Set(sections.flatMap(\.claimIDs)) }
@@ -61,6 +65,12 @@ struct WorkspaceTopicReadingView: View {
         }
         .onChange(of: sections.map(\.id)) { _,ids in if let selectedSection,!ids.contains(selectedSection) { self.selectedSection=nil } }
         .sheet(item:$correctingClaim) { claim in ClaimCorrectionView(claim:claim,model:model) { correctingClaim=nil } }
+        .alert("停止使用这条理解？", isPresented:$confirmingRejection, presenting:pendingRejection) { claim in
+            Button("停止使用", role:.destructive) { Task { _=await model.review(claim, action:.reject) } }
+            Button("取消", role:.cancel) {}
+        } message: { _ in
+            Text("确定后，这份理解将不再用于主题阅读与相关行动。原文与处理历史会保留。")
+        }
     }
 
     private var introduction: some View {
@@ -83,9 +93,9 @@ struct WorkspaceTopicReadingView: View {
                 }
             }
             Text("AI 综合整理 · 每张卡片保留原话入口").font(.caption).foregroundStyle(.secondary)
-        }.padding(24).frame(maxWidth:.infinity,alignment:.leading)
-            .background(palette.surface,in:RoundedRectangle(cornerRadius:16))
-            .overlay { RoundedRectangle(cornerRadius:16).strokeBorder(palette.border,lineWidth:1) }
+        }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
+            .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
     }
 
     private func metric(_ title:String,value:Int,icon:String) -> some View {
@@ -97,9 +107,19 @@ struct WorkspaceTopicReadingView: View {
             Label(model.organizingTopics ? "正在整理小主题与阅读卡片" : "这份主题尚未生成结构卡片",systemImage:"rectangle.3.group").font(.headline)
             Text("完整材料已保留。整理后，每个小主题会展示自己的要点、原话和相关行动。").font(.callout).foregroundStyle(.secondary)
             if model.organizingTopics { ProgressView().controlSize(.small) }
-            else { Button("整理主题卡片") { model.queueTopicOrganization(retry:true) }.disabled(!model.modelConfigured) }
+            else {
+                Button("整理主题卡片") { model.queueTopicOrganization(retry:true) }.disabled(!model.modelConfigured)
+                if !model.modelConfigured {
+                    HStack(spacing:8) {
+                        Text("整理需要先配置文本模型。").font(.caption).foregroundStyle(.secondary)
+                        Button("配置文本模型…") { model.chooseTextModel() }.font(.caption)
+                    }
+                }
+            }
             if !model.topicOrganizationStatus.isEmpty { Text(model.topicOrganizationStatus).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
-        }.padding(22).frame(maxWidth:.infinity,alignment:.leading).background(palette.surface,in:RoundedRectangle(cornerRadius:14))
+        }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
+            .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border.opacity(0.8),lineWidth:1) }
     }
 
     private var structure: some View {
@@ -127,17 +147,19 @@ struct WorkspaceTopicReadingView: View {
                                 Text(section.title).font(.system(size:13,weight:.medium)).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
                                 Spacer(minLength:0)
                             }.padding(13).frame(maxWidth:.infinity,minHeight:60,alignment:.topLeading)
-                                .background(selectedSection == section.id ? palette.selection : palette.canvas,in:RoundedRectangle(cornerRadius:9))
+                                .background(selectedSection == section.id ? palette.selection : hoveredSectionID == section.id ? palette.selection.opacity(0.5) : palette.canvas,in:RoundedRectangle(cornerRadius:9))
                                 .overlay { RoundedRectangle(cornerRadius:9).strokeBorder(selectedSection == section.id ? palette.accent : palette.border,lineWidth:1) }
                                 .contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityValue(selectedSection == section.id ? "已选择" : "")
+                            .onHover { inside in hoveredSectionID = inside ? section.id : (hoveredSectionID == section.id ? nil : hoveredSectionID) }
                     }
                 }
             }
             if sections.count > 6 { Button(showingAllSections ? "收起结构" : "展开全部 \(sections.count) 个小主题") { showingAllSections.toggle() }.font(.caption) }
             Text("连线表示主题下的内容分组").font(.system(size:11)).foregroundStyle(.secondary)
         }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
-            .background(palette.surface,in:RoundedRectangle(cornerRadius:14))
+            .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border.opacity(0.8),lineWidth:1) }
     }
 
     private var readingCards: some View {
@@ -166,7 +188,7 @@ struct WorkspaceTopicReadingView: View {
                                 Text(claim.statement).font(.callout).textSelection(.enabled)
                                 HStack {
                                     Button("更正理解或归属",systemImage:"pencil") { correctingClaim=claim }
-                                    Button("停止使用") { Task { _=await model.review(claim,action:.reject) } }
+                                    Button("停止使用") { pendingRejection=claim;confirmingRejection=true }
                                 }.font(.caption).disabled(model.reviewingClaim)
                             }
                         }
@@ -193,9 +215,9 @@ struct WorkspaceTopicReadingView: View {
                 discuss("围绕“" + section.title + "”继续讨论。请结合现有原话，区分已有结论、不同意见与需要验证的部分。")
             }.font(.system(size:12,weight:.medium)).buttonStyle(.borderless)
         }.padding(22).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
-            .background(palette.canvas,in:RoundedRectangle(cornerRadius:14))
+            .background(palette.canvas,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
             .overlay(alignment:.topLeading) { RoundedRectangle(cornerRadius:2).fill(palette.action.opacity(0.65)).frame(width:28,height:3).padding(.leading,22) }
-            .overlay { RoundedRectangle(cornerRadius:14).strokeBorder(palette.border,lineWidth:1) }
+            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
     }
 
     @ViewBuilder private var overviewActions: some View {
@@ -227,8 +249,9 @@ struct WorkspaceTopicReadingView: View {
                             Text(question).font(.system(size:15,weight:.medium)).multilineTextAlignment(.leading)
                             Spacer(minLength:4)
                             Image(systemName:"arrow.up.right").font(.caption).foregroundStyle(.secondary)
-                        }.padding(18).frame(maxWidth:.infinity,alignment:.leading).background(palette.surface,in:RoundedRectangle(cornerRadius:11)).contentShape(Rectangle())
+                        }.padding(18).frame(maxWidth:.infinity,alignment:.leading).background(hoveredQuestion == question ? palette.selection : palette.surface,in:RoundedRectangle(cornerRadius:11)).contentShape(Rectangle())
                     }.buttonStyle(.plain).help("带上当前主题继续讨论")
+                        .onHover { inside in hoveredQuestion = inside ? question : (hoveredQuestion == question ? nil : hoveredQuestion) }
                 }
             }
         }
@@ -336,6 +359,7 @@ struct WorkspaceTopicReadingView: View {
                 Spacer(minLength:0)
                 Image(systemName:"chevron.right").font(.caption2).foregroundStyle(.secondary)
             }.padding(10).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+                .workspaceHoverHighlight(cornerRadius:10)
         }.buttonStyle(.plain)
     }
 
@@ -361,6 +385,7 @@ struct WorkspaceTopicReadingView: View {
 
 struct WorkspaceTopicTile: View {
     @Environment(\.workspacePalette) private var palette
+    @State private var hovered = false
     let topic: ReflectionQuestion
     let sourceCount: Int
     let open: () -> Void
@@ -382,9 +407,9 @@ struct WorkspaceTopicTile: View {
                     if let count=topic.organization?.sections?.count { Label("\(count) 个小主题",systemImage:"square.grid.2x2") }
                 }.font(.system(size:11,weight:.medium)).foregroundStyle(.secondary)
             }.padding(22).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
-                .background(palette.surface,in:RoundedRectangle(cornerRadius:15))
-                .overlay { RoundedRectangle(cornerRadius:15).strokeBorder(palette.border,lineWidth:1) }
-                .contentShape(RoundedRectangle(cornerRadius:15))
-        }.buttonStyle(.plain)
+                .background(hovered ? palette.selection.opacity(0.6) : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+                .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
+                .contentShape(RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+        }.buttonStyle(.plain).onHover { hovered = $0 }
     }
 }

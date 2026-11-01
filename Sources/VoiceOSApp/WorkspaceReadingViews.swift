@@ -27,9 +27,9 @@ struct WorkspaceTabs: View {
                 .foregroundStyle(selection == title ? palette.canvas : palette.text)
                 .frame(maxWidth: fill ? .infinity : nil)
                 .padding(.horizontal, 20).padding(.vertical, 13)
-                .background(selection == title ? palette.accent : palette.surface, in: RoundedRectangle(cornerRadius: 10))
-                .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(selection == title ? .clear : palette.border, lineWidth: 1) }
-                .contentShape(RoundedRectangle(cornerRadius: 10))
+                .background(selection == title ? palette.accent : palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.tabRadius))
+                .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.tabRadius).strokeBorder(selection == title ? .clear : palette.border, lineWidth: 1) }
+                .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.tabRadius))
         }.buttonStyle(.plain)
             .accessibilityAddTraits(selection == title ? [.isSelected] : [])
             .accessibilityIdentifier("workspace.tab." + title)
@@ -69,8 +69,8 @@ struct WorkspaceSection<Content: View>: View {
             Rectangle().fill(palette.border).frame(height: 1)
             LazyVStack(alignment: .leading, spacing: 0, content: content).padding(.top, 8)
         }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 14))
-            .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(palette.border.opacity(0.8), lineWidth: 1) }
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius))
+            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius).strokeBorder(palette.border.opacity(0.8), lineWidth: 1) }
     }
 }
 
