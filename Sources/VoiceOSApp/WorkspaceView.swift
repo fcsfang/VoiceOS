@@ -145,6 +145,15 @@ struct WorkspaceView: View {
             VStack(spacing:0) {
                 header
                 Divider()
+                if let message = model.workspaceLastError {
+                    HStack(alignment:.firstTextBaseline,spacing:12) {
+                        Label(message,systemImage:"exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange).textSelection(.enabled)
+                        Spacer(minLength:8)
+                        if model.workspaceLastErrorRetry != nil { Button("重试") { model.retryWorkspaceError() } }
+                        Button { model.clearWorkspaceError() } label: { Image(systemName:"xmark").font(.caption) }
+                            .buttonStyle(.plain).accessibilityLabel("关闭错误提示")
+                    }.padding(.horizontal,20).padding(.vertical,10).background(palette.surface)
+                }
                 Group {
                     if !model.startupIssue.isEmpty {
                         ContentUnavailableView {
@@ -596,7 +605,11 @@ struct WorkspaceView: View {
             WorkspaceRow(title:"Apple 提醒事项",subtitle:model.reminderCalendarTitle,icon:"checklist") { Task { await model.connectReminders() } }
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
             sectionTitle("资料与历史")
-            HStack { Button("导出结构化资料") { model.export(includeMedia:false) };Button("导出资料与原件") { model.export(includeMedia:true) } }
+            HStack(spacing:12) {
+                Button("导出结构化资料") { model.export(includeMedia:false) }
+                Button("导出资料与原件") { model.export(includeMedia:true) }
+                if model.exporting { ProgressView().controlSize(.small) }
+            }.disabled(model.exporting)
             HStack { Button("打开已有资料库") { chooseLibrary() };Button("从迁移包恢复") { go(.tool("恢复资料")) } }
             sectionTitle("回顾与查找")
             WorkspaceRow(title:"静默回顾",subtitle:"不要求回应；看到与当前表达相关的原文",icon:"text.bubble") { go(.tool("静默回顾")) }
