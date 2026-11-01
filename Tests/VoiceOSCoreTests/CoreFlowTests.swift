@@ -2725,4 +2725,34 @@ final class CoreFlowTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("[0].input.current.sources[0].text"))
         }
     }
+
+    func testRecordingTrackRolesRejectProgramAudioAsOwnVoice() {
+        let three = RecordingMediaInfo(duration: 60, tracks: [
+            .init(id: 0, title: "混音"), .init(id: 1, title: "我的声音"), .init(id: 2, title: "系统内录")
+        ])
+        XCTAssertEqual(FullRecordingOrganizer.decide(track: 0, ownVoice: true, in: three).fixedRole, .mix)
+        XCTAssertEqual(FullRecordingOrganizer.decide(track: 1, ownVoice: true, in: three).fixedRole, .personal)
+        XCTAssertEqual(FullRecordingOrganizer.decide(track: 2, ownVoice: true, in: three).fixedRole, .context)
+        XCTAssertTrue(FullRecordingOrganizer.decide(track: 1, ownVoice: true, in: three).importsAsPersonal)
+        XCTAssertFalse(FullRecordingOrganizer.decide(track: 2, ownVoice: true, in: three).allowsOwnVoice)
+        XCTAssertFalse(FullRecordingOrganizer.decide(track: 2, ownVoice: true, in: three).importsAsPersonal)
+
+        let two = RecordingMediaInfo(duration: 60, tracks: [.init(id: 0, title: "音轨 0"), .init(id: 1, title: "音轨 1")])
+        XCTAssertNil(FullRecordingOrganizer.decide(track: 0, ownVoice: true, in: two).fixedRole)
+        XCTAssertNil(FullRecordingOrganizer.decide(track: 1, ownVoice: true, in: two).fixedRole)
+        XCTAssertTrue(FullRecordingOrganizer.decide(track: 0, ownVoice: true, in: two).allowsOwnVoice)
+        XCTAssertTrue(FullRecordingOrganizer.decide(track: 0, ownVoice: true, in: two).importsAsPersonal)
+        XCTAssertTrue(FullRecordingOrganizer.decide(track: 1, ownVoice: true, in: two).importsAsPersonal)
+        XCTAssertFalse(FullRecordingOrganizer.decide(track: 1, ownVoice: false, in: two).importsAsPersonal)
+
+        let single = RecordingMediaInfo(duration: 60, tracks: [.init(id: 0, title: "音轨 0")])
+        XCTAssertNil(FullRecordingOrganizer.decide(track: 0, ownVoice: false, in: single).fixedRole)
+        XCTAssertFalse(FullRecordingOrganizer.decide(track: 0, ownVoice: false, in: single).importsAsPersonal)
+        XCTAssertTrue(FullRecordingOrganizer.decide(track: 0, ownVoice: true, in: single).importsAsPersonal)
+
+        let unknown = FullRecordingOrganizer.decide(track: 9, ownVoice: true, in: single)
+        XCTAssertNil(unknown.fixedRole)
+        XCTAssertFalse(unknown.allowsOwnVoice)
+        XCTAssertFalse(unknown.importsAsPersonal)
+    }
 }

@@ -5,11 +5,15 @@ public struct RecordingAudioTrack: Identifiable, Sendable {
     public let id: Int
     public let title: String
     public var startMS: Int = 0
+    public init(id: Int, title: String, startMS: Int = 0) { self.id = id; self.title = title; self.startMS = startMS }
 }
 public struct RecordingMediaInfo: Sendable {
     public let duration: Double
     public let tracks: [RecordingAudioTrack]
     public var recordedAt: String? = nil
+    public init(duration: Double, tracks: [RecordingAudioTrack], recordedAt: String? = nil) {
+        self.duration = duration; self.tracks = tracks; self.recordedAt = recordedAt
+    }
     /// Saved recording convention: audio 0 = mix, 1 = microphone, 2 = system.
     public var usesPersonalRecordingLayout: Bool { tracks.count == 3 }
     public var personalTrack: Int { tracks.count > 1 ? 1 : 0 }
@@ -21,7 +25,26 @@ public struct RecordingMediaInfo: Sendable {
     public static let personalRecordingLayout = "固定录制格式（从 0 编号）：音轨 0 混音 · 音轨 1 我的声音 · 音轨 2 系统内录。本人和节目分别完整转写，按时间与语义关联；节目内容保留外部归属。"
 }
 
+public enum RecordingTrackRole: Equatable, Sendable {
+    case mix, personal, context
+}
+public struct RecordingTrackDecision: Equatable, Sendable {
+    /// The role fixed by the recording layout, when it fixes one.
+    public let fixedRole: RecordingTrackRole?
+    public let allowsOwnVoice: Bool
+    public let importsAsPersonal: Bool
+}
 public enum FullRecordingOrganizer {
+    public static func decide(track: Int, ownVoice: Bool, in media: RecordingMediaInfo) -> RecordingTrackDecision {
+        guard media.tracks.contains(where: { $0.id == track }) else {
+            return .init(fixedRole: nil, allowsOwnVoice: false, importsAsPersonal: false)
+        }
+        if media.usesPersonalRecordingLayout {
+            let role: RecordingTrackRole = track == media.personalTrack ? .personal : track == media.contextTrack ? .context : .mix
+            return .init(fixedRole: role, allowsOwnVoice: role == .personal, importsAsPersonal: role == .personal && ownVoice)
+        }
+        return .init(fixedRole: nil, allowsOwnVoice: true, importsAsPersonal: ownVoice)
+    }
     private static func executable(_ name: String) throws -> URL {
         guard let path = ["/opt/homebrew/bin/", "/usr/local/bin/"].map({ $0 + name }).first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             throw VoiceOSError("请使用已配置的本地 \(name)；没有安装或下载工具")
