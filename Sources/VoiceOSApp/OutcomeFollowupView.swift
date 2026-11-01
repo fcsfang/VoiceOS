@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct OutcomeFollowupView: View {
+    @Environment(\.workspacePalette) private var palette
     let actions: [ActionRecord]
     let onRecord: (ActionRecord) -> Void
     let onOpen: (ActionRecord) -> Void
@@ -27,7 +28,7 @@ struct OutcomeFollowupView: View {
                     ForEach(actions) { action in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack(alignment: .top, spacing: 12) {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.success)
                                 Text(action.title).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                                 Button("记录结果") { onRecord(action) }.buttonStyle(.borderedProminent)
                                 Button("这次跳过") { onSkip(action) }.buttonStyle(.borderless)
@@ -40,7 +41,7 @@ struct OutcomeFollowupView: View {
                             }.font(.caption).foregroundStyle(.secondary)
                         }
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                     }
                 }.padding(.vertical, 4)
             }

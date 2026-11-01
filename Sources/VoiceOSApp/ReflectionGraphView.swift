@@ -134,7 +134,7 @@ struct ReflectionTimelineView: View {
                 ContentUnavailableView("暂时无法打开回顾", systemImage: "arrow.triangle.branch", description: Text(error ?? "请刷新资料"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let error { Text(error).font(.callout).foregroundStyle(.red).padding(10) }
+            if let error { Text(error).font(.callout).foregroundStyle(palette.danger).padding(10) }
             HStack {
                 Label("实线：来源与行动关系", systemImage: "line.diagonal")
                 Text("┄ AI 思想关联 · 可查看前后原话")
@@ -147,11 +147,7 @@ struct ReflectionTimelineView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("REFLECTION ATLAS").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2.4).foregroundStyle(palette.accent)
-                    Text("认知地图").font(.system(size: 29, weight: .medium, design: .serif))
-                    Text(periodPurpose).font(.callout).foregroundStyle(palette.text.opacity(0.65))
-                }
+                WorkspaceHero(eyebrow: "REFLECTION ATLAS", title: "认知地图", subtitle: periodPurpose)
                 Spacer()
                 Button { showsQuestions = true } label: { Label("主题与问题", systemImage: "square.stack") }
                 Button { changeID = nil; showsChanges = true } label: { Label("认识对照", systemImage: "rectangle.split.2x1") }
@@ -168,9 +164,9 @@ struct ReflectionTimelineView: View {
                         ForEach(ReflectionPeriod.allCases, id: \.self) { Text($0.label).tag($0) }
                     }.labelsHidden().pickerStyle(.segmented).frame(width: 130)
                     HStack(spacing: 8) {
-                        Button { shift(-1) } label: { Image(systemName: "chevron.left") }.help("上一个周期")
+                        Button { shift(-1) } label: { Image(systemName: "chevron.left") }.help("上一个周期").accessibilityLabel("上一个周期")
                         Text(dateLabel).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                        Button { shift(1) } label: { Image(systemName: "chevron.right") }.help("下一个周期")
+                        Button { shift(1) } label: { Image(systemName: "chevron.right") }.help("下一个周期").accessibilityLabel("下一个周期")
                     }.buttonStyle(.plain)
                     DatePicker("选择日期", selection: $anchor, displayedComponents: .date).labelsHidden().frame(width: 100)
                 } else if !topics.isEmpty {
@@ -182,12 +178,16 @@ struct ReflectionTimelineView: View {
                 Spacer()
                 Picker("回顾方式", selection: $timeline) { Text("图谱").tag(false); Text("时间线").tag(true) }
                     .labelsHidden().pickerStyle(.segmented).frame(width: 138)
-                Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }.help(periodic ? "刷新这个周期" : "刷新这个主题").disabled(loading)
+                Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }.help(periodic ? "刷新这个周期" : "刷新这个主题").accessibilityLabel(periodic ? "刷新这个周期" : "刷新这个主题").disabled(loading)
                 Button {
                     if let focus { Task { if !(await reflect(focus, draft)) { error = model.status } } }
                 } label: { Label(periodic ? "一起回顾" : "一起探索", systemImage: "sparkles") }
                     .buttonStyle(.borderedProminent).tint(palette.accent)
                     .disabled(focus?.sourceIDs.isEmpty != false || loading || model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
+            }
+            if focus?.sourceIDs.isEmpty == true {
+                Text(periodic ? "当前周期没有可探索的材料" : "当前主题没有可探索的材料")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }.padding(.horizontal, 26).padding(.top, 24).padding(.bottom, 20)
     }
@@ -316,8 +316,9 @@ struct ReflectionTimelineView: View {
         let height = max(460, (layout.values.map(\.y).max() ?? 110) + 90), width: CGFloat = 964
         return VStack(spacing: 0) {
             HStack {
-                TextField("在图谱中定位内容…", text: $query).textFieldStyle(.plain)
-                    .onSubmit { if let node = matches.first { locate(node.id, layout: layout, contentSize: CGSize(width: width * scale + 36, height: height * scale + 36)) } }
+                WorkspaceSearchField(text: $query, placeholder: "在图谱中定位内容…") {
+                    if let node = matches.first { locate(node.id, layout: layout, contentSize: CGSize(width: width * scale + 36, height: height * scale + 36)) }
+                }
                 Text("\(items.count) 个节点 · \(links.count) 条关系").font(.caption).foregroundStyle(.secondary)
                 Slider(value: $scale, in: 0.55...1.2).frame(width: 75).accessibilityLabel("图谱缩放")
             }.padding(.horizontal, 22).padding(.vertical, 14)
@@ -440,9 +441,9 @@ struct ReflectionTimelineView: View {
                 Text(node.title).font(.system(size: 13, weight: .medium)).lineLimit(3).multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }.padding(13).frame(width: 196, height: 104, alignment: .topLeading)
-                .background(palette.surface.opacity(node.context ? 0.5 : 1), in: RoundedRectangle(cornerRadius: 12))
+                .background(palette.surface.opacity(node.context ? 0.5 : 1), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 .overlay(alignment: .leading) { RoundedRectangle(cornerRadius: 2).fill(palette.graphColor(node.lane)).frame(width: 3, height: 30).padding(.leading, 1) }
-                .overlay { RoundedRectangle(cornerRadius: 12).stroke(selection == node.id ? palette.graphColor(node.lane) : palette.text.opacity(0.12), lineWidth: selection == node.id ? 2 : 1) }
+                .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).stroke(selection == node.id ? palette.graphColor(node.lane) : palette.text.opacity(0.12), lineWidth: selection == node.id ? 2 : 1) }
                 .shadow(color: palette.text.opacity(0.04), radius: 7, y: 3)
         }.buttonStyle(.plain).accessibilityLabel(node.label + "，" + node.title)
     }
@@ -527,13 +528,13 @@ struct ReflectionTimelineView: View {
     }
     private func showSource(_ id:String) {
         if let openSource { openSource(id) }
-        else { model.selected=id;dismiss() }
+        else { model.requestWorkspaceSource(id); dismiss() }
     }
     private func quote(_ title: String, _ text: String) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text(text).font(.callout).textSelection(.enabled)
-        }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
     }
     private func metric(_ title: String, _ count: Int, color: Color) -> some View {
         HStack(alignment: .firstTextBaseline) {

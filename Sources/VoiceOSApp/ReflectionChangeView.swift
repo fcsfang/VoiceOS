@@ -15,10 +15,6 @@ struct ReflectionChangeView: View {
     @State private var selectedID: String?
     @State private var error: String?
 
-    private var ink: Color { palette.text }
-    private var green: Color { palette.accent }
-    private var paper: Color { palette.canvas }
-
     init(model: ControlCenter, focus: ConversationReflectionFocus, selectedConnectionID: String?,
          embedded: Bool = false, close: (() -> Void)? = nil, openSource: ((String) -> Void)? = nil,
          reflect: @escaping (ConversationReflectionFocus, String) async -> Bool, dismissAtlas: @escaping () -> Void) {
@@ -33,11 +29,7 @@ struct ReflectionChangeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("THOUGHTS IN CONTEXT").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(green)
-                    Text("认识对照").font(.system(size: 27, weight: .medium, design: .serif))
-                    Text("从前后原话出发，看看什么延续了，什么仍需核对。").font(.callout).foregroundStyle(.secondary)
-                }
+                WorkspaceHero(eyebrow: "THOUGHTS IN CONTEXT", title: "认识对照", subtitle: "从前后原话出发，看看什么延续了，什么仍需核对。")
                 Spacer()
                 Button("返回地图", action: closeView).keyboardShortcut(.cancelAction)
             }.padding(24)
@@ -56,8 +48,8 @@ struct ReflectionChangeView: View {
                 ContentUnavailableView("这个周期还没有可对照的关联", systemImage: "rectangle.split.2x1", description: Text("后续表达与已有观点形成有依据的关联时，会在这里展示前后原话。也可以先从地图发起一次回顾。"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let error { Text(error).font(.callout).foregroundStyle(.red).padding(16) }
-        }.foregroundStyle(ink).background(paper)
+            if let error { Text(error).font(.callout).foregroundStyle(palette.danger).padding(16) }
+        }.foregroundStyle(palette.text).background(palette.canvas)
             .frame(width: embedded ? nil : 960, height: embedded ? nil : 680)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -68,10 +60,10 @@ struct ReflectionChangeView: View {
                 ForEach(focus.connections) { connection in
                     Button { selectedID = connection.id } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(relation(connection.update.relation)).font(.caption).foregroundStyle(green)
+                            Text(relation(connection.update.relation)).font(.caption).foregroundStyle(palette.accent)
                             Text(connection.update.understanding).font(.callout).lineLimit(4).multilineTextAlignment(.leading)
                         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
-                            .background(green.opacity(selected?.id == connection.id ? 0.10 : 0), in: RoundedRectangle(cornerRadius: 9))
+                            .background(palette.accent.opacity(selected?.id == connection.id ? 0.10 : 0), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                     }.buttonStyle(.plain)
                 }
             }.padding(14)
@@ -83,7 +75,7 @@ struct ReflectionChangeView: View {
         let historicalSources = Array(Set(thought?.evidence.filter { $0.quote.contains(update.historicalQuote) }.map { $0.reference.sourceID } ?? [])).sorted()
         return VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text(relation(update.relation)).font(.headline).foregroundStyle(green)
+                Text(relation(update.relation)).font(.headline).foregroundStyle(palette.accent)
                 Spacer()
                 Text("AI 关系候选 · 待你核对").font(.caption).foregroundStyle(.secondary)
             }
@@ -106,7 +98,7 @@ struct ReflectionChangeView: View {
                 Button {
                     Task { if await reflect(focus, prompt(connection)) { closeView() } else { error = model.status } }
                 } label: { Label("带着原话继续讨论", systemImage: "bubble.left.and.bubble.right") }
-                    .buttonStyle(.borderedProminent).tint(green)
+                    .buttonStyle(.borderedProminent).tint(palette.accent)
                     .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
                 Text("先打开可编辑的问题，确认发送后再交给 AI。关联仍作为候选保留。").font(.caption).foregroundStyle(.secondary)
             }
@@ -114,7 +106,7 @@ struct ReflectionChangeView: View {
     }
     private func evidenceCard(_ title: String, quote: String, sourceIDs: [String]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(green)
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(palette.accent)
             Text(quote).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
             Divider()
             if sourceIDs.isEmpty { Text("请返回地图核对观点来源").font(.caption).foregroundStyle(.secondary) }
@@ -126,12 +118,12 @@ struct ReflectionChangeView: View {
                 }
                 Button("查看来源全文") {
                     if let openSource { openSource(id) }
-                    else { model.selected = id; dismiss(); dismissAtlas() }
+                    else { model.requestWorkspaceSource(id); dismiss(); dismissAtlas() }
                 }.font(.caption)
             }
         }.padding(16).frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 12))
-            .overlay { RoundedRectangle(cornerRadius: 12).stroke(green.opacity(0.14), lineWidth: 1) }
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).stroke(palette.accent.opacity(0.14), lineWidth: 1) }
     }
     private func closeView() {
         if let close { close() } else { dismiss() }

@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct DiscussionView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model:ControlCenter
     var initialText: String = ""
     let dismiss:()->Void
@@ -9,6 +10,7 @@ struct DiscussionView: View {
     @State private var allowCloud=true
     private struct ReferencePreview:Identifiable { let id=UUID();let text:String;let version:String }
     @State private var referencePreview:ReferencePreview?
+    @State private var confirmingEnd=false
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
             HStack {
@@ -48,7 +50,7 @@ struct DiscussionView: View {
                                 Text("我 · 第\(turn.ordinal)轮").font(.headline)
                                 Text(turn.text).textSelection(.enabled)
                                 HStack {
-                                    Button("查看个人原文") { model.selected=turn.sourceID;dismiss() }
+                                    Button("查看个人原文") { model.requestWorkspaceSource(turn.sourceID); dismiss() }
                                     Button("整理我的这轮表达") { model.understandDiscussionTurn(turn);dismiss() }.disabled(!model.canUnderstandDiscussionTurn(turn))
                                 }
                                 Text("整理会发送本轮个人原话，提取待核对观点与明确行动；行动遵循已保存的提醒清单授权。").font(.caption).foregroundStyle(.secondary)
@@ -62,7 +64,7 @@ struct DiscussionView: View {
                                                 if part.kind == .aiSuggestion {
                                                     let kept=model.discussionDerivations.first { $0.discussionAttemptID == reply.id && $0.partIndex == index }
                                                     if let claimID=kept?.claimID ?? outcomeParagraphClaim(reply,index:index,part:part),let claim=model.claims.first(where: { $0.id == claimID }) {
-                                                        Button("已保留 · 查看 AI 候选") { model.selected=claim.references.first?.sourceID;dismiss() }
+                                                        Button("已保留 · 查看 AI 候选") { if let sourceID=claim.references.first?.sourceID { model.requestWorkspaceSource(sourceID); dismiss() } }
                                                     } else {
                                                         Button("保留为 AI 候选") { Task { if await model.retainDiscussionCandidate(reply,index:index) { dismiss() } } }
                                                             .disabled(reply.validity != "current" || session.validity != "current" || model.discussionSaving || model.discussionSending || model.dictationActive)
@@ -72,7 +74,7 @@ struct DiscussionView: View {
                                                 ForEach(Array(part.references.enumerated()),id:\.offset) { _,ref in
                                                     Button("查看引用原文 · "+String(ref.sourceID.prefix(8))) { inspectReference(ref) }
                                                 }
-                                            }.padding(10).frame(maxWidth:.infinity,alignment:.leading).background(.quaternary,in:RoundedRectangle(cornerRadius:8))
+                                            }.padding(10).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
                                         }
                                         Text("输入 \(reply.usage?["input_tokens"].map(String.init) ?? "未知") / 输出 \(reply.usage?["output_tokens"].map(String.init) ?? "未知") tokens · 实际费用未知").font(.caption).foregroundStyle(.secondary)
                                     }
@@ -90,7 +92,7 @@ struct DiscussionView: View {
                                     if let claim=model.claims.first(where: { $0.id == id }) {
                                         Text(claim.statement).textSelection(.enabled)
                                         Text((claim.ownership == "ai_candidate" ? "已有 AI 候选" : "已有个人/来源候选")+" · "+(claim.reviewState == "rejected" ? "已拒绝" : (claim.reviewState == "endorsed" ? "已认可" : "待核对"))).font(.caption).foregroundStyle(.secondary)
-                                        Button("查看原候选与行动") { model.selected=claim.references.first?.sourceID;dismiss() }
+                                        Button("查看原候选与行动") { if let sourceID=claim.references.first?.sourceID { model.requestWorkspaceSource(sourceID); dismiss() } }
                                     }
                                 }
                             }
@@ -103,7 +105,7 @@ struct DiscussionView: View {
                                         if let question=model.questionRecords.first(where: { $0.seed.claimID == claim.id }) {
                                             QuestionStateView(question: question, model: model)
                                         }
-                                        Button("查看成果候选与行动") { model.selected=claim.references.first?.sourceID;dismiss() }
+                                        Button("查看成果候选与行动") { if let sourceID=claim.references.first?.sourceID { model.requestWorkspaceSource(sourceID); dismiss() } }
                                     }
                                     if let action=proposal.action,proposal.ownership == .aiCandidate { Text("AI 行动建议（未创建个人任务）："+action.title).font(.caption).foregroundStyle(.secondary) }
                                     ForEach(Array(proposal.sourceEvidence.enumerated()),id:\.offset) { _,evidence in
@@ -170,13 +172,19 @@ struct DiscussionView: View {
                 HStack {
                     Text(model.discussionStatus).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                     Spacer()
-                    if session.state == "active" { Button("结束讨论") { Task { await model.endDiscussion() } }.disabled(model.discussionSaving || model.dictationActive) }
+                    if session.state == "active" { Button("结束讨论") { confirmingEnd = true }.disabled(model.discussionSaving || model.dictationActive) }
                 }
             } else {
                 ContentUnavailableView("还没有选择讨论",systemImage:"bubble.left.and.bubble.right",description:Text("在资料详情点击“继续讨论”建立新的讨论，或选择已保存历史。"))
             }
         }.padding(24).frame(width:760,height:780)
         .onAppear { text = initialText }
+        .alert("结束讨论？", isPresented: $confirmingEnd) {
+            Button("取消", role: .cancel) {}
+            Button("结束讨论", role: .destructive) { Task { await model.endDiscussion() } }
+        } message: {
+            Text("对话将归档，不能再继续。")
+        }
         .sheet(item:$referencePreview) { preview in
             VStack(alignment:.leading,spacing:12) {
                 Text("当时引用的原文版本").font(.title2)

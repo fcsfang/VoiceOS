@@ -12,6 +12,8 @@ extension QuestionStatus {
     }
 }
 struct QuestionStateView: View {
+    @Environment(\.workspacePalette) private var palette
+    @Environment(\.dismiss) private var dismiss
     let question: QuestionRecord
     @ObservedObject var model: ControlCenter
     @State private var changing = false
@@ -20,7 +22,7 @@ struct QuestionStateView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("问题第 \(question.version) 版 · \(question.status.displayLabel)").font(.callout)
             if question.seed.ownership == "ai_candidate" { Text("AI 提出的问题 · 不代表我的疑问").font(.caption).foregroundStyle(.secondary) }
-            if question.validity == "frozen" { Text("历史状态 · 原话、归属或答案依据已变化，暂停当前使用").font(.caption).foregroundStyle(.orange) }
+            if question.validity == "frozen" { Text("历史状态 · 原话、归属或答案依据已变化，暂停当前使用").font(.caption).foregroundStyle(palette.warning) }
             if question.canReopen { Text("当前答案依据已变化；可明确重开，旧答案仍保留在历史中。").font(.caption).foregroundStyle(.secondary) }
             Button(question.canReopen ? "重新打开并保留历史…" : "登记问题状态…") { changing = true }.disabled((question.validity != "current" && !question.canReopen) || model.savingQuestion)
             if let revisions = model.questionRevisions[question.id], !revisions.isEmpty {
@@ -33,7 +35,7 @@ struct QuestionStateView: View {
                                 Text("答案原话：" + evidence.quote).font(.callout).textSelection(.enabled)
                                 HStack {
                                     Button("核对当时答案版本") { answerHistory = revision }
-                                    Button("查看答案来源当前页") { model.selected = evidence.reference.sourceID }
+                                    Button("查看答案来源当前页") { model.requestWorkspaceSource(evidence.reference.sourceID); dismiss() }
                                 }
                             }
                             Text(revision.createdAt).font(.caption).foregroundStyle(.secondary)

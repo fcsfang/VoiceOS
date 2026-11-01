@@ -9,6 +9,7 @@ struct WorkspaceDiscussionView: View {
     let close: () -> Void
     let openSource: (String) -> Void
     @FocusState private var editorFocused: Bool
+    @State private var confirmingEnd = false
     private var busy: Bool { model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive }
     private var canSend: Bool {
         model.discussionWritable && model.modelConfigured && !busy && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.discussionCanSend || model.discussionRecordingID != nil)
@@ -27,7 +28,7 @@ struct WorkspaceDiscussionView: View {
                     Text(contextTitle).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer()
-                Button(action: close) { Image(systemName: "xmark") }.buttonStyle(.plain).help("收起讨论，保留阅读位置")
+                WorkspaceIconButton(systemImage: "xmark", label: "收起讨论，保留阅读位置") { close() }
             }.padding(18)
             Divider()
             ScrollViewReader { reader in
@@ -40,7 +41,7 @@ struct WorkspaceDiscussionView: View {
                                     VStack(alignment: .leading, spacing: 5) {
                                         Text(source.origin == "user" ? "我的表达" : source.origin == "ai" ? "AI 交付" : "外部资料").font(.caption).foregroundStyle(.secondary)
                                         Text(source.text).lineLimit(3)
-                                        if source.localOnly { Text("仅本地 · 发送前需在材料详情授权").font(.caption).foregroundStyle(.orange) }
+                                        if source.localOnly { Text("仅本地 · 发送前需在材料详情授权").font(.caption).foregroundStyle(palette.warning) }
                                     }.padding(.vertical, 6)
                                 }.buttonStyle(.plain)
                             }
@@ -49,7 +50,7 @@ struct WorkspaceDiscussionView: View {
                         ForEach(model.discussionTurns) { turn in
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("我").font(.caption).foregroundStyle(.secondary)
-                                Text(turn.text).textSelection(.enabled).padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.selection, in: RoundedRectangle(cornerRadius: 9))
+                                Text(turn.text).textSelection(.enabled).padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                                 ForEach(model.discussionReplies.filter { $0.replyToTurnID == turn.id }) { reply in
                                     Text(reply.validity == "current" ? "VoiceOS" : "VoiceOS · 历史依据").font(.caption).foregroundStyle(.secondary)
                                     if reply.parts.isEmpty { Text(reply.state == "reserved" ? "正在思考…" : "这次回复未完成，原因见下方。").foregroundStyle(.secondary) }
@@ -85,7 +86,7 @@ struct WorkspaceDiscussionView: View {
             Divider()
             VStack(alignment: .leading, spacing: 10) {
                 if model.discussionWritable {
-                    TextEditor(text: $draft).font(.body).scrollContentBackground(.hidden).frame(height: 90).padding(7).background(palette.surface, in: RoundedRectangle(cornerRadius: 7)).focused($editorFocused).disabled(busy)
+                    TextEditor(text: $draft).font(.body).scrollContentBackground(.hidden).frame(height: 90).padding(7).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius)).focused($editorFocused).disabled(busy)
                     if let id = model.discussionRecordingID, let source = model.records.first(where: { $0.id == id }) {
                         Text(source.transcript ?? (model.dictationActive ? "正在录制…" : "正在本地转写…")).font(.caption).lineLimit(5).textSelection(.enabled)
                     }
@@ -102,10 +103,18 @@ struct WorkspaceDiscussionView: View {
                 }
                 if !model.discussionStatus.isEmpty { Text(model.discussionStatus).font(.caption).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(4) }
                 if model.discussionWritable {
-                    Button("结束并整理讨论") { Task { await model.endDiscussion(); if model.discussionCanExtract { model.extractDiscussionOutcome() } } }.font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).disabled(busy)
+                    Button("结束并整理讨论") { confirmingEnd = true }.font(.caption).buttonStyle(.plain).foregroundStyle(.secondary).disabled(busy)
                 } else if model.discussionCanExtract { Button("整理讨论成果") { model.extractDiscussionOutcome() }.font(.caption) }
             }.padding(16)
         }.background(palette.sidebar)
+            .alert("结束并整理这段讨论？", isPresented: $confirmingEnd) {
+                Button("取消", role: .cancel) {}
+                Button("结束并整理", role: .destructive) {
+                    Task { await model.endDiscussion(); if model.discussionCanExtract { model.extractDiscussionOutcome() } }
+                }
+            } message: {
+                Text("将调用一次模型把讨论整理为记录，会产生用量。")
+            }
             .task {
                 // A focus write before the field attaches to its window is dropped.
                 guard model.discussionWritable, !busy, !model.dictationBusy, !editorFocused,
