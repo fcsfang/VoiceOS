@@ -23,6 +23,7 @@ struct EnglishInputPreview: View {
     }
 }
 struct EnglishPracticeView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     var embedded = false
     let dismiss: () -> Void
@@ -36,10 +37,17 @@ struct EnglishPracticeView: View {
     }
     private var current: SourceRecord? { sources.first { $0.id == currentID } }
     private var priorCandidates: [SourceRecord] { sources.filter { $0.id != currentID } }
+    private var sendHint: String? {
+        if !model.modelConfigured { return "尚未配置文本模型；配置后可发送文本反馈。" }
+        if model.englishBusy { return "正在准备或发送文本反馈，请稍候。" }
+        if model.englishSnapshot == nil { return "先点“准备并核对文字”，核对待发送文字后才能发送。" }
+        return nil
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("英文表达反馈").font(.title2)
-            Text("只发送选定的个人文字和出处；原始音频不会上传。反馈独立保存，不创建认知候选、行动或提醒事项。")
+            WorkspaceHeading(eyebrow: "工具 · 英文练习", title: "英文表达反馈",
+                             subtitle: "只发送选定的个人文字和出处；原始音频不会上传。")
+            Text("反馈独立保存，不创建认知候选、行动或提醒事项。")
                 .font(.callout).foregroundStyle(.secondary)
             if sources.isEmpty {
                 ContentUnavailableView {
@@ -79,11 +87,13 @@ struct EnglishPracticeView: View {
                     Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)) } } }
                         .disabled(current == nil || model.englishBusy)
                     Button(model.englishBusy ? "正在发送…" : "发送文本反馈") { Task { await model.performEnglishPractice() } }
+                        .buttonStyle(.borderedProminent)
                         .disabled(model.englishSnapshot == nil || model.englishBusy || !model.modelConfigured)
                     if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
                     if model.englishSnapshot != nil { Button("查看待发送文字…") { showingInput = true } }
                     Spacer(); if !embedded { Button("完成", action: dismiss).keyboardShortcut(.cancelAction) }
                 }
+                if let hint = sendHint { Text(hint).font(.caption).foregroundStyle(.secondary) }
             }
             if !model.englishAttempts.isEmpty {
                 Divider(); Text("反馈历史（\(model.englishAttempts.count)）").font(.headline)
@@ -93,7 +103,7 @@ struct EnglishPracticeView: View {
                         Text("\(attempt.state == "completed" ? "已保存" : attempt.state == "reserved" ? "等待结果" : "未完成 · 不自动重发") · \(attempt.createdAt)").font(.caption)
                         if let reason = attempt.error { Text(reason).font(.caption).foregroundStyle(.secondary) }
                         Text("用量：\(attempt.inputTokens.map(String.init) ?? "未知") / \(attempt.outputTokens.map(String.init) ?? "未知") tokens · 费用未知").font(.caption).foregroundStyle(.secondary)
-                        if attempt.validity == "frozen" { Text("历史反馈 · 依据或授权已变化，暂停当前使用").font(.caption).foregroundStyle(.orange) }
+                        if attempt.validity == "frozen" { Text("历史反馈 · 依据或授权已变化，暂停当前使用").font(.caption).foregroundStyle(palette.warning) }
                         if let result = attempt.result {
                             ForEach(Array(result.suggestions.enumerated()), id: \.offset) { index, suggestion in
                                 VStack(alignment: .leading, spacing: 3) {
@@ -101,8 +111,8 @@ struct EnglishPracticeView: View {
                                     Text("原句：\(suggestion.original.quote)").textSelection(.enabled)
                                     Text("建议：\(suggestion.suggestedText)").textSelection(.enabled)
                                     Text(suggestion.explanation).font(.caption).foregroundStyle(.secondary)
-                                    if suggestion.possibleTranscriptIssue { Text("可能是转写问题，需人工核对").font(.caption).foregroundStyle(.orange) }
-                                }.padding(8).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 6))
+                                    if suggestion.possibleTranscriptIssue { Text("可能是转写问题，需人工核对").font(.caption).foregroundStyle(palette.warning) }
+                                }.padding(8).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                             }
                             ForEach(Array(result.comparisons.enumerated()), id: \.offset) { _, comparison in
                                 VStack(alignment: .leading, spacing: 3) {

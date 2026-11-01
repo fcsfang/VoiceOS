@@ -8,6 +8,7 @@ struct FullRecordingInput: Identifiable {
 }
 
 struct FullRecordingView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let input: FullRecordingInput
     var embedded = false
@@ -36,7 +37,7 @@ struct FullRecordingView: View {
             Text(input.media.contextTrack != nil && track == input.media.personalTrack ? "Qwen 在本机分别完整转写你的声音和节目声音，AI 校正后结合双轨全文理解，保留双方原话与时间。节目观点、你的复述与看法分开，只有你明确要做的事进入待办。双轨文字使用已配置模型，原始音视频留在本机。" : "Qwen 在本机完整转写本人音轨，AI 依据全文校正识别错误，保留原意与修订历史。随后整理观点与明确待办；原始音视频保留在本机。")
                 .font(.callout)
             if let issue = model.recordingModelIssue {
-                Text(issue).font(.callout).foregroundStyle(.orange)
+                WorkspaceNoticeText(message: issue)
                 HStack {
                     if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() } }
                     if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
@@ -44,6 +45,12 @@ struct FullRecordingView: View {
             }
             if model.fullRecordingBusy { ProgressView().controlSize(.small) }
             Text(model.fullRecordingStatus).font(.callout).textSelection(.enabled).frame(minHeight: 48, alignment: .topLeading)
+            if !trackDecision.importsAsPersonal && !model.fullRecordingBusy {
+                Text(input.media.usesPersonalRecordingLayout
+                     ? "所选音轨不是本人音轨，或尚未勾选“所选音轨是我的声音”；确认后才能完整整理。"
+                     : "勾选“所选音轨是我的声音”后才能完整整理。")
+                    .font(.caption).foregroundStyle(palette.warning)
+            }
             HStack {
                 if model.fullRecordingBusy { Button("停止处理") { model.cancelFullRecording() } }
                 else { Button("关闭") { model.fullRecordingInput = nil }.keyboardShortcut(.cancelAction) }
