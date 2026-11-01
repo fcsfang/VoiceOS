@@ -56,9 +56,10 @@ struct RecordingFollowupView: View {
                     ForEach(eligible) { source in Text(source.displayTitle).tag(source.id) }
                 }
                 Button(sourceID == "all" ? "更新下一步" : "生成或重试跟进") {
-                    if let id = sourceID == "all" ? eligible.first?.id : sourceID { model.refreshFollowup(id) }
-                }.disabled(model.followupBusy || model.fullRecordingBusy || eligible.isEmpty)
+                    if let id = sourceID == "all" ? nil : sourceID { model.refreshFollowup(id) }
+                }.disabled(model.followupBusy || model.fullRecordingBusy || eligible.isEmpty || sourceID == "all")
                 if model.followupBusy { ProgressView().controlSize(.small) }
+                if sourceID == "all", !eligible.isEmpty { Text("先在来源里选择一份录音，再生成跟进。").font(.caption).foregroundStyle(.secondary) }
             }
             Text(model.followupStatus).font(.caption).foregroundStyle(.secondary)
             Toggle("显示历史版本", isOn: $includeHistory).font(.caption)
