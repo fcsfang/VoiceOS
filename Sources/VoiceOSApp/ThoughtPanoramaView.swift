@@ -18,6 +18,8 @@ struct ThoughtPanoramaView: View {
     let correctClaim: (String) -> Void
     let discuss: (String, PanoramaSelection) -> Void
     @State private var query = ""
+    @State private var searchMatches = ConstellationSearchMatches()
+    @State private var recenterToken = 0
     @State private var recent = true
     @State private var focusedRegionID: String?
     @State private var showCoverage = false
@@ -96,6 +98,7 @@ struct ThoughtPanoramaView: View {
             .labelsHidden()
             .frame(width: compact ? 130 : 150)
             searchField(width: minimal ? 120 : compact ? 150 : 220)
+            searchMatchStatus
             if compact {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
@@ -167,6 +170,41 @@ struct ThoughtPanoramaView: View {
         .padding(.horizontal, 8)
         .frame(width: width, height: 26)
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var hasQuery: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var hasPanoramaRegions: Bool {
+        guard let snapshot = state?.snapshot else { return false }
+        return !snapshot.proposal.questions.isEmpty
+    }
+
+    @ViewBuilder
+    private var searchMatchStatus: some View {
+        if hasQuery, hasPanoramaRegions {
+            Text(searchMatchLabel)
+                .font(.system(size: 11))
+                .foregroundStyle(searchMatches.count == 0 ? Color.orange : Color.secondary)
+                .lineLimit(1)
+                .fixedSize()
+                .help("按区域标题、摘要、问题与联系文字匹配；计数为区域数")
+                .accessibilityLabel(searchMatchLabel + "，按区域标题、摘要、问题与联系文字匹配")
+            if searchMatches.count > 0 {
+                Button("定位") { recenterToken &+= 1 }
+                    .font(.system(size: 11))
+                    .buttonStyle(.borderless)
+                    .help("定位匹配区域")
+                    .accessibilityLabel("定位到 \(searchMatches.count) 个匹配区域")
+            }
+        }
+    }
+
+    private var searchMatchLabel: String {
+        if searchMatches.count == 0 { return "没有匹配的区域" }
+        let suffix = searchMatches.includesQuestionOrRelationText ? "（含问题与联系文字）" : ""
+        return "\(searchMatches.count) 个区域匹配" + suffix
     }
 
     @ViewBuilder
@@ -285,7 +323,15 @@ struct ThoughtPanoramaView: View {
     private func panorama(_ snapshot: PanoramaSnapshot?) -> some View {
         Group {
             if let snapshot, !snapshot.proposal.questions.isEmpty {
-                PanoramaConstellationView(snapshot: snapshot, query: query, recentOnly: recent, selection: $selection, focusedRegionID: $focusedRegionID)
+                PanoramaConstellationView(
+                    snapshot: snapshot,
+                    query: query,
+                    recentOnly: recent,
+                    selection: $selection,
+                    focusedRegionID: $focusedRegionID,
+                    searchMatches: $searchMatches,
+                    recenterToken: recenterToken
+                )
             } else {
                 emptyState
             }

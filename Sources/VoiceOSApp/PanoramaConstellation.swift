@@ -30,6 +30,15 @@ struct ConstellationContentKey: Hashable, Sendable {
     }
 }
 
+// MARK: - Search matches
+
+/// Region-level search state published to the toolbar. Counted from the same
+/// derived `searchText` the dimming pass uses, so the number matches the canvas.
+struct ConstellationSearchMatches: Equatable, Sendable {
+    var count = 0
+    var includesQuestionOrRelationText = false
+}
+
 // MARK: - Derived model
 
 /// One derivation pass per content key. Recent flags, ordering, search text and
@@ -424,6 +433,19 @@ struct ConstellationCamera: Equatable, Sendable {
         )
     }
 
+    func fitted(to box: CGRect, canvas: CGSize, world: CGSize, margin: CGFloat = 24) -> Self {
+        guard box.width > 0, box.height > 0, canvas.width > 0, canvas.height > 0 else { return self }
+        let raw = min((canvas.width - margin * 2) / box.width, (canvas.height - margin * 2) / box.height)
+        let zoom = min(max(raw, Self.zoomRange.lowerBound), 1)
+        var next = Self(
+            zoom: zoom,
+            pan: CGPoint(x: canvas.width / 2 - box.midX * zoom, y: canvas.height / 2 - box.midY * zoom),
+            mode: .free
+        )
+        next.clampPan(canvas: canvas, world: world)
+        return next
+    }
+
     func panned(by delta: CGSize, canvas: CGSize, world: CGSize) -> Self {
         var next = Self(zoom: zoom, pan: CGPoint(x: pan.x + delta.width, y: pan.y + delta.height), mode: .free)
         next.clampPan(canvas: canvas, world: world)
@@ -478,6 +500,8 @@ struct PanoramaConstellationView: View {
     let recentOnly: Bool
     @Binding var selection: PanoramaSelection?
     @Binding var focusedRegionID: String?
+    @Binding var searchMatches: ConstellationSearchMatches
+    let recenterToken: Int
 
     @State private var stage: StageState?
     @State private var camera = ConstellationCamera.initial
@@ -542,12 +566,21 @@ struct PanoramaConstellationView: View {
                     previous.model.regionByID.keys.contains { model.regionByID[$0] != nil }
                 } ?? false
                 stage = StageState(key: contentKey, model: model, layout: layout)
+                publishSearchMatches(for: model)
                 if !survived || (camera.mode == .fit && focusedRegionID == nil) {
                     camera = .fitting(world: layout.worldSize, canvas: size)
                 } else {
                     camera = camera.clamped(canvas: size, world: layout.worldSize)
                 }
             }
+            .onChange(of: normalizedQuery) { _, _ in
+                if let stage {
+                    publishSearchMatches(for: stage.model)
+                } else {
+                    searchMatches = ConstellationSearchMatches()
+                }
+            }
+            .onChange(of: recenterToken) { _, _ in revealMatches(canvas: size) }
             .onChange(of: size) { oldSize, newSize in
                 guard let stage else { return }
                 let grew = newSize.width >= oldSize.width && newSize.height >= oldSize.height
@@ -567,6 +600,38 @@ struct PanoramaConstellationView: View {
 
     private var normalizedQuery: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func matchingRegionIDs(in model: ConstellationModel) -> [String] {
+        let needle = normalizedQuery
+        guard !needle.isEmpty else { return [] }
+        return model.regions.filter { $0.searchText.contains(needle) }.map(\.id)
+    }
+
+    private func publishSearchMatches(for model: ConstellationModel) {
+        let ids = matchingRegionIDs(in: model)
+        let needle = normalizedQuery
+        let includesQuestionOrRelationText = ids.contains { id in
+            guard let region = model.regionByID[id] else { return false }
+            return !(region.title + "\n" + region.summary).lowercased().contains(needle)
+        }
+        searchMatches = ConstellationSearchMatches(count: ids.count, includesQuestionOrRelationText: includesQuestionOrRelationText)
+    }
+
+    private func revealMatches(canvas: CGSize) {
+        guard let stage else { return }
+        let rects = matchingRegionIDs(in: stage.model).compactMap { id -> CGRect? in
+            guard let center = stage.layout.centers[id] else { return nil }
+            return CGRect(
+                x: center.x - ConstellationLayout.cardSize.width / 2,
+                y: center.y - ConstellationLayout.cardSize.height / 2,
+                width: ConstellationLayout.cardSize.width,
+                height: ConstellationLayout.cardSize.height
+            )
+        }
+        guard let first = rects.first else { return }
+        let box = rects.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -24, dy: -24)
+        camera = camera.fitted(to: box, canvas: canvas, world: stage.layout.worldSize)
     }
 
     private func highlightedPair(in stage: StageState) -> ConstellationModel.Pair? {
