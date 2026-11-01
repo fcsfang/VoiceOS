@@ -152,6 +152,8 @@ struct WorkspaceView: View {
                             Button("重试打开资料库") { Task { await model.start() } }.buttonStyle(.borderedProminent)
                             Button("打开其他资料库",action:chooseLibrary)
                         }
+                    } else if !model.initialized {
+                        ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
                     } else { pageContent }
                 }.frame(maxWidth:.infinity,maxHeight:.infinity)
                 if !error.isEmpty { Text(error).font(.callout).foregroundStyle(.orange).textSelection(.enabled).padding(12) }
