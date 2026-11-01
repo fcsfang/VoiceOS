@@ -1,9 +1,9 @@
 ---
-status: in_progress
+status: paused
 started: 2026-11-01T01:30+08
-updated: 2026-11-01T01:30+08
-branch: codex/panorama-slicing
-pr:
+updated: 2026-11-01T08:20+08
+branch: main
+pr: https://github.com/fcsfang/VoiceOS/pull/57, https://github.com/fcsfang/VoiceOS/pull/58, https://github.com/fcsfang/VoiceOS/pull/59, https://github.com/fcsfang/VoiceOS/pull/60, https://github.com/fcsfang/VoiceOS/pull/61, https://github.com/fcsfang/VoiceOS/pull/62, https://github.com/fcsfang/VoiceOS/pull/63, https://github.com/fcsfang/VoiceOS/pull/64, https://github.com/fcsfang/VoiceOS/pull/65
 owner: 主会话
 ---
 
@@ -37,20 +37,32 @@ owner: 主会话
 
 ## 当前状态
 
-设计已定：以候选 1 为基线，吸收候选 2 的显式 target、默认未表达原因、扁平组合回执与独立聚焦身份；片预算 8,000、阈值 16,000、切片 repair。决策记录见 `docs/adr/043-panorama-sliced-generation.md`。实现已交给单个代理。
+已完成并合入 main 到 77d03b7。
+
+- 分片生成：CE3C1904 四片 5分21秒、4分41秒、8分38秒、2分35秒，单元核验一次通过；ED362352 与 24 个小单元零模型调用复用。
+- 全局综合：拆成两轮才可行。第一轮整份输出在 561 秒撞 65,536 token 上限；改为紧凑引用输出后第一次成功，v2 产出 102 个问题、37 条联系、11 个区域，用时 5 分 52 秒。
+- 核对链：逐问题、逐联系、逐单元覆盖与一致性核对照常运行，但语义拒绝的尾巴很长。为此合入了覆盖补集本地化、有界修复循环、拒绝确定性重放、按区域取核对上下文、claim 引用、修复摘要最小化。
+- 未完成：完成快照尚未产出。最新一轮在 q50 之后继续推进，按用户要求于 08:03 停止，没有正在运行的模型调用。
+
+## 花费与停止
+
+本地今天 00:00 起，副本上共 322 次逐问题核对、15 次综合修复、6 次综合、7 次生成，约 2871 万输入 token、87 万输出 token，另有 13 次失败请求没有回执。大头是核对重复全文。用户看到 API 账单后要求先收尾，运行循环与 40 分钟定时续跑已停止。
 
 ## 下一步
 
-实现、红先测试、全量测试，再在真实资料库副本上重试并记录每个阶段的耗时。
+- 分批核对：一次核对一组问题，共享全文只读一遍，只修真正被拒的条目；预计把一次完整通过从几十次全文重读降到几次。
+- 给真实运行设预算上限（轮数或 token 预算），在单元与综合都缓存的前提下继续核对链。
+- 见 issue #66。
 
 ## 验证
 
-- 新场景先以当前代码失败，修复后通过。
-- `swift test -j 4` 全部通过。
-- 真实资料库副本发起重试：CE3C1904 完成，25/25 单元核验；记录关系综合是否运行及其结果。
+- `swift build` 通过，`swift test -j 4` 10 项 0 失败。
+- 真实副本：25/25 单元核验；global.synthesize 完成并可重放；逐问题核对持续通过到中途，语义拒绝由修复循环逐一处理。
+- 花费与阶段耗时记录在 `work/overnight/LOG.md`。
 
 ## 链接
 
 - #55 分块生成，含 600 秒服务上限的实测证据。
-- #46、#53 全景恢复与引文重试。
-- `work/overnight/LOG.md` 2026-11-01 的测量记录。
+- #66 综合核对的分批与预算（后续）。
+- `docs/adr/043-panorama-sliced-generation.md`、`docs/adr/044-compact-synthesis.md`。
+- `work/overnight/LOG.md` 2026-11-01 的测量与花费记录。
