@@ -183,7 +183,7 @@ struct WorkspaceSourceView: View {
                         if !pausedActions.isEmpty {
                             Text("受影响的任务与问题").font(.subheadline.bold())
                             ForEach(pausedActions) { action in
-                                WorkspaceRow(title:action.title,subtitle:model.workspaceActionStatus(action),trailing:"查看任务") { openTask(action.id) }
+                                WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看任务") { openTask(action.id) }
                             }
                         }
                         if !automaticallyUpdating {
@@ -212,7 +212,7 @@ struct WorkspaceSourceView: View {
                 }
                 if pausedThoughts.isEmpty && !pausedActions.isEmpty {
                     WorkspaceSection(title:"观点已更正，关联待办需要重新确认",subtitle:"打开任务即可看到更正后的观点，并填写准确的待办；之前的任务记录保留。",icon:"pause.circle",count:pausedActions.count) {
-                        ForEach(pausedActions) { action in WorkspaceRow(title:action.title,subtitle:model.workspaceActionStatus(action),trailing:"查看与处理") { openTask(action.id) } }
+                        ForEach(pausedActions) { action in WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看与处理") { openTask(action.id) } }
                     }
                 }
                 if (expression?.sourceIDs.count ?? 0) <= 1,let summary=source.contentSummary,!summary.isEmpty {
@@ -277,7 +277,7 @@ struct WorkspaceSourceView: View {
                         ForEach(currentActions) { action in
                             if let delivery=model.assistantExecutions.first(where: { $0.actionID == action.id && $0.validity == "current" && $0.state == "completed" }) {
                                 WorkspaceRow(title:action.title,subtitle:"AI 已交付 · 原任务完成情况单独保留",icon:"doc.text",trailing:"阅读结果") { openDelivery(delivery.id) }
-                            } else { WorkspaceRow(title:action.title,subtitle:model.workspaceActionStatus(action),icon:"circle") { openTask(action.id) } }
+                            } else { WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),icon:"circle") { openTask(action.id) } }
                             if action.id != currentActions.last?.id { Divider() }
                         }
                     }
@@ -285,7 +285,7 @@ struct WorkspaceSourceView: View {
                 let historyActions = actions.filter { $0.validity != "current" && !model.workspaceTaskRequiresReview($0) }
                 if !historyActions.isEmpty {
                     DisclosureGroup("之前提取的任务与完成记录（\(historyActions.count)）") {
-                        ForEach(historyActions) { action in WorkspaceRow(title:action.title,subtitle:model.workspaceActionStatus(action),trailing:"查看记录") { openTask(action.id) } }
+                        ForEach(historyActions) { action in WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看记录") { openTask(action.id) } }
                     }
                 }
                 WorkspaceSection(title:"原话与依据",subtitle:"完整内容、来源核查与修订记录",icon:"quote.bubble") {
@@ -356,10 +356,10 @@ struct WorkspaceSourceView: View {
                 HStack { Spacer();Button("关闭") { showingOriginal=false } }
             }.padding(24).frame(width:650,height:520)
         }
-        .task(id: source.id + pausedThoughts.map(\.id).joined() + (source.transcriptVersionID ?? "")) {
+        .task(id: source.id + pausedThoughts.map(\.id).joined() + (source.transcriptVersionID ?? "") + String(source.policyVersion) + source.state) {
             historyTask?.cancel(); historyState = .idle
             guard !pausedThoughts.isEmpty,let store=model.store else { return }
-            do { pauseExplanation = try await store.understandingPauseExplanation(sourceID:source.id) }
+            do { pauseExplanation = try await store.understandingPause(sourceID:source.id).summary }
             catch { pauseExplanation = "暂时无法读取暂停原因：" + error.localizedDescription }
         }
         .task(id: source.id + model.discussionList.map { $0.id + String($0.version) + $0.validity }.joined()) {

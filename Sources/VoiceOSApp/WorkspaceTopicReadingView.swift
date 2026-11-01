@@ -331,7 +331,7 @@ struct WorkspaceTopicReadingView: View {
                 Image(systemName:action.state == "completed" ? "checkmark.circle.fill" : action.kind == "task" ? "circle" : "lightbulb").foregroundStyle(palette.action)
                 VStack(alignment:.leading,spacing:5) {
                     Text(action.title).font(.system(size:14,weight:.medium)).multilineTextAlignment(.leading)
-                    Text(model.workspaceActionStatus(action)).font(.caption).foregroundStyle(.secondary)
+                    Text(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action)).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength:0)
                 Image(systemName:"chevron.right").font(.caption2).foregroundStyle(.secondary)

@@ -4,6 +4,7 @@ import VoiceOSCore
 struct CorrectionImpactView: View {
     @ObservedObject var model: ControlCenter
     var embedded = false
+    @State private var policyFreezes: [PolicyFreezeImpact] = []
     let dismiss: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -51,7 +52,21 @@ struct CorrectionImpactView: View {
                         }
                         Divider()
                     }
-                    if model.correctionImpacts.isEmpty { Text("目前没有因明确更正而暂停的任务。").foregroundStyle(.secondary) }
+                    if !policyFreezes.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("许可变更后暂停的理解").font(.headline)
+                            Text("以下暂停来自云端使用许可调整，不是对文字错误的更正判定；完成记录与任务历史保持独立。").font(.caption).foregroundStyle(.secondary)
+                            ForEach(policyFreezes) { freeze in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(freeze.sourceName).font(.subheadline)
+                                    Text(freeze.summary).font(.callout)
+                                    Button("查看材料与暂停原因") { model.selected = freeze.sourceID; dismiss() }
+                                }.padding(.vertical, 6)
+                            }
+                        }
+                        Divider()
+                    }
+                    if model.correctionImpacts.isEmpty && policyFreezes.isEmpty { Text("目前没有因明确更正或许可调整而暂停的任务。").foregroundStyle(.secondary) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             if model.correctionImpacts.contains(where: { !$0.scheduleEffects.isEmpty }) {
@@ -62,6 +77,10 @@ struct CorrectionImpactView: View {
         }.padding(24).frame(width: embedded ? nil : 720, height: embedded ? nil : 620)
             .sheet(item: $model.pendingCompensation) { plan in
                 CompensationConfirmationView(plan: plan,model: model) { model.pendingCompensation = nil }
+            }
+            .task(id: model.records.map { $0.id + String($0.policyVersion) }.joined()) {
+                guard let store = model.store else { policyFreezes = []; return }
+                policyFreezes = (try? await store.policyFreezeImpacts()) ?? []
             }
     }
 }
