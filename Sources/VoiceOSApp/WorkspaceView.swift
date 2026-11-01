@@ -431,7 +431,7 @@ struct WorkspaceView: View {
             }
             if rows.isEmpty {
                 if materialFilter == "日常材料" {
-                    WorkspaceEmptyState(title:"还没有材料",systemImage:"tray",description:"可以先记录想法，或导入一段录音、视频。") {
+                    WorkspaceEmptyState(title: model.records.isEmpty ? "还没有材料" : "日常材料是空的", systemImage:"tray", description: model.records.isEmpty ? "可以先记录想法，或导入一段录音、视频。" : "其他材料在已归档或回收站里，可以切换查看。") {
                         Button("添加材料") { go(.capture) }.buttonStyle(.borderedProminent)
                     }
                 } else {
