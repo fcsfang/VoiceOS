@@ -89,6 +89,7 @@ struct WorkspaceView: View {
     @FocusState private var searchFocused: Bool
     @State private var taskFeedbackDrafts: [String: TaskFeedbackDraft] = [:]
     @State private var creatingTopic = false
+    @State private var savingTopic = false
     @State private var newTopicTitle = ""
     @State private var topicFocus: ConversationReflectionFocus?
     @State private var reviewPeriod = ReflectionPeriod.week
@@ -431,7 +432,7 @@ struct WorkspaceView: View {
                     TextField("你持续关心的主题或问题",text:$newTopicTitle).textFieldStyle(.roundedBorder)
                     HStack {
                         Button("取消") { creatingTopic=false }
-                        Button("保存主题") { Task { await saveTopic() } }.buttonStyle(.borderedProminent).disabled(newTopicTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
+                        Button("保存主题") { Task { await saveTopic() } }.buttonStyle(.borderedProminent).disabled(newTopicTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || savingTopic)
                     }
                 }.padding(18).background(palette.selection,in:RoundedRectangle(cornerRadius:9))
             }
@@ -657,6 +658,9 @@ struct WorkspaceView: View {
         go(.themes);topicID=id;topicTab="概览";topicReadingMode="卡片";topicFocus=nil
     }
     private func saveTopic() async {
+        guard !savingTopic else { return }
+        savingTopic = true
+        defer { savingTopic = false }
         do {
             if let topic, creatingTopic, !newTopicTitle.isEmpty { try await model.renameReflectionQuestion(topic.id,title:newTopicTitle,allowCloud:true) }
             else { let created=try await model.createReflectionQuestion(newTopicTitle,allowCloud:true);topicID=created.id }
