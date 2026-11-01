@@ -184,8 +184,13 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
         if failConsistency { failConsistency=false; throw VoiceOSError("模拟最后一致性暂停") }
         sawPriorGlobalRejection=rejections.contains { $0.review.relations.contains { !$0.accepted } }
         XCTAssertEqual(Set(unitProposals.map(\.unitID)),Set(input.manifest.unitIDs))
-        XCTAssertEqual(Set(reviews.filter { $0.stage == "global.question" }.map(\.scopeID)),Set(proposal.questions.map(\.id)))
-        XCTAssertEqual(Set(reviews.filter { $0.stage == "global.relation" }.map(\.scopeID)),Set(proposal.relations.map(\.id)))
+        let regionByQuestion=Dictionary(uniqueKeysWithValues: proposal.questions.map { ($0.id,$0.regionID) })
+        let relationScopes=Set(proposal.relations.compactMap { relation -> String? in
+            guard let from=regionByQuestion[relation.from], let to=regionByQuestion[relation.to] else { return nil }
+            return from <= to ? from+"|"+to : to+"|"+from
+        })
+        XCTAssertEqual(Set(reviews.filter { $0.stage == "global.question" }.map(\.scopeID)),Set(proposal.questions.map(\.regionID)))
+        XCTAssertEqual(Set(reviews.filter { $0.stage == "global.relation" }.map(\.scopeID)),relationScopes)
         XCTAssertEqual(Set(reviews.filter { $0.stage == "global.coverage" }.map(\.scopeID)),Set(input.manifest.unitIDs))
         return (review(proposal),receipt())
     }
@@ -244,6 +249,7 @@ extension CoreFlowTests {
         try await assertPanoramaManifestDuringAwait(root: root)
         try await assertPanoramaUnknownRecovery(root: root)
         try await assertPanoramaStagedWire()
+        try await assertPanoramaReviewBatching()
         try await assertPanoramaCompactSynthesis(root: root)
         try await assertPanoramaTransientRetry(root: root)
     }
@@ -413,6 +419,37 @@ extension CoreFlowTests {
         let reopened=try Database(file)
         XCTAssertEqual(try reopened.query("SELECT state FROM panorama_attempts").first?["state"],"unknown")
         XCTAssertEqual(try reopened.query("SELECT state FROM panorama_steps").first?["state"],"unknown")
+    }
+    private func assertPanoramaReviewBatching() async throws {
+        func evidence(_ source: String) -> [PanoramaEvidence] {
+            [.init(sourceID: source, transcriptVersionID: "t-"+source, start: 0, end: 1, quote: "原文", claimIDs: [])]
+        }
+        let proposal=PanoramaProposal(
+            regions: [.init(id: "r1", title: "甲", summary: "甲区"), .init(id: "r2", title: "乙", summary: "乙区")],
+            questions: [
+                .init(id: "q1", regionID: "r1", title: "问一", summary: "", evidence: evidence("s1")),
+                .init(id: "q2", regionID: "r1", title: "问二", summary: "", evidence: evidence("s3")),
+                .init(id: "q3", regionID: "r2", title: "问三", summary: "", evidence: evidence("s2"))
+            ],
+            relations: [
+                .init(id: "e1", from: "q1", to: "q3", label: "连一", explanation: "", fromEvidence: evidence("s1"), toEvidence: evidence("s2")),
+                .init(id: "e2", from: "q2", to: "q3", label: "连二", explanation: "", fromEvidence: evidence("s3"), toEvidence: evidence("s2")),
+                .init(id: "e3", from: "q2", to: "q1", label: "连三", explanation: "", fromEvidence: evidence("s3"), toEvidence: evidence("s1"))
+            ],
+            unrepresentedSources: [], unrepresentedClaims: [])
+        let questions=VoiceOSStore.panoramaQuestionBatches(proposal)
+        XCTAssertEqual(questions.map(\.scopeID), ["r1", "r2"])
+        XCTAssertEqual(questions[0].questionIDs, ["q1", "q2"])
+        XCTAssertEqual(questions[0].sourceIDs, Set(["s1", "s3"]))
+        XCTAssertEqual(questions[1].questionIDs, ["q3"])
+        XCTAssertEqual(questions[1].sourceIDs, Set(["s2"]))
+        let relations=VoiceOSStore.panoramaRelationBatches(proposal)
+        XCTAssertEqual(relations.map(\.scopeID), ["r1|r2", "r1|r1"])
+        XCTAssertEqual(relations[0].relationIDs, ["e1", "e2"])
+        XCTAssertEqual(Set(relations[0].questionIDs), Set(["q1", "q2", "q3"]))
+        XCTAssertEqual(relations[0].sourceIDs, Set(["s1", "s2", "s3"]))
+        XCTAssertEqual(relations[1].relationIDs, ["e3"])
+        XCTAssertEqual(relations[1].sourceIDs, Set(["s1", "s3"]))
     }
     private func assertPanoramaCompactSynthesis(root: URL) async throws {
         let directory=root.appendingPathComponent("synthesis-identity")

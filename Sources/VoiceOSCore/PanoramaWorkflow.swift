@@ -136,6 +136,67 @@ struct PanoramaGlobalValidation: Sendable {
     let finalReceipt: PanoramaReceipt
 }
 
+/// One independent evidence review covers a whole region's questions, or a
+/// group of relations sharing an endpoint-region pair, so the shared context is
+/// read once. The review semantics are unchanged; only the grouping is.
+struct PanoramaReviewBatch: Sendable {
+    let scopeID: String
+    let questionIDs: [String]
+    let relationIDs: [String]
+    let sourceIDs: Set<String>
+}
+
+/// Caps how many global review requests one attempt may spend. A repaired
+/// candidate only invalidates the batches it touches, but a pathological chain
+/// must still stop with a clear error instead of consuming the whole budget.
+final class PanoramaReviewBudget {
+    private(set) var remaining: Int
+    init(_ limit: Int) { remaining = limit }
+    func spend() throws {
+        guard remaining > 0 else { throw VoiceOSError("全景核对达到本轮预算上限，已保留部分结果；可明确重试继续") }
+        remaining -= 1
+    }
+}
+
+extension VoiceOSStore {
+    static func panoramaQuestionBatches(_ proposal: PanoramaProposal) -> [PanoramaReviewBatch] {
+        var order: [String] = []
+        var grouped: [String: [PanoramaQuestion]] = [:]
+        for question in proposal.questions {
+            if grouped[question.regionID] == nil { order.append(question.regionID) }
+            grouped[question.regionID, default: []].append(question)
+        }
+        return order.compactMap { regionID in
+            guard let questions = grouped[regionID] else { return nil }
+            return .init(scopeID: regionID, questionIDs: questions.map(\.id), relationIDs: [],
+                         sourceIDs: Set(questions.flatMap { $0.evidence.map(\.sourceID) }))
+        }
+    }
+    static func panoramaRelationBatches(_ proposal: PanoramaProposal) -> [PanoramaReviewBatch] {
+        let regionByQuestion = Dictionary(uniqueKeysWithValues: proposal.questions.map { ($0.id, $0.regionID) })
+        var order: [String] = []
+        var grouped: [String: [PanoramaRelation]] = [:]
+        var pairByScope: [String: [String]] = [:]
+        for relation in proposal.relations {
+            guard let from = regionByQuestion[relation.from], let to = regionByQuestion[relation.to] else { continue }
+            let pair = from <= to ? [from, to] : [to, from]
+            let scopeID = pair.joined(separator: "|")
+            if grouped[scopeID] == nil { order.append(scopeID); pairByScope[scopeID] = pair }
+            grouped[scopeID, default: []].append(relation)
+        }
+        let questionsByRegion = Dictionary(grouping: proposal.questions, by: \.regionID)
+        return order.compactMap { scopeID in
+            guard let relations = grouped[scopeID], let pair = pairByScope[scopeID] else { return nil }
+            let regionSources = Set(pair.flatMap { regionID in
+                (questionsByRegion[regionID] ?? []).flatMap { $0.evidence.map(\.sourceID) }
+            })
+            let relationSources = relations.flatMap { ($0.fromEvidence + $0.toEvidence).map(\.sourceID) }
+            return .init(scopeID: scopeID, questionIDs: Set(relations.flatMap { [$0.from, $0.to] }).sorted(),
+                         relationIDs: relations.map(\.id), sourceIDs: regionSources.union(relationSources))
+        }
+    }
+}
+
 extension VoiceOSStore {
     static func validatePanoramaStageReview(_ review: PanoramaReview, proposal: PanoramaProposal, input: PanoramaInput,
         generation: PanoramaReceipt, verification: PanoramaReceipt) throws {
