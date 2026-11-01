@@ -540,7 +540,11 @@ struct PanoramaConstellationView: View {
                     VStack {
                         Spacer(minLength: 0)
                         HStack {
-                            ConstellationLegend(isPartial: snapshot.isPartial, hasEdges: !stage.model.edges.isEmpty)
+                            ConstellationLegend(
+                                isPartial: snapshot.isPartial,
+                                hasEdges: !stage.model.edges.isEmpty,
+                                hasRecent: recentOnly && stage.model.regions.contains { $0.isRecent }
+                            )
                             Spacer(minLength: 0)
                         }
                         .padding(12)
@@ -785,6 +789,7 @@ private struct EdgeLayer: View {
 }
 
 private struct RegionCard: View {
+    @Environment(\.workspacePalette) private var palette
     let region: ConstellationModel.Region
     let focused: Bool
     let hovered: Bool
@@ -802,7 +807,7 @@ private struct RegionCard: View {
                         Text("\(region.questionIDs.count) 个问题").font(.system(size: 11)).foregroundStyle(.secondary)
                         Spacer(minLength: 0)
                         if recent {
-                            Circle().fill(Color.accentColor).frame(width: 5, height: 5).accessibilityHidden(true)
+                            Circle().fill(palette.accent).frame(width: 5, height: 5).accessibilityLabel("近期更新的区域")
                         }
                     }
                 }
@@ -829,9 +834,9 @@ private struct RegionCard: View {
     }
 
     private var borderColor: Color {
-        if focused || selected { return .accentColor }
-        if hovered { return Color.accentColor.opacity(0.55) }
-        return Color.secondary.opacity(0.25)
+        if focused || selected { return palette.accent }
+        if hovered { return palette.accent.opacity(0.55) }
+        return palette.border
     }
 }
 
@@ -875,6 +880,7 @@ private struct ZoomCluster: View {
 private struct ConstellationLegend: View {
     let isPartial: Bool
     let hasEdges: Bool
+    let hasRecent: Bool
 
     var body: some View {
         Text(copy)
@@ -888,7 +894,14 @@ private struct ConstellationLegend: View {
     }
 
     private var copy: String {
-        if hasEdges { return "虚线 · AI 候选联系，尚待核对" }
-        return isPartial ? "跨材料联系尚未核对完成；当前仅显示已核对区域" : "当前没有已核对的跨区域候选联系"
+        let base: String
+        if hasEdges {
+            base = "虚线 · AI 候选联系，尚待核对"
+        } else if isPartial {
+            base = "跨材料联系尚未核对完成；当前仅显示已核对区域"
+        } else {
+            base = "当前没有已核对的跨区域候选联系"
+        }
+        return hasRecent ? base + " · 圆点为近期更新" : base
     }
 }
