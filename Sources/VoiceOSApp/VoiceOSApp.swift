@@ -453,11 +453,14 @@ final class ControlCenter: ObservableObject {
         guard let claim = claims.first(where: { $0.id == action.claimID }) else { return false }
         return !recordingActionRequiresReview(action) && !claim.references.isEmpty && claim.references.allSatisfy { ref in records.contains { $0.id == ref.sourceID && !$0.localOnly } }
     }
+    static weak var primary: ControlCenter?
     private let rootOverride: URL?
     var libraryTitle: String { rootOverride == nil ? "VoiceOS" : "独立资料库 · " + rootOverride!.lastPathComponent }
     init(root: URL? = nil) {
         rootOverride=root
         recordingInbox=RecordingInbox(libraryRoot:root ?? ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"].map { URL(fileURLWithPath:$0) })
+        // Only the app's main model (no root) backs the app-level menu action.
+        if root == nil, ControlCenter.primary == nil { ControlCenter.primary = self }
     }
     var store: VoiceOSStore?
     @Published var workspaceTopics: [ReflectionQuestion] = []
@@ -536,6 +539,12 @@ final class ControlCenter: ObservableObject {
         dictationInterrupted = interrupted; dictationBusy = true
         status = interrupted ? "录制因系统中断结束，保留片段待核对" : "正在停止录制并核对原件…"
         dictation.stop()
+    }
+    var canToggleCaptureDictation: Bool {
+        initialized && !dictationBusy && !fullRecordingBusy && (dictationActive || recordingModelIssue == nil)
+    }
+    func toggleCaptureDictation() {
+        if dictationActive { stopDictation() } else { Task { await startDictation(processAfterTranscription: true) } }
     }
     private func finishDictation(success:Bool) async {
         guard let store, let id = dictationSource else { return }
@@ -2111,8 +2120,24 @@ final class ControlCenter: ObservableObject {
     }
 }
 
+@MainActor
 final class ApplicationDelegate: NSObject, NSApplicationDelegate {
+    private var dictationKeyMonitor: Any?
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // SwiftUI accepts only the import command on this scene, so Command-Shift-R is handled here.
+        dictationKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard !event.isARepeat,
+                  flags == [.command, .shift],
+                  event.charactersIgnoringModifiers?.lowercased() == "r" else { return event }
+            Task { @MainActor in
+                guard let model = ControlCenter.primary, model.canToggleCaptureDictation else { return }
+                model.toggleCaptureDictation()
+            }
+            return nil
+        }
+    }
 }
 @main
 struct VoiceOSApp: App {

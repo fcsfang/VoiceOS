@@ -84,6 +84,7 @@ struct TextCaptureView: View {
                     Text("CAPTURE YOUR CONTEXT").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(green)
                     Text("把文字，带进思考").font(.system(size: 26, weight: .medium, design: .serif))
                     Text("可粘贴原文，或拖入一份 txt / md 文件；分别保留自己的表达与外部资料的真实归属。").font(.callout).foregroundStyle(.secondary)
+                    Text("⌘⇧R 开始或停止口述").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("导入文字文件") { chooseFile() }.disabled(draft.saving)
