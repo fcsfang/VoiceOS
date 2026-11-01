@@ -29,6 +29,7 @@ struct EnglishPracticeView: View {
     @State private var currentID = ""
     @State private var priorIDs: Set<String> = []
     @State private var showingInput = false
+    @State private var suppressSelectionReset = false
     private var sources: [SourceRecord] {
         model.records.filter { $0.origin == "user" && $0.speaker == "user" && !($0.transcript ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && ["saved", "reference_only"].contains($0.state) }
     }
@@ -39,35 +40,43 @@ struct EnglishPracticeView: View {
             Text("英文表达反馈").font(.title2)
             Text("只发送选定的个人文字和出处；原始音频不会上传。反馈独立保存，不创建认知候选、行动或提醒事项。")
                 .font(.callout).foregroundStyle(.secondary)
-            Picker("本次练习", selection: $currentID) {
-                Text("选择一份我的英文原话").tag("")
-                ForEach(sources) { source in
-                    Text(String((source.transcript ?? source.name).prefix(90))).tag(source.id)
+            if sources.isEmpty {
+                ContentUnavailableView("还没有可练习的英文原话", systemImage: "character.book.closed", description: Text("需要一份已保存、已完成文字转写的个人原话。完成一段英文录音并保存后，回到这里即可练习。"))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Picker("本次练习", selection: $currentID) {
+                    Text("选择一份我的英文原话").tag("")
+                    ForEach(sources) { source in
+                        Text(String((source.transcript ?? source.name).prefix(90))).tag(source.id)
+                    }
                 }
-            }
-            .disabled(model.englishBusy)
-            .onChange(of: currentID) { _, _ in priorIDs = priorIDs.filter { $0 != currentID }; model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。" }
-            Text("可选旧练习（最多 2 份）").font(.headline)
-            ScrollView {
-                ForEach(priorCandidates) { source in
-                    Toggle(isOn: Binding(get: { priorIDs.contains(source.id) }, set: { value in
-                        if value { if priorIDs.count < 2 { priorIDs.insert(source.id) } }
-                        else { priorIDs.remove(source.id) }
-                        model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
-                    })) {
-                        VStack(alignment: .leading) { Text(source.name); Text(source.transcript ?? "").lineLimit(2).font(.caption).foregroundStyle(.secondary) }
-                    }.disabled(model.englishBusy || (!priorIDs.contains(source.id) && priorIDs.count >= 2))
+                .disabled(model.englishBusy)
+                .onChange(of: currentID) { _, _ in
+                    if suppressSelectionReset { suppressSelectionReset = false; return }
+                    priorIDs = priorIDs.filter { $0 != currentID }; model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
                 }
-            }.frame(maxHeight: model.englishAttempts.isEmpty ? 210 : 110)
-            Text(model.englishStatus).font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)) } } }
-                    .disabled(current == nil || model.englishBusy)
-                Button(model.englishBusy ? "正在发送…" : "发送文本反馈") { Task { await model.performEnglishPractice() } }
-                    .disabled(model.englishSnapshot == nil || model.englishBusy || !model.modelConfigured)
-                if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
-                if model.englishSnapshot != nil { Button("查看待发送文字…") { showingInput = true } }
-                Spacer(); if !embedded { Button("完成", action: dismiss).keyboardShortcut(.cancelAction) }
+                Text("可选旧练习（最多 2 份）").font(.headline)
+                ScrollView {
+                    ForEach(priorCandidates) { source in
+                        Toggle(isOn: Binding(get: { priorIDs.contains(source.id) }, set: { value in
+                            if value { if priorIDs.count < 2 { priorIDs.insert(source.id) } }
+                            else { priorIDs.remove(source.id) }
+                            model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
+                        })) {
+                            VStack(alignment: .leading) { Text(source.name); Text(source.transcript ?? "").lineLimit(2).font(.caption).foregroundStyle(.secondary) }
+                        }.disabled(model.englishBusy || (!priorIDs.contains(source.id) && priorIDs.count >= 2))
+                    }
+                }.frame(maxHeight: model.englishAttempts.isEmpty ? 210 : 110)
+                Text(model.englishStatus).font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)) } } }
+                        .disabled(current == nil || model.englishBusy)
+                    Button(model.englishBusy ? "正在发送…" : "发送文本反馈") { Task { await model.performEnglishPractice() } }
+                        .disabled(model.englishSnapshot == nil || model.englishBusy || !model.modelConfigured)
+                    if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
+                    if model.englishSnapshot != nil { Button("查看待发送文字…") { showingInput = true } }
+                    Spacer(); if !embedded { Button("完成", action: dismiss).keyboardShortcut(.cancelAction) }
+                }
             }
             if !model.englishAttempts.isEmpty {
                 Divider(); Text("反馈历史（\(model.englishAttempts.count)）").font(.headline)
@@ -105,6 +114,12 @@ struct EnglishPracticeView: View {
         .sheet(isPresented: $showingInput) {
             if let snapshot = model.englishSnapshot { EnglishInputPreview(snapshot: snapshot) { showingInput = false } }
         }
-        .task { if currentID.isEmpty { currentID = sources.first?.id ?? "" } }
+        .task {
+            guard currentID.isEmpty, let first = sources.first else { return }
+            suppressSelectionReset = true
+            currentID = first.id
+            model.englishSnapshot = nil
+            model.englishStatus = "已选择，准备并核对文字。"
+        }
     }
 }

@@ -6,8 +6,11 @@ struct ThoughtPanoramaView: View {
     let message: String
     let isGenerating: Bool
     let modelConfigured: Bool
+    let readError: String?
     @Binding var selection: PanoramaSelection?
     let retry: () -> Void
+    let retryRefresh: () -> Void
+    let dismissReadError: () -> Void
     let chooseTextModel: () -> Void
     let openMaterials: () -> Void
     let openSource: (String) -> Void
@@ -27,6 +30,7 @@ struct ThoughtPanoramaView: View {
             let hasSideReader = width >= 740
             VStack(spacing: 0) {
                 constellationToolbar(width: width)
+                if let readError { readErrorBanner(readError) }
                 Divider()
                 HStack(spacing: 0) {
                     panorama(state?.snapshot)
@@ -115,6 +119,22 @@ struct ThoughtPanoramaView: View {
         .padding(.horizontal, 16)
         .frame(maxWidth: .infinity)
         .frame(height: 52)
+    }
+
+    private func readErrorBanner(_ text: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Text(text).font(.system(size: 12)).lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button("重试", action: retryRefresh).controlSize(.small)
+            Button { dismissReadError() } label: { Image(systemName: "xmark") }
+                .buttonStyle(.plain)
+                .help("关闭提示")
+                .accessibilityLabel("关闭读取错误提示")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color.orange.opacity(0.10))
     }
 
     private func partialChip(_ snapshot: PanoramaSnapshot, short: Bool) -> some View {
@@ -516,6 +536,6 @@ struct PanoramaHome: View {
     let correctClaim: (String) -> Void
     let discuss: (String, PanoramaSelection) -> Void
     var body: some View {
-        ThoughtPanoramaView(state: screen.state, message: screen.message, isGenerating: screen.isGenerating, modelConfigured: screen.modelConfigured, selection: $screen.selection, retry: retry, chooseTextModel: chooseTextModel, openMaterials: openMaterials, openSource: openSource, correctSource: correctSource, correctClaim: correctClaim, discuss: discuss)
+        ThoughtPanoramaView(state: screen.state, message: screen.message, isGenerating: screen.isGenerating, modelConfigured: screen.modelConfigured, readError: screen.readError, selection: $screen.selection, retry: retry, retryRefresh: { screen.retryRefresh() }, dismissReadError: { screen.dismissReadError() }, chooseTextModel: chooseTextModel, openMaterials: openMaterials, openSource: openSource, correctSource: correctSource, correctClaim: correctClaim, discuss: discuss)
     }
 }

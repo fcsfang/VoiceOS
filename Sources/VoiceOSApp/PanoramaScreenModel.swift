@@ -5,16 +5,21 @@ import VoiceOSCore
 final class PanoramaScreenModel: ObservableObject {
     @Published private(set) var state: PanoramaState?
     @Published private(set) var message = "正在核对完整材料与使用许可"
+    @Published private(set) var readError: String?
     @Published var selection: PanoramaSelection?
     @Published private(set) var isGenerating = false
     @Published private(set) var modelConfigured = false
     private var worker: Task<Void,Never>?
     private var refreshVersion = 0
     private var progressWorker: Task<Void,Never>?
+    private var lastStore: VoiceOSStore?
+    private var lastPort: (any PanoramaModelPort)?
 
     func refresh(store: VoiceOSStore?, port: (any PanoramaModelPort)?) async {
         modelConfigured = port != nil
         guard let store else { return }
+        lastStore = store
+        lastPort = port
         refreshVersion += 1
         let version = refreshVersion
         do {
@@ -30,13 +35,20 @@ final class PanoramaScreenModel: ObservableObject {
                 if !exists { self.selection=nil }
             }
             state = current
+            readError = nil
             message = current.error ?? statusMessage(current, configured: port != nil)
             guard worker == nil, current.canGenerate, let port else { return }
             generate(store: store, port: port, retry: false)
         } catch {
             guard version == refreshVersion else { return }
-            state = nil; selection = nil; message = error.localizedDescription
+            readError = error.localizedDescription
         }
+    }
+    func retryRefresh() {
+        Task { await refresh(store: lastStore, port: lastPort) }
+    }
+    func dismissReadError() {
+        readError = nil
     }
     func retry(store: VoiceOSStore?, port: (any PanoramaModelPort)?) {
         guard worker == nil, let store, let port else { return }
