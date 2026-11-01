@@ -41,9 +41,18 @@ public struct CandidateClaim: Identifiable, Sendable {
     public let reviewVersion: Int
     public let reviewState: String
 }
+public struct UnderstandingPause: Sendable, Equatable {
+    public struct PolicyChange: Sendable, Equatable {
+        public let fromVersion: Int
+        public let toVersion: Int
+        public let changedAt: String?
+    }
+    public let summary: String
+    public let policyChange: PolicyChange?
+}
 extension VoiceOSStore {
     /// Explain the saved extraction against today's source; never guess why a task was completed.
-    public func understandingPauseExplanation(sourceID: String) throws -> String {
+    public func understandingPause(sourceID: String) throws -> UnderstandingPause {
         guard let row = try db.query("""
             SELECT x.snapshot_json,i.policy_version FROM model_attempts a
             JOIN contexts x ON x.id=a.context_id JOIN context_inputs i ON i.context_id=x.id
@@ -54,21 +63,42 @@ extension VoiceOSStore {
               let saved = row["snapshot_json"],
               let previous = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(saved.utf8)).sources.first(where: { $0.sourceID == sourceID }),
               let source = try sources().first(where: { $0.id == sourceID }) else {
-            return "应用暂停了之前提取的观点和任务，但没有保存具体原因。"
+            return UnderstandingPause(summary: "应用暂停了之前提取的观点和任务，但没有保存具体原因。", policyChange: nil)
         }
-        if source.state == "quarantined" { return "保存的原件未通过完整性检查。请先恢复可用原件，暂时不能重新识别。" }
-        if source.localOnly { return "这份文字现在仅限本机使用，之前的云端识别已暂停。" }
+        if source.state == "quarantined" { return UnderstandingPause(summary: "保存的原件未通过完整性检查。请先恢复可用原件，暂时不能重新识别。", policyChange: nil) }
+        let savedPolicy = Int(row["policy_version"] ?? "1") ?? 1
+        // A permit change invalidates every input saved under the old version, so it
+        // outranks per-source edits and the local-only state when explaining a pause.
+        if savedPolicy != source.policyVersion {
+            let changedAt = try db.query("SELECT created_at FROM source_policy_revisions WHERE source_id=? AND from_version=? ORDER BY to_version LIMIT 1", [sourceID, String(savedPolicy)]).first?["created_at"]
+            var summary = "这份文字的云端使用许可已从第 \(savedPolicy) 版调整为第 \(source.policyVersion) 版"
+            if let changedAt { summary += "（" + Self.pauseTime(changedAt) + "）" }
+            summary += "，之前的识别不能直接沿用。"
+            if source.localOnly { summary += "当前仅限本机使用。" }
+            return UnderstandingPause(summary: summary, policyChange: UnderstandingPause.PolicyChange(fromVersion: savedPolicy, toVersion: source.policyVersion, changedAt: changedAt))
+        }
         if previous.transcriptVersionID != source.transcriptVersionID || previous.text != source.transcript {
-            return "转写文字已更正，之前提取的观点和任务尚未按更正后的文字重新识别。"
+            return UnderstandingPause(summary: "转写文字已更正，之前提取的观点和任务尚未按更正后的文字重新识别。", policyChange: nil)
         }
         if previous.origin != source.origin || previous.speaker != source.speaker {
-            return "这份材料的说话人或内容归属已调整，需要重新区分谁的观点、谁要做的事。"
+            return UnderstandingPause(summary: "这份材料的说话人或内容归属已调整，需要重新区分谁的观点、谁要做的事。", policyChange: nil)
         }
-        if row["policy_version"] != String(source.policyVersion) { return "这份文字的云端使用许可已调整，之前的识别不能直接沿用。" }
         if try json(previous.transcriptionReview) != json(source.transcriptionReview) {
-            return "转写文字没有变化。应用更新了转写核对记录，之前提取的观点和任务需要重新识别。"
+            return UnderstandingPause(summary: "转写文字没有变化。应用更新了转写核对记录，之前提取的观点和任务需要重新识别。", policyChange: nil)
         }
-        return "之前提取的观点或其关联材料已被暂停使用；任务是否完成仍以单独保存的完成记录为准。"
+        if source.localOnly { return UnderstandingPause(summary: "这份文字现在仅限本机使用，之前的云端识别已暂停。", policyChange: nil) }
+        return UnderstandingPause(summary: "之前提取的观点或其关联材料已被暂停使用；任务是否完成仍以单独保存的完成记录为准。", policyChange: nil)
+    }
+    public func understandingPauseExplanation(sourceID: String) throws -> String {
+        try understandingPause(sourceID: sourceID).summary
+    }
+    private static func pauseTime(_ iso: String) -> String {
+        guard let date = ISO8601DateFormatter().date(from: iso) else { return iso }
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter.string(from: date)
     }
     @discardableResult
     public func persistLocalContext(_ context: LocalTranscriptContext, commandID: String = UUID().uuidString, destination: ModelDestination = .local) throws -> String {

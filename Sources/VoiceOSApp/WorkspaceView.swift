@@ -89,6 +89,7 @@ struct WorkspaceView: View {
     @FocusState private var searchFocused: Bool
     @State private var taskFeedbackDrafts: [String: TaskFeedbackDraft] = [:]
     @State private var creatingTopic = false
+    @State private var savingTopic = false
     @State private var newTopicTitle = ""
     @State private var topicFocus: ConversationReflectionFocus?
     @State private var reviewPeriod = ReflectionPeriod.week
@@ -152,6 +153,8 @@ struct WorkspaceView: View {
                             Button("重试打开资料库") { Task { await model.start() } }.buttonStyle(.borderedProminent)
                             Button("打开其他资料库",action:chooseLibrary)
                         }
+                    } else if !model.initialized {
+                        ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
                     } else { pageContent }
                 }.frame(maxWidth:.infinity,maxHeight:.infinity)
                 if !error.isEmpty { Text(error).font(.callout).foregroundStyle(.orange).textSelection(.enabled).padding(12) }
@@ -207,6 +210,14 @@ struct WorkspaceView: View {
             ClaimCorrectionView(claim: claim, model: model) { panoramaClaimEditor = nil }
         }
         .sheet(item:$model.pendingScheduleEffect) { effect in ReminderScheduleConfirmationView(effect:effect,model:model) { model.pendingScheduleEffect=nil } }
+        .alert("无法导入录音或视频", isPresented: Binding(
+            get: { model.fullRecordingImportIssue != nil },
+            set: { if !$0 { model.fullRecordingImportIssue = nil } }
+        )) {
+            Button("好") { model.fullRecordingImportIssue = nil }
+        } message: {
+            Text(model.fullRecordingImportIssue ?? "")
+        }
     }
     private var topicLoadKey: String {
         guard page == .themes, let id = topicID else { return "" }
@@ -307,11 +318,20 @@ struct WorkspaceView: View {
         case .settings: scrolled { settings }
         case .capture:
             VStack(alignment:.leading,spacing:0) {
-                HStack {
-                    Button(model.dictationActive ? "停止并整理" : "开始口述并自动整理",systemImage:model.dictationActive ? "stop.circle" : "mic") {
-                        if model.dictationActive { model.stopDictation() } else { Task { await model.startDictation(processAfterTranscription:true) } }
-                    }.buttonStyle(.borderedProminent).disabled(model.dictationBusy || model.fullRecordingBusy)
-                    Button("导入音频 / 视频") { model.chooseFullRecording() }
+                VStack(alignment:.leading,spacing:10) {
+                    HStack {
+                        Button(model.dictationActive ? "停止并整理" : "开始口述并自动整理",systemImage:model.dictationActive ? "stop.circle" : "mic") {
+                            if model.dictationActive { model.stopDictation() } else { Task { await model.startDictation(processAfterTranscription:true) } }
+                        }.buttonStyle(.borderedProminent).disabled(model.dictationBusy || model.fullRecordingBusy || (!model.dictationActive && model.recordingModelIssue != nil))
+                        Button("导入音频 / 视频") { model.chooseFullRecording() }
+                    }
+                    if let issue = model.recordingModelIssue {
+                        HStack(spacing:10) {
+                            Text(issue).font(.caption).foregroundStyle(.orange)
+                            if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.controlSize(.small) }
+                            if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.controlSize(.small) }
+                        }
+                    }
                 }.padding(24)
                 TextCaptureView(model:model,draft:$model.textCaptureDraft,onSaved:{ if page == .capture { go(.source($0)) } },dismiss:back)
             }.frame(maxWidth:860).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.top)
@@ -412,7 +432,7 @@ struct WorkspaceView: View {
                     TextField("你持续关心的主题或问题",text:$newTopicTitle).textFieldStyle(.roundedBorder)
                     HStack {
                         Button("取消") { creatingTopic=false }
-                        Button("保存主题") { Task { await saveTopic() } }.buttonStyle(.borderedProminent).disabled(newTopicTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
+                        Button("保存主题") { Task { await saveTopic() } }.buttonStyle(.borderedProminent).disabled(newTopicTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || savingTopic)
                     }
                 }.padding(18).background(palette.selection,in:RoundedRectangle(cornerRadius:9))
             }
@@ -638,6 +658,9 @@ struct WorkspaceView: View {
         go(.themes);topicID=id;topicTab="概览";topicReadingMode="卡片";topicFocus=nil
     }
     private func saveTopic() async {
+        guard !savingTopic else { return }
+        savingTopic = true
+        defer { savingTopic = false }
         do {
             if let topic, creatingTopic, !newTopicTitle.isEmpty { try await model.renameReflectionQuestion(topic.id,title:newTopicTitle,allowCloud:true) }
             else { let created=try await model.createReflectionQuestion(newTopicTitle,allowCloud:true);topicID=created.id }

@@ -267,6 +267,7 @@ final class ControlCenter: ObservableObject {
     @Published var fullRecordingDetail = ""
     @Published var fullRecordingCount: Int?
     @Published var fullRecordingOutput: URL?
+    @Published var fullRecordingImportIssue: String?
     private var fullRecordingWorker: Task<Void, Never>?
     private var fullRecordingLog: URL?
     private(set) var fullRecordingSourceID: String?
@@ -278,6 +279,14 @@ final class ControlCenter: ObservableObject {
     @Published var modelSummary = "尚未配置文本模型"
     @Published var speechSummary = "Qwen 本地转写 · 尚未配置"
     private var speechPort: (any SpeechPort)?
+    var speechConfigured: Bool { speechPort is LocalQwenSpeechPort }
+    var textModelConfigured: Bool { modelConfigured && textConfigurationFile != nil }
+    var recordingModelIssue: String? {
+        if !speechConfigured { return "尚未配置本地 Qwen 转写模型。" }
+        if !textModelConfigured { return "尚未配置文本模型。" }
+        if Bundle.main.url(forResource: "organize_podcast", withExtension: "py") == nil { return "应用缺少完整整理脚本，请更新应用。" }
+        return nil
+    }
     private let speechPreferenceKey="voiceos.localSpeechSelection.v1"
     private func installSpeechSelection(_ selection: LocalSpeechSelection, persist: Bool) throws {
         let port=try selection.port()
@@ -486,9 +495,9 @@ final class ControlCenter: ObservableObject {
     private var dictationObservers: [NSObjectProtocol] = []
     func startDictation(processAfterTranscription: Bool = false) async {
         guard let store, !dictationBusy, !dictationActive, !fullRecordingBusy, !importing, worker == nil, understandingWorker == nil else { status = "请等待当前录音或文字处理结束"; return }
-        if processAfterTranscription {
-            guard speechPort is LocalQwenSpeechPort, modelConfigured, textConfigurationFile != nil,
-                  Bundle.main.url(forResource: "organize_podcast", withExtension: "py") != nil else { status = "请先配置 Qwen 和文本模型，再录制并完整整理"; return }
+        if processAfterTranscription, let issue = recordingModelIssue {
+            status = issue + "无法录制并完整整理"
+            return
         }
         dictationBusy = true; defer { dictationBusy = false }
         let duration: TimeInterval?
@@ -731,10 +740,24 @@ final class ControlCenter: ObservableObject {
                 do {
                     let media = try await FullRecordingOrganizer.inspect(url)
                     self.fullRecordingCount = nil; self.fullRecordingStatus = ""
-                    self.fullRecordingOutput = nil
+                    self.fullRecordingOutput = nil; self.fullRecordingImportIssue = nil
                     self.fullRecordingInput = FullRecordingInput(url: url, media: media)
-                } catch { self.status = error.localizedDescription }
+                } catch { self.fullRecordingImportIssue = error.localizedDescription }
             }
+        }
+    }
+    func importFullRecordingAsExternal(_ input: FullRecordingInput) {
+        guard let store, !importing, !fullRecordingBusy else { fullRecordingStatus = "请等待当前处理结束"; return }
+        importing = true
+        fullRecordingStatus = "正在保存为外部资料…"
+        Task {
+            defer { importing = false }
+            do {
+                selected = try await store.importFile(input.url)
+                fullRecordingInput = nil
+                fullRecordingStatus = "已作为外部资料导入；原文件保留"
+                await refresh(); scheduleProcessing()
+            } catch { fullRecordingStatus = error.localizedDescription }
         }
     }
     func cancelFullRecording() { fullRecordingWorker?.cancel() }
@@ -956,10 +979,14 @@ final class ControlCenter: ObservableObject {
         return temporary ? .retryableFailure(message) : .needsAttention(message)
     }
     func organizeRecording(_ input: FullRecordingInput, track: Int, importCommand: String? = nil, finished: ((Bool) -> Void)? = nil) {
+        guard FullRecordingOrganizer.decide(track: track, ownVoice: true, in: input.media).importsAsPersonal else {
+            fullRecordingStatus = "完整整理只能使用本人音轨"
+            lastRecordingOutcome = .needsAttention(fullRecordingStatus); finished?(false); return
+        }
         guard let store, var speech = speechPort as? LocalQwenSpeechPort, !fullRecordingBusy, worker == nil,
               understandingWorker == nil, !dictationActive, let configuration = textConfigurationFile,
               let script = Bundle.main.url(forResource: "organize_podcast", withExtension: "py") else {
-            fullRecordingStatus = "请先配置 Qwen 和文本模型，并等待当前处理结束"
+            fullRecordingStatus = recordingModelIssue ?? "请等待当前处理结束或重新打开资料库"
             lastRecordingOutcome = .needsAttention(fullRecordingStatus); finished?(false); return
         }
         fullRecordingBusy = true; fullRecordingCount = nil

@@ -118,6 +118,7 @@ struct WorkspaceTaskView: View {
     @State private var showingSettings = false
     @State private var scheduleAction: ActionRecord?
     @State private var replacementTitle = ""
+    @State private var pauseReasons: [String] = []
     private var correctedClaim: CandidateClaim? {
         model.claims.first { $0.id == action.claimID && $0.validity == "current" && $0.reviewState != "rejected" && $0.reviewVersion > action.claimReviewVersion }
     }
@@ -135,6 +136,7 @@ struct WorkspaceTaskView: View {
                     VStack(alignment:.leading,spacing:12) {
                         Label(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),systemImage:action.state == "completed" ? "checkmark.circle" : "pause.circle").font(.headline)
                         Text(action.state == "completed" ? "这项任务已有完成记录。AI 提取暂停不会撤销完成状态，也不需要你再完成一次。" : model.workspaceTaskRequiresReview(action) ? "AI 之前从材料中提取了这项待办，尚未登记完成；暂停也不代表识别有误。打开下方材料，查看具体原因及处理按钮。" : "这次提取仅作为历史保留。打开下方材料可查看最新识别的任务；本条记录的完成状态仍单独保留。").font(.callout).foregroundStyle(.secondary)
+                        ForEach(pauseReasons,id:\.self) { Text($0).font(.callout).foregroundStyle(.secondary) }
                         ForEach(sources) { source in Button("打开材料：" + source.workspaceTitle) { openSource(source.id) } }
                         if model.workspaceTaskRequiresReview(action), let claim = correctedClaim {
                             Text("你更正后的观点").font(.subheadline.bold())
@@ -241,6 +243,15 @@ struct WorkspaceTaskView: View {
                 }
                 if !error.isEmpty { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
             }.frame(maxWidth: 820, alignment: .leading).padding(30).frame(maxWidth: .infinity, alignment: .top)
+        }
+        .task(id: action.id + String(action.version) + action.validity + sources.map { $0.id + String($0.policyVersion) + $0.state }.joined()) {
+            guard action.validity != "current", let store = model.store else { pauseReasons = []; return }
+            var reasons: [String] = []
+            for source in sources {
+                guard let pause = try? await store.understandingPause(sourceID: source.id) else { continue }
+                if !reasons.contains(pause.summary) { reasons.append(pause.summary) }
+            }
+            pauseReasons = reasons
         }
         .task(id: action.id + String(action.version) + String(model.recentOutcomes.count)) { await loadFeedback() }
         .sheet(isPresented: $confirming) { ConfirmTaskView(action: action, model: model) { confirming = false } }

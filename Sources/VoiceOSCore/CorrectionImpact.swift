@@ -30,6 +30,19 @@ public struct CorrectionActionImpact: Identifiable, Sendable {
     public let summary: String
     public let digest: String
 }
+/// A policy change is not a diagnosis of error, so it stays separate from
+/// correction impacts and never revives or rewrites the paused records.
+public struct PolicyFreezeImpact: Identifiable, Sendable {
+    public let sourceID: String
+    public let sourceName: String
+    public let fromVersion: Int
+    public let toVersion: Int
+    public let changedAt: String
+    public let frozenClaimCount: Int
+    public let frozenActionCount: Int
+    public let summary: String
+    public var id: String { sourceID + ":" + String(fromVersion) }
+}
 extension VoiceOSStore {
     /// Only explicit error corrections create impacts. Privacy restrictions,
     /// endorsement/rejection and migration freezing are not diagnoses of error.
@@ -93,6 +106,38 @@ extension VoiceOSStore {
             return .init(action: action,roots: orderedRoots,link: link,scheduleEffects: effects,understandingProgress: understandingProgress,summary: summary,
                          digest: try Self.actionHash(fields + orderedRoots.map(\.id) + operationState + sourceState))
         }
+    }
+
+    /// Read-only list of permit revisions that left understanding paused. This
+    /// projection feeds the "纠错影响" page; it does not re-derive or unfreeze anything.
+    public func policyFreezeImpacts() throws -> [PolicyFreezeImpact] {
+        var impacts: [PolicyFreezeImpact] = []
+        for row in try db.query("""
+            SELECT r.source_id,r.from_version,r.to_version,r.to_local_only,r.created_at,s.name
+            FROM source_policy_revisions r JOIN sources s ON s.id=r.source_id
+            ORDER BY r.created_at DESC,r.source_id,r.to_version
+            """) {
+            guard let sourceID = row["source_id"], let from = row["from_version"].flatMap(Int.init),
+                  let to = row["to_version"].flatMap(Int.init), let changedAt = row["created_at"] else { continue }
+            let claims = try db.query("""
+                SELECT DISTINCT c.id FROM claims c JOIN model_attempts a ON a.id=c.attempt_id
+                JOIN context_inputs i ON i.context_id=a.context_id
+                WHERE i.source_id=? AND i.policy_version=? AND c.validity='frozen'
+                """, [sourceID, String(from)])
+            guard !claims.isEmpty else { continue }
+            let actions = try db.query("""
+                SELECT DISTINCT ac.id FROM actions ac JOIN claims c ON c.id=ac.claim_id
+                JOIN model_attempts a ON a.id=c.attempt_id JOIN context_inputs i ON i.context_id=a.context_id
+                WHERE i.source_id=? AND i.policy_version=? AND ac.validity='frozen'
+                """, [sourceID, String(from)])
+            let local = row["to_local_only"] == "1"
+            impacts.append(PolicyFreezeImpact(sourceID: sourceID, sourceName: row["name"] ?? "已保存的材料",
+                fromVersion: from, toVersion: to, changedAt: changedAt,
+                frozenClaimCount: claims.count, frozenActionCount: actions.count,
+                summary: "云端使用许可从第 \(from) 版调整为第 \(to) 版后，使用旧许可的 \(claims.count) 条理解暂停使用。"
+                    + (local ? "当前仅限本机使用。" : "需要按当前许可重新识别后才会恢复为当前内容。") + "完成记录与任务历史保持独立。"))
+        }
+        return impacts
     }
 
     private func correctionUnderstandingProgress(sourceID: String) throws -> CorrectionUnderstandingProgress {

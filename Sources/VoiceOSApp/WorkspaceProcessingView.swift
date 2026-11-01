@@ -56,7 +56,7 @@ extension ControlCenter {
         return completion + (workspaceTaskRequiresReview(action) ? " · AI 提取已暂停" : " · 历史记录")
     }
     func workspaceExternalCompletionNote(_ action: ActionRecord) -> String? {
-        guard action.validity == "frozen", reminderLinks.contains(where: { $0.actionID == action.id && $0.remoteCompleted == true }) else { return nil }
+        guard action.validity == "frozen", reminderLinks.contains(where: { $0.actionID == action.id && $0.state == "linked" && $0.remoteMarkerValid == true && $0.remoteCompleted == true }) else { return nil }
         return "提醒事项已标记完成 · " + workspaceActionStatus(action)
     }
     var workspacePausedTasks: [ActionRecord] { actionRecords.filter { $0.kind == "task" && workspaceTaskRequiresReview($0) } }
@@ -162,7 +162,7 @@ struct WorkspaceProcessingView: View {
                         ForEach(model.records.filter { ids.contains($0.id) }) { source in
                             WorkspaceRow(title:source.workspaceTitle,subtitle:"查看暂停原因、受影响的任务和处理按钮",trailing:"打开材料") { openSource(source.id) }
                             ForEach(model.workspacePausedTasks.filter { task in model.claims.first(where: { $0.id == task.claimID })?.references.contains { $0.sourceID == source.id } == true }) { task in
-                                VStack(alignment:.leading,spacing:5) { Text(task.title);Text(model.workspaceActionStatus(task)).font(.caption).foregroundStyle(.secondary) }.padding(.leading,26).padding(.bottom,12)
+                                VStack(alignment:.leading,spacing:5) { Text(task.title);Text(model.workspaceExternalCompletionNote(task) ?? model.workspaceActionStatus(task)).font(.caption).foregroundStyle(.secondary) }.padding(.leading,26).padding(.bottom,12)
                             }
                         }
                     }
