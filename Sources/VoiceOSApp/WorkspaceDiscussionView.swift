@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import VoiceOSCore
 
@@ -7,6 +8,7 @@ struct WorkspaceDiscussionView: View {
     @Binding var draft: String
     let close: () -> Void
     let openSource: (String) -> Void
+    @FocusState private var editorFocused: Bool
     private var busy: Bool { model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive }
     private var canSend: Bool {
         model.discussionWritable && model.modelConfigured && !busy && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.discussionCanSend || model.discussionRecordingID != nil)
@@ -83,7 +85,7 @@ struct WorkspaceDiscussionView: View {
             Divider()
             VStack(alignment: .leading, spacing: 10) {
                 if model.discussionWritable {
-                    TextEditor(text: $draft).font(.body).scrollContentBackground(.hidden).frame(height: 90).padding(7).background(palette.surface, in: RoundedRectangle(cornerRadius: 7)).disabled(busy)
+                    TextEditor(text: $draft).font(.body).scrollContentBackground(.hidden).frame(height: 90).padding(7).background(palette.surface, in: RoundedRectangle(cornerRadius: 7)).focused($editorFocused).disabled(busy)
                     if let id = model.discussionRecordingID, let source = model.records.first(where: { $0.id == id }) {
                         Text(source.transcript ?? (model.dictationActive ? "正在录制…" : "正在本地转写…")).font(.caption).lineLimit(5).textSelection(.enabled)
                     }
@@ -104,6 +106,16 @@ struct WorkspaceDiscussionView: View {
                 } else if model.discussionCanExtract { Button("整理讨论成果") { model.extractDiscussionOutcome() }.font(.caption) }
             }.padding(16)
         }.background(palette.sidebar)
+            .task {
+                // A focus write before the field attaches to its window is dropped.
+                guard model.discussionWritable, !busy, !model.dictationBusy, !editorFocused,
+                      !(NSApp.keyWindow?.firstResponder is NSText) else { return }
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                guard !Task.isCancelled, !busy, !model.dictationBusy, !editorFocused,
+                      !(NSApp.keyWindow?.firstResponder is NSText) else { return }
+                editorFocused = true
+            }
+            .onDisappear { editorFocused = false }
     }
     private func send() async {
         if model.discussionRecordingID != nil, !(await model.attachDiscussionRecording(allowCloud: true)) { return }
