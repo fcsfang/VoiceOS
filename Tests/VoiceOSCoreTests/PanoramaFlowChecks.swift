@@ -28,17 +28,19 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     var sawPriorGlobalRejection=false
     var coverageTargets: [PanoramaCoverageTarget]=[]
     var synthesisReferenceFailures: Int
+    var failSliceRepairs: Int
 
     init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false, repairUnits: Bool = false, invalidQuote: Bool = false,
          failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, unitTransientFailures: [String: Int] = [:], invalidQuoteAttempts: Int = 0,
          invalidFocusAttempts: Int = 0, failFocusAt: Int? = nil, beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil,
-         rejectedDecisionSubstring: String? = nil, rejectCoverageOnly: Bool = false, synthesisReferenceFailures: Int = 0, semanticRejections: Int = 0) {
+         rejectedDecisionSubstring: String? = nil, rejectCoverageOnly: Bool = false, synthesisReferenceFailures: Int = 0, semanticRejections: Int = 0, failSliceRepairs: Int = 0) {
         configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits; self.repairUnits=repairUnits; self.invalidQuote=invalidQuote
         self.failCoverage=failCoverage; self.failConsistency=failConsistency; self.beforeGenerate=beforeGenerate; self.transientFailures=transientFailures
         self.unitTransientFailures=unitTransientFailures; self.invalidQuoteAttempts=invalidQuoteAttempts
         self.invalidFocusAttempts=invalidFocusAttempts; self.failFocusAt=failFocusAt
         self.rejectedDecisionSubstring=rejectedDecisionSubstring; self.rejectCoverageOnly=rejectCoverageOnly
         self.synthesisReferenceFailures=synthesisReferenceFailures; self.semanticRejections=semanticRejections
+        self.failSliceRepairs=failSliceRepairs
     }
     private func receipt() -> PanoramaReceipt {
         serial += 1
@@ -135,6 +137,10 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
         return (review(proposal,accepted: !rejectUnits && (!repairUnits || priorRejection != nil)),receipt())
     }
     func repair(_ proposal: PanoramaProposal, input: PanoramaInput, review: PanoramaReview) async throws -> (PanoramaProposal, PanoramaReceipt) {
+        if failSliceRepairs > 0 {
+            failSliceRepairs -= 1
+            throw ModelPortFailure.rejected("响应未完成（status=failed；error.code=upstream_error）；未接纳部分结果")
+        }
         unitRepairs += 1
         return (proposal,receipt())
     }
@@ -720,6 +726,7 @@ extension CoreFlowTests {
         try await assertPanoramaSlicedRepair(root: root.appendingPathComponent("focused-repair"))
         try await assertPanoramaSameAttemptReuse(root: root.appendingPathComponent("focused-same-attempt"))
         try await assertPanoramaSlicedRepairScope(root: root.appendingPathComponent("focused-repair-scope"))
+        try await assertPanoramaSliceRepairFallback(root: root.appendingPathComponent("focused-repair-fallback"))
         try await assertPanoramaFocusedWire()
         print("Panorama sliced generation planned, merged, reused failed slices, replayed legacy and same-attempt rows, and repaired only rejected slices")
     }
@@ -986,6 +993,21 @@ extension CoreFlowTests {
         XCTAssertFalse(try database.query("SELECT id FROM panorama_steps WHERE stage='unit.review-repair'").isEmpty)
     }
 
+    private func assertPanoramaSliceRepairFallback(root: URL) async throws {
+        let store=try await panoramaFixtureStore(root,texts: [String(repeating: "长文",count: 9_000)])
+        let port=ProgressivePanoramaFixture(identity: "slice-fallback-fixture",repairUnits: true,failSliceRepairs: 1)
+        try await store.generatePanorama(using: port)
+        let state=try await store.panoramaState()
+        XCTAssertEqual(state.status,"completed")
+        let database=try Database(root.appendingPathComponent("voiceos.sqlite"))
+        let regenerated=try database.query("SELECT state FROM panorama_steps WHERE stage='unit.focus.regenerate'")
+        XCTAssertEqual(regenerated.count,1)
+        XCTAssertEqual(regenerated.first?["state"],"completed")
+        let completedRepairs=try database.query("SELECT state FROM panorama_steps WHERE stage='unit.focus.repair' AND state='completed'")
+        XCTAssertEqual(completedRepairs.count,2)
+        let failedRepairs=try database.query("SELECT state FROM panorama_steps WHERE stage='unit.focus.repair' AND state='failed'")
+        XCTAssertEqual(failedRepairs.count,1)
+    }
     private func assertPanoramaRepairLoop(root: URL) async throws {
         let store=try await panoramaFixtureStore(root, count: 3)
         let port=ProgressivePanoramaFixture(semanticRejections: 2)
