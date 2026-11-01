@@ -114,6 +114,10 @@ final class ControlCenter: ObservableObject {
     @Published var discussionStatus="选择一份历史，明确进入讨论。"
     private var discussionModel:ResponsesDiscussionPort?
     @Published var selected: String?
+    /// Sheet-scoped views cannot navigate the workspace themselves; they ask
+    /// for a source and the workspace consumes the request from its own state.
+    @Published var pendingWorkspaceSourceID: String?
+    func requestWorkspaceSource(_ id: String) { pendingWorkspaceSourceID = id }
     @Published var retrievalResult: RetrievalResult?
     @Published var retrievalStatus = ""
     @Published var searchingHistory = false
