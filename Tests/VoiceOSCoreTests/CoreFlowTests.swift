@@ -2232,6 +2232,43 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertTrue(invalidated.claims.allSatisfy { $0.validity == "frozen" })
     }
 
+    func testPolicyFreezeExplainsCauseAndKeepsOldClaimsFrozen() async throws {
+        let store = try await openStore(), model = FlowModel(createsTask: true)
+        let sourceID = try await expression(store, text: "我认为检索质量最重要。", model: model)
+        let initial = try await store.latestCandidateClaims(for: sourceID)
+        XCTAssertEqual(initial.count, 1)
+        let policy = try await store.sourcePolicy(sourceID: sourceID)
+        XCTAssertFalse(policy.localOnly)
+        let revoked = try await store.setSourceLocalOnly(sourceID: sourceID, expectedVersion: policy.version, localOnly: true)
+        let pause = try await store.understandingPause(sourceID: sourceID)
+        XCTAssertEqual(pause.policyChange?.fromVersion, policy.version)
+        XCTAssertEqual(pause.policyChange?.toVersion, revoked)
+        XCTAssertNotNil(pause.policyChange?.changedAt)
+        XCTAssertTrue(pause.summary.contains("云端使用许可"))
+        XCTAssertTrue(pause.summary.contains("第 \(policy.version) 版调整为第 \(revoked) 版"))
+        XCTAssertNotNil(pause.summary.range(of: #"\d{4}-\d{2}-\d{2} \d{2}:\d{2}"#, options: .regularExpression), "暂停原因应带许可变更时间")
+        XCTAssertTrue(pause.summary.contains("当前仅限本机使用"))
+        let initialIDs = Set(initial.map(\.id))
+        let frozen = try await store.candidateClaims(includeFrozen: true).filter { claim in claim.references.contains { $0.sourceID == sourceID } }
+        XCTAssertEqual(Set(frozen.map(\.id)), initialIDs)
+        XCTAssertTrue(frozen.allSatisfy { $0.validity == "frozen" })
+        let withoutCurrent = try await store.latestCandidateClaims(for: sourceID)
+        XCTAssertTrue(withoutCurrent.isEmpty)
+        let impact = try await store.policyFreezeImpacts().first { $0.sourceID == sourceID }
+        XCTAssertEqual(impact?.fromVersion, policy.version)
+        XCTAssertEqual(impact?.toVersion, revoked)
+        XCTAssertEqual(impact?.frozenClaimCount, 1)
+        XCTAssertEqual(impact?.frozenActionCount, 1)
+        _ = try await store.setSourceLocalOnly(sourceID: sourceID, expectedVersion: revoked, localOnly: false)
+        _ = try await store.continueSourceUnderstanding(sourceID: sourceID, using: model)
+        let current = try await store.latestCandidateClaims(for: sourceID)
+        XCTAssertEqual(current.count, 1)
+        XCTAssertFalse(initialIDs.contains(try XCTUnwrap(current.first?.id)))
+        let all = try await store.candidateClaims(includeFrozen: true).filter { claim in claim.references.contains { $0.sourceID == sourceID } }
+        XCTAssertTrue(all.filter { initialIDs.contains($0.id) }.allSatisfy { $0.validity == "frozen" })
+        XCTAssertEqual(all.filter { $0.validity == "current" }.count, 1)
+    }
+
     func testEnglishPracticeStoresFeedbackAgainstPriorPractice() async throws {
         let store = try await openStore()
         let oldID = try await store.recordUserExpression("The model have one layer.")
