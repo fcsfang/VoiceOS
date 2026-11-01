@@ -98,7 +98,7 @@ struct ThoughtPanoramaView: View {
             .labelsHidden()
             .frame(width: compact ? 130 : 150)
             searchField(width: minimal ? 120 : compact ? 150 : 220)
-            searchMatchStatus
+            searchMatchStatus(width: width)
             if compact {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
@@ -181,22 +181,24 @@ struct ThoughtPanoramaView: View {
         return !snapshot.proposal.questions.isEmpty
     }
 
+    // The status shrinks with the toolbar so it never pushes the right-side
+    // controls out: full copy, then the count, then only the locate control.
+    // Below 520 the fixed items already fill the pane.
     @ViewBuilder
-    private var searchMatchStatus: some View {
+    private func searchMatchStatus(width: CGFloat) -> some View {
         if hasQuery, hasPanoramaRegions {
-            Text(searchMatchLabel)
-                .font(.system(size: 11))
-                .foregroundStyle(searchMatches.count == 0 ? Color.orange : Color.secondary)
-                .lineLimit(1)
-                .fixedSize()
-                .help("按区域标题、摘要、问题与联系文字匹配；计数为区域数")
-                .accessibilityLabel(searchMatchLabel + "，按区域标题、摘要、问题与联系文字匹配")
-            if searchMatches.count > 0 {
-                Button("定位") { recenterToken &+= 1 }
-                    .font(.system(size: 11))
-                    .buttonStyle(.borderless)
-                    .help("定位匹配区域")
-                    .accessibilityLabel("定位到 \(searchMatches.count) 个匹配区域")
+            if width >= 900 {
+                searchMatchText(searchMatchLabel)
+                if searchMatches.count > 0 { locateButton }
+            } else if width >= 620 {
+                searchMatchText(searchMatchCompactLabel)
+                if searchMatches.count > 0 { locateButton }
+            } else if width >= 520 {
+                if searchMatches.count > 0 {
+                    locateIconButton
+                } else {
+                    searchMatchText("无匹配")
+                }
             }
         }
     }
@@ -205,6 +207,47 @@ struct ThoughtPanoramaView: View {
         if searchMatches.count == 0 { return "没有匹配的区域" }
         let suffix = searchMatches.includesQuestionOrRelationText ? "（含问题与联系文字）" : ""
         return "\(searchMatches.count) 个区域匹配" + suffix
+    }
+
+    private var searchMatchCompactLabel: String {
+        searchMatches.count == 0 ? "无匹配" : "\(searchMatches.count) 个"
+    }
+
+    private var searchMatchHelp: String {
+        let base = searchMatches.count == 0 ? "没有匹配的区域" : "\(searchMatches.count) 个区域匹配"
+        let detail = searchMatches.includesQuestionOrRelationText ? base + "，含问题与联系文字" : base
+        return detail + "；按区域标题、摘要、问题与联系文字匹配"
+    }
+
+    private func searchMatchText(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(searchMatches.count == 0 ? Color.orange : Color.secondary)
+            .lineLimit(1)
+            .fixedSize()
+            .help(searchMatchHelp)
+            .accessibilityLabel(searchMatchHelp)
+    }
+
+    private var locateHelp: String {
+        "定位到 \(searchMatches.count) 个匹配区域"
+    }
+
+    private var locateButton: some View {
+        Button("定位") { recenterToken &+= 1 }
+            .font(.system(size: 11))
+            .buttonStyle(.borderless)
+            .help(locateHelp)
+            .accessibilityLabel(locateHelp)
+    }
+
+    private var locateIconButton: some View {
+        Button { recenterToken &+= 1 } label: {
+            Image(systemName: "scope").frame(width: 22, height: 22)
+        }
+        .buttonStyle(.borderless)
+        .help(locateHelp)
+        .accessibilityLabel(locateHelp)
     }
 
     @ViewBuilder
