@@ -2135,11 +2135,16 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             guard !event.isARepeat,
                   flags == [.command, .shift],
                   event.charactersIgnoringModifiers?.lowercased() == "r" else { return event }
-            Task { @MainActor in
-                guard let model = ControlCenter.primary, model.canToggleCaptureDictation else { return }
+            // Only the root library window may route here; standalone libraries keep their own dictation.
+            let handled = MainActor.assumeIsolated { () -> Bool in
+                guard let model = ControlCenter.primary,
+                      let keyWindow = NSApp.keyWindow,
+                      keyWindow.title == model.libraryTitle || keyWindow.identifier?.rawValue == "control-center",
+                      model.canToggleCaptureDictation else { return false }
                 model.toggleCaptureDictation()
+                return true
             }
-            return nil
+            return handled ? nil : event
         }
     }
 }
@@ -2154,6 +2159,36 @@ struct VoiceOSApp: App {
             if let path = path.wrappedValue { RestoredLibraryView(path: path) }
         }
         .commands { CommandGroup(after: .newItem) { Button("导入音频或视频…") { focusedModel?.chooseFullRecording() }.keyboardShortcut("i").disabled(focusedModel?.initialized != true || focusedModel?.importing == true) } }
+        MenuBarExtra("VoiceOS", systemImage: "waveform") { MenuBarQuickView() }
+            .menuBarExtraStyle(.menu)
+    }
+}
+private struct MenuBarQuickView: View {
+    @Environment(\.openWindow) private var openWindow
+    var body: some View {
+        if let model = ControlCenter.primary {
+            MenuBarDictationItem(model: model)
+            Divider()
+            Button("打开 VoiceOS") { openMainWindow() }
+            Button("退出 VoiceOS") { NSApplication.shared.terminate(nil) }
+        } else {
+            Button("打开 VoiceOS") { openMainWindow() }
+            Text("控制中心尚未准备好").disabled(true)
+        }
+    }
+    private func openMainWindow() {
+        openWindow(id: "control-center")
+        NSApp.activate(ignoringOtherApps: true)
+        Task { @MainActor in
+            NSApp.windows.first { $0.identifier?.rawValue == "control-center" || $0.title == "VoiceOS" }?.makeKeyAndOrderFront(nil)
+        }
+    }
+}
+private struct MenuBarDictationItem: View {
+    @ObservedObject var model: ControlCenter
+    var body: some View {
+        Button(model.dictationActive ? "停止口述并整理" : "开始口述并自动整理") { model.toggleCaptureDictation() }
+            .disabled(!model.canToggleCaptureDictation)
     }
 }
 
@@ -2165,6 +2200,7 @@ struct ActionCreationView: View {
     @State private var kind: ActionKind = .opportunity
     @State private var note = ""
     @State private var commandID = UUID().uuidString
+    @State private var feedback = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("记录行动意图").font(.title2)
@@ -2176,11 +2212,14 @@ struct ActionCreationView: View {
             }.pickerStyle(.segmented)
             TextField("要做什么", text: $title)
             TextField("补充说明（可选）", text: $note)
-            Text(model.status).font(.caption).foregroundStyle(.secondary)
+            if !feedback.isEmpty { Text(feedback).font(.caption).foregroundStyle(.secondary) }
             HStack {
                 Button("取消", action: close).disabled(model.savingAction)
                 Spacer()
-                Button("保存意图") { Task { if await model.createAction(claim, title: title, kind: kind, note: note, commandID: commandID) { close() } } }
+                Button("保存意图") {
+                    feedback = "正在保存意图…"
+                    Task { if await model.createAction(claim, title: title, kind: kind, note: note, commandID: commandID) { close() } else { feedback = model.status } }
+                }
                     .disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 600)
@@ -2294,7 +2333,7 @@ struct PackageRestoreView: View {
             Button("选择保存位置…",action:chooseParent).disabled(restoring || restored != nil)
             TextField("新资料库文件夹名称",text:$folderName).disabled(restoring || restored != nil)
             if let destination { Text(destination.path).font(.caption).textSelection(.enabled) }
-            if !errorText.isEmpty { Text(errorText).foregroundStyle(.red).textSelection(.enabled) }
+            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             if let restored { Text("恢复完成 · 当前库保留，外部连接未启用").foregroundStyle(.green); Button("打开恢复的资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() } }
             HStack {
                 Button(restored == nil ? "取消" : "完成",action:dismiss).disabled(restoring)
