@@ -157,6 +157,20 @@ final class RecordingInbox: ObservableObject {
         folders[index].enabled = enabled; save()
         status = enabled ? "已恢复接收新录音" : "已暂停这个入口"
     }
+    func removeFolder(_ folder: RecordingInboxFolder) {
+        guard let index = folders.firstIndex(where: { $0.id == folder.id }) else { return }
+        let removed = folders.remove(at: index)
+        let removedPath = URL(fileURLWithPath: removed.path).standardizedFileURL.path
+        for url in scopedURLs where url.standardizedFileURL.path == removedPath {
+            url.stopAccessingSecurityScopedResource()
+        }
+        scopedURLs.removeAll { $0.standardizedFileURL.path == removedPath }
+        items = items.filter { $0.value.folderID != removed.id }
+        folderErrors[removed.id] = nil
+        if activeFolderID == removed.id { activeFolderID = nil }
+        status = "已移除入口：\(removed.voiceMemos ? "语音备忘录" : URL(fileURLWithPath: removed.path).lastPathComponent) · 原文件保留在原处"
+        save()
+    }
     func retryFailures() {
         failures = []
         for id in Array(items.keys) where items[id]?.state != .processing {
@@ -181,15 +195,24 @@ final class RecordingInbox: ObservableObject {
         guard let item=items[id],item.state != .processing else { return }
         finish(id,outcome:.completed)
     }
+    func ignore(_ id: String) {
+        guard let item = items[id], item.state != .processing else { return }
+        recordProcessed(item)
+        status = "不再处理：\(URL(fileURLWithPath: item.path).lastPathComponent) · 原件保留在原处"
+        save()
+    }
+    private func recordProcessed(_ item: RecordingInboxItem) {
+        receipts.insert(item.id); failures.remove(item.id); items[item.id] = nil
+        if let stamp = item.fileStamp, let index = folders.firstIndex(where: { $0.id == item.folderID }) {
+            folders[index].baseline[item.path] = stamp
+        }
+    }
     private func finish(_ id: String, outcome: RecordingInboxOutcome) {
         guard var item = items[id] else { return }
         item.updatedAt = now(); item.nextAttempt = nil
         switch outcome {
         case .completed:
-            receipts.insert(id); failures.remove(id); items[id] = nil
-            if let stamp = item.fileStamp, let index = folders.firstIndex(where: { $0.id == item.folderID }) {
-                folders[index].baseline[item.path] = stamp
-            }
+            recordProcessed(item)
             status = "已完成：\(URL(fileURLWithPath: item.path).lastPathComponent) · 等待下一份录音"
         case .retryableFailure(let explanation):
             item.explanation = explanation
@@ -310,19 +333,23 @@ final class RecordingInbox: ObservableObject {
 }
 
 struct RecordingInboxView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var inbox: RecordingInbox
     @ObservedObject var model: ControlCenter
     var embedded = false
     let dismiss: () -> Void
+    @State private var folderPendingRemoval: RecordingInboxFolder?
+    @State private var itemPendingIgnore: RecordingInboxItem?
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("自动接收录音").font(.title2)
-            Text("将自己的录音放入收件箱，或连接已同步到 Mac 的语音备忘录。VoiceOS 打开且 Mac 唤醒时，自动完成 Qwen 全长转写，由 AI 识别连续表达并合并理解，再整理观点、任务和提醒事项。")
+            WorkspaceHeading(eyebrow: "工具 · 收件箱", title: "自动接收录音",
+                             subtitle: "将自己的录音放入收件箱，或连接已同步到 Mac 的语音备忘录。")
+            Text("VoiceOS 打开且 Mac 唤醒时，自动完成 Qwen 全长转写，由 AI 识别连续表达并合并理解，再整理观点、任务和提醒事项。")
             Text("只接收连接后新增或更新的素材；原文件保留。每 10 秒检查，文件连续两次检查不变后自动处理。同批录音先转写再判断分组；稍后到达的补录自动接续。音频在本机处理，文字使用已配置文本模型。")
                 .font(.callout).foregroundStyle(.secondary)
             Text(RecordingMediaInfo.personalRecordingLayout).font(.callout).foregroundStyle(.secondary)
             HStack {
-                Button("启用 VoiceOS收件箱") { inbox.addDefaultInbox() }
+                Button("启用 VoiceOS收件箱") { inbox.addDefaultInbox() }.buttonStyle(.borderedProminent)
                 Button("其他文件夹…") { inbox.chooseFolder(voiceMemos: false) }
                 Button("连接语音备忘录…") { inbox.chooseFolder(voiceMemos: true) }
             }
@@ -338,11 +365,19 @@ struct RecordingInboxView: View {
                     HStack {
                         Toggle(folder.voiceMemos ? "语音备忘录" : URL(fileURLWithPath: folder.path).lastPathComponent,
                                isOn: Binding(get: { inbox.folders.first(where: { $0.id == folder.id })?.enabled ?? false }, set: { inbox.setEnabled(folder, $0) }))
-                        Spacer(); Button("打开文件夹") { inbox.open(folder) }
+                        Spacer()
+                        Button("打开文件夹") { inbox.open(folder) }
+                        Button("移除入口", role: .destructive) { folderPendingRemoval = folder }
                     }
                     Text(folder.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                    if let error = inbox.folderErrors[folder.id] { Text(error).font(.callout).foregroundStyle(.orange) }
+                    if let error = inbox.folderErrors[folder.id] { WorkspaceNoticeText(message: error) }
                 }
+            }
+            .alert("移除这个自动入口？", isPresented: Binding(get: { folderPendingRemoval != nil }, set: { if !$0 { folderPendingRemoval = nil } }), presenting: folderPendingRemoval) { folder in
+                Button("移除入口", role: .destructive) { inbox.removeFolder(folder); folderPendingRemoval = nil }
+                Button("保留", role: .cancel) { folderPendingRemoval = nil }
+            } message: { _ in
+                Text("移除入口不会删除原文件，只是不再自动接收这个文件夹的新录音。")
             }
             Text(inbox.status).font(.callout).textSelection(.enabled)
             if !inbox.pendingItems.isEmpty {
@@ -356,11 +391,14 @@ struct RecordingInboxView: View {
                                 } else if let next = item.nextAttempt {
                                     Text("将在 \(next.formatted(date: .abbreviated, time: .standard)) 自动重试 · 已尝试 \(item.attempts) 次").foregroundStyle(.secondary)
                                 } else {
-                                    Text("等待手动重试 · 已尝试 \(item.attempts) 次").foregroundStyle(.orange)
+                                    Text("等待手动重试 · 已尝试 \(item.attempts) 次").foregroundStyle(palette.warning)
                                 }
                                 Text(item.explanation).foregroundStyle(.secondary).textSelection(.enabled)
                                 if item.state != .processing {
-                                    Button("重试这份素材") { inbox.retry(item.id) }
+                                    HStack(spacing: 8) {
+                                        Button("重试这份素材") { inbox.retry(item.id) }
+                                        Button("不再处理这份素材", role: .destructive) { itemPendingIgnore = item }
+                                    }
                                 }
                                 if inbox.folders.first(where: { $0.id == item.folderID })?.enabled == false {
                                     Text("入口已暂停，恢复前不会自动重试").foregroundStyle(.secondary)
@@ -368,7 +406,14 @@ struct RecordingInboxView: View {
                             }.font(.caption)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(maxHeight: 150)
+                }
+                .alert("不再处理这份素材？", isPresented: Binding(get: { itemPendingIgnore != nil }, set: { if !$0 { itemPendingIgnore = nil } }), presenting: itemPendingIgnore) { item in
+                    Button("不再处理", role: .destructive) { inbox.ignore(item.id); itemPendingIgnore = nil }
+                    Button("保留", role: .cancel) { itemPendingIgnore = nil }
+                } message: { item in
+                    Text("“\(URL(fileURLWithPath: item.path).lastPathComponent)”不会再自动处理；原件保留在原处。")
+                }
+                .frame(maxHeight: 150)
             }
             if model.fullRecordingBusy { ProgressView(model.fullRecordingStatus).font(.caption) }
             HStack {

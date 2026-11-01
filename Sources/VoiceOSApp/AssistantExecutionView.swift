@@ -32,7 +32,6 @@ struct AssistantDelegationView: View {
     @State private var saving = false
     @State private var error = ""
     @State private var allowCloud = false
-    private var green: Color { palette.accent }
     private var taskSources: [SourceRecord] {
         let ids = Set(model.claims.first(where: { $0.id == action.claimID })?.references.map(\.sourceID) ?? [])
         return model.records.filter { ids.contains($0.id) }
@@ -45,8 +44,8 @@ struct AssistantDelegationView: View {
             VStack(alignment: .leading, spacing: 7) {
                 Text("交付要求").font(.headline)
                 TextEditor(text: $instruction).font(.body).frame(height: 190)
-                    .padding(8).background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
-                    .overlay { RoundedRectangle(cornerRadius: 8).stroke(green.opacity(0.2)) }
+                    .padding(8).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                    .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(palette.accent.opacity(0.2)) }
             }
             Picker("关联主题", selection: $questionID) {
                 Text("暂不关联").tag("")
@@ -64,7 +63,7 @@ struct AssistantDelegationView: View {
                 }.frame(maxHeight: 150)
             }
             Toggle("允许交付要求与以上完整任务原文用于云端代办", isOn: $allowCloud).font(.callout)
-            if !error.isEmpty { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
+            if !error.isEmpty { Text(error).font(.callout).foregroundStyle(palette.danger).textSelection(.enabled) }
             HStack {
                 Button("取消", action: dismiss).disabled(saving)
                 Spacer()
@@ -76,7 +75,7 @@ struct AssistantDelegationView: View {
                         else { error = model.assistantStatus.isEmpty ? model.status : model.assistantStatus }
                         saving = false
                     }
-                }.buttonStyle(.borderedProminent).tint(green)
+                }.buttonStyle(.borderedProminent).tint(palette.accent)
                     .disabled(saving || !allowCloud || !model.modelConfigured || instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             if !model.modelConfigured { Text("先配置模型连接，才能开始代办。").font(.caption).foregroundStyle(.secondary) }
@@ -89,6 +88,11 @@ struct AssistantDelegationView: View {
                 catch { self.error = error.localizedDescription }
             }
     }
+}
+
+private enum ExecutionCommand: String, Identifiable {
+    case cancel, retry
+    var id: String { rawValue }
 }
 
 struct AssistantExecutionView: View {
@@ -104,19 +108,13 @@ struct AssistantExecutionView: View {
     @State private var error = ""
     @State private var includeCancelled = false
     @State private var feedbackAction: ActionRecord?
-    private var ink: Color { palette.text }
-    private var green: Color { palette.accent }
-    private var paper: Color { palette.canvas }
+    @State private var confirmingCommand: ExecutionCommand?
     private var visible: [AssistantExecutionRecord] { model.assistantExecutions.filter { includeCancelled || $0.state != "cancelled" } }
     private var selected: AssistantExecutionRecord? { visible.first { $0.id == selectedID } ?? visible.first }
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("YOUR ASSISTANT").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(green)
-                    Text("把事情，推进到有结果").font(.system(size: 26, weight: .medium, design: .serif))
-                    Text("明确委托，查看成果，再带回自己的主题与行动。").font(.callout).foregroundStyle(.secondary)
-                }
+                WorkspaceHero(eyebrow: "YOUR ASSISTANT", title: "把事情，推进到有结果", subtitle: "明确委托，查看成果，再带回自己的主题与行动。")
                 Spacer()
                 Button("完成", action: dismiss).keyboardShortcut(.cancelAction)
             }.padding(24)
@@ -133,10 +131,10 @@ struct AssistantExecutionView: View {
                                 } label: {
                                     VStack(alignment: .leading, spacing: 7) {
                                         Text(.init(execution.title)).font(.system(size: 14, weight: .medium)).lineLimit(3)
-                                        Text(assistantExecutionLabel(execution)).font(.caption).foregroundStyle(execution.state == "failed" ? .orange : .secondary)
+                                        Text(assistantExecutionLabel(execution)).font(.caption).foregroundStyle(execution.state == "failed" ? palette.warning : .secondary)
                                     }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(selected?.id == execution.id ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: 9))
-                                        .overlay { RoundedRectangle(cornerRadius: 9).stroke(selected?.id == execution.id ? green.opacity(0.5) : .clear) }
+                                        .background(selected?.id == execution.id ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                                        .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(selected?.id == execution.id ? palette.accent.opacity(0.5) : .clear) }
                                 }.buttonStyle(.plain)
                             }
                         }
@@ -155,7 +153,7 @@ struct AssistantExecutionView: View {
                 Text(model.assistantStatus).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
             }.padding(.horizontal, 24).padding(.vertical, 10)
-        }.foregroundStyle(ink).background(paper).frame(width: 1030, height: 730)
+        }.foregroundStyle(palette.text).background(palette.canvas).frame(width: 1030, height: 730)
             .sheet(isPresented: $showingDiscussion) { DiscussionView(model: model) { showingDiscussion = false } }
             .sheet(item: $feedbackAction) { action in ActionFeedbackView(action: action, model: model) { feedbackAction = nil } }
             .task {
@@ -170,25 +168,25 @@ struct AssistantExecutionView: View {
             Text(.init(execution.title)).font(.system(size: 22, weight: .medium, design: .serif)).textSelection(.enabled)
             HStack {
                 Label(assistantExecutionLabel(execution), systemImage: execution.state == "completed" ? "doc.text" : execution.state == "failed" ? "exclamationmark.circle" : "hourglass")
-                    .font(.callout).foregroundStyle(green)
+                    .font(.callout).foregroundStyle(palette.accent)
                 Spacer()
                 if ["queued", "running"].contains(execution.state) {
-                    Button("取消代办") { Task { await model.cancelAssistant(execution) } }.disabled(saving)
+                    Button("取消代办") { confirmingCommand = .cancel }.disabled(saving)
                 }
                 if execution.validity == "current", ["failed", "cancelled"].contains(execution.state) {
-                    Button("重新执行") { Task { await model.retryAssistant(execution) } }.disabled(saving)
+                    Button("重新执行") { confirmingCommand = .retry }.disabled(saving)
                 }
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     DisclosureGroup("本次交付要求") { Text(execution.instruction).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6) }
                     if execution.validity != "current" {
-                        Label("原始任务或资料已有变化。保留这份历史成果，接续使用前请核对当前依据。", systemImage: "pause.circle").font(.callout).foregroundStyle(.orange)
+                        Label("原始任务或资料已有变化。保留这份历史成果，接续使用前请核对当前依据。", systemImage: "pause.circle").font(.callout).foregroundStyle(palette.warning)
                     }
                     if let report = execution.report, !report.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
-                                Text("AI 交付物").font(.headline).foregroundStyle(green)
+                                Text("AI 交付物").font(.headline).foregroundStyle(palette.accent)
                                 Spacer()
                                 Button("保存完整报告…") { exportReport(execution) }
                             }
@@ -204,7 +202,7 @@ struct AssistantExecutionView: View {
                             ForEach(Array(execution.references.enumerated()), id: \.offset) { _, reference in
                                 if let url = URL(string: reference.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
                                     VStack(alignment: .leading, spacing: 3) {
-                                        Link(reference.title.isEmpty ? reference.url : reference.title, destination: url).tint(green)
+                                        Link(reference.title.isEmpty ? reference.url : reference.title, destination: url).tint(palette.accent)
                                         Text(reference.url).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                                     }
                                 }
@@ -218,7 +216,7 @@ struct AssistantExecutionView: View {
                         }.padding(.vertical, 20)
                     }
                     if let message = execution.error, !message.isEmpty {
-                        Text(message).foregroundStyle(.orange).textSelection(.enabled)
+                        Text(message).foregroundStyle(palette.danger).textSelection(.enabled)
                     }
                     Text("这是 AI 产出。它不会自动成为你的观点，也不会把原任务标为完成；采纳与实际结果可以在后续记录。").font(.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
@@ -243,13 +241,24 @@ struct AssistantExecutionView: View {
                     }
                     Button("带着成果继续讨论") {
                         Task { if await model.beginAssistantDiscussion(execution) { showingDiscussion = true } }
-                    }.buttonStyle(.borderedProminent).tint(green)
+                    }.buttonStyle(.borderedProminent).tint(palette.accent)
                         .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive || saving)
                 }
                 if execution.questionID != nil { Text("成果已关联主题；仍保留 AI 产出归属。").font(.caption).foregroundStyle(.secondary) }
             }
-            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled) }
+            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger).textSelection(.enabled) }
         }.padding(22).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .alert(confirmingCommand == .cancel ? "取消这次代办？" : "重新执行这次代办？",
+                   isPresented: Binding(get: { confirmingCommand != nil }, set: { if !$0 { confirmingCommand = nil } })) {
+                if confirmingCommand == .cancel {
+                    Button("取消代办", role: .destructive) { Task { await model.cancelAssistant(execution) } }
+                } else {
+                    Button("重新执行") { Task { await model.retryAssistant(execution) } }
+                }
+                Button("返回", role: .cancel) {}
+            } message: {
+                Text(confirmingCommand == .cancel ? "取消后这次代办不再继续；已保存的交付要求会保留。" : "重新执行会再调用一次模型，可能产生新的用量。")
+            }
     }
     private func exportReport(_ execution: AssistantExecutionRecord) {
         guard let report = execution.report else { return }
@@ -315,8 +324,8 @@ struct AssistantReportView: View {
                     ScrollView(.horizontal) {
                         Text(verbatim: block.text).font(.system(size:14, design: .monospaced)).lineSpacing(5).textSelection(.enabled)
                             .padding(16)
-                    }.background(palette.canvas, in: RoundedRectangle(cornerRadius: 9))
-                        .overlay { RoundedRectangle(cornerRadius:9).strokeBorder(palette.border,lineWidth:1) }
+                    }.background(palette.canvas, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                        .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border,lineWidth:1) }
                 } else {
                     Text(inline(block.text))
                         .font(.system(size:block.heading == 1 ? 25 : block.heading == 2 ? 21 : block.heading == 3 ? 18 : 16,weight:block.heading > 0 ? .semibold : .regular))

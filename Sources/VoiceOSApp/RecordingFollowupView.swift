@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct RecordingFollowupSummary: View {
+    @Environment(\.workspacePalette) private var palette
     let receipt: RecordingFollowupReceipt
     @ObservedObject var model: ControlCenter
     let open: () -> Void
@@ -14,11 +15,12 @@ struct RecordingFollowupSummary: View {
                 Text(receipt.state == "running" ? "正在后台生成思想关联与下一步" : receipt.state == "queued" ? "思想关联与下一步已排队，录音和任务已保存" : "自动跟进待完成，可重试").font(.callout)
             }
             Button("查看思想与下一步", action: open)
-        }.padding(10).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 8))
+        }.padding(10).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
     }
 }
 
 struct RecordingFollowupView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let embedded: Bool
     let dismiss: () -> Void
@@ -42,9 +44,8 @@ struct RecordingFollowupView: View {
     private func englishCurrent(_ receipt: RecordingFollowupReceipt) -> Bool { model.followupValidity[receipt.id]?.sourceCurrent == true && model.followupValidity[receipt.id]?.english == true }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Text("思想与下一步").font(.title2)
-                Spacer()
+            HStack(alignment: .top) {
+                WorkspaceHeading(eyebrow: "工具 · 思想与下一步", title: "思想与下一步")
                 if !embedded { Button("完成", action: dismiss) }
             }
             Picker("查看", selection: $tab) {
@@ -57,7 +58,8 @@ struct RecordingFollowupView: View {
                 }
                 Button(sourceID == "all" ? "更新下一步" : "生成或重试跟进") {
                     if let id = sourceID == "all" ? nil : sourceID { model.refreshFollowup(id) }
-                }.disabled(model.followupBusy || model.fullRecordingBusy || eligible.isEmpty || sourceID == "all")
+                }.buttonStyle(.borderedProminent)
+                    .disabled(model.followupBusy || model.fullRecordingBusy || eligible.isEmpty || sourceID == "all")
                 if model.followupBusy { ProgressView().controlSize(.small) }
                 if sourceID == "all", !eligible.isEmpty { Text("先在来源里选择一份录音，再生成跟进。").font(.caption).foregroundStyle(.secondary) }
             }
@@ -96,7 +98,7 @@ struct RecordingFollowupView: View {
             Text(sourceName(receipt.sourceID)).font(.headline).lineLimit(1)
             Spacer()
             if receipt.state == "running" { Text("生成中").font(.caption).foregroundStyle(.secondary) }
-            else if receipt.state == "completed" && model.followupValidity[receipt.id]?.sourceCurrent != true { Text("录音依据 · 待刷新").font(.caption).foregroundStyle(.orange) }
+            else if receipt.state == "completed" && model.followupValidity[receipt.id]?.sourceCurrent != true { Text("录音依据 · 待刷新").font(.caption).foregroundStyle(palette.warning) }
             Button("原录音") { model.selected = receipt.sourceID; dismiss() }
         }
     }
@@ -105,7 +107,7 @@ struct RecordingFollowupView: View {
         let target = receipt.input.thoughts.first { $0.id == update.claimID }
         return VStack(alignment: .leading, spacing: 8) {
             Text(labels[update.relation] ?? "思想关联").font(.caption).foregroundStyle(.secondary)
-            if !thoughtCurrent(receipt, update.claimID) { Text("这条关联的依据已变化").font(.caption).foregroundStyle(.orange) }
+            if !thoughtCurrent(receipt, update.claimID) { Text("这条关联的依据已变化").font(.caption).foregroundStyle(palette.warning) }
             Text(update.understanding).font(.headline).textSelection(.enabled)
             DisclosureGroup("前后原话与出处") {
                 VStack(alignment: .leading, spacing: 8) {
@@ -119,7 +121,7 @@ struct RecordingFollowupView: View {
                     Text("依据个人表达形成的关系，不代表外部事实已经验证。").font(.caption).foregroundStyle(.secondary)
                 }.padding(.top, 6)
             }
-        }.padding(12).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+        }.padding(12).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }
     private var goalList: some View {
         var seen = Set<String>()
@@ -139,7 +141,7 @@ struct RecordingFollowupView: View {
                             if !plan.nextStep.existingTaskID.isEmpty { model.showTask(plan.nextStep.existingTaskID); dismiss() }
                             else { Task { await model.activateStep(plan.nextStep, plan: plan, receipt: receipt) } }
                         }.disabled(!goalCurrent(receipt, plan.goalID) || model.savingAction)
-                        if !goalCurrent(receipt, plan.goalID) { Text("该目标或阶段任务已变化，请更新建议").font(.caption).foregroundStyle(.orange) }
+                        if !goalCurrent(receipt, plan.goalID) { Text("该目标或阶段任务已变化，请更新建议").font(.caption).foregroundStyle(palette.warning) }
                     }
                     DisclosureGroup("阶段、条件与依据") {
                         Text(plan.summary).font(.callout).textSelection(.enabled)
@@ -166,19 +168,19 @@ struct RecordingFollowupView: View {
                         }
                         Text("阶段步骤是 AI 建议；选用后才成为你的任务。").font(.caption).foregroundStyle(.secondary)
                     }
-                }.padding(12).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+                }.padding(12).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             }
         }
     }
     private func practiceCard(_ practice: PracticeFollowup, receipt: RecordingFollowupReceipt) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !englishCurrent(receipt) { Text("英语练习的原话或比较依据已变化").font(.caption).foregroundStyle(.orange) }
+            if !englishCurrent(receipt) { Text("英语练习的原话或比较依据已变化").font(.caption).foregroundStyle(palette.warning) }
             ForEach(Array(practice.suggestions.enumerated()), id: \.offset) { _, suggestion in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(suggestion.original).textSelection(.enabled)
                     Text(suggestion.suggested).fontWeight(.medium).textSelection(.enabled)
                     Text(suggestion.explanation).font(.caption).foregroundStyle(.secondary)
-                    if suggestion.possibleTranscriptIssue { Text("可能是转写问题，建议回听核对").font(.caption).foregroundStyle(.orange) }
+                    if suggestion.possibleTranscriptIssue { Text("可能是转写问题，建议回听核对").font(.caption).foregroundStyle(palette.warning) }
                     quoteActions(sourceID: receipt.sourceID, quote: suggestion.original)
                 }
             }
@@ -192,7 +194,7 @@ struct RecordingFollowupView: View {
             }
             Text("下次可以试试：" + practice.nextExercise).font(.callout.bold())
             Text("基于原句的表达反馈，不提供发音或掌握度评分。").font(.caption).foregroundStyle(.secondary)
-        }.padding(12).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+        }.padding(12).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }
     private func quoteActions(sourceID: String, quote: String) -> some View {
         HStack {

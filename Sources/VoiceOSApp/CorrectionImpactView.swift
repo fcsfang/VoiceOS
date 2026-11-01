@@ -74,7 +74,7 @@ struct CorrectionImpactView: View {
             }
             Text(model.status).font(.caption).foregroundStyle(.secondary)
             if !embedded { HStack { Spacer(); Button("完成", action: dismiss).keyboardShortcut(.defaultAction) } }
-        }.padding(24).frame(width: embedded ? nil : 720, height: embedded ? nil : 620)
+        }.padding(24).frame(width: embedded ? nil : WorkspaceMetrics.modalMedium, height: embedded ? nil : 620)
             .sheet(item: $model.pendingCompensation) { plan in
                 CompensationConfirmationView(plan: plan,model: model) { model.pendingCompensation = nil }
             }
@@ -131,7 +131,7 @@ private struct CompensationConfirmationView: View {
             Text("恢复为：" + plan.desired.summary).font(.headline)
             Text("依据\(plan.rootIDs.count)条明确纠错和\(plan.operationIDs.count)次可追溯AI排期，拟恢复这段排期链之前的期限。受影响不等于任务必然错误，请确认这项效果符合你的意图。").font(.callout)
             Text("只改期限，保留当前任务标题和完成状态。执行前重新核对；变化后停止旧方案。旧行动与认知保持暂停，不把补偿当成真实行动结果。").font(.callout).foregroundStyle(.secondary)
-            if !errorText.isEmpty { Text(errorText).foregroundStyle(.red) }
+            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
                 Button("暂不补偿",action: dismiss).disabled(saving)
                 Spacer()
@@ -142,7 +142,7 @@ private struct CompensationConfirmationView: View {
                         saving = false
                         if approved { dismiss() } else { errorText = model.status }
                     }
-                }.keyboardShortcut(.defaultAction).disabled(saving || model.remindersBusy || !plan.eligibleForConfirmation)
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(saving || model.remindersBusy || !plan.eligibleForConfirmation)
             }
         }.padding(24).frame(width: 640)
     }

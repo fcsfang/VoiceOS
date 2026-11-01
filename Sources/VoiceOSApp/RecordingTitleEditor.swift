@@ -30,7 +30,7 @@ struct RecordingTitleEditor: View {
                 Button("保存") {
                     saving = true
                     Task { if await model.renameRecording(record, title: title) { dismiss() }; saving = false }
-                }.keyboardShortcut(.defaultAction)
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.count > 100)
             }.disabled(saving)
         }.padding(24).frame(width: 600)

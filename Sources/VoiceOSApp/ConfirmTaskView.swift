@@ -15,7 +15,7 @@ struct ConfirmTaskView: View {
                 .font(.callout).foregroundStyle(.secondary)
             TextField("需要跟进什么", text: $title).disabled(model.savingAction)
             ScrollView { Text(action.note).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 160)
-            if !error.isEmpty { Text(error).foregroundStyle(.red) }
+            if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {
                 Button("取消", action: dismiss).disabled(model.savingAction)
                 Spacer()
@@ -26,7 +26,7 @@ struct ConfirmTaskView: View {
                     }
                 }.buttonStyle(.borderedProminent).disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-        }.padding(24).frame(width: 620)
+        }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
         .onAppear {
             title = action.title.replacingOccurrences(of: "（待核对）", with: "")
             if title.hasPrefix("【"), let end = title.firstIndex(of: "】") { title = String(title[title.index(after: end)...]) }

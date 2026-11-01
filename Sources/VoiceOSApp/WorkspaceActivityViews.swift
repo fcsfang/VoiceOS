@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 import VoiceOSCore
 
 struct WorkspaceDeliveryView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let execution: AssistantExecutionRecord
     let openTask: (String) -> Void
@@ -16,7 +17,7 @@ struct WorkspaceDeliveryView: View {
             VStack(alignment: .leading, spacing: 30) {
                 WorkspaceHeading(eyebrow: "AI 助理 · " + assistantExecutionLabel(execution), title: execution.title)
                 if execution.validity != "current" {
-                    Label("依据已变化，这份交付作为历史保留。", systemImage: "pause.circle").foregroundStyle(.orange)
+                    Label("依据已变化，这份交付作为历史保留。", systemImage: "pause.circle").foregroundStyle(palette.warning)
                 }
                 if let report = execution.report, !report.isEmpty {
                     WorkspaceSection(title:"交付正文",subtitle:"AI 产出 · " + (ConversationReflectionFocus.date(execution.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? execution.createdAt),icon:"doc.text",actionTitle:"保存报告…",action:{ export(report) }) {
@@ -47,7 +48,7 @@ struct WorkspaceDeliveryView: View {
                     }.padding(.vertical, 30)
                     Text("可以继续阅读其他材料，VoiceOS 保持运行就会继续处理。").foregroundStyle(.secondary)
                 }
-                if let message = execution.error, !message.isEmpty { Text(message).foregroundStyle(.orange).textSelection(.enabled) }
+                if let message = execution.error, !message.isEmpty { WorkspaceNoticeText(message:message,severity:.danger) }
                 WorkspaceSection(title:"继续使用这份成果",icon:"arrow.right.circle") {
                     HStack {
                         Button("原任务与使用结果") { openTask(execution.actionID) }
@@ -74,8 +75,8 @@ struct WorkspaceDeliveryView: View {
                         Text("AI 产出 · " + execution.createdAt).font(.caption).foregroundStyle(.secondary)
                     }.padding(.vertical,14)
                 }
-                if !error.isEmpty { Text(error).foregroundStyle(.orange) }
-            }.frame(maxWidth: 820, alignment: .leading).padding(30).frame(maxWidth: .infinity, alignment: .top)
+                if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
+            }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
         }.task(id: execution.id) { topicID = execution.questionID ?? "" }
     }
     private func export(_ report: String) {
@@ -109,6 +110,8 @@ struct WorkspaceTaskView: View {
     let openDelivery: (String) -> Void
     let discuss: () -> Void
     @State private var feedbackHistory: [ActionFeedbackRecord] = []
+    @State private var feedbackError: String?
+    @State private var feedbackActionID = ""
     @State private var delegating = false
     @State private var instruction = ""
     @State private var error = ""
@@ -145,9 +148,14 @@ struct WorkspaceTaskView: View {
                             TextField("要做的事情",text:$replacementTitle)
                             Button("保存为新的待办") { saveReplacement(claim) }.disabled(saving || replacementTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
                         }
-                    }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:12))
+                    }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
                 }
                 if let fields = action.intent?.reminderFields?.observed ?? action.intent?.reminderFields?.desired, !fields.summary.isEmpty { Label(fields.summary, systemImage: "calendar").font(.callout) }
+                if let due = model.reminderLinks.first(where: { $0.actionID == action.id && $0.state == "linked" })?.remoteDueDate, due != .none {
+                    let overdue = dueIsPast(due)
+                    Label((overdue ? "已逾期 " : "到期 ") + due.summary, systemImage: "calendar").font(.callout)
+                        .foregroundStyle(overdue ? palette.warning : palette.text)
+                }
                 if current, action.kind == "task" {
                     VStack(alignment:.leading,spacing:8) {
                         if let link=model.reminderLinks.first(where: { $0.actionID == action.id }) {
@@ -181,8 +189,14 @@ struct WorkspaceTaskView: View {
                 if delegating {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("让 AI 推进这件事").font(.headline)
-                        TextEditor(text: $instruction).frame(minHeight: 130).padding(8).background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
+                        TextEditor(text: $instruction).frame(minHeight: 130).workspaceEditorSurface()
                         Text("发送后使用完整任务原文执行调研、比较或起草，结果自动保存。").font(.caption).foregroundStyle(.secondary)
+                        if !model.modelConfigured {
+                            HStack(spacing:8) {
+                                Text("开始代办需要先配置文本模型。").font(.caption).foregroundStyle(palette.warning)
+                                Button("配置文本模型…") { model.chooseTextModel() }.font(.caption)
+                            }
+                        }
                         HStack {
                             Button("收起") { delegating = false }
                             Spacer()
@@ -196,6 +210,12 @@ struct WorkspaceTaskView: View {
                             WorkspaceRow(title: execution.title, subtitle: assistantExecutionLabel(execution), icon: "sparkles", trailing: execution.state == "completed" ? "阅读结果" : "查看进度") { openDelivery(execution.id) }
                             if execution.id != executions.last?.id { Divider() }
                         }
+                    }
+                }
+                if let feedbackError {
+                    HStack(spacing:10) {
+                        WorkspaceNoticeText(message:feedbackError,severity:.danger)
+                        Button("重试") { Task { await loadFeedback() } }.font(.caption).buttonStyle(.borderless)
                     }
                 }
                 if !feedbackHistory.isEmpty {
@@ -215,7 +235,7 @@ struct WorkspaceTaskView: View {
                         DisclosureGroup(action.state == "completed" ? "记录这次的结果或收获" : "记录实际进展", isExpanded: $draft.expanded) {
                             VStack(alignment: .leading, spacing: 12) {
                                 Picker("记录类型", selection: $draft.kind) { Text("实际结果 / 进展").tag(ActionFeedbackKind.outcome); Text("我的反思").tag(ActionFeedbackKind.reflection) }.pickerStyle(.menu).disabled(model.savingFeedback)
-                                TextEditor(text: $draft.text).frame(minHeight: 100).padding(8).background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
+                                TextEditor(text: $draft.text).frame(minHeight: 100).workspaceEditorSurface()
                                     .accessibilityLabel("实际进展与收获草稿").disabled(model.savingFeedback)
                                 Text("本窗口内切页保留草稿；正式保存后才接回任务，关闭窗口前请保存。").font(.caption).foregroundStyle(.secondary)
                                 HStack {
@@ -241,8 +261,8 @@ struct WorkspaceTaskView: View {
                         }.padding(.top, 10)
                     }.padding(.vertical,16)
                 }
-                if !error.isEmpty { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
-            }.frame(maxWidth: 820, alignment: .leading).padding(30).frame(maxWidth: .infinity, alignment: .top)
+                if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
+            }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
         }
         .task(id: action.id + String(action.version) + action.validity + sources.map { $0.id + String($0.policyVersion) + $0.state }.joined()) {
             guard action.validity != "current", let store = model.store else { pauseReasons = []; return }
@@ -321,7 +341,12 @@ struct WorkspaceTaskView: View {
             } catch { self.error=error.localizedDescription }
         }
     }
-    private func loadFeedback() async { feedbackHistory = (try? await model.store?.actionFeedback(actionID: action.id)) ?? [] }
+    private func loadFeedback() async {
+        if feedbackActionID != action.id { feedbackActionID = action.id; feedbackHistory = [] }
+        guard let store = model.store else { feedbackError = "资料库尚未打开，无法读取反馈历史"; return }
+        do { feedbackHistory = try await store.actionFeedback(actionID: action.id); feedbackError = nil }
+        catch { feedbackError = "读取反馈历史失败：" + error.localizedDescription }
+    }
     private func changeState() {
         let state:LocalActionState=action.state == "completed" ? .open : .completed
         Task {
@@ -346,6 +371,26 @@ struct WorkspaceTaskView: View {
             if await model.enqueueAssistant(action, instruction: instruction, questionID: topicID, allowCloud: true) { delegating = false; error = "" }
             else { error = model.assistantStatus }
             saving = false
+        }
+    }
+    private func dueIsPast(_ due: ReminderDueDate) -> Bool {
+        switch due {
+        case .none: return false
+        case let .instant(utc, _):
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: utc) { return date < Date() }
+            formatter.formatOptions = [.withInternetDateTime]
+            guard let date = formatter.date(from: utc) else { return false }
+            return date < Date()
+        case let .dateOnly(localDate, zone):
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = zone.flatMap(TimeZone.init(identifier:)) ?? .current
+            let formatter = DateFormatter()
+            formatter.calendar = calendar
+            formatter.timeZone = calendar.timeZone
+            formatter.dateFormat = "yyyy-MM-dd"
+            return localDate < formatter.string(from: Date())
         }
     }
 }
