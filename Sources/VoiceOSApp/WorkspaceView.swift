@@ -198,6 +198,11 @@ struct WorkspaceView: View {
             model.stopPlayback()
             Task { await model.refreshSourceDiscussions(); await model.refreshAssociationSelection() }
         }
+        .onChange(of:model.pendingWorkspaceSourceID) { _, id in
+            guard let id else { return }
+            model.pendingWorkspaceSourceID = nil
+            go(.source(id))
+        }
         .onChange(of:model.taskPresentation) { _, _ in
             if let id=model.focusedTaskID { go(.task(id)) } else { go(.actions) }
         }
