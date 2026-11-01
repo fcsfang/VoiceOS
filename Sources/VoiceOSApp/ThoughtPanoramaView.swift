@@ -8,6 +8,7 @@ struct ThoughtPanoramaView: View {
     let modelConfigured: Bool
     let readError: String?
     @Binding var selection: PanoramaSelection?
+    @Environment(\.workspacePalette) private var palette
     let retry: () -> Void
     let retryRefresh: () -> Void
     let dismissReadError: () -> Void
@@ -63,7 +64,7 @@ struct ThoughtPanoramaView: View {
                 }
             }
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(palette.canvas)
         .sheet(isPresented: $showCoverage) { coverage.frame(minWidth: 620, minHeight: 480) }
         .onAppear { reconcileNavigation() }
         .onChange(of: navigationIDs) { _, _ in reconcileNavigation() }
@@ -101,17 +102,17 @@ struct ThoughtPanoramaView: View {
             searchMatchStatus(width: width)
             if compact {
                 Image(systemName: "info.circle")
-                    .foregroundStyle(.secondary)
-                    .help(message)
-                    .accessibilityLabel(message)
+                    .foregroundStyle(showsUnitFailure ? palette.warning : Color.secondary)
+                    .help(toolbarMessageHelp)
+                    .accessibilityLabel(toolbarMessage)
                 Spacer(minLength: 0)
             } else {
-                Text(message)
+                Text(toolbarMessage)
                     .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(showsUnitFailure ? palette.warning : Color.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .help(message)
+                    .help(toolbarMessageHelp)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             contextualControl(iconOnly: minimal)
@@ -124,20 +125,40 @@ struct ThoughtPanoramaView: View {
         .frame(height: 52)
     }
 
+    // Core reports unit failures as "N 个完整单元未能核对" plus raw unit IDs.
+    // Keep the count in the toolbar and leave the full IDs in the tooltip.
+    private var unverifiedUnitIDs: [String] {
+        guard let state else { return [] }
+        let verified = Set(state.snapshot?.workflow?.verifiedUnitIDs ?? [])
+        return state.input.units.map(\.id).filter { !verified.contains($0) }
+    }
+
+    private var showsUnitFailure: Bool {
+        !unverifiedUnitIDs.isEmpty && message.contains("个完整单元未能核对")
+    }
+
+    private var toolbarMessage: String {
+        showsUnitFailure ? "\(unverifiedUnitIDs.count) 个单元尚未核对" : message
+    }
+
+    private var toolbarMessageHelp: String {
+        showsUnitFailure ? "尚未核对的完整单元：\n" + unverifiedUnitIDs.joined(separator: "\n") : message
+    }
+
     private func readErrorBanner(_ text: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(palette.danger)
             Text(text).font(.system(size: 12)).lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button("重试", action: retryRefresh).controlSize(.small)
             Button { dismissReadError() } label: { Image(systemName: "xmark") }
                 .buttonStyle(.plain)
-                .help("关闭提示")
+                .help("关闭读取错误提示")
                 .accessibilityLabel("关闭读取错误提示")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.10))
+        .background(palette.danger.opacity(0.10))
     }
 
     private func partialChip(_ snapshot: PanoramaSnapshot, short: Bool) -> some View {
@@ -146,11 +167,11 @@ struct ThoughtPanoramaView: View {
         return Button { showCoverage = true } label: {
             Text(short ? "\(verified)/\(total)" : "部分全景 \(verified)/\(total)")
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.orange)
+                .foregroundStyle(palette.warning)
                 .lineLimit(1)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.orange.opacity(0.14), in: Capsule())
+                .background(palette.warning.opacity(0.14), in: Capsule())
         }
         .buttonStyle(.plain)
         .help("已核对 \(verified)/\(total) 个完整单元 · 仅显示已核对区域，跨材料联系与全局覆盖尚未完成")
@@ -158,18 +179,8 @@ struct ThoughtPanoramaView: View {
     }
 
     private func searchField(width: CGFloat) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("查找问题与联系，长期节点始终保留", text: $query).textFieldStyle(.plain)
-            if !query.isEmpty {
-                Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("清除查找")
-            }
-        }
-        .padding(.horizontal, 8)
-        .frame(width: width, height: 26)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+        WorkspaceSearchField(text: $query, placeholder: "查找问题与联系，长期节点始终保留")
+            .frame(width: width)
     }
 
     private var hasQuery: Bool {
@@ -222,7 +233,7 @@ struct ThoughtPanoramaView: View {
     private func searchMatchText(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11))
-            .foregroundStyle(searchMatches.count == 0 ? Color.orange : Color.secondary)
+            .foregroundStyle(searchMatches.count == 0 ? palette.warning : Color.secondary)
             .lineLimit(1)
             .fixedSize()
             .help(searchMatchHelp)
@@ -316,7 +327,7 @@ struct ThoughtPanoramaView: View {
                                 Text("打开区域摘要").frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .buttonStyle(.plain)
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(palette.accent)
                             .accessibilityLabel("打开区域摘要：" + region.title)
                             ForEach(region.questionIDs, id: \.self) { id in
                                 Button {
@@ -384,12 +395,12 @@ struct ThoughtPanoramaView: View {
     private var emptyState: some View {
         VStack(spacing: 18) {
             ZStack {
-                Ellipse().fill(.green.opacity(0.08)).frame(width: 300, height: 190).rotationEffect(.degrees(-15))
-                Ellipse().fill(.blue.opacity(0.08)).frame(width: 240, height: 160).offset(x: 110, y: 40)
+                Ellipse().fill(palette.selection).frame(width: 300, height: 190).rotationEffect(.degrees(-15))
+                Ellipse().fill(palette.accent.opacity(0.08)).frame(width: 240, height: 160).offset(x: 110, y: 40)
                 Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 62, weight: .light)).foregroundStyle(.secondary)
             }.padding(.bottom, 20)
             Text(state?.snapshot != nil ? "材料已核对，尚未形成持续问题" : isGenerating ? "让完整表达连成脉络" : "从表达中发现持续探索的问题").font(.title2)
-            Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 480)
+            Text(toolbarMessage).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 480).help(toolbarMessageHelp)
             HStack { Button("打开材料", action: openMaterials); if state?.snapshot == nil, state?.input.units.isEmpty == false { Button("生成或重试全景", action: retry).disabled(!modelConfigured || isGenerating || state?.status == "running") } }
         }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -407,9 +418,7 @@ struct ThoughtPanoramaView: View {
                 HStack {
                     Text("探索区域 · AI 归纳").font(.caption).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
-                    Button { focusedRegionID = nil } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("关闭区域摘要")
+                    WorkspaceIconButton(systemImage: "xmark", label: "关闭区域摘要") { focusedRegionID = nil }
                 }
                 Text(region.title).font(.title3.weight(.semibold)).textSelection(.enabled)
                 Text(region.summary).font(.system(size: 14)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -423,7 +432,7 @@ struct ThoughtPanoramaView: View {
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(10)
-                            .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+                            .background(palette.selection.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
                         }
                         .buttonStyle(.plain)
                         .help(question.title)
@@ -447,10 +456,10 @@ struct ThoughtPanoramaView: View {
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(12)
-                                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+                                .background(palette.selection.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
                                 .overlay {
                                     RoundedRectangle(cornerRadius: 12).stroke(
-                                        self.selection == .relation(relation.id) ? Color.accentColor : Color.secondary.opacity(0.2),
+                                        self.selection == .relation(relation.id) ? palette.accent : palette.border,
                                         style: StrokeStyle(dash: [5, 4])
                                     )
                                 }
@@ -476,7 +485,14 @@ struct ThoughtPanoramaView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("返回区域：" + region.title)
                 }
-                HStack { Text("核对这条线索").font(.headline); Spacer(); Button { self.selection = nil } label: { Image(systemName: "xmark") }.buttonStyle(.plain) }
+                HStack {
+                    Text("核对这条线索").font(.headline)
+                    Spacer()
+                    WorkspaceIconButton(systemImage: "xmark", label: "关闭检查器") {
+                        self.selection = nil
+                        self.focusedRegionID = nil
+                    }
+                }
                 switch selection {
                 case .question(let id):
                     if let question = snapshot.proposal.questions.first(where: { $0.id == id }) {
@@ -491,7 +507,7 @@ struct ThoughtPanoramaView: View {
                 case .relation(let id):
                     if let relation = snapshot.proposal.relations.first(where: { $0.id == id }) {
                         Text(relation.label).font(.title3.weight(.semibold))
-                        Text("AI 候选解释 · 尚待核对").font(.caption).foregroundStyle(.blue)
+                        Text("AI 候选解释 · 尚待核对").font(.caption).foregroundStyle(palette.warning)
                         Text(relation.explanation).textSelection(.enabled)
                         ForEach(snapshot.proposal.questions.filter { $0.id == relation.from || $0.id == relation.to }) { question in
                             Button(question.title) { self.selection = .question(question.id) }
@@ -519,7 +535,7 @@ struct ThoughtPanoramaView: View {
                     Text(evidenceTime(item, source: source) + " · 当前原文第 \(item.start)–\(item.end) 字符").font(.caption2).foregroundStyle(.secondary)
                     HStack { Button("完整原文") { performAction { openSource(item.sourceID) } }; Button("更正原文") { performAction { correctSource(item.sourceID) } } }
                     ForEach(item.claimIDs, id: \.self) { id in Button("更正这条理解或归属") { performAction { correctClaim(id) } } }
-                }.padding(13).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 13))
+                }.padding(13).frame(maxWidth: .infinity, alignment: .leading).background(palette.selection.opacity(0.5), in: RoundedRectangle(cornerRadius: 13))
             }
         }
     }
@@ -545,7 +561,7 @@ struct ThoughtPanoramaView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if let state {
                         if let snapshot=state.snapshot, snapshot.isPartial {
-                            Text("这是已核对区域。其余完整单元、跨单元联系与全局覆盖尚未完成；当前结果不代表本人认可。").foregroundStyle(.orange)
+                            Text("这是已核对区域。其余完整单元、跨单元联系与全局覆盖尚未完成；当前结果不代表本人认可。").foregroundStyle(palette.warning)
                         }
                         Text("输入不按近期或条数裁剪。仅完整整理、当前版本与许可均有效的材料入选；节目依赖单独计数。AI 未归入项仍保留完整入口。")
                         ForEach(state.input.sources) { source in
