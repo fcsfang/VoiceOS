@@ -19,6 +19,7 @@ private struct WorkspaceNavigationEntry: Hashable {
     let topicID: String?
     let topicTab: String
     let topicReadingMode: String
+    var listFilter: String = ""
 }
 extension SourceRecord {
     var workspaceTitle: String {
@@ -72,6 +73,7 @@ struct WorkspaceView: View {
     @State private var page: WorkspacePage = .home
     @State private var path: [WorkspaceNavigationEntry] = []
     @State private var scrollPositions: [WorkspaceNavigationEntry: ScrollPosition] = [:]
+    @State private var sourceScrollPositions: [String: ScrollPosition] = [:]
     @State private var topicID: String?
     @State private var topicTab = "概览"
     @State private var topicReadingMode = "卡片"
@@ -299,7 +301,7 @@ struct WorkspaceView: View {
             if let source=model.records.first(where: { $0.id == id }) {
                 if source.isTrashed { TrashedMaterialView(model:model,source:source) }
                 else {
-                    WorkspaceSourceView(model:model,source:source,openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },openDiscussion:{ id in Task { await openSavedDiscussion(id) } },openSource:{ go(.source($0)) },openFollowups:{ go(.tool("思想与下一步")) })
+                    WorkspaceSourceView(model:model,source:source,openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },openDiscussion:{ id in Task { await openSavedDiscussion(id) } },openSource:{ go(.source($0)) },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id))
                         .id(id)
                 }
             } else { unavailable("这份材料暂时不可用",description:"可以搜索其他材料，或回到主题。") }
@@ -341,10 +343,23 @@ struct WorkspaceView: View {
     }
     private func scrolled<Content:View>(@ViewBuilder content: () -> Content) -> some View {
         ScrollView { content().frame(maxWidth:860,alignment:.leading).padding(30).frame(maxWidth:.infinity,alignment:.top) }
-            .scrollPosition(scrollBinding(for: navigationEntry))
+            .scrollPosition(scrollBinding(for: scrollKey))
     }
     private func scrollBinding(for key: WorkspaceNavigationEntry) -> Binding<ScrollPosition> {
         Binding(get: { scrollPositions[key] ?? ScrollPosition(edge: .top) }, set: { scrollPositions[key] = $0 })
+    }
+    private var scrollKey: WorkspaceNavigationEntry {
+        // A filter switches the visible list, so it must not inherit another list's offset.
+        var entry = navigationEntry
+        switch page {
+        case .materials: entry.listFilter = materialFilter
+        case .actions: entry.listFilter = actionFilter
+        default: break
+        }
+        return entry
+    }
+    private func sourceScrollBinding(_ id:String) -> Binding<ScrollPosition> {
+        Binding(get: { sourceScrollPositions[id] ?? ScrollPosition(edge: .top) }, set: { sourceScrollPositions[id] = $0 })
     }
     private func unavailable(_ title:String,description:String) -> some View { ContentUnavailableView(title,systemImage:"leaf",description:Text(description)).frame(maxWidth:.infinity) }
     private func distinctExpressions(_ sources:[SourceRecord]) -> [SourceRecord] {
