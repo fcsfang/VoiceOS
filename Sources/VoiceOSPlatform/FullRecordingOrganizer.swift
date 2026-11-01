@@ -29,7 +29,7 @@ public enum RecordingTrackRole: Equatable, Sendable {
     case mix, personal, context
 }
 public struct RecordingTrackDecision: Equatable, Sendable {
-    /// The role fixed by the recording layout, or nil when the user must state it.
+    /// The role fixed by the recording layout, when it fixes one.
     public let fixedRole: RecordingTrackRole?
     public let allowsOwnVoice: Bool
     public let importsAsPersonal: Bool
@@ -43,7 +43,6 @@ public enum FullRecordingOrganizer {
             let role: RecordingTrackRole = track == media.personalTrack ? .personal : track == media.contextTrack ? .context : .mix
             return .init(fixedRole: role, allowsOwnVoice: role == .personal, importsAsPersonal: role == .personal && ownVoice)
         }
-        // A one or two track file has no saved speaker convention; the checkbox states the role.
         return .init(fixedRole: nil, allowsOwnVoice: true, importsAsPersonal: ownVoice)
     }
     private static func executable(_ name: String) throws -> URL {

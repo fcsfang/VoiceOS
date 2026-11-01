@@ -326,7 +326,7 @@ struct RecordingInboxView: View {
                 Button("其他文件夹…") { inbox.chooseFolder(voiceMemos: false) }
                 Button("连接语音备忘录…") { inbox.chooseFolder(voiceMemos: true) }
             }
-            if !inbox.folders.isEmpty && model.recordingModelIssue != nil {
+            if !inbox.folders.isEmpty && (!model.speechConfigured || !model.textModelConfigured) {
                 Text("已连接；配置模型后开始处理新录音").font(.callout).foregroundStyle(.secondary)
                 HStack {
                     if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() } }

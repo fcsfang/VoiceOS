@@ -980,7 +980,7 @@ final class ControlCenter: ObservableObject {
     }
     func organizeRecording(_ input: FullRecordingInput, track: Int, importCommand: String? = nil, finished: ((Bool) -> Void)? = nil) {
         guard FullRecordingOrganizer.decide(track: track, ownVoice: true, in: input.media).importsAsPersonal else {
-            fullRecordingStatus = "只有本人音轨可以作为你的声音整理；节目或混音音轨请作为外部资料导入"
+            fullRecordingStatus = "完整整理只能使用本人音轨"
             lastRecordingOutcome = .needsAttention(fullRecordingStatus); finished?(false); return
         }
         guard let store, var speech = speechPort as? LocalQwenSpeechPort, !fullRecordingBusy, worker == nil,

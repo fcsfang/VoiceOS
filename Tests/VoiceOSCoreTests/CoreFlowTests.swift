@@ -2712,5 +2712,10 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertNil(FullRecordingOrganizer.decide(track: 0, ownVoice: false, in: single).fixedRole)
         XCTAssertFalse(FullRecordingOrganizer.decide(track: 0, ownVoice: false, in: single).importsAsPersonal)
         XCTAssertTrue(FullRecordingOrganizer.decide(track: 0, ownVoice: true, in: single).importsAsPersonal)
+
+        let unknown = FullRecordingOrganizer.decide(track: 9, ownVoice: true, in: single)
+        XCTAssertNil(unknown.fixedRole)
+        XCTAssertFalse(unknown.allowsOwnVoice)
+        XCTAssertFalse(unknown.importsAsPersonal)
     }
 }
