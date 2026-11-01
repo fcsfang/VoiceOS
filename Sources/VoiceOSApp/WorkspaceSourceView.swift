@@ -52,7 +52,8 @@ struct WorkspaceSourceView: View {
     @State private var loadedDiscussions: [ConversationRecord] = []
     @State private var pauseExplanation = "正在读取具体原因…"
     @State private var showingOriginal = false
-    @State private var requestedOrganization = false
+    @State private var pendingRejection: CandidateClaim?
+    @State private var confirmingRejection = false
     @State private var error=""
     private var sourceStatus: String {
         if source.transcript == nil { return source.jobState == "failed" ? "转写失败 · 原件已保存" : "尚未完成转写 · 原件已保存" }
@@ -73,7 +74,7 @@ struct WorkspaceSourceView: View {
             ForEach(versions) { version in
                 DisclosureGroup("第 \(version.number) 版 · " + version.createdAt) { Text(version.text).textSelection(.enabled) }
             }
-        case .failed(let message): Text("原文版本读取失败：" + message).foregroundStyle(.orange).textSelection(.enabled)
+        case .failed(let message): WorkspaceNoticeText(message:"原文版本读取失败：" + message,severity:.danger)
         }
     }
     private func loadHistory() {
@@ -101,6 +102,10 @@ struct WorkspaceSourceView: View {
     }
     private var review:KnowledgeReviewRecord? { model.knowledgeReviews.filter { $0.sourceID == source.id && $0.validity == "current" }.sorted { $0.createdAt > $1.createdAt }.first }
     private var processing:Bool { model.fullRecordingBusy && model.fullRecordingSourceID.map { expressionIDs.contains($0) } == true || model.understandingSource == source.id || model.processingIntents.contains { $0.sourceID == source.id && [.queued,.running].contains($0.state) } }
+    private var organizationStatusText:String {
+        if let title=model.workspaceProcessingTitle,model.workspaceProcessingSourceID.map({ expressionIDs.contains($0) }) == true,!title.isEmpty { return title }
+        return "正在整理这份材料…"
+    }
     private var pendingUnderstanding:Bool {
         model.records.contains { record in
             guard let ids=record.presentation?.correctedSourceIDs else { return false }
@@ -168,6 +173,7 @@ struct WorkspaceSourceView: View {
                         Button("更正原文") { editing=source }.disabled(source.transcript == nil)
                         Button(source.localOnly ? "允许这份文字用于云端并整理" : "改为仅本地") { Task { await model.changeTextPolicy(source);if source.localOnly { organize() } } }
                         Button("重新整理当前文字",action:organize).disabled(source.transcript == nil || source.localOnly || !model.modelConfigured)
+                        if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
                     }
                 }
                 if source.transcript == nil {
@@ -197,18 +203,20 @@ struct WorkspaceSourceView: View {
                             Text("当前仅本机保存。允许后会将这份完整文字发送给已配置的模型。").font(.callout).foregroundStyle(.secondary)
                             Button("允许这份文字用于云端并重新识别") { Task { await model.changeTextPolicy(source);organize() } }.disabled(!model.modelConfigured || model.fullRecordingBusy || model.understandingSource != nil)
                         } else { Button(automaticallyUpdating ? "正在自动更新…" : processing ? "正在重新识别…" : pendingUnderstanding ? "重试更新理解" : "重新识别观点和任务",action:organize).buttonStyle(.borderedProminent).disabled(processing || model.fullRecordingBusy || model.understandingSource != nil || !model.modelConfigured || source.state == "quarantined") }
-                        if !model.modelConfigured { Text("请先在设置中配置文字模型。").font(.caption).foregroundStyle(.orange) }
-                        HStack {
-                            Button("查看完整文字") { showingOriginal = true }
-                            Button("文字有误，去更正") { editing = source }
-                        }.disabled(source.transcript == nil)
+                        if !model.modelConfigured {
+                            HStack(spacing:8) {
+                                Text("重新识别需要先配置文本模型。").font(.caption).foregroundStyle(palette.warning)
+                                Button("配置文本模型…") { model.chooseTextModel() }.font(.caption)
+                            }
+                        }
+                        Button("查看完整文字") { showingOriginal = true }.disabled(source.transcript == nil)
                         Text("之前的提取与完成记录会保留为历史。已连接的 Apple 提醒事项可能仍会通知，重新识别不等于已撤销系统提醒。").font(.caption).foregroundStyle(.secondary)
-                    }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:12))
+                    }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
                 }
-                if requestedOrganization || processing {
+                if processing {
                     HStack(alignment:.top,spacing:10) {
-                        if processing { ProgressView().controlSize(.small) }
-                        Text(source.transcriptionBackend?.hasPrefix("Qwen3-ASR") == true ? model.fullRecordingStatus : model.status).font(.callout).textSelection(.enabled)
+                        ProgressView().controlSize(.small)
+                        Text(organizationStatusText).font(.callout).textSelection(.enabled)
                     }
                 }
                 if let followup = model.recordingFollowups.last(where: { expressionIDs.contains($0.sourceID) }) {
@@ -234,7 +242,7 @@ struct WorkspaceSourceView: View {
                                     Text(thought.ownership == "ai_candidate" ? "AI 分析与建议" : thought.ownership == "external" ? "外部观点" : "从我的表达中提取").font(.system(size:13)).foregroundStyle(.secondary)
                                     HStack {
                                         Button("更正理解或归属",systemImage:"pencil") { claimEditor=thought }
-                                        Button("停止使用") { Task { _=await model.review(thought,action:.reject) } }
+                                        Button("停止使用") { pendingRejection=thought;confirmingRejection=true }
                                         Button("记录行动意图") { actionClaim=thought }.disabled(thought.validity == "frozen" || thought.reviewState == "rejected")
                                     }.font(.caption).disabled(model.reviewingClaim)
                                     DisclosureGroup("原话依据与调整") {
@@ -312,7 +320,7 @@ struct WorkspaceSourceView: View {
                         VStack(alignment:.leading,spacing:13) {
                             if let review=source.transcriptionReview {
                                 Text("转写校正已保存，原始版本可追溯。").font(.callout)
-                                ForEach(Array((review.unresolved_issues ?? []).enumerated()),id:\.offset) { _,issue in Text(issue.reason).font(.caption).foregroundStyle(.orange) }
+                                ForEach(Array((review.unresolved_issues ?? []).enumerated()),id:\.offset) { _,issue in Text(issue.reason).font(.caption).foregroundStyle(palette.warning) }
                             }
                             Button("查看全部原文版本", action:loadHistory)
                             historyVersions
@@ -320,7 +328,6 @@ struct WorkspaceSourceView: View {
                             ForEach(model.attempts[source.id] ?? []) { attempt in
                                 Text((attempt.state == "completed" ? "理解已完成" : "理解：" + attempt.state) + (attempt.contextState == "stale" ? " · 历史依据已变化" : "")).font(.caption).foregroundStyle(.secondary)
                             }
-                            Button("更正文字") { editing=source }.disabled(source.transcript == nil)
                             ForEach(loadedDiscussions) { session in Button("打开讨论 · " + String(session.id.prefix(8))) { openDiscussion(session.id) } }
                         }.padding(.top,12)
                     }.padding(.vertical,16)
@@ -338,12 +345,12 @@ struct WorkspaceSourceView: View {
                             }
                             Text(model.fullRecordingStatus).font(.caption).foregroundStyle(.secondary)
                             Text(model.transcriptReviewStatus).font(.caption).foregroundStyle(.secondary)
-                            if let error=source.error { Text(error).font(.caption).foregroundStyle(.orange) }
+                            if let error=source.error { Text(error).font(.caption).foregroundStyle(palette.danger) }
                         }.padding(.top,12)
                     }.padding(.vertical,16)
                 }
-                if !error.isEmpty { Text(error).foregroundStyle(.orange) }
-            }.frame(maxWidth:820,alignment:.leading).padding(30).frame(maxWidth:.infinity,alignment:.top)
+                if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
+            }.frame(maxWidth:WorkspaceMetrics.pageWidth,alignment:.leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth:.infinity,alignment:.top)
         }.onDisappear { historyTask?.cancel() }
     }
     var body:some View {
@@ -359,6 +366,12 @@ struct WorkspaceSourceView: View {
                 ScrollView { Text(source.transcript ?? "暂无文字").textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
                 HStack { Spacer();Button("关闭") { showingOriginal=false } }
             }.padding(24).frame(width:650,height:520)
+        }
+        .alert("停止使用这条理解？", isPresented:$confirmingRejection, presenting:pendingRejection) { claim in
+            Button("停止使用", role:.destructive) { Task { _=await model.review(claim, action:.reject) } }
+            Button("取消", role:.cancel) {}
+        } message: { _ in
+            Text("确定后，这份理解将不再用于当前阅读与行动。原文与处理历史会保留。")
         }
         .task(id: source.id + pausedThoughts.map(\.id).joined() + (source.transcriptVersionID ?? "") + String(source.policyVersion) + source.state) {
             historyTask?.cancel(); historyState = .idle
@@ -384,7 +397,7 @@ struct WorkspaceSourceView: View {
                 try Task.checkCancellation();loadedContextLinks=links
             } catch is CancellationError {} catch { contextIssue=error.localizedDescription }
         }
-        .onChange(of:source.id) { _,_ in requestedOrganization=false;showingOriginal=false }
+        .onChange(of:source.id) { _,_ in showingOriginal=false }
     }
     private func contextRelation(_ relation:String)->String {
         ["summary":"复述或总结 · 不代表赞同","agreement":"表达赞同","disagreement":"提出不同看法","qualification":"补充适用条件","application":"联系实际情境","question":"由节目引出的疑问","uncertain":"AI 推测的联系 · 尚不确定"][relation] ?? "AI 关联分析"
@@ -409,7 +422,6 @@ struct WorkspaceSourceView: View {
     }
     private func organize() {
         guard let current=model.records.first(where: { $0.id == source.id }),!current.localOnly else { return }
-        requestedOrganization = true
         if current.origin == "user",current.transcriptionBackend?.hasPrefix("Qwen3-ASR") == true { model.organizeFullTranscript(current) }
         else if current.origin == "user",(current.transcript?.unicodeScalars.count ?? 0) > 4000 { model.understandSegmented(current) }
         else { model.understand(current) }
@@ -426,7 +438,7 @@ struct WorkspaceTranscriptEditor:View {
         VStack(alignment:.leading,spacing:16) {
             Text("更正原文").font(.title2)
             Text(source.localOnly ? "这份材料仅本机保存。更正后保留原话历史，旧理解暂停使用；允许云端处理后可重新整理。" : "保存后自动更新完整理解；原话历史、真实完成与结果保留。不能确定的关联会单独说明。").font(.callout).foregroundStyle(.secondary)
-            TextEditor(text:$text).frame(minHeight:300)
+            TextEditor(text:$text).frame(minHeight:300).workspaceEditorSurface()
             Text(model.status).font(.caption).foregroundStyle(.secondary)
             HStack { Button("取消",action:close);Spacer();Button("保存更正") { Task { if await model.correct(source,text:text) { close() } } }.disabled(text == source.transcript || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty) }
         }.padding(24).frame(width:650).onAppear { text=source.transcript ?? "" }
@@ -447,7 +459,7 @@ struct ClaimCorrectionView:View {
         VStack(alignment:.leading,spacing:16) {
             Text("更正当前理解").font(.title2)
             Text("更正不会改写原话，历史与相关行动依据会分别保留。").font(.callout).foregroundStyle(.secondary)
-            TextEditor(text:$text).frame(minHeight:180)
+            TextEditor(text:$text).frame(minHeight:180).workspaceEditorSurface()
             Picker("内容归属",selection:$ownership) {
                 Text("我的暂定表达").tag("user_tentative");Text("外部观点").tag("external");Text("AI 建议").tag("ai_candidate");Text("归属待核对").tag("unresolved")
             }
