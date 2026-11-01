@@ -13,6 +13,7 @@ struct WorkspaceSourceView: View {
     let openDiscussion:(String)->Void
     var openSource:(String)->Void = { _ in }
     var openFollowups:()->Void = {}
+    var scroll: Binding<ScrollPosition>? = nil
     private var expression:RecordingExpression? {
         let catalog=Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })
         return source.recordingExpression(in:catalog)
@@ -109,7 +110,10 @@ struct WorkspaceSourceView: View {
     private var automaticallyUpdating:Bool { pendingUnderstanding && model.fullRecordingBusy }
     private var pausedThoughts: [CandidateClaim] { (model.currentClaimsBySource[source.id] ?? []).filter { $0.validity != "current" } }
     private var pausedActions: [ActionRecord] { actions.filter { model.workspaceTaskRequiresReview($0) } }
-    private var readingContent:some View {
+    @ViewBuilder private var readingContent:some View {
+        if let scroll { readingScrollView.scrollPosition(scroll) } else { readingScrollView }
+    }
+    private var readingScrollView: some View {
         ScrollView {
             LazyVStack(alignment:.leading,spacing:30) {
                 WorkspaceHeading(eyebrow:(source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + " · " + source.recordingSubtitle,title:(expression?.sourceIDs.count ?? 0) > 1 ? expression!.title : source.workspaceTitle)
