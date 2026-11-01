@@ -63,7 +63,7 @@ struct ActionScheduleEditor: View {
                 Text("解释时区：" + timeZone.identifier).font(.caption).foregroundStyle(.secondary)
             }
             Text("这是你在控制中心作出的期限选择，先仅本地保存。外部期限有差异时，需查看具体改期并确认；不会因为保存而自动修改提醒事项。").font(.callout).foregroundStyle(.secondary)
-            if !errorText.isEmpty { Text(errorText).foregroundStyle(.red) }
+            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
                 Button("取消", action: dismiss).disabled(saving)
                 Spacer()
@@ -79,9 +79,9 @@ struct ActionScheduleEditor: View {
                             if saved { dismiss() } else { errorText = model.status }
                         }
                     } catch { errorText = error.localizedDescription }
-                }.keyboardShortcut(.defaultAction).disabled(saving || model.savingAction)
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(saving || model.savingAction)
             }
-        }.padding(24).frame(width: 620)
+        }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
     }
 }
 
@@ -106,7 +106,7 @@ struct ReminderScheduleConfirmationView: View {
             }
             Text("只允许这一项期限变更。执行前会重新核对；任务、清单或期限发生变化时停止写入。标题、完成状态和其他字段保留。").font(.callout)
             Text("确认不代表任务已完成或观点已验证。可以撤回后续写入许可；已派发的变更不能因此自动撤销。").font(.caption).foregroundStyle(.secondary)
-            if !errorText.isEmpty { Text(errorText).foregroundStyle(.red) }
+            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
                 Button("暂不修改", action: dismiss).disabled(saving)
                 Spacer()
@@ -117,8 +117,8 @@ struct ReminderScheduleConfirmationView: View {
                         saving = false
                         if approved { dismiss() } else { errorText = model.status }
                     }
-                }.keyboardShortcut(.defaultAction).disabled(saving || model.remindersBusy)
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(saving || model.remindersBusy)
             }
-        }.padding(24).frame(width: 620)
+        }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
     }
 }

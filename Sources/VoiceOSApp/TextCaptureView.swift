@@ -16,9 +16,6 @@ struct TextCaptureView: View {
     @State private var dropTargeted = false
     @FocusState private var focus: CaptureField?
     private enum CaptureField: Hashable { case title, text }
-    private var ink: Color { palette.text }
-    private var green: Color { palette.accent }
-    private var paper: Color { palette.canvas }
     private var validationIssue: String? {
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if title.isEmpty { return "填写标题和完整原文后即可保存。" }
@@ -29,12 +26,17 @@ struct TextCaptureView: View {
     private var valid: Bool { validationIssue == nil }
     var body: some View {
         VStack(spacing: 0) {
-            ScrollView { content.padding(24) }
+            ScrollView {
+                content
+                    .padding(WorkspaceMetrics.pagePadding)
+                    .frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading)
+                    .frame(maxWidth: .infinity)
+            }
             Divider()
             VStack(alignment: .leading, spacing: 10) {
                 if !model.initialized { ProgressView("正在恢复资料库与草稿…").controlSize(.small) }
-                if !draft.error.isEmpty { Text(draft.error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
-                if !model.textCaptureDraftIssue.isEmpty { Text(model.textCaptureDraftIssue).font(.callout).foregroundStyle(.orange).textSelection(.enabled) }
+                if !draft.error.isEmpty { WorkspaceNoticeText(message: draft.error, severity: .danger) }
+                if !model.textCaptureDraftIssue.isEmpty { WorkspaceNoticeText(message: model.textCaptureDraftIssue) }
                 Text("草稿自动保存在本机，切页或重开应用可继续；保存成功后清空。").font(.caption).foregroundStyle(.secondary)
                 if let validationIssue { Text(validationIssue).font(.caption).foregroundStyle(.secondary) }
                 if importing { ProgressView("正在读取完整文件…").controlSize(.small) }
@@ -46,12 +48,12 @@ struct TextCaptureView: View {
                     Spacer()
                     if draft.saving { ProgressView().controlSize(.small) }
                     Button("仅本地保存") { save(process: false) }.disabled(draft.saving || !valid)
-                    Button("保存并理解全文") { save(process: true) }.buttonStyle(.borderedProminent).tint(green)
+                    Button("保存并理解全文") { save(process: true) }.buttonStyle(.borderedProminent).tint(palette.accent)
                         .disabled(draft.saving || !valid || !draft.allowCloud || !model.canUnderstandCapturedText)
                 }
-            }.padding(20).background(paper)
-        }.foregroundStyle(ink).background(paper).interactiveDismissDisabled(draft.saving).disabled(!model.initialized || importing)
-            .overlay { RoundedRectangle(cornerRadius: 10).stroke(dropTargeted ? green : .clear, lineWidth: 2).allowsHitTesting(false) }
+            }.padding(20).background(palette.canvas)
+        }.foregroundStyle(palette.text).background(palette.canvas).interactiveDismissDisabled(draft.saving).disabled(!model.initialized || importing)
+            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(dropTargeted ? palette.accent : .clear, lineWidth: 2).allowsHitTesting(false) }
             .dropDestination(for: URL.self) { urls, _ in
                 guard model.initialized, !draft.saving, !importing, !confirmingReplacement else { return false }
                 guard urls.count == 1, let url = urls.first else {
@@ -79,16 +81,12 @@ struct TextCaptureView: View {
     }
     private var content: some View {
         VStack(alignment: .leading, spacing: 17) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("CAPTURE YOUR CONTEXT").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(green)
-                    Text("把文字，带进思考").font(.system(size: 26, weight: .medium, design: .serif))
-                    Text("可粘贴原文，或拖入一份 txt / md 文件；分别保留自己的表达与外部资料的真实归属。").font(.callout).foregroundStyle(.secondary)
-                    Text("⌘⇧R 开始或停止口述").font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
+            HStack(alignment: .top, spacing: 12) {
+                WorkspaceHero(eyebrow: "CAPTURE YOUR CONTEXT", title: "把文字，带进思考",
+                              subtitle: "可粘贴原文，或拖入一份 txt / md 文件；分别保留自己的表达与外部资料的真实归属。")
                 Button("导入文字文件") { chooseFile() }.disabled(draft.saving)
             }
+            Text("⌘⇧R 开始或停止口述").font(.caption).foregroundStyle(.secondary)
             Picker("原文归属", selection: $draft.ownership) {
                 Text("我的表达").tag(TextCaptureOwnership.personal)
                 Text("外部资料").tag(TextCaptureOwnership.external)
@@ -104,8 +102,7 @@ struct TextCaptureView: View {
                     Text("\(draft.text.unicodeScalars.count) 字").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
                 TextEditor(text: $draft.text).font(.body).scrollContentBackground(.hidden).frame(minHeight:240)
-                    .padding(10).background(palette.surface, in: RoundedRectangle(cornerRadius: 9))
-                    .overlay { RoundedRectangle(cornerRadius: 9).stroke(green.opacity(0.2)) }.focused($focus, equals: .text).disabled(draft.saving)
+                    .workspaceEditorSurface().focused($focus, equals: .text).disabled(draft.saving)
                     .accessibilityLabel("完整原文")
             }.frame(maxHeight: .infinity)
             Toggle("允许这份完整原文用于云端理解", isOn: $draft.allowCloud).disabled(draft.saving)

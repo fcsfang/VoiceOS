@@ -38,7 +38,7 @@ struct ReminderSettingsView: View {
                 Text("无").tag(0); Text("高").tag(1); Text("中").tag(5); Text("低").tag(9)
                 if ![0, 1, 5, 9].contains(priority) { Text("当前优先级（\(priority)）").tag(priority) }
             }
-            if !error.isEmpty { Text(error).font(.callout).foregroundStyle(.red) }
+            if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {
                 Button("取消", action: dismiss).disabled(model.reminderFieldEditing)
                 Spacer()
