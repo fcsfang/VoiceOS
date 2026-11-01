@@ -40,6 +40,8 @@
 
 ## 使用体验批次四
 
+- PR #75 合入六个工作流与记录。
+
 - PR #73 设计词汇：`WorkspaceMetrics`（阅读栏宽、页面边距、三档圆角、弹窗宽度）、`WorkspaceHero`、`WorkspaceSearchField`、`WorkspaceEmptyState`、`WorkspaceIconButton`、`WorkspaceNoticeText`、悬停与编辑面修饰器；调色板新增 warning/danger/success 语义色。
 - PR #74 原文导航契约：弹窗经 `requestWorkspaceSource` 请求导航，工作区消费后打开材料，“查看原文”不再无反应。
 - 六个并行工作流（外壳、全景、阅读、编辑面、工具页、应用层）合入 31 个文件，627 增 326 删：

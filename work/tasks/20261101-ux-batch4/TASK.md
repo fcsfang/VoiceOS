@@ -3,7 +3,7 @@ status: completed
 started: 2026-11-01T20:10+08
 updated: 2026-11-01T22:30+08
 branch: main
-pr: https://github.com/fcsfang/VoiceOS/pull/73, https://github.com/fcsfang/VoiceOS/pull/74, PR_TBD
+pr: https://github.com/fcsfang/VoiceOS/pull/73, https://github.com/fcsfang/VoiceOS/pull/74, https://github.com/fcsfang/VoiceOS/pull/75
 owner: 主会话
 ---
 
