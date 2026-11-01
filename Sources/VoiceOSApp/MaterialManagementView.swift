@@ -47,7 +47,7 @@ struct MaterialManagementControls: View {
                 } label: {
                     Image(systemName:"ellipsis.circle")
                 }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                    .accessibilityLabel("更多材料操作")
+                    .accessibilityLabel("更多材料操作").help("更多材料操作")
             }
             busyIndicator
         }
