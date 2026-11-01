@@ -14,6 +14,8 @@ struct TextCaptureView: View {
     @State private var pendingImport: (text: String, title: String, fileName: String)?
     @State private var confirmingReplacement = false
     @State private var dropTargeted = false
+    @FocusState private var focus: CaptureField?
+    private enum CaptureField: Hashable { case title, text }
     private var ink: Color { palette.text }
     private var green: Color { palette.accent }
     private var paper: Color { palette.canvas }
@@ -59,7 +61,15 @@ struct TextCaptureView: View {
                 readFile(url)
                 return true
             } isTargeted: { dropTargeted = $0 }
-            .onDisappear { importWorker?.cancel(); importing = false; model.flushTextCaptureDraft() }
+            .task {
+                // A focus write before the field attaches to its window is dropped.
+                guard model.initialized, !model.dictationActive, !model.dictationBusy, !draft.saving, !importing,
+                      focus == nil, !(NSApp.keyWindow?.firstResponder is NSText) else { return }
+                do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+                guard !Task.isCancelled, focus == nil, !(NSApp.keyWindow?.firstResponder is NSText) else { return }
+                focus = .text
+            }
+            .onDisappear { importWorker?.cancel(); importing = false; model.flushTextCaptureDraft(); focus = nil }
             .alert("替换当前文字草稿？", isPresented: $confirmingReplacement) {
                 Button("保留当前草稿", role: .cancel) { pendingImport = nil }
                 Button("用文件替换", role: .destructive) { applyImport() }
@@ -84,7 +94,7 @@ struct TextCaptureView: View {
             }.pickerStyle(.segmented).disabled(draft.saving)
             Text(draft.ownership == .personal ? "仅选择你亲自表达的判断、想法或行动。摘录、文章和其他人的笔记请选外部资料。" : "文章、摘录和他人笔记作为外部资料；作者的观点与行动不会归为你的个人认识或待办。")
                 .font(.callout).foregroundStyle(.secondary)
-            TextField(draft.ownership == .personal ? "表达标题" : "资料标题 · 可填写作者与出处", text: $draft.title).textFieldStyle(.roundedBorder).disabled(draft.saving)
+            TextField(draft.ownership == .personal ? "表达标题" : "资料标题 · 可填写作者与出处", text: $draft.title).textFieldStyle(.roundedBorder).focused($focus, equals: .title).disabled(draft.saving)
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("完整原文").font(.headline)
@@ -94,7 +104,7 @@ struct TextCaptureView: View {
                 }
                 TextEditor(text: $draft.text).font(.body).scrollContentBackground(.hidden).frame(minHeight:240)
                     .padding(10).background(palette.surface, in: RoundedRectangle(cornerRadius: 9))
-                    .overlay { RoundedRectangle(cornerRadius: 9).stroke(green.opacity(0.2)) }.disabled(draft.saving)
+                    .overlay { RoundedRectangle(cornerRadius: 9).stroke(green.opacity(0.2)) }.focused($focus, equals: .text).disabled(draft.saving)
                     .accessibilityLabel("完整原文")
             }.frame(maxHeight: .infinity)
             Toggle("允许这份完整原文用于云端理解", isOn: $draft.allowCloud).disabled(draft.saving)
