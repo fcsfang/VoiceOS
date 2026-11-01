@@ -42,6 +42,12 @@ struct WorkspacePalette {
     // Graph colors distinguish kinds of evidence without tinting the workspace.
     var action: Color { adaptive(0x526B82, 0xA9BED1) }
     var outcome: Color { adaptive(0x826B52, 0xCDB99E) }
+    // Status roles. Warnings are recoverable; danger marks failed writes or
+    // destructive results. Success follows the theme accent so completion never
+    // introduces an off-hue green.
+    var warning: Color { adaptive(0x9A5B13, 0xE8B15D) }
+    var danger: Color { adaptive(0xB42318, 0xF97066) }
+    var success: Color { accent }
 
     func graphColor(_ lane: Int) -> Color { [text, accent, action, outcome][lane] }
 
