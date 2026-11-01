@@ -608,6 +608,14 @@ final class ControlCenter: ObservableObject {
                 configureTextModel(URL(fileURLWithPath: path))
             }
             await refresh()
+            // Long panorama runs must be resumable without a visible window.
+            // Only the explicit launch variable retries; a failed state alone
+            // never auto-spends on its own.
+            if ProcessInfo.processInfo.environment["VOICEOS_RETRY_PANORAMA"] == "1", !panoramaLaunchRetryIssued,
+               modelConfigured, panorama.state?.status == "failed" {
+                panoramaLaunchRetryIssued = true
+                retryPanorama()
+            }
             scheduleProcessing()
             installReminderRefresh()
             dictationObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.willSleepNotification,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.flushTextCaptureDraft(); self?.stopDictation(interrupted:true) } })
@@ -633,6 +641,7 @@ final class ControlCenter: ObservableObject {
     }
     private var refreshWorker: Task<Void, Never>?
     private var refreshPending = false
+    private var panoramaLaunchRetryIssued = false
     func refresh() async {
         refreshPending = true
         if let refreshWorker { await refreshWorker.value; return }
