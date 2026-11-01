@@ -39,6 +39,71 @@ struct ConstellationSearchMatches: Equatable, Sendable {
     var includesQuestionOrRelationText = false
 }
 
+// MARK: - Region identity
+
+/// Stable hue per region id. Color tells regions apart and never groups them.
+private enum RegionIdentity {
+    private struct RGB: Sendable {
+        let red: Double
+        let green: Double
+        let blue: Double
+
+        func color(opacity: Double = 1) -> Color {
+            Color(red: red, green: green, blue: blue, opacity: opacity)
+        }
+    }
+
+    private struct Tone: Sendable {
+        let light: RGB
+        let dark: RGB
+    }
+
+    // Muted earth tones with a light and dark pair. They sit on both workspace
+    // themes without competing with card text.
+    private static let tones: [Tone] = [
+        Tone(light: RGB(red: 0.70, green: 0.44, blue: 0.35), dark: RGB(red: 0.84, green: 0.60, blue: 0.50)),
+        Tone(light: RGB(red: 0.67, green: 0.50, blue: 0.27), dark: RGB(red: 0.83, green: 0.68, blue: 0.42)),
+        Tone(light: RGB(red: 0.49, green: 0.55, blue: 0.30), dark: RGB(red: 0.68, green: 0.73, blue: 0.46)),
+        Tone(light: RGB(red: 0.34, green: 0.50, blue: 0.38), dark: RGB(red: 0.53, green: 0.69, blue: 0.56)),
+        Tone(light: RGB(red: 0.27, green: 0.49, blue: 0.50), dark: RGB(red: 0.47, green: 0.69, blue: 0.70)),
+        Tone(light: RGB(red: 0.36, green: 0.46, blue: 0.62), dark: RGB(red: 0.58, green: 0.67, blue: 0.80)),
+        Tone(light: RGB(red: 0.44, green: 0.41, blue: 0.62), dark: RGB(red: 0.65, green: 0.62, blue: 0.80)),
+        Tone(light: RGB(red: 0.54, green: 0.39, blue: 0.51), dark: RGB(red: 0.72, green: 0.58, blue: 0.69)),
+        Tone(light: RGB(red: 0.63, green: 0.38, blue: 0.41), dark: RGB(red: 0.80, green: 0.57, blue: 0.60)),
+        Tone(light: RGB(red: 0.53, green: 0.45, blue: 0.34), dark: RGB(red: 0.72, green: 0.64, blue: 0.52))
+    ]
+
+    /// FNV-1a over the UTF-8 bytes. Swift's Hasher is seeded per launch, so it
+    /// cannot keep a region's color stable across snapshots and launches.
+    static func paletteIndex(for regionID: String) -> Int {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in regionID.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return Int(hash % UInt64(tones.count))
+    }
+
+    static func color(index: Int, scheme: ColorScheme) -> Color {
+        tone(index, scheme: scheme).color()
+    }
+
+    static func edgeColor(from startIndex: Int, to endIndex: Int, scheme: ColorScheme) -> Color {
+        let start = tone(startIndex, scheme: scheme)
+        let end = tone(endIndex, scheme: scheme)
+        return RGB(
+            red: (start.red + end.red) / 2,
+            green: (start.green + end.green) / 2,
+            blue: (start.blue + end.blue) / 2
+        ).color()
+    }
+
+    private static func tone(_ index: Int, scheme: ColorScheme) -> RGB {
+        let entry = tones[index % tones.count]
+        return scheme == .dark ? entry.dark : entry.light
+    }
+}
+
 // MARK: - Derived model
 
 /// One derivation pass per content key. Recent flags, ordering, search text and
@@ -46,6 +111,7 @@ struct ConstellationSearchMatches: Equatable, Sendable {
 struct ConstellationModel: Sendable {
     struct Region: Identifiable, Sendable {
         let id: String
+        let identityIndex: Int
         let title: String
         let summary: String
         let questionIDs: [String]
@@ -173,6 +239,7 @@ struct ConstellationModel: Sendable {
             let regionQuestions = questionsByRegion[region.id] ?? []
             return Region(
                 id: region.id,
+                identityIndex: RegionIdentity.paletteIndex(for: region.id),
                 title: region.title,
                 summary: region.summary,
                 questionIDs: regionQuestions.map(\.id),
@@ -746,6 +813,7 @@ private struct StageState {
 /// keeps stroke widths constant at every zoom; edges never hit-test and are
 /// never the only way to reach a relation.
 private struct EdgeLayer: View {
+    @Environment(\.colorScheme) private var colorScheme
     let stage: StageState
     let camera: ConstellationCamera
     let highlightedPair: ConstellationModel.Pair?
@@ -776,10 +844,21 @@ private struct EdgeLayer: View {
                 let dimmed = !query.isEmpty
                     && !(stage.model.regionByID[edge.pair.a]?.searchText.contains(query) ?? false)
                     && !(stage.model.regionByID[edge.pair.b]?.searchText.contains(query) ?? false)
+                let edgeColor: Color
+                if let hoveredRegionID,
+                   edge.pair.a == hoveredRegionID || edge.pair.b == hoveredRegionID,
+                   let index = stage.model.regionByID[hoveredRegionID]?.identityIndex {
+                    edgeColor = RegionIdentity.color(index: index, scheme: colorScheme)
+                } else if let startIndex = stage.model.regionByID[edge.pair.a]?.identityIndex,
+                          let endIndex = stage.model.regionByID[edge.pair.b]?.identityIndex {
+                    edgeColor = RegionIdentity.edgeColor(from: startIndex, to: endIndex, scheme: colorScheme)
+                } else {
+                    edgeColor = Color.secondary
+                }
                 context.opacity = dimmed ? 0.25 : 1
                 context.stroke(
                     path,
-                    with: .color(highlighted ? Color.accentColor : Color.secondary.opacity(0.45)),
+                    with: .color(edgeColor.opacity(highlighted ? 0.9 : 0.38)),
                     style: StrokeStyle(lineWidth: highlighted ? 2 : 1, dash: highlighted ? [6, 3] : [5, 4])
                 )
             }
@@ -790,6 +869,7 @@ private struct EdgeLayer: View {
 
 private struct RegionCard: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
     let region: ConstellationModel.Region
     let focused: Bool
     let hovered: Bool
@@ -800,11 +880,20 @@ private struct RegionCard: View {
     let onOpen: () -> Void
 
     var body: some View {
+        let identity = RegionIdentity.color(index: region.identityIndex, scheme: colorScheme)
         Button(action: onOpen) {
             VStack(alignment: .leading, spacing: compact ? 0 : 5) {
                 if !compact {
                     HStack(spacing: 5) {
                         Text("\(region.questionIDs.count) 个问题").font(.system(size: 11)).foregroundStyle(.secondary)
+                        if !region.questionIDs.isEmpty {
+                            HStack(spacing: 2) {
+                                ForEach(0..<min(region.questionIDs.count, 5), id: \.self) { _ in
+                                    Circle().fill(identity.opacity(0.75)).frame(width: 3, height: 3)
+                                }
+                            }
+                            .accessibilityHidden(true)
+                        }
                         Spacer(minLength: 0)
                         if recent {
                             Circle().fill(palette.accent).frame(width: 5, height: 5).accessibilityLabel("近期更新的区域")
@@ -820,9 +909,20 @@ private struct RegionCard: View {
             .padding(.horizontal, 12)
             .padding(.vertical, compact ? 8 : 9)
             .frame(width: ConstellationLayout.cardSize.width, height: ConstellationLayout.cardSize.height, alignment: compact ? .leading : .topLeading)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14).fill(.thinMaterial)
+                    RoundedRectangle(cornerRadius: 14).fill(identity.opacity(colorScheme == .dark ? 0.16 : 0.10))
+                }
+            }
             .overlay {
-                RoundedRectangle(cornerRadius: 14).strokeBorder(borderColor, lineWidth: focused || selected ? 2 : 1)
+                RoundedRectangle(cornerRadius: 14).strokeBorder(borderColor(identity), lineWidth: focused || selected ? 2 : 1)
+            }
+            .overlay(alignment: .leading) {
+                Capsule()
+                    .fill(identity.opacity(0.9))
+                    .frame(width: 3, height: compact ? 24 : 30)
+                    .padding(.leading, 6)
             }
             .contentShape(RoundedRectangle(cornerRadius: 14))
         }
@@ -833,10 +933,10 @@ private struct RegionCard: View {
         .accessibilityHint("打开区域摘要与问题")
     }
 
-    private var borderColor: Color {
-        if focused || selected { return palette.accent }
-        if hovered { return palette.accent.opacity(0.55) }
-        return palette.border
+    private func borderColor(_ identity: Color) -> Color {
+        if focused || selected { return identity.opacity(0.9) }
+        if hovered { return identity.opacity(0.65) }
+        return identity.opacity(0.35)
     }
 }
 
@@ -886,22 +986,22 @@ private struct ConstellationLegend: View {
         Text(copy)
             .font(.caption)
             .foregroundStyle(.secondary)
-            .lineLimit(1)
+            .lineLimit(2)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .background(.ultraThinMaterial, in: Capsule())
-            .help("位置邻近仅表示引用过相同材料，不代表主题相似")
+            .help("颜色仅用于区分区域，不代表分组；位置邻近仅表示引用过相同材料，不代表主题相似")
     }
 
     private var copy: String {
         let base: String
         if hasEdges {
-            base = "虚线 · AI 候选联系，尚待核对"
+            base = "颜色仅用于区分区域 · 虚线 · AI 候选联系，尚待核对"
         } else if isPartial {
-            base = "跨材料联系尚未核对完成；当前仅显示已核对区域"
+            base = "颜色仅用于区分区域 · 跨材料联系尚未核对完成；当前仅显示已核对区域"
         } else {
-            base = "当前没有已核对的跨区域候选联系"
+            base = "颜色仅用于区分区域 · 当前没有已核对的跨区域候选联系"
         }
-        return hasRecent ? base + " · 圆点为近期更新" : base
+        return hasRecent ? base + " · 右上圆点为近期更新" : base
     }
 }

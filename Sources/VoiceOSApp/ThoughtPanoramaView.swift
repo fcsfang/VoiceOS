@@ -468,7 +468,7 @@ struct ThoughtPanoramaView: View {
                             .accessibilityLabel("AI 候选联系：" + relation.label)
                         }
                     }
-                    Text("虚线 · AI 候选联系，尚待核对").font(.system(size: 13)).foregroundStyle(.secondary)
+                    Text("颜色仅用于区分区域 · 虚线 · AI 候选联系，尚待核对").font(.system(size: 13)).foregroundStyle(.secondary)
                 }
             }.padding(20)
         }
