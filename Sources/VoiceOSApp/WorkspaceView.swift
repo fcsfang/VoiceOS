@@ -207,6 +207,14 @@ struct WorkspaceView: View {
             ClaimCorrectionView(claim: claim, model: model) { panoramaClaimEditor = nil }
         }
         .sheet(item:$model.pendingScheduleEffect) { effect in ReminderScheduleConfirmationView(effect:effect,model:model) { model.pendingScheduleEffect=nil } }
+        .alert("无法导入录音或视频", isPresented: Binding(
+            get: { model.fullRecordingImportIssue != nil },
+            set: { if !$0 { model.fullRecordingImportIssue = nil } }
+        )) {
+            Button("好") { model.fullRecordingImportIssue = nil }
+        } message: {
+            Text(model.fullRecordingImportIssue ?? "")
+        }
     }
     private var topicLoadKey: String {
         guard page == .themes, let id = topicID else { return "" }
@@ -307,11 +315,20 @@ struct WorkspaceView: View {
         case .settings: scrolled { settings }
         case .capture:
             VStack(alignment:.leading,spacing:0) {
-                HStack {
-                    Button(model.dictationActive ? "停止并整理" : "开始口述并自动整理",systemImage:model.dictationActive ? "stop.circle" : "mic") {
-                        if model.dictationActive { model.stopDictation() } else { Task { await model.startDictation(processAfterTranscription:true) } }
-                    }.buttonStyle(.borderedProminent).disabled(model.dictationBusy || model.fullRecordingBusy)
-                    Button("导入音频 / 视频") { model.chooseFullRecording() }
+                VStack(alignment:.leading,spacing:10) {
+                    HStack {
+                        Button(model.dictationActive ? "停止并整理" : "开始口述并自动整理",systemImage:model.dictationActive ? "stop.circle" : "mic") {
+                            if model.dictationActive { model.stopDictation() } else { Task { await model.startDictation(processAfterTranscription:true) } }
+                        }.buttonStyle(.borderedProminent).disabled(model.dictationBusy || model.fullRecordingBusy || (!model.dictationActive && model.recordingModelIssue != nil))
+                        Button("导入音频 / 视频") { model.chooseFullRecording() }
+                    }
+                    if let issue = model.recordingModelIssue {
+                        HStack(spacing:10) {
+                            Text(issue).font(.caption).foregroundStyle(.orange)
+                            if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.controlSize(.small) }
+                            if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.controlSize(.small) }
+                        }
+                    }
                 }.padding(24)
                 TextCaptureView(model:model,draft:$model.textCaptureDraft,onSaved:{ if page == .capture { go(.source($0)) } },dismiss:back)
             }.frame(maxWidth:860).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.top)
