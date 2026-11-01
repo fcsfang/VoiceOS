@@ -26,6 +26,7 @@ struct EnglishPracticeView: View {
     @ObservedObject var model: ControlCenter
     var embedded = false
     let dismiss: () -> Void
+    var openCapture: (() -> Void)? = nil
     @State private var currentID = ""
     @State private var priorIDs: Set<String> = []
     @State private var showingInput = false
@@ -41,8 +42,14 @@ struct EnglishPracticeView: View {
             Text("只发送选定的个人文字和出处；原始音频不会上传。反馈独立保存，不创建认知候选、行动或提醒事项。")
                 .font(.callout).foregroundStyle(.secondary)
             if sources.isEmpty {
-                ContentUnavailableView("还没有可练习的英文原话", systemImage: "character.book.closed", description: Text("需要一份已保存、已完成文字转写的个人原话。完成一段英文录音并保存后，回到这里即可练习。"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ContentUnavailableView {
+                    Label("还没有可练习的英文原话", systemImage: "character.book.closed")
+                } description: {
+                    Text("需要一份已保存、已完成文字转写的个人原话。完成一段英文录音并保存后，回到这里即可练习。")
+                } actions: {
+                    if let openCapture { Button("去记录英文表达", action: openCapture).buttonStyle(.borderedProminent) }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Picker("本次练习", selection: $currentID) {
                     Text("选择一份我的英文原话").tag("")

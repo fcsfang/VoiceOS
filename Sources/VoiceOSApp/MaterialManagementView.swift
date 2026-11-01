@@ -2,22 +2,18 @@ import SwiftUI
 import VoiceOSCore
 
 struct MaterialManagementControls: View {
+    enum Style { case full, compact }
     @ObservedObject var model: ControlCenter
     let source: SourceRecord
+    var style: Style = .full
     @State private var confirmingTrash = false
     @State private var busy = false
     private var count: Int {
         source.recordingExpression(in:Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) }))?.sourceIDs.count ?? 1
     }
     var body: some View {
-        HStack(spacing:12) {
-            if source.isTrashed {
-                Button("恢复材料",systemImage:"arrow.uturn.backward") { update(.active) }
-            } else {
-                Button(source.isArchived ? "取消归档" : "归档",systemImage:"archivebox") { update(source.isArchived ? .active : .archived) }
-                Button("移入回收站",systemImage:"trash",role:.destructive) { confirmingTrash=true }
-            }
-            if busy { ProgressView().controlSize(.small) }
+        Group {
+            if style == .compact { compactControls } else { fullControls }
         }.disabled(busy)
             .alert("将材料移入回收站？",isPresented:$confirmingTrash) {
                 Button("取消",role:.cancel) {}
@@ -25,6 +21,42 @@ struct MaterialManagementControls: View {
             } message: {
                 Text("“\(source.workspaceTitle)”\(count > 1 ? "包含 \(count) 段连续录音，将一起移入回收站" : "将从日常列表移除")。停止云端处理并暂停相关理解，原件、原话和任务历史保留，可恢复为仅本机材料。已连接的 Apple 提醒事项仍可能通知，请在提醒事项中单独处理。")
             }
+    }
+    private var fullControls: some View {
+        HStack(spacing:12) {
+            if source.isTrashed {
+                restoreButton
+            } else {
+                Button(source.isArchived ? "取消归档" : "归档",systemImage:"archivebox") { update(source.isArchived ? .active : .archived) }
+                Button("移入回收站",systemImage:"trash",role:.destructive) { confirmingTrash=true }
+            }
+            busyIndicator
+        }
+    }
+    private var compactControls: some View {
+        HStack(spacing:10) {
+            if source.isTrashed {
+                restoreButton
+            } else {
+                if source.isArchived {
+                    Button("取消归档",systemImage:"archivebox") { update(.active) }
+                }
+                Menu {
+                    if !source.isArchived { Button("归档",systemImage:"archivebox") { update(.archived) } }
+                    Button("移入回收站",systemImage:"trash",role:.destructive) { confirmingTrash=true }
+                } label: {
+                    Image(systemName:"ellipsis.circle")
+                }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                    .accessibilityLabel("更多材料操作")
+            }
+            busyIndicator
+        }
+    }
+    private var restoreButton: some View {
+        Button("恢复材料",systemImage:"arrow.uturn.backward") { update(.active) }
+    }
+    @ViewBuilder private var busyIndicator: some View {
+        if busy { ProgressView().controlSize(.small) }
     }
     private func update(_ disposition: MaterialDisposition) {
         busy=true

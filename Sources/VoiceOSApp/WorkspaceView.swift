@@ -420,8 +420,11 @@ struct WorkspaceView: View {
                 Button("添加材料") { go(.capture) }.buttonStyle(.borderedProminent)
             } else {
                 ForEach(rows) { source in
-                    sourceRow(source,catalog:catalog,showOriginalName:true)
-                    MaterialManagementControls(model:model,source:source).font(.caption)
+                    HStack(alignment:.top,spacing:4) {
+                        sourceRow(source,catalog:catalog,showOriginalName:true).frame(maxWidth:.infinity,alignment:.leading)
+                        MaterialManagementControls(model:model,source:source,style:.compact)
+                            .font(.caption).padding(.top,21)
+                    }
                     if source.id != rows.last?.id { Divider() }
                 }
                 if rows.isEmpty { Text("这里暂时没有材料。").foregroundStyle(.secondary) }
@@ -654,7 +657,7 @@ struct WorkspaceView: View {
         case "纠错影响": CorrectionImpactView(model:model,embedded:true,dismiss:openSelectedSource)
         case "静默回顾": CognitiveFeedbackView(model:model,embedded:true,dismiss:back).task { model.quietAssociationSourceID=nil; await model.refreshQuietFeedback() }
         case "查找历史文字": HistorySearchView(model:model,embedded:true,dismiss:back)
-        case "英文表达反馈": EnglishPracticeView(model:model,embedded:true,dismiss:back)
+        case "英文表达反馈": EnglishPracticeView(model:model,embedded:true,dismiss:back,openCapture:{ go(.capture) })
         case "恢复资料": PackageRestoreView(dismiss:back).frame(maxWidth:.infinity,maxHeight:.infinity)
         default: WorkspaceProcessingView(model:model,inbox:model.recordingInbox,openSource:{ go(.source($0)) },openSettings:{ go(.settings) },openInbox:{ go(.tool("自动入口")) })
         }
