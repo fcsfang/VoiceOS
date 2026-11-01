@@ -36,9 +36,7 @@ struct ReflectionQuestionsView: View {
     @State private var periodicReview = false
     @State private var chosenPeriod: ReflectionPeriod?
     @State private var chosenAnchor: Date?
-    private var ink: Color { palette.text }
-    private var green: Color { palette.accent }
-    private var paper: Color { palette.canvas }
+    @State private var reviewing = false
     private var selected: ReflectionQuestion? { questions.first { $0.id == selectedID } }
     private var reviewPeriod: ReflectionPeriod { chosenPeriod ?? period }
     private var reviewAnchor: Date { chosenAnchor ?? anchor }
@@ -79,11 +77,7 @@ struct ReflectionQuestionsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("TOPICS IN PROGRESS").font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2).foregroundStyle(green)
-                    Text("主题与问题").font(.system(size: 26, weight: .medium, design: .serif))
-                    Text("把跨越时间的材料、认识、尝试与结果接到同一个主题。").font(.callout).foregroundStyle(.secondary)
-                }
+                WorkspaceHero(eyebrow: "TOPICS IN PROGRESS", title: "主题与问题", subtitle: "把跨越时间的材料、认识、尝试与结果接到同一个主题。")
                 Spacer()
                 Button("返回地图") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
             }.padding(24)
@@ -97,9 +91,9 @@ struct ReflectionQuestionsView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            if let error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled).padding(12) }
+            if let error { Text(error).font(.callout).foregroundStyle(palette.danger).textSelection(.enabled).padding(12) }
         }
-        .foregroundStyle(ink).background(paper).frame(width: 1020, height: 760)
+        .foregroundStyle(palette.text).background(palette.canvas).frame(width: 1020, height: 760)
         .task { selectedID = initialQuestionID; await reload() }
         .sheet(isPresented: $creating) { createSheet }
         .sheet(isPresented: $managingSources) { sourcesSheet }
@@ -109,7 +103,7 @@ struct ReflectionQuestionsView: View {
             HStack {
                 Text("长期探索").font(.headline)
                 Spacer()
-                Button { beginCreating() } label: { Image(systemName: "plus") }.help("新增主题或问题").disabled(busy)
+                WorkspaceIconButton(systemImage: "plus", label: "新增主题或问题") { beginCreating() }.disabled(busy)
             }
             ScrollView {
                 LazyVStack(spacing: 8) {
@@ -131,8 +125,8 @@ struct ReflectionQuestionsView: View {
                                 Text(question.title).font(.system(size: 14, weight: .medium)).multilineTextAlignment(.leading).lineLimit(4)
                                 Text("更新于 " + date(question.updatedAt)).font(.caption).foregroundStyle(.secondary)
                             }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
-                                .background(selectedID == question.id ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: 9))
-                                .overlay { RoundedRectangle(cornerRadius: 9).stroke(selectedID == question.id ? green.opacity(0.5) : .clear) }
+                                .background(selectedID == question.id ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                                .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(selectedID == question.id ? palette.accent.opacity(0.5) : .clear) }
                         }.buttonStyle(.plain).disabled(busy)
                     }
                 }
@@ -159,8 +153,12 @@ struct ReflectionQuestionsView: View {
                 Spacer()
                 Button {
                     Task { await startReview(question) }
-                } label: { Label(periodicReview ? "一起回顾" : "一起探索", systemImage: "sparkles") }
-                    .buttonStyle(.borderedProminent).tint(green).disabled(busy)
+                } label: {
+                    HStack(spacing: 6) {
+                        if reviewing { ProgressView().controlSize(.small) }
+                        Label(periodicReview ? "一起回顾" : "一起探索", systemImage: "sparkles")
+                    }
+                }.buttonStyle(.borderedProminent).tint(palette.accent).disabled(busy || reviewing)
             }
             if let feedback = topicFeedback.first(where: { $0.id == question.id }), feedback.mode != .normal || feedback.snoozedUntil != nil {
                 Text(feedback.mode == .paused ? "此主题的静默提示已暂停，可从提示设置恢复。" : feedback.mode == .reduced ? "此主题已减少提示；不会据此判断你失去兴趣。" : "此主题已选择稍后提示。")
@@ -203,13 +201,13 @@ struct ReflectionQuestionsView: View {
     private func entryCard(_ entry: ReflectionQuestionEntry) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
-                Label(entry.kind.label, systemImage: icon(entry.kind)).font(.caption).foregroundStyle(green)
+                Label(entry.kind.label, systemImage: icon(entry.kind)).font(.caption).foregroundStyle(palette.accent)
                 Spacer()
                 Text(date(entry.createdAt) + " · 我的记录").font(.caption).foregroundStyle(.secondary)
             }
             Text(entry.text).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
             if !entry.unavailableSourceIDs.isEmpty {
-                Text("部分依据已变化或暂停使用；请重新核对，这条历史记录保留原文。").font(.caption).foregroundStyle(.orange)
+                Text("部分依据已变化或暂停使用；请重新核对，这条历史记录保留原文。").font(.caption).foregroundStyle(palette.warning)
             }
             HStack {
                 Button("查看记录原文") { openSource(entry.sourceID) }
@@ -225,9 +223,9 @@ struct ReflectionQuestionsView: View {
                     Button("停止用于这个主题", role: .destructive) {
                         Task { await perform { try await model.stopReflectionQuestionEntry(entry.id) } }
                     }
-                } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 22)
+                } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 22).help("更多操作").accessibilityLabel("更多操作")
             }.font(.caption).disabled(busy)
-        }.padding(14).background(palette.surface, in: RoundedRectangle(cornerRadius: 10))
+        }.padding(14).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }
     private func composer(_ question: ReflectionQuestion) -> some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -235,7 +233,7 @@ struct ReflectionQuestionsView: View {
                 Picker("留下什么", selection: $kind) {
                     ForEach(ReflectionQuestionEntryKind.allCases, id: \.self) { Text($0.label).tag($0) }
                 }.frame(width: 215)
-                Text("\(text.unicodeScalars.count) / 4000").font(.caption).foregroundStyle(text.unicodeScalars.count > 4000 ? .red : .secondary)
+                Text("\(text.unicodeScalars.count) / 4000").font(.caption).foregroundStyle(text.unicodeScalars.count > 4000 ? palette.danger : .secondary)
                 Spacer()
                 Menu("附上依据 · \(evidenceIDs.count)") {
                     ForEach(availableSources.filter { sourceIDs.contains($0.id) && $0.id != question.sourceID }) { source in
@@ -247,8 +245,8 @@ struct ReflectionQuestionsView: View {
             }
             Text(prompt(kind)).font(.caption).foregroundStyle(.secondary)
             TextEditor(text: $text).font(.body).scrollContentBackground(.hidden).padding(6)
-                .frame(height: 78).background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
-                .overlay { RoundedRectangle(cornerRadius: 8).stroke(ink.opacity(0.14)) }
+                .frame(height: 78).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(palette.text.opacity(0.14)) }
             HStack {
                 Toggle("允许这条文字用于云端回顾", isOn: $allowCloud).font(.caption)
                 Spacer()
@@ -259,7 +257,7 @@ struct ReflectionQuestionsView: View {
                         }
                         if saved { text = ""; evidenceIDs = [] }
                     }
-                }.buttonStyle(.borderedProminent).tint(green)
+                }.buttonStyle(.borderedProminent).tint(palette.accent)
                     .disabled(busy || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
             }
         }.disabled(busy)
@@ -292,10 +290,10 @@ struct ReflectionQuestionsView: View {
                         } catch { self.error = error.localizedDescription; creating = false }
                         busy = false
                     }
-                }.buttonStyle(.borderedProminent).tint(green).keyboardShortcut(.defaultAction)
+                }.buttonStyle(.borderedProminent).tint(palette.accent).keyboardShortcut(.defaultAction)
                     .disabled(busy || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.unicodeScalars.count > 200)
             }
-        }.padding(28).frame(width: 560).background(paper)
+        }.padding(28).frame(width: 560).background(palette.canvas)
     }
     private var sourcesSheet: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -311,7 +309,7 @@ struct ReflectionQuestionsView: View {
                 Text("任务与目标").tag("tasks")
             }.pickerStyle(.segmented)
             HStack {
-                TextField(sourceMode == "sources" ? "搜索标题或完整原文" : "搜索知识或任务标题", text: $sourceQuery).textFieldStyle(.roundedBorder)
+                WorkspaceSearchField(text: $sourceQuery, placeholder: sourceMode == "sources" ? "搜索标题或完整原文" : "搜索知识或任务标题")
                 Toggle("只看已关联", isOn: $onlyLinked).toggleStyle(.checkbox)
             }
             ScrollView {
@@ -339,13 +337,13 @@ struct ReflectionQuestionsView: View {
                             if source.localOnly {
                                 Button("查看原文并设置文字许可") { openSource(source.id) }.font(.caption)
                             }
-                        }.padding(12).background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
+                        }.padding(12).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                     }
                     if visibleSources.isEmpty { Text("没有符合条件的文字资料。").foregroundStyle(.secondary).padding() }
                     }
                 }
             }
-        }.padding(24).frame(width: 740, height: 600).background(paper)
+        }.padding(24).frame(width: 740, height: 600).background(palette.canvas)
     }
     private func knowledgeLinkCard(_ claim: CandidateClaim) -> some View {
         let ids = Set(claim.references.map(\.sourceID))
@@ -363,7 +361,7 @@ struct ReflectionQuestionsView: View {
                     Task { await perform { try await model.linkTopicClaim(questionID: selectedID, claimID: claim.id, expectedReviewVersion: claim.reviewVersion) } }
                 }.disabled(linked || busy || ids.isEmpty)
             }.font(.caption)
-        }.padding(13).background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
+        }.padding(13).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
     }
     private func taskLinkCard(_ action: ActionRecord) -> some View {
         let claim = model.claims.first { $0.id == action.claimID }
@@ -382,7 +380,7 @@ struct ReflectionQuestionsView: View {
                     Task { await perform { try await model.linkTopicAction(questionID: selectedID, actionID: action.id, expectedVersion: action.version) } }
                 }.disabled(linked || busy || ids.isEmpty)
             }.font(.caption)
-        }.padding(13).background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
+        }.padding(13).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
     }
     private func visitTopic(_ id: String) async {
         guard !busy else { return }
@@ -428,8 +426,9 @@ struct ReflectionQuestionsView: View {
         catch { self.error = error.localizedDescription; return false }
     }
     private func startReview(_ question: ReflectionQuestion) async {
-        guard !busy else { return }
-        busy = true; error = nil; defer { busy = false }
+        guard !busy, !reviewing else { return }
+        reviewing = true; busy = true; error = nil
+        defer { reviewing = false; busy = false }
         do {
             let focus: ConversationReflectionFocus
             let prompt: String
@@ -441,10 +440,15 @@ struct ReflectionQuestionsView: View {
                 prompt = focus.topicReviewPrompt
             }
             try await model.markTopicReviewed(question.id)
-            if !(await reflect(focus, prompt)) { error = model.status }
+            if await reflect(focus, prompt) {
+                dismiss()
+                dismissAtlas()
+            } else {
+                error = model.status.isEmpty ? "这次回顾没有完成，请稍后重试。" : model.status
+            }
         } catch { self.error = error.localizedDescription }
     }
-    private func openSource(_ id: String) { model.selected = id; dismiss(); dismissAtlas() }
+    private func openSource(_ id: String) { model.requestWorkspaceSource(id); dismiss(); dismissAtlas() }
     private func beginCreating() { editingQuestion = nil; title = ""; titleCloud = false; creating = true }
     private func sourceTitle(_ id: String) -> String { model.records.first { $0.id == id }?.displayTitle ?? "历史来源 · \(id.prefix(8))" }
     private func date(_ text: String) -> String { ConversationReflectionFocus.date(text)?.formatted(date: .abbreviated, time: .shortened) ?? text }

@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct ReflectionEventListView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
     let discuss: (CandidateClaim) -> Void
@@ -74,7 +75,7 @@ struct ReflectionEventListView: View {
     var body: some View {
         let visible = events
         VStack(alignment: .leading, spacing: 14) {
-            TextField("查找录音、思考、任务或结果", text: $query)
+            WorkspaceSearchField(text: $query, placeholder: "查找录音、思考、任务或结果")
             Text("\(visible.filter { $0.source != nil }.count) 条表达 · \(visible.filter { $0.feedback != nil }.count) 条结果与反思 · \(visible.filter { $0.completion != nil }.count) 条完成登记")
                 .font(.caption).foregroundStyle(.secondary)
             ScrollView {
@@ -92,7 +93,7 @@ struct ReflectionEventListView: View {
                                     Label("完成登记 · " + (focus.tasks.first { $0.actionID == completion.actionID }?.title ?? "任务"), systemImage: "checkmark.circle")
                                     Text("按实际状态记录时间排列；不代表已取得收获。").font(.caption).foregroundStyle(.secondary)
                                     Button("任务与结果") { model.showTask(completion.actionID); dismiss() }
-                                }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+                                }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                             }
                         }
                     }
@@ -150,7 +151,7 @@ struct ReflectionEventListView: View {
                 if source.origin == "ai" { Text("AI 交付物 · 不代表我的观点或实际验证").font(.caption).foregroundStyle(.secondary) }
                 else if source.expressedDate == nil { Text("录制时间未知，按导入时间排列").font(.caption).foregroundStyle(.secondary) }
             }
-        }.padding(12).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+        }.padding(12).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }
     private func outcomeCard(_ feedback: ActionFeedbackRecord, date: Date?) -> some View {
         let task = action(feedback)
@@ -173,10 +174,10 @@ struct ReflectionEventListView: View {
                 Text(feedback.text).font(.callout).foregroundStyle(.secondary).lineLimit(2)
                 Text(date.map { "记录于 " + $0.formatted(date: .omitted, time: .shortened) } ?? "记录时间待核对").font(.caption).foregroundStyle(.secondary)
             }
-        }.padding(12).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+        }.padding(12).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }
     private func showSource(_ id:String) {
-        if let openSource { openSource(id) } else { model.selected=id;dismiss() }
+        if let openSource { openSource(id) } else { model.requestWorkspaceSource(id); dismiss() }
     }
     private func owner(_ claim: CandidateClaim) -> String {
         switch claim.ownership {

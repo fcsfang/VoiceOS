@@ -9,16 +9,15 @@ struct TopicResurfacingCard: View {
     let busy: Bool
     let open: () -> Void
     let feedback: (CognitiveFeedbackMode, Bool) -> Void
-    private var green: Color { palette.accent }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("可以再看一眼", systemImage: "leaf").font(.caption).foregroundStyle(green)
+            Label("可以再看一眼", systemImage: "leaf").font(.caption).foregroundStyle(palette.accent)
             Text(item.title).font(.system(size: 15, weight: .medium, design: .serif)).lineLimit(3)
             Text(item.quote).font(.callout).lineLimit(4).textSelection(.enabled)
             Text(item.reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
-                Button("接着探索", action: open).buttonStyle(.borderedProminent).tint(green)
+                Button("接着探索", action: open).buttonStyle(.borderedProminent).tint(palette.accent)
                 Spacer(minLength: 0)
                 Menu("稍后") {
                     Button("稍后 7 天") { feedback(.normal, true) }
@@ -27,7 +26,7 @@ struct TopicResurfacingCard: View {
                 }
             }.font(.caption)
         }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
-            .background(green.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+            .background(palette.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             .disabled(busy)
     }
 }

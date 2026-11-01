@@ -9,7 +9,6 @@ struct KnowledgeReviewSection: View {
     let sourceIDs: [String]
     var quoteFilter: String? = nil
     var matchingQuotesBySource: [String: [String]]? = nil
-    private var green: Color { palette.accent }
     private var sources: [SourceRecord] { model.records.filter { sourceIDs.contains($0.id) && $0.origin == "user" && $0.speaker == "user" } }
 
     var body: some View {
@@ -28,8 +27,8 @@ struct KnowledgeReviewSection: View {
                 Text(model.knowledgeReviewStatus).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
         }.padding(14)
-            .background(green.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
-            .overlay { RoundedRectangle(cornerRadius: 10).stroke(green.opacity(0.15)) }
+            .background(palette.accent.opacity(0.045), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius))
+            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius).stroke(palette.accent.opacity(0.15)) }
         }
     }
 
@@ -54,12 +53,12 @@ struct KnowledgeReviewSection: View {
                         Text(record.state == "queued" ? "知识核查已排队" : "正在查证原话中的知识判断…").font(.callout)
                     }
                 case "failed":
-                    Label("本次核查未完成", systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(.orange)
+                    Label("本次核查未完成", systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(palette.warning)
                     if let error = record.error { Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
                     Button("重试知识核查") { Task { await model.reviewKnowledge(sourceID: source.id, retry: true) } }
                         .disabled(!canReview(source))
                 case "frozen":
-                    Label("历史核查 · 原话或授权已变化", systemImage: "pause.circle").font(.callout).foregroundStyle(.orange)
+                    Label("历史核查 · 原话或授权已变化", systemImage: "pause.circle").font(.callout).foregroundStyle(palette.warning)
                     Text("这份核查保留供追溯，当前不能据此判断这条认识。可以针对现有原文重新核查。").font(.caption).foregroundStyle(.secondary)
                     let issues = record.issues.filter { matches($0, source: source) }
                     if !issues.isEmpty {
@@ -102,12 +101,12 @@ struct KnowledgeReviewSection: View {
     }
     private func issueCard(_ issue: KnowledgeReviewIssue) -> some View {
         VStack(alignment: .leading, spacing: 11) {
-            Text(kindLabel(issue.kind.rawValue)).font(.caption.bold()).foregroundStyle(green)
+            Text(kindLabel(issue.kind.rawValue)).font(.caption.bold()).foregroundStyle(palette.accent)
             VStack(alignment: .leading, spacing: 5) {
                 Text("原话").font(.caption).foregroundStyle(.secondary)
                 Text(issue.quote).font(.callout).textSelection(.enabled)
             }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
-                .background(green.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+                .background(palette.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
             field("为什么值得核对", issue.explanation)
             field("更准确的理解建议", issue.betterUnderstanding)
             field("适用条件与边界", issue.boundary)
@@ -117,7 +116,7 @@ struct KnowledgeReviewSection: View {
                     Text("核查来源").font(.caption.bold()).foregroundStyle(.secondary)
                     ForEach(Array(issue.references.enumerated()), id: \.offset) { _, reference in
                         if let url = URL(string: reference.url), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil {
-                            Link(reference.title.isEmpty ? reference.url : reference.title, destination: url).font(.callout).tint(green)
+                            Link(reference.title.isEmpty ? reference.url : reference.title, destination: url).font(.callout).tint(palette.accent)
                             Text(reference.url).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                         }
                     }
@@ -125,7 +124,7 @@ struct KnowledgeReviewSection: View {
             }
             Text("AI 核查建议 · 尚不代表你接受了修正").font(.caption).foregroundStyle(.secondary)
         }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.65), in: RoundedRectangle(cornerRadius: 9))
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }
     @ViewBuilder private func field(_ title: String, _ text: String) -> some View {
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
