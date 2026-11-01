@@ -325,7 +325,14 @@ struct RecordingInboxView: View {
                 Button("启用 VoiceOS收件箱") { inbox.addDefaultInbox() }
                 Button("其他文件夹…") { inbox.chooseFolder(voiceMemos: false) }
                 Button("连接语音备忘录…") { inbox.chooseFolder(voiceMemos: true) }
-            }.disabled(!model.modelConfigured)
+            }
+            if !inbox.folders.isEmpty && model.recordingModelIssue != nil {
+                Text("已连接；配置模型后开始处理新录音").font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() } }
+                    if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
+                }
+            }
             ForEach(inbox.folders) { folder in
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
