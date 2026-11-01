@@ -272,13 +272,28 @@ extension VoiceOSStore {
                     let step=PanoramaSliceRepairInput(policy: plan.policy.version, planDigest: plan.digest, unitID: unitID,
                         ordinal: slice.focus.ordinal, count: plan.slices.count, focus: slice.focus, target: slice.target,
                         input: input, proposal: projected, review: projectedReview)
-                    let result: (PanoramaProposal, PanoramaReceipt)=try await panoramaUnitStep(
-                        attemptID: attemptID, stage: "unit.focus.repair", scopeID: "\(unitID)#slice-\(slice.focus.ordinal)", replayOnly: false,
-                        input: step, whole: whole, identity: port.focusConfigurationIdentity,
-                        operation: { try await port.repair(projected, input: slice.scope, review: projectedReview) },
-                        validate: { proposal, _ in _ = try Self.validatePanoramaFocused(proposal, scope: slice.scope, focus: slice.focus) },
-                        normalize: { try Self.locatePanoramaQuotes($0, input: input) })
-                    proposals.append(result.0); receipts.append(result.1)
+                    do {
+                        let result: (PanoramaProposal, PanoramaReceipt)=try await panoramaUnitStep(
+                            attemptID: attemptID, stage: "unit.focus.repair", scopeID: "\(unitID)#slice-\(slice.focus.ordinal)", replayOnly: false,
+                            input: step, whole: whole, identity: port.focusConfigurationIdentity,
+                            operation: { try await port.repair(projected, input: slice.scope, review: projectedReview) },
+                            validate: { proposal, _ in _ = try Self.validatePanoramaFocused(proposal, scope: slice.scope, focus: slice.focus) },
+                            normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+                        proposals.append(result.0); receipts.append(result.1)
+                    } catch {
+                        // A repair that the provider keeps failing cannot be replayed
+                        // into success; regenerate that slice once on the path that
+                        // already produced it. The regenerated slice is re-reviewed
+                        // with the rest of the unit, so no rejection is hidden.
+                        guard Self.panoramaUpstreamRejection(error) else { throw error }
+                        let result: (PanoramaProposal, PanoramaReceipt)=try await panoramaUnitStep(
+                            attemptID: attemptID, stage: "unit.focus.regenerate", scopeID: "\(unitID)#slice-\(slice.focus.ordinal)", replayOnly: false,
+                            input: slice.stepInput, whole: whole, identity: port.focusConfigurationIdentity + "|regenerate-after-repair-v1",
+                            operation: { try await port.generate(input, focus: slice.focus, target: slice.target) },
+                            validate: { proposal, _ in _ = try Self.validatePanoramaFocused(proposal, scope: slice.scope, focus: slice.focus) },
+                            normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+                        proposals.append(result.0); receipts.append(result.1)
+                    }
                 }
                 return (try plan.merge(proposals), try PanoramaReceipt.composite(parts: receipts, identity: port.focusConfigurationIdentity, kind: "repair"))
             }, validate: { proposal, _ in _ = try Self.validatePanorama(proposal, input: input) },
@@ -484,6 +499,10 @@ extension VoiceOSStore {
         try requirePanoramaManifest(input)
         let partial=try Self.partialPanorama(units, input: input, id: attemptID, phase: phase)
         try db.execute("UPDATE panorama_attempts SET snapshot_json=? WHERE id=?", [try Self.relevanceJSON(partial),attemptID])
+    }
+    private static func panoramaUpstreamRejection(_ error: Error) -> Bool {
+        guard case let ModelPortFailure.rejected(reason, _, _) = error else { return false }
+        return reason.contains("upstream_error") || reason.contains("响应未完成")
     }
     private static func panoramaFailure(_ error: Error) -> String {
         if let error=error as? VoiceOSError { return error.message }
