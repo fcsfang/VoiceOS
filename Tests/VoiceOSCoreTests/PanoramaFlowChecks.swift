@@ -139,7 +139,7 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     func repair(_ proposal: PanoramaProposal, input: PanoramaInput, review: PanoramaReview) async throws -> (PanoramaProposal, PanoramaReceipt) {
         if failSliceRepairs > 0 {
             failSliceRepairs -= 1
-            throw ModelPortFailure.rejected("响应未完成（status=failed；error.code=upstream_error）；未接纳部分结果")
+            throw PanoramaTransientFailure(reason: "响应未完成（status=failed；error.code=upstream_error）；未接纳部分结果")
         }
         unitRepairs += 1
         return (proposal,receipt())
@@ -995,7 +995,7 @@ extension CoreFlowTests {
 
     private func assertPanoramaSliceRepairFallback(root: URL) async throws {
         let store=try await panoramaFixtureStore(root,texts: [String(repeating: "长文",count: 9_000)])
-        let port=ProgressivePanoramaFixture(identity: "slice-fallback-fixture",repairUnits: true,failSliceRepairs: 1)
+        let port=ProgressivePanoramaFixture(identity: "slice-fallback-fixture",repairUnits: true,failSliceRepairs: 3)
         try await store.generatePanorama(using: port)
         let state=try await store.panoramaState()
         XCTAssertEqual(state.status,"completed")
@@ -1006,7 +1006,7 @@ extension CoreFlowTests {
         let completedRepairs=try database.query("SELECT state FROM panorama_steps WHERE stage='unit.focus.repair' AND state='completed'")
         XCTAssertEqual(completedRepairs.count,2)
         let failedRepairs=try database.query("SELECT state FROM panorama_steps WHERE stage='unit.focus.repair' AND state='failed'")
-        XCTAssertEqual(failedRepairs.count,1)
+        XCTAssertEqual(failedRepairs.count,3)
     }
     private func assertPanoramaRepairLoop(root: URL) async throws {
         let store=try await panoramaFixtureStore(root, count: 3)
