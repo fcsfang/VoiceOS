@@ -428,13 +428,16 @@ struct ConstellationLayout: Equatable, Sendable {
     private static func normalized(_ points: [CGPoint], ids: [String]) -> ConstellationLayout {
         let placed = points
         let box = boundingBox(placed)
+        // Cards are drawn around their centers; the world must include the card
+        // extents or the fit clips the top and bottom rows under the toolbar.
+        let inset = CGSize(width: cardSize.width / 2 + layoutMargin, height: cardSize.height / 2 + layoutMargin)
         var centers: [String: CGPoint] = [:]
         for (index, point) in placed.enumerated() {
-            centers[ids[index]] = CGPoint(x: point.x - box.minX + layoutMargin, y: point.y - box.minY + layoutMargin)
+            centers[ids[index]] = CGPoint(x: point.x - box.minX + inset.width, y: point.y - box.minY + inset.height)
         }
         return ConstellationLayout(
             centers: centers,
-            worldSize: CGSize(width: box.width + layoutMargin * 2, height: box.height + layoutMargin * 2)
+            worldSize: CGSize(width: box.width + inset.width * 2, height: box.height + inset.height * 2)
         )
     }
 
