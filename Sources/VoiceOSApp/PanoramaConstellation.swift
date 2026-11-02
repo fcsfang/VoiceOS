@@ -292,7 +292,7 @@ struct ConstellationModel: Sendable {
 // MARK: - Layout (pure, deterministic, cached once per key)
 
 struct ConstellationLayout: Equatable, Sendable {
-    static let cardSize = CGSize(width: 150, height: 64)
+    static let cardSize = CGSize(width: 176, height: 60)
     static let cardGap: CGFloat = 22
     static let layoutMargin: CGFloat = 24
 
@@ -443,68 +443,150 @@ struct ConstellationLayout: Equatable, Sendable {
         return normalized(points, ids: ids)
     }
 
-    /// One clean field per area: areas occupy disjoint grid cells and regions
-    /// are packed only inside their own area, so hulls never interleave. The
-    /// force layout below remains for snapshots without areas.
+    /// One field per area, laid out like the mockup: areas sit on an ellipse,
+    /// each packed around its center, and a short relaxation lets the fields
+    /// read as separate organic clusters instead of grid cells. Regions without
+    /// an area fall into a plain strip below the ring. Without any areas the
+    /// force layout above owns the map.
     private static func hierarchicalLayout(model: ConstellationModel) -> ConstellationLayout? {
+        guard !model.areas.isEmpty else { return nil }
         let regionIDs=Set(model.regions.map(\.id))
         var groups: [(id: String, members: [String])]=model.areas.compactMap { area in
             let members=area.regionIDs.filter { regionIDs.contains($0) }
             return members.isEmpty ? nil : (area.id, members)
         }
         let assigned=Set(groups.flatMap(\.members))
-        for region in model.regions.sorted(by: { $0.id < $1.id }) where !assigned.contains(region.id) {
-            groups.append((region.id, [region.id]))
-        }
-        guard !groups.isEmpty else { return nil }
+        let solo=model.regions.map(\.id).filter { !assigned.contains($0) }.sorted()
+        guard !groups.isEmpty || !solo.isEmpty else { return nil }
 
-        struct Local { let offsets: [String: CGPoint]; let size: CGSize }
-        var locals: [String: Local]=[:]
-        let spacing=cardSize.width+cardGap+12
-        for group in groups {
+        // Largest fields first so the big ones take the roomier ring slots.
+        groups=groups.enumerated().sorted { lhs, rhs in
+            lhs.element.members.count == rhs.element.members.count
+                ? lhs.offset < rhs.offset
+                : lhs.element.members.count > rhs.element.members.count
+        }.map(\.element)
+
+        let ringNodes=groups.reduce(0) { $0 + $1.members.count }
+        // Ring room grows with the field sizes, not just their count, so large
+        // fields do not bleed into their neighbours' slots.
+        let ringScale=max(1, pow(CGFloat(ringNodes) / 27, 0.9))
+        let radiusX=620 * ringScale
+        let radiusY=radiusX * 0.645
+
+        var points: [String: CGPoint]=[:]
+        var areaCenters: [String: CGPoint]=[:]
+        for (index, group) in groups.enumerated() {
+            let angle=Double(index) / Double(groups.count) * 2 * .pi - .pi / 2
+            let center=CGPoint(x: cos(angle) * radiusX, y: sin(angle) * radiusY)
+            areaCenters[group.id]=center
             let members=group.members.sorted()
-            var points=members.enumerated().map { index, _ -> CGPoint in
-                let angle=Double(index)*2.39996322972865332
-                let radius=spacing*0.62*sqrt(Double(index))
-                return CGPoint(x: cos(angle)*radius, y: sin(angle)*radius*0.72)
+            for (i, id) in members.enumerated() {
+                let b=Double(i) / Double(members.count) * 2 * .pi + 0.5
+                points[id]=CGPoint(x: center.x + cos(b) * (50 + Double(i) * 9),
+                                   y: center.y + sin(b) * (40 + Double(i) * 7))
             }
-            separateOverlaps(&points)
-            let box=boundingBox(points)
-            let centered=points.map { CGPoint(x: $0.x-box.midX, y: $0.y-box.midY) }
-            var offsets: [String: CGPoint]=[:]
-            for (index, id) in members.enumerated() { offsets[id]=centered[index] }
-            locals[group.id]=Local(offsets: offsets,
-                size: CGSize(width: box.width+cardSize.width+cardGap*2, height: box.height+cardSize.height+cardGap*2))
+        }
+        let columns=8
+        let stripStep=cardSize.width + cardGap
+        for (i, id) in solo.enumerated() {
+            points[id]=CGPoint(x: -radiusX + CGFloat(i % columns) * stripStep,
+                               y: radiusY + 380 + CGFloat(i / columns) * (cardSize.height + cardGap))
         }
 
-        let ordered=groups.sorted { lhs, rhs in
-            guard let l=locals[lhs.id], let r=locals[rhs.id] else { return lhs.id < rhs.id }
-            let left=l.size.width*l.size.height, right=r.size.width*r.size.height
-            return left == right ? lhs.id < rhs.id : left > right
-        }
-        let columns=max(1, Int(ceil(sqrt(Double(ordered.count)))))
-        let rows=Int(ceil(Double(ordered.count)/Double(columns)))
-        let cellWidth=(ordered.compactMap { locals[$0.id]?.size.width }.max() ?? 320)+150
-        let cellHeight=(ordered.compactMap { locals[$0.id]?.size.height }.max() ?? 220)+130
-        var centers: [String: CGPoint]=[:]
-        for (index, group) in ordered.enumerated() {
-            let row=index/columns, column=index%columns
-            // Odd rows shift by half a cell so the fields read organically.
-            let stagger=(row % 2 == 0) ? 0 : cellWidth*0.5
-            centers[group.id]=CGPoint(
-                x: CGFloat(column)-CGFloat(columns-1)/2 + stagger/cellWidth,
-                y: CGFloat(row)-CGFloat(rows-1)/2)
-            centers[group.id]!.x *= cellWidth
-            centers[group.id]!.y *= cellHeight
-        }
-        var placed: [String: CGPoint]=[:]
-        for group in groups {
-            guard let local=locals[group.id], let center=centers[group.id] else { continue }
-            for (id, offset) in local.offsets { placed[id]=CGPoint(x: center.x+offset.x, y: center.y+offset.y) }
-        }
         let ids=model.regions.map(\.id).sorted()
-        let points=ids.map { placed[$0] ?? .zero }
-        return normalized(points, ids: ids)
+        let pinned=Set(solo)
+        let areaOf=Dictionary(uniqueKeysWithValues: model.areas.flatMap { area in
+            area.regionIDs.map { ($0, area.id) }
+        })
+        let minDistance: CGFloat=200
+        let edgeTarget: CGFloat=285
+        let edgeStrength: CGFloat=0.03
+        let cohesion: CGFloat=0.02
+
+        for _ in 0..<240 {
+            for i in 0..<ids.count {
+                for j in (i + 1)..<ids.count {
+                    let a=ids[i], b=ids[j]
+                    guard var pa=points[a], var pb=points[b] else { continue }
+                    var dx=pa.x - pb.x
+                    var dy=pa.y - pb.y
+                    var distance=sqrt(dx * dx + dy * dy)
+                    if distance < 0.001 { dx=0.001; dy=0.001; distance=sqrt(dx * dx + dy * dy) }
+                    guard distance < minDistance else { continue }
+                    let force=(minDistance - distance) / distance * 0.5
+                    if !pinned.contains(a) { pa.x += dx * force; pa.y += dy * force }
+                    if !pinned.contains(b) { pb.x -= dx * force; pb.y -= dy * force }
+                    points[a]=pa
+                    points[b]=pb
+                }
+            }
+            for edge in model.edges {
+                let a=edge.pair.a, b=edge.pair.b
+                guard var pa=points[a], var pb=points[b] else { continue }
+                let dx=pb.x - pa.x
+                let dy=pb.y - pa.y
+                let distance=max(sqrt(dx * dx + dy * dy), 0.001)
+                let sameArea=areaOf[a] != nil && areaOf[a] == areaOf[b]
+                let force=(distance - edgeTarget) / distance * edgeStrength * (sameArea ? 1 : 0.4)
+                if !pinned.contains(a) { pa.x += dx * force; pa.y += dy * force }
+                if !pinned.contains(b) { pb.x -= dx * force; pb.y -= dy * force }
+                points[a]=pa
+                points[b]=pb
+            }
+            for id in ids where !pinned.contains(id) {
+                guard let areaID=areaOf[id], let center=areaCenters[areaID], var point=points[id] else { continue }
+                point.x += (center.x - point.x) * cohesion
+                point.y += (center.y - point.y) * cohesion
+                points[id]=point
+            }
+        }
+
+        // Nudge whole fields apart while their member circles overlap, so hulls
+        // read as separate islands instead of interleaving. The radii are
+        // conservative; the goal is a visible seam, not a rigid pack.
+        struct Field { let ids: [String]; let origin: CGPoint; var center: CGPoint; let radius: CGFloat }
+        var fields: [Field]=[]
+        for group in groups {
+            let fieldPoints=group.members.compactMap { points[$0] }
+            guard !fieldPoints.isEmpty else { continue }
+            let origin=CGPoint(x: fieldPoints.reduce(0) { $0 + $1.x } / CGFloat(fieldPoints.count),
+                               y: fieldPoints.reduce(0) { $0 + $1.y } / CGFloat(fieldPoints.count))
+            let extent=fieldPoints.map { hypot($0.x - origin.x, $0.y - origin.y) }.max() ?? 0
+            fields.append(Field(ids: group.members, origin: origin, center: origin, radius: extent + 110))
+        }
+        let fieldGap: CGFloat=30
+        for _ in 0..<60 {
+            var moved=false
+            for i in 0..<fields.count {
+                for j in (i + 1)..<fields.count {
+                    var dx=fields[j].center.x - fields[i].center.x
+                    var dy=fields[j].center.y - fields[i].center.y
+                    var distance=hypot(dx, dy)
+                    let required=fields[i].radius + fields[j].radius + fieldGap
+                    guard distance < required else { continue }
+                    if distance < 1 { dx=1; dy=0; distance=1 }
+                    let shift=(required - distance) / 2
+                    fields[i].center.x -= dx / distance * shift
+                    fields[i].center.y -= dy / distance * shift
+                    fields[j].center.x += dx / distance * shift
+                    fields[j].center.y += dy / distance * shift
+                    moved=true
+                }
+            }
+            if !moved { break }
+        }
+        for field in fields {
+            let shift=CGPoint(x: field.center.x - field.origin.x, y: field.center.y - field.origin.y)
+            guard shift != .zero else { continue }
+            for id in field.ids {
+                points[id]?.x += shift.x
+                points[id]?.y += shift.y
+            }
+        }
+
+        var placed=ids.map { points[$0] ?? .zero }
+        separateOverlaps(&placed)
+        return normalized(placed, ids: ids)
     }
 
     private static func coldSeed(index: Int, count: Int) -> CGPoint {
@@ -589,7 +671,7 @@ final class ConstellationLayoutStore {
 
 struct ConstellationCamera: Equatable, Sendable {
     enum Mode: Equatable, Sendable { case fit, free }
-    static let zoomRange: ClosedRange<CGFloat> = 0.35...3.0
+    static let zoomRange: ClosedRange<CGFloat> = 0.25...3.0
     static let initial = ConstellationCamera(zoom: 1, pan: .zero, mode: .fit)
 
     private(set) var zoom: CGFloat
@@ -986,7 +1068,7 @@ private struct EdgeLayer: View {
                 context.stroke(
                     path,
                     with: .color(edgeColor.opacity(highlighted ? 0.9 : 0.30)),
-                    style: StrokeStyle(lineWidth: highlighted ? 2 : 1, dash: highlighted ? [6, 3] : [5, 4])
+                    style: StrokeStyle(lineWidth: highlighted ? 1.6 : 1)
                 )
             }
         }
@@ -1009,42 +1091,35 @@ private struct RegionCard: View {
     var body: some View {
         let identity = RegionIdentity.color(index: region.areaIndex ?? region.identityIndex, scheme: colorScheme)
         Button(action: onOpen) {
-            VStack(alignment: .leading, spacing: compact ? 0 : 5) {
+            VStack(alignment: .leading, spacing: compact ? 0 : 4) {
+                Text(region.title)
+                    .font(.system(size: compact ? 14 : 12.5, weight: .semibold))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 if !compact {
-                    HStack(spacing: 5) {
-                        Text("\(region.questionIDs.count) 个问题").font(.system(size: 11)).foregroundStyle(.secondary)
-                        if !region.questionIDs.isEmpty {
-                            HStack(spacing: 2) {
-                                ForEach(0..<min(region.questionIDs.count, 5), id: \.self) { _ in
-                                    Circle().fill(identity.opacity(0.75)).frame(width: 3, height: 3)
-                                }
-                            }
-                            .accessibilityHidden(true)
-                        }
+                    HStack(spacing: 4) {
+                        Text("\(region.questionIDs.count) 个问题 · \(region.evidenceCount) 处原话")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                         Spacer(minLength: 0)
                         if recent {
                             Circle().fill(palette.accent).frame(width: 5, height: 5).accessibilityLabel("近期更新的区域")
                         }
                     }
                 }
-                Text(region.title)
-                    .font(.system(size: compact ? 14 : 13.5, weight: .semibold))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, compact ? 8 : 9)
+            .padding(.vertical, compact ? 8 : 6)
             .frame(width: ConstellationLayout.cardSize.width, height: ConstellationLayout.cardSize.height, alignment: compact ? .leading : .topLeading)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 14))
+            .background {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(palette.surface)
+                    .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+            }
             .overlay {
                 RoundedRectangle(cornerRadius: 14).strokeBorder(borderColor(identity), lineWidth: focused || selected ? 2 : 1)
-            }
-            .overlay(alignment: .leading) {
-                Capsule()
-                    .fill(identity.opacity(0.9))
-                    .frame(width: 3, height: compact ? 24 : 30)
-                    .padding(.leading, 6)
             }
             .contentShape(RoundedRectangle(cornerRadius: 14))
         }
@@ -1058,7 +1133,7 @@ private struct RegionCard: View {
     private func borderColor(_ identity: Color) -> Color {
         if focused || selected { return identity.opacity(1) }
         if hovered { return identity.opacity(0.8) }
-        return identity.opacity(0.55)
+        return identity.opacity(0.45)
     }
 }
 
@@ -1120,7 +1195,7 @@ private struct ConstellationLegend: View {
         let prefix = hasAreas ? "色块与名称是大区 · " : "颜色仅用于区分区域 · "
         let base: String
         if hasEdges {
-            base = prefix + "虚线 · AI 候选联系，尚待核对"
+            base = prefix + "细线 · AI 候选联系，尚待核对"
         } else if isPartial {
             base = "颜色仅用于区分区域 · 跨材料联系尚未核对完成；当前仅显示已核对区域"
         } else {
@@ -1134,7 +1209,6 @@ private struct ConstellationLegend: View {
 /// model did not produce (older snapshots, unit proposals) draw no hull.
 private struct AreaHullLayer: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.workspacePalette) private var palette
     let stage: StageState
     let camera: ConstellationCamera
 
@@ -1157,20 +1231,15 @@ private struct AreaHullLayer: View {
                 let path = smoothedPath(hull)
                 let color = RegionIdentity.color(index: area.identityIndex, scheme: colorScheme)
                 context.fill(path, with: .color(color.opacity(colorScheme == .dark ? 0.14 : 0.09)))
-                context.stroke(path, with: .color(color.opacity(0.30)), lineWidth: 1)
-                if let anchor = hull.min(by: { $0.y < $1.y }) {
-                    let resolved = context.resolve(Text(area.title).font(.system(size: 11, weight: .semibold)).foregroundColor(color.opacity(0.92)))
+                context.stroke(path, with: .color(color.opacity(0.24)), lineWidth: 1)
+                if let anchor = hull.min(by: { $0.y < $1.y }), let left = hull.map(\.x).min() {
+                    let resolved = context.resolve(Text(area.title).font(.system(size: 12, weight: .semibold)).foregroundColor(color))
                     let measured = resolved.measure(in: CGSize(width: 320, height: 40))
-                    // Centered above the hull's top edge, kept inside the canvas,
-                    // so the plate never sits on a card or off the edge.
-                    let desired = CGRect(x: anchor.x - measured.width / 2 - 6, y: anchor.y - measured.height - 10,
-                                         width: measured.width + 12, height: measured.height + 5)
-                    let plate = CGRect(x: min(max(desired.minX, 8), size.width - desired.width - 8),
-                                       y: min(max(desired.minY, 8), size.height - desired.height - 8),
-                                       width: desired.width, height: desired.height)
-                    context.fill(Path(roundedRect: plate, cornerRadius: 5), with: .color(palette.canvas.opacity(0.88)))
-                    context.stroke(Path(roundedRect: plate, cornerRadius: 5), with: .color(color.opacity(0.28)), lineWidth: 1)
-                    context.draw(resolved, at: CGPoint(x: plate.minX + 6, y: plate.minY + 2), anchor: .topLeading)
+                    // Plain colored name at the hull's top-left, like the mockup,
+                    // clamped so it never runs off the canvas.
+                    let x = min(max(left, 8), size.width - measured.width - 8)
+                    let y = min(max(anchor.y - measured.height - 6, 8), size.height - measured.height - 8)
+                    context.draw(resolved, at: CGPoint(x: x, y: y), anchor: .topLeading)
                 }
             }
         }
