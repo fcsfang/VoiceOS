@@ -633,9 +633,9 @@ struct PanoramaConstellationView: View {
             .frame(width: size.width, height: size.height, alignment: .topLeading)
             .background(ScrollWheelBridge { delta in
                 guard let world = stage?.layout.worldSize, world.width > 0, world.height > 0 else { return }
-                // Positive scrollingDeltaY is an upward two-finger scroll; the
-                // content follows the fingers, so the camera pans the other way.
-                camera = camera.panned(by: CGSize(width: -delta.width, height: -delta.height), canvas: size, world: world)
+                // Scrolling down (fingers move down) moves the content up; both
+                // axes follow the scroll delta without flipping.
+                camera = camera.panned(by: CGSize(width: delta.width, height: delta.height), canvas: size, world: world)
             })
             .highPriorityGesture(dragGesture(canvas: size, world: stage?.layout.worldSize ?? .zero))
             .simultaneousGesture(magnifyGesture(canvas: size, world: stage?.layout.worldSize ?? .zero))
