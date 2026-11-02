@@ -501,8 +501,12 @@ extension VoiceOSStore {
         try db.execute("UPDATE panorama_attempts SET snapshot_json=? WHERE id=?", [try Self.relevanceJSON(partial),attemptID])
     }
     private static func panoramaUpstreamRejection(_ error: Error) -> Bool {
-        guard case let ModelPortFailure.rejected(reason, _, _) = error else { return false }
-        return reason.contains("upstream_error") || reason.contains("响应未完成")
+        let reason: String?
+        if case let ModelPortFailure.rejected(text, _, _) = error { reason = text }
+        else if let transient = error as? PanoramaTransientFailure { reason = transient.reason }
+        else { reason = nil }
+        guard let reason else { return false }
+        return reason.contains("upstream_error") || reason.contains("响应未完成") || reason.contains("流式模型返回失败")
     }
     private static func panoramaFailure(_ error: Error) -> String {
         if let error=error as? VoiceOSError { return error.message }
