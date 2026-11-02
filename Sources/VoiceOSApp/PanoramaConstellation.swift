@@ -1071,6 +1071,7 @@ private struct ConstellationLegend: View {
 /// model did not produce (older snapshots, unit proposals) draw no hull.
 private struct AreaHullLayer: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.workspacePalette) private var palette
     let stage: StageState
     let camera: ConstellationCamera
 
@@ -1092,11 +1093,15 @@ private struct AreaHullLayer: View {
                 guard hull.count >= 3 else { continue }
                 let path = smoothedPath(hull)
                 let color = RegionIdentity.color(index: area.identityIndex, scheme: colorScheme)
-                context.fill(path, with: .color(color.opacity(colorScheme == .dark ? 0.10 : 0.06)))
-                context.stroke(path, with: .color(color.opacity(0.22)), lineWidth: 1)
+                context.fill(path, with: .color(color.opacity(colorScheme == .dark ? 0.14 : 0.09)))
+                context.stroke(path, with: .color(color.opacity(0.30)), lineWidth: 1)
                 if let anchor = hull.min(by: { $0.x + $0.y < $1.x + $1.y }) {
-                    context.draw(Text(area.title).font(.system(size: 11, weight: .semibold)).foregroundColor(color.opacity(0.85)),
-                                 at: CGPoint(x: anchor.x + 10, y: anchor.y - 6), anchor: .bottomLeading)
+                    let resolved = context.resolve(Text(area.title).font(.system(size: 11, weight: .semibold)).foregroundColor(color.opacity(0.92)))
+                    let measured = resolved.measure(in: CGSize(width: 320, height: 40))
+                    let plate = CGRect(x: anchor.x + 8, y: anchor.y - measured.height - 8, width: measured.width + 12, height: measured.height + 5)
+                    context.fill(Path(roundedRect: plate, cornerRadius: 5), with: .color(palette.canvas.opacity(0.88)))
+                    context.stroke(Path(roundedRect: plate, cornerRadius: 5), with: .color(color.opacity(0.28)), lineWidth: 1)
+                    context.draw(resolved, at: CGPoint(x: plate.minX + 6, y: plate.minY + 2), anchor: .topLeading)
                 }
             }
         }
