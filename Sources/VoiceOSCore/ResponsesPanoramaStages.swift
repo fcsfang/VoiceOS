@@ -20,7 +20,7 @@ extension ResponsesPanoramaPort {
     public func groupAreas(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> ([PanoramaArea], PanoramaReceipt) {
         let request=VoiceOSStore.panoramaAreaRequest(proposal)
         let (output, receipt): (PanoramaAreaOutput, PanoramaReceipt)=try await call(request, instructions: Self.areaInstructions,
-            schema: Self.areaSchema, name: "voiceos_panorama_areas")
+            schema: Self.areaSchema, name: "voiceos_panorama_areas", shape: Self.areaShapeInstructions)
         return (output.areas.map { .init(id: $0.id, title: $0.title, summary: $0.summary, regionIDs: $0.regionIDs) }, receipt)
     }
     private static func compactEvidence(_ questions: [PanoramaQuestion]) throws -> [String:[PanoramaEvidence]] {
