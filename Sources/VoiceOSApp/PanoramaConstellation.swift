@@ -268,7 +268,7 @@ struct ConstellationModel: Sendable {
 
 struct ConstellationLayout: Equatable, Sendable {
     static let cardSize = CGSize(width: 150, height: 64)
-    static let cardGap: CGFloat = 16
+    static let cardGap: CGFloat = 22
     static let layoutMargin: CGFloat = 24
 
     let centers: [String: CGPoint]
@@ -492,7 +492,7 @@ struct ConstellationCamera: Equatable, Sendable {
         CGPoint(x: pan.x + world.x * zoom, y: pan.y + world.y * zoom)
     }
 
-    static func fitting(world: CGSize, canvas: CGSize, margin: CGFloat = 24) -> Self {
+    static func fitting(world: CGSize, canvas: CGSize, margin: CGFloat = 32) -> Self {
         guard world.width > 0, world.height > 0, canvas.width > 0, canvas.height > 0 else { return initial }
         let raw = min((canvas.width - margin * 2) / world.width, (canvas.height - margin * 2) / world.height)
         let zoom = min(max(raw, zoomRange.lowerBound), 1)
@@ -921,7 +921,7 @@ private struct RegionCard: View {
             .background {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14).fill(.thinMaterial)
-                    RoundedRectangle(cornerRadius: 14).fill(identity.opacity(colorScheme == .dark ? 0.16 : 0.10))
+                    RoundedRectangle(cornerRadius: 14).fill(identity.opacity(colorScheme == .dark ? 0.10 : 0.06))
                 }
             }
             .overlay {
