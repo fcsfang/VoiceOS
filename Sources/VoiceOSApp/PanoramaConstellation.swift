@@ -9,6 +9,7 @@ import VoiceOSCore
 struct ConstellationContentKey: Hashable, Sendable {
     let snapshotID: String
     let regions: [String]
+    let areas: [String]
     let questions: [String]
     let regionPairCounts: [String]
     let evidenceSourceIDs: [String]
@@ -17,6 +18,7 @@ struct ConstellationContentKey: Hashable, Sendable {
     init(snapshot: PanoramaSnapshot) {
         snapshotID = snapshot.id
         regions = snapshot.proposal.regions.map { $0.id + "\u{1F}" + $0.title }.sorted()
+        areas = snapshot.proposal.areas.map { $0.id + "\u{1F}" + $0.title + "\u{1F}" + $0.regionIDs.sorted().joined(separator: ",") }.sorted()
         questions = snapshot.proposal.questions.map { $0.id + "\u{1F}" + $0.regionID }.sorted()
         let regionIDByQuestion = Dictionary(uniqueKeysWithValues: snapshot.proposal.questions.map { ($0.id, $0.regionID) })
         regionPairCounts = snapshot.proposal.relations.compactMap { relation -> String? in
