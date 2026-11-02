@@ -112,12 +112,24 @@ struct ConstellationModel: Sendable {
     struct Region: Identifiable, Sendable {
         let id: String
         let identityIndex: Int
+        /// Identity color of the area this region belongs to, when the
+        /// synthesis produced areas; regions then read as one field.
+        let areaIndex: Int?
         let title: String
         let summary: String
         let questionIDs: [String]
         let evidenceCount: Int
         let isRecent: Bool
         let searchText: String
+    }
+
+    /// A synthesis-produced group of related regions. The map draws one soft
+    /// hull and one name per area; the grouping is model content, not a UI guess.
+    struct Area: Identifiable, Sendable {
+        let id: String
+        let title: String
+        let identityIndex: Int
+        let regionIDs: [String]
     }
 
     /// Undirected region pair in canonical order, so one pair can never exist
@@ -150,6 +162,7 @@ struct ConstellationModel: Sendable {
 
     let regions: [Region]
     let regionByID: [String: Region]
+    let areas: [Area]
     let edges: [RegionEdge]
     let affinityPairs: [WeightedPair]
     let questionByID: [String: PanoramaQuestion]
@@ -235,11 +248,21 @@ struct ConstellationModel: Sendable {
             return left == right ? lhs.offset < rhs.offset : left > right
         }.map(\.element)
 
+        let areaRecords = snapshot.proposal.areas.compactMap { area -> Area? in
+            let kept = area.regionIDs.filter { id in snapshot.proposal.regions.contains { $0.id == id } }
+            guard !kept.isEmpty else { return nil }
+            return Area(id: area.id, title: area.title, identityIndex: RegionIdentity.paletteIndex(for: area.id), regionIDs: kept)
+        }
+        areas = areaRecords
+        let areaIndexByRegion = Dictionary(uniqueKeysWithValues: areaRecords.flatMap { area in
+            area.regionIDs.map { ($0, area.identityIndex) }
+        })
         regions = orderedRegions.map { region in
             let regionQuestions = questionsByRegion[region.id] ?? []
             return Region(
                 id: region.id,
                 identityIndex: RegionIdentity.paletteIndex(for: region.id),
+                areaIndex: areaIndexByRegion[region.id],
                 title: region.title,
                 summary: region.summary,
                 questionIDs: regionQuestions.map(\.id),
@@ -298,6 +321,15 @@ struct ConstellationLayout: Equatable, Sendable {
             guard let a = indexByID[pair.pair.a], let b = indexByID[pair.pair.b] else { return nil }
             return (a, b, CGFloat(min(pair.weight, 3)))
         }
+        // Regions of one area pull toward a shared size so each area forms a
+        // compact field the hull can enclose.
+        var areaSprings: [(a: Int, b: Int, weight: CGFloat)]=[]
+        for area in model.areas where area.regionIDs.count > 1 {
+            let members=area.regionIDs.compactMap { indexByID[$0] }
+            for i in 0..<members.count {
+                for j in (i + 1)..<members.count { areaSprings.append((members[i], members[j], 1)) }
+            }
+        }
 
         // Repulsion measures the gap between card extents, not point distance:
         // a point force expands the map to ~9000 units, and scaling that back
@@ -343,6 +375,19 @@ struct ConstellationLayout: Equatable, Sendable {
                 let dy = points[spring.b].y - points[spring.a].y
                 let distance = max(sqrt(dx * dx + dy * dy), 0.001)
                 let force = (distance - relationTarget) * relationStrength * spring.weight
+                let ux = dx / distance
+                let uy = dy / distance
+                displacement[spring.a].dx += ux * force
+                displacement[spring.a].dy += uy * force
+                displacement[spring.b].dx -= ux * force
+                displacement[spring.b].dy -= uy * force
+            }
+
+            for spring in areaSprings {
+                let dx = points[spring.b].x - points[spring.a].x
+                let dy = points[spring.b].y - points[spring.a].y
+                let distance = max(sqrt(dx * dx + dy * dy), 0.001)
+                let force = (distance - 250) * 0.012 * spring.weight
                 let ux = dx / distance
                 let uy = dy / distance
                 displacement[spring.a].dx += ux * force
@@ -593,6 +638,8 @@ struct PanoramaConstellationView: View {
                             focusedRegionID = nil
                         })
                     if let stage {
+                        AreaHullLayer(stage: stage, camera: camera)
+                            .allowsHitTesting(false)
                         EdgeLayer(
                             stage: stage,
                             camera: camera,
@@ -613,6 +660,7 @@ struct PanoramaConstellationView: View {
                             ConstellationLegend(
                                 isPartial: snapshot.isPartial,
                                 hasEdges: !stage.model.edges.isEmpty,
+                                hasAreas: stage.model.areas.contains { $0.regionIDs.count > 1 },
                                 hasRecent: recentOnly && stage.model.regions.contains { $0.isRecent }
                             )
                             Spacer(minLength: 0)
@@ -856,10 +904,10 @@ private struct EdgeLayer: View {
                 let edgeColor: Color
                 if let hoveredRegionID,
                    edge.pair.a == hoveredRegionID || edge.pair.b == hoveredRegionID,
-                   let index = stage.model.regionByID[hoveredRegionID]?.identityIndex {
+                   let index = stage.model.regionByID[hoveredRegionID].map { $0.areaIndex ?? $0.identityIndex } {
                     edgeColor = RegionIdentity.color(index: index, scheme: colorScheme)
-                } else if let startIndex = stage.model.regionByID[edge.pair.a]?.identityIndex,
-                          let endIndex = stage.model.regionByID[edge.pair.b]?.identityIndex {
+                } else if let startIndex = stage.model.regionByID[edge.pair.a].map({ $0.areaIndex ?? $0.identityIndex }),
+                          let endIndex = stage.model.regionByID[edge.pair.b].map({ $0.areaIndex ?? $0.identityIndex }) {
                     edgeColor = RegionIdentity.edgeColor(from: startIndex, to: endIndex, scheme: colorScheme)
                 } else {
                     edgeColor = Color.secondary
@@ -889,7 +937,7 @@ private struct RegionCard: View {
     let onOpen: () -> Void
 
     var body: some View {
-        let identity = RegionIdentity.color(index: region.identityIndex, scheme: colorScheme)
+        let identity = RegionIdentity.color(index: region.areaIndex ?? region.identityIndex, scheme: colorScheme)
         Button(action: onOpen) {
             VStack(alignment: .leading, spacing: compact ? 0 : 5) {
                 if !compact {
@@ -989,6 +1037,7 @@ private struct ZoomCluster: View {
 private struct ConstellationLegend: View {
     let isPartial: Bool
     let hasEdges: Bool
+    let hasAreas: Bool
     let hasRecent: Bool
 
     var body: some View {
@@ -1003,15 +1052,86 @@ private struct ConstellationLegend: View {
     }
 
     private var copy: String {
+        let prefix = hasAreas ? "色块与名称是大区 · " : "颜色仅用于区分区域 · "
         let base: String
         if hasEdges {
-            base = "颜色仅用于区分区域 · 虚线 · AI 候选联系，尚待核对"
+            base = prefix + "虚线 · AI 候选联系，尚待核对"
         } else if isPartial {
             base = "颜色仅用于区分区域 · 跨材料联系尚未核对完成；当前仅显示已核对区域"
         } else {
             base = "颜色仅用于区分区域 · 当前没有已核对的跨区域候选联系"
         }
         return hasRecent ? base + " · 右上圆点为近期更新" : base
+    }
+}
+
+/// Soft hull and name behind each synthesis-produced area. Areas that the
+/// model did not produce (older snapshots, unit proposals) draw no hull.
+private struct AreaHullLayer: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let stage: StageState
+    let camera: ConstellationCamera
+
+    var body: some View {
+        Canvas { context, size in
+            let viewport = CGRect(origin: .zero, size: size).insetBy(dx: -240, dy: -240)
+            for area in stage.model.areas where area.regionIDs.count > 1 {
+                let corners = area.regionIDs.compactMap { stage.layout.centers[$0] }.flatMap { center -> [CGPoint] in
+                    let halfWidth = ConstellationLayout.cardSize.width / 2 + 18
+                    let halfHeight = ConstellationLayout.cardSize.height / 2 + 18
+                    return [CGPoint(x: center.x - halfWidth, y: center.y - halfHeight),
+                            CGPoint(x: center.x + halfWidth, y: center.y - halfHeight),
+                            CGPoint(x: center.x + halfWidth, y: center.y + halfHeight),
+                            CGPoint(x: center.x - halfWidth, y: center.y + halfHeight)]
+                }
+                let projected = corners.map(camera.project)
+                guard projected.contains(where: { viewport.contains($0) }) else { continue }
+                let hull = convexHull(projected)
+                guard hull.count >= 3 else { continue }
+                let path = smoothedPath(hull)
+                let color = RegionIdentity.color(index: area.identityIndex, scheme: colorScheme)
+                context.fill(path, with: .color(color.opacity(colorScheme == .dark ? 0.10 : 0.06)))
+                context.stroke(path, with: .color(color.opacity(0.22)), lineWidth: 1)
+                if let anchor = hull.min(by: { $0.x + $0.y < $1.x + $1.y }) {
+                    context.draw(Text(area.title).font(.system(size: 11, weight: .semibold)).foregroundColor(color.opacity(0.85)),
+                                 at: CGPoint(x: anchor.x + 10, y: anchor.y - 6), anchor: .bottomLeading)
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+
+    private func convexHull(_ points: [CGPoint]) -> [CGPoint] {
+        let sorted = points.sorted { $0.x == $1.x ? $0.y < $1.y : $0.x < $1.x }
+        guard sorted.count >= 3 else { return sorted }
+        func cross(_ o: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat {
+            (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
+        }
+        var lower: [CGPoint] = []
+        for point in sorted {
+            while lower.count >= 2, cross(lower[lower.count - 2], lower[lower.count - 1], point) <= 0 { lower.removeLast() }
+            lower.append(point)
+        }
+        var upper: [CGPoint] = []
+        for point in sorted.reversed() {
+            while upper.count >= 2, cross(upper[upper.count - 2], upper[upper.count - 1], point) <= 0 { upper.removeLast() }
+            upper.append(point)
+        }
+        return Array(lower.dropLast()) + Array(upper.dropLast())
+    }
+
+    private func smoothedPath(_ points: [CGPoint]) -> Path {
+        var path = Path()
+        guard points.count >= 3 else { return path }
+        func mid(_ a: CGPoint, _ b: CGPoint) -> CGPoint { CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2) }
+        path.move(to: mid(points[0], points[points.count - 1]))
+        for index in 0..<points.count {
+            let point = points[index]
+            let next = points[(index + 1) % points.count]
+            path.addQuadCurve(to: mid(point, next), control: point)
+        }
+        path.closeSubpath()
+        return path
     }
 }
 

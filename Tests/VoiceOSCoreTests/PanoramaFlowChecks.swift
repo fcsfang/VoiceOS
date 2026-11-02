@@ -493,16 +493,16 @@ extension CoreFlowTests {
         }
         let synthesize=try completedStep("global.synthesize","all")
         let synthesizeJSON=try XCTUnwrap(synthesize["input_json"]), synthesizeDigest=try XCTUnwrap(synthesize["input_digest"])
-        XCTAssertEqual(synthesizeDigest,digest(synthesizeJSON,"identity-fixture|compact-synthesis-v4"))
+        XCTAssertEqual(synthesizeDigest,digest(synthesizeJSON,"identity-fixture|compact-synthesis-v5"))
         XCTAssertNotEqual(synthesizeDigest,digest(synthesizeJSON,"identity-fixture"))
         let repair=try completedStep("global.repair","all")
         let repairJSON=try XCTUnwrap(repair["input_json"]), repairDigest=try XCTUnwrap(repair["input_digest"])
-        XCTAssertEqual(repairDigest,digest(repairJSON,"identity-fixture|compact-synthesis-v4|repair-v1"))
+        XCTAssertEqual(repairDigest,digest(repairJSON,"identity-fixture|compact-synthesis-v5|repair-v1"))
         let unitID=try XCTUnwrap(snapshot.input.units.first?.id)
         let unit=try completedStep("unit.generate",unitID)
         let unitJSON=try XCTUnwrap(unit["input_json"]), unitDigest=try XCTUnwrap(unit["input_digest"])
         XCTAssertEqual(unitDigest,digest(unitJSON,"identity-fixture"))
-        XCTAssertNotEqual(unitDigest,digest(unitJSON,"identity-fixture|compact-synthesis-v4"))
+        XCTAssertNotEqual(unitDigest,digest(unitJSON,"identity-fixture|compact-synthesis-v5"))
         let retryDirectory=root.appendingPathComponent("synthesis-reference-retry")
         let retryStore=try await panoramaFixtureStore(retryDirectory,count: 1)
         let retryPort=ProgressivePanoramaFixture(identity: "reference-retry-fixture",synthesisReferenceFailures: 1)
@@ -576,6 +576,7 @@ extension CoreFlowTests {
         }
         func compactSynthesisBody(questionRefs: (first:[String],second:[String]),fromRefs:[String],toRefs:[String]) -> [String:Any] {
             ["regions":[["id":"r","title":"检索条件","summary":"保持待核对归属"]],
+             "areas":[["id":"a","title":"检索研究","summary":"检索条件与归属","regionIDs":["r"]]],
              "questions":[["id":"gq0","regionID":"r","title":"跨单元问题一","summary":"引用第一条单元问题","evidenceRefs":questionRefs.first],
                           ["id":"gq1","regionID":"r","title":"跨单元问题二","summary":"引用第二条单元问题","evidenceRefs":questionRefs.second]],
              "relations":[["id":"ge","from":"gq0","to":"gq1","label":"限定检索条件","explanation":"引用双方单元问题","fromEvidenceRefs":fromRefs,"toEvidenceRefs":toRefs]],
@@ -583,6 +584,7 @@ extension CoreFlowTests {
         }
         let mergedBody=compactSynthesisBody(questionRefs: (first: ["q0","q0"],second: ["q1"]),fromRefs: ["q0","q0"],toRefs: ["q1"])
         let repairedBody: [String:Any]=["regions":[["id":"r","title":"检索条件","summary":"保持待核对归属"]],
+            "areas":[["id":"a","title":"检索研究","summary":"检索条件与归属","regionIDs":["r"]]],
             "questions":[["id":"q0","regionID":"r","title":questions[0].title,"summary":questions[0].summary,"evidenceRefs":["q0"]],
                          ["id":"q1","regionID":"r","title":questions[1].title,"summary":questions[1].summary,"evidenceRefs":["q1"]]],
             "relations":[["id":"e","from":"q0","to":"q1","label":"限定检索条件","explanation":"保留双方完整原文的否定条件","fromEvidenceRefs":["q0"],"toEvidenceRefs":["q1"]]],

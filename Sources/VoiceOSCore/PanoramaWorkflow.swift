@@ -109,9 +109,15 @@ extension VoiceOSStore {
         let sourceReasons=Dictionary(uniqueKeysWithValues: proposal.unrepresentedSources.map { ($0.id,$0.reason) })
         let claimReasons=Dictionary(uniqueKeysWithValues: proposal.unrepresentedClaims.map { ($0.id,$0.reason) })
         let scopedReason="本次仅核对指定问题、联系或单元；其余内容由对应单元的全局覆盖核对负责"
+        let areas=proposal.areas.compactMap { area -> PanoramaArea? in
+            let kept=area.regionIDs.filter { regions.contains($0) }
+            guard !kept.isEmpty else { return nil }
+            return .init(id: area.id, title: area.title, summary: area.summary, regionIDs: kept)
+        }
         return .init(regions: proposal.regions.filter { regions.contains($0.id) }, questions: questions, relations: relations,
             unrepresentedSources: input.manifest.sourceIDs.filter { !sources.contains($0) }.map { .init(id: $0, reason: sourceReasons[$0] ?? scopedReason) },
-            unrepresentedClaims: input.manifest.claimIDs.filter { !claims.contains($0) }.map { .init(id: $0, reason: claimReasons[$0] ?? scopedReason) })
+            unrepresentedClaims: input.manifest.claimIDs.filter { !claims.contains($0) }.map { .init(id: $0, reason: claimReasons[$0] ?? scopedReason) },
+            areas: areas)
     }
     static func panoramaRejection(_ rejection: PanoramaRejection, unitID: String) -> PanoramaRejection {
         let prefix="unit["+unitID+"]/"

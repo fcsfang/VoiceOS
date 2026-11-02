@@ -117,7 +117,7 @@ public struct ResponsesPanoramaPort: PanoramaModelPort {
         }
         return kind + " " + path
     }
-    static let proposalShapeInstructions="顶层必须包含 regions、questions、relations、unrepresentedSources、unrepresentedClaims。regions 每项只含 id/title/summary，绝不嵌套 questions。所有问题平铺在顶层 questions；每个问题必须有 id/regionID/title/summary/evidence，regionID 必须逐字对应顶层某个 region.id。"
+    static let proposalShapeInstructions="顶层必须包含 regions、areas、questions、relations、unrepresentedSources、unrepresentedClaims。regions 每项只含 id/title/summary，绝不嵌套 questions。areas 每项含 id/title/summary/regionIDs，regionIDs 必须逐字对应 routes 里声明的 regions id，每个区域恰好属于一个大区。所有问题平铺在顶层 questions；每个问题必须有 id/regionID/title/summary/evidence，regionID 必须逐字对应顶层某个 region.id。"
     private static let reviewShapeInstructions="顶层必须包含 questions、relations、coverageAccepted、reason。questions 和 relations 每项只含 id/accepted/reason，accepted 与 coverageAccepted 必须为布尔值。"
     private static func object(_ properties: [String:Any]) -> [String:Any] {
         ["type":"object","properties":properties,"required":properties.keys.sorted(),"additionalProperties":false]
@@ -136,6 +136,7 @@ public struct ResponsesPanoramaPort: PanoramaModelPort {
         let string:[String:Any]=["type":"string"]
         let pending=object(["id":string,"reason":string])
         return object(["regions":array(object(["id":string,"title":string,"summary":string])),
+            "areas":array(object(["id":string,"title":string,"summary":string,"regionIDs":array(string)])),
             "questions":array(object(["id":string,"regionID":string,"title":string,"summary":string,"evidenceRefs":array(string)])),
             "relations":array(object(["id":string,"from":string,"to":string,"label":string,"explanation":string,"fromEvidenceRefs":array(string),"toEvidenceRefs":array(string)])),
             "unrepresentedSources":array(pending),"unrepresentedClaims":array(pending)])
