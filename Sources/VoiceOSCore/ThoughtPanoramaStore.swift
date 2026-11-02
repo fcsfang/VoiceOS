@@ -516,12 +516,25 @@ extension VoiceOSStore {
         }
         guard !proposals.isEmpty else { throw VoiceOSError("缺少已核对单元的生成记录") }
         let input=state.input
-        let generated: (PanoramaProposal, PanoramaReceipt)=try await panoramaStep(attemptID: snapshot.id, stage: "draft.synthesize", scopeID: "all",
-            input: PanoramaSynthesisInput(input: input, proposals: proposals), whole: input,
-            identity: port.synthesisConfigurationIdentity + "|draft-v1",
-            operation: { try await port.synthesize(proposals, input: input) },
-            validate: { proposal, _ in _ = try Self.validatePanorama(proposal, input: input) },
-            normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+        // A draft is a single idempotent synthesis; a dropped stream is worth
+        // another request instead of asking the person to start over.
+        var retries=0
+        let generated: (PanoramaProposal, PanoramaReceipt)
+        while true {
+            do {
+                generated=try await panoramaStep(attemptID: snapshot.id, stage: "draft.synthesize", scopeID: "all",
+                    input: PanoramaSynthesisInput(input: input, proposals: proposals), whole: input,
+                    identity: port.synthesisConfigurationIdentity + "|draft-v1",
+                    operation: { try await port.synthesize(proposals, input: input) },
+                    validate: { proposal, _ in _ = try Self.validatePanorama(proposal, input: input) },
+                    normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+                break
+            } catch {
+                guard Self.panoramaUpstreamRejection(error), retries < 2 else { throw error }
+                retries += 1
+                try await Task.sleep(for: .seconds(5))
+            }
+        }
         let coverage=try Self.validatePanorama(generated.0, input: input)
         let note="综合草稿：由 \(proposals.count)/\(input.units.count) 个已核对单元生成；全局独立核对尚未完成，联系均为候选。"
         let receipts=(workflow.receipts) + [PanoramaStepReceipt(stage: "draft.synthesize", scopeID: "all", receipt: generated.1)]
