@@ -193,7 +193,7 @@ struct PanoramaModelInput {
             try .init(id: identity($0.id, sources), reason: $0.reason)
         }, unrepresentedClaims: proposal.unrepresentedClaims.map {
             try .init(id: identity($0.id, claims), reason: $0.reason)
-        })
+        }, areas: proposal.areas)
     }
 }
 

@@ -111,7 +111,8 @@ extension ResponsesPanoramaPort {
             unrepresentedSources: pending(whole.manifest.sourceIDs, representedSources, sourceReasons,
                 fixed: "综合未把该材料归入具体问题；完整原文与认识入口保留"),
             unrepresentedClaims: pending(whole.manifest.claimIDs, representedClaims, claimReasons,
-                fixed: "综合未把该观点归入具体问题；完整原文与认识入口保留"))
+                fixed: "综合未把该观点归入具体问题；完整原文与认识入口保留"),
+            areas: compact.areas.map { .init(id: $0.id, title: $0.title, summary: $0.summary, regionIDs: $0.regionIDs) })
     }
     public func verifyEvidence(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> (PanoramaReview, PanoramaReceipt) {
         let wire=try PanoramaModelInput(input)
@@ -165,6 +166,13 @@ extension ResponsesPanoramaPort {
 }
 
 struct PanoramaCompactProposal: Decodable {
+    struct Area: Decodable {
+        let id: String
+        let title: String
+        let summary: String
+        let regionIDs: [String]
+    }
+    let areas: [Area]
     struct Question: Decodable {
         let id: String
         let regionID: String

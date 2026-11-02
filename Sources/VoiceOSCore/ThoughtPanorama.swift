@@ -84,12 +84,49 @@ public struct PanoramaUnrepresented: Codable, Sendable {
     public let id: String
     public let reason: String
 }
+/// A named area above regions: the synthesis groups related regions into a
+/// handful of areas so the map reads as several large fields, each holding
+/// several specific regions. Areas carry no claim beyond this grouping.
+public struct PanoramaArea: Codable, Sendable, Identifiable {
+    public let id: String
+    public let title: String
+    public let summary: String
+    public let regionIDs: [String]
+    public init(id: String, title: String, summary: String, regionIDs: [String]) {
+        self.id=id; self.title=title; self.summary=summary; self.regionIDs=regionIDs
+    }
+}
 public struct PanoramaProposal: Codable, Sendable {
     public let regions: [PanoramaRegion]
     public let questions: [PanoramaQuestion]
     public let relations: [PanoramaRelation]
     public let unrepresentedSources: [PanoramaUnrepresented]
     public let unrepresentedClaims: [PanoramaUnrepresented]
+    /// Empty for unit proposals and for snapshots written before areas existed.
+    public let areas: [PanoramaArea]
+
+    public init(regions: [PanoramaRegion], questions: [PanoramaQuestion], relations: [PanoramaRelation],
+                unrepresentedSources: [PanoramaUnrepresented], unrepresentedClaims: [PanoramaUnrepresented],
+                areas: [PanoramaArea] = []) {
+        self.regions=regions; self.questions=questions; self.relations=relations
+        self.unrepresentedSources=unrepresentedSources; self.unrepresentedClaims=unrepresentedClaims; self.areas=areas
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case regions, questions, relations, unrepresentedSources, unrepresentedClaims, areas
+    }
+
+    // Synthesized Codable would require the key, so older snapshots and unit
+    // proposals without areas would fail to decode.
+    public init(from decoder: Decoder) throws {
+        let container=try decoder.container(keyedBy: CodingKeys.self)
+        regions=try container.decode([PanoramaRegion].self, forKey: .regions)
+        questions=try container.decode([PanoramaQuestion].self, forKey: .questions)
+        relations=try container.decode([PanoramaRelation].self, forKey: .relations)
+        unrepresentedSources=try container.decode([PanoramaUnrepresented].self, forKey: .unrepresentedSources)
+        unrepresentedClaims=try container.decode([PanoramaUnrepresented].self, forKey: .unrepresentedClaims)
+        areas=try container.decodeIfPresent([PanoramaArea].self, forKey: .areas) ?? []
+    }
 }
 public struct PanoramaReceipt: Codable, Sendable {
     public let responseID: String
@@ -224,7 +261,7 @@ extension PanoramaModelPort {
     public var focusConfigurationIdentity: String { configurationIdentity + "|unit-slices-v1" }
     /// Compact global synthesis copies evidence locally, so a shape change
     /// invalidates only synthesis rows and keeps verified unit receipts.
-    public var synthesisConfigurationIdentity: String { configurationIdentity + "|compact-synthesis-v4" }
+    public var synthesisConfigurationIdentity: String { configurationIdentity + "|compact-synthesis-v5" }
     /// Repair prompts iterate independently of synthesis and review rows.
     public var repairConfigurationIdentity: String { synthesisConfigurationIdentity + "|repair-v1" }
     public func generate(_ input: PanoramaInput, focus: PanoramaGenerationFocus, target: PanoramaCoverageTarget) async throws -> (PanoramaProposal, PanoramaReceipt) {
@@ -280,6 +317,17 @@ extension VoiceOSStore {
         let claims=Dictionary(uniqueKeysWithValues: input.claims.map { ($0.id, $0) })
         let regions=Set(proposal.regions.map(\.id)), questions=Dictionary(grouping: proposal.questions, by: \.id)
         func nonempty(_ value: String) -> Bool { !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if !proposal.areas.isEmpty {
+            var covered: [String]=[]
+            for area in proposal.areas {
+                guard nonempty(area.id), nonempty(area.title), !area.regionIDs.isEmpty,
+                      Set(area.regionIDs).count == area.regionIDs.count,
+                      area.regionIDs.allSatisfy({ regions.contains($0) }) else { throw VoiceOSError("全景大区的身份或区域归属无效") }
+                covered.append(contentsOf: area.regionIDs)
+            }
+            guard Set(proposal.areas.map(\.id)).count == proposal.areas.count,
+                  Set(covered) == regions, covered.count == proposal.regions.count else { throw VoiceOSError("全景大区没有恰好覆盖每个区域一次") }
+        }
         guard regions.count == proposal.regions.count, questions.count == proposal.questions.count,
               Set(proposal.relations.map(\.id)).count == proposal.relations.count,
               proposal.regions.allSatisfy({ nonempty($0.id) && nonempty($0.title) && nonempty($0.summary) }),
