@@ -153,7 +153,11 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
             relations=[.init(id: "global-edge", from: questions[0].id, to: questions[1].id, label: "尚未核对的联系", explanation: "需要双方全文独立判断",
                 fromEvidence: questions[0].evidence, toEvidence: questions[1].evidence)]
         } else { relations=[] }
-        return (.init(regions: regions, questions: questions, relations: relations, unrepresentedSources: [], unrepresentedClaims: []),receipt())
+        let representedSources=Set(questions.flatMap(\.evidence).map(\.sourceID))
+        let representedClaims=Set(questions.flatMap(\.evidence).flatMap(\.claimIDs))
+        let pendingSources=input.manifest.sourceIDs.filter { !representedSources.contains($0) }.map { PanoramaUnrepresented(id: $0, reason: "夹具保留未表达原因") }
+        let pendingClaims=input.manifest.claimIDs.filter { !representedClaims.contains($0) }.map { PanoramaUnrepresented(id: $0, reason: "夹具保留未表达原因") }
+        return (.init(regions: regions, questions: questions, relations: relations, unrepresentedSources: pendingSources, unrepresentedClaims: pendingClaims),receipt())
     }
     func repairSynthesis(_ proposal: PanoramaProposal, input: PanoramaInput, context: PanoramaInput, rejection: PanoramaRejection) async throws -> (PanoramaProposal, PanoramaReceipt) {
         globalRepairs += 1
@@ -256,6 +260,7 @@ extension CoreFlowTests {
         try await assertPanoramaUnknownRecovery(root: root)
         try await assertPanoramaStagedWire()
         try await assertPanoramaReviewBatching()
+        try await assertPanoramaDraftSynthesis(root: root.appendingPathComponent("draft-synthesis"))
         try await assertPanoramaCompactSynthesis(root: root)
         try await assertPanoramaTransientRetry(root: root)
     }
@@ -456,6 +461,20 @@ extension CoreFlowTests {
         XCTAssertEqual(relations[0].sourceIDs, Set(["s1", "s2", "s3"]))
         XCTAssertEqual(relations[1].relationIDs, ["e3"])
         XCTAssertEqual(relations[1].sourceIDs, Set(["s1", "s3"]))
+    }
+    private func assertPanoramaDraftSynthesis(root: URL) async throws {
+        let store=try await panoramaFixtureStore(root, count: 3)
+        do { try await store.generatePanorama(using: ProgressivePanoramaFixture(identity: "draft-partial", failGenerationAt: 2)) } catch {}
+        let partial=try await store.panoramaState()
+        let verified=partial.snapshot?.workflow?.verifiedUnitIDs.count ?? 0
+        XCTAssertGreaterThan(verified, 0)
+        XCTAssertLessThan(verified, partial.snapshot?.input.units.count ?? 0)
+        try await store.draftPanorama(using: ProgressivePanoramaFixture(identity: "draft-fixture"))
+        let drafted=try await store.panoramaState()
+        XCTAssertEqual(drafted.snapshot?.isPartial, true)
+        XCTAssertEqual(drafted.snapshot?.workflow?.phase, .synthesis)
+        XCTAssertTrue(drafted.error?.contains("综合草稿") == true)
+        XCTAssertFalse(drafted.snapshot?.proposal.questions.isEmpty ?? true)
     }
     private func assertPanoramaCompactSynthesis(root: URL) async throws {
         let directory=root.appendingPathComponent("synthesis-identity")

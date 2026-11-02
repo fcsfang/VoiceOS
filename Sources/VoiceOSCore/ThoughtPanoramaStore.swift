@@ -495,6 +495,42 @@ extension VoiceOSStore {
             }, retainSemanticRejection: true)
         return .init(reviews: reviews, finalReview: final.0, finalReceipt: final.1)
     }
+    /// Synthesizes a labeled draft over the units that already passed their own
+    /// review, so the panorama can show real regions and relations before the
+    /// full global review finishes. The attempt stays failed with an explicit
+    /// note; a later completed run replaces the draft.
+    public func draftPanorama(using port: any PanoramaModelPort) async throws {
+        let state=try panoramaState()
+        guard let snapshot=state.snapshot, let workflow=snapshot.workflow, !workflow.isComplete else {
+            throw VoiceOSError("当前全景不是可生成草稿的部分结果")
+        }
+        guard state.status != "running" else { throw VoiceOSError("全景正在运行，请等待当前尝试结束") }
+        let verified=workflow.verifiedUnitIDs
+        guard !verified.isEmpty else { throw VoiceOSError("尚无已核对单元") }
+        var proposals: [PanoramaUnitProposal]=[]
+        for unitID in verified {
+            guard let row=try db.query("SELECT result_json FROM panorama_steps WHERE stage='unit.generate' AND scope_id=? AND state='completed' ORDER BY rowid DESC LIMIT 1", [unitID]).first,
+                  let json=row["result_json"],
+                  let proposal=try? JSONDecoder().decode(PanoramaProposal.self, from: Data(json.utf8)) else { continue }
+            proposals.append(.init(unitID: unitID, proposal: Self.namespacePanorama(proposal, unitID: unitID)))
+        }
+        guard !proposals.isEmpty else { throw VoiceOSError("缺少已核对单元的生成记录") }
+        let input=state.input
+        let generated: (PanoramaProposal, PanoramaReceipt)=try await panoramaStep(attemptID: snapshot.id, stage: "draft.synthesize", scopeID: "all",
+            input: PanoramaSynthesisInput(input: input, proposals: proposals), whole: input,
+            identity: port.synthesisConfigurationIdentity + "|draft-v1",
+            operation: { try await port.synthesize(proposals, input: input) },
+            validate: { proposal, _ in _ = try Self.validatePanorama(proposal, input: input) },
+            normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+        let coverage=try Self.validatePanorama(generated.0, input: input)
+        let note="综合草稿：由 \(proposals.count)/\(input.units.count) 个已核对单元生成；全局独立核对尚未完成，联系均为候选。"
+        let receipts=(workflow.receipts) + [PanoramaStepReceipt(stage: "draft.synthesize", scopeID: "all", receipt: generated.1)]
+        let draft=PanoramaSnapshot(id: snapshot.id, createdAt: Self.now(), input: input, proposal: generated.0, coverage: coverage,
+            generation: generated.1, verification: generated.1,
+            review: PanoramaReview(questions: [], relations: [], coverageAccepted: false, reason: note),
+            workflow: .init(phase: .synthesis, verifiedUnitIDs: proposals.map(\.unitID), totalUnitCount: input.units.count, receipts: receipts))
+        try db.execute("UPDATE panorama_attempts SET snapshot_json=?,generation_receipt=?,error=? WHERE id=?", [try Self.relevanceJSON(draft),try Self.relevanceJSON(generated.1),note,snapshot.id])
+    }
     private func publishPanoramaPhase(_ phase: PanoramaPhase, units: [VerifiedPanoramaUnit], input: PanoramaInput, attemptID: String) throws {
         try requirePanoramaManifest(input)
         let partial=try Self.partialPanorama(units, input: input, id: attemptID, phase: phase)

@@ -309,7 +309,7 @@ struct WorkspaceView: View {
     @ViewBuilder private var pageContent: some View {
         switch page {
         case .home:
-            PanoramaHome(screen: model.panorama, retry: model.retryPanorama, chooseTextModel: model.chooseTextModel,
+            PanoramaHome(screen: model.panorama, retry: model.retryPanorama, draft: model.generateDraftPanorama, chooseTextModel: model.chooseTextModel,
                 openMaterials: { go(.materials) }, openSource: { go(.source($0)) }, correctSource: { id in
                     panoramaSourceEditor = model.records.first { $0.id == id }
                 }, correctClaim: { id in
