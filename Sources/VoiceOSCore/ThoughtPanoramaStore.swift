@@ -536,13 +536,28 @@ extension VoiceOSStore {
             }
         }
         let coverage=try Self.validatePanorama(generated.0, input: input)
+        // Areas are a separate, small call: a grouping failure must not cost
+        // the synthesized regions and relations.
+        var draftAreas: [PanoramaArea]=[]
+        do {
+            let request=Self.panoramaAreaRequest(generated.0)
+            let result: ([PanoramaArea], PanoramaReceipt)=try await panoramaStep(attemptID: snapshot.id, stage: "draft.areas", scopeID: "all",
+                input: request, whole: input, identity: "panorama-areas-v1",
+                operation: { try await port.groupAreas(generated.0, input: input) },
+                validate: { areas, _ in try Self.validatePanoramaAreas(areas, regionIDs: Set(generated.0.regions.map(\.id))) })
+            draftAreas=result.0
+        } catch {}
         let note="综合草稿：由 \(proposals.count)/\(input.units.count) 个已核对单元生成；全局独立核对尚未完成，联系均为候选。"
         let receipts=(workflow.receipts) + [PanoramaStepReceipt(stage: "draft.synthesize", scopeID: "all", receipt: generated.1)]
         let draft=PanoramaSnapshot(id: snapshot.id, createdAt: Self.now(), input: input, proposal: generated.0, coverage: coverage,
             generation: generated.1, verification: generated.1,
             review: PanoramaReview(questions: [], relations: [], coverageAccepted: false, reason: note),
             workflow: .init(phase: .synthesis, verifiedUnitIDs: proposals.map(\.unitID), totalUnitCount: input.units.count, receipts: receipts))
-        try db.execute("UPDATE panorama_attempts SET snapshot_json=?,generation_receipt=?,error=? WHERE id=?", [try Self.relevanceJSON(draft),try Self.relevanceJSON(generated.1),note,snapshot.id])
+        let draftSnapshot=PanoramaSnapshot(id: draft.id, createdAt: draft.createdAt, input: draft.input,
+            proposal: .init(regions: draft.proposal.regions, questions: draft.proposal.questions, relations: draft.proposal.relations,
+                unrepresentedSources: draft.proposal.unrepresentedSources, unrepresentedClaims: draft.proposal.unrepresentedClaims, areas: draftAreas),
+            coverage: draft.coverage, generation: draft.generation, verification: draft.verification, review: draft.review, workflow: draft.workflow)
+        try db.execute("UPDATE panorama_attempts SET snapshot_json=?,generation_receipt=?,error=? WHERE id=?", [try Self.relevanceJSON(draftSnapshot),try Self.relevanceJSON(generated.1),note,snapshot.id])
     }
     private func publishPanoramaPhase(_ phase: PanoramaPhase, units: [VerifiedPanoramaUnit], input: PanoramaInput, attemptID: String) throws {
         try requirePanoramaManifest(input)

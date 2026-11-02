@@ -145,6 +145,26 @@ struct PanoramaGlobalValidation: Sendable {
 /// One independent evidence review covers a whole region's questions, or a
 /// group of relations sharing an endpoint-region pair, so the shared context is
 /// read once. The review semantics are unchanged; only the grouping is.
+struct PanoramaAreaRequest: Encodable, Sendable {
+    struct Region: Encodable, Sendable {
+        let id: String
+        let title: String
+        let summary: String
+        let questionTitles: [String]
+    }
+    let regions: [Region]
+}
+extension VoiceOSStore {
+    /// The grouping request carries only region identity and question titles;
+    /// areas never cite evidence, so the full transcripts are not needed.
+    static func panoramaAreaRequest(_ proposal: PanoramaProposal) -> PanoramaAreaRequest {
+        let byRegion=Dictionary(grouping: proposal.questions, by: \.regionID)
+        return .init(regions: proposal.regions.map { region in
+            .init(id: region.id, title: region.title, summary: region.summary,
+                  questionTitles: (byRegion[region.id] ?? []).map(\.title))
+        })
+    }
+}
 struct PanoramaReviewBatch: Sendable {
     let scopeID: String
     let questionIDs: [String]

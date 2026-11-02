@@ -17,6 +17,12 @@ extension ResponsesPanoramaPort {
             schema: Self.compactProposalSchema, name: "voiceos_panorama_global_repair_refs", shape: Self.compactShapeInstructions)
         return (try Self.expandedProposal(result.0, evidence: try Self.compactEvidence(proposal.questions), wire: wire, whole: input), result.1)
     }
+    public func groupAreas(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> ([PanoramaArea], PanoramaReceipt) {
+        let request=VoiceOSStore.panoramaAreaRequest(proposal)
+        let (output, receipt): (PanoramaAreaOutput, PanoramaReceipt)=try await call(request, instructions: Self.areaInstructions,
+            schema: Self.areaSchema, name: "voiceos_panorama_areas")
+        return (output.areas.map { .init(id: $0.id, title: $0.title, summary: $0.summary, regionIDs: $0.regionIDs) }, receipt)
+    }
     private static func compactEvidence(_ questions: [PanoramaQuestion]) throws -> [String:[PanoramaEvidence]] {
         var result:[String:[PanoramaEvidence]]=[:]
         for question in questions {
@@ -111,8 +117,7 @@ extension ResponsesPanoramaPort {
             unrepresentedSources: pending(whole.manifest.sourceIDs, representedSources, sourceReasons,
                 fixed: "综合未把该材料归入具体问题；完整原文与认识入口保留"),
             unrepresentedClaims: pending(whole.manifest.claimIDs, representedClaims, claimReasons,
-                fixed: "综合未把该观点归入具体问题；完整原文与认识入口保留"),
-            areas: compact.areas.map { .init(id: $0.id, title: $0.title, summary: $0.summary, regionIDs: $0.regionIDs) })
+                fixed: "综合未把该观点归入具体问题；完整原文与认识入口保留"))
     }
     public func verifyEvidence(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> (PanoramaReview, PanoramaReceipt) {
         let wire=try PanoramaModelInput(input)
@@ -165,7 +170,7 @@ extension ResponsesPanoramaPort {
     """
 }
 
-struct PanoramaCompactProposal: Decodable {
+struct PanoramaAreaOutput: Decodable {
     struct Area: Decodable {
         let id: String
         let title: String
@@ -173,6 +178,8 @@ struct PanoramaCompactProposal: Decodable {
         let regionIDs: [String]
     }
     let areas: [Area]
+}
+struct PanoramaCompactProposal: Decodable {
     struct Question: Decodable {
         let id: String
         let regionID: String

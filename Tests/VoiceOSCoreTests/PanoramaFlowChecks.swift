@@ -29,18 +29,19 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
     var coverageTargets: [PanoramaCoverageTarget]=[]
     var synthesisReferenceFailures: Int
     var failSliceRepairs: Int
+    var failAreas: Bool
 
     init(identity: String = "progressive-fixture", failGenerationAt: Int? = nil, rejectUnits: Bool = false, repairUnits: Bool = false, invalidQuote: Bool = false,
          failCoverage: Bool = false, failConsistency: Bool = false, transientFailures: Int = 0, unitTransientFailures: [String: Int] = [:], invalidQuoteAttempts: Int = 0,
          invalidFocusAttempts: Int = 0, failFocusAt: Int? = nil, beforeGenerate: (@Sendable (PanoramaInput) async throws -> Void)? = nil,
-         rejectedDecisionSubstring: String? = nil, rejectCoverageOnly: Bool = false, synthesisReferenceFailures: Int = 0, semanticRejections: Int = 0, failSliceRepairs: Int = 0) {
+         rejectedDecisionSubstring: String? = nil, rejectCoverageOnly: Bool = false, synthesisReferenceFailures: Int = 0, semanticRejections: Int = 0, failSliceRepairs: Int = 0, failAreas: Bool = false) {
         configurationIdentity=identity; self.failGenerationAt=failGenerationAt; self.rejectUnits=rejectUnits; self.repairUnits=repairUnits; self.invalidQuote=invalidQuote
         self.failCoverage=failCoverage; self.failConsistency=failConsistency; self.beforeGenerate=beforeGenerate; self.transientFailures=transientFailures
         self.unitTransientFailures=unitTransientFailures; self.invalidQuoteAttempts=invalidQuoteAttempts
         self.invalidFocusAttempts=invalidFocusAttempts; self.failFocusAt=failFocusAt
         self.rejectedDecisionSubstring=rejectedDecisionSubstring; self.rejectCoverageOnly=rejectCoverageOnly
         self.synthesisReferenceFailures=synthesisReferenceFailures; self.semanticRejections=semanticRejections
-        self.failSliceRepairs=failSliceRepairs
+        self.failSliceRepairs=failSliceRepairs; self.failAreas=failAreas
     }
     private func receipt() -> PanoramaReceipt {
         serial += 1
@@ -180,6 +181,10 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
         let report=review(proposal)
         let relations=report.relations.map { PanoramaDecision(id: $0.id,accepted: accepted,reason: accepted ? $0.reason : "双方原文尚不能支持此联系") }
         return (.init(questions: report.questions,relations: relations,coverageAccepted: accepted,reason: accepted ? report.reason : "关系应保留双方否定条件"),receipt())
+    }
+    func groupAreas(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> ([PanoramaArea], PanoramaReceipt) {
+        if failAreas { throw VoiceOSError("模拟大区划分失败") }
+        return ([.init(id: "area-all", title: "全部区域", summary: "夹具大区，覆盖全部区域", regionIDs: proposal.regions.map(\.id))], receipt())
     }
     func verifyCoverage(_ proposal: PanoramaProposal, input: PanoramaInput, target: PanoramaCoverageTarget, rejections: [PanoramaRejection]) async throws -> (PanoramaReview, PanoramaReceipt) {
         coverageReviews += 1
@@ -475,6 +480,9 @@ extension CoreFlowTests {
         XCTAssertEqual(drafted.snapshot?.workflow?.phase, .synthesis)
         XCTAssertTrue(drafted.error?.contains("综合草稿") == true)
         XCTAssertFalse(drafted.snapshot?.proposal.questions.isEmpty ?? true)
+        XCTAssertEqual(drafted.snapshot?.proposal.areas.count, 1)
+        let regionIDs=Set(drafted.snapshot?.proposal.regions.map(\.id) ?? [])
+        XCTAssertEqual(Set(drafted.snapshot?.proposal.areas.first?.regionIDs ?? []), regionIDs)
     }
     private func assertPanoramaCompactSynthesis(root: URL) async throws {
         let directory=root.appendingPathComponent("synthesis-identity")
@@ -576,7 +584,6 @@ extension CoreFlowTests {
         }
         func compactSynthesisBody(questionRefs: (first:[String],second:[String]),fromRefs:[String],toRefs:[String]) -> [String:Any] {
             ["regions":[["id":"r","title":"检索条件","summary":"保持待核对归属"]],
-             "areas":[["id":"a","title":"检索研究","summary":"检索条件与归属","regionIDs":["r"]]],
              "questions":[["id":"gq0","regionID":"r","title":"跨单元问题一","summary":"引用第一条单元问题","evidenceRefs":questionRefs.first],
                           ["id":"gq1","regionID":"r","title":"跨单元问题二","summary":"引用第二条单元问题","evidenceRefs":questionRefs.second]],
              "relations":[["id":"ge","from":"gq0","to":"gq1","label":"限定检索条件","explanation":"引用双方单元问题","fromEvidenceRefs":fromRefs,"toEvidenceRefs":toRefs]],
@@ -584,7 +591,6 @@ extension CoreFlowTests {
         }
         let mergedBody=compactSynthesisBody(questionRefs: (first: ["q0","q0"],second: ["q1"]),fromRefs: ["q0","q0"],toRefs: ["q1"])
         let repairedBody: [String:Any]=["regions":[["id":"r","title":"检索条件","summary":"保持待核对归属"]],
-            "areas":[["id":"a","title":"检索研究","summary":"检索条件与归属","regionIDs":["r"]]],
             "questions":[["id":"q0","regionID":"r","title":questions[0].title,"summary":questions[0].summary,"evidenceRefs":["q0"]],
                          ["id":"q1","regionID":"r","title":questions[1].title,"summary":questions[1].summary,"evidenceRefs":["q1"]]],
             "relations":[["id":"e","from":"q0","to":"q1","label":"限定检索条件","explanation":"保留双方完整原文的否定条件","fromEvidenceRefs":["q0"],"toEvidenceRefs":["q1"]]],
