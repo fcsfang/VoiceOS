@@ -224,7 +224,7 @@ extension PanoramaModelPort {
     public var focusConfigurationIdentity: String { configurationIdentity + "|unit-slices-v1" }
     /// Compact global synthesis copies evidence locally, so a shape change
     /// invalidates only synthesis rows and keeps verified unit receipts.
-    public var synthesisConfigurationIdentity: String { configurationIdentity + "|compact-synthesis-v2" }
+    public var synthesisConfigurationIdentity: String { configurationIdentity + "|compact-synthesis-v3" }
     /// Repair prompts iterate independently of synthesis and review rows.
     public var repairConfigurationIdentity: String { synthesisConfigurationIdentity + "|repair-v1" }
     public func generate(_ input: PanoramaInput, focus: PanoramaGenerationFocus, target: PanoramaCoverageTarget) async throws -> (PanoramaProposal, PanoramaReceipt) {
