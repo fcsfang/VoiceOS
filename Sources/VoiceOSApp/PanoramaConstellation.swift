@@ -315,9 +315,11 @@ struct ConstellationLayout: Equatable, Sendable {
             seeds[id] ?? coldSeed(index: index, count: count)
         }
 
+        let areaByRegion = Dictionary(uniqueKeysWithValues: model.areas.flatMap { area in area.regionIDs.map { ($0, area.id) } })
         let edgeSprings: [(a: Int, b: Int, weight: CGFloat)] = model.edges.compactMap { edge in
             guard let a = indexByID[edge.pair.a], let b = indexByID[edge.pair.b] else { return nil }
-            return (a, b, CGFloat(min(edge.count, 3)))
+            let sameArea = areaByRegion[edge.pair.a] != nil && areaByRegion[edge.pair.a] == areaByRegion[edge.pair.b]
+            return (a, b, CGFloat(min(edge.count, 3)) * (sameArea ? 1 : 0.35))
         }
         let affinitySprings: [(a: Int, b: Int, weight: CGFloat)] = model.affinityPairs.compactMap { pair in
             guard let a = indexByID[pair.pair.a], let b = indexByID[pair.pair.b] else { return nil }
@@ -389,7 +391,7 @@ struct ConstellationLayout: Equatable, Sendable {
                 let dx = points[spring.b].x - points[spring.a].x
                 let dy = points[spring.b].y - points[spring.a].y
                 let distance = max(sqrt(dx * dx + dy * dy), 0.001)
-                let force = (distance - 250) * 0.012 * spring.weight
+                let force = (distance - 230) * 0.03 * spring.weight
                 let ux = dx / distance
                 let uy = dy / distance
                 displacement[spring.a].dx += ux * force
