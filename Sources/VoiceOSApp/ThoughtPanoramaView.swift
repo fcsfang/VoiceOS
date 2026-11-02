@@ -10,6 +10,7 @@ struct ThoughtPanoramaView: View {
     @Binding var selection: PanoramaSelection?
     @Environment(\.workspacePalette) private var palette
     let retry: () -> Void
+    let draft: () -> Void
     let retryRefresh: () -> Void
     let dismissReadError: () -> Void
     let chooseTextModel: () -> Void
@@ -275,12 +276,20 @@ struct ThoughtPanoramaView: View {
                 Button("连接文本模型", action: chooseTextModel)
             }
         } else if let state, ["failed", "unknown"].contains(state.status) {
+            let canDraft=state.snapshot?.isPartial == true && state.snapshot?.proposal.relations.isEmpty == true
             if iconOnly {
+                if canDraft {
+                    Button { draft() } label: { Image(systemName: "doc.badge.plus").frame(width: 22, height: 22) }
+                        .buttonStyle(.borderless)
+                        .help("先生成综合草稿")
+                        .accessibilityLabel("先生成综合草稿")
+                }
                 Button { retry() } label: { Image(systemName: "arrow.clockwise").frame(width: 22, height: 22) }
                     .buttonStyle(.borderless)
                     .help("继续核对")
                     .accessibilityLabel("继续核对")
             } else {
+                if canDraft { Button("生成草稿", action: draft).help("用已核对单元先生成带联系的综合草稿，全局核对尚未完成") }
                 Button("继续核对", action: retry)
             }
         }
@@ -634,6 +643,7 @@ struct ThoughtPanoramaView: View {
 struct PanoramaHome: View {
     @ObservedObject var screen: PanoramaScreenModel
     let retry: () -> Void
+    let draft: () -> Void
     let chooseTextModel: () -> Void
     let openMaterials: () -> Void
     let openSource: (String) -> Void
@@ -641,6 +651,6 @@ struct PanoramaHome: View {
     let correctClaim: (String) -> Void
     let discuss: (String, PanoramaSelection) -> Void
     var body: some View {
-        ThoughtPanoramaView(state: screen.state, message: screen.message, isGenerating: screen.isGenerating, modelConfigured: screen.modelConfigured, readError: screen.readError, selection: $screen.selection, retry: retry, retryRefresh: { screen.retryRefresh() }, dismissReadError: { screen.dismissReadError() }, chooseTextModel: chooseTextModel, openMaterials: openMaterials, openSource: openSource, correctSource: correctSource, correctClaim: correctClaim, discuss: discuss)
+        ThoughtPanoramaView(state: screen.state, message: screen.message, isGenerating: screen.isGenerating, modelConfigured: screen.modelConfigured, readError: screen.readError, selection: $screen.selection, retry: retry, draft: draft, retryRefresh: { screen.retryRefresh() }, dismissReadError: { screen.dismissReadError() }, chooseTextModel: chooseTextModel, openMaterials: openMaterials, openSource: openSource, correctSource: correctSource, correctClaim: correctClaim, discuss: discuss)
     }
 }

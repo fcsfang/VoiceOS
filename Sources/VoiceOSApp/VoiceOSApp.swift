@@ -616,6 +616,11 @@ final class ControlCenter: ObservableObject {
                 panoramaLaunchRetryIssued = true
                 retryPanorama()
             }
+            if ProcessInfo.processInfo.environment["VOICEOS_DRAFT_PANORAMA"] == "1", !panoramaDraftIssued,
+               modelConfigured, panorama.state?.snapshot?.isPartial == true {
+                panoramaDraftIssued = true
+                generateDraftPanorama()
+            }
             scheduleProcessing()
             installReminderRefresh()
             dictationObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.willSleepNotification,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.flushTextCaptureDraft(); self?.stopDictation(interrupted:true) } })
@@ -642,6 +647,7 @@ final class ControlCenter: ObservableObject {
     private var refreshWorker: Task<Void, Never>?
     private var refreshPending = false
     private var panoramaLaunchRetryIssued = false
+    private var panoramaDraftIssued = false
     func refresh() async {
         refreshPending = true
         if let refreshWorker { await refreshWorker.value; return }
@@ -2572,6 +2578,13 @@ extension ControlCenter {
         } catch { discussionStatus=error.localizedDescription; return false }
     }
     func retryPanorama() { panorama.retry(store: store, port: panoramaModel) }
+    func generateDraftPanorama() {
+        guard let store, let port=panoramaModel else { return }
+        Task {
+            do { try await store.draftPanorama(using: port); await refresh() }
+            catch { status=error.localizedDescription }
+        }
+    }
     func beginPanoramaDiscussion(snapshotID: String, selection: PanoramaSelection) async -> String? {
         guard let store, !discussionSaving, !discussionSending, !discussionExtracting, !dictationActive else { return nil }
         discussionSaving = true
