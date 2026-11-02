@@ -252,6 +252,7 @@ public protocol PanoramaModelPort: Sendable {
     func verifyConsistency(_ proposal: PanoramaProposal, input: PanoramaInput, unitProposals: [PanoramaUnitProposal], reviews: [PanoramaScopedReview], rejections: [PanoramaRejection]) async throws -> (PanoramaReview, PanoramaReceipt)
     func repair(_ proposal: PanoramaProposal, input: PanoramaInput, review: PanoramaReview) async throws -> (PanoramaProposal, PanoramaReceipt)
     func verify(_ proposal: PanoramaProposal, input: PanoramaInput, priorRejection: PanoramaRejection?) async throws -> (PanoramaReview, PanoramaReceipt)
+    func groupAreas(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> ([PanoramaArea], PanoramaReceipt)
 }
 
 extension PanoramaModelPort {
@@ -281,6 +282,9 @@ extension PanoramaModelPort {
     }
     public func verifyConsistency(_ proposal: PanoramaProposal, input: PanoramaInput, unitProposals: [PanoramaUnitProposal], reviews: [PanoramaScopedReview], rejections: [PanoramaRejection]) async throws -> (PanoramaReview, PanoramaReceipt) {
         throw VoiceOSError("当前模型端口尚不支持全景一致性核对，已核对区域保留")
+    }
+    public func groupAreas(_ proposal: PanoramaProposal, input: PanoramaInput) async throws -> ([PanoramaArea], PanoramaReceipt) {
+        throw VoiceOSError("当前模型端口尚不支持大区划分")
     }
 }
 
@@ -317,17 +321,7 @@ extension VoiceOSStore {
         let claims=Dictionary(uniqueKeysWithValues: input.claims.map { ($0.id, $0) })
         let regions=Set(proposal.regions.map(\.id)), questions=Dictionary(grouping: proposal.questions, by: \.id)
         func nonempty(_ value: String) -> Bool { !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-        if !proposal.areas.isEmpty {
-            var covered: [String]=[]
-            for area in proposal.areas {
-                guard nonempty(area.id), nonempty(area.title), !area.regionIDs.isEmpty,
-                      Set(area.regionIDs).count == area.regionIDs.count,
-                      area.regionIDs.allSatisfy({ regions.contains($0) }) else { throw VoiceOSError("全景大区的身份或区域归属无效") }
-                covered.append(contentsOf: area.regionIDs)
-            }
-            guard Set(proposal.areas.map(\.id)).count == proposal.areas.count,
-                  Set(covered) == regions, covered.count == proposal.regions.count else { throw VoiceOSError("全景大区没有恰好覆盖每个区域一次") }
-        }
+        if !proposal.areas.isEmpty { try validatePanoramaAreas(proposal.areas, regionIDs: regions) }
         guard regions.count == proposal.regions.count, questions.count == proposal.questions.count,
               Set(proposal.relations.map(\.id)).count == proposal.relations.count,
               proposal.regions.allSatisfy({ nonempty($0.id) && nonempty($0.title) && nonempty($0.summary) }),
@@ -370,6 +364,19 @@ extension VoiceOSStore {
         return .init(submittedSourceIDs: input.manifest.sourceIDs, submittedClaimIDs: input.manifest.claimIDs,
                      representedSourceIDs: representedSources.sorted(), representedClaimIDs: representedClaims.sorted(),
                      unrepresentedSources: proposal.unrepresentedSources, unrepresentedClaims: proposal.unrepresentedClaims)
+    }
+    static func validatePanoramaAreas(_ areas: [PanoramaArea], regionIDs: Set<String>) throws {
+        var covered: [String]=[]
+        for area in areas {
+            guard !area.id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !area.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !area.regionIDs.isEmpty,
+                  Set(area.regionIDs).count == area.regionIDs.count,
+                  area.regionIDs.allSatisfy({ regionIDs.contains($0) }) else { throw VoiceOSError("全景大区的身份或区域归属无效") }
+            covered.append(contentsOf: area.regionIDs)
+        }
+        guard Set(areas.map(\.id)).count == areas.count,
+              Set(covered) == regionIDs, covered.count == regionIDs.count else { throw VoiceOSError("全景大区没有恰好覆盖每个区域一次") }
     }
     static func validatePanoramaReview(_ review: PanoramaReview, proposal: PanoramaProposal, generation: PanoramaReceipt, verification: PanoramaReceipt) throws {
         guard !generation.responseID.isEmpty, !verification.responseID.isEmpty, generation.responseID != verification.responseID,
