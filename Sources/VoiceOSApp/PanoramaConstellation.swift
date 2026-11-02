@@ -631,6 +631,12 @@ struct PanoramaConstellationView: View {
                 }
             }
             .frame(width: size.width, height: size.height, alignment: .topLeading)
+            .background(ScrollWheelBridge { delta in
+                guard let world = stage?.layout.worldSize, world.width > 0, world.height > 0 else { return }
+                // Positive scrollingDeltaY is an upward two-finger scroll; the
+                // content follows the fingers, so the camera pans the other way.
+                camera = camera.panned(by: CGSize(width: -delta.width, height: -delta.height), canvas: size, world: world)
+            })
             .highPriorityGesture(dragGesture(canvas: size, world: stage?.layout.worldSize ?? .zero))
             .simultaneousGesture(magnifyGesture(canvas: size, world: stage?.layout.worldSize ?? .zero))
             .task(id: contentKey) {
@@ -1006,5 +1012,57 @@ private struct ConstellationLegend: View {
             base = "颜色仅用于区分区域 · 当前没有已核对的跨区域候选联系"
         }
         return hasRecent ? base + " · 右上圆点为近期更新" : base
+    }
+}
+
+/// Two-finger trackpad scrolling pans the constellation. SwiftUI has no
+/// scroll-wheel modifier for a canvas, so a transparent NSView watches local
+/// scroll events and consumes only those landing inside its bounds; pinch
+/// zoom stays on the existing MagnifyGesture.
+private struct ScrollWheelBridge: NSViewRepresentable {
+    let onScroll: (CGSize) -> Void
+
+    func makeNSView(context: Context) -> ScrollWheelView {
+        let view = ScrollWheelView()
+        view.onScroll = onScroll
+        return view
+    }
+
+    func updateNSView(_ nsView: ScrollWheelView, context: Context) {
+        nsView.onScroll = onScroll
+    }
+}
+
+private final class ScrollWheelView: NSView {
+    var onScroll: ((CGSize) -> Void)?
+    private var monitor: Any?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+        guard window != nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self, self.contains(event: event) else { return event }
+            let scale: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10
+            let delta = CGSize(width: event.scrollingDeltaX * scale, height: event.scrollingDeltaY * scale)
+            guard delta.width != 0 || delta.height != 0 else { return event }
+            MainActor.assumeIsolated { self.onScroll?(delta) }
+            return nil
+        }
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow == nil, let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
+        }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    private func contains(event: NSEvent) -> Bool {
+        guard let window, event.window === window else { return false }
+        return bounds.contains(convert(event.locationInWindow, from: nil))
     }
 }
