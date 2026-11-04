@@ -575,7 +575,7 @@ private struct RegionInspectorPanel: View {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 8) {
                     ReaderKicker(
-                        dot: area.map { ReaderAreaTone.color(index: $0.identityIndex, scheme: colorScheme) } ?? palette.accent,
+                        dot: area.map { RegionIdentity.color(index: $0.identityIndex, scheme: colorScheme) } ?? palette.accent,
                         text: area.map { "大区 · " + $0.title } ?? "探索区域 · AI 归纳"
                     )
                     Spacer(minLength: 0)
@@ -636,10 +636,6 @@ private struct RegionInspectorPanel: View {
                     }
                 }
                 Text("AI 归纳，尚未表示本人认可").font(.caption).foregroundStyle(.tertiary)
-                ReaderPrimaryAction(title: "沿这个区域继续追问", isEnabled: hero != nil) {
-                    guard let hero else { return }
-                    actions.perform { actions.discuss(snapshot.id, .question(hero.id)) }
-                }
             }
             .padding(20)
         }
@@ -749,7 +745,7 @@ private struct RelationInspectorPanel: View {
                     }
                 }
                 ReaderKicker(
-                    dot: area.map { ReaderAreaTone.color(index: $0.identityIndex, scheme: colorScheme) } ?? palette.accent,
+                    dot: area.map { RegionIdentity.color(index: $0.identityIndex, scheme: colorScheme) } ?? palette.accent,
                     text: area.map { "大区 · " + $0.title } ?? "候选联系"
                 )
                 Text(relation.label).font(.title3.weight(.semibold))
@@ -875,14 +871,7 @@ private struct ReaderQuoteCard: View {
 
 private struct ReaderPrimaryAction: View {
     let title: String
-    var isEnabled = true
     let action: () -> Void
-
-    init(title: String, isEnabled: Bool = true, action: @escaping () -> Void) {
-        self.title = title
-        self.isEnabled = isEnabled
-        self.action = action
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -895,7 +884,6 @@ private struct ReaderPrimaryAction: View {
                 .padding(8)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!isEnabled)
             Text("带入相关完整表达与节目原文，先打开可编辑的 AI 候选草稿；点击发送后才成为你的提问。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -1047,28 +1035,6 @@ private struct ReaderRelationRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("AI 候选联系：" + relation.label)
-    }
-}
-
-/// Mirrors the map's area tones. RegionIdentity is file-private to
-/// PanoramaConstellation.swift, and the reader dot must match the field color.
-private enum ReaderAreaTone {
-    private static let light: [UInt32] = [
-        0xB37059, 0xAB8045, 0x7D8C4D, 0x578061, 0x457D80,
-        0x5C759E, 0x70699E, 0x8A6382, 0xA16169, 0x877357
-    ]
-    private static let dark: [UInt32] = [
-        0xD69980, 0xD4AD6B, 0xADBA75, 0x87B08F, 0x78B0B3,
-        0x94ABCC, 0xA69ECC, 0xB894B0, 0xCC9199, 0xB8A385
-    ]
-
-    static func color(index: Int, scheme: ColorScheme) -> Color {
-        let value = (scheme == .dark ? dark : light)[index % light.count]
-        return Color(
-            red: Double(value >> 16 & 255) / 255,
-            green: Double(value >> 8 & 255) / 255,
-            blue: Double(value & 255) / 255
-        )
     }
 }
 
