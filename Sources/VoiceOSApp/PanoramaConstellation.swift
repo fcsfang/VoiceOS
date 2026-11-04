@@ -443,15 +443,15 @@ struct ConstellationLayout: Equatable, Sendable {
         return normalized(points, ids: ids)
     }
 
-    /// One field per area, laid out like the mockup: areas sit on an ellipse,
-    /// each packed around its center, and a short relaxation lets the fields
-    /// read as separate organic clusters instead of grid cells. Regions without
-    /// an area fall into a plain strip below the ring. Without any areas the
-    /// force layout above owns the map.
+    /// One field per area, packed like the mockup: each area's regions settle
+    /// into a tight, evenly spaced island, then the islands pack greedily so
+    /// they sit close with visible seams. Regions without an area fall into a
+    /// plain strip below the packed fields. Without any areas the force layout
+    /// above owns the map.
     private static func hierarchicalLayout(model: ConstellationModel) -> ConstellationLayout? {
         guard !model.areas.isEmpty else { return nil }
         let regionIDs=Set(model.regions.map(\.id))
-        var groups: [(id: String, members: [String])]=model.areas.compactMap { area in
+        let groups: [(id: String, members: [String])]=model.areas.compactMap { area in
             let members=area.regionIDs.filter { regionIDs.contains($0) }
             return members.isEmpty ? nil : (area.id, members)
         }
@@ -459,134 +459,116 @@ struct ConstellationLayout: Equatable, Sendable {
         let solo=model.regions.map(\.id).filter { !assigned.contains($0) }.sorted()
         guard !groups.isEmpty || !solo.isEmpty else { return nil }
 
-        // Largest fields first so the big ones take the roomier ring slots.
-        groups=groups.enumerated().sorted { lhs, rhs in
-            lhs.element.members.count == rhs.element.members.count
-                ? lhs.offset < rhs.offset
-                : lhs.element.members.count > rhs.element.members.count
-        }.map(\.element)
+        struct Field {
+            let id: String
+            let members: [String]
+            let offsets: [CGPoint]
+            let radius: CGFloat
+        }
+        var fields=groups.map { group -> Field in
+            let members=group.members.sorted()
+            let offsets=fieldOffsets(count: members.count)
+            let extent=offsets.map { hypot($0.x, $0.y) }.max() ?? 0
+            return Field(id: group.id, members: members, offsets: offsets,
+                         radius: extent + hypot(cardSize.width / 2, cardSize.height / 2) + 18)
+        }
+        // Largest fields first so the big islands claim the center and the
+        // small ones fill the gaps around them.
+        fields.sort { lhs, rhs in
+            lhs.radius == rhs.radius ? lhs.id < rhs.id : lhs.radius > rhs.radius
+        }
 
-        let ringNodes=groups.reduce(0) { $0 + $1.members.count }
-        // Ring room grows with the field sizes, not just their count, so large
-        // fields do not bleed into their neighbours' slots.
-        let ringScale=max(1, pow(CGFloat(ringNodes) / 27, 0.9))
-        let radiusX=620 * ringScale
-        let radiusY=radiusX * 0.645
+        let totalRadius=fields.reduce(0) { $0 + $1.radius }
+        let ringCap=4 * totalRadius
+        var centers: [CGPoint]=[]
+        for field in fields {
+            guard !centers.isEmpty else {
+                centers.append(.zero)
+                continue
+            }
+            var center: CGPoint?
+            var ring: CGFloat=0
+            while center == nil, ring <= ringCap {
+                let samples=max(36, Int(ceil(2 * Double.pi * Double(max(ring, 1)) / 22)))
+                for sample in 0..<samples {
+                    let angle=Double(sample) / Double(samples) * 2 * Double.pi
+                    let candidate=CGPoint(x: CGFloat(cos(angle) * Double(ring)),
+                                          y: CGFloat(sin(angle) * Double(ring)))
+                    let fits=centers.indices.allSatisfy { index in
+                        hypot(candidate.x - centers[index].x, candidate.y - centers[index].y)
+                            >= field.radius + fields[index].radius + 26
+                    }
+                    if fits {
+                        center=candidate
+                        break
+                    }
+                }
+                ring += 10
+            }
+            // The cap is four times the total radii, so this fallback only runs
+            // on a degenerate pack; angle 0 keeps it deterministic.
+            centers.append(center ?? CGPoint(x: ringCap, y: 0))
+        }
+
+        // The solo strip starts at the pack's left edge and hangs below it, so
+        // it never interleaves with an area island.
+        let packedMinX=zip(fields, centers).map { $0.1.x - $0.0.radius }.min() ?? 0
+        let packedMaxY=zip(fields, centers).map { $0.1.y + $0.0.radius }.max() ?? 0
 
         var points: [String: CGPoint]=[:]
-        var areaCenters: [String: CGPoint]=[:]
-        for (index, group) in groups.enumerated() {
-            let angle=Double(index) / Double(groups.count) * 2 * .pi - .pi / 2
-            let center=CGPoint(x: cos(angle) * radiusX, y: sin(angle) * radiusY)
-            areaCenters[group.id]=center
-            let members=group.members.sorted()
-            for (i, id) in members.enumerated() {
-                let b=Double(i) / Double(members.count) * 2 * .pi + 0.5
-                points[id]=CGPoint(x: center.x + cos(b) * (50 + Double(i) * 9),
-                                   y: center.y + sin(b) * (40 + Double(i) * 7))
+        for (field, center) in zip(fields, centers) {
+            for (id, offset) in zip(field.members, field.offsets) {
+                points[id]=CGPoint(x: center.x + offset.x, y: center.y + offset.y)
             }
         }
         let columns=8
         let stripStep=cardSize.width + cardGap
         for (i, id) in solo.enumerated() {
-            points[id]=CGPoint(x: -radiusX + CGFloat(i % columns) * stripStep,
-                               y: radiusY + 380 + CGFloat(i / columns) * (cardSize.height + cardGap))
+            points[id]=CGPoint(x: packedMinX + CGFloat(i % columns) * stripStep,
+                               y: packedMaxY + 60 + CGFloat(i / columns) * (cardSize.height + cardGap))
         }
 
         let ids=model.regions.map(\.id).sorted()
-        let pinned=Set(solo)
-        let areaOf=Dictionary(uniqueKeysWithValues: model.areas.flatMap { area in
-            area.regionIDs.map { ($0, area.id) }
-        })
-        let minDistance: CGFloat=200
-        let edgeTarget: CGFloat=285
-        let edgeStrength: CGFloat=0.03
-        let cohesion: CGFloat=0.02
-
-        for _ in 0..<240 {
-            for i in 0..<ids.count {
-                for j in (i + 1)..<ids.count {
-                    let a=ids[i], b=ids[j]
-                    guard var pa=points[a], var pb=points[b] else { continue }
-                    var dx=pa.x - pb.x
-                    var dy=pa.y - pb.y
-                    var distance=sqrt(dx * dx + dy * dy)
-                    if distance < 0.001 { dx=0.001; dy=0.001; distance=sqrt(dx * dx + dy * dy) }
-                    guard distance < minDistance else { continue }
-                    let force=(minDistance - distance) / distance * 0.5
-                    if !pinned.contains(a) { pa.x += dx * force; pa.y += dy * force }
-                    if !pinned.contains(b) { pb.x -= dx * force; pb.y -= dy * force }
-                    points[a]=pa
-                    points[b]=pb
-                }
-            }
-            for edge in model.edges {
-                let a=edge.pair.a, b=edge.pair.b
-                guard var pa=points[a], var pb=points[b] else { continue }
-                let dx=pb.x - pa.x
-                let dy=pb.y - pa.y
-                let distance=max(sqrt(dx * dx + dy * dy), 0.001)
-                let sameArea=areaOf[a] != nil && areaOf[a] == areaOf[b]
-                let force=(distance - edgeTarget) / distance * edgeStrength * (sameArea ? 1 : 0.4)
-                if !pinned.contains(a) { pa.x += dx * force; pa.y += dy * force }
-                if !pinned.contains(b) { pb.x -= dx * force; pb.y -= dy * force }
-                points[a]=pa
-                points[b]=pb
-            }
-            for id in ids where !pinned.contains(id) {
-                guard let areaID=areaOf[id], let center=areaCenters[areaID], var point=points[id] else { continue }
-                point.x += (center.x - point.x) * cohesion
-                point.y += (center.y - point.y) * cohesion
-                points[id]=point
-            }
-        }
-
-        // Nudge whole fields apart while their member circles overlap, so hulls
-        // read as separate islands instead of interleaving. The radii are
-        // conservative; the goal is a visible seam, not a rigid pack.
-        struct Field { let ids: [String]; let origin: CGPoint; var center: CGPoint; let radius: CGFloat }
-        var fields: [Field]=[]
-        for group in groups {
-            let fieldPoints=group.members.compactMap { points[$0] }
-            guard !fieldPoints.isEmpty else { continue }
-            let origin=CGPoint(x: fieldPoints.reduce(0) { $0 + $1.x } / CGFloat(fieldPoints.count),
-                               y: fieldPoints.reduce(0) { $0 + $1.y } / CGFloat(fieldPoints.count))
-            let extent=fieldPoints.map { hypot($0.x - origin.x, $0.y - origin.y) }.max() ?? 0
-            fields.append(Field(ids: group.members, origin: origin, center: origin, radius: extent + 110))
-        }
-        let fieldGap: CGFloat=30
-        for _ in 0..<60 {
-            var moved=false
-            for i in 0..<fields.count {
-                for j in (i + 1)..<fields.count {
-                    var dx=fields[j].center.x - fields[i].center.x
-                    var dy=fields[j].center.y - fields[i].center.y
-                    var distance=hypot(dx, dy)
-                    let required=fields[i].radius + fields[j].radius + fieldGap
-                    guard distance < required else { continue }
-                    if distance < 1 { dx=1; dy=0; distance=1 }
-                    let shift=(required - distance) / 2
-                    fields[i].center.x -= dx / distance * shift
-                    fields[i].center.y -= dy / distance * shift
-                    fields[j].center.x += dx / distance * shift
-                    fields[j].center.y += dy / distance * shift
-                    moved=true
-                }
-            }
-            if !moved { break }
-        }
-        for field in fields {
-            let shift=CGPoint(x: field.center.x - field.origin.x, y: field.center.y - field.origin.y)
-            guard shift != .zero else { continue }
-            for id in field.ids {
-                points[id]?.x += shift.x
-                points[id]?.y += shift.y
-            }
-        }
-
         var placed=ids.map { points[$0] ?? .zero }
         separateOverlaps(&placed)
         return normalized(placed, ids: ids)
+    }
+
+    /// Phyllotaxis seed plus pairwise separation gives every area a tight,
+    /// deterministic, RNG-free local layout for any member count.
+    private static func fieldOffsets(count: Int) -> [CGPoint] {
+        var offsets=(0..<count).map { index -> CGPoint in
+            let angle=Double(index) * 2.39996322972865332
+            let radius=100 * sqrt(Double(index))
+            return CGPoint(x: CGFloat(cos(angle) * radius), y: CGFloat(sin(angle) * radius))
+        }
+        let minimumDistance: CGFloat=196
+        guard count > 1 else { return offsets }
+        for _ in 0..<200 {
+            for i in 0..<(count - 1) {
+                for j in (i + 1)..<count {
+                    var dx=offsets[i].x - offsets[j].x
+                    var dy=offsets[i].y - offsets[j].y
+                    var distance=hypot(dx, dy)
+                    if distance < 0.001 {
+                        dx=0.001
+                        dy=0
+                        distance=0.001
+                    }
+                    guard distance < minimumDistance else { continue }
+                    let force=(minimumDistance - distance) / distance * 0.5
+                    offsets[i].x += dx * force
+                    offsets[i].y += dy * force
+                    offsets[j].x -= dx * force
+                    offsets[j].y -= dy * force
+                }
+            }
+            for i in 0..<count {
+                offsets[i].x *= 0.98
+                offsets[i].y *= 0.98
+            }
+        }
+        return offsets
     }
 
     private static func coldSeed(index: Int, count: Int) -> CGPoint {
