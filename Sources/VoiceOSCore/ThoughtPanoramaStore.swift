@@ -351,9 +351,18 @@ extension VoiceOSStore {
         try Task.checkCancellation()
         try requirePanoramaManifest(whole)
         let json=try Self.relevanceJSON(input)
-        let digest=Self.panoramaStepDigest(json,identity: identity)
-        if let row=try db.query("SELECT result_json,receipt_json FROM panorama_steps WHERE attempt_id=? AND stage=? AND scope_id=? AND input_digest=? AND state='completed' ORDER BY rowid DESC LIMIT 1", [attemptID,stage,scopeID,digest]).first,
-           let result=row["result_json"], let receipt=row["receipt_json"] {
+        // Global steps are keyed on evidence, not on the attempt row that paid
+        // for them, so unchanged evidence replays across attempts as well.
+        let evidenceScoped=input as? any PanoramaEvidenceScopedInput
+        let stepJSON=try evidenceScoped?.panoramaEvidenceJSON() ?? json
+        let digest=Self.panoramaStepDigest(stepJSON,identity: identity)
+        let cached: [String:String]?
+        if evidenceScoped != nil {
+            cached=try db.query("SELECT result_json,receipt_json FROM panorama_steps WHERE stage=? AND scope_id=? AND input_digest=? AND state='completed' ORDER BY rowid DESC LIMIT 1", [stage,scopeID,digest]).first
+        } else {
+            cached=try db.query("SELECT result_json,receipt_json FROM panorama_steps WHERE attempt_id=? AND stage=? AND scope_id=? AND input_digest=? AND state='completed' ORDER BY rowid DESC LIMIT 1", [attemptID,stage,scopeID,digest]).first
+        }
+        if let row=cached, let result=row["result_json"], let receipt=row["receipt_json"] {
             let decoded=try JSONDecoder().decode(Result.self, from: Data(result.utf8))
             let savedReceipt=try JSONDecoder().decode(PanoramaReceipt.self, from: Data(receipt.utf8))
             try validate(decoded,savedReceipt)
@@ -362,7 +371,7 @@ extension VoiceOSStore {
         // Only a cache miss reaches the provider; a replayed receipt costs nothing.
         try budget?.spend()
         let id=UUID().uuidString
-        try db.execute("INSERT INTO panorama_steps(id,attempt_id,stage,scope_id,input_digest,state,input_json,created_at) VALUES(?,?,?,?,?,'running',?,?)", [id,attemptID,stage,scopeID,digest,json,Self.now()])
+        try db.execute("INSERT INTO panorama_steps(id,attempt_id,stage,scope_id,input_digest,state,input_json,created_at) VALUES(?,?,?,?,?,'running',?,?)", [id,attemptID,stage,scopeID,digest,stepJSON,Self.now()])
         var receivedResult: String?, receivedReceipt: String?
         do {
             let (raw,receipt)=try await operation()
@@ -386,7 +395,7 @@ extension VoiceOSStore {
         let proposals=units.map { PanoramaUnitProposal(unitID: $0.unitID, proposal: $0.proposal) }
         try publishPanoramaPhase(.synthesis, units: units, input: input, attemptID: attemptID)
         let generated: (PanoramaProposal, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.synthesize", scopeID: "all",
-            input: PanoramaSynthesisInput(input: input, proposals: proposals), whole: input, identity: port.synthesisConfigurationIdentity,
+            input: PanoramaGlobalSynthesisInput(input: input, proposals: proposals), whole: input, identity: port.synthesisConfigurationIdentity,
             operation: { try await port.synthesize(proposals, input: input) }, validate: { proposal, _ in
                 _ = try Self.validatePanorama(proposal, input: input)
             }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
@@ -440,7 +449,7 @@ extension VoiceOSStore {
             let scoped=try Self.panoramaScope(input, sourceIDs: batch.sourceIDs)
             let selected=Self.panoramaProjection(proposal, input: scoped, questionIDs: Set(batch.questionIDs), relationIDs: [])
             let result: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.question", scopeID: batch.scopeID,
-                input: PanoramaProposalInput(input: scoped, proposal: selected), whole: input, identity: port.configurationIdentity,
+                input: PanoramaGlobalEvidenceReviewInput(input: scoped, proposal: selected), whole: input, identity: port.configurationIdentity,
                 operation: { try await port.verifyEvidence(selected, input: scoped) }, validate: { review, receipt in
                     _ = try Self.validatePanorama(selected, input: scoped)
                     try Self.validatePanoramaStageReview(review, proposal: selected, input: scoped, generation: generation, verification: receipt)
@@ -451,7 +460,7 @@ extension VoiceOSStore {
             let scoped=try Self.panoramaScope(input, sourceIDs: batch.sourceIDs)
             let selected=Self.panoramaProjection(proposal, input: scoped, questionIDs: Set(batch.questionIDs), relationIDs: Set(batch.relationIDs))
             let result: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.relation", scopeID: batch.scopeID,
-                input: PanoramaProposalInput(input: scoped, proposal: selected), whole: input, identity: port.configurationIdentity,
+                input: PanoramaGlobalEvidenceReviewInput(input: scoped, proposal: selected), whole: input, identity: port.configurationIdentity,
                 operation: { try await port.verifyEvidence(selected, input: scoped) }, validate: { review, receipt in
                     _ = try Self.validatePanorama(selected, input: scoped)
                     try Self.validatePanoramaStageReview(review, proposal: selected, input: scoped, generation: generation, verification: receipt)
