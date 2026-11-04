@@ -591,7 +591,12 @@ private struct RegionInspectorPanel: View {
                     VStack(alignment: .leading, spacing: 10) {
                         ReaderSectionLabel("值得先看")
                         Text(hero.title).font(.system(size: 15, weight: .semibold)).lineLimit(3)
-                        if let quote = hero.evidence.first?.quote {
+                        if !hero.summary.isEmpty {
+                            Text(hero.summary)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        } else if let quote = hero.evidence.first?.quote {
                             Text("“" + quote + "”")
                                 .font(.system(size: 12.5))
                                 .foregroundStyle(.secondary)
@@ -682,6 +687,7 @@ private struct QuestionInspectorPanel: View {
                     question: nil,
                     evidence: question.evidence,
                     sources: snapshot.input.sources,
+                    claims: snapshot.input.claims,
                     firstLineLimit: 4,
                     actions: actions,
                     openQuestion: nil
@@ -756,6 +762,7 @@ private struct RelationInspectorPanel: View {
                     question: fromQuestion,
                     evidence: relation.fromEvidence,
                     sources: snapshot.input.sources,
+                    claims: snapshot.input.claims,
                     firstLineLimit: 3,
                     actions: actions,
                     openQuestion: { selection = .question(relation.from) }
@@ -765,6 +772,7 @@ private struct RelationInspectorPanel: View {
                     question: toQuestion,
                     evidence: relation.toEvidence,
                     sources: snapshot.input.sources,
+                    claims: snapshot.input.claims,
                     firstLineLimit: 3,
                     actions: actions,
                     openQuestion: { selection = .question(relation.to) }
@@ -787,6 +795,7 @@ private struct ReaderEvidenceBlock: View {
     let question: PanoramaQuestion?
     let evidence: [PanoramaEvidence]
     let sources: [PanoramaSource]
+    let claims: [PanoramaClaim]
     let firstLineLimit: Int
     let actions: ReaderActions
     let openQuestion: (() -> Void)?
@@ -810,7 +819,7 @@ private struct ReaderEvidenceBlock: View {
                 .accessibilityLabel("AI 归纳问题：" + question.title)
             }
             if let first = pairs.first {
-                ReaderQuoteCard(item: first.item, source: first.source, lineLimit: firstLineLimit, actions: actions)
+                ReaderQuoteCard(item: first.item, source: first.source, claims: claims, lineLimit: firstLineLimit, actions: actions)
             } else {
                 Text("尚无原话").font(.system(size: 13)).foregroundStyle(.secondary)
             }
@@ -818,7 +827,7 @@ private struct ReaderEvidenceBlock: View {
                 ReaderDisclosure(title: "其他 \(pairs.count - 1) 处原话", expanded: $showsMore) {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(Array(pairs.dropFirst().enumerated()), id: \.offset) { _, pair in
-                            ReaderQuoteCard(item: pair.item, source: pair.source, lineLimit: 3, actions: actions)
+                            ReaderQuoteCard(item: pair.item, source: pair.source, claims: claims, lineLimit: 3, actions: actions)
                         }
                     }
                 }
@@ -831,6 +840,7 @@ private struct ReaderQuoteCard: View {
     @Environment(\.workspacePalette) private var palette
     let item: PanoramaEvidence
     let source: PanoramaSource
+    let claims: [PanoramaClaim]
     let lineLimit: Int
     let actions: ReaderActions
 
@@ -842,30 +852,42 @@ private struct ReaderQuoteCard: View {
                 .font(.system(size: 13))
                 .lineLimit(lineLimit)
                 .textSelection(.enabled)
-            Text(source.occurredAt + " · " + source.title)
+            Text(String(source.occurredAt.prefix(10)) + " · " + readerEvidenceTime(item, source: source) + " · " + source.title)
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Text(readerEvidenceTime(item, source: source) + " · 当前原文第 \(item.start)–\(item.end) 字符")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
             HStack(spacing: 12) {
                 Button("完整原文") { actions.perform { actions.openSource(item.sourceID) } }
                 Button("更正原文") { actions.perform { actions.correctSource(item.sourceID) } }
+                claimCorrectionMenu
                 Spacer(minLength: 0)
             }
             .font(.caption)
             .buttonStyle(.borderless)
-            ForEach(item.claimIDs, id: \.self) { id in
-                Button("更正这条理解或归属") { actions.perform { actions.correctClaim(id) } }
-                    .font(.caption)
-                    .buttonStyle(.borderless)
-            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.selection.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private var claimCorrectionMenu: some View {
+        if item.claimIDs.count == 1, let id = item.claimIDs.first {
+            Button("更正理解或归属") { actions.perform { actions.correctClaim(id) } }
+        } else if item.claimIDs.count > 1 {
+            Menu("更正理解（\(item.claimIDs.count)）") {
+                ForEach(Array(item.claimIDs.enumerated()), id: \.offset) { index, id in
+                    Button(claimLabel(id, index: index)) { actions.perform { actions.correctClaim(id) } }
+                }
+            }
+        }
+    }
+
+    private func claimLabel(_ id: String, index: Int) -> String {
+        let statement = claims.first { $0.id == id }?.statement ?? ""
+        guard !statement.isEmpty else { return "第 \(index + 1) 条理解" }
+        return statement.count > 24 ? String(statement.prefix(24)) + "…" : statement
     }
 }
 
