@@ -429,12 +429,29 @@ extension VoiceOSStore {
         try Task.checkCancellation()
         try requirePanoramaManifest(input)
         let coverage=try Self.validatePanorama(proposal, input: input)
+        // Areas are a separate, small call: a grouping failure must not cost the
+        // fully reviewed regions and relations, same as on the draft path. The
+        // completed snapshot carries them so the home map keeps area layout.
+        var completedAreas: [PanoramaArea]=[]
+        var areaReceipt: PanoramaReceipt?
+        do {
+            let request=Self.panoramaAreaRequest(proposal)
+            let result: ([PanoramaArea], PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.areas", scopeID: "all",
+                input: request, whole: input, identity: "panorama-areas-v1",
+                operation: { try await port.groupAreas(proposal, input: input) },
+                validate: { areas, _ in try Self.validatePanoramaAreas(areas, regionIDs: Set(proposal.regions.map(\.id))) })
+            completedAreas=result.0
+            areaReceipt=result.1
+        } catch {}
+        let completedProposal=PanoramaProposal(regions: proposal.regions, questions: proposal.questions, relations: proposal.relations,
+            unrepresentedSources: proposal.unrepresentedSources, unrepresentedClaims: proposal.unrepresentedClaims, areas: completedAreas)
         let unitReceipts=units.flatMap { [PanoramaStepReceipt(stage: "unit.generate", scopeID: $0.unitID, receipt: $0.generation), PanoramaStepReceipt(stage: "unit.verify", scopeID: $0.unitID, receipt: $0.verification)] }
         let receipts=unitReceipts + [.init(stage: "global.synthesize", scopeID: "all", receipt: generated.1)]
             + (issues.isEmpty ? [] : [PanoramaStepReceipt(stage: "global.repair", scopeID: "all", receipt: candidate.1)])
             + reviews.map { PanoramaStepReceipt(stage: $0.stage, scopeID: $0.scopeID, receipt: $0.receipt) }
+            + (areaReceipt.map { [PanoramaStepReceipt(stage: "global.areas", scopeID: "all", receipt: $0)] } ?? [])
             + [.init(stage: "global.consistency", scopeID: "all", receipt: final.1)]
-        let snapshot=PanoramaSnapshot(id: attemptID, createdAt: Self.now(), input: input, proposal: proposal, coverage: coverage,
+        let snapshot=PanoramaSnapshot(id: attemptID, createdAt: Self.now(), input: input, proposal: completedProposal, coverage: coverage,
             generation: candidate.1, verification: final.1, review: final.0,
             workflow: .init(phase: .completed, verifiedUnitIDs: units.map(\.unitID), totalUnitCount: input.units.count, receipts: receipts))
         try db.execute("UPDATE panorama_attempts SET state='completed',snapshot_json=?,generation_receipt=?,verification_receipt=?,error=NULL WHERE id=?", [try Self.relevanceJSON(snapshot),try Self.relevanceJSON(candidate.1),try Self.relevanceJSON(final.1),attemptID])
