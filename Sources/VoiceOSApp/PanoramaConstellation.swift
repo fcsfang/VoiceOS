@@ -44,7 +44,7 @@ struct ConstellationSearchMatches: Equatable, Sendable {
 // MARK: - Region identity
 
 /// Stable hue per region id. Color tells regions apart and never groups them.
-private enum RegionIdentity {
+enum RegionIdentity {
     private struct RGB: Sendable {
         let red: Double
         let green: Double

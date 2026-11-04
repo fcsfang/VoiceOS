@@ -76,10 +76,53 @@ struct ThoughtPanoramaView: View {
 
     @ViewBuilder
     private func readerContent(_ snapshot: PanoramaSnapshot, performAction: @escaping (@escaping () -> Void) -> Void) -> some View {
+        let actions = ReaderActions(
+            perform: performAction,
+            openSource: openSource,
+            correctSource: correctSource,
+            correctClaim: correctClaim,
+            discuss: discuss
+        )
         if let selection {
-            inspector(snapshot, selection: selection, performAction: performAction)
+            switch selection {
+            case .question(let id):
+                if let question = snapshot.proposal.questions.first(where: { $0.id == id }) {
+                    QuestionInspectorPanel(
+                        snapshot: snapshot,
+                        question: question,
+                        backRegion: focusedRegionID.flatMap { regionID in
+                            snapshot.proposal.regions.first { $0.id == regionID }
+                        },
+                        selection: $selection,
+                        focusedRegionID: $focusedRegionID,
+                        actions: actions
+                    )
+                    .id(id)
+                }
+            case .relation(let id):
+                if let relation = snapshot.proposal.relations.first(where: { $0.id == id }) {
+                    RelationInspectorPanel(
+                        snapshot: snapshot,
+                        relation: relation,
+                        backRegion: focusedRegionID.flatMap { regionID in
+                            snapshot.proposal.regions.first { $0.id == regionID }
+                        },
+                        selection: $selection,
+                        focusedRegionID: $focusedRegionID,
+                        actions: actions
+                    )
+                    .id(id)
+                }
+            }
         } else if let focusedRegionID, let region = snapshot.proposal.regions.first(where: { $0.id == focusedRegionID }) {
-            regionInspector(snapshot, region: region)
+            RegionInspectorPanel(
+                snapshot: snapshot,
+                region: region,
+                selection: $selection,
+                focusedRegionID: $focusedRegionID,
+                actions: actions
+            )
+            .id(region.id)
         }
     }
 
@@ -414,148 +457,6 @@ struct ThoughtPanoramaView: View {
         }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func regionInspector(_ snapshot: PanoramaSnapshot, region: PanoramaRegion) -> some View {
-        let model = ConstellationModel(snapshot: snapshot, now: .now)
-        let questions = (model.regionByID[region.id]?.questionIDs ?? []).compactMap { model.questionByID[$0] }
-        let incident = snapshot.proposal.relations.filter { relation in
-            guard let from = model.questionByID[relation.from], let to = model.questionByID[relation.to] else { return false }
-            return from.regionID == region.id || to.regionID == region.id
-        }
-        let evidenceCount = questions.reduce(0) { $0 + $1.evidence.count }
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HStack {
-                    Text("探索区域 · AI 归纳").font(.caption).foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    WorkspaceIconButton(systemImage: "xmark", label: "关闭区域摘要") { focusedRegionID = nil }
-                }
-                Text(region.title).font(.title3.weight(.semibold)).textSelection(.enabled)
-                Text(region.summary).font(.system(size: 14)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Text("\(questions.count) 个问题 · \(evidenceCount) 处原话").font(.caption).foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(questions) { question in
-                        Button { self.selection = .question(question.id) } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(question.title).font(.system(size: 14, weight: .medium)).multilineTextAlignment(.leading)
-                                Text("\(question.evidence.count) 处原话").font(.caption).foregroundStyle(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                            .background(palette.selection.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
-                        }
-                        .buttonStyle(.plain)
-                        .help(question.title)
-                        .accessibilityLabel("AI 归纳问题：" + question.title)
-                    }
-                }
-                if incident.isEmpty {
-                    Text("当前区域尚无候选联系。").font(.system(size: 13)).foregroundStyle(.secondary)
-                } else {
-                    Text("与这些问题相连的候选联系").font(.system(size: 14, weight: .semibold))
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(incident) { relation in
-                            Button { self.selection = .relation(relation.id) } label: {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack(alignment: .top, spacing: 6) {
-                                        Text(model.questionByID[relation.from]?.title ?? "")
-                                        Image(systemName: "arrow.left.arrow.right").foregroundStyle(.secondary)
-                                        Text(model.questionByID[relation.to]?.title ?? "")
-                                    }.font(.system(size: 13)).foregroundStyle(.secondary)
-                                    Text(relation.label).font(.system(size: 14, weight: .medium))
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(12)
-                                .background(palette.selection.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 12).stroke(
-                                        self.selection == .relation(relation.id) ? palette.accent : palette.border,
-                                        style: StrokeStyle(dash: [5, 4])
-                                    )
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("AI 候选联系：" + relation.label)
-                        }
-                    }
-                    Text("颜色仅用于区分区域 · 虚线 · AI 候选联系，尚待核对").font(.system(size: 13)).foregroundStyle(.secondary)
-                }
-            }.padding(20)
-        }
-    }
-
-    private func inspector(_ snapshot: PanoramaSnapshot, selection: PanoramaSelection, performAction: @escaping (@escaping () -> Void) -> Void) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                if let focusedRegionID, let region = snapshot.proposal.regions.first(where: { $0.id == focusedRegionID }) {
-                    Button { self.selection = nil } label: {
-                        Label("返回「\(region.title)」", systemImage: "chevron.left").font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel("返回区域：" + region.title)
-                }
-                HStack {
-                    Text("核对这条线索").font(.headline)
-                    Spacer()
-                    WorkspaceIconButton(systemImage: "xmark", label: "关闭检查器") {
-                        self.selection = nil
-                        self.focusedRegionID = nil
-                    }
-                }
-                switch selection {
-                case .question(let id):
-                    if let question = snapshot.proposal.questions.first(where: { $0.id == id }) {
-                        Text(question.title).font(.title3.weight(.semibold))
-                        Text("AI 归纳 · 未表示本人认可").font(.caption).foregroundStyle(.secondary)
-                        Text(question.summary)
-                        evidenceList(question.evidence, snapshot: snapshot, performAction: performAction)
-                        ForEach(snapshot.proposal.relations.filter { $0.from == id || $0.to == id }) { relation in
-                            Button("候选联系 · " + relation.label) { self.selection = .relation(relation.id) }
-                        }
-                    }
-                case .relation(let id):
-                    if let relation = snapshot.proposal.relations.first(where: { $0.id == id }) {
-                        Text(relation.label).font(.title3.weight(.semibold))
-                        Text("AI 候选解释 · 尚待核对").font(.caption).foregroundStyle(palette.warning)
-                        Text(relation.explanation).textSelection(.enabled)
-                        ForEach(snapshot.proposal.questions.filter { $0.id == relation.from || $0.id == relation.to }) { question in
-                            Button(question.title) { self.selection = .question(question.id) }
-                        }
-                        Text("一侧原话").font(.headline)
-                        evidenceList(relation.fromEvidence, snapshot: snapshot, performAction: performAction)
-                        Text("另一侧原话").font(.headline)
-                        evidenceList(relation.toEvidence, snapshot: snapshot, performAction: performAction)
-                        Text("对联系有异议，可沿线讨论。原话与理解更正分别返回材料的正式更正入口。").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Button { performAction { discuss(snapshot.id, selection) } } label: { HStack { Text("沿这条线索继续"); Spacer(); Image(systemName: "arrow.right") }.padding(8) }.buttonStyle(.borderedProminent)
-                Text("带入相关完整表达与节目原文，先打开可编辑的 AI 候选草稿；点击发送后才成为你的提问。").font(.caption).foregroundStyle(.secondary)
-            }.padding(20)
-        }
-    }
-
-    private func evidenceList(_ evidence: [PanoramaEvidence], snapshot: PanoramaSnapshot, performAction: @escaping (@escaping () -> Void) -> Void) -> some View {
-        ForEach(Array(evidence.enumerated()), id: \.offset) { _, item in
-            if let source = snapshot.input.sources.first(where: { $0.id == item.sourceID }) {
-                VStack(alignment: .leading, spacing: 9) {
-                    Text(source.transcript.origin == "user" && source.transcript.speaker == "user" ? "我的原话" : "外部 / AI 来源 · 不代表本人认可").font(.caption.weight(.medium))
-                    Text("“" + item.quote + "”").textSelection(.enabled)
-                    Text(source.occurredAt + " · " + source.title).font(.caption).foregroundStyle(.secondary)
-                    Text(evidenceTime(item, source: source) + " · 当前原文第 \(item.start)–\(item.end) 字符").font(.caption2).foregroundStyle(.secondary)
-                    HStack { Button("完整原文") { performAction { openSource(item.sourceID) } }; Button("更正原文") { performAction { correctSource(item.sourceID) } } }
-                    ForEach(item.claimIDs, id: \.self) { id in Button("更正这条理解或归属") { performAction { correctClaim(id) } } }
-                }.padding(13).frame(maxWidth: .infinity, alignment: .leading).background(palette.selection.opacity(0.5), in: RoundedRectangle(cornerRadius: 13))
-            }
-        }
-    }
-
-    private func evidenceTime(_ item: PanoramaEvidence, source: PanoramaSource) -> String {
-        let spans = source.transcript.spans.filter { $0.textEnd > item.start && $0.textStart < item.end }
-        guard let start = spans.compactMap(\.startMS).min(), let end = spans.compactMap(\.endMS).max() else { return "文字来源" }
-        func time(_ ms: Int) -> String { String(format: "%d:%02d", ms / 60000, (ms / 1000) % 60) }
-        return time(start) + "–" + time(end)
-    }
-
     private func dependencyCount(_ input: PanoramaInput) -> Int {
         Set(input.units.flatMap(\.dependencyIDs)).count
     }
@@ -638,6 +539,532 @@ struct ThoughtPanoramaView: View {
             }
         }
     }
+}
+
+// MARK: - Reader panels
+
+private struct ReaderActions {
+    let perform: (@escaping () -> Void) -> Void
+    let openSource: (String) -> Void
+    let correctSource: (String) -> Void
+    let correctClaim: (String) -> Void
+    let discuss: (String, PanoramaSelection) -> Void
+}
+
+private struct RegionInspectorPanel: View {
+    @Environment(\.workspacePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
+    let snapshot: PanoramaSnapshot
+    let region: PanoramaRegion
+    @Binding var selection: PanoramaSelection?
+    @Binding var focusedRegionID: String?
+    let actions: ReaderActions
+    @State private var showsRelations = false
+
+    var body: some View {
+        let model = ConstellationModel(snapshot: snapshot, now: .now)
+        let questions = (model.regionByID[region.id]?.questionIDs ?? []).compactMap { model.questionByID[$0] }
+        let incident = snapshot.proposal.relations.filter { relation in
+            guard let from = model.questionByID[relation.from], let to = model.questionByID[relation.to] else { return false }
+            return from.regionID == region.id || to.regionID == region.id
+        }
+        let evidenceCount = questions.reduce(0) { $0 + $1.evidence.count }
+        let area = model.areas.first { $0.regionIDs.contains(region.id) }
+        let hero = questions.first
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 8) {
+                    ReaderKicker(
+                        dot: area.map { RegionIdentity.color(index: $0.identityIndex, scheme: colorScheme) } ?? palette.accent,
+                        text: area.map { "大区 · " + $0.title } ?? "探索区域 · AI 归纳"
+                    )
+                    Spacer(minLength: 0)
+                    WorkspaceIconButton(systemImage: "xmark", label: "关闭区域摘要") { focusedRegionID = nil }
+                }
+                Text(region.title).font(.title3.weight(.semibold)).textSelection(.enabled)
+                Text("\(questions.count) 个问题 · \(evidenceCount) 处原话 · \(incident.count) 条候选联系")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ReaderCappedText(text: region.summary, size: 14)
+                Divider()
+                if let hero {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ReaderSectionLabel("值得先看")
+                        Text(hero.title).font(.system(size: 15, weight: .semibold)).lineLimit(3)
+                        if !hero.summary.isEmpty {
+                            Text(hero.summary)
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        } else if let quote = hero.evidence.first?.quote {
+                            Text("“" + quote + "”")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        Text("\(hero.evidence.count) 处原话")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        Button { selection = .question(hero.id) } label: {
+                            Text("查看这条线索")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(palette.accent)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("查看这条线索：" + hero.title)
+                    }
+                } else {
+                    Text("这个区域还没有问题。").font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+                if questions.count > 1 {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ReaderSectionLabel("其他问题 · \(questions.count - 1)")
+                            .padding(.bottom, 2)
+                        ForEach(Array(questions.dropFirst().enumerated()), id: \.offset) { index, question in
+                            if index > 0 { Divider() }
+                            ReaderQuestionRow(question: question) { selection = .question(question.id) }
+                        }
+                    }
+                }
+                if !incident.isEmpty {
+                    ReaderDisclosure(title: "候选联系 · \(incident.count)", expanded: $showsRelations) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(incident.enumerated()), id: \.offset) { index, relation in
+                                if index > 0 { Divider() }
+                                ReaderRelationRow(
+                                    relation: relation,
+                                    fromTitle: model.questionByID[relation.from]?.title ?? "",
+                                    toTitle: model.questionByID[relation.to]?.title ?? ""
+                                ) { selection = .relation(relation.id) }
+                            }
+                        }
+                    }
+                }
+                Text("AI 归纳，尚未表示本人认可").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(20)
+        }
+    }
+}
+
+private struct QuestionInspectorPanel: View {
+    let snapshot: PanoramaSnapshot
+    let question: PanoramaQuestion
+    let backRegion: PanoramaRegion?
+    @Binding var selection: PanoramaSelection?
+    @Binding var focusedRegionID: String?
+    let actions: ReaderActions
+    @State private var showsRelations = false
+
+    var body: some View {
+        let model = ConstellationModel(snapshot: snapshot, now: .now)
+        let relations = snapshot.proposal.relations.filter { $0.from == question.id || $0.to == question.id }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 8) {
+                    if let backRegion {
+                        Button { selection = nil } label: {
+                            Label("返回「\(backRegion.title)」", systemImage: "chevron.left")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("返回区域：" + backRegion.title)
+                    }
+                    Spacer(minLength: 0)
+                    WorkspaceIconButton(systemImage: "xmark", label: "关闭检查器") {
+                        selection = nil
+                        focusedRegionID = nil
+                    }
+                }
+                Text(question.title).font(.title3.weight(.semibold))
+                Text("AI 归纳 · 未表示本人认可 · \(question.evidence.count) 处原话")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ReaderCappedText(text: question.summary, size: 13)
+                ReaderEvidenceBlock(
+                    label: "原话",
+                    question: nil,
+                    evidence: question.evidence,
+                    sources: snapshot.input.sources,
+                    claims: snapshot.input.claims,
+                    firstLineLimit: 4,
+                    actions: actions,
+                    openQuestion: nil
+                )
+                if !relations.isEmpty {
+                    ReaderDisclosure(title: "候选联系 · \(relations.count)", expanded: $showsRelations) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(relations.enumerated()), id: \.offset) { index, relation in
+                                if index > 0 { Divider() }
+                                ReaderRelationRow(
+                                    relation: relation,
+                                    fromTitle: model.questionByID[relation.from]?.title ?? "",
+                                    toTitle: model.questionByID[relation.to]?.title ?? ""
+                                ) { selection = .relation(relation.id) }
+                            }
+                        }
+                    }
+                }
+                ReaderPrimaryAction(title: "沿这条线索继续") {
+                    actions.perform { actions.discuss(snapshot.id, .question(question.id)) }
+                }
+            }
+            .padding(20)
+        }
+    }
+}
+
+private struct RelationInspectorPanel: View {
+    @Environment(\.workspacePalette) private var palette
+    @Environment(\.colorScheme) private var colorScheme
+    let snapshot: PanoramaSnapshot
+    let relation: PanoramaRelation
+    let backRegion: PanoramaRegion?
+    @Binding var selection: PanoramaSelection?
+    @Binding var focusedRegionID: String?
+    let actions: ReaderActions
+
+    var body: some View {
+        let model = ConstellationModel(snapshot: snapshot, now: .now)
+        let fromQuestion = model.questionByID[relation.from]
+        let toQuestion = model.questionByID[relation.to]
+        let anchor = fromQuestion.flatMap { model.regionByID[$0.regionID] }
+        let areaIndex = anchor.flatMap { $0.areaIndex }
+        let area = areaIndex.flatMap { index in model.areas.first { $0.identityIndex == index } }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 8) {
+                    if let backRegion {
+                        Button { selection = nil } label: {
+                            Label("返回「\(backRegion.title)」", systemImage: "chevron.left")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("返回区域：" + backRegion.title)
+                    }
+                    Spacer(minLength: 0)
+                    WorkspaceIconButton(systemImage: "xmark", label: "关闭检查器") {
+                        selection = nil
+                        focusedRegionID = nil
+                    }
+                }
+                ReaderKicker(
+                    dot: area.map { RegionIdentity.color(index: $0.identityIndex, scheme: colorScheme) } ?? palette.accent,
+                    text: area.map { "大区 · " + $0.title } ?? "候选联系"
+                )
+                Text(relation.label).font(.title3.weight(.semibold))
+                Text("AI 候选解释 · 尚待核对").font(.caption).foregroundStyle(palette.warning)
+                Text(relation.explanation).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled)
+                ReaderEvidenceBlock(
+                    label: "一侧原话",
+                    question: fromQuestion,
+                    evidence: relation.fromEvidence,
+                    sources: snapshot.input.sources,
+                    claims: snapshot.input.claims,
+                    firstLineLimit: 3,
+                    actions: actions,
+                    openQuestion: { selection = .question(relation.from) }
+                )
+                ReaderEvidenceBlock(
+                    label: "另一侧原话",
+                    question: toQuestion,
+                    evidence: relation.toEvidence,
+                    sources: snapshot.input.sources,
+                    claims: snapshot.input.claims,
+                    firstLineLimit: 3,
+                    actions: actions,
+                    openQuestion: { selection = .question(relation.to) }
+                )
+                Text("对联系有异议，可沿线讨论。原话与理解更正分别返回材料的正式更正入口。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ReaderPrimaryAction(title: "沿这条线索继续") {
+                    actions.perform { actions.discuss(snapshot.id, .relation(relation.id)) }
+                }
+            }
+            .padding(20)
+        }
+    }
+}
+
+private struct ReaderEvidenceBlock: View {
+    @Environment(\.workspacePalette) private var palette
+    let label: String
+    let question: PanoramaQuestion?
+    let evidence: [PanoramaEvidence]
+    let sources: [PanoramaSource]
+    let claims: [PanoramaClaim]
+    let firstLineLimit: Int
+    let actions: ReaderActions
+    let openQuestion: (() -> Void)?
+    @State private var showsMore = false
+
+    var body: some View {
+        let pairs = evidence.compactMap { item in
+            sources.first(where: { $0.id == item.sourceID }).map { (item: item, source: $0) }
+        }
+        VStack(alignment: .leading, spacing: 8) {
+            ReaderSectionLabel(label)
+            if let question, let openQuestion {
+                Button(action: openQuestion) {
+                    Text(question.title)
+                        .font(.system(size: 11))
+                        .foregroundStyle(palette.accent)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("AI 归纳问题：" + question.title)
+            }
+            if let first = pairs.first {
+                ReaderQuoteCard(item: first.item, source: first.source, claims: claims, lineLimit: firstLineLimit, actions: actions)
+            } else {
+                Text("尚无原话").font(.system(size: 13)).foregroundStyle(.secondary)
+            }
+            if pairs.count > 1 {
+                ReaderDisclosure(title: "其他 \(pairs.count - 1) 处原话", expanded: $showsMore) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(Array(pairs.dropFirst().enumerated()), id: \.offset) { _, pair in
+                            ReaderQuoteCard(item: pair.item, source: pair.source, claims: claims, lineLimit: 3, actions: actions)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct ReaderQuoteCard: View {
+    @Environment(\.workspacePalette) private var palette
+    let item: PanoramaEvidence
+    let source: PanoramaSource
+    let claims: [PanoramaClaim]
+    let lineLimit: Int
+    let actions: ReaderActions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(source.transcript.origin == "user" && source.transcript.speaker == "user" ? "我的原话" : "外部 / AI 来源 · 不代表本人认可")
+                .font(.caption.weight(.medium))
+            Text("“" + item.quote + "”")
+                .font(.system(size: 13))
+                .lineLimit(lineLimit)
+                .textSelection(.enabled)
+            Text(String(source.occurredAt.prefix(10)) + " · " + readerEvidenceTime(item, source: source) + " · " + source.title)
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            HStack(spacing: 12) {
+                Button("完整原文") { actions.perform { actions.openSource(item.sourceID) } }
+                Button("更正原文") { actions.perform { actions.correctSource(item.sourceID) } }
+                claimCorrectionMenu
+                Spacer(minLength: 0)
+            }
+            .font(.caption)
+            .buttonStyle(.borderless)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.selection.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private var claimCorrectionMenu: some View {
+        if item.claimIDs.count == 1, let id = item.claimIDs.first {
+            Button("更正理解或归属") { actions.perform { actions.correctClaim(id) } }
+        } else if item.claimIDs.count > 1 {
+            Menu("更正理解（\(item.claimIDs.count)）") {
+                ForEach(Array(item.claimIDs.enumerated()), id: \.offset) { index, id in
+                    Button(claimLabel(id, index: index)) { actions.perform { actions.correctClaim(id) } }
+                }
+            }
+        }
+    }
+
+    private func claimLabel(_ id: String, index: Int) -> String {
+        let statement = claims.first { $0.id == id }?.statement ?? ""
+        guard !statement.isEmpty else { return "第 \(index + 1) 条理解" }
+        return statement.count > 24 ? String(statement.prefix(24)) + "…" : statement
+    }
+}
+
+private struct ReaderPrimaryAction: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: action) {
+                HStack {
+                    Text(title)
+                    Spacer()
+                    Image(systemName: "arrow.right")
+                }
+                .padding(8)
+            }
+            .buttonStyle(.borderedProminent)
+            Text("带入相关完整表达与节目原文，先打开可编辑的 AI 候选草稿；点击发送后才成为你的提问。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+private struct ReaderDisclosure<Content: View>: View {
+    let title: String
+    @Binding var expanded: Bool
+    let content: () -> Content
+
+    init(title: String, expanded: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) {
+        self.title = title
+        _expanded = expanded
+        self.content = content
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .accessibilityHidden(true)
+                }
+                .contentShape(Rectangle())
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityValue(expanded ? "已展开" : "已折叠")
+            if expanded { content() }
+        }
+    }
+}
+
+private struct ReaderKicker: View {
+    let dot: Color
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(dot)
+                .frame(width: 6, height: 6)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+    }
+}
+
+private struct ReaderSectionLabel: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+    }
+}
+
+private struct ReaderCappedText: View {
+    @Environment(\.workspacePalette) private var palette
+    let text: String
+    let size: CGFloat
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(text)
+                .font(.system(size: size))
+                .foregroundStyle(.secondary)
+                .lineLimit(expanded ? nil : 3)
+                .fixedSize(horizontal: false, vertical: true)
+            if text.count > 60 {
+                Button(expanded ? "收起" : "展开") { expanded.toggle() }
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(palette.accent)
+                    .accessibilityLabel(expanded ? "收起摘要" : "展开摘要")
+            }
+        }
+    }
+}
+
+private struct ReaderQuestionRow: View {
+    let question: PanoramaQuestion
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(question.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("\(question.evidence.count) 处原话")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize()
+            }
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(question.title)
+        .accessibilityLabel("AI 归纳问题：" + question.title)
+    }
+}
+
+private struct ReaderRelationRow: View {
+    let relation: PanoramaRelation
+    let fromTitle: String
+    let toTitle: String
+    let select: () -> Void
+
+    var body: some View {
+        Button(action: select) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(relation.label)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Text(fromTitle + " ↔ " + toTitle)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("AI 候选联系：" + relation.label)
+    }
+}
+
+private func readerEvidenceTime(_ item: PanoramaEvidence, source: PanoramaSource) -> String {
+    let spans = source.transcript.spans.filter { $0.textEnd > item.start && $0.textStart < item.end }
+    guard let start = spans.compactMap(\.startMS).min(), let end = spans.compactMap(\.endMS).max() else { return "文字来源" }
+    func time(_ ms: Int) -> String { String(format: "%d:%02d", ms / 60000, (ms / 1000) % 60) }
+    return time(start) + "–" + time(end)
 }
 
 struct PanoramaHome: View {
