@@ -496,7 +496,7 @@ struct ConstellationLayout: Equatable, Sendable {
                                           y: CGFloat(sin(angle) * Double(ring)))
                     let fits=centers.indices.allSatisfy { index in
                         hypot(candidate.x - centers[index].x, candidate.y - centers[index].y)
-                            >= field.radius + fields[index].radius + 26
+                            >= field.radius + fields[index].radius + 44
                     }
                     if fits {
                         center=candidate
