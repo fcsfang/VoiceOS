@@ -323,13 +323,14 @@ extension VoiceOSStore {
     }
     private func panoramaStep<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, input: Input,
         whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
-        validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }, retainSemanticRejection: Bool = false) async throws -> (Result, PanoramaReceipt) {
+        validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }, retainSemanticRejection: Bool = false,
+        budget: PanoramaReviewBudget? = nil) async throws -> (Result, PanoramaReceipt) {
         var retries=0
         while true {
             let started=Date()
             do {
                 return try await panoramaStepAttempt(attemptID: attemptID,stage: stage,scopeID: scopeID,input: input,whole: whole,identity: identity,
-                    operation: operation,validate: validate,normalize: normalize,retainSemanticRejection: retainSemanticRejection)
+                    operation: operation,validate: validate,normalize: normalize,retainSemanticRejection: retainSemanticRejection,budget: budget)
             } catch {
                 // A request that already spent the whole 600-second window must not be replayed three times.
                 let elapsed=Date().timeIntervalSince(started)
@@ -345,7 +346,8 @@ extension VoiceOSStore {
     }
     private func panoramaStepAttempt<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, input: Input,
         whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
-        validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }, retainSemanticRejection: Bool = false) async throws -> (Result, PanoramaReceipt) {
+        validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }, retainSemanticRejection: Bool = false,
+        budget: PanoramaReviewBudget? = nil) async throws -> (Result, PanoramaReceipt) {
         try Task.checkCancellation()
         try requirePanoramaManifest(whole)
         let json=try Self.relevanceJSON(input)
@@ -357,6 +359,8 @@ extension VoiceOSStore {
             try validate(decoded,savedReceipt)
             return (decoded,savedReceipt)
         }
+        // Only a cache miss reaches the provider; a replayed receipt costs nothing.
+        try budget?.spend()
         let id=UUID().uuidString
         try db.execute("INSERT INTO panorama_steps(id,attempt_id,stage,scope_id,input_digest,state,input_json,created_at) VALUES(?,?,?,?,?,'running',?,?)", [id,attemptID,stage,scopeID,digest,json,Self.now()])
         var receivedResult: String?, receivedReceipt: String?
@@ -389,6 +393,7 @@ extension VoiceOSStore {
         var candidate=generated
         var issues: [PanoramaSemanticIssue]=[]
         var repairs=0
+        // The budget caps real global review requests, not cached replays.
         let reviewBudget=PanoramaReviewBudget(120)
         let validation: PanoramaGlobalValidation
         // A rejection after a repair must feed the next repair with the repaired
@@ -432,7 +437,6 @@ extension VoiceOSStore {
         var reviews: [PanoramaScopedReview]=[]
         try publishPanoramaPhase(.evidence, units: units, input: input, attemptID: attemptID)
         for batch in Self.panoramaQuestionBatches(proposal) {
-            try budget.spend()
             let scoped=try Self.panoramaScope(input, sourceIDs: batch.sourceIDs)
             let selected=Self.panoramaProjection(proposal, input: scoped, questionIDs: Set(batch.questionIDs), relationIDs: [])
             let result: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.question", scopeID: batch.scopeID,
@@ -440,11 +444,10 @@ extension VoiceOSStore {
                 operation: { try await port.verifyEvidence(selected, input: scoped) }, validate: { review, receipt in
                     _ = try Self.validatePanorama(selected, input: scoped)
                     try Self.validatePanoramaStageReview(review, proposal: selected, input: scoped, generation: generation, verification: receipt)
-                }, retainSemanticRejection: true)
+                }, retainSemanticRejection: true, budget: budget)
             reviews.append(.init(stage: "global.question", scopeID: batch.scopeID, review: result.0, receipt: result.1))
         }
         for batch in Self.panoramaRelationBatches(proposal) {
-            try budget.spend()
             let scoped=try Self.panoramaScope(input, sourceIDs: batch.sourceIDs)
             let selected=Self.panoramaProjection(proposal, input: scoped, questionIDs: Set(batch.questionIDs), relationIDs: Set(batch.relationIDs))
             let result: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.relation", scopeID: batch.scopeID,
@@ -452,7 +455,7 @@ extension VoiceOSStore {
                 operation: { try await port.verifyEvidence(selected, input: scoped) }, validate: { review, receipt in
                     _ = try Self.validatePanorama(selected, input: scoped)
                     try Self.validatePanoramaStageReview(review, proposal: selected, input: scoped, generation: generation, verification: receipt)
-                }, retainSemanticRejection: true)
+                }, retainSemanticRejection: true, budget: budget)
             reviews.append(.init(stage: "global.relation", scopeID: batch.scopeID, review: result.0, receipt: result.1))
         }
         try publishPanoramaPhase(.coverage, units: units, input: input, attemptID: attemptID)
@@ -476,23 +479,21 @@ extension VoiceOSStore {
             let target=PanoramaCoverageTarget(sourceIDs: unit.input.manifest.sourceIDs, claimIDs: unit.input.manifest.claimIDs)
             let relevantRejections=(unit.rejection.map { [$0] } ?? []) + relatedIssues.map(\.rejection)
             let request=PanoramaCoverageInput(input: scoped, proposal: selected, target: target, rejections: relevantRejections)
-            try budget.spend()
             let result: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.coverage", scopeID: unit.unitID,
                 input: request, whole: input, identity: port.configurationIdentity,
                 operation: { try await port.verifyCoverage(selected, input: scoped, target: target, rejections: relevantRejections) }, validate: { review, receipt in
                     _ = try Self.validatePanorama(selected, input: scoped)
                     try Self.validatePanoramaStageReview(review, proposal: selected, input: scoped, generation: generation, verification: receipt)
-                }, retainSemanticRejection: true)
+                }, retainSemanticRejection: true, budget: budget)
             reviews.append(.init(stage: "global.coverage", scopeID: unit.unitID, review: result.0, receipt: result.1, target: target))
         }
         try publishPanoramaPhase(.consistency, units: units, input: input, attemptID: attemptID)
         let request=PanoramaConsistencyInput(input: input, proposal: proposal, unitProposals: proposals, reviews: reviews, rejections: rejections)
-        try budget.spend()
         let final: (PanoramaReview, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.consistency", scopeID: "all",
             input: request, whole: input, identity: port.configurationIdentity,
             operation: { try await port.verifyConsistency(proposal, input: input, unitProposals: proposals, reviews: reviews, rejections: rejections) }, validate: { review, receipt in
                 try Self.validatePanoramaStageReview(review, proposal: proposal, input: input, generation: generation, verification: receipt)
-            }, retainSemanticRejection: true)
+            }, retainSemanticRejection: true, budget: budget)
         return .init(reviews: reviews, finalReview: final.0, finalReceipt: final.1)
     }
     /// Synthesizes a labeled draft over the units that already passed their own
