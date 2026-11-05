@@ -144,9 +144,11 @@ extension VoiceOSStore {
         try db.execute("INSERT INTO assistant_executions(id,action_id,action_version,input_json,sequence,instruction_source_id,question_id,state,validity,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'queued','current',?,?)", [id,actionID,String(expectedVersion),try Self.relevanceJSON(input),sequence,instructionID,questionID,now,now])
         return try assistantExecutions(actionID: actionID).first(where: { $0.id == id })!
     }
-    public func discoverAutomaticAssistantExecutions(using port: any AssistantModelPort) async throws {
-        guard !assistantDiscoveryActive else { return }; assistantDiscoveryActive = true
+    @discardableResult
+    public func discoverAutomaticAssistantExecutions(using port: any AssistantModelPort) async throws -> Bool {
+        guard !assistantDiscoveryActive else { return false }; assistantDiscoveryActive = true
         defer { assistantDiscoveryActive = false }
+        var changed = false
         _ = try assistantExecutions()
         for action in try actions() where action.kind == "task" && action.intentActor == "user" {
             try Task.checkCancellation()
@@ -161,6 +163,7 @@ extension VoiceOSStore {
                    try assistantExecutions(actionID: action.id).isEmpty {
                     let record = try enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version)
                     try db.execute("UPDATE assistant_executions SET assessment_json=? WHERE id=?", [json,record.id])
+                    changed = true
                 }
                 continue
             }
@@ -169,19 +172,24 @@ extension VoiceOSStore {
                   (try? validateAssistantInput(input, destination: port.configuration.destination)) != nil else { continue }
             let id = UUID().uuidString
             try db.execute("INSERT INTO assistant_assessments(id,action_id,action_version,input_json,state,created_at) VALUES(?,?,?,?,'running',?)", [id,action.id,String(action.version),try Self.relevanceJSON(input),Self.now()])
+            changed = true
             do {
                 let result = try await runAssistantAssessment(input, key: "assessment:"+id, using: port)
                 try validateAssistantInput(input, destination: port.configuration.destination)
                 try db.execute("UPDATE assistant_assessments SET state='completed',assessment_json=? WHERE id=?", [try Self.relevanceJSON(result),id])
+                changed = true
                 if result.explicitDelegation {
                     let record = try enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version)
                     try db.execute("UPDATE assistant_executions SET assessment_json=? WHERE id=?", [try Self.relevanceJSON(result),record.id])
+                    changed = true
                 }
             } catch {
                 try db.execute("UPDATE assistant_assessments SET state='failed',error=? WHERE id=?", [Self.assistantError(error),id])
+                changed = true
                 try Task.checkCancellation()
             }
         }
+        return changed
     }
     public func assistantAssessmentIssues() throws -> [AssistantAssessmentIssue] {
         let current = Dictionary(uniqueKeysWithValues: try actions().map { ($0.id,$0) })
