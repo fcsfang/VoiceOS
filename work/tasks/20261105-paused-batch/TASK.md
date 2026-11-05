@@ -1,9 +1,9 @@
 ---
-status: in-progress
+status: merged
 started: 2026-11-05
 updated: 2026-11-05
-branch: codex/rebatch-paused
-pr: -
+branch: worktree-agent-a50f5fcd5ba90976e
+pr: 113
 owner: poteto-agent
 ---
 # 暂停行动一键重新识别
@@ -33,3 +33,9 @@ owner: poteto-agent
 ## 链接
 
 真实使用盘点中的 46 项暂停行动。
+
+## 进展
+
+- PR #113 合入（cb1f22f）：两处暂停区的一键入口，确认、逐份进度、协作停止、摘要；55 项测试通过。
+- 同时修复转写校正后认知/关联回执可能被错误复用：回执查询加入上下文摘要，过期关联只保存理解并保留历史。
+- 复核修正：评估失败时保留剩余；确认文案补上转写校正可能多一次模型调用。
