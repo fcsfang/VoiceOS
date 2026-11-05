@@ -194,6 +194,7 @@ struct WorkspaceSourceView: View {
                             Text("受影响的任务与问题").font(.subheadline.bold())
                             ForEach(pausedActions) { action in
                                 WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看任务") { openTask(action.id) }
+                                WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
                             }
                         }
                         if !automaticallyUpdating {
@@ -224,7 +225,10 @@ struct WorkspaceSourceView: View {
                 }
                 if pausedThoughts.isEmpty && !pausedActions.isEmpty {
                     WorkspaceSection(title:"观点已更正，关联待办需要重新确认",subtitle:"打开任务即可看到更正后的观点，并填写准确的待办；之前的任务记录保留。",icon:"pause.circle",count:pausedActions.count) {
-                        ForEach(pausedActions) { action in WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看与处理") { openTask(action.id) } }
+                        ForEach(pausedActions) { action in
+                            WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看与处理") { openTask(action.id) }
+                            WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
+                        }
                     }
                 }
                 if (expression?.sourceIDs.count ?? 0) <= 1,let summary=source.contentSummary,!summary.isEmpty {

@@ -69,9 +69,16 @@ extension ControlCenter {
         if action.validity == "current" { return completion + (recordingActionRequiresReview(action) ? " · 行动关系待核对，暂不同步" : "") }
         return completion + (workspaceTaskRequiresReview(action) ? " · AI 提取已暂停" : " · 历史记录")
     }
+    func workspaceExternalCompletionLink(_ action: ActionRecord) -> ReminderLink? {
+        guard action.validity == "frozen" else { return nil }
+        return reminderLinks.first { $0.actionID == action.id && $0.state == "linked" && $0.remoteMarkerValid == true && $0.remoteCompleted == true }
+    }
     func workspaceExternalCompletionNote(_ action: ActionRecord) -> String? {
-        guard action.validity == "frozen", reminderLinks.contains(where: { $0.actionID == action.id && $0.state == "linked" && $0.remoteMarkerValid == true && $0.remoteCompleted == true }) else { return nil }
+        guard workspaceExternalCompletionLink(action) != nil else { return nil }
         return "提醒事项已标记完成 · " + workspaceActionStatus(action)
+    }
+    func workspaceExternalCompletion(_ action: ActionRecord) -> ExternalCompletionCandidate? {
+        ExternalCompletionCandidate(action: action, link: workspaceExternalCompletionLink(action))
     }
     var workspacePausedTasks: [ActionRecord] { actionRecords.filter { $0.kind == "task" && workspaceTaskRequiresReview($0) } }
     var workspaceFailedFollowups: [RecordingFollowupReceipt] {
@@ -178,7 +185,11 @@ struct WorkspaceProcessingView: View {
                         ForEach(model.records.filter { ids.contains($0.id) }) { source in
                             WorkspaceRow(title:source.workspaceTitle,subtitle:"查看暂停原因、受影响的任务和处理按钮",trailing:"打开材料") { openSource(source.id) }
                             ForEach(model.workspacePausedTasks.filter { task in model.claims.first(where: { $0.id == task.claimID })?.references.contains { $0.sourceID == source.id } == true }) { task in
-                                VStack(alignment:.leading,spacing:5) { Text(task.title);Text(model.workspaceExternalCompletionNote(task) ?? model.workspaceActionStatus(task)).font(.caption).foregroundStyle(.secondary) }.padding(.leading,26).padding(.bottom,12)
+                                VStack(alignment:.leading,spacing:5) {
+                                    Text(task.title)
+                                    Text(model.workspaceExternalCompletionNote(task) ?? model.workspaceActionStatus(task)).font(.caption).foregroundStyle(.secondary)
+                                    WorkspaceExternalCompletionButton(model:model,action:task)
+                                }.padding(.leading,26).padding(.bottom,12)
                             }
                         }
                         PausedActionBatchControl(model:model)
@@ -252,5 +263,37 @@ struct WorkspaceProcessingView: View {
         case .cancelled: return "已停止后续处理，已有内容保留"
         case .completed: return "理解与关联已完成"
         }
+    }
+}
+
+struct WorkspaceExternalCompletionButton: View {
+    @Environment(\.workspacePalette) private var palette
+    @ObservedObject var model: ControlCenter
+    let action: ActionRecord
+    @State private var confirming = false
+    @State private var error = ""
+    var body: some View {
+        let candidate = model.workspaceExternalCompletion(action)
+        if candidate != nil || !error.isEmpty {
+            VStack(alignment:.leading,spacing:6) {
+                if candidate != nil {
+                    Button("确认外部已完成") { confirming = true }.disabled(model.savingAction)
+                }
+                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger).textSelection(.enabled) }
+            }
+            .alert("把「\(action.title)」登记为已完成？", isPresented: $confirming) {
+                Button("确认外部已完成") { confirm() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("任务将标记为已完成并进入结果队列。原始声明与理解继续冻结保留，不会恢复旧输出。Apple 提醒事项本身不会被修改。")
+            }
+        }
+    }
+    private func confirm() {
+        guard let candidate = model.workspaceExternalCompletion(action) else {
+            error = "提醒事项关联或最新回读已变化，请查看最新状态"
+            return
+        }
+        Task { error = await model.confirmExternalCompletion(candidate) ? "" : model.status }
     }
 }

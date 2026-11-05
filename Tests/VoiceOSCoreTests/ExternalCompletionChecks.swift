@@ -119,10 +119,14 @@ final class ExternalCompletionChecks: XCTestCase {
             linkID: fixture.link.id, expectedObservationID: fixture.observationID, commandID: "queue-result")
         let pending = try await store.pendingOutcomeFollowups()
         XCTAssertTrue(pending.contains { $0.id == fixture.action.id && $0.version == confirmed })
+        let snapshot = try await store.workspaceSnapshot()
+        XCTAssertTrue(snapshot.outcomeFollowups.contains { $0.id == fixture.action.id && $0.version == confirmed })
         let sourceID = try await store.recordActionFeedback(
             actionID: fixture.action.id, expectedVersion: confirmed, kind: .outcome, text: "阅读后发现检索质量确实影响结果。")
         let remaining = try await store.pendingOutcomeFollowups()
         XCTAssertFalse(remaining.contains { $0.id == fixture.action.id })
+        let refreshed = try await store.workspaceSnapshot()
+        XCTAssertFalse(refreshed.outcomeFollowups.contains { $0.id == fixture.action.id })
         let outcomes = try await store.recentActionOutcomes()
         let recorded = outcomes.first { $0.actionID == fixture.action.id }
         XCTAssertEqual(recorded?.sourceID, sourceID)
@@ -224,5 +228,36 @@ final class ExternalCompletionChecks: XCTestCase {
         XCTAssertTrue(outcomes.isEmpty)
         let actions = try await store.actions(includeHistory: true)
         XCTAssertEqual(actions.first { $0.id == action.id }?.version, completed)
+    }
+
+    func testCandidateOffersOnlyFrozenOpenTaskWithCompletedLinkedObservation() {
+        func action(state: String = "open", validity: String = "frozen", kind: String = "task") -> ActionRecord {
+            ActionRecord(id: "action", claimID: "claim", claimReviewVersion: 1, title: "查阅相关论文", kind: kind,
+                         intentActor: "user", note: "", state: state, validity: validity, version: 4, autoSend: false, intent: nil)
+        }
+        func link(state: String = "linked", markerValid: Bool? = true, completed: Bool? = true,
+                  observationID: String? = "observation") -> ReminderLink {
+            ReminderLink(id: "link", actionID: "action", calendarID: "calendar", state: state, externalID: "reminder",
+                         remoteTitle: "查阅相关论文", remoteCompleted: completed, lastObservedAt: nil, lastCheckedAt: nil,
+                         lastObservationID: observationID, remoteMarkerValid: markerValid, remoteDueDate: nil)
+        }
+        let candidate = ExternalCompletionCandidate(action: action(), link: link())
+        XCTAssertEqual(candidate?.expectedVersion, 4)
+        XCTAssertEqual(candidate?.linkID, "link")
+        XCTAssertEqual(candidate?.observationID, "observation")
+        XCTAssertEqual(candidate?.commandID, "external-completion-ui:action:observation")
+
+        XCTAssertNil(ExternalCompletionCandidate(action: action(state: "completed"), link: link()))
+        XCTAssertNil(ExternalCompletionCandidate(action: action(state: "dismissed"), link: link()))
+        XCTAssertNil(ExternalCompletionCandidate(action: action(validity: "current"), link: link()))
+        XCTAssertNil(ExternalCompletionCandidate(action: action(kind: "opportunity"), link: link()))
+        XCTAssertNil(ExternalCompletionCandidate(action: action(), link: link(state: "conflict")))
+        XCTAssertNil(ExternalCompletionCandidate(action: action(), link: link(state: "reserved")))
+        XCTAssertNil(ExternalCompletionCandidate(action: action(), link: link(markerValid: false)))
+        XCTAssertNil(ExternalCompletionCandidate(action: action(), link: link(markerValid: nil)))
+        XCTAssertNil(ExternalCompletionCandidate(action: action(), link: link(completed: false)))
+        XCTAssertNil(ExternalCompletionCandidate(action: action(), link: link(completed: nil)))
+        XCTAssertNil(ExternalCompletionCandidate(action: action(), link: link(observationID: nil)))
+        XCTAssertNil(ExternalCompletionCandidate(action: action(), link: nil))
     }
 }

@@ -86,7 +86,7 @@ extension VoiceOSStore {
             }
         }
         result.actions = try actions(includeHistory: true)
-        if result.actions.contains(where: { $0.kind == "task" && $0.state == "completed" && $0.validity == "current" }) {
+        if result.actions.contains(where: { $0.kind == "task" && $0.state == "completed" }) {
             result.outcomeFollowups = try pendingOutcomeFollowups()
         }
         result.claims = try candidateClaims(includeFrozen: true)
