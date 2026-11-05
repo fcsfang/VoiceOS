@@ -3056,12 +3056,18 @@ extension ControlCenter {
                 assistantStatus = "正在检查明确委托，并推进已保存的代办…"
                 // Deliver queued work first; discovering other tasks must not
                 // postpone an explicit delegation made in the foreground.
-                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh() }) { try Task.checkCancellation() }
-                try await store.discoverAutomaticAssistantExecutions(using: port)
-                await refresh()
-                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh() }) { try Task.checkCancellation() }
+                var changed = false
+                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh() }) {
+                    changed = true
+                    try Task.checkCancellation()
+                }
+                if try await store.discoverAutomaticAssistantExecutions(using: port) { changed = true }
+                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh() }) {
+                    changed = true
+                    try Task.checkCancellation()
+                }
                 assistantStatus = "AI 代办状态已更新；成果可在任务或工作台查看"
-                await refresh()
+                if changed { await refresh() }
             } catch { assistantStatus = "AI 代办尚未完成：" + error.localizedDescription; await refresh() }
         }
     }
