@@ -7,22 +7,33 @@ struct WorkspaceProcessingActivity {
 }
 
 extension ControlCenter {
+    var workspaceProcessingStatus: WorkspaceProcessingStatus {
+        .init(
+            isInitializing: !initialized,
+            hasStartupIssue: !startupIssue.isEmpty,
+            isDictating: dictationActive,
+            isOrganizingRecording: fullRecordingBusy,
+            recordingStatus: fullRecordingStatus,
+            isSealingDictation: dictationBusy,
+            isReviewingTranscript: transcriptReviewSourceID != nil,
+            activityLabel: processingActivity?.label,
+            isUnderstanding: understandingSource != nil,
+            isReplyingDiscussion: discussionSending,
+            isExtractingDiscussion: discussionExtracting,
+            knowledgeReview: knowledgeReviewBusy ? .running : .idle,
+            assistantExecution: assistantExecutionPhase,
+            followup: followupBusy ? .running : .idle,
+            topicOrganization: organizingTopics ? .running : .idle
+        )
+    }
+    /// The assistant worker also scans and discovers work. Only a current
+    /// execution that the store marked running is a delivery in flight.
+    private var assistantExecutionPhase: WorkspaceProcessingStatus.Phase {
+        guard assistantBusy else { return .idle }
+        return assistantExecutions.contains { $0.validity == "current" && $0.state == "running" } ? .running : .completed
+    }
     var workspaceProcessingTitle: String? {
-        if !initialized { return startupIssue.isEmpty ? "正在恢复资料库与草稿" : nil }
-        if dictationActive { return "正在录音，停止后保存并整理" }
-        if fullRecordingBusy { return fullRecordingStatus.isEmpty ? "正在完整整理录音" : fullRecordingStatus }
-        if dictationBusy { return "正在封存录音与转写" }
-        if transcriptReviewSourceID != nil { return "AI 正在校正完整转写" }
-        if let activity = processingActivity { return activity.label }
-        if understandingSource != nil { return "正在理解当前材料" }
-        if discussionSending { return "正在回复讨论" }
-        if discussionExtracting { return "正在整理讨论成果" }
-        if knowledgeReviewBusy { return "正在核查知识理解" }
-        if assistantBusy { return "AI 正在执行代办" }
-        if followupBusy { return "正在接续思想与目标" }
-        if organizingTopics { return "正在连接主题与更新简报" }
-        if remindersBusy { return "正在同步提醒事项" }
-        if reminderFieldsPending { return "正在核对提醒日期与优先级" }
+        if case .running(let title) = workspaceProcessingStatus.display { return title }
         return nil
     }
     var workspaceProcessingSourceID: String? { transcriptReviewSourceID ?? processingActivity?.sourceID ?? understandingSource ?? fullRecordingSourceID }
@@ -79,8 +90,9 @@ struct WorkspaceProcessingBar: View {
     @ObservedObject var inbox: RecordingInbox
     let open: () -> Void
     var body: some View {
+        let status = model.workspaceProcessingStatus
         HStack(spacing:12) {
-            if let title = model.workspaceProcessingTitle {
+            if case .running(let title) = status.display {
                 ProgressView().controlSize(.small)
                 VStack(alignment:.leading,spacing:3) {
                     Text(title).lineLimit(1)
@@ -88,7 +100,7 @@ struct WorkspaceProcessingBar: View {
                 }
             } else if model.workspaceNeedsAttention || inbox.pendingItems.contains(where: { $0.state == .needsAttention }) || !inbox.folderErrors.isEmpty {
                 Label("有事项需要查看，原文与历史保留",systemImage:"exclamationmark.circle").foregroundStyle(.orange)
-            } else { Text(model.status).foregroundStyle(.secondary).lineLimit(1) }
+            } else { Text(status.title).foregroundStyle(.secondary).lineLimit(1) }
             Spacer(minLength:8)
             if model.dictationActive { Button("停止并整理") { model.stopDictation() } }
             else if model.fullRecordingBusy { Button("停止后续处理") { model.cancelFullRecording() } }
@@ -124,7 +136,7 @@ struct WorkspaceProcessingView: View {
                         }
                     }
                 } else {
-                    Label("当前没有正在执行的处理",systemImage:"checkmark.circle").foregroundStyle(.secondary)
+                    Label(WorkspaceProcessingStatus.idleTitle,systemImage:"checkmark.circle").foregroundStyle(.secondary)
                 }
                 if !model.workspaceUnfinishedIntents.isEmpty {
                     WorkspaceSection(title:"文字理解与关联",icon:"text.bubble",count:model.workspaceUnfinishedIntents.count) {
