@@ -2377,6 +2377,23 @@ final class ControlCenter: ObservableObject {
         } catch { status = error.localizedDescription }
         await refresh(); await queueActionFollowups([action.id])
     }
+    func confirmExternalCompletion(_ candidate: ExternalCompletionCandidate) async -> Bool {
+        guard let store else { status = "资料库尚未打开，无法登记外部完成"; return false }
+        guard !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            _ = try await store.confirmExternalCompletion(actionID: candidate.actionID, expectedVersion: candidate.expectedVersion,
+                                                          linkID: candidate.linkID, expectedObservationID: candidate.observationID,
+                                                          commandID: candidate.commandID)
+            await refresh()
+            status = "外部完成已登记 · 已进入结果队列"
+            return true
+        } catch {
+            status = error.localizedDescription
+            await refresh()
+            return false
+        }
+    }
     func reviewHistory(_ claim: CandidateClaim) async {
         do { claimHistory = try await store?.claimReviewHistory(claimID: claim.id) ?? [] }
         catch { status = error.localizedDescription }

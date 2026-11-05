@@ -1,5 +1,27 @@
 import Foundation
 
+/// The one UI entry for a frozen open task whose linked reminder was completed
+/// outside VoiceOS. It derives eligibility from the same evidence the store
+/// re-checks, so the button cannot offer a confirmation the store refuses.
+public struct ExternalCompletionCandidate: Sendable, Equatable {
+    public let actionID: String
+    public let expectedVersion: Int
+    public let linkID: String
+    public let observationID: String
+    public var commandID: String { "external-completion-ui:" + actionID + ":" + observationID }
+
+    public init?(action: ActionRecord, link: ReminderLink?) {
+        guard action.kind == "task", action.validity == "frozen", action.state == "open",
+              let link, link.actionID == action.id, link.state == "linked",
+              link.remoteMarkerValid == true, link.remoteCompleted == true,
+              let observationID = link.lastObservationID, !observationID.isEmpty else { return nil }
+        self.actionID = action.id
+        self.expectedVersion = action.version
+        self.linkID = link.id
+        self.observationID = observationID
+    }
+}
+
 extension VoiceOSStore {
     /// A frozen task stays in the result queue only through a revision carrying
     /// this prefix at its current version; the observation row alone proves nothing.
