@@ -19,6 +19,7 @@ struct ThoughtPanoramaView: View {
     let correctSource: (String) -> Void
     let correctClaim: (String) -> Void
     let discuss: (String, PanoramaSelection) -> Void
+    let themeReply: (PanoramaThemeBriefing) async throws -> String
     @State private var query = ""
     @State private var searchMatches = ConstellationSearchMatches()
     @State private var recenterToken = 0
@@ -120,7 +121,8 @@ struct ThoughtPanoramaView: View {
                 region: region,
                 selection: $selection,
                 focusedRegionID: $focusedRegionID,
-                actions: actions
+                actions: actions,
+                themeReply: themeReply
             )
             .id(region.id)
         }
@@ -559,7 +561,12 @@ private struct RegionInspectorPanel: View {
     @Binding var selection: PanoramaSelection?
     @Binding var focusedRegionID: String?
     let actions: ReaderActions
+    let themeReply: (PanoramaThemeBriefing) async throws -> String
     @State private var showsRelations = false
+    @State private var showsOtherQuestions = false
+    @State private var reply: String?
+    @State private var replyError: String?
+    @State private var loadingReply = false
 
     var body: some View {
         let model = ConstellationModel(snapshot: snapshot, now: .now)
@@ -568,9 +575,13 @@ private struct RegionInspectorPanel: View {
             guard let from = model.questionByID[relation.from], let to = model.questionByID[relation.to] else { return false }
             return from.regionID == region.id || to.regionID == region.id
         }
-        let evidenceCount = questions.reduce(0) { $0 + $1.evidence.count }
         let area = model.areas.first { $0.regionIDs.contains(region.id) }
-        let hero = questions.first
+        let briefing = PanoramaThemeBriefing.make(snapshot: snapshot, region: region)
+        let openQuestion = briefing.openQuestionID.flatMap { id in questions.first { $0.id == id } }
+        let quoted = Set(briefing.quotes.map(\.questionID))
+        let otherQuestions = questions.filter { question in
+            question.id != openQuestion?.id && !quoted.contains(question.id)
+        }
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 HStack(spacing: 8) {
@@ -579,50 +590,59 @@ private struct RegionInspectorPanel: View {
                         text: area.map { "大区 · " + $0.title } ?? "探索区域 · AI 归纳"
                     )
                     Spacer(minLength: 0)
-                    WorkspaceIconButton(systemImage: "xmark", label: "关闭区域摘要") { focusedRegionID = nil }
+                    WorkspaceIconButton(systemImage: "xmark", label: "关闭主题") { focusedRegionID = nil }
                 }
                 Text(region.title).font(.title3.weight(.semibold)).textSelection(.enabled)
-                Text("\(questions.count) 个问题 · \(evidenceCount) 处原话 · \(incident.count) 条候选联系")
+                Text(themeMetaLine(briefing, questions: questions, relations: incident.count))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                ReaderCappedText(text: region.summary, size: 14)
-                Divider()
-                if let hero {
-                    VStack(alignment: .leading, spacing: 10) {
-                        ReaderSectionLabel("值得先看")
-                        Text(hero.title).font(.system(size: 15, weight: .semibold)).lineLimit(3)
-                        if !hero.summary.isEmpty {
-                            Text(hero.summary)
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        } else if let quote = hero.evidence.first?.quote {
-                            Text("“" + quote + "”")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
+                if !briefing.quotes.isEmpty {
+                    ReaderSectionLabel("你的话")
+                    ForEach(briefing.quotes) { quote in
+                        Button { selection = .question(quote.questionID) } label: {
+                            themeQuoteCard(quote)
                         }
-                        Text("\(hero.evidence.count) 处原话")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                        Button { selection = .question(hero.id) } label: {
-                            Text("查看这条线索")
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("你的原话：" + quote.text)
+                    }
+                    ReaderSectionLabel("AI 的回应")
+                    if loadingReply {
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("正在读这件事…").font(.system(size: 12)).foregroundStyle(.secondary)
+                        }
+                    } else if let reply {
+                        Text(reply)
+                            .font(.system(size: 13))
+                            .lineSpacing(4)
+                            .textSelection(.enabled)
+                    } else if let replyError {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(replyError).font(.system(size: 12)).foregroundStyle(palette.danger)
+                            Button("重试") { Task { await loadReply(briefing) } }
                                 .font(.system(size: 12, weight: .medium))
+                                .buttonStyle(.borderless)
                                 .foregroundStyle(palette.accent)
                         }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel("查看这条线索：" + hero.title)
                     }
+                    Text("AI 的推断，不是你的结论").font(.caption).foregroundStyle(.tertiary)
                 } else {
-                    Text("这个区域还没有问题。").font(.system(size: 13)).foregroundStyle(.secondary)
+                    ReaderCappedText(text: region.summary, size: 14)
                 }
-                if questions.count > 1 {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ReaderSectionLabel("其他问题 · \(questions.count - 1)")
-                            .padding(.bottom, 2)
-                        ForEach(Array(questions.dropFirst().enumerated()), id: \.offset) { index, question in
-                            if index > 0 { Divider() }
-                            ReaderQuestionRow(question: question) { selection = .question(question.id) }
+                if let openQuestion {
+                    ReaderSectionLabel("还没想完")
+                    ReaderQuestionRow(question: openQuestion) { selection = .question(openQuestion.id) }
+                    Text("\(briefing.openQuestionEvidenceCount) 处原话")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                if !otherQuestions.isEmpty {
+                    ReaderDisclosure(title: "其他问题 · \(otherQuestions.count)", expanded: $showsOtherQuestions) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(otherQuestions.enumerated()), id: \.offset) { index, question in
+                                if index > 0 { Divider() }
+                                ReaderQuestionRow(question: question) { selection = .question(question.id) }
+                            }
                         }
                     }
                 }
@@ -644,6 +664,64 @@ private struct RegionInspectorPanel: View {
             }
             .padding(20)
         }
+        .defaultScrollAnchor(.top)
+        .task(id: briefing.digest) {
+            guard !briefing.quotes.isEmpty else { return }
+            await loadReply(briefing)
+        }
+    }
+
+    private func loadReply(_ briefing: PanoramaThemeBriefing) async {
+        if reply != nil { return }
+        loadingReply = true
+        replyError = nil
+        do { reply = try await themeReply(briefing) }
+        catch { replyError = error.localizedDescription }
+        loadingReply = false
+    }
+
+    private func themeMetaLine(_ briefing: PanoramaThemeBriefing, questions: [PanoramaQuestion], relations: Int) -> String {
+        let evidenceCount = questions.reduce(0) { $0 + $1.evidence.count }
+        var parts: [String] = []
+        if let iso = briefing.quotes.map(\.occurredAt).max(), let date = themeShortDate(iso) {
+            parts.append(date)
+        }
+        parts.append("\(questions.count) 个问题")
+        parts.append("\(evidenceCount) 处原话")
+        if relations > 0 { parts.append("\(relations) 条候选联系") }
+        return parts.joined(separator: " · ")
+    }
+
+    private func themeQuoteCard(_ quote: PanoramaThemeQuote) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("“" + quote.text + "”")
+                .font(.system(size: 13))
+                .lineSpacing(3)
+                .lineLimit(5)
+                .multilineTextAlignment(.leading)
+                .foregroundStyle(.primary)
+            Text(themeMeta(quote))
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.selection, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func themeMeta(_ quote: PanoramaThemeQuote) -> String {
+        var parts: [String] = []
+        if let date = themeShortDate(quote.occurredAt) { parts.append(date) }
+        if !quote.sourceTitle.isEmpty { parts.append(quote.sourceTitle) }
+        return parts.joined(separator: " · ")
+    }
+
+    private func themeShortDate(_ iso: String) -> String? {
+        let prefix = iso.prefix(10)
+        let parts = prefix.split(separator: "-")
+        guard parts.count == 3, let month = Int(parts[1]), let day = Int(parts[2]) else { return nil }
+        return "\(month)月\(day)日"
     }
 }
 
@@ -1077,7 +1155,8 @@ struct PanoramaHome: View {
     let correctSource: (String) -> Void
     let correctClaim: (String) -> Void
     let discuss: (String, PanoramaSelection) -> Void
+    let themeReply: (PanoramaThemeBriefing) async throws -> String
     var body: some View {
-        ThoughtPanoramaView(state: screen.state, message: screen.message, isGenerating: screen.isGenerating, modelConfigured: screen.modelConfigured, readError: screen.readError, selection: $screen.selection, retry: retry, draft: draft, retryRefresh: { screen.retryRefresh() }, dismissReadError: { screen.dismissReadError() }, chooseTextModel: chooseTextModel, openMaterials: openMaterials, openSource: openSource, correctSource: correctSource, correctClaim: correctClaim, discuss: discuss)
+        ThoughtPanoramaView(state: screen.state, message: screen.message, isGenerating: screen.isGenerating, modelConfigured: screen.modelConfigured, readError: screen.readError, selection: $screen.selection, retry: retry, draft: draft, retryRefresh: { screen.retryRefresh() }, dismissReadError: { screen.dismissReadError() }, chooseTextModel: chooseTextModel, openMaterials: openMaterials, openSource: openSource, correctSource: correctSource, correctClaim: correctClaim, discuss: discuss, themeReply: themeReply)
     }
 }
