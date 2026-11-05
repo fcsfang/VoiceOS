@@ -246,8 +246,11 @@ public struct PanoramaState: Sendable {
     public let status: String
     public let error: String?
     public let progress: PanoramaProgress?
-    public init(input: PanoramaInput, snapshot: PanoramaSnapshot?, status: String, error: String?, progress: PanoramaProgress? = nil) {
+    public let themeAppearanceCounts: [String: Int]
+    public init(input: PanoramaInput, snapshot: PanoramaSnapshot?, status: String, error: String?, progress: PanoramaProgress? = nil,
+                themeAppearanceCounts: [String: Int] = [:]) {
         self.input=input; self.snapshot=snapshot; self.status=status; self.error=error; self.progress=progress
+        self.themeAppearanceCounts=themeAppearanceCounts
     }
     public var canGenerate: Bool { !input.units.isEmpty && !["completed", "running", "failed", "unknown"].contains(status) }
 }

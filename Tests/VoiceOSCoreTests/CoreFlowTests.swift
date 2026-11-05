@@ -1720,11 +1720,14 @@ final class CoreFlowTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let url=root.appendingPathComponent("panorama-schema.sqlite")
         var created: Database?=try Database(url)
-        XCTAssertEqual(try created?.query("PRAGMA user_version").first?["user_version"], "50")
+        XCTAssertEqual(try created?.query("PRAGMA user_version").first?["user_version"], "51")
         created=nil
         let reopened=try Database(url)
         XCTAssertEqual(try reopened.query("PRAGMA table_info(panorama_steps)").filter { $0["name"] == "receipt_json" }.count, 1)
         XCTAssertEqual(try reopened.query("PRAGMA table_info(panorama_theme_replies)").filter { $0["name"] == "reply" }.count, 1)
+        for table in ["panorama_themes", "panorama_theme_batches", "panorama_theme_appearances"] {
+            XCTAssertEqual(try reopened.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [table]).count, 1)
+        }
     }
     private func assertPanoramaSchemaRepair() async throws {
         let text="格式核对需要完整原文。"
