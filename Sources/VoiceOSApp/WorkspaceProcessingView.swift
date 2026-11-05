@@ -9,6 +9,9 @@ struct WorkspaceProcessingActivity {
 extension ControlCenter {
     var workspaceProcessingTitle: String? {
         if !initialized { return startupIssue.isEmpty ? "正在恢复资料库与草稿" : nil }
+        if let batch = pausedActionBatch, case .running(let progress) = batch.phase {
+            return progress.currentTitle.isEmpty ? progress.label : progress.label + " · " + progress.currentTitle
+        }
         if dictationActive { return "正在录音，停止后保存并整理" }
         if fullRecordingBusy { return fullRecordingStatus.isEmpty ? "正在完整整理录音" : fullRecordingStatus }
         if dictationBusy { return "正在封存录音与转写" }
@@ -25,7 +28,7 @@ extension ControlCenter {
         if reminderFieldsPending { return "正在核对提醒日期与优先级" }
         return nil
     }
-    var workspaceProcessingSourceID: String? { transcriptReviewSourceID ?? processingActivity?.sourceID ?? understandingSource ?? fullRecordingSourceID }
+    var workspaceProcessingSourceID: String? { pausedActionBatch?.currentSourceID ?? transcriptReviewSourceID ?? processingActivity?.sourceID ?? understandingSource ?? fullRecordingSourceID }
     var workspaceUnfinishedIntents: [ExpressionProcessingIntentRecord] {
         processingIntents.filter { intent in
             guard ![.completed,.cancelled,.frozen].contains(intent.state), let input = intent.snapshot.context.sources.first else { return false }
@@ -90,7 +93,8 @@ struct WorkspaceProcessingBar: View {
                 Label("有事项需要查看，原文与历史保留",systemImage:"exclamationmark.circle").foregroundStyle(.orange)
             } else { Text(model.status).foregroundStyle(.secondary).lineLimit(1) }
             Spacer(minLength:8)
-            if model.dictationActive { Button("停止并整理") { model.stopDictation() } }
+            if model.pausedActionBatch?.isRunning == true { Button("停止后续处理") { model.stopPausedActionBatch() } }
+            else if model.dictationActive { Button("停止并整理") { model.stopDictation() } }
             else if model.fullRecordingBusy { Button("停止后续处理") { model.cancelFullRecording() } }
             Button("查看处理",action:open).accessibilityIdentifier("workspace.processing")
         }.font(.caption).padding(.horizontal,20).padding(.vertical,12).background(palette.surface)
@@ -165,6 +169,7 @@ struct WorkspaceProcessingView: View {
                                 VStack(alignment:.leading,spacing:5) { Text(task.title);Text(model.workspaceExternalCompletionNote(task) ?? model.workspaceActionStatus(task)).font(.caption).foregroundStyle(.secondary) }.padding(.leading,26).padding(.bottom,12)
                             }
                         }
+                        PausedActionBatchControl(model:model)
                     }
                 }
                 ForEach(model.records.filter { model.transcriptReviewIssue(for:$0) != nil }) { source in

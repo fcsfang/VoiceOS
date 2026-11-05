@@ -422,9 +422,7 @@ struct WorkspaceSourceView: View {
     }
     private func organize() {
         guard let current=model.records.first(where: { $0.id == source.id }),!current.localOnly else { return }
-        if current.origin == "user",current.transcriptionBackend?.hasPrefix("Qwen3-ASR") == true { model.organizeFullTranscript(current) }
-        else if current.origin == "user",(current.transcript?.unicodeScalars.count ?? 0) > 4000 { model.understandSegmented(current) }
-        else { model.understand(current) }
+        model.reidentify(current)
     }
     private func quote(_ span:TranscriptSpan,text:String) -> String { let s=Array(text.unicodeScalars);guard span.textStart>=0,span.textEnd<=s.count else { return "原文范围已变化" };return String(String.UnicodeScalarView(s[span.textStart..<span.textEnd])) }
     private func time(_ ms:Int)->String { String(format:"%02d:%02d",ms/60000,ms/1000%60) }

@@ -344,6 +344,9 @@ final class ControlCenter: ObservableObject {
     @Published var segmentedBatches: [SegmentedProcessingBatch] = []
     @Published var segmentedCognitiveCounts: [String:Int] = [:]
     @Published var segmentedAssociationStates: [String:String] = [:]
+    @Published private(set) var pausedActionBatch: PausedActionBatchRun?
+    private var pausedActionBatchWorker: Task<Void, Never>?
+    private var sourceReidentifyWorker: Task<Void, Never>?
     private var segmentExtractionModel: ResponsesSegmentExtractionPort?
     private var segmentAggregationModel: ResponsesSegmentAggregationPort?
     private var textModel: ResponsesModelPort?
@@ -632,7 +635,7 @@ final class ControlCenter: ObservableObject {
             queueRecordingTitles()
                 recordingInbox.start(canProcess: { [weak self] in
                     guard let self else { return false }
-                    return self.initialized && self.modelConfigured && self.speechPort is LocalQwenSpeechPort && !self.fullRecordingBusy && self.worker == nil && self.understandingWorker == nil && !self.dictationActive && !self.dictationBusy && !self.importing
+                    return self.initialized && self.modelConfigured && self.speechPort is LocalQwenSpeechPort && !self.fullRecordingBusy && self.worker == nil && self.understandingWorker == nil && !self.dictationActive && !self.dictationBusy && !self.importing && self.pausedActionBatch?.isRunning != true
                 }, resumeSaved: { [weak self] in
                     await self?.resumeSavedRecordingExpressions()
                 }, receive: { [weak self] batch, finished in
@@ -930,11 +933,12 @@ final class ControlCenter: ObservableObject {
     }
     /// Once per launch, recover imported recordings that predate continuity
     /// metadata, and resume saved groups interrupted before whole-expression analysis.
-    private func resumeSavedRecordingExpressions() async {
+    @discardableResult
+    private func resumeSavedRecordingExpressions() async -> Task<Void, Never>? {
         guard !resumedSavedRecordingExpressions,worker == nil,understandingWorker == nil,!dictationActive,!dictationBusy,let store,
               let speech=speechPort as? LocalQwenSpeechPort,let grouping=recordingExpressionModel,
               let configuration=textConfigurationFile,let script=Bundle.main.url(forResource:"organize_podcast",withExtension:"py"),
-              !fullRecordingBusy else { return }
+              !fullRecordingBusy else { return nil }
         resumedSavedRecordingExpressions=true
         do {
             try await store.enrollPreviouslyImportedAutomaticRecordings()
@@ -944,10 +948,10 @@ final class ControlCenter: ObservableObject {
             let newInput=corrected ? nil : try await store.prepareRecordingExpressions()
             let pending=try await store.recordingExpressions().contains { $0.state != "completed" }
             try await acknowledgeCompletedRecordingExpressions(store:store)
-            guard newInput != nil || pending || corrected else { return }
-        } catch { setFullRecordingStatus(error.localizedDescription);return }
+            guard newInput != nil || pending || corrected else { return nil }
+        } catch { setFullRecordingStatus(error.localizedDescription);return nil }
         fullRecordingBusy=true;fullRecordingCount=nil
-        fullRecordingWorker=Task {
+        let task=Task {
             let refreshTask=watchFullRecording()
             defer { refreshTask.cancel();fullRecordingBusy=false;fullRecordingWorker=nil;fullRecordingLog=nil;fullRecordingSourceID=nil;scheduleProcessing();resumeRecordingFollowups();resumeKnowledgeReviews() }
             do {
@@ -961,6 +965,8 @@ final class ControlCenter: ObservableObject {
             } catch { setFullRecordingStatus("连续表达尚未整理完成，重开应用后继续："+error.localizedDescription) }
             await refresh()
         }
+        fullRecordingWorker=task
+        return task
     }
     private func acknowledgeCompletedRecordingExpressions(store:VoiceOSStore) async throws {
         let completed=Set(try await store.recordingExpressions().filter { $0.state == "completed" }.flatMap(\.sourceIDs))
@@ -1096,14 +1102,15 @@ final class ControlCenter: ObservableObject {
             await refresh()
         }
     }
-    func organizeFullTranscript(_ record: SourceRecord) {
+    @discardableResult
+    func organizeFullTranscript(_ record: SourceRecord) -> Task<Void, Never>? {
         if record.presentation?.expression != nil || record.presentation?.recordingContext != nil {
-            guard !fullRecordingBusy,worker == nil,understandingWorker == nil else { status="当前录音仍在处理，完成后可重新整理";return }
-            Task {
+            guard !fullRecordingBusy,worker == nil,understandingWorker == nil else { status="当前录音仍在处理，完成后可重新整理";return nil }
+            return Task {
                 do { try await queueWholeRecordingUnderstanding(sourceID:record.id) }
                 catch { status="原文已保留，整体整理尚未排入："+error.localizedDescription }
             }
-        } else { organizeSavedRecording(sourceID: record.id, transcribeFirst: false) }
+        } else { return organizeSavedRecording(sourceID: record.id, transcribeFirst: false) }
     }
     private func queueWholeRecordingUnderstanding(sourceID:String) async throws {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
@@ -1111,15 +1118,19 @@ final class ControlCenter: ObservableObject {
         resumedSavedRecordingExpressions=false
         await refresh()
         status="已排入完整表达重新整理，保留原任务身份、完成与实际反馈。"
-        await resumeSavedRecordingExpressions()
+        guard let worker = await resumeSavedRecordingExpressions() else {
+            throw VoiceOSError("整体整理未能开始；请确认本地转写与文本模型配置")
+        }
+        await worker.value
     }
-    private func organizeSavedRecording(sourceID: String, transcribeFirst: Bool) {
+    @discardableResult
+    private func organizeSavedRecording(sourceID: String, transcribeFirst: Bool) -> Task<Void, Never>? {
         guard let store, var speech = speechPort as? LocalQwenSpeechPort, let configuration = textConfigurationFile,
               let script = Bundle.main.url(forResource: "organize_podcast", withExtension: "py"),
-              !fullRecordingBusy, worker == nil, understandingWorker == nil else { status = "请先配置模型并等待当前处理结束"; return }
+              !fullRecordingBusy, worker == nil, understandingWorker == nil else { status = "请先配置模型并等待当前处理结束"; return nil }
         fullRecordingBusy = true; fullRecordingCount = nil; fullRecordingOutput = nil
         fullRecordingSourceID = sourceID
-        fullRecordingWorker = Task {
+        let task = Task {
             let refreshTask = watchFullRecording()
             defer { refreshTask.cancel(); fullRecordingBusy = false; fullRecordingWorker = nil; fullRecordingLog = nil; fullRecordingSourceID = nil; scheduleProcessing(); resumeRecordingFollowups(); resumeKnowledgeReviews() }
             do {
@@ -1140,6 +1151,8 @@ final class ControlCenter: ObservableObject {
             catch { setFullRecordingStatus(error.localizedDescription) }
             await refresh()
         }
+        fullRecordingWorker = task
+        return task
     }
     private func completeFullOrganization(sourceID: String, speech: LocalQwenSpeechPort, configuration: URL, script: URL) async throws {
         guard let store, let record = try await store.sources().first(where: { $0.id == sourceID }), let version = record.transcriptVersionID else { throw VoiceOSError("完整转写尚未保存") }
@@ -1349,13 +1362,14 @@ final class ControlCenter: ObservableObject {
             understandingSource = nil; understandingWorker = nil
         }
     }
-    func understandSegmented(_ record: SourceRecord) {
+    @discardableResult
+    func understandSegmented(_ record: SourceRecord) -> Task<Void, Never>? {
         guard let store,let extraction=segmentExtractionModel,let aggregation=segmentAggregationModel,
               understandingWorker == nil,!discussionExtracting,!record.localOnly,
               record.origin == "user",record.speaker == "user",["audio","user_text"].contains(record.kind),
-              (record.transcript ?? "").unicodeScalars.count>4000 else { return }
+              (record.transcript ?? "").unicodeScalars.count>4000 else { return nil }
         understandingSource=record.id;status="正在分段理解文字 · 原始音视频仍在本机"
-        understandingWorker=Task {
+        let task=Task {
             do {
                 try await ensureTranscriptReviewed(sourceID: record.id)
                 guard let current = try await store.sources().first(where: { $0.id == record.id }) else { throw VoiceOSError("资料已变化") }
@@ -1380,6 +1394,8 @@ final class ControlCenter: ObservableObject {
             await refresh();requestReminderRefresh();resumeKnowledgeReviews()
             understandingSource=nil;understandingWorker=nil
         }
+        understandingWorker=task
+        return task
     }
     func cancelSegmented(_ id: String) {
         guard let store else { return }
@@ -1389,6 +1405,238 @@ final class ControlCenter: ObservableObject {
             await refresh()
         }
     }
+
+    var workspaceBusySourceIDs: Set<String> {
+        var busy = Set<String>()
+        if let understandingSource { busy.insert(understandingSource) }
+        if fullRecordingBusy, let fullRecordingSourceID { busy.insert(fullRecordingSourceID) }
+        if let sourceID = processingActivity?.sourceID { busy.insert(sourceID) }
+        if let transcriptReviewSourceID { busy.insert(transcriptReviewSourceID) }
+        for intent in processingIntents where intent.state == .queued || intent.state == .running { busy.insert(intent.sourceID) }
+        for batch in segmentedBatches where batch.state == .queued { busy.insert(batch.scope.plan.source.sourceID) }
+        for request in recordingRequests where request.state == "waiting" || request.state == "enqueued" { busy.insert(request.sourceID) }
+        return busy
+    }
+
+    var pausedActionBatchPreview: PausedActionBatchPlan {
+        var snapshot = WorkspaceSnapshot()
+        snapshot.sources = records
+        snapshot.claims = claims
+        snapshot.currentClaimsBySource = currentClaimsBySource
+        snapshot.actions = actionRecords
+        snapshot.processingIntents = processingIntents
+        snapshot.segmentedBatches = segmentedBatches
+        snapshot.recordingRequests = recordingRequests
+        return PausedActionBatch.plan(snapshot: snapshot, additionallyBusySources: workspaceBusySourceIDs)
+    }
+
+    var pausedActionBatchUnavailableReason: String? {
+        if pausedActionBatch?.isRunning == true || isPausedActionBatchConfirming { return "另一批重新识别正在进行" }
+        if !modelConfigured || textModel == nil { return "需要先配置文本模型" }
+        if sourceReidentifyWorker != nil || understandingWorker != nil || fullRecordingBusy || transcriptReviewSourceID != nil ||
+            processingActivity != nil || worker != nil || importing || dictationActive || dictationBusy || discussionExtracting {
+            return "另一项处理正在进行，完成后再继续"
+        }
+        return nil
+    }
+
+    private var isPausedActionBatchConfirming: Bool {
+        if case .some(.confirming) = pausedActionBatch?.phase { return true }
+        return false
+    }
+
+    func preparePausedActionBatch() async {
+        guard let store else { status = "资料库尚未打开"; return }
+        do {
+            let snapshot = try await store.workspaceSnapshot()
+            let plan = PausedActionBatch.plan(snapshot: snapshot, additionallyBusySources: workspaceBusySourceIDs)
+            guard plan.isBatchable else { status = "没有可以批量重新识别的暂停待办。"; return }
+            pausedActionBatch = PausedActionBatchRun(plan: plan, phase: .confirming, stopRequested: false)
+        } catch { status = error.localizedDescription }
+    }
+
+    func startPausedActionBatch() {
+        guard let run = pausedActionBatch, case .confirming = run.phase, pausedActionBatchWorker == nil else { return }
+        pausedActionBatch?.phase = .running(PausedActionBatchProgress(done: 0, total: run.plan.targets.count,
+                                                                      currentSourceID: nil, currentTitle: ""))
+        pausedActionBatch?.stopRequested = false
+        let plan = run.plan
+        pausedActionBatchWorker = Task { await runPausedActionBatch(plan) }
+    }
+
+    func stopPausedActionBatch() {
+        guard pausedActionBatch?.isRunning == true else { return }
+        // Stop is cooperative: the in-flight model call must finish rather than
+        // become an unknown result.
+        pausedActionBatch?.stopRequested = true
+    }
+
+    func cancelPausedActionBatch() {
+        guard pausedActionBatch?.isRunning != true else { return }
+        pausedActionBatch = nil
+    }
+
+    func dismissPausedActionBatch() { cancelPausedActionBatch() }
+
+    private func runPausedActionBatch(_ plan: PausedActionBatchPlan) async {
+        var updated: [PausedActionBatchSummary.Updated] = []
+        var skipped: [PausedActionBatchSummary.Skipped] = []
+        var failed: [PausedActionBatchSummary.Failed] = []
+        var stoppedRemaining = 0
+        for (index, target) in plan.targets.enumerated() {
+            if pausedActionBatch?.stopRequested == true {
+                stoppedRemaining = plan.targets.count - index
+                break
+            }
+            pausedActionBatch?.phase = .running(PausedActionBatchProgress(done: index, total: plan.targets.count,
+                                                                          currentSourceID: target.sourceID,
+                                                                          currentTitle: title(for: target.sourceID)))
+            let before = await evaluatePausedActionIDs(target.actionIDs)
+            if before.remaining.isEmpty {
+                skipped.append(.init(sourceID: target.sourceID, reason: .noLongerPaused, message: nil))
+                continue
+            }
+            let receipt = await reidentifySource(target.sourceID)
+            switch receipt {
+            case .skipped(let reason):
+                skipped.append(.init(sourceID: target.sourceID, reason: reason, message: nil))
+            case .failed(let message):
+                let after = await evaluatePausedActionIDs(target.actionIDs)
+                failed.append(.init(sourceID: target.sourceID, message: message, remainingActionIDs: after.remaining))
+            case .finished(let reused):
+                let after = await evaluatePausedActionIDs(target.actionIDs)
+                if after.remaining.isEmpty {
+                    updated.append(.init(sourceID: target.sourceID, reused: reused))
+                } else {
+                    let explanation = await pauseExplanation(for: target.sourceID)
+                    failed.append(.init(sourceID: target.sourceID,
+                                        message: explanation + "（仍有 \(after.remaining.count) 条暂停待办）",
+                                        remainingActionIDs: after.remaining))
+                }
+            }
+            await refresh()
+        }
+        await refresh()
+        let allActionIDs = Array(Set(plan.targets.flatMap(\.actionIDs))).sorted()
+        let final = await evaluatePausedActionIDs(allActionIDs)
+        pausedActionBatch?.phase = .finished(PausedActionBatchSummary(
+            updated: updated, skipped: skipped, failed: failed, stoppedRemaining: stoppedRemaining,
+            resolvedActionIDs: final.resolved, remainingActionIDs: final.remaining,
+            reviewOnlyActionIDs: plan.reviewOnlyActionIDs, withdrawnActionIDs: plan.withdrawnActionIDs,
+            unattachedActionIDs: plan.unattachedActionIDs))
+        pausedActionBatch?.stopRequested = false
+        pausedActionBatchWorker = nil
+        scheduleProcessing()
+    }
+
+    func reidentify(_ record: SourceRecord) {
+        guard sourceReidentifyWorker == nil, understandingWorker == nil, pausedActionBatch?.isRunning != true else { return }
+        understandingSource = record.id
+        sourceReidentifyWorker = Task {
+            _ = await reidentifySource(record.id)
+            await refresh(); requestReminderRefresh(); resumeKnowledgeReviews()
+            understandingSource = nil
+            sourceReidentifyWorker = nil
+        }
+    }
+
+    private func reidentifySource(_ sourceID: String) async -> SourceReidentifyReceipt {
+        guard let store else { return .failed("资料库尚未打开") }
+        guard let source = try? await store.sources().first(where: { $0.id == sourceID }) else { return .failed("材料已不存在") }
+        guard let textModel else { return .failed("需要先配置文本模型") }
+        let localRetrieval: any LocalRetrievalPort
+        if let semanticRetrieval { localRetrieval = semanticRetrieval } else { localRetrieval = retrieval }
+        do {
+            switch PausedActionBatch.route(for: source) {
+            case .textUnderstanding:
+                try await ensureTranscriptReviewed(sourceID: sourceID)
+                let result = try await store.reidentifySource(
+                    SourceReidentificationRequest(sourceID: sourceID, pausedActionIDs: pausedActionIDs(for: sourceID),
+                                                  cognition: textModel.configuration,
+                                                  association: associationModel?.configuration,
+                                                  semantic: semanticRetrieval != nil),
+                    cognitionPort: textModel, associationPort: associationModel, retrieval: localRetrieval)
+                applyReidentificationResult(result)
+                if case .completed = result, !isPersonal(source) {
+                    await associateUnderstoodExpression(sourceID)
+                    await processFollowup(sourceID: sourceID)
+                }
+                switch result {
+                case .completed(let report):
+                    if report.remainingActionIDs.isEmpty { return .finished(reused: report.reused) }
+                    let explanation = await pauseExplanation(for: sourceID)
+                    return .failed(explanation + "（仍有 \(report.remainingActionIDs.count) 条暂停待办）")
+                case .skipped(let reason):
+                    return .skipped(reason)
+                case .failed(let message):
+                    return .failed(message)
+                }
+            case .segmented:
+                guard let task = understandSegmented(source) else { return .failed("当前条件不能分段重新识别") }
+                await task.value
+                return await finishedByEvaluation(sourceID)
+            case .wholeRecording:
+                guard let task = organizeFullTranscript(source) else { return .failed("当前条件不能按完整录音重新识别") }
+                await task.value
+                return await finishedByEvaluation(sourceID)
+            }
+        } catch is CancellationError {
+            return .skipped(.noLongerPaused)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    private func applyReidentificationResult(_ result: SourceReidentificationResult) {
+        switch result {
+        case .completed(let report):
+            status = (report.reused ? "沿用已有理解" : "理解完成") + " · \(report.claimIDs.count) 条候选待核对"
+        case .skipped:
+            status = "已跳过这次重新识别 · 原文与历史保留"
+        case .failed(let message):
+            status = message
+        }
+    }
+
+    private func isPersonal(_ source: SourceRecord) -> Bool {
+        source.origin == "user" && source.speaker == "user" && ["user_text", "audio"].contains(source.kind)
+    }
+
+    private func pausedActionIDs(for sourceID: String) -> [String] {
+        let references = Dictionary(uniqueKeysWithValues: claims.map { ($0.id, $0.references) })
+        return actionRecords.filter { action in
+            guard action.kind == "task",
+                  references[action.claimID]?.contains(where: { $0.sourceID == sourceID }) == true,
+                  let reason = WorkspaceActionPause.reason(for: action, sources: records, claims: claims,
+                                                           currentClaimsBySource: currentClaimsBySource,
+                                                           actions: actionRecords) else { return false }
+            return reason == .extractionPaused
+        }.map(\.id).sorted()
+    }
+
+    private func evaluatePausedActionIDs(_ actionIDs: [String]) async -> (resolved: [String], remaining: [String], reasons: [String: WorkspaceActionPauseReason]) {
+        guard let store, !actionIDs.isEmpty else { return (actionIDs, [], [:]) }
+        guard let snapshot = try? await store.workspaceSnapshot() else { return ([], actionIDs, [:]) }
+        return WorkspaceActionPause.evaluate(actionIDs: actionIDs, sources: snapshot.sources, claims: snapshot.claims,
+                                             currentClaimsBySource: snapshot.currentClaimsBySource, actions: snapshot.actions)
+    }
+
+    private func pauseExplanation(for sourceID: String) async -> String {
+        guard let store else { return "仍有待办保持暂停，请打开材料查看原因。" }
+        return (try? await store.understandingPauseExplanation(sourceID: sourceID)) ?? "仍有待办保持暂停，请打开材料查看原因。"
+    }
+
+    private func finishedByEvaluation(_ sourceID: String) async -> SourceReidentifyReceipt {
+        let evaluation = await evaluatePausedActionIDs(pausedActionIDs(for: sourceID))
+        if evaluation.remaining.isEmpty { return .finished(reused: false) }
+        let explanation = await pauseExplanation(for: sourceID)
+        return .failed(explanation + "（仍有 \(evaluation.remaining.count) 条暂停待办）")
+    }
+
+    private func title(for sourceID: String) -> String {
+        records.first(where: { $0.id == sourceID })?.workspaceTitle ?? ""
+    }
+
     private func applyUnderstandingContinuation(_ result: SourceUnderstandingContinuation, sourceID: String) async {
         if result.state == "completed" || result.state == "discussion_completed" {
             status = result.reused ? "沿用已有理解 · 核对关联处理，不重复生成候选或任务" : "理解完成 · \(result.claimIDs.count) 条候选待核对"
@@ -1521,7 +1769,8 @@ final class ControlCenter: ObservableObject {
         if failures == 0 { status = "导入完成 · 可查看原件和转写状态" }
     }
     private func scheduleProcessing() {
-        guard worker == nil, !fullRecordingBusy, !dictationActive else { return }
+        guard worker == nil, !fullRecordingBusy, !dictationActive,
+              pausedActionBatch?.isRunning != true, sourceReidentifyWorker == nil else { return }
         // Owned by the application model, not the SwiftUI view task/window lifetime.
         worker = Task {
             await process()
