@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...50).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...51).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -925,6 +925,37 @@ final class Database {
                 )
                 """)
                 try execute("PRAGMA user_version=50")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "50" {
+            try transaction {
+                try execute("""
+                CREATE TABLE panorama_themes (
+                    id TEXT PRIMARY KEY,title TEXT NOT NULL,created_at TEXT NOT NULL,last_seen_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE panorama_theme_batches (
+                    attempt_id TEXT NOT NULL REFERENCES panorama_attempts(id),
+                    phase TEXT NOT NULL CHECK(phase IN ('synthesis','completed')),
+                    theme_count INTEGER NOT NULL,created_at TEXT NOT NULL,
+                    PRIMARY KEY(attempt_id,phase)
+                )
+                """)
+                try execute("""
+                CREATE TABLE panorama_theme_appearances (
+                    attempt_id TEXT NOT NULL,phase TEXT NOT NULL CHECK(phase IN ('synthesis','completed')),
+                    theme_id TEXT NOT NULL REFERENCES panorama_themes(id),raw_region_id TEXT NOT NULL,
+                    region_title TEXT NOT NULL,question_titles_json TEXT NOT NULL,claim_ids_json TEXT NOT NULL,
+                    source_ids_json TEXT NOT NULL,quote_keys_json TEXT NOT NULL,
+                    match_kind TEXT NOT NULL CHECK(match_kind IN ('exact','matched','new')),match_score REAL,
+                    created_at TEXT NOT NULL,PRIMARY KEY(attempt_id,phase,theme_id),
+                    FOREIGN KEY(attempt_id,phase) REFERENCES panorama_theme_batches(attempt_id,phase)
+                )
+                """)
+                try execute("CREATE INDEX panorama_theme_appearance_theme ON panorama_theme_appearances(theme_id,created_at)")
+                try execute("PRAGMA user_version=51")
             }
         }
 
