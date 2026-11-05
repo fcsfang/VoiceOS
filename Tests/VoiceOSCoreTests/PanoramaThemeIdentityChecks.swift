@@ -318,13 +318,32 @@ extension CoreFlowTests {
         XCTAssertEqual(callsAfterQuoteChange, 2, "原话变化后必须重新请求")
     }
 
-    private func themeReplyBriefing(questionID: String, quote: String) throws -> PanoramaThemeBriefing {
-        let proposal = themeProposal([
-            .init(id: "reply-theme", title: "检索条件",
+    private func themeReplyBriefing(questionID: String, quote: String, title: String = "检索条件",
+                                    summary: String = "主题摘要 reply-theme") throws -> PanoramaThemeBriefing {
+        let base = themeProposal([
+            .init(id: "reply-theme", title: title,
                   questions: [.init(id: questionID, title: "检索条件怎么保留？", claims: [], source: "s1", quote: quote)])
         ])
+        let proposal = PanoramaProposal(regions: [.init(id: "reply-theme", title: title, summary: summary)],
+            questions: base.questions, relations: [], unrepresentedSources: [], unrepresentedClaims: [])
         let snapshot = themeSnapshot(proposal, workflow: nil)
         return try XCTUnwrap(PanoramaThemeBriefing.make(snapshot: snapshot, regionID: "reply-theme"))
+    }
+
+    func testPanoramaThemeReplyCacheChangesWithThemeText() async throws {
+        let directory = try themeDirectory("theme-reply-text")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try VoiceOSStore(root: directory, inspector: NativeMediaInspector())
+        try await store.recover()
+        let port = CountingThemeReplyPort()
+        let base = try themeReplyBriefing(questionID: "q", quote: "原话甲")
+        let otherTitle = try themeReplyBriefing(questionID: "q", quote: "原话甲", title: "检索范围")
+        let otherSummary = try themeReplyBriefing(questionID: "q", quote: "原话甲", summary: "新的主题摘要")
+        _ = try await store.panoramaThemeReply(base, using: port)
+        _ = try await store.panoramaThemeReply(otherTitle, using: port)
+        _ = try await store.panoramaThemeReply(otherSummary, using: port)
+        let calls = await port.calls
+        XCTAssertEqual(calls, 3, "标题或摘要变化后必须重新请求")
     }
 }
 

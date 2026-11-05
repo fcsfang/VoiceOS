@@ -107,7 +107,7 @@ public struct PanoramaThemeBriefing: Codable, Sendable {
         }
         let quoteQuestionIDs = Set(picked.map(\.question.id))
         let open = ranked.first(where: { !quoteQuestionIDs.contains($0.id) }) ?? ranked.first
-        let digestValue = Digest(regionID: region.id,
+        let digestValue = Digest(regionID: region.id, title: region.title, summary: region.summary,
             quotes: quotes.map { [$0.text, $0.sourceTitle, $0.occurredAt] },
             statements: statements,
             openQuestionTitle: open?.title ?? "",
@@ -121,6 +121,8 @@ public struct PanoramaThemeBriefing: Codable, Sendable {
 
     private struct Digest: Encodable {
         let regionID: String
+        let title: String
+        let summary: String
         let quotes: [[String]]
         let statements: [String]
         let openQuestionTitle: String
