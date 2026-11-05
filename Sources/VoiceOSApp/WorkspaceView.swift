@@ -316,6 +316,8 @@ struct WorkspaceView: View {
                     panoramaClaimEditor = model.claims.first { $0.id == id }
                 }, discuss: { snapshot, selection in
                     Task { await openPanoramaDiscussion(snapshotID: snapshot, selection: selection) }
+                }, themeReply: { briefing in
+                    try await model.themeReply(briefing)
                 })
         case .themes: scrolled { themes }.id(navigationEntry)
         case .materials: scrolled { materials }

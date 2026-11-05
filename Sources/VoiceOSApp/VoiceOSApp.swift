@@ -113,6 +113,7 @@ final class ControlCenter: ObservableObject {
     private var outcomeModel:ResponsesOutcomePort?
     @Published var discussionStatus="选择一份历史，明确进入讨论。"
     private var discussionModel:ResponsesDiscussionPort?
+    private var themeReplyModel:ResponsesThemeReplyPort?
     @Published var selected: String?
     /// Sheet-scoped views cannot navigate the workspace themselves; they ask
     /// for a source and the workspace consumes the request from its own state.
@@ -743,6 +744,7 @@ final class ControlCenter: ObservableObject {
             panoramaModel=suite.panorama
             Task { await panorama.refresh(store: store, port: panoramaModel) }
             discussionModel=suite.discussion;outcomeModel=suite.outcome
+            themeReplyModel=suite.themeReply
             recordingTitleModel=suite.recordingTitles
             topicModel=suite.topics; topicAttemptDigest=nil
             recordingExpressionModel=suite.recordingExpressions
@@ -2584,6 +2586,11 @@ extension ControlCenter {
             do { try await store.draftPanorama(using: port); await refresh() }
             catch { status=error.localizedDescription }
         }
+    }
+    func themeReply(_ briefing: PanoramaThemeBriefing) async throws -> String {
+        guard let store else { throw VoiceOSError("资料库尚未打开") }
+        guard let themeReplyModel else { throw VoiceOSError("请先配置文本模型") }
+        return try await store.panoramaThemeReply(briefing, using: themeReplyModel)
     }
     func beginPanoramaDiscussion(snapshotID: String, selection: PanoramaSelection) async -> String? {
         guard let store, !discussionSaving, !discussionSending, !discussionExtracting, !dictationActive else { return nil }
