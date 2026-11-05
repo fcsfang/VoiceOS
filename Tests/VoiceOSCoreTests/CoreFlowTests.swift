@@ -2236,6 +2236,66 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertTrue(invalidated.claims.allSatisfy { $0.validity == "frozen" })
     }
 
+    func testPausedActionBatchPassUpdatesEachSourceWithoutDuplicateActions() async throws {
+        let store = try await openStore(), model = FlowModel(createsTask: true)
+        let firstID = try await expression(store, text: "我认为容量最重要。", model: model)
+        let secondID = try await expression(store, text: "我认为检索质量最重要。", model: model)
+        let review = try JSONDecoder().decode(TranscriptionReview.self, from: Data("""
+            {"completed":true,"changed":false,"response_id":"synthetic-review-2","response_ids":["synthetic-review-1","synthetic-review-2"],"context_review_version":2,"corrections":[],"unresolved_issues":[],"scope":"complete_expression_knowledge_and_intent","full_text_independent_passes":2}
+            """.utf8))
+        try await store.saveTranscriptionReview(review, sourceID: firstID)
+        try await store.saveTranscriptionReview(review, sourceID: secondID)
+        let plan = PausedActionBatch.plan(snapshot: try await store.workspaceSnapshot())
+        XCTAssertEqual(plan.targets.count, 2)
+        XCTAssertEqual(plan.affectedMaterialCount, 2)
+        XCTAssertTrue(plan.targets.allSatisfy { $0.route == .textUnderstanding })
+        let oldActionIDs = Set(plan.targets.flatMap(\.actionIDs))
+        XCTAssertEqual(oldActionIDs.count, 2)
+        let oldActions = try await store.actions(includeHistory: true).filter { oldActionIDs.contains($0.id) }
+        XCTAssertEqual(oldActions.count, 2)
+        XCTAssertTrue(oldActions.allSatisfy { $0.validity == "frozen" })
+        let batchModel = FlowModel(createsTask: true)
+        for target in plan.targets {
+            let result = try await store.reidentifySource(
+                SourceReidentificationRequest(sourceID: target.sourceID, pausedActionIDs: target.actionIDs,
+                                              cognition: flowConfiguration, association: flowConfiguration, semantic: false),
+                cognitionPort: batchModel, associationPort: FlowAssociation(), retrieval: NativeRetrieval())
+            guard case .completed(let report) = result else {
+                return XCTFail("批量重新识别应完成：\(result)")
+            }
+            XCTAssertTrue(report.remainingActionIDs.isEmpty)
+            XCTAssertEqual(report.resolvedActionIDs, target.actionIDs)
+            XCTAssertFalse(report.reused)
+        }
+        let calls = await batchModel.calls
+        XCTAssertEqual(calls, 2)
+        let allActions = try await store.actions(includeHistory: true)
+        XCTAssertEqual(allActions.filter { $0.validity == "current" }.count, 2)
+        XCTAssertTrue(allActions.filter { oldActionIDs.contains($0.id) }.allSatisfy { $0.validity == "frozen" })
+        for target in plan.targets {
+            let currentClaims = try await store.latestCandidateClaims(for: target.sourceID)
+            XCTAssertEqual(currentClaims.count, 1)
+            XCTAssertEqual(currentClaims.first?.validity, "current")
+        }
+        let database = await store.db
+        let duplicateCommands = try database.query("SELECT command_id FROM actions WHERE validity='current' GROUP BY command_id HAVING COUNT(*)>1")
+        XCTAssertTrue(duplicateCommands.isEmpty)
+        let actionCountAfterFirstPass = allActions.count
+        for target in plan.targets {
+            let result = try await store.reidentifySource(
+                SourceReidentificationRequest(sourceID: target.sourceID, pausedActionIDs: target.actionIDs,
+                                              cognition: flowConfiguration, association: flowConfiguration, semantic: false),
+                cognitionPort: batchModel, associationPort: FlowAssociation(), retrieval: NativeRetrieval())
+            XCTAssertEqual(result, .skipped(.noLongerPaused))
+        }
+        let callsAfterSecondPass = await batchModel.calls
+        XCTAssertEqual(callsAfterSecondPass, 2)
+        let actionsAfterSecondPass = try await store.actions(includeHistory: true)
+        XCTAssertEqual(actionsAfterSecondPass.count, actionCountAfterFirstPass)
+        let finalSnapshot = try await store.workspaceSnapshot()
+        XCTAssertTrue(PausedActionBatch.plan(snapshot: finalSnapshot).targets.isEmpty)
+    }
+
     func testPolicyFreezeExplainsCauseAndKeepsOldClaimsFrozen() async throws {
         let store = try await openStore(), model = FlowModel(createsTask: true)
         let sourceID = try await expression(store, text: "我认为检索质量最重要。", model: model)

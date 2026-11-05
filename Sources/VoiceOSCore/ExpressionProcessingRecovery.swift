@@ -3,15 +3,21 @@ import Foundation
 extension VoiceOSStore {
     // Scope identity is independent of the currently configured model. The earliest
     // existing receipt owns once-only cognition; config changes cannot replay it.
-    func processingCognitionReceipt(sourceID: String, sourceVersionID: String, transcriptVersionID: String, policyVersion: Int) throws -> [String: String]? {
-        try db.query("""
+    func processingCognitionReceipt(sourceID: String, sourceVersionID: String, transcriptVersionID: String, policyVersion: Int,
+                                    contentDigest: String? = nil) throws -> [String: String]? {
+        // A transcription review changes the context digest without changing the
+        // transcript version, so version and policy alone can select a stale receipt.
+        let digestClause = contentDigest == nil ? "" : " AND c.digest=?"
+        var arguments: [String?] = [sourceID, sourceVersionID, transcriptVersionID, String(policyVersion)]
+        if let contentDigest { arguments.append(contentDigest) }
+        return try db.query("""
             SELECT a.*,c.state AS context_state FROM model_attempts a
             JOIN contexts c ON c.id=a.context_id JOIN context_inputs i ON i.context_id=c.id
             JOIN transcript_versions v ON v.id=i.transcript_version_id JOIN transcripts t ON t.id=v.transcript_id
             WHERE i.source_id=? AND t.input_version_id=? AND i.transcript_version_id=? AND i.policy_version=?
-              AND a.execution_kind='model_request'
+              AND a.execution_kind='model_request'\(digestClause)
             ORDER BY a.producer_sequence LIMIT 1
-            """, [sourceID, sourceVersionID, transcriptVersionID, String(policyVersion)]).first
+            """, arguments).first
     }
 
     func processingAssociationReceipt(_ snapshot: ExpressionProcessingIntentSnapshot) throws -> [String: String]? {
@@ -21,8 +27,9 @@ extension VoiceOSStore {
             JOIN contexts c ON c.id=a.context_id JOIN context_inputs i ON i.context_id=c.id
             JOIN transcript_versions v ON v.id=i.transcript_version_id JOIN transcripts t ON t.id=v.transcript_id
             WHERE a.current_source_id=? AND i.source_id=? AND t.input_version_id=? AND i.transcript_version_id=? AND i.policy_version=?
+              AND c.digest=?
             ORDER BY a.created_at,a.id LIMIT 1
-            """, [source.sourceID, source.sourceID, source.sourceVersionID, source.transcriptVersionID, String(snapshot.policyVersion)]).first
+            """, [source.sourceID, source.sourceID, source.sourceVersionID, source.transcriptVersionID, String(snapshot.policyVersion), snapshot.context.contentDigest]).first
     }
 
     /// Startup only, after reserved model receipts have become unknown and their
@@ -32,7 +39,8 @@ extension VoiceOSStore {
             for row in try db.query("SELECT * FROM processing_intents WHERE state='running'") {
                 let record = try processingRecord(row), snapshot = record.snapshot, source = snapshot.context.sources[0]
                 let cognition = try processingCognitionReceipt(sourceID: source.sourceID, sourceVersionID: source.sourceVersionID,
-                    transcriptVersionID: source.transcriptVersionID, policyVersion: snapshot.policyVersion)
+                    transcriptVersionID: source.transcriptVersionID, policyVersion: snapshot.policyVersion,
+                    contentDigest: snapshot.context.contentDigest)
                 let association = try processingAssociationReceipt(snapshot)
                 let cognitionID = cognition?["id"], associationID = association?["id"]
                 var boundRow = row

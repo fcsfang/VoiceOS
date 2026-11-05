@@ -77,7 +77,8 @@ extension VoiceOSStore {
     func cognitionAttemptID(for snapshot: ExpressionProcessingIntentSnapshot) throws -> String? {
         let source = snapshot.context.sources[0]
         return try processingCognitionReceipt(sourceID: source.sourceID, sourceVersionID: source.sourceVersionID,
-            transcriptVersionID: source.transcriptVersionID, policyVersion: snapshot.policyVersion)?["id"]
+            transcriptVersionID: source.transcriptVersionID, policyVersion: snapshot.policyVersion,
+            contentDigest: snapshot.context.contentDigest)?["id"]
     }
 
     func associationAttemptID(for snapshot: ExpressionProcessingIntentSnapshot) throws -> String? {
@@ -217,9 +218,16 @@ extension VoiceOSStore {
             }
             associationStarted = true
             let association = try await processExpressionAssociation(sourceID: snapshot.context.sources[0].sourceID, retrieval: retrieval, semantic: semantic, model: associationPort)
+            // A transcription review changes the context digest without changing the
+            // transcript version; an association receipt from the earlier basis must
+            // not be rebound to this intent.
             let associationAttempt: String?
-            if let attempt = association.attempt?.id { associationAttempt = attempt }
-            else { associationAttempt = try associationAttemptID(for: snapshot) }
+            if let attempt = association.attempt {
+                associationAttempt = attempt.snapshot.current.contentDigest == snapshot.context.contentDigest ? attempt.id : nil
+            } else {
+                associationAttempt = try associationAttemptID(for: snapshot)
+            }
+            let associationReceiptIsStale = association.attempt != nil && associationAttempt == nil
             associationAttemptForIntent = associationAttempt
             row = try processingRow(id: id)
             if row["state"] == ExpressionProcessingIntentState.cancelled.rawValue {
@@ -235,6 +243,8 @@ extension VoiceOSStore {
             switch association.state {
             case .completed, .noCandidates:
                 try updateProcessing(id, state: .completed, phase: .completed, error: nil)
+            case .frozen where associationReceiptIsStale:
+                try updateProcessing(id, state: .completed, phase: .completed, error: "关联依据已变化；本次只保存理解，旧关联保留为历史")
             case .unknown:
                 try updateProcessing(id, state: .unknown, phase: .association, error: "关联结果未知，不自动重发")
             case .frozen:

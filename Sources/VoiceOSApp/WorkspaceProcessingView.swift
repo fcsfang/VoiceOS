@@ -33,10 +33,13 @@ extension ControlCenter {
         return assistantExecutions.contains { $0.validity == "current" && $0.state == "running" } ? .running : .completed
     }
     var workspaceProcessingTitle: String? {
+        if let batch = pausedActionBatch, case .running(let progress) = batch.phase {
+            return progress.currentTitle.isEmpty ? progress.label : progress.label + " · " + progress.currentTitle
+        }
         if case .running(let title) = workspaceProcessingStatus.display { return title }
         return nil
     }
-    var workspaceProcessingSourceID: String? { transcriptReviewSourceID ?? processingActivity?.sourceID ?? understandingSource ?? fullRecordingSourceID }
+    var workspaceProcessingSourceID: String? { pausedActionBatch?.currentSourceID ?? transcriptReviewSourceID ?? processingActivity?.sourceID ?? understandingSource ?? fullRecordingSourceID }
     var workspaceUnfinishedIntents: [ExpressionProcessingIntentRecord] {
         processingIntents.filter { intent in
             guard ![.completed,.cancelled,.frozen].contains(intent.state), let input = intent.snapshot.context.sources.first else { return false }
@@ -92,7 +95,7 @@ struct WorkspaceProcessingBar: View {
     var body: some View {
         let status = model.workspaceProcessingStatus
         HStack(spacing:12) {
-            if case .running(let title) = status.display {
+            if let title = model.workspaceProcessingTitle {
                 ProgressView().controlSize(.small)
                 VStack(alignment:.leading,spacing:3) {
                     Text(title).lineLimit(1)
@@ -102,7 +105,8 @@ struct WorkspaceProcessingBar: View {
                 Label("有事项需要查看，原文与历史保留",systemImage:"exclamationmark.circle").foregroundStyle(.orange)
             } else { Text(status.title).foregroundStyle(.secondary).lineLimit(1) }
             Spacer(minLength:8)
-            if model.dictationActive { Button("停止并整理") { model.stopDictation() } }
+            if model.pausedActionBatch?.isRunning == true { Button("停止后续处理") { model.stopPausedActionBatch() } }
+            else if model.dictationActive { Button("停止并整理") { model.stopDictation() } }
             else if model.fullRecordingBusy { Button("停止后续处理") { model.cancelFullRecording() } }
             Button("查看处理",action:open).accessibilityIdentifier("workspace.processing")
         }.font(.caption).padding(.horizontal,20).padding(.vertical,12).background(palette.surface)
@@ -177,6 +181,7 @@ struct WorkspaceProcessingView: View {
                                 VStack(alignment:.leading,spacing:5) { Text(task.title);Text(model.workspaceExternalCompletionNote(task) ?? model.workspaceActionStatus(task)).font(.caption).foregroundStyle(.secondary) }.padding(.leading,26).padding(.bottom,12)
                             }
                         }
+                        PausedActionBatchControl(model:model)
                     }
                 }
                 ForEach(model.records.filter { model.transcriptReviewIssue(for:$0) != nil }) { source in

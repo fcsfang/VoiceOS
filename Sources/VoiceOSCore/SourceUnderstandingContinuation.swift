@@ -62,7 +62,8 @@ extension VoiceOSStore {
         }
         let ids = try await understandSource(sourceID: sourceID, using: port)
         let attempt = try processingCognitionReceipt(sourceID: sourceID, sourceVersionID: context.sources[0].sourceVersionID,
-                                                    transcriptVersionID: context.sources[0].transcriptVersionID, policyVersion: policy.version)
+                                                    transcriptVersionID: context.sources[0].transcriptVersionID, policyVersion: policy.version,
+                                                    contentDigest: context.contentDigest)
         return .init(state: "completed", claimIDs: ids, reused: false, attemptID: attempt?["id"])
     }
 }
