@@ -119,6 +119,7 @@ public actor VoiceOSStore {
         try Self.validateReminderScheduleOperations(db)
         try Self.validateReminderCompensations(db)
         ready = true
+        try backfillPanoramaThemeLedger()
     }
     @discardableResult
     public func importFile(_ input: URL, commandID: String = UUID().uuidString) async throws -> String {

@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import VoiceOSCore
+import VoiceOSPlatform
 
 extension CoreFlowTests {
     private struct ThemeQuestion {
@@ -114,7 +115,7 @@ extension CoreFlowTests {
         XCTAssertEqual(Set(ids).count, 2, "只有一个候选继承旧主题")
     }
 
-    func testPanoramaThemeMergeKeepsOneToOne() throws {
+    func testPanoramaThemeMergeKeepsOneToOne() async throws {
         let prior = PanoramaThemeMap.make(proposal: themeProposal([
             .init(id: "p1", title: "检索条件", questions: [.init(id: "q1", title: "如何保留条件？", claims: ["c1", "c2"], source: "s1", quote: "原话甲")]),
             .init(id: "p2", title: "检索范围", questions: [.init(id: "q2", title: "如何保留条件？", claims: ["c1", "c2"], source: "s1", quote: "原话甲")])
@@ -124,6 +125,23 @@ extension CoreFlowTests {
         ])
         let result = try PanoramaThemeIdentity.rewrite(candidate, attemptID: "merge", current: nil, prior: prior)
         XCTAssertEqual(result.proposal.regions.first?.id, "p1", "两个旧主题中只有一个继承")
+        let directory = try themeDirectory("merge-ledger")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try VoiceOSStore(root: directory, inspector: NativeMediaInspector())
+        try await store.recover()
+        let database = try Database(directory.appendingPathComponent("voiceos.sqlite"))
+        try database.execute("INSERT INTO panorama_attempts(id,digest,state,input_json,created_at) VALUES('merge-prior','d1','completed','{}','2026-11-05T00:00:00Z')")
+        try await store.recordPanoramaThemeBatch(.init(attemptID: "merge-prior", phase: .completed, createdAt: "2026-11-05T00:00:00Z",
+            matches: [.init(themeID: "p2", rawRegionID: "r2", regionTitle: "检索范围", questionTitles: [], claimIDs: [],
+                           sourceIDs: [], quoteKeys: [], kind: .new, score: nil)]), replacing: false)
+        try database.execute("INSERT INTO panorama_attempts(id,digest,state,input_json,created_at) VALUES('merge-next','d2','completed','{}','2026-11-05T00:00:01Z')")
+        try await store.recordPanoramaThemeBatch(.init(attemptID: "merge-next", phase: .completed, createdAt: "2026-11-05T00:00:01Z",
+            matches: [.init(themeID: "p1", rawRegionID: "r1", regionTitle: "检索条件", questionTitles: [], claimIDs: [],
+                           sourceIDs: [], quoteKeys: [], kind: .matched, score: 1)]), replacing: false)
+        XCTAssertEqual(try database.query("SELECT count(*) AS n FROM panorama_themes").first?["n"], "2")
+        XCTAssertEqual(try database.query("SELECT count(*) AS n FROM panorama_themes WHERE id='p2'").first?["n"], "1")
+        let latest = try await store.latestPanoramaThemeMap()
+        XCTAssertEqual(latest?.references.map(\.id), ["p1"])
     }
 
     func testPanoramaThemeRewriteUpdatesQuestionsAndAreas() throws {
@@ -184,5 +202,47 @@ extension CoreFlowTests {
         let draft = PanoramaWorkflow(phase: .synthesis, verifiedUnitIDs: [], totalUnitCount: 1,
             receipts: [.init(stage: "draft.synthesize", scopeID: "all", receipt: receipt)])
         XCTAssertTrue(PanoramaThemeMap.isEligible(snapshot(draft), attemptState: "failed"))
+    }
+
+    private func themeSnapshot(_ proposal: PanoramaProposal, workflow: PanoramaWorkflow?) -> PanoramaSnapshot {
+        let receipt = PanoramaReceipt(responseID: "receipt", model: "fixture", createdAt: "2026-11-05T00:00:00Z")
+        let review = PanoramaReview(questions: [], relations: [], coverageAccepted: false, reason: "")
+        let input = PanoramaInput(manifest: .init(digest: "theme-fixture", sourceIDs: [], claimIDs: [], unitIDs: []),
+            units: [], sources: [], claims: [], exclusions: [])
+        let coverage = PanoramaCoverage(submittedSourceIDs: [], submittedClaimIDs: [], representedSourceIDs: [],
+            representedClaimIDs: [], unrepresentedSources: [], unrepresentedClaims: [])
+        return .init(id: "theme-snapshot", createdAt: "2026-11-05T00:00:00Z", input: input, proposal: proposal,
+            coverage: coverage, generation: receipt, verification: receipt, review: review, workflow: workflow)
+    }
+
+    func testPanoramaThemeBackfillIsIdempotent() async throws {
+        let directory = try themeDirectory("backfill")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent("voiceos.sqlite")
+        let proposal = themeProposal([
+            .init(id: "backfill-1", title: "检索条件", questions: [.init(id: "bq1", title: "如何核对？", claims: ["bc1"], source: "bs1", quote: "原话甲")]),
+            .init(id: "backfill-2", title: "实验记录", questions: [.init(id: "bq2", title: "结果如何？", claims: ["bc2"], source: "bs2", quote: "原话乙")])
+        ])
+        let workflow = PanoramaWorkflow(phase: .completed, verifiedUnitIDs: [], totalUnitCount: 1, receipts: [])
+        let snapshot = themeSnapshot(proposal, workflow: workflow)
+        var database: Database? = try Database(file)
+        try database?.execute("INSERT INTO panorama_attempts(id,digest,state,input_json,snapshot_json,created_at) VALUES(?,?,'completed','{}',?,?)",
+            ["backfill-attempt", "backfill", try VoiceOSStore.relevanceJSON(snapshot), "2026-11-05T00:00:00Z"])
+        database = nil
+        var store: VoiceOSStore? = try VoiceOSStore(root: directory, inspector: NativeMediaInspector())
+        try await store?.recover()
+        let counts = try await store?.panoramaThemeAppearanceCounts()
+        XCTAssertEqual(counts?.keys.sorted(), ["backfill-1", "backfill-2"])
+        let batch = try Database(file).query("SELECT phase,theme_count FROM panorama_theme_batches").first
+        XCTAssertEqual(batch?["phase"], "completed")
+        XCTAssertEqual(batch?["theme_count"], "2")
+        store = nil
+        let reopened = try VoiceOSStore(root: directory, inspector: NativeMediaInspector())
+        try await reopened.recover()
+        let reopenedCounts = try await reopened.panoramaThemeAppearanceCounts()
+        XCTAssertEqual(reopenedCounts, counts)
+        let reopenedDatabase = try Database(file)
+        XCTAssertEqual(try reopenedDatabase.query("SELECT count(*) AS n FROM panorama_theme_batches").first?["n"], "1")
+        XCTAssertEqual(try reopenedDatabase.query("SELECT count(*) AS n FROM panorama_theme_appearances").first?["n"], "2")
     }
 }

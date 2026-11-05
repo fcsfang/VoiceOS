@@ -250,3 +250,92 @@ enum PanoramaThemeIdentity {
         reference(id: region.id, title: region.title, questions: questionsByRegion[region.id] ?? [])
     }
 }
+
+struct PanoramaThemeBatch: Sendable {
+    let attemptID: String
+    let phase: PanoramaPhase
+    let createdAt: String
+    let matches: [PanoramaThemeMatch]
+}
+
+extension VoiceOSStore {
+    func latestPanoramaThemeMap() throws -> PanoramaThemeMap? {
+        let rows=try db.query("""
+            SELECT b.attempt_id,b.phase,a.theme_id,a.region_title,a.question_titles_json,a.claim_ids_json,a.source_ids_json,a.quote_keys_json
+            FROM panorama_theme_batches b
+            JOIN panorama_attempts p ON p.id=b.attempt_id
+            JOIN panorama_theme_appearances a ON a.attempt_id=b.attempt_id AND a.phase=b.phase
+            ORDER BY p.rowid DESC,CASE b.phase WHEN 'completed' THEN 0 ELSE 1 END,a.rowid
+            """)
+        guard let first=rows.first,let attempt=first["attempt_id"],let phase=first["phase"] else { return nil }
+        func strings(_ row: [String:String], _ key: String) -> [String] {
+            guard let json=row[key] else { return [] }
+            return (try? JSONDecoder().decode([String].self, from: Data(json.utf8))) ?? []
+        }
+        let selected=rows.filter { $0["attempt_id"] == attempt && $0["phase"] == phase }
+        return .init(references: selected.map { row in
+            .init(id: row["theme_id"]!, title: row["region_title"]!, questionTitles: strings(row,"question_titles_json"),
+                  claimIDs: Set(strings(row,"claim_ids_json")), sourceIDs: Set(strings(row,"source_ids_json")),
+                  quoteKeys: Set(strings(row,"quote_keys_json")))
+        })
+    }
+
+    func recordPanoramaThemeBatch(_ batch: PanoramaThemeBatch, replacing: Bool) throws {
+        guard batch.phase == .synthesis || batch.phase == .completed else { throw VoiceOSError("全景主题批次阶段无效") }
+        let phase=batch.phase.rawValue
+        if replacing {
+            try db.execute("DELETE FROM panorama_theme_appearances WHERE attempt_id=? AND phase=?", [batch.attemptID,phase])
+            try db.execute("DELETE FROM panorama_theme_batches WHERE attempt_id=? AND phase=?", [batch.attemptID,phase])
+        }
+        try db.execute("INSERT INTO panorama_theme_batches(attempt_id,phase,theme_count,created_at) VALUES(?,?,?,?)",
+                       [batch.attemptID,phase,String(batch.matches.count),batch.createdAt])
+        for match in batch.matches {
+            try db.execute("""
+                INSERT INTO panorama_themes(id,title,created_at,last_seen_at) VALUES(?,?,?,?)
+                ON CONFLICT(id) DO UPDATE SET title=excluded.title,last_seen_at=excluded.last_seen_at
+                """, [match.themeID,match.regionTitle,batch.createdAt,batch.createdAt])
+            try db.execute("""
+                INSERT INTO panorama_theme_appearances(attempt_id,phase,theme_id,raw_region_id,region_title,question_titles_json,claim_ids_json,source_ids_json,quote_keys_json,match_kind,match_score,created_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+                """, [batch.attemptID,phase,match.themeID,match.rawRegionID,match.regionTitle,
+                      try Self.relevanceJSON(match.questionTitles),try Self.relevanceJSON(match.claimIDs),
+                      try Self.relevanceJSON(match.sourceIDs),try Self.relevanceJSON(match.quoteKeys),
+                      match.kind.rawValue,match.score.map { String($0) },batch.createdAt])
+        }
+    }
+
+    func backfillPanoramaThemeLedger() throws {
+        let rows=try db.query("""
+            SELECT id,state,snapshot_json FROM panorama_attempts
+            WHERE snapshot_json IS NOT NULL AND id NOT IN (SELECT attempt_id FROM panorama_theme_batches)
+            ORDER BY rowid
+            """)
+        guard !rows.isEmpty else { return }
+        try db.transaction {
+            for row in rows {
+                guard let id=row["id"],let json=row["snapshot_json"],
+                      let snapshot=try? JSONDecoder().decode(PanoramaSnapshot.self, from: Data(json.utf8)),
+                      PanoramaThemeMap.isEligible(snapshot, attemptState: row["state"] ?? "") else { continue }
+                let phase: PanoramaPhase = snapshot.workflow?.phase == .completed ? .completed : .synthesis
+                let matches=PanoramaThemeMap.make(snapshot: snapshot).references.map { reference -> PanoramaThemeMatch in
+                    let themeID=PanoramaThemeIdentity.adoptableID(reference.id) ? reference.id
+                        : PanoramaThemeIdentity.mintedID(attemptID: id, rawRegionID: reference.id)
+                    return .init(themeID: themeID, rawRegionID: reference.id, regionTitle: reference.title,
+                                 questionTitles: reference.questionTitles, claimIDs: reference.claimIDs.sorted(),
+                                 sourceIDs: reference.sourceIDs.sorted(), quoteKeys: reference.quoteKeys.sorted(),
+                                 kind: .new, score: nil)
+                }
+                try recordPanoramaThemeBatch(.init(attemptID: id, phase: phase, createdAt: snapshot.createdAt, matches: matches), replacing: false)
+            }
+        }
+    }
+
+    func panoramaThemeAppearanceCounts() throws -> [String: Int] {
+        var counts: [String: Int]=[:]
+        for row in try db.query("SELECT theme_id,COUNT(*) AS count FROM panorama_theme_appearances GROUP BY theme_id") {
+            guard let id=row["theme_id"],let count=row["count"].flatMap(Int.init) else { continue }
+            counts[id]=count
+        }
+        return counts
+    }
+}

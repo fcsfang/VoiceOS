@@ -393,13 +393,17 @@ extension VoiceOSStore {
     }
     private func finishPanorama(_ units: [VerifiedPanoramaUnit], input: PanoramaInput, attemptID: String, port: any PanoramaModelPort) async throws {
         let proposals=units.map { PanoramaUnitProposal(unitID: $0.unitID, proposal: $0.proposal) }
+        // The phase publish overwrites this attempt's draft snapshot, so capture its theme map first.
+        let themePrior=try latestPanoramaThemeMap()
         try publishPanoramaPhase(.synthesis, units: units, input: input, attemptID: attemptID)
         let generated: (PanoramaProposal, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.synthesize", scopeID: "all",
             input: PanoramaGlobalSynthesisInput(input: input, proposals: proposals), whole: input, identity: port.synthesisConfigurationIdentity,
             operation: { try await port.synthesize(proposals, input: input) }, validate: { proposal, _ in
                 _ = try Self.validatePanorama(proposal, input: input)
             }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
-        var candidate=generated
+        let synthesized=try PanoramaThemeIdentity.rewrite(generated.0, attemptID: attemptID, current: nil, prior: themePrior)
+        var candidate=(synthesized.proposal, generated.1)
+        var themeMatches=synthesized.matches
         var issues: [PanoramaSemanticIssue]=[]
         var repairs=0
         // The budget caps real global review requests, not cached replays.
@@ -417,11 +421,15 @@ extension VoiceOSStore {
                 guard repairs < 5 else { throw issue }
                 repairs += 1
                 let original=candidate.0
-                candidate=try await panoramaStep(attemptID: attemptID, stage: "global.repair", scopeID: "all",
+                let repaired: (PanoramaProposal, PanoramaReceipt)=try await panoramaStep(attemptID: attemptID, stage: "global.repair", scopeID: "all",
                     input: PanoramaGlobalRepairInput(input: input, proposal: original, issue: issue), whole: input, identity: port.repairConfigurationIdentity,
                     operation: { try await port.repairSynthesis(original, input: input, context: issue.input, rejection: issue.rejection) }, validate: { proposal, _ in
                         _ = try Self.validatePanorama(proposal, input: input)
                     }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
+                let rewritten=try PanoramaThemeIdentity.rewrite(repaired.0, attemptID: attemptID,
+                    current: PanoramaThemeMap(proposal: original, attemptID: attemptID, phase: .completed), prior: themePrior)
+                candidate=(rewritten.proposal, repaired.1)
+                themeMatches=rewritten.matches
             }
         }
         let proposal=candidate.0
@@ -454,7 +462,10 @@ extension VoiceOSStore {
         let snapshot=PanoramaSnapshot(id: attemptID, createdAt: Self.now(), input: input, proposal: completedProposal, coverage: coverage,
             generation: candidate.1, verification: final.1, review: final.0,
             workflow: .init(phase: .completed, verifiedUnitIDs: units.map(\.unitID), totalUnitCount: input.units.count, receipts: receipts))
-        try db.execute("UPDATE panorama_attempts SET state='completed',snapshot_json=?,generation_receipt=?,verification_receipt=?,error=NULL WHERE id=?", [try Self.relevanceJSON(snapshot),try Self.relevanceJSON(candidate.1),try Self.relevanceJSON(final.1),attemptID])
+        try db.transaction {
+            try db.execute("UPDATE panorama_attempts SET state='completed',snapshot_json=?,generation_receipt=?,verification_receipt=?,error=NULL WHERE id=?", [try Self.relevanceJSON(snapshot),try Self.relevanceJSON(candidate.1),try Self.relevanceJSON(final.1),attemptID])
+            try recordPanoramaThemeBatch(.init(attemptID: attemptID, phase: .completed, createdAt: snapshot.createdAt, matches: themeMatches), replacing: true)
+        }
     }
     private func reviewPanoramaCandidate(_ proposal: PanoramaProposal, generation: PanoramaReceipt, units: [VerifiedPanoramaUnit], input: PanoramaInput,
         attemptID: String, port: any PanoramaModelPort, issues: [PanoramaSemanticIssue], budget: PanoramaReviewBudget) async throws -> PanoramaGlobalValidation {
@@ -534,6 +545,7 @@ extension VoiceOSStore {
         guard state.status != "running" else { throw VoiceOSError("全景正在运行，请等待当前尝试结束") }
         let verified=workflow.verifiedUnitIDs
         guard !verified.isEmpty else { throw VoiceOSError("尚无已核对单元") }
+        let themePrior=try latestPanoramaThemeMap()
         var proposals: [PanoramaUnitProposal]=[]
         for unitID in verified {
             guard let row=try db.query("SELECT result_json FROM panorama_steps WHERE stage='unit.generate' AND scope_id=? AND state='completed' ORDER BY rowid DESC LIMIT 1", [unitID]).first,
@@ -562,21 +574,23 @@ extension VoiceOSStore {
                 try await Task.sleep(for: .seconds(5))
             }
         }
-        let coverage=try Self.validatePanorama(generated.0, input: input)
+        let rewritten=try PanoramaThemeIdentity.rewrite(generated.0, attemptID: snapshot.id, current: nil, prior: themePrior)
+        let proposal=rewritten.proposal
+        let coverage=try Self.validatePanorama(proposal, input: input)
         // Areas are a separate, small call: a grouping failure must not cost
         // the synthesized regions and relations.
         var draftAreas: [PanoramaArea]=[]
         do {
-            let request=Self.panoramaAreaRequest(generated.0)
+            let request=Self.panoramaAreaRequest(proposal)
             let result: ([PanoramaArea], PanoramaReceipt)=try await panoramaStep(attemptID: snapshot.id, stage: "draft.areas", scopeID: "all",
                 input: request, whole: input, identity: "panorama-areas-v1",
-                operation: { try await port.groupAreas(generated.0, input: input) },
-                validate: { areas, _ in try Self.validatePanoramaAreas(areas, regionIDs: Set(generated.0.regions.map(\.id))) })
+                operation: { try await port.groupAreas(proposal, input: input) },
+                validate: { areas, _ in try Self.validatePanoramaAreas(areas, regionIDs: Set(proposal.regions.map(\.id))) })
             draftAreas=result.0
         } catch {}
         let note="综合草稿：由 \(proposals.count)/\(input.units.count) 个已核对单元生成；全局独立核对尚未完成，联系均为候选。"
         let receipts=(workflow.receipts) + [PanoramaStepReceipt(stage: "draft.synthesize", scopeID: "all", receipt: generated.1)]
-        let draft=PanoramaSnapshot(id: snapshot.id, createdAt: Self.now(), input: input, proposal: generated.0, coverage: coverage,
+        let draft=PanoramaSnapshot(id: snapshot.id, createdAt: Self.now(), input: input, proposal: proposal, coverage: coverage,
             generation: generated.1, verification: generated.1,
             review: PanoramaReview(questions: [], relations: [], coverageAccepted: false, reason: note),
             workflow: .init(phase: .synthesis, verifiedUnitIDs: proposals.map(\.unitID), totalUnitCount: input.units.count, receipts: receipts))
@@ -584,8 +598,12 @@ extension VoiceOSStore {
             proposal: .init(regions: draft.proposal.regions, questions: draft.proposal.questions, relations: draft.proposal.relations,
                 unrepresentedSources: draft.proposal.unrepresentedSources, unrepresentedClaims: draft.proposal.unrepresentedClaims, areas: draftAreas),
             coverage: draft.coverage, generation: draft.generation, verification: draft.verification, review: draft.review, workflow: draft.workflow)
-        try db.execute("UPDATE panorama_attempts SET snapshot_json=?,generation_receipt=?,error=? WHERE id=?", [try Self.relevanceJSON(draftSnapshot),try Self.relevanceJSON(generated.1),note,snapshot.id])
+        try db.transaction {
+            try db.execute("UPDATE panorama_attempts SET snapshot_json=?,generation_receipt=?,error=? WHERE id=?", [try Self.relevanceJSON(draftSnapshot),try Self.relevanceJSON(generated.1),note,snapshot.id])
+            try recordPanoramaThemeBatch(.init(attemptID: snapshot.id, phase: .synthesis, createdAt: draft.createdAt, matches: rewritten.matches), replacing: true)
+        }
     }
+    // Unit and phase partials never write the theme ledger; only the global synthesis snapshot does.
     private func publishPanoramaPhase(_ phase: PanoramaPhase, units: [VerifiedPanoramaUnit], input: PanoramaInput, attemptID: String) throws {
         try requirePanoramaManifest(input)
         let partial=try Self.partialPanorama(units, input: input, id: attemptID, phase: phase)
