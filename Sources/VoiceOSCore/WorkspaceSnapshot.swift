@@ -3,6 +3,7 @@ import Foundation
 /// One synchronous store read supplies a coherent workspace. No actor suspension
 /// can mix an old task list with a newly corrected source halfway through a refresh.
 public struct WorkspaceSnapshot: Sendable {
+    public init() {}
     public var sources: [SourceRecord] = []
     public var claims: [CandidateClaim] = []
     public var currentClaimsBySource: [String: [CandidateClaim]] = [:]
