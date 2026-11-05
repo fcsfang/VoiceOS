@@ -280,4 +280,45 @@ extension CoreFlowTests {
         XCTAssertTrue(second.snapshot?.proposal.regions.contains { $0.id == themeID } == true)
         XCTAssertEqual(second.themeAppearanceCounts[themeID], 2)
     }
+
+    func testPanoramaThemeReplyCacheFollowsThemeAcrossSnapshots() async throws {
+        let directory = try themeDirectory("theme-reply")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try VoiceOSStore(root: directory, inspector: NativeMediaInspector())
+        try await store.recover()
+        let first = try themeReplyBriefing(questionID: "question-a", quote: "我总觉得检索条件没有被完整保留下来。")
+        let second = try themeReplyBriefing(questionID: "question-b", quote: "我总觉得检索条件没有被完整保留下来。")
+        let changed = try themeReplyBriefing(questionID: "question-b", quote: "我总觉得检索条件一直没有被完整保留下来。")
+        let port = CountingThemeReplyPort()
+
+        let firstReply = try await store.panoramaThemeReply(first, using: port)
+        let secondReply = try await store.panoramaThemeReply(second, using: port)
+        let callsAfterSameContent = await port.calls
+        XCTAssertEqual(callsAfterSameContent, 1, "仅问题 ID 变化时应复用同一主题的回应")
+        XCTAssertEqual(firstReply, secondReply)
+
+        _ = try await store.panoramaThemeReply(changed, using: port)
+        let callsAfterQuoteChange = await port.calls
+        XCTAssertEqual(callsAfterQuoteChange, 2, "原话变化后必须重新请求")
+    }
+
+    private func themeReplyBriefing(questionID: String, quote: String) throws -> PanoramaThemeBriefing {
+        let proposal = themeProposal([
+            .init(id: "reply-theme", title: "检索条件",
+                  questions: [.init(id: questionID, title: "检索条件怎么保留？", claims: [], source: "s1", quote: quote)])
+        ])
+        let snapshot = themeSnapshot(proposal, workflow: nil)
+        return try XCTUnwrap(PanoramaThemeBriefing.make(snapshot: snapshot, regionID: "reply-theme"))
+    }
+}
+
+private actor CountingThemeReplyPort: PanoramaThemeReplyPort {
+    nonisolated let configuration = ModelConfiguration(provider: "fixture", model: "theme-reply",
+        promptVersion: "theme-reply-v1", schemaVersion: "theme-reply-text-v1", destination: .local)
+    private(set) var calls = 0
+
+    func reply(_ briefing: PanoramaThemeBriefing) async throws -> PanoramaThemeReplyResponse {
+        calls += 1
+        return .init(text: "第 \(calls) 次主题回应。")
+    }
 }
