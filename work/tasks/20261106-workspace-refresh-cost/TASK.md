@@ -1,9 +1,9 @@
 ---
-status: planning
+status: merged
 started: 2026-11-06
 updated: 2026-11-06
 branch: -
-pr: -
+pr: 118
 owner: coordinator
 ---
 # 工作区整库刷新的空闲成本
@@ -41,3 +41,9 @@ owner: coordinator
 ## 链接
 
 `/tmp/voiceos-sample-10s.txt`，`/tmp/voiceos-cpu-after-fix.log`。
+
+## 进展
+
+- PR #117（247c219）隐藏页不再重建全景，页面出现时补一次。
+- PR #118（2bb2279）修复根因：助手发现无条件刷新导致自持循环；发现返回是否改变持久状态，只有改变才刷新。240 秒刷新 10→4 次，CPU 74.6%→20.2%，最后 120 秒 1.3%。
+- 剩余：启动时 98 条提醒事项的核对约 20 秒，属于提醒同步，另行处理。
