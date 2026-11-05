@@ -231,16 +231,17 @@ extension CoreFlowTests {
         database = nil
         var store: VoiceOSStore? = try VoiceOSStore(root: directory, inspector: NativeMediaInspector())
         try await store?.recover()
-        let counts = try await store?.panoramaThemeAppearanceCounts()
-        XCTAssertEqual(counts?.keys.sorted(), ["backfill-1", "backfill-2"])
+        let history = try await store?.panoramaThemeHistory()
+        XCTAssertEqual(history?.keys.sorted(), ["backfill-1", "backfill-2"])
+        XCTAssertEqual(history?["backfill-1"]?.firstSeenAt, "2026-11-05T00:00:00Z")
         let batch = try Database(file).query("SELECT phase,theme_count FROM panorama_theme_batches").first
         XCTAssertEqual(batch?["phase"], "completed")
         XCTAssertEqual(batch?["theme_count"], "2")
         store = nil
         let reopened = try VoiceOSStore(root: directory, inspector: NativeMediaInspector())
         try await reopened.recover()
-        let reopenedCounts = try await reopened.panoramaThemeAppearanceCounts()
-        XCTAssertEqual(reopenedCounts, counts)
+        let reopenedHistory = try await reopened.panoramaThemeHistory()
+        XCTAssertEqual(reopenedHistory, history)
         let reopenedDatabase = try Database(file)
         XCTAssertEqual(try reopenedDatabase.query("SELECT count(*) AS n FROM panorama_theme_batches").first?["n"], "1")
         XCTAssertEqual(try reopenedDatabase.query("SELECT count(*) AS n FROM panorama_theme_appearances").first?["n"], "2")
@@ -257,8 +258,19 @@ extension CoreFlowTests {
                                        sourceIDs: [], quoteKeys: [], kind: .new, score: nil)
         try await store.recordPanoramaThemeBatch(.init(attemptID: "same-attempt", phase: .synthesis, createdAt: "2026-11-05T00:00:00Z", matches: [match]), replacing: false)
         try await store.recordPanoramaThemeBatch(.init(attemptID: "same-attempt", phase: .completed, createdAt: "2026-11-05T00:00:01Z", matches: [match]), replacing: false)
-        let counts = try await store.panoramaThemeAppearanceCounts()
-        XCTAssertEqual(counts["p1"], 1, "同一次尝试的草稿与完成不能算两次出现")
+        let history = try await store.panoramaThemeHistory()
+        XCTAssertEqual(history["p1"]?.appearanceCount, 1, "同一次尝试的草稿与完成不能算两次出现")
+    }
+
+    func testPanoramaThemeWithoutAppearanceHasNoHistory() async throws {
+        let directory = try themeDirectory("no-history")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try VoiceOSStore(root: directory, inspector: NativeMediaInspector())
+        try await store.recover()
+        let database = try Database(directory.appendingPathComponent("voiceos.sqlite"))
+        try database.execute("INSERT INTO panorama_themes(id,title,created_at,last_seen_at) VALUES('orphan','旧主题','2026-11-05T00:00:00Z','2026-11-05T00:00:00Z')")
+        let history = try await store.panoramaThemeHistory()
+        XCTAssertNil(history["orphan"], "没有出现记录的主题不能生成历史")
     }
 
     func testPanoramaThemeAppearanceCountAfterTwoSnapshots() async throws {
@@ -269,16 +281,20 @@ extension CoreFlowTests {
         let first = try await store.panoramaState()
         let firstSnapshot = try XCTUnwrap(first.snapshot)
         let themeID = try XCTUnwrap(firstSnapshot.proposal.regions.first?.id)
-        XCTAssertEqual(first.themeAppearanceCounts[themeID], 1)
+        XCTAssertEqual(first.themeHistory[themeID]?.appearanceCount, 1)
+        XCTAssertEqual(first.themeHistory[themeID]?.firstSeenAt, firstSnapshot.createdAt)
         let added = try await store.recordUserExpression("新增独立材料，保留不同的检索条件。")
         _ = try await store.setSourceLocalOnly(sourceID: added, expectedVersion: 1, localOnly: false)
         let context = try await store.prepareLocalTranscriptContext(sourceIDs: [added], scalarBudget: Int.max)
         _ = try await store.importOrganizedClaims(context: context, proposals: [], commandID: "theme-appearance")
         try await store.generatePanorama(using: ProgressivePanoramaFixture())
         let second = try await store.panoramaState()
+        let secondSnapshot = try XCTUnwrap(second.snapshot)
         XCTAssertEqual(second.status, "completed")
-        XCTAssertTrue(second.snapshot?.proposal.regions.contains { $0.id == themeID } == true)
-        XCTAssertEqual(second.themeAppearanceCounts[themeID], 2)
+        XCTAssertTrue(secondSnapshot.proposal.regions.contains { $0.id == themeID })
+        XCTAssertEqual(second.themeHistory[themeID]?.appearanceCount, 2)
+        XCTAssertEqual(second.themeHistory[themeID]?.firstSeenAt, firstSnapshot.createdAt)
+        XCTAssertEqual(second.themeHistory[themeID]?.lastSeenAt, secondSnapshot.createdAt)
     }
 
     func testPanoramaThemeReplyCacheFollowsThemeAcrossSnapshots() async throws {

@@ -330,12 +330,16 @@ extension VoiceOSStore {
         }
     }
 
-    func panoramaThemeAppearanceCounts() throws -> [String: Int] {
-        var counts: [String: Int]=[:]
-        for row in try db.query("SELECT theme_id,COUNT(DISTINCT attempt_id) AS count FROM panorama_theme_appearances GROUP BY theme_id") {
-            guard let id=row["theme_id"],let count=row["count"].flatMap(Int.init) else { continue }
-            counts[id]=count
+    func panoramaThemeHistory() throws -> [String: PanoramaThemeHistory] {
+        var history: [String: PanoramaThemeHistory]=[:]
+        for row in try db.query("""
+            SELECT theme_id,COUNT(DISTINCT attempt_id) AS count,MIN(created_at) AS first_seen,MAX(created_at) AS last_seen
+            FROM panorama_theme_appearances GROUP BY theme_id
+            """) {
+            guard let id=row["theme_id"],let count=row["count"].flatMap(Int.init),
+                  let first=row["first_seen"],let last=row["last_seen"] else { continue }
+            history[id] = .init(appearanceCount: count, firstSeenAt: first, lastSeenAt: last)
         }
-        return counts
+        return history
     }
 }

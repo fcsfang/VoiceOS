@@ -119,7 +119,7 @@ struct ThoughtPanoramaView: View {
             RegionInspectorPanel(
                 snapshot: snapshot,
                 region: region,
-                appearanceCount: state?.themeAppearanceCounts[region.id] ?? 0,
+                history: state?.themeHistory[region.id],
                 selection: $selection,
                 focusedRegionID: $focusedRegionID,
                 actions: actions,
@@ -559,7 +559,7 @@ private struct RegionInspectorPanel: View {
     @Environment(\.colorScheme) private var colorScheme
     let snapshot: PanoramaSnapshot
     let region: PanoramaRegion
-    let appearanceCount: Int
+    let history: PanoramaThemeHistory?
     @Binding var selection: PanoramaSelection?
     @Binding var focusedRegionID: String?
     let actions: ReaderActions
@@ -685,7 +685,10 @@ private struct RegionInspectorPanel: View {
     private func themeMetaLine(_ briefing: PanoramaThemeBriefing, questions: [PanoramaQuestion], relations: Int) -> String {
         let evidenceCount = questions.reduce(0) { $0 + $1.evidence.count }
         var parts: [String] = []
-        if appearanceCount > 1 { parts.append("第 \(appearanceCount) 次出现") }
+        if let history, history.appearanceCount > 1 {
+            parts.append("第 \(history.appearanceCount) 次出现")
+            if let date = themeShortDate(history.firstSeenAt) { parts.append("首次 " + date) }
+        }
         if let iso = briefing.quotes.map(\.occurredAt).max(), let date = themeShortDate(iso) {
             parts.append(date)
         }
