@@ -76,9 +76,44 @@ private struct KnowledgeReviewProgress: Codable {
     var checkedIDs: [String] = []
     var issues: [KnowledgeReviewIssue] = []
 }
+struct KnowledgeReviewSourceSignature: Equatable {
+    let sourceVersionID: String
+    let transcriptVersionID: String
+    let origin: String
+    let speaker: String
+    let localOnly: Bool
+    let policyVersion: Int
+    let scalarBudget: Int
+    let transcriptionReviewJSON: String?
+    let claimReviewVersions: [String: Int]
+}
+extension KnowledgeReviewSourceSignature {
+    init?(_ input: KnowledgeReviewInput, storedDigest: String) {
+        guard input.inputDigest == storedDigest,
+              input.policyVersion > 0,
+              !input.claimReviewVersions.isEmpty,
+              input.context.sources.count == 1,
+              let source = input.context.sources.first,
+              source.sourceID == input.sourceID,
+              source.transcriptVersionID == input.transcriptVersionID,
+              source.origin == "user",
+              source.speaker == "user",
+              input.context.scalarBudget == source.text.unicodeScalars.count,
+              input.context.recordingContexts == nil,
+              input.continuousExpression == nil else { return nil }
+        let sourceJSON: String
+        do { sourceJSON = try VoiceOSStore.relevanceJSON(input.context.sources) } catch { return nil }
+        let contentDigest = VoiceOSStore.relevanceHash(Data(sourceJSON.utf8))
+        guard contentDigest == input.context.contentDigest else { return nil }
+        let reviewJSON = source.transcriptionReview.flatMap { try? VoiceOSStore.relevanceJSON($0) }
+        guard source.transcriptionReview == nil || reviewJSON != nil else { return nil }
+        self.init(sourceVersionID: source.sourceVersionID,transcriptVersionID: source.transcriptVersionID,origin: source.origin,speaker: source.speaker,localOnly: source.localOnly,policyVersion: input.policyVersion,scalarBudget: input.context.scalarBudget,transcriptionReviewJSON: reviewJSON,claimReviewVersions: input.claimReviewVersions)
+    }
+}
 
 extension VoiceOSStore {
     public func prepareKnowledgeReview(sourceID: String) throws -> KnowledgeReviewInput {
+        knowledgeReviewPreparations += 1
         guard ready, let source = try sources().first(where: { $0.id == sourceID }),source.origin == "user",source.speaker == "user",!source.needsTranscriptionReview,let text = source.transcript,!text.isEmpty,let version = source.transcriptVersionID else { throw VoiceOSError("知识核查只接受已有完整原话的个人资料") }
         let claims = try latestCandidateClaims(for: sourceID)
         guard !claims.isEmpty else { throw VoiceOSError("请先完成这份原话的理解，再进行知识核查") }
@@ -96,9 +131,89 @@ extension VoiceOSStore {
         guard try Self.relevanceJSON(current) == Self.relevanceJSON(input) else { throw VoiceOSError("原话、归属、理解或授权已变化，旧知识核查已暂停") }
         if destination == .cloud,input.context.sources.contains(where:\.localOnly) { throw VoiceOSError("仅本地原话不能用于云端知识核查") }
     }
+    private func knowledgeReviewSignature(sourceID: String) throws -> KnowledgeReviewSourceSignature? {
+        guard ready,knowledgeReviewScanFastPathEnabled else { return nil }
+        guard let row = try db.query("""
+        SELECT s.state,s.kind,s.version_id AS source_version_id,s.origin,s.speaker,s.local_only,s.policy_version,s.duration,s.relative_path,s.presentation_json,
+               t.input_version_id,t.current_version_id,t.backend,v.id AS transcript_version_id,length(v.text) AS text_length,v.spans_json,
+               (SELECT COUNT(*) FROM transcripts t2 WHERE t2.source_id=s.id) AS transcript_count
+        FROM sources s
+        LEFT JOIN transcripts t ON t.source_id=s.id
+        LEFT JOIN transcript_versions v ON v.id=t.current_version_id
+        WHERE s.id=?
+        """,[sourceID]).first else { return nil }
+        guard ["saved","reference_only"].contains(row["state"] ?? ""),row["origin"] == "user",row["speaker"] == "user",row["kind"] != "ai_text",
+              let transcriptCount = row["transcript_count"].flatMap(Int.init),transcriptCount == 1,
+              let sourceVersion = row["source_version_id"],let transcriptVersion = row["transcript_version_id"],
+              transcriptVersion == row["current_version_id"],row["input_version_id"] == sourceVersion,
+              let textLength = row["text_length"].flatMap(Int.init),textLength > 0,
+              let policyVersion = row["policy_version"].flatMap(Int.init),policyVersion > 0,
+              let spansJSON = row["spans_json"],
+              let spans = try? JSONDecoder().decode([TranscriptSpan].self,from:Data(spansJSON.utf8)),
+              Set(spans.map(\.id)).count == spans.count,spans.allSatisfy({ UUID(uuidString: $0.id) != nil }) else { return nil }
+        var offset = 0
+        for span in spans {
+            guard span.textStart == offset,span.textEnd > span.textStart,span.textEnd <= textLength else { return nil }
+            if let start = span.startMS,let end = span.endMS {
+                guard start >= 0,end >= start,let duration = row["duration"].flatMap(Double.init),Double(end) <= duration * 1000 + 1 else { return nil }
+            } else if span.startMS != nil || span.endMS != nil { return nil }
+            offset = span.textEnd
+        }
+        guard offset == textLength else { return nil }
+        if row["state"] == "saved" {
+            guard let relativePath = row["relative_path"],let url = try? assetURL(relativePath: relativePath),hasCurrentVerifiedFile(url) else { return nil }
+        }
+        var presentation: RecordingPresentation?
+        if let json = row["presentation_json"] {
+            guard let decoded = try? JSONDecoder().decode(RecordingPresentation.self,from:Data(json.utf8)) else { return nil }
+            presentation = decoded
+        }
+        if let expression = presentation?.expression {
+            guard expression.sourceIDs.count == 1,expression.sourceIDs.first == sourceID,expression.state == "completed" else { return nil }
+        }
+        guard presentation?.recordingContext == nil else { return nil }
+        let review = presentation?.transcriptionReview.flatMap { $0.transcriptVersionID == transcriptVersion ? $0 : nil }
+        let needsReview = ["audio","video"].contains(row["kind"] ?? "") && row["backend"]?.hasPrefix("Qwen3-ASR") == true && !spans.isEmpty &&
+            spans.allSatisfy { $0.startMS != nil && $0.endMS != nil } && review?.isCompleteFullTextReview != true
+        guard !needsReview else { return nil }
+        guard let claims = try knowledgeReviewClaimVersions(sourceID: sourceID),!claims.isEmpty else { return nil }
+        return .init(sourceVersionID: sourceVersion,transcriptVersionID: transcriptVersion,origin: row["origin"]!,speaker: row["speaker"]!,localOnly: row["local_only"] != "0",policyVersion: policyVersion,scalarBudget: textLength,transcriptionReviewJSON: review.flatMap { try? Self.relevanceJSON($0) },claimReviewVersions: claims)
+    }
+    private func knowledgeReviewClaimVersions(sourceID: String) throws -> [String: Int]? {
+        guard let attempt = try db.query("""
+        SELECT a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
+        WHERE i.source_id=? AND a.state='completed' AND a.provider NOT LIKE 'english_feedback:%'
+        ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC LIMIT 1
+        """,[sourceID]).first?["id"] else { return [:] }
+        var result: [String: Int] = [:]
+        for row in try db.query("""
+        SELECT c.id,c.review_version,c.refs_json FROM claims c
+        JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id
+        LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version
+        WHERE c.attempt_id=? AND c.validity='current' AND x.state='current' AND COALESCE(r.decision,'pending')!='rejected'
+          AND json_extract(x.snapshot_json,'$.reflectionFocus') IS NULL
+        """,[attempt]) {
+            guard let id = row["id"],let version = row["review_version"].flatMap(Int.init),let refsJSON = row["refs_json"],
+                  let refs = try? JSONDecoder().decode([ClaimReference].self,from:Data(refsJSON.utf8)) else { return nil }
+            if refs.contains(where: { $0.sourceID == sourceID }) { result[id] = version }
+        }
+        return result
+    }
     @discardableResult
     public func enqueueKnowledgeReview(sourceID: String, retry: Bool = false) throws -> KnowledgeReviewRecord {
-        _ = try knowledgeReviews(sourceID:sourceID)
+        let reviews = try knowledgeReviews(sourceID:sourceID)
+        if knowledgeReviewScanFastPathEnabled,let latest = reviews.first(where: { $0.state != "frozen" }),
+           let storedRow = try db.query("SELECT input_digest,input_json FROM knowledge_reviews WHERE id=?",[latest.id]).first,
+           let storedJSON = storedRow["input_json"],
+           let storedInput = try? decodeWithPath(KnowledgeReviewInput.self,from:Data(storedJSON.utf8),label:"知识核查输入"),
+           let stored = KnowledgeReviewSourceSignature(storedInput,storedDigest: storedRow["input_digest"] ?? ""),
+           let current = try? knowledgeReviewSignature(sourceID: sourceID),current == stored {
+            if retry,latest.state == "failed" {
+                try db.execute("UPDATE knowledge_reviews SET state='queued',error=NULL WHERE id=?",[latest.id])
+                return try knowledgeReviews(sourceID:sourceID).first { $0.id == latest.id }!
+            }
+            return latest
+        }
         let input = try prepareKnowledgeReview(sourceID:sourceID)
         if let row = try db.query("SELECT * FROM knowledge_reviews WHERE source_id=? AND input_digest=? AND state!='frozen' ORDER BY created_at DESC,id",[sourceID,input.inputDigest]).first {
             if retry,row["state"] == "failed" { try db.execute("UPDATE knowledge_reviews SET state='queued',error=NULL WHERE id=?",[row["id"]]) }
@@ -110,11 +225,24 @@ extension VoiceOSStore {
     }
     public func knowledgeReviews(sourceID: String? = nil) throws -> [KnowledgeReviewRecord] {
         let rows = try db.query("SELECT * FROM knowledge_reviews \(sourceID == nil ? "" : "WHERE source_id=?") ORDER BY created_at DESC,id",sourceID.map { [$0] } ?? [])
+        var signatures: [String: KnowledgeReviewSourceSignature] = [:]
         return try rows.map { row in
             var state = row["state"]!
             let input = try decodeWithPath(KnowledgeReviewInput.self,from:Data(row["input_json"]!.utf8),label:"知识核查输入")
-            if state != "frozen",(try? validateKnowledgeReviewInput(input,destination:.local)) == nil {
-                state="frozen";try db.execute("UPDATE knowledge_reviews SET state='frozen',error='原话、理解或授权已变化；保留历史核查' WHERE id=?",[row["id"]])
+            if state != "frozen" {
+                var fresh = false
+                if knowledgeReviewScanFastPathEnabled,let stored = KnowledgeReviewSourceSignature(input,storedDigest: row["input_digest"] ?? "") {
+                    let current: KnowledgeReviewSourceSignature?
+                    if let cached = signatures[input.sourceID] { current = cached }
+                    else {
+                        current = try? knowledgeReviewSignature(sourceID: input.sourceID)
+                        if let current { signatures[input.sourceID] = current }
+                    }
+                    fresh = current == stored
+                }
+                if !fresh,(try? validateKnowledgeReviewInput(input,destination:.local)) == nil {
+                    state="frozen";try db.execute("UPDATE knowledge_reviews SET state='frozen',error='原话、理解或授权已变化；保留历史核查' WHERE id=?",[row["id"]])
+                }
             }
             let progress = try row["result_json"].map { try decodeWithPath(KnowledgeReviewProgress.self,from:Data($0.utf8),label:"知识核查进度") }
             let ids = try decodeWithPath([String].self,from:Data((row["response_ids_json"] ?? "[]").utf8),label:"知识核查回执")

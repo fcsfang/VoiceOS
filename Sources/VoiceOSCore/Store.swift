@@ -6,6 +6,9 @@ public actor VoiceOSStore {
     let db: Database
     private let inspector: any MediaInspector
     var ready = false
+    var knowledgeReviewPreparations = 0
+    private(set) var knowledgeReviewScanFastPathEnabled = true
+    func setKnowledgeReviewScanFastPathEnabled(_ enabled: Bool) { knowledgeReviewScanFastPathEnabled = enabled }
     private var activeImports: Set<String> = []
     private var verifiedFiles: [URL: (stamp: DurableFiles.Fingerprint, bytes: Int64, hash: String)] = [:]
     var activeCaptures: Set<String> = []
@@ -224,6 +227,10 @@ public actor VoiceOSStore {
         guard try DurableFiles.fingerprint(url) == before else { throw VoiceOSError("原件在核对期间发生变化") }
         verifiedFiles[url] = (before, result.0, result.1)
         return result
+    }
+    func hasCurrentVerifiedFile(_ url: URL) -> Bool {
+        guard let cached = verifiedFiles[url] else { return false }
+        return (try? DurableFiles.fingerprint(url)) == cached.stamp
     }
     public func retryTranscription(sourceID: String) throws {
         try db.execute("UPDATE jobs SET state='queued',error=NULL WHERE source_id=? AND state IN ('failed','blocked') AND EXISTS(SELECT 1 FROM sources WHERE id=? AND state='saved')", [sourceID,sourceID])
