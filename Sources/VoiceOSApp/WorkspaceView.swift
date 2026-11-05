@@ -578,6 +578,11 @@ struct WorkspaceView: View {
             if actionFilter == "全部", !paused.isEmpty {
                 WorkspaceSection(title:"需要核对的待办",subtitle:"尚未登记完成，行动关系待核对或 AI 提取已暂停。打开任务查看依据和具体原因。",icon:"pause.circle",count:paused.count) {
                     ForEach(paused) { action in actionRow(action);if action.id != paused.last?.id { Divider() } }
+                    if model.pausedActionBatch == nil { PausedActionBatchControl(model:model) }
+                }
+            }
+            if model.pausedActionBatch != nil {
+                WorkspaceSection(title:"批量重新识别",icon:"arrow.triangle.2.circlepath") {
                     PausedActionBatchControl(model:model)
                 }
             }

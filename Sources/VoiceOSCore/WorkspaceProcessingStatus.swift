@@ -90,6 +90,12 @@ public struct WorkspaceProcessingStatus: Equatable, Sendable {
         }
     }
 
+    /// Dictation and other foreground work outrank a paused batch's progress label.
+    public func visibleTitle(preferringPausedBatch pausedBatchTitle: String?) -> String? {
+        if case .running(let title) = display { return title }
+        return pausedBatchTitle
+    }
+
     public var isRunning: Bool {
         if case .running = display { return true }
         return false
