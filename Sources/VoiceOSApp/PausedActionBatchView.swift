@@ -121,7 +121,7 @@ struct PausedActionBatchControl: View {
                 if preview.isBatchable {
                     Button("重新识别全部暂停的待办…") { Task { await model.preparePausedActionBatch() } }
                         .disabled(model.pausedActionBatchUnavailableReason != nil)
-                    Text("涉及 \(preview.affectedMaterialCount) 份材料、\(preview.targetActionCount) 条暂停待办。每份材料重新识别一次，会调用已配置的文本模型；长文字或完整录音沿用该材料的现有分段流程，相同依据会复用，不会重复发送。")
+                    Text("涉及 \(preview.affectedMaterialCount) 份材料、\(preview.targetActionCount) 条暂停待办。每份材料重新识别一次，会调用已配置的文本模型；长文字或完整录音沿用该材料的现有分段流程，部分材料会先校正完整转写，可能因此多一次模型调用。相同依据会复用，不会重复发送。")
                         .font(.caption).foregroundStyle(.secondary)
                     if let reason = model.pausedActionBatchUnavailableReason {
                         Text(reason).font(.caption).foregroundStyle(.secondary)
@@ -164,7 +164,7 @@ struct PausedActionBatchControl: View {
 
     private func confirmationCopy(_ plan: PausedActionBatchPlan) -> String {
         var text = "共 \(plan.targetActionCount) 条标记为“AI 提取已暂停”的待办，涉及 \(plan.affectedMaterialCount) 份材料。"
-        text += "将按顺序逐份重新识别，每份材料只重新识别一次；普通文字会调用一次理解模型，长文字或完整录音会沿用该材料的现有分段流程。已有相同依据的识别会复用，不会重复发送。"
+        text += "将按顺序逐份重新识别，每份材料只重新识别一次；普通文字会调用一次理解模型，长文字或完整录音会沿用该材料的现有分段流程。部分材料会先校正完整转写，可能因此多一次模型调用。已有相同依据的识别会复用，不会重复发送。"
         text += "旧待办转入历史，已登记的完成记录和提醒事项保留。"
         if !plan.skips.isEmpty {
             text += "本次跳过 \(plan.skips.count) 份材料（隔离、无可用文字、仅本机或正在处理）。"
