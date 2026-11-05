@@ -186,6 +186,7 @@ struct WorkspaceView: View {
         .navigationTitle(model.libraryTitle)
         .focusedSceneValue(\.voiceOSController,model)
         .task { await model.start() }
+        .task { await model.setPanoramaVisible(page == .home) }
         .task(id:topicLoadKey) {
             guard page == .themes, let id=topicID else { topicFocus=nil; return }
             do { let focus=try await model.loadTopicReflection(id); if topicID == id && !Task.isCancelled { topicFocus=focus } }
@@ -195,6 +196,7 @@ struct WorkspaceView: View {
             model.stopPlayback()
             if next != .search { searchFocused = false }
             if case .source(let id) = next { model.selected = id }
+            Task { await model.setPanoramaVisible(next == .home) }
         }
         .onChange(of:model.selected) { _, id in
             model.stopPlayback()
@@ -214,6 +216,7 @@ struct WorkspaceView: View {
         }
         .onOpenURL { url in if model.initialized { openReminder(url) } else { pendingURL=url } }
         .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;openReminder(url) } }
+        .onDisappear { Task { await model.setPanoramaVisible(false) } }
         .sheet(isPresented:$model.choosingReminderCalendar) {
             VStack(alignment:.leading,spacing:16) {
                 Text("选择提醒事项清单").font(.title2)

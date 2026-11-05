@@ -12,6 +12,7 @@ enum WorkspaceErrorRetry {
 @MainActor
 final class ControlCenter: ObservableObject {
     let panorama = PanoramaScreenModel()
+    private var panoramaPolicy = PanoramaRefreshPolicy()
     private var panoramaModel: ResponsesPanoramaPort?
     @Published var textCaptureDraft = TextCaptureDraft() {
         didSet { if !textCaptureDraft.hasSameContents(as: oldValue) { scheduleDraftSave() } }
@@ -667,7 +668,7 @@ final class ControlCenter: ObservableObject {
     }
     private func reloadWorkspace() async {
         guard let store else { return }
-        await panorama.refresh(store: store, port: panoramaModel)
+        await panoramaChanged()
         do {
             let snapshot = try await store.workspaceSnapshot()
             // Publish together, without awaits between related data sets.
@@ -730,6 +731,19 @@ final class ControlCenter: ObservableObject {
         resumeAssistantExecutions()
         queueTopicOrganization()
     }
+    func setPanoramaVisible(_ visible: Bool) async {
+        guard panoramaPolicy.setVisible(visible) else { return }
+        await refreshPanorama()
+    }
+    private func refreshPanorama() async {
+        guard panoramaPolicy.isVisible, let store else { return }
+        panoramaPolicy.markRefreshed()
+        await panorama.refresh(store: store, port: panoramaModel)
+    }
+    private func panoramaChanged() async {
+        guard panoramaPolicy.workspaceChanged() else { return }
+        await refreshPanorama()
+    }
     func chooseTextModel() {
         let panel = NSOpenPanel()
         panel.title = "选择本地文本模型配置"; panel.prompt = "使用配置"
@@ -745,7 +759,7 @@ final class ControlCenter: ObservableObject {
             // queued non-streaming attempts from being silently replayed.
             let suite=try LocalTextModel.loadSuite(from:file,segmentRequestTimeout:600,segmentStreaming:true),port=suite.cognition
             panoramaModel=suite.panorama
-            Task { await panorama.refresh(store: store, port: panoramaModel) }
+            Task { await self.panoramaChanged() }
             discussionModel=suite.discussion;outcomeModel=suite.outcome
             themeReplyModel=suite.themeReply
             recordingTitleModel=suite.recordingTitles
@@ -2871,7 +2885,7 @@ extension ControlCenter {
             return result.draft
         } catch {
             status = error.localizedDescription
-            await panorama.refresh(store: store, port: panoramaModel)
+            await panoramaChanged()
             return nil
         }
     }
