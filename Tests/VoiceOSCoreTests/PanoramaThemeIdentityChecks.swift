@@ -245,4 +245,24 @@ extension CoreFlowTests {
         XCTAssertEqual(try reopenedDatabase.query("SELECT count(*) AS n FROM panorama_theme_batches").first?["n"], "1")
         XCTAssertEqual(try reopenedDatabase.query("SELECT count(*) AS n FROM panorama_theme_appearances").first?["n"], "2")
     }
+
+    func testPanoramaThemeAppearanceCountAfterTwoSnapshots() async throws {
+        let directory = try themeDirectory("appearances")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try await panoramaFixtureStore(directory, count: 1)
+        try await store.generatePanorama(using: ProgressivePanoramaFixture())
+        let first = try await store.panoramaState()
+        let firstSnapshot = try XCTUnwrap(first.snapshot)
+        let themeID = try XCTUnwrap(firstSnapshot.proposal.regions.first?.id)
+        XCTAssertEqual(first.themeAppearanceCounts[themeID], 1)
+        let added = try await store.recordUserExpression("新增独立材料，保留不同的检索条件。")
+        _ = try await store.setSourceLocalOnly(sourceID: added, expectedVersion: 1, localOnly: false)
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [added], scalarBudget: Int.max)
+        _ = try await store.importOrganizedClaims(context: context, proposals: [], commandID: "theme-appearance")
+        try await store.generatePanorama(using: ProgressivePanoramaFixture())
+        let second = try await store.panoramaState()
+        XCTAssertEqual(second.status, "completed")
+        XCTAssertTrue(second.snapshot?.proposal.regions.contains { $0.id == themeID } == true)
+        XCTAssertEqual(second.themeAppearanceCounts[themeID], 2)
+    }
 }

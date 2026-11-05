@@ -87,7 +87,8 @@ extension VoiceOSStore {
             progress = .init(phase: snapshot?.workflow?.phase ?? .units, verifiedUnitCount: verified.count,
                              totalUnitCount: input.units.count, activeStage: steps.last(where: { $0["state"] == "running" })?["stage"])
         }
-        return .init(input: input, snapshot: snapshot, status: row?["state"] ?? (input.units.isEmpty ? "empty" : "pending"), error: row?["error"], progress: progress)
+        return .init(input: input, snapshot: snapshot, status: row?["state"] ?? (input.units.isEmpty ? "empty" : "pending"), error: row?["error"],
+                     progress: progress, themeAppearanceCounts: try panoramaThemeAppearanceCounts())
     }
     public func generatePanorama(using port: any PanoramaModelPort, retry: Bool = false) async throws {
         let input=try panoramaInput(), digest=input.manifest.digest
