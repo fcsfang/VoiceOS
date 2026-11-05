@@ -174,4 +174,138 @@ final class KnowledgeReviewScanChecks: XCTestCase {
                      slowMedian * 1000, slowTimes.min()! * 1000, slowTimes.max()! * 1000, slowPreparations,
                      fastMedian * 1000, fastTimes.min()! * 1000, fastTimes.max()! * 1000, fastPreparations))
     }
+
+    private func attachCompletedExpression(_ store: VoiceOSStore, sourceIDs: [String], id: String) async throws {
+        let records = try await store.sources()
+        let members = try sourceIDs.map { sourceID -> (SourceRecord, String, Int) in
+            let record = try XCTUnwrap(records.first { $0.id == sourceID })
+            return (record, try XCTUnwrap(record.transcriptVersionID), record.policyVersion)
+        }
+        let expression = RecordingExpression(id: id, sourceIDs: sourceIDs, title: "连续表达", summary: "同一连续表达的完整分段", reason: "按录音顺序承接同一表达", responseIDs: [], versions: Dictionary(uniqueKeysWithValues: members.map { ($0.0.id, $0.1) }), policies: Dictionary(uniqueKeysWithValues: members.map { ($0.0.id, $0.2) }), state: "completed", previousActionIDs: [])
+        let db = await store.db
+        for member in members {
+            var presentation = member.0.presentation ?? RecordingPresentation()
+            presentation.expression = expression
+            try db.execute("UPDATE sources SET presentation_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(presentation), as: UTF8.self), member.0.id])
+        }
+    }
+
+    private func seedExternal(_ store: VoiceOSStore, text: String) async throws -> String {
+        let id = try await store.recordUserExpression(text)
+        _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+        let db = await store.db
+        try db.execute("UPDATE sources SET origin='external',speaker='external' WHERE id=?", [id])
+        return id
+    }
+
+    func testMultiMemberExpressionUnchangedSkipsPreparation() async throws {
+        let store = try await openStore()
+        let firstID = try await seed(store, text: String(repeating: "第一段连续表达需要完整保留。", count: 40))
+        let secondID = try await seed(store, text: String(repeating: "第二段连续表达需要完整保留。", count: 40))
+        try await attachCompletedExpression(store, sourceIDs: [firstID, secondID], id: "scan-multi")
+        let first = try await store.enqueueKnowledgeReview(sourceID: firstID)
+        let preparedOnce = await store.knowledgeReviewPreparations
+        XCTAssertEqual(preparedOnce, 1)
+        let second = try await store.enqueueKnowledgeReview(sourceID: firstID)
+        XCTAssertEqual(second.id, first.id)
+        let preparedTwice = await store.knowledgeReviewPreparations
+        XCTAssertEqual(preparedTwice, preparedOnce)
+        _ = try await store.enqueueKnowledgeReview(sourceID: secondID)
+        let preparedMember = await store.knowledgeReviewPreparations
+        _ = try await store.enqueueKnowledgeReview(sourceID: secondID)
+        let preparedMemberTwice = await store.knowledgeReviewPreparations
+        XCTAssertEqual(preparedMemberTwice, preparedMember)
+        let reviewed = try await store.knowledgeReviews(sourceID: firstID)
+        XCTAssertEqual(reviewed.first { $0.id == first.id }?.validity, "current")
+    }
+
+    func testMultiMemberTranscriptChangeFallsBackAndFreezes() async throws {
+        let store = try await openStore()
+        let firstID = try await seed(store, text: String(repeating: "连续表达首段需要完整保留。", count: 40))
+        let secondID = try await seed(store, text: String(repeating: "连续表达次段需要完整保留。", count: 40))
+        try await attachCompletedExpression(store, sourceIDs: [firstID, secondID], id: "scan-transcript")
+        let first = try await store.enqueueKnowledgeReview(sourceID: firstID)
+        let before = await store.knowledgeReviewPreparations
+        let records = try await store.sources()
+        let member = try XCTUnwrap(records.first { $0.id == secondID })
+        _ = try await store.correctTranscript(sourceID: secondID, expectedVersionID: try XCTUnwrap(member.transcriptVersionID), text: "更正后的连续表达次段需要完整保留。")
+        let reviewed = try await store.knowledgeReviews(sourceID: firstID)
+        XCTAssertEqual(reviewed.first { $0.id == first.id }?.validity, "frozen")
+        let after = await store.knowledgeReviewPreparations
+        XCTAssertEqual(after, before + 1)
+    }
+
+    func testMultiMemberPolicyChangeFallsBackAndFreezes() async throws {
+        let store = try await openStore()
+        let firstID = try await seed(store, text: String(repeating: "连续表达首段授权核对。", count: 40))
+        let secondID = try await seed(store, text: String(repeating: "连续表达次段授权核对。", count: 40))
+        try await attachCompletedExpression(store, sourceIDs: [firstID, secondID], id: "scan-policy")
+        let first = try await store.enqueueKnowledgeReview(sourceID: firstID)
+        let before = await store.knowledgeReviewPreparations
+        let policy = try await store.sourcePolicy(sourceID: secondID)
+        _ = try await store.setSourceLocalOnly(sourceID: secondID, expectedVersion: policy.version, localOnly: true)
+        let reviewed = try await store.knowledgeReviews(sourceID: firstID)
+        XCTAssertEqual(reviewed.first { $0.id == first.id }?.validity, "frozen")
+        let after = await store.knowledgeReviewPreparations
+        XCTAssertEqual(after, before + 1)
+    }
+
+    func testMultiMemberMembershipChangeFallsBackAndFreezes() async throws {
+        let store = try await openStore()
+        let firstID = try await seed(store, text: String(repeating: "连续表达首段成员核对。", count: 40))
+        let secondID = try await seed(store, text: String(repeating: "连续表达次段成员核对。", count: 40))
+        try await attachCompletedExpression(store, sourceIDs: [firstID, secondID], id: "scan-membership")
+        let first = try await store.enqueueKnowledgeReview(sourceID: firstID)
+        let before = await store.knowledgeReviewPreparations
+        try await attachCompletedExpression(store, sourceIDs: [firstID], id: "scan-single")
+        let reviewed = try await store.knowledgeReviews(sourceID: firstID)
+        XCTAssertEqual(reviewed.first { $0.id == first.id }?.validity, "frozen")
+        let after = await store.knowledgeReviewPreparations
+        XCTAssertEqual(after, before + 1)
+    }
+
+    func testRecordingContextUnchangedSkipsPreparation() async throws {
+        let store = try await openStore()
+        let personalID = try await seed(store, text: String(repeating: "双轨个人原话需要完整保留。", count: 40))
+        let externalID = try await seedExternal(store, text: "节目组认为智能体可以完全自主。")
+        try await store.attachRecordingContext(personalSourceID: personalID, externalSourceID: externalID, sessionID: "scan-pairing")
+        let first = try await store.enqueueKnowledgeReview(sourceID: personalID)
+        let preparedOnce = await store.knowledgeReviewPreparations
+        XCTAssertEqual(preparedOnce, 1)
+        let second = try await store.enqueueKnowledgeReview(sourceID: personalID)
+        XCTAssertEqual(second.id, first.id)
+        let preparedTwice = await store.knowledgeReviewPreparations
+        XCTAssertEqual(preparedTwice, preparedOnce)
+    }
+
+    func testRecordingContextChangeFallsBackAndFreezes() async throws {
+        let store = try await openStore()
+        let personalID = try await seed(store, text: String(repeating: "双轨偏移前的个人原话。", count: 40))
+        let externalID = try await seedExternal(store, text: "节目组会发布一份报告。")
+        try await store.attachRecordingContext(personalSourceID: personalID, externalSourceID: externalID, sessionID: "scan-pairing-change")
+        let first = try await store.enqueueKnowledgeReview(sourceID: personalID)
+        let before = await store.knowledgeReviewPreparations
+        try await store.attachRecordingContext(personalSourceID: personalID, externalSourceID: externalID, sessionID: "scan-pairing-change", offsetMS: 250)
+        let reviewed = try await store.knowledgeReviews(sourceID: personalID)
+        XCTAssertEqual(reviewed.first { $0.id == first.id }?.validity, "frozen")
+        let after = await store.knowledgeReviewPreparations
+        XCTAssertEqual(after, before + 1)
+    }
+
+    func testNewestUnusableReviewDoesNotHideMatchingOlderReview() async throws {
+        let store = try await openStore()
+        let sourceID = try await seed(store, text: String(repeating: "排序回退原话需要完整保留。", count: 40))
+        let older = try await store.enqueueKnowledgeReview(sourceID: sourceID)
+        let db = await store.db
+        let stored = try XCTUnwrap(try db.query("SELECT input_json FROM knowledge_reviews WHERE id=?", [older.id]).first)
+        let inputJSON = try XCTUnwrap(stored["input_json"])
+        try db.execute("UPDATE knowledge_reviews SET created_at='2000-01-01T00:00:00Z' WHERE id=?", [older.id])
+        let newerID = UUID().uuidString
+        try db.execute("INSERT INTO knowledge_reviews(id,source_id,input_digest,input_json,state,response_ids_json,created_at) VALUES(?,?,?,?,'failed','[]','2999-01-01T00:00:00Z')", [newerID, sourceID, "stale-digest", inputJSON])
+        let before = await store.knowledgeReviewPreparations
+        let result = try await store.enqueueKnowledgeReview(sourceID: sourceID)
+        XCTAssertEqual(result.id, older.id)
+        let after = await store.knowledgeReviewPreparations
+        XCTAssertEqual(after, before + 1)
+    }
 }
