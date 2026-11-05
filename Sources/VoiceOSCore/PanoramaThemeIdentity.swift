@@ -332,7 +332,7 @@ extension VoiceOSStore {
 
     func panoramaThemeAppearanceCounts() throws -> [String: Int] {
         var counts: [String: Int]=[:]
-        for row in try db.query("SELECT theme_id,COUNT(*) AS count FROM panorama_theme_appearances GROUP BY theme_id") {
+        for row in try db.query("SELECT theme_id,COUNT(DISTINCT attempt_id) AS count FROM panorama_theme_appearances GROUP BY theme_id") {
             guard let id=row["theme_id"],let count=row["count"].flatMap(Int.init) else { continue }
             counts[id]=count
         }

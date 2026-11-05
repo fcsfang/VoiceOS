@@ -246,6 +246,21 @@ extension CoreFlowTests {
         XCTAssertEqual(try reopenedDatabase.query("SELECT count(*) AS n FROM panorama_theme_appearances").first?["n"], "2")
     }
 
+    func testPanoramaThemeAppearanceCountsDistinctAttempts() async throws {
+        let directory = try themeDirectory("appearance-attempts")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = try VoiceOSStore(root: directory, inspector: NativeMediaInspector())
+        try await store.recover()
+        let database = try Database(directory.appendingPathComponent("voiceos.sqlite"))
+        try database.execute("INSERT INTO panorama_attempts(id,digest,state,input_json,created_at) VALUES('same-attempt','d','failed','{}','2026-11-05T00:00:00Z')")
+        let match = PanoramaThemeMatch(themeID: "p1", rawRegionID: "r1", regionTitle: "检索条件", questionTitles: [], claimIDs: [],
+                                       sourceIDs: [], quoteKeys: [], kind: .new, score: nil)
+        try await store.recordPanoramaThemeBatch(.init(attemptID: "same-attempt", phase: .synthesis, createdAt: "2026-11-05T00:00:00Z", matches: [match]), replacing: false)
+        try await store.recordPanoramaThemeBatch(.init(attemptID: "same-attempt", phase: .completed, createdAt: "2026-11-05T00:00:01Z", matches: [match]), replacing: false)
+        let counts = try await store.panoramaThemeAppearanceCounts()
+        XCTAssertEqual(counts["p1"], 1, "同一次尝试的草稿与完成不能算两次出现")
+    }
+
     func testPanoramaThemeAppearanceCountAfterTwoSnapshots() async throws {
         let directory = try themeDirectory("appearances")
         defer { try? FileManager.default.removeItem(at: directory) }
