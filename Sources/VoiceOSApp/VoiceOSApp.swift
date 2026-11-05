@@ -3226,8 +3226,7 @@ extension ControlCenter {
         guard initialized, let store, let port = knowledgeReviewModel, knowledgeReviewWorker == nil,
               !fullRecordingBusy, !dictationActive else { return }
         knowledgeReviewWorker = Task {
-            knowledgeReviewBusy = true
-            defer { knowledgeReviewBusy = false; knowledgeReviewWorker = nil }
+            defer { knowledgeReviewWorker = nil }
             do {
                 let sources = try await store.sources()
                 let claims = try await store.latestCandidateClaimsBySource()
@@ -3242,6 +3241,8 @@ extension ControlCenter {
                     try Task.checkCancellation(); attempted.insert(next.id)
                     knowledgeReviewStatus = "正在查证知识判断，核对来源与适用条件…"
                     await refresh()
+                    knowledgeReviewBusy = true
+                    defer { knowledgeReviewBusy = false }
                     let result = try await store.processKnowledgeReview(sourceID: next.sourceID, using: port)
                     knowledgeReviewStatus = result.state == "completed"
                         ? (result.issues.isEmpty ? "本次未提出需要纠偏的知识判断。" : "已保存 \(result.issues.count) 条知识核查建议与依据。")

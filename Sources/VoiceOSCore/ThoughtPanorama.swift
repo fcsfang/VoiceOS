@@ -240,17 +240,25 @@ public struct PanoramaSnapshot: Codable, Sendable, Identifiable {
 public enum PanoramaSelection: Hashable, Sendable {
     case question(String), relation(String)
 }
+public struct PanoramaThemeHistory: Sendable, Equatable {
+    public let appearanceCount: Int
+    public let firstSeenAt: String
+    public let lastSeenAt: String
+    public init(appearanceCount: Int, firstSeenAt: String, lastSeenAt: String) {
+        self.appearanceCount=appearanceCount; self.firstSeenAt=firstSeenAt; self.lastSeenAt=lastSeenAt
+    }
+}
 public struct PanoramaState: Sendable {
     public let input: PanoramaInput
     public let snapshot: PanoramaSnapshot?
     public let status: String
     public let error: String?
     public let progress: PanoramaProgress?
-    public let themeAppearanceCounts: [String: Int]
+    public let themeHistory: [String: PanoramaThemeHistory]
     public init(input: PanoramaInput, snapshot: PanoramaSnapshot?, status: String, error: String?, progress: PanoramaProgress? = nil,
-                themeAppearanceCounts: [String: Int] = [:]) {
+                themeHistory: [String: PanoramaThemeHistory] = [:]) {
         self.input=input; self.snapshot=snapshot; self.status=status; self.error=error; self.progress=progress
-        self.themeAppearanceCounts=themeAppearanceCounts
+        self.themeHistory=themeHistory
     }
     public var canGenerate: Bool { !input.units.isEmpty && !["completed", "running", "failed", "unknown"].contains(status) }
 }

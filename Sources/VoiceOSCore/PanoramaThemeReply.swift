@@ -107,10 +107,11 @@ public struct PanoramaThemeBriefing: Codable, Sendable {
         }
         let quoteQuestionIDs = Set(picked.map(\.question.id))
         let open = ranked.first(where: { !quoteQuestionIDs.contains($0.id) }) ?? ranked.first
-        let digestValue = Digest(regionID: region.id,
+        let digestValue = Digest(regionID: region.id, title: region.title, summary: region.summary,
             quotes: quotes.map { [$0.text, $0.sourceTitle, $0.occurredAt] },
             statements: statements,
-            openQuestionID: open?.id ?? "")
+            openQuestionTitle: open?.title ?? "",
+            openQuestionEvidenceCount: open?.evidence.count ?? 0)
         let digest = (try? VoiceOSStore.relevanceJSON(digestValue)).map { VoiceOSStore.relevanceHash(Data($0.utf8)) } ?? region.id
         return .init(regionID: region.id, title: region.title, summary: region.summary,
             quotes: quotes, statements: statements,
@@ -120,9 +121,12 @@ public struct PanoramaThemeBriefing: Codable, Sendable {
 
     private struct Digest: Encodable {
         let regionID: String
+        let title: String
+        let summary: String
         let quotes: [[String]]
         let statements: [String]
-        let openQuestionID: String
+        let openQuestionTitle: String
+        let openQuestionEvidenceCount: Int
     }
 
     private static func normalizedStatement(_ raw: String) -> String {

@@ -10,9 +10,11 @@ extension VoiceOSStore {
         FROM action_feedback f JOIN actions a ON a.id=f.action_id
         JOIN sources s ON s.id=f.source_id
         JOIN transcripts t ON t.source_id=s.id JOIN transcript_versions v ON v.id=t.current_version_id
-        WHERE a.kind='task' AND a.validity='current' AND s.state IN ('saved','reference_only')
+        WHERE a.kind='task' AND (a.validity='current' OR (a.validity='frozen' AND EXISTS(
+            SELECT 1 FROM action_revisions r WHERE r.action_id=a.id AND r.version=a.version
+            AND r.command_id LIKE ?))) AND s.state IN ('saved','reference_only')
         AND f.kind IN ('outcome','reflection') ORDER BY f.created_at DESC,f.sequence DESC
-        """).compactMap { row in
+        """, [Self.externalCompletionCommandPrefix + "%"]).compactMap { row in
             let intent = try Self.feedbackIntent(row["feedback_json"])
             guard (intent?.relation == nil || intent?.relation == "outcome"),
                   intent?.organizedClaimID.map({ claims[$0]?.validity == "current" }) ?? true,
@@ -25,8 +27,13 @@ extension VoiceOSStore {
     /// A reopened task starts another version, so prior results stay in history.
     public func pendingOutcomeFollowups() throws -> [ActionRecord] {
         let results = Dictionary(grouping: try recentActionOutcomes(), by: \.actionID)
+        let externallyConfirmed = Set(try db.query("""
+            SELECT r.action_id FROM action_revisions r JOIN actions a ON a.id=r.action_id AND a.version=r.version
+            WHERE r.command_id LIKE ?
+            """, [Self.externalCompletionCommandPrefix + "%"]).compactMap { $0["action_id"] })
         let completed = try actions(includeHistory: true).filter {
-            $0.kind == "task" && $0.state == "completed" && $0.validity == "current"
+            $0.kind == "task" && $0.state == "completed"
+                && ($0.validity == "current" || ($0.validity == "frozen" && externallyConfirmed.contains($0.id)))
         }
         return completed.filter { action in
             !(results[action.id] ?? []).contains { feedback in
