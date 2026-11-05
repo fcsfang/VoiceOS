@@ -127,6 +127,20 @@ public struct PanoramaProposal: Codable, Sendable {
         unrepresentedClaims=try container.decode([PanoramaUnrepresented].self, forKey: .unrepresentedClaims)
         areas=try container.decodeIfPresent([PanoramaArea].self, forKey: .areas) ?? []
     }
+
+    // Proposals written before areas existed carry no key at all. Omitting the
+    // key while areas are empty keeps step inputs byte-identical to those
+    // receipts, so a unit chain paid before the areas change still replays
+    // instead of regenerating every unit on the same evidence.
+    public func encode(to encoder: Encoder) throws {
+        var container=encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(regions, forKey: .regions)
+        try container.encode(questions, forKey: .questions)
+        try container.encode(relations, forKey: .relations)
+        try container.encode(unrepresentedSources, forKey: .unrepresentedSources)
+        try container.encode(unrepresentedClaims, forKey: .unrepresentedClaims)
+        if !areas.isEmpty { try container.encode(areas, forKey: .areas) }
+    }
 }
 public struct PanoramaReceipt: Codable, Sendable {
     public let responseID: String

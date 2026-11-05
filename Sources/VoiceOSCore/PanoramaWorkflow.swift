@@ -98,6 +98,63 @@ struct PanoramaConsistencyInput: Encodable {
     let rejections: [PanoramaRejection]
 }
 
+/// Global synthesis and review depend on evidence alone: transcripts, claims,
+/// units and the proposals built from them. Titles, display dates and the
+/// attempt digest can change while a run is in flight (`panoramaEvidenceDigest`
+/// already ignores them), so their step keys drop those fields. A later attempt
+/// on the same evidence then replays completed global receipts instead of
+/// paying for every call again, the way unit receipts already replay.
+protocol PanoramaEvidenceScopedInput: Encodable {
+    func panoramaEvidenceJSON() throws -> String
+}
+extension PanoramaInput {
+    var panoramaEvidenceScoped: PanoramaInput {
+        .init(manifest: .init(digest: "", sourceIDs: manifest.sourceIDs, claimIDs: manifest.claimIDs, unitIDs: manifest.unitIDs),
+              units: units,
+              sources: sources.map { .init(transcript: $0.transcript, title: "", occurredAt: "", policyVersion: $0.policyVersion) },
+              claims: claims, exclusions: [])
+    }
+}
+/// Step inputs used only by global stages. Unit review and draft synthesis
+/// share their shape with global calls but keep their existing keys, so a
+/// separate wrapper carries the evidence-scoped form instead of changing the
+/// digests of unit and draft receipts already stored in the library.
+struct PanoramaGlobalEvidenceReviewInput: Encodable {
+    let input: PanoramaInput
+    let proposal: PanoramaProposal
+}
+struct PanoramaGlobalSynthesisInput: Encodable {
+    let input: PanoramaInput
+    let proposals: [PanoramaUnitProposal]
+}
+extension PanoramaGlobalEvidenceReviewInput: PanoramaEvidenceScopedInput {
+    func panoramaEvidenceJSON() throws -> String {
+        try VoiceOSStore.relevanceJSON(PanoramaGlobalEvidenceReviewInput(input: input.panoramaEvidenceScoped, proposal: proposal))
+    }
+}
+extension PanoramaCoverageInput: PanoramaEvidenceScopedInput {
+    func panoramaEvidenceJSON() throws -> String {
+        try VoiceOSStore.relevanceJSON(PanoramaCoverageInput(input: input.panoramaEvidenceScoped, proposal: proposal, target: target, rejections: rejections))
+    }
+}
+extension PanoramaConsistencyInput: PanoramaEvidenceScopedInput {
+    func panoramaEvidenceJSON() throws -> String {
+        try VoiceOSStore.relevanceJSON(PanoramaConsistencyInput(input: input.panoramaEvidenceScoped, proposal: proposal,
+            unitProposals: unitProposals, reviews: reviews, rejections: rejections))
+    }
+}
+extension PanoramaGlobalSynthesisInput: PanoramaEvidenceScopedInput {
+    func panoramaEvidenceJSON() throws -> String {
+        try VoiceOSStore.relevanceJSON(PanoramaGlobalSynthesisInput(input: input.panoramaEvidenceScoped, proposals: proposals))
+    }
+}
+extension PanoramaGlobalRepairInput: PanoramaEvidenceScopedInput {
+    func panoramaEvidenceJSON() throws -> String {
+        try VoiceOSStore.relevanceJSON(PanoramaGlobalRepairInput(input: input.panoramaEvidenceScoped, proposal: proposal,
+            issue: PanoramaSemanticIssue(input: issue.input.panoramaEvidenceScoped, rejection: issue.rejection)))
+    }
+}
+
 extension VoiceOSStore {
     static func panoramaProjection(_ proposal: PanoramaProposal, input: PanoramaInput, questionIDs: Set<String>, relationIDs: Set<String>) -> PanoramaProposal {
         let relations=proposal.relations.filter { relationIDs.contains($0.id) }
