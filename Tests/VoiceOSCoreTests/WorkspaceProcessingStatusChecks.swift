@@ -34,4 +34,16 @@ extension CoreFlowTests {
         let status = WorkspaceProcessingStatus(activityLabel: "正在本地转写", knowledgeReview: .running)
         XCTAssertEqual(status.title, "正在本地转写")
     }
+
+    func testDictationOutranksPausedBatchTitle() {
+        let status = WorkspaceProcessingStatus(isDictating: true)
+        XCTAssertEqual(status.visibleTitle(preferringPausedBatch: "正在重新识别 1/3"),
+                       "正在录音，停止后保存并整理")
+    }
+
+    func testPausedBatchTitleShowsWhenItIsTheOnlyRunningWork() {
+        let status = WorkspaceProcessingStatus()
+        XCTAssertEqual(status.visibleTitle(preferringPausedBatch: "正在重新识别 1/3"), "正在重新识别 1/3")
+        XCTAssertNil(status.visibleTitle(preferringPausedBatch: nil))
+    }
 }

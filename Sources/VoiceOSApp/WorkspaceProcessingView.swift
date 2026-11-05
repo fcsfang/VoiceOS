@@ -33,11 +33,13 @@ extension ControlCenter {
         return assistantExecutions.contains { $0.validity == "current" && $0.state == "running" } ? .running : .completed
     }
     var workspaceProcessingTitle: String? {
+        let batchTitle: String?
         if let batch = pausedActionBatch, case .running(let progress) = batch.phase {
-            return progress.currentTitle.isEmpty ? progress.label : progress.label + " · " + progress.currentTitle
+            batchTitle = progress.currentTitle.isEmpty ? progress.label : progress.label + " · " + progress.currentTitle
+        } else {
+            batchTitle = nil
         }
-        if case .running(let title) = workspaceProcessingStatus.display { return title }
-        return nil
+        return workspaceProcessingStatus.visibleTitle(preferringPausedBatch: batchTitle)
     }
     var workspaceProcessingSourceID: String? { pausedActionBatch?.currentSourceID ?? transcriptReviewSourceID ?? processingActivity?.sourceID ?? understandingSource ?? fullRecordingSourceID }
     var workspaceUnfinishedIntents: [ExpressionProcessingIntentRecord] {
@@ -112,8 +114,8 @@ struct WorkspaceProcessingBar: View {
                 Label("有事项需要查看，原文与历史保留",systemImage:"exclamationmark.circle").foregroundStyle(.orange)
             } else { Text(status.title).foregroundStyle(.secondary).lineLimit(1) }
             Spacer(minLength:8)
-            if model.pausedActionBatch?.isRunning == true { Button("停止后续处理") { model.stopPausedActionBatch() } }
-            else if model.dictationActive { Button("停止并整理") { model.stopDictation() } }
+            if model.dictationActive { Button("停止并整理") { model.stopDictation() } }
+            else if model.pausedActionBatch?.isRunning == true { Button("停止后续处理") { model.stopPausedActionBatch() } }
             else if model.fullRecordingBusy { Button("停止后续处理") { model.cancelFullRecording() } }
             Button("查看处理",action:open).accessibilityIdentifier("workspace.processing")
         }.font(.caption).padding(.horizontal,20).padding(.vertical,12).background(palette.surface)
@@ -192,6 +194,11 @@ struct WorkspaceProcessingView: View {
                                 }.padding(.leading,26).padding(.bottom,12)
                             }
                         }
+                        if model.pausedActionBatch == nil { PausedActionBatchControl(model:model) }
+                    }
+                }
+                if model.pausedActionBatch != nil {
+                    WorkspaceSection(title:"批量重新识别",icon:"arrow.triangle.2.circlepath") {
                         PausedActionBatchControl(model:model)
                     }
                 }

@@ -1531,6 +1531,7 @@ final class ControlCenter: ObservableObject {
             await refresh()
         }
         await refresh()
+        requestReminderRefresh()
         let allActionIDs = Array(Set(plan.targets.flatMap(\.actionIDs))).sorted()
         let final = await evaluatePausedActionIDs(allActionIDs)
         pausedActionBatch?.phase = .finished(PausedActionBatchSummary(
