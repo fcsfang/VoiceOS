@@ -3,7 +3,7 @@ status: in_review
 started: 2026-11-09
 updated: 2026-11-09
 branch: codex/transcript-filler-review-20261109
-pr: -
+pr: 123
 owner: codex
 ---
 # 让 AI 理解前的转写更干净
