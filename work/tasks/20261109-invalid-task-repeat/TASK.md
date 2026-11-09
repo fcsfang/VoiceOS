@@ -3,7 +3,7 @@ status: in_review
 started: 2026-11-09
 updated: 2026-11-09
 branch: codex/recover-invalid-task-repeat-20261109
-pr: -
+pr: 124
 owner: codex
 ---
 # 从无效的重复待办建议恢复整理
