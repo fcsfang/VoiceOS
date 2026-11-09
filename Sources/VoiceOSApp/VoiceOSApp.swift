@@ -2998,6 +2998,14 @@ extension ControlCenter {
             await refresh(); resumeAssistantExecutions(); return true
         } catch { assistantStatus = error.localizedDescription; await refresh(); return false }
     }
+    func analyzeThought(_ action: ActionRecord) async -> Bool {
+        guard let store, assistantModel != nil else { assistantStatus = "请先配置文本模型"; return false }
+        do {
+            _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: .analysis)
+            assistantStatus = "已开始分析；结果会保存在这条内容下"
+            await refresh(); resumeAssistantExecutions(); return true
+        } catch { assistantStatus = error.localizedDescription; await refresh(); return false }
+    }
     func retryAssistant(_ execution: AssistantExecutionRecord) async {
         do { try await store?.retryAssistantExecution(id: execution.id); assistantStatus = "已重新排队"; await refresh(); resumeAssistantExecutions() }
         catch { assistantStatus = error.localizedDescription }

@@ -1,18 +1,45 @@
 import Foundation
 
 public enum AssistantTaskKind: String, Codable, Sendable { case research, draft, comparison }
+/// What VoiceOS should do with one item, decided per item. Execution is the
+/// rare case where the user asks AI to do work now; analysis answers thoughts
+/// and questions; reminder keeps operational work on the remind-only path.
+public enum AssistantIntent: String, Codable, Sendable { case analysis, execution, reminder, none }
+public enum AssistantMode: String, Codable, Sendable { case execution, analysis }
 public struct AssistantReference: Codable, Hashable, Sendable {
     public let url: String
     public let title: String
     public init(url: String, title: String) { self.url = url; self.title = title }
 }
 public struct AssistantAssessment: Codable, Sendable {
-    public let explicitDelegation: Bool
+    public let intent: AssistantIntent
     public let supported: Bool
     public let kind: AssistantTaskKind
     public let reason: String
+    public var explicitDelegation: Bool { intent == .execution }
+    public init(intent: AssistantIntent, supported: Bool, kind: AssistantTaskKind, reason: String) {
+        self.intent = intent; self.supported = supported; self.kind = kind; self.reason = reason
+    }
     public init(explicitDelegation: Bool, supported: Bool, kind: AssistantTaskKind, reason: String) {
-        self.explicitDelegation = explicitDelegation; self.supported = supported; self.kind = kind; self.reason = reason
+        self.init(intent: explicitDelegation ? .execution : .none, supported: supported, kind: kind, reason: reason)
+    }
+    private enum CodingKeys: String, CodingKey { case intent, explicitDelegation, supported, kind, reason }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let delegated = (try? container.decodeIfPresent(Bool.self, forKey: .explicitDelegation)) ?? nil
+        intent = (try? container.decodeIfPresent(AssistantIntent.self, forKey: .intent)) ?? nil
+            ?? (delegated == true ? .execution : .none)
+        supported = (try? container.decode(Bool.self, forKey: .supported)) ?? false
+        kind = (try? container.decode(AssistantTaskKind.self, forKey: .kind)) ?? .draft
+        reason = (try? container.decode(String.self, forKey: .reason)) ?? ""
+    }
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(intent, forKey: .intent)
+        try container.encode(intent == .execution, forKey: .explicitDelegation)
+        try container.encode(supported, forKey: .supported)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(reason, forKey: .reason)
     }
 }
 public struct AssistantTaskInput: Codable, Sendable {
@@ -26,6 +53,27 @@ public struct AssistantTaskInput: Codable, Sendable {
     public let context: LocalTranscriptContext
     public let policyVersions: [String: Int]
     public let references: [ClaimReference]
+    public let mode: AssistantMode
+    public init(actionID: String, actionVersion: Int, claimID: String, claimReviewVersion: Int, title: String, note: String, instruction: String, context: LocalTranscriptContext, policyVersions: [String: Int], references: [ClaimReference], mode: AssistantMode = .execution) {
+        self.actionID = actionID; self.actionVersion = actionVersion; self.claimID = claimID; self.claimReviewVersion = claimReviewVersion
+        self.title = title; self.note = note; self.instruction = instruction; self.context = context
+        self.policyVersions = policyVersions; self.references = references; self.mode = mode
+    }
+    private enum CodingKeys: String, CodingKey { case actionID, actionVersion, claimID, claimReviewVersion, title, note, instruction, context, policyVersions, references, mode }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        actionID = try container.decode(String.self, forKey: .actionID)
+        actionVersion = try container.decode(Int.self, forKey: .actionVersion)
+        claimID = try container.decode(String.self, forKey: .claimID)
+        claimReviewVersion = try container.decode(Int.self, forKey: .claimReviewVersion)
+        title = try container.decode(String.self, forKey: .title)
+        note = try container.decode(String.self, forKey: .note)
+        instruction = try container.decode(String.self, forKey: .instruction)
+        context = try container.decode(LocalTranscriptContext.self, forKey: .context)
+        policyVersions = try container.decode([String: Int].self, forKey: .policyVersions)
+        references = try container.decode([ClaimReference].self, forKey: .references)
+        mode = try container.decodeIfPresent(AssistantMode.self, forKey: .mode) ?? .execution
+    }
 }
 public struct AssistantExecutionRequest: Sendable {
     public let executionID: String
@@ -74,16 +122,18 @@ public struct AssistantExecutionRecord: Identifiable, Codable, Sendable {
     public let error: String?
     public let resultSourceID: String?
     public let questionID: String?
+    public let mode: AssistantMode
     public let createdAt: String
     public let updatedAt: String
 }
 
 extension VoiceOSStore {
-    private func assistantInput(actionID: String, expectedVersion: Int, instruction: String, instructionSourceID: String? = nil, allowsCompleted: Bool = false, destination: ModelDestination = .local) throws -> AssistantTaskInput {
+    private func assistantInput(actionID: String, expectedVersion: Int, instruction: String, instructionSourceID: String? = nil, allowsCompleted: Bool = false, destination: ModelDestination = .local, mode: AssistantMode = .execution) throws -> AssistantTaskInput {
         guard ready, let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
-              action.version == expectedVersion, action.validity == "current", (action.state == "open" || allowsCompleted && action.state == "completed"), action.kind == "task", action.intentActor == "user",
+              action.version == expectedVersion, action.validity == "current", (action.state == "open" || allowsCompleted && action.state == "completed"),
+              action.kind == "task" && action.intentActor == "user" || mode == .analysis && action.kind == "opportunity" && action.intentActor == "user",
               let claim = try candidateClaim(id: action.claimID), claim.reviewVersion == action.claimReviewVersion,
-              claim.ownership == "user_tentative", !claim.references.isEmpty else { throw VoiceOSError("仅当前有效的个人待办可交给 AI；请核对原话与归属") }
+              claim.ownership == "user_tentative", !claim.references.isEmpty else { throw VoiceOSError("仅当前有效的个人内容可由 AI 处理；请核对原话与归属") }
         var ids: [String] = []
         for ref in claim.references where !ids.contains(ref.sourceID) { ids.append(ref.sourceID) }
         if let instructionSourceID, !ids.contains(instructionSourceID) { ids.append(instructionSourceID) }
@@ -96,7 +146,7 @@ extension VoiceOSStore {
               instructionSourceID == nil || context.sources.first(where: { $0.sourceID == instructionSourceID })?.text == instruction else { throw VoiceOSError("委托原话版本或归属已变化") }
         var policies: [String: Int] = [:]
         for id in ids { policies[id] = try sourcePolicy(sourceID: id).version }
-        return .init(actionID: actionID, actionVersion: action.version, claimID: claim.id, claimReviewVersion: claim.reviewVersion, title: action.title, note: action.note, instruction: instruction, context: context, policyVersions: policies, references: claim.references)
+        return .init(actionID: actionID, actionVersion: action.version, claimID: claim.id, claimReviewVersion: claim.reviewVersion, title: action.title, note: action.note, instruction: instruction, context: context, policyVersions: policies, references: claim.references, mode: mode)
     }
     private func validateAssistantInput(_ input: AssistantTaskInput, destination: ModelDestination, allowsCompletionHistory: Bool = false) throws {
         var version = input.actionVersion
@@ -107,8 +157,8 @@ extension VoiceOSStore {
             version = latest
         }
         let instructionID = input.context.sources.first(where: { !input.references.map(\.sourceID).contains($0.sourceID) })?.sourceID
-        let live = try assistantInput(actionID: input.actionID, expectedVersion: version, instruction: input.instruction, instructionSourceID: instructionID, allowsCompleted: allowsCompletionHistory,destination:destination)
-        let current = AssistantTaskInput(actionID: live.actionID,actionVersion: input.actionVersion,claimID: live.claimID,claimReviewVersion: live.claimReviewVersion,title: live.title,note: live.note,instruction: live.instruction,context: live.context,policyVersions: live.policyVersions,references: live.references)
+        let live = try assistantInput(actionID: input.actionID, expectedVersion: version, instruction: input.instruction, instructionSourceID: instructionID, allowsCompleted: allowsCompletionHistory,destination:destination,mode:input.mode)
+        let current = AssistantTaskInput(actionID: live.actionID,actionVersion: input.actionVersion,claimID: live.claimID,claimReviewVersion: live.claimReviewVersion,title: live.title,note: live.note,instruction: live.instruction,context: live.context,policyVersions: live.policyVersions,references: live.references,mode: input.mode)
         guard try Self.relevanceJSON(current) == Self.relevanceJSON(input) else { throw VoiceOSError("委托、原话或授权已变化，请重新交给 AI") }
         if destination == .cloud, input.context.sources.contains(where: \.localOnly) { throw VoiceOSError("委托依据含仅本地资料，请先允许这些原话用于云端") }
     }
@@ -126,19 +176,19 @@ extension VoiceOSStore {
         return try rows.map { row in
             let input = try JSONDecoder().decode(AssistantTaskInput.self, from: Data(row["input_json"]!.utf8))
             let result = try row["result_json"].map { try JSONDecoder().decode(AssistantExecutionResult.self, from: Data($0.utf8)) }
-            return .init(id: row["id"]!,actionID: input.actionID,actionVersion: input.actionVersion,state: row["state"]!,validity: row["validity"]!,title: result?.title ?? input.title,instruction: input.instruction,instructionSourceID: row["instruction_source_id"],sourceIDs: input.context.sources.map(\.sourceID),report: result?.markdown,references: result?.references ?? [],responseID: result?.responseID,error: row["error"],resultSourceID: row["result_source_id"],questionID: row["question_id"],createdAt: row["created_at"]!,updatedAt: row["updated_at"]!)
+            return .init(id: row["id"]!,actionID: input.actionID,actionVersion: input.actionVersion,state: row["state"]!,validity: row["validity"]!,title: result?.title ?? input.title,instruction: input.instruction,instructionSourceID: row["instruction_source_id"],sourceIDs: input.context.sources.map(\.sourceID),report: result?.markdown,references: result?.references ?? [],responseID: result?.responseID,error: row["error"],resultSourceID: row["result_source_id"],questionID: row["question_id"],mode: input.mode,createdAt: row["created_at"]!,updatedAt: row["updated_at"]!)
         }
     }
     @discardableResult
-    public func enqueueAssistantExecution(actionID: String, expectedVersion: Int, instruction: String = "", questionID: String? = nil, allowInstructionCloud: Bool = false) throws -> AssistantExecutionRecord {
+    public func enqueueAssistantExecution(actionID: String, expectedVersion: Int, instruction: String = "", questionID: String? = nil, allowInstructionCloud: Bool = false, mode: AssistantMode = .execution) throws -> AssistantExecutionRecord {
         _ = try assistantExecutions()
-        let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let existing = try assistantExecutions(actionID: actionID).first(where: { $0.actionVersion == expectedVersion && $0.validity == "current" && $0.instruction == instruction && ["queued","running","completed"].contains($0.state) }) { return existing }
-        _ = try assistantInput(actionID: actionID, expectedVersion: expectedVersion, instruction: "")
+        let instruction = mode == .analysis ? "" : instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existing = try assistantExecutions(actionID: actionID).first(where: { $0.actionVersion == expectedVersion && $0.mode == mode && $0.validity == "current" && $0.instruction == instruction && ["queued","running","completed"].contains($0.state) }) { return existing }
+        _ = try assistantInput(actionID: actionID, expectedVersion: expectedVersion, instruction: "", mode: mode)
         if let questionID { guard try reflectionQuestions().contains(where: { $0.id == questionID }) else { throw VoiceOSError("主题不存在") } }
         let instructionID = instruction.isEmpty ? nil : try recordUserExpression(instruction)
         if allowInstructionCloud, let instructionID { let policy = try sourcePolicy(sourceID: instructionID); _ = try setSourceLocalOnly(sourceID: instructionID, expectedVersion: policy.version, localOnly: false) }
-        let input = try assistantInput(actionID: actionID, expectedVersion: expectedVersion, instruction: instruction, instructionSourceID: instructionID)
+        let input = try assistantInput(actionID: actionID, expectedVersion: expectedVersion, instruction: instruction, instructionSourceID: instructionID, mode: mode)
         let id = UUID().uuidString, now = Self.now()
         let sequence = try db.query("SELECT COALESCE(MAX(sequence),0)+1 AS next FROM assistant_executions").first?["next"]
         try db.execute("INSERT INTO assistant_executions(id,action_id,action_version,input_json,sequence,instruction_source_id,question_id,state,validity,created_at,updated_at) VALUES(?,?,?,?,?,?,?,'queued','current',?,?)", [id,actionID,String(expectedVersion),try Self.relevanceJSON(input),sequence,instructionID,questionID,now,now])
@@ -150,18 +200,19 @@ extension VoiceOSStore {
         defer { assistantDiscoveryActive = false }
         var changed = false
         _ = try assistantExecutions()
-        for action in try actions() where action.kind == "task" && action.intentActor == "user" {
+        for action in try actions() where action.kind == "task" && action.intentActor == "user" && action.state == "open" && action.validity == "current" {
             try Task.checkCancellation()
             let prior = try db.query("SELECT * FROM assistant_assessments WHERE action_id=? AND action_version=?", [action.id,String(action.version)]).first
             if let prior {
                 // A crash between the completed assessment and queue insertion
-                // must not lose a real delegation, and must never resend it.
+                // must not lose a queued analysis or delegation, and must never resend it.
                 if prior["state"] == "completed", let json = prior["assessment_json"],
-                   let assessment = try? JSONDecoder().decode(AssistantAssessment.self, from: Data(json.utf8)), assessment.explicitDelegation,
+                   let assessment = try? JSONDecoder().decode(AssistantAssessment.self, from: Data(json.utf8)),
+                   let mode = Self.queuedMode(for: assessment),
                    let cached = try? JSONDecoder().decode(AssistantTaskInput.self, from: Data((prior["input_json"] ?? "").utf8)),
                    (try? validateAssistantInput(cached, destination: port.configuration.destination)) != nil,
                    try assistantExecutions(actionID: action.id).isEmpty {
-                    let record = try enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version)
+                    let record = try enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: mode)
                     try db.execute("UPDATE assistant_executions SET assessment_json=? WHERE id=?", [json,record.id])
                     changed = true
                 }
@@ -178,8 +229,8 @@ extension VoiceOSStore {
                 try validateAssistantInput(input, destination: port.configuration.destination)
                 try db.execute("UPDATE assistant_assessments SET state='completed',assessment_json=? WHERE id=?", [try Self.relevanceJSON(result),id])
                 changed = true
-                if result.explicitDelegation {
-                    let record = try enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version)
+                if let mode = Self.queuedMode(for: result) {
+                    let record = try enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: mode)
                     try db.execute("UPDATE assistant_executions SET assessment_json=? WHERE id=?", [try Self.relevanceJSON(result),record.id])
                     changed = true
                 }
@@ -190,6 +241,14 @@ extension VoiceOSStore {
             }
         }
         return changed
+    }
+    private static func queuedMode(for assessment: AssistantAssessment) -> AssistantMode? {
+        guard assessment.supported else { return nil }
+        switch assessment.intent {
+        case .execution: return .execution
+        case .analysis: return .analysis
+        case .reminder, .none: return nil
+        }
     }
     public func assistantAssessmentIssues() throws -> [AssistantAssessmentIssue] {
         let current = Dictionary(uniqueKeysWithValues: try actions().map { ($0.id,$0) })
@@ -211,8 +270,8 @@ extension VoiceOSStore {
             let assessment = try await runAssistantAssessment(input, key: "assessment:"+id, using: port)
             try validateAssistantInput(input, destination: port.configuration.destination)
             try db.execute("UPDATE assistant_assessments SET state='completed',assessment_json=? WHERE id=?", [try Self.relevanceJSON(assessment),id])
-            if assessment.explicitDelegation {
-                let record = try enqueueAssistantExecution(actionID: actionID, expectedVersion: expectedVersion)
+            if let mode = Self.queuedMode(for: assessment) {
+                let record = try enqueueAssistantExecution(actionID: actionID, expectedVersion: expectedVersion, mode: mode)
                 try db.execute("UPDATE assistant_executions SET assessment_json=? WHERE id=?", [try Self.relevanceJSON(assessment),record.id])
             }
         } catch {
@@ -247,8 +306,11 @@ extension VoiceOSStore {
         do {
             try validateAssistantInput(input, destination: port.configuration.destination)
             let assessment: AssistantAssessment
-            if let json = row["assessment_json"] { assessment = try JSONDecoder().decode(AssistantAssessment.self, from: Data(json.utf8)) }
-            else {
+            if let json = row["assessment_json"] {
+                assessment = try JSONDecoder().decode(AssistantAssessment.self, from: Data(json.utf8))
+            } else if input.mode == .analysis {
+                assessment = AssistantAssessment(intent: .analysis, supported: true, kind: .draft, reason: "用户请求分析")
+            } else {
                 assessment = try await runAssistantAssessment(input, key: id, using: port)
                 try validateAssistantInput(input, destination: port.configuration.destination)
                 try requireAssistantRunning(id)
@@ -261,7 +323,7 @@ extension VoiceOSStore {
             try Task.checkCancellation()
             try validateAssistantInput(input, destination: port.configuration.destination)
             try requireAssistantRunning(id)
-            try Self.validateAssistantResult(result, kind: assessment.kind)
+            try Self.validateAssistantResult(result, kind: assessment.intent == .analysis ? .draft : assessment.kind)
             try db.transaction {
                 let sourceID = try saveAssistantResultSource(result, executionID: id, allowsCloud: port.configuration.destination == .cloud)
                 try db.execute("UPDATE assistant_executions SET state='completed',result_json=?,result_source_id=?,updated_at=? WHERE id=?", [try Self.relevanceJSON(result),sourceID,Self.now(),id])

@@ -10,11 +10,12 @@ struct AssistantSheetSelection: Identifiable {
 
 func assistantExecutionLabel(_ execution: AssistantExecutionRecord) -> String {
     if execution.validity != "current" { return "依据已变化 · 暂停使用" }
+    let analysis = execution.mode == .analysis
     switch execution.state {
-    case "queued": return "已排队"
-    case "running": return "正在执行"
-    case "completed": return "成果已就绪"
-    case "failed": return "需要重试"
+    case "queued": return analysis ? "等待分析" : "已排队"
+    case "running": return analysis ? "正在分析" : "正在执行"
+    case "completed": return analysis ? "分析已就绪" : "成果已就绪"
+    case "failed": return analysis ? "分析未完成" : "需要重试"
     case "cancelled": return "已取消"
     default: return execution.state
     }

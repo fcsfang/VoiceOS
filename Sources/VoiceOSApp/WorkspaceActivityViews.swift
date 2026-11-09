@@ -180,7 +180,12 @@ struct WorkspaceTaskView: View {
                     if current {
                         Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
                         if action.state == "open", action.intentActor == "user" {
-                            Button("交给 AI", systemImage: "sparkles") { instruction = action.title + "\n\n请给出清晰的结论和可用的交付物；调研时附可核查的来源。"; delegating.toggle() }
+                            if action.kind == "task" {
+                                Button("交给 AI", systemImage: "sparkles") { instruction = action.title + "\n\n请给出清晰的结论和可用的交付物；调研时附可核查的来源。"; delegating.toggle() }
+                            } else {
+                                Button("让 VoiceOS 分析", systemImage: "text.magnifyingglass") { analyze() }
+                                    .disabled(model.assistantBusy || !model.modelConfigured)
+                            }
                         }
                     }
                 }
@@ -364,6 +369,12 @@ struct WorkspaceTaskView: View {
                 if draft.commandID == input.commandID && draft.text == input.text && draft.kind == input.kind { draft = TaskFeedbackDraft() }
                 error = ""; await loadFeedback()
             } else { error = model.status }
+        }
+    }
+    private func analyze() {
+        Task {
+            if await model.analyzeThought(action) { error = "" }
+            else { error = model.assistantStatus }
         }
     }
     private func delegate() {
