@@ -381,7 +381,8 @@ target_id必须逐字复制已有任务的id。uncertain=true或任何引用未�
         if target is None or task["uncertain"] or any(r["citation_status"] != "located" or not r["quote"] for r in task["references"]):
             raise ValueError("Task continuation is missing a clear target or original quote")
         if relation == "repeat" and (target["state"] != "open" or task["intent_type"] != "task" or task["followup_state"] != "pending"):
-            raise ValueError("Only the same pending task can be merged as a repeat")
+            print(f"候选 {task['id']} 不符合重复待办条件，按原分类保留并继续整理", flush=True)
+            continue
         task["continuation"] = {"relation": relation, "target": target, "notes": decision["notes"]}
     saved = json.loads(receipt.read_text())
     if not saved.get("response_id"): raise ValueError("Task continuation API receipt is missing")
