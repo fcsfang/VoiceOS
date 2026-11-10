@@ -1,5 +1,5 @@
 ---
-status: started
+status: merged
 started: 2026-11-10
 updated: 2026-11-10
 branch: work/task-initiation
@@ -59,4 +59,4 @@ owner: coordinator
 
 ## 进展
 
-- 2026-11-10 审计、设计二选一、核心与页面实现、82 项测试通过。分支 `work/task-initiation`，PR 待审。
+- 2026-11-10 审计、设计二选一、核心与页面实现、82 项测试通过。合并 `e736afb`（PR #128）；dist 从合并后 main 重建。
