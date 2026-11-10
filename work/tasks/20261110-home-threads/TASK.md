@@ -3,7 +3,7 @@ status: started
 started: 2026-11-10
 updated: 2026-11-10
 branch: work/home-threads
-pr:
+pr: 129
 owner: coordinator
 ---
 # 首页信息重构：线索式阅读
