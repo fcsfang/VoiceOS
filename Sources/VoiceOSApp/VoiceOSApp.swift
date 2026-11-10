@@ -376,6 +376,176 @@ final class ControlCenter: ObservableObject {
     @Published var assistantAssessmentIssues: [AssistantAssessmentIssue] = []
     @Published var assistantBusy = false
     @Published var assistantStatus = ""
+    @Published var taskInitiations: [TaskInitiationRecord] = []
+    @Published var initiationStatus = ""
+    @Published var initiationBusy = false
+    @Published var initiationText = ""
+    @Published var initiationSourceID: String?
+    private var initiationModel: ResponsesTaskInitiationPort?
+    func generateTaskInitiation(text: String, sourceID: String?, mode: TaskInitiationMode, allowCloud: Bool) async -> Bool {
+        guard !initiationBusy else { return false }
+        guard let store else { initiationStatus = "资料库尚未打开"; return false }
+        guard let port = initiationModel else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return false }
+        guard allowCloud else { initiationStatus = "请先允许这段原话用于云端，再生成启动材料"; return false }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { initiationStatus = "先写下或从材料带入一段原话"; return false }
+        guard trimmed.unicodeScalars.count <= 4000 else { initiationStatus = "原话超过 4000 字；请拆分或精简后再生成"; return false }
+        initiationBusy = true
+        defer { initiationBusy = false }
+        do {
+            let chosenID = try await initiationSource(for: trimmed, preferred: sourceID, store: store)
+            if let source = try await store.sources().first(where: { $0.id == chosenID }), source.localOnly {
+                _ = try await store.setSourceLocalOnly(sourceID: chosenID, expectedVersion: source.policyVersion, localOnly: false)
+            }
+            let input = try await store.taskInitiationInput(sourceID: chosenID, mode: mode)
+            initiationStatus = "正在整理可以开始的下一步…"
+            let proposal = try await port.initiate(input)
+            _ = try await store.recordTaskInitiation(input, proposal: proposal)
+            initiationText = ""; initiationSourceID = nil
+            await refresh()
+            initiationStatus = proposal.route == .captureOnly ? "已按原意仅记录；没有生成提示词、教程或任务。"
+                : proposal.route == .clarify ? "需要先回答一个关键问题，才能继续。"
+                : "启动材料已生成；可以预览、编辑或复制。"
+            return true
+        } catch {
+            initiationStatus = "启动材料未生成：" + error.localizedDescription
+            return false
+        }
+    }
+    private func initiationSource(for text: String, preferred: String?, store: VoiceOSStore) async throws -> String {
+        if let preferred, let source = try await store.sources().first(where: { $0.id == preferred }),
+           source.origin == "user", source.speaker == "user", ["saved", "reference_only"].contains(source.state),
+           source.transcript == text {
+            return source.id
+        }
+        return try await store.recordUserExpression(text)
+    }
+    func answerTaskInitiation(_ record: TaskInitiationRecord, answer: String) async -> Bool {
+        guard !initiationBusy else { return false }
+        guard let store else { return false }
+        guard let port = initiationModel else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return false }
+        let clean = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { initiationStatus = "请先填写澄清回答"; return false }
+        initiationBusy = true
+        defer { initiationBusy = false }
+        do {
+            let input = try await store.taskInitiationInput(sourceID: record.sourceID, mode: .direct,
+                                                            preferredRoute: record.input.preferredRoute, answer: clean)
+            initiationStatus = "正在按你的回答整理…"
+            let proposal = try await port.initiate(input)
+            _ = try await store.recordTaskInitiationClarification(id: record.id, answer: clean, proposal: proposal)
+            await refresh()
+            initiationStatus = "已按你的回答生成启动材料。"
+            return true
+        } catch {
+            initiationStatus = "按回答生成未完成：" + error.localizedDescription
+            return false
+        }
+    }
+    func skipTaskInitiationClarification(_ record: TaskInitiationRecord) async -> Bool {
+        guard !initiationBusy else { return false }
+        guard let store else { return false }
+        initiationBusy = true
+        do {
+            try await store.discardTaskInitiation(id: record.id)
+            await refresh()
+        } catch {
+            initiationBusy = false
+            initiationStatus = error.localizedDescription
+            return false
+        }
+        initiationBusy = false
+        return await generateTaskInitiation(text: record.input.text, sourceID: record.sourceID, mode: .direct, allowCloud: true)
+    }
+    func switchTaskInitiationRoute(_ record: TaskInitiationRecord, to route: TaskInitiationRoute) async -> Bool {
+        guard !initiationBusy else { return false }
+        guard record.state == "draft" else { initiationStatus = "只有草稿可以更换路线"; return false }
+        guard route != .clarify else { initiationStatus = "直接生成时不能改用澄清路线"; return false }
+        guard route != record.route else { return true }
+        guard let store else { return false }
+        initiationBusy = true
+        defer { initiationBusy = false }
+        do {
+            if route == .captureOnly {
+                let proposal = TaskInitiationProposal(isTaskInitiation: true, route: .captureOnly,
+                                                      title: record.proposal.title, reason: "用户选择仅记录")
+                _ = try await store.replaceTaskInitiation(id: record.id, preferredRoute: .captureOnly, proposal: proposal)
+            } else {
+                guard let port = initiationModel else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return false }
+                let input = try await store.taskInitiationInput(sourceID: record.sourceID, mode: .direct,
+                                                                preferredRoute: route, answer: record.input.answer)
+                initiationStatus = "正在按新路线重新整理…"
+                let proposal = try await port.initiate(input)
+                _ = try await store.replaceTaskInitiation(id: record.id, preferredRoute: route, proposal: proposal)
+            }
+            await refresh()
+            initiationStatus = "已换到「" + taskInitiationRouteLabel(route) + "」路线。"
+            return true
+        } catch {
+            initiationStatus = "更换路线未完成：" + error.localizedDescription
+            return false
+        }
+    }
+    func setTaskInitiationPreference(_ record: TaskInitiationRecord, preference: TaskInitiationPreference) async -> Bool {
+        guard !initiationBusy else { return false }
+        guard let store else { return false }
+        initiationBusy = true
+        defer { initiationBusy = false }
+        do {
+            _ = try await store.setTaskInitiationPreference(id: record.id, preference: preference)
+            await refresh()
+            initiationStatus = preference == .quickDelivery ? "执行偏好：优先快速交付。" : "执行偏好：边做边学，交付时解释关键实现。"
+            return true
+        } catch {
+            initiationStatus = error.localizedDescription
+            return false
+        }
+    }
+    func confirmTaskInitiation(_ record: TaskInitiationRecord, artifact: String) async -> Bool {
+        guard !initiationBusy else { return false }
+        guard let store else { return false }
+        initiationBusy = true
+        defer { initiationBusy = false }
+        do {
+            _ = try await store.confirmTaskInitiation(id: record.id, artifact: artifact)
+            await refresh()
+            initiationStatus = "已确认这份启动材料；尚未执行，也没有创建任务或提醒。"
+            return true
+        } catch {
+            initiationStatus = error.localizedDescription
+            return false
+        }
+    }
+    func markTaskInitiationCopied(_ record: TaskInitiationRecord, artifact: String) async -> Bool {
+        guard !initiationBusy else { return false }
+        guard let store else { return false }
+        initiationBusy = true
+        defer { initiationBusy = false }
+        do {
+            _ = try await store.markTaskInitiationCopied(id: record.id, artifact: artifact)
+            await refresh()
+            initiationStatus = "已复制；复制不代表任务已执行或完成。"
+            return true
+        } catch {
+            initiationStatus = error.localizedDescription
+            return false
+        }
+    }
+    func discardTaskInitiation(_ record: TaskInitiationRecord) async -> Bool {
+        guard !initiationBusy else { return false }
+        guard let store else { return false }
+        initiationBusy = true
+        defer { initiationBusy = false }
+        do {
+            try await store.discardTaskInitiation(id: record.id)
+            await refresh()
+            initiationStatus = "已删除这条启动记录；原话仍保留在材料中。"
+            return true
+        } catch {
+            initiationStatus = error.localizedDescription
+            return false
+        }
+    }
     private var reminderFieldModel: ResponsesReminderFieldPort?
     private var reminderFieldWorker: Task<Void, Never>?
     private var reminderFieldFailure: String?
@@ -682,6 +852,7 @@ final class ControlCenter: ObservableObject {
             actionRecords = snapshot.actions
             assistantExecutions = snapshot.assistantExecutions
             assistantAssessmentIssues = snapshot.assistantAssessmentIssues
+            taskInitiations = snapshot.taskInitiations
             knowledgeReviews = snapshot.knowledgeReviews
             recentOutcomes = snapshot.recentOutcomes
             outcomeFollowups = snapshot.outcomeFollowups
@@ -766,6 +937,7 @@ final class ControlCenter: ObservableObject {
             topicModel=suite.topics; topicAttemptDigest=nil
             recordingExpressionModel=suite.recordingExpressions
             assistantModel=suite.assistant
+            initiationModel=suite.initiation
             followupModel=suite.followup;englishModel=suite.english;associationModel=suite.association;reminderFieldModel=suite.reminderFields
             knowledgeReviewModel=suite.knowledgeReview
             relevance.cancel();relevanceModel=suite.relevance

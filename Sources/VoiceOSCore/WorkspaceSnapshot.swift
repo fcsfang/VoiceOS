@@ -14,6 +14,7 @@ public struct WorkspaceSnapshot: Sendable {
     public var actions: [ActionRecord] = []
     public var assistantExecutions: [AssistantExecutionRecord] = []
     public var assistantAssessmentIssues: [AssistantAssessmentIssue] = []
+    public var taskInitiations: [TaskInitiationRecord] = []
     public var knowledgeReviews: [KnowledgeReviewRecord] = []
     public var recentOutcomes: [ActionFeedbackRecord] = []
     public var outcomeFollowups: [ActionRecord] = []
@@ -50,6 +51,7 @@ extension VoiceOSStore {
         result.outcomeOrigins = try conversationOutcomeOrigins()
         result.assistantExecutions = try assistantExecutions()
         result.assistantAssessmentIssues = try assistantAssessmentIssues()
+        result.taskInitiations = try taskInitiations()
         result.knowledgeReviews = try knowledgeReviews()
         result.recentOutcomes = try recentActionOutcomes()
         result.correctionImpacts = try correctionActionImpacts()

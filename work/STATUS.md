@@ -1,14 +1,14 @@
 # 项目状态
 
-更新：2026-11-06T07:10+08
+更新：2026-11-10T17:30+08
 
 ## 当前基线
 
-- `main` 收在 PR #121 合并提交 `94e67b1`，本地与远端一致。
-- SQLite schema 51。
-- `swift build` 通过，`swift test -j 4` 67 项通过。
+- `main` 收在 PR #127 合并提交 `8cd45bb`，本地与远端一致。
+- SQLite schema 51；`work/task-initiation` 分支为 schema 52，待审。
+- `swift build` 通过，`swift test -j 4` 72 项通过；任务启动分支 82 项通过。
 - 仓库不使用自动 CI。日常迭代用 `swift build`，完整测试本地跑 `swift test`。
-- 本地与远端只剩 `main`。
+- 本地与远端只剩 `main` 与在审的 `work/task-initiation`。
 
 ## 今日落地
 
@@ -165,12 +165,18 @@
 - `RecentContentIndex` 纯函数过滤非本人材料，去掉「说明：」「【录音中活动】」「【待核对】」等提取簿记并按陈述去重；行动反馈按天合并。
 - 验证：`swift test -j 4` 72 项 0 失败；隔离副本实机核对，11月8日录音显示 79 条想法，全景切换正常。合并 `8cd45bb`（PR #127），dist 从合并后 main 重建。
 
+## 任务启动 P0（2026-11-10，分支在审）
 
-
-- 无模型调用在跑，无进行中的分支会话。
+- 用户目标：VoiceOS 是任务启动层，不是执行者；把口述中的模糊任务转成可开始的下一步。需求与提示词在 `docs/feature-plans/`。
+- 审计结论：复用文字保存与云端授权、转写版本、`ModelHTTPTransport`/`ResponsesEnvelope`、模型套件、工作台外壳与快照；新增 `task_initiations`（迁移 52）、`TaskInitiationModelPort` 与 Responses 实现、启动页。未扩展 `assistant_executions`（`action_id` 非空，纯问题没有锚点，放宽会危及助理链路），也未写入 `actions`（会变成任务并触发提醒）。
+- 行为：四路线 `agent_handoff` / `guided_start` / `clarify` / `capture_only`；模型只返回语义字段，交接提示词与教程由纯函数拼装，事实、假设、待确认分栏，固定要求先检查真实环境；用户可换路线、改执行偏好、编辑、复制、确认；复制只记时间，不改变状态，不宣告执行；仅记录不生成材料。
+- 验证：`swift build -j 4`；`swift test -j 4` 82 项 0 失败（新增 10 项，覆盖 T01 到 T13 的 P0 部分）。隔离副本实机：真实模型生成「自己动手」教程与「交给 Agent」八段交接包，切换路线后内容更新；复制后剪贴板为交接包，`copied_at` 有值且状态仍 draft；吐槽句得到 `capture_only`，无材料；重启后两条记录保留，schema 52；actions 459、claims 938 前后不变（新增 2 条助理分析执行属既有启动发现）。确认按钮的自动点击未命中，确认语义由离线测试覆盖。
+- 分支 `work/task-initiation`，PR #128 待审。
 
 ## 下一步
 
+- 审阅并合并 `work/task-initiation`；合并后 dist 从新 main 重建，确认实机首次运行。
+- 任务启动 P1：任务恢复、执行器模板、偏好记忆、结果回流、启动包随资料库导出。
 - #66 核对分批与预算上限，用省成本方案跑完最后一段。
 - #44 外部完成确认的产品语义、#51 访谈录音的说话人归属仍是产品决定。
 - #39 触摸屏上的滚动恢复需要原生验收。

@@ -6,10 +6,10 @@ import VoiceOSCore
 // One navigation state owns the workspace. Discussion is a sibling, so expanding
 // it never replaces the reading view or its disclosure/scroll state.
 enum WorkspacePage: Hashable {
-    case home, themes, materials, actions, source(String), delivery(String), task(String), settings, capture, search, tool(String)
+    case home, themes, materials, actions, initiate, source(String), delivery(String), task(String), settings, capture, search, tool(String)
     var isTopLevel: Bool {
         switch self {
-        case .home, .themes, .materials, .actions, .settings: true
+        case .home, .themes, .materials, .actions, .initiate, .settings: true
         default: false
         }
     }
@@ -125,6 +125,7 @@ struct WorkspaceView: View {
         case .home: "首页"
         case .settings: "设置"
         case .capture: "记录想法"
+        case .initiate: "启动"
         case .search: "全局搜索"
         case .tool(let name): name
         }
@@ -134,7 +135,7 @@ struct WorkspaceView: View {
         for previous in path.reversed() {
             switch previous.page {
             case .themes: return true
-            case .home, .materials, .actions, .search, .capture, .settings: return false
+            case .home, .materials, .actions, .search, .capture, .settings, .initiate: return false
             default: continue
             }
         }
@@ -263,6 +264,7 @@ struct WorkspaceView: View {
                 nav("主题",icon:"circle.hexagongrid",target:.themes).keyboardShortcut("2",modifiers:.command)
                 nav("材料",icon:"books.vertical",target:.materials).keyboardShortcut("3",modifiers:.command)
                 nav("行动",icon:"checkmark.circle",target:.actions).keyboardShortcut("4",modifiers:.command)
+                nav("启动",icon:"arrow.up.forward",target:.initiate).keyboardShortcut("5",modifiers:.command)
             }
             Spacer()
             Button { go(.capture) } label: { Label("记录想法",systemImage:"mic").frame(maxWidth:.infinity).padding(.vertical,7) }
@@ -342,11 +344,16 @@ struct WorkspaceView: View {
         case .themes: scrolled { themes }.id(navigationEntry)
         case .materials: scrolled { materials }
         case .actions: scrolled { actions }
+        case .initiate: TaskInitiationView(model:model,openSource:{ go(.source($0)) })
         case .source(let id):
             if let source=model.records.first(where: { $0.id == id }) {
                 if source.isTrashed { TrashedMaterialView(model:model,source:source) }
                 else {
-                    WorkspaceSourceView(model:model,source:source,openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },openDiscussion:{ id in Task { await openSavedDiscussion(id) } },openSource:{ go(.source($0)) },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id))
+                    WorkspaceSourceView(model:model,source:source,openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },openDiscussion:{ id in Task { await openSavedDiscussion(id) } },openSource:{ go(.source($0)) },openInitiation:{ id in
+                        model.initiationSourceID = id
+                        model.initiationText = model.records.first(where: { $0.id == id })?.transcript ?? ""
+                        go(.initiate)
+                    },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id))
                         .id(id)
                 }
             } else { unavailable("这份材料暂时不可用",description:"可以搜索其他材料，或回到主题。") }

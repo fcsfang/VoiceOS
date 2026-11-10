@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...51).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...52).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -956,6 +956,30 @@ final class Database {
                 """)
                 try execute("CREATE INDEX panorama_theme_appearance_theme ON panorama_theme_appearances(theme_id,created_at)")
                 try execute("PRAGMA user_version=51")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "51" {
+            try transaction {
+                try execute("""
+                CREATE TABLE task_initiations (
+                  id TEXT PRIMARY KEY,
+                  command_id TEXT NOT NULL UNIQUE,
+                  source_id TEXT NOT NULL REFERENCES sources(id),
+                  transcript_version_id TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('clarify','draft','confirmed')),
+                  route TEXT NOT NULL CHECK(route IN ('agent_handoff','guided_start','clarify','capture_only')),
+                  input_json TEXT NOT NULL,
+                  proposal_json TEXT NOT NULL,
+                  edited_artifact TEXT,
+                  copied_at TEXT,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  CHECK((state='clarify') = (route='clarify'))
+                )
+                """)
+                try execute("CREATE INDEX task_initiation_created ON task_initiations(created_at, id)")
+                try execute("PRAGMA user_version=52")
             }
         }
 
