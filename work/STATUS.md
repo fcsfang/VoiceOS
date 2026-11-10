@@ -183,7 +183,7 @@
 
 - 用户提供浅色白底黑 V 与深色黑底白 V 两张 1254 方形标志；当前应用没有应用图标，侧栏还是波形占位。
 - 侧栏用 26pt 标志加 VoiceOS；Dock 图标按应用外观在两张之间切换；构建脚本从浅色标志生成 10 个尺寸的 `AppIcon.icns`，Info.plist 写 `CFBundleIconFile=AppIcon`，Finder 使用浅色版本。
-- 验证：91 项测试 0 失败；浅色与深色实机截图，Dock 图标同步切换。分支 `work/app-logo`，PR 待审。
+- 验证：91 项测试 0 失败；浅色与深色实机截图，Dock 图标同步切换。分支 `work/app-logo`，PR #130 待审。
 
 ## 下一步
 

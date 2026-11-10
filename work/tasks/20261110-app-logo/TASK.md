@@ -3,7 +3,7 @@ status: started
 started: 2026-11-10
 updated: 2026-11-11
 branch: work/app-logo
-pr:
+pr: 130
 owner: coordinator
 ---
 # 应用标志：浅色与深色两张 LOGO 接入
