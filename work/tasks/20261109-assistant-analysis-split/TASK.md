@@ -1,9 +1,9 @@
 ---
-status: review
+status: merged
 started: 2026-11-09
-updated: 2026-11-09
+updated: 2026-11-10
 branch: work/assistant-analysis-split
-pr: -
+pr: 125
 owner: coordinator
 ---
 # AI 助理按任务类型分流：执行类只提醒，思想类直接分析
@@ -36,4 +36,5 @@ owner: coordinator
 
 ## 进展
 
-- 2026-11-09 核心与入口完成：意图分类、分析模式、自动分析与按需分析、标签区分。
+- 2026-11-09 核心与入口完成：意图分类、分析模式、自动分析与按需分析、标签区分。合并 `23ec635`（PR #125）。
+- 2026-11-10 旧评估重分类：已有开放待办中由旧分类器写的评估会重跑一次，接入分析路径。合并 `9a1b72b`（PR #126）。

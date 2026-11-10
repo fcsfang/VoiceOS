@@ -1,9 +1,9 @@
 ---
-status: review
+status: merged
 started: 2026-11-10
 updated: 2026-11-10
 branch: work/content-first-home
-pr: -
+pr: 127
 owner: coordinator
 ---
 # 内容优先的首页：最近记录与想法
@@ -45,4 +45,4 @@ owner: coordinator
 
 ## 进展
 
-- 2026-11-10 原型三选一（用户选 C），实现索引与双栏首页，实机核对通过。
+- 2026-11-10 原型三选一（用户选 C），实现索引与双栏首页，实机核对通过。合并 `8cd45bb`（PR #127）。
