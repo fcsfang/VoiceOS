@@ -71,6 +71,7 @@ struct WorkspaceView: View {
     @AppStorage("voiceos.workspaceAppearance") private var appearance = WorkspaceAppearance.system
     private var palette: WorkspacePalette { WorkspacePalette(theme: theme) }
     @State private var page: WorkspacePage = .home
+    @State private var homeShowsPanorama = false
     @State private var path: [WorkspaceNavigationEntry] = []
     @State private var scrollPositions: [WorkspaceNavigationEntry: ScrollPosition] = [:]
     @State private var sourceScrollPositions: [String: ScrollPosition] = [:]
@@ -186,7 +187,7 @@ struct WorkspaceView: View {
         .navigationTitle(model.libraryTitle)
         .focusedSceneValue(\.voiceOSController,model)
         .task { await model.start() }
-        .task { await model.setPanoramaVisible(page == .home) }
+        .task { await model.setPanoramaVisible(page == .home && homeShowsPanorama) }
         .task(id:topicLoadKey) {
             guard page == .themes, let id=topicID else { topicFocus=nil; return }
             do { let focus=try await model.loadTopicReflection(id); if topicID == id && !Task.isCancelled { topicFocus=focus } }
@@ -196,7 +197,10 @@ struct WorkspaceView: View {
             model.stopPlayback()
             if next != .search { searchFocused = false }
             if case .source(let id) = next { model.selected = id }
-            Task { await model.setPanoramaVisible(next == .home) }
+            Task { await model.setPanoramaVisible(next == .home && homeShowsPanorama) }
+        }
+        .onChange(of:homeShowsPanorama) { _, show in
+            Task { await model.setPanoramaVisible(page == .home && show) }
         }
         .onChange(of:model.selected) { _, id in
             model.stopPlayback()
@@ -312,16 +316,29 @@ struct WorkspaceView: View {
     @ViewBuilder private var pageContent: some View {
         switch page {
         case .home:
-            PanoramaHome(screen: model.panorama, retry: model.retryPanorama, draft: model.generateDraftPanorama, chooseTextModel: model.chooseTextModel,
-                openMaterials: { go(.materials) }, openSource: { go(.source($0)) }, correctSource: { id in
-                    panoramaSourceEditor = model.records.first { $0.id == id }
-                }, correctClaim: { id in
-                    panoramaClaimEditor = model.claims.first { $0.id == id }
-                }, discuss: { snapshot, selection in
-                    Task { await openPanoramaDiscussion(snapshotID: snapshot, selection: selection) }
-                }, themeReply: { briefing in
-                    try await model.themeReply(briefing)
-                })
+            VStack(spacing: 0) {
+                HStack {
+                    Picker("首页视图", selection: $homeShowsPanorama) {
+                        Text("最近").tag(false)
+                        Text("全景").tag(true)
+                    }.pickerStyle(.segmented).labelsHidden().frame(width: 172)
+                    Spacer()
+                }.padding(.horizontal, 26).padding(.top, 12).padding(.bottom, 2)
+                if homeShowsPanorama {
+                    PanoramaHome(screen: model.panorama, retry: model.retryPanorama, draft: model.generateDraftPanorama, chooseTextModel: model.chooseTextModel,
+                        openMaterials: { go(.materials) }, openSource: { go(.source($0)) }, correctSource: { id in
+                            panoramaSourceEditor = model.records.first { $0.id == id }
+                        }, correctClaim: { id in
+                            panoramaClaimEditor = model.claims.first { $0.id == id }
+                        }, discuss: { snapshot, selection in
+                            Task { await openPanoramaDiscussion(snapshotID: snapshot, selection: selection) }
+                        }, themeReply: { briefing in
+                            try await model.themeReply(briefing)
+                        })
+                } else {
+                    RecentContentHome(model: model, openSource: { go(.source($0)) }, capture: { go(.capture) })
+                }
+            }
         case .themes: scrolled { themes }.id(navigationEntry)
         case .materials: scrolled { materials }
         case .actions: scrolled { actions }

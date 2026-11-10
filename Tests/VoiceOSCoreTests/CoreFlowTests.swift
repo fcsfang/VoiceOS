@@ -2890,6 +2890,26 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertFalse(second)
     }
 
+    func testRecentContentIndexGroupsThoughtsByDayAndDropsBookkeeping() async throws {
+        let store = try await openStore(), model = FlowModel(createsTask: true)
+        let yesterday = try await expression(store, text: "与父亲深入交流后，我意识到过去的了解有偏差。", model: model)
+        let today = try await expression(store, text: "【录音中活动】整理书架", model: model)
+        try await store.dateFlowExpression(yesterday, at: Date().addingTimeInterval(-86400))
+        try await store.dateFlowExpression(today, at: Date())
+        let days = RecentContentIndex.build(sources: try await store.sources(), claims: try await store.candidateClaims())
+        XCTAssertEqual(days.count, 2)
+        let todayItems = try XCTUnwrap(days.first).items
+        XCTAssertTrue(todayItems.contains { $0.sourceIDs.contains(today) && $0.thoughts.isEmpty })
+        let yesterdayItems = try XCTUnwrap(days.last).items
+        let item = try XCTUnwrap(yesterdayItems.first { $0.sourceIDs.contains(yesterday) })
+        XCTAssertEqual(item.thoughts.map(\.statement), ["与父亲深入交流后，我意识到过去的了解有偏差。"])
+        XCTAssertNil(RecentContentIndex.thoughtStatement("说明：只是提取注释"))
+        XCTAssertEqual(RecentContentIndex.thoughtStatement("保留否定条件；说明：提取注释"), "保留否定条件")
+        XCTAssertEqual(RecentContentIndex.thoughtStatement("观点句子\n说明：提取注释"), "观点句子")
+        XCTAssertNil(RecentContentIndex.thoughtStatement("【问题】某句（待核对）\n说明：注释"))
+        XCTAssertEqual(RecentContentIndex.dedupe([.init(claimID: "a", statement: "同一句"), .init(claimID: "b", statement: "同一句")]).count, 1)
+    }
+
     func testRecordingTrackRolesRejectProgramAudioAsOwnVoice() {
         let three = RecordingMediaInfo(duration: 60, tracks: [
             .init(id: 0, title: "混音"), .init(id: 1, title: "我的声音"), .init(id: 2, title: "系统内录")
