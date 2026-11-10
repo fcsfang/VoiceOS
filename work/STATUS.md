@@ -171,7 +171,7 @@
 - 审计结论：复用文字保存与云端授权、转写版本、`ModelHTTPTransport`/`ResponsesEnvelope`、模型套件、工作台外壳与快照；新增 `task_initiations`（迁移 52）、`TaskInitiationModelPort` 与 Responses 实现、启动页。未扩展 `assistant_executions`（`action_id` 非空，纯问题没有锚点，放宽会危及助理链路），也未写入 `actions`（会变成任务并触发提醒）。
 - 行为：四路线 `agent_handoff` / `guided_start` / `clarify` / `capture_only`；模型只返回语义字段，交接提示词与教程由纯函数拼装，事实、假设、待确认分栏，固定要求先检查真实环境；用户可换路线、改执行偏好、编辑、复制、确认；复制只记时间，不改变状态，不宣告执行；仅记录不生成材料。
 - 验证：`swift build -j 4`；`swift test -j 4` 82 项 0 失败（新增 10 项，覆盖 T01 到 T13 的 P0 部分）。隔离副本实机：真实模型生成「自己动手」教程与「交给 Agent」八段交接包，切换路线后内容更新；复制后剪贴板为交接包，`copied_at` 有值且状态仍 draft；吐槽句得到 `capture_only`，无材料；重启后两条记录保留，schema 52；actions 459、claims 938 前后不变（新增 2 条助理分析执行属既有启动发现）。确认按钮的自动点击未命中，确认语义由离线测试覆盖。
-- 分支 `work/task-initiation`，PR 待审。
+- 分支 `work/task-initiation`，PR #128 待审。
 
 ## 下一步
 

@@ -3,7 +3,7 @@ status: started
 started: 2026-11-10
 updated: 2026-11-10
 branch: work/task-initiation
-pr:
+pr: 128
 owner: coordinator
 ---
 # 任务启动（Task Initiation）P0：把模糊口述变成可开始的下一步
