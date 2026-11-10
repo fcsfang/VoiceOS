@@ -52,3 +52,4 @@ Issue #44。
 - 界面入口已派代理实现（任务页与暂停区确认按钮），核心 API 见 #110。
 - 界面已合入（#115）：详情页、暂停列表与来源页按钮，确认后进入结果队列；结果队列快照门已修。实时截图因锁屏未完成，步骤已记录。
 - #115 界面与结果队列门合入；实时截图因锁屏未完成，隔离副本保留。
+- 解锁后已在隔离副本实机核对：入口、弹窗文案、确认后「已登记完成」与入口消失、行动保持 frozen、新增 actor=user 修订、结果队列 41→42 且首行即该任务。截图 `/tmp/voiceos-win-task.png`、`/tmp/voiceos-win-confirm.png`、`/tmp/voiceos-win-confirmed.png`、`/tmp/voiceos-win-outcome2.png`。

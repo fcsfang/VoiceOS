@@ -10,16 +10,17 @@ private let flowConfiguration = ModelConfiguration(provider: "fixture", model: "
 private actor FlowModel: ModelPort {
     let configuration: ModelConfiguration
     let createsTask: Bool
+    let actionKind: ActionKind
     var calls = 0
-    init(createsTask: Bool = false, destination: ModelDestination = .local) {
-        self.createsTask = createsTask
+    init(createsTask: Bool = false, actionKind: ActionKind = .task, destination: ModelDestination = .local) {
+        self.createsTask = createsTask; self.actionKind = actionKind
         configuration = .init(provider: "fixture", model: "flow", promptVersion: "v1", schemaVersion: "v1", destination: destination)
     }
     func generate(_ request: ModelRequest) async throws -> ModelResponse {
         calls += 1
         let source = request.context.sources[0]
         let reference = ClaimReference(sourceID: source.sourceID, transcriptVersionID: source.transcriptVersionID, spanID: source.spans[0].id)
-        let action = createsTask ? ExtractedAction(title: source.text, kind: .task, quote: source.text, autoSend: true) : nil
+        let action = createsTask ? ExtractedAction(title: source.text, kind: actionKind, quote: source.text, autoSend: actionKind == .task) : nil
         if source.origin == "external" { XCTAssertTrue(source.text.hasSuffix("末尾观点也必须完整保留。")) }
         return ModelResponse(status: .completed, claims: [ClaimProposal(statement: source.origin == "external" ? "作者认为检索需要评估。" : source.text, ownership: source.origin == "external" ? .external : .userTentative, references: [reference], action: action)])
     }
@@ -209,6 +210,23 @@ private actor FlowAssistantReliability: AssistantModelPort {
     func waitForBlockedRequest() async {
         if started { return }
         await withCheckedContinuation { startWaiter = $0 }
+    }
+}
+// Thought items are answered in place; operational items keep the reminder path.
+private actor FlowIntentAssistant: AssistantModelPort {
+    let configuration = ModelConfiguration(provider: "fixture", model: "assistant-intent", promptVersion: "v1", schemaVersion: "v1", destination: .cloud)
+    var assessments = 0
+    func assess(_ input: AssistantTaskInput) async throws -> AssistantAssessment {
+        assessments += 1
+        if input.title.contains("分析") {
+            return .init(intent: .analysis, supported: true, kind: .draft, reason: "想法与问题适合直接分析")
+        }
+        return .init(intent: .reminder, supported: false, kind: .draft, reason: "需要本人执行或交给外部代理，VoiceOS 只提醒")
+    }
+    func execute(_ request: AssistantExecutionRequest) async throws -> AssistantExecutionResult {
+        XCTAssertEqual(request.input.mode, .analysis)
+        XCTAssertTrue(request.input.instruction.isEmpty)
+        return .init(title: "关于犹豫的分析", markdown: "# 关于犹豫的分析\n\n你卡住的是对投入与回报的权衡，而不是能力不足。", responseID: UUID().uuidString)
     }
 }
 private actor FlowKnowledgeTransport: ModelHTTPTransport {
@@ -2790,6 +2808,62 @@ final class CoreFlowTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("跟进回执解码失败"))
             XCTAssertTrue(error.localizedDescription.contains("[0].input.current.sources[0].text"))
         }
+    }
+
+    func testThoughtTasksAreAnalyzedAutomaticallyWhileOperationalTasksOnlyRemind() async throws {
+        let store = try await openStore(), model = FlowModel(createsTask: true)
+        _ = try await expression(store, text: "分析一下：我为什么总在要不要继续做这件事上犹豫。", model: model)
+        _ = try await expression(store, text: "提醒我明天下午整理书架。", model: model)
+        let assistant = FlowIntentAssistant()
+        let firstDiscovery = try await store.discoverAutomaticAssistantExecutions(using: assistant)
+        XCTAssertTrue(firstDiscovery)
+        let discovered = try await store.assistantExecutions()
+        XCTAssertEqual(discovered.count, 1)
+        XCTAssertEqual(discovered.first?.mode, .analysis)
+        XCTAssertTrue(discovered.first?.title.contains("分析") == true)
+        let secondDiscovery = try await store.discoverAutomaticAssistantExecutions(using: assistant)
+        XCTAssertFalse(secondDiscovery)
+        let processed = try await store.processNextAssistantExecution(using: assistant)
+        XCTAssertTrue(processed)
+        let records = try await store.assistantExecutions()
+        let completed = try XCTUnwrap(records.first)
+        XCTAssertEqual(completed.state, "completed")
+        XCTAssertEqual(completed.mode, .analysis)
+        XCTAssertTrue(completed.report?.contains("你卡住的是") == true)
+        XCTAssertNotNil(completed.resultSourceID)
+    }
+    func testAssistantAssessmentDecodingAcceptsLegacyAndIntentShapes() throws {
+        let legacyNone = Data(#"{"explicitDelegation":false,"supported":true,"kind":"research","reason":"本人后续计划"}"#.utf8)
+        let none = try JSONDecoder().decode(AssistantAssessment.self, from: legacyNone)
+        XCTAssertEqual(none.intent, .none)
+        XCTAssertFalse(none.explicitDelegation)
+        let legacyDelegated = Data(#"{"explicitDelegation":true,"supported":true,"kind":"draft","reason":"明确委托"}"#.utf8)
+        XCTAssertEqual(try JSONDecoder().decode(AssistantAssessment.self, from: legacyDelegated).intent, .execution)
+        let analysis = Data(#"{"intent":"analysis","supported":true,"reason":"想法与问题"}"#.utf8)
+        let decoded = try JSONDecoder().decode(AssistantAssessment.self, from: analysis)
+        XCTAssertEqual(decoded.intent, .analysis)
+        XCTAssertEqual(decoded.kind, .draft)
+        XCTAssertTrue(decoded.supported)
+        XCTAssertEqual(try JSONDecoder().decode(AssistantAssessment.self, from: JSONEncoder().encode(decoded)).intent, .analysis)
+    }
+
+    func testQuestionCanBeAnalyzedOnDemandWithoutAssessmentCall() async throws {
+        let store = try await openStore()
+        _ = try await expression(store, text: "问题：我为什么总在要不要继续做这件事上犹豫？", model: FlowModel(createsTask: true, actionKind: .opportunity))
+        let actions = try await store.actions()
+        let question = try XCTUnwrap(actions.first { $0.kind == "opportunity" })
+        let assistant = FlowIntentAssistant()
+        let record = try await store.enqueueAssistantExecution(actionID: question.id, expectedVersion: question.version, mode: .analysis)
+        XCTAssertEqual(record.mode, .analysis)
+        let processed = try await store.processNextAssistantExecution(using: assistant)
+        XCTAssertTrue(processed)
+        let executions = try await store.assistantExecutions(actionID: question.id)
+        let completed = try XCTUnwrap(executions.first)
+        XCTAssertEqual(completed.state, "completed")
+        XCTAssertEqual(completed.mode, .analysis)
+        XCTAssertEqual(completed.instruction, "")
+        let assessmentCount = await assistant.assessments
+        XCTAssertEqual(assessmentCount, 0)
     }
 
     func testRecordingTrackRolesRejectProgramAudioAsOwnVoice() {
