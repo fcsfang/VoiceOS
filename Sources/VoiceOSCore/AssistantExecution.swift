@@ -203,7 +203,10 @@ extension VoiceOSStore {
         for action in try actions() where action.kind == "task" && action.intentActor == "user" && action.state == "open" && action.validity == "current" {
             try Task.checkCancellation()
             let prior = try db.query("SELECT * FROM assistant_assessments WHERE action_id=? AND action_version=?", [action.id,String(action.version)]).first
-            if let prior {
+            // Assessments written before intent classification always decided
+            // "no delegation"; re-classify them once so thoughts reach analysis.
+            let legacy = prior.map { $0["state"] == "completed" && !($0["assessment_json"] ?? "").contains("\"intent\"") } ?? false
+            if let prior, !legacy {
                 // A crash between the completed assessment and queue insertion
                 // must not lose a queued analysis or delegation, and must never resend it.
                 if prior["state"] == "completed", let json = prior["assessment_json"],
@@ -221,8 +224,9 @@ extension VoiceOSStore {
             guard try assistantExecutions(actionID: action.id).isEmpty,
                   let input = try? assistantInput(actionID: action.id, expectedVersion: action.version, instruction: ""),
                   (try? validateAssistantInput(input, destination: port.configuration.destination)) != nil else { continue }
-            let id = UUID().uuidString
-            try db.execute("INSERT INTO assistant_assessments(id,action_id,action_version,input_json,state,created_at) VALUES(?,?,?,?,'running',?)", [id,action.id,String(action.version),try Self.relevanceJSON(input),Self.now()])
+            let id: String
+            if let prior { id = prior["id"]!; try db.execute("UPDATE assistant_assessments SET state='running',input_json=?,error=NULL WHERE id=?", [try Self.relevanceJSON(input),id]) }
+            else { id = UUID().uuidString; try db.execute("INSERT INTO assistant_assessments(id,action_id,action_version,input_json,state,created_at) VALUES(?,?,?,?,'running',?)", [id,action.id,String(action.version),try Self.relevanceJSON(input),Self.now()]) }
             changed = true
             do {
                 let result = try await runAssistantAssessment(input, key: "assessment:"+id, using: port)

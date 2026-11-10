@@ -2866,6 +2866,30 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(assessmentCount, 0)
     }
 
+    func testLegacyAssessmentIsReclassifiedOnceForOpenTasks() async throws {
+        let store = try await openStore()
+        _ = try await expression(store, text: "分析一下：我为什么总在要不要继续做这件事上犹豫。", model: FlowModel(createsTask: true))
+        let allActions = try await store.actions()
+        let action = try XCTUnwrap(allActions.first { $0.kind == "task" })
+        let database = await store.db
+        let legacyID = UUID().uuidString
+        let legacy = #"{"explicitDelegation":false,"supported":false,"kind":"draft","reason":"本人后续计划"}"#
+        try database.execute("INSERT INTO assistant_assessments(id,action_id,action_version,input_json,state,assessment_json,created_at) VALUES(?,?,?,?,'completed',?,?)",
+                             [legacyID, action.id, String(action.version), "{}", legacy, "2026-11-01T00:00:00Z"])
+        let assistant = FlowIntentAssistant()
+        let first = try await store.discoverAutomaticAssistantExecutions(using: assistant)
+        XCTAssertTrue(first)
+        let rows = try database.query("SELECT * FROM assistant_assessments WHERE action_id=?", [action.id])
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows.first?["id"], legacyID)
+        XCTAssertTrue(rows.first?["assessment_json"]?.contains("\"intent\"") == true)
+        let executions = try await store.assistantExecutions(actionID: action.id)
+        XCTAssertEqual(executions.count, 1)
+        XCTAssertEqual(executions.first?.mode, .analysis)
+        let second = try await store.discoverAutomaticAssistantExecutions(using: assistant)
+        XCTAssertFalse(second)
+    }
+
     func testRecordingTrackRolesRejectProgramAudioAsOwnVoice() {
         let three = RecordingMediaInfo(duration: 60, tracks: [
             .init(id: 0, title: "混音"), .init(id: 1, title: "我的声音"), .init(id: 2, title: "系统内录")
