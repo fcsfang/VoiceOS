@@ -69,7 +69,12 @@ struct WorkspaceView: View {
     @ObservedObject var model: ControlCenter
     @AppStorage("voiceos.workspaceTheme") private var theme = WorkspaceTheme.graphite
     @AppStorage("voiceos.workspaceAppearance") private var appearance = WorkspaceAppearance.system
+    @Environment(\.colorScheme) private var colorScheme
     private var palette: WorkspacePalette { WorkspacePalette(theme: theme) }
+    private var brandImage: NSImage? {
+        if let forced = appearance.colorScheme { return AppBrand.image(for: forced) }
+        return AppBrand.image(for: colorScheme)
+    }
     @State private var page: WorkspacePage = .home
     @State private var homeShowsPanorama = false
     @State private var path: [WorkspaceNavigationEntry] = []
@@ -258,7 +263,15 @@ struct WorkspaceView: View {
     }
     private var sidebar: some View {
         VStack(alignment:.leading,spacing:28) {
-            Label("VoiceOS",systemImage:"waveform").font(.system(size:19,weight:.medium)).padding(.horizontal,9)
+            HStack(spacing:9) {
+                if let brandImage {
+                    Image(nsImage: brandImage).resizable().interpolation(.high).frame(width: 26, height: 26)
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName:"waveform").font(.system(size:19,weight:.medium))
+                }
+                Text("VoiceOS").font(.system(size:19,weight:.medium))
+            }.padding(.horizontal,9)
             VStack(spacing:5) {
                 nav("首页",icon:"house",target:.home).keyboardShortcut("1",modifiers:.command)
                 nav("主题",icon:"circle.hexagongrid",target:.themes).keyboardShortcut("2",modifiers:.command)
@@ -277,6 +290,8 @@ struct WorkspaceView: View {
                 Button { go(.settings);showingDiscussion=false } label: { Label("设置",systemImage:"slider.horizontal.3").foregroundStyle(.secondary) }.buttonStyle(.plain)
             }.padding(.horizontal,8)
         }.padding(.horizontal,13).padding(.vertical,28).frame(width:172).background(palette.sidebar)
+            .onAppear { AppBrand.applyApplicationIcon(preferred: appearance) }
+            .onChange(of: appearance) { _, next in AppBrand.applyApplicationIcon(preferred: next) }
     }
     private func nav(_ title:String,icon:String,target:WorkspacePage) -> some View {
         Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {

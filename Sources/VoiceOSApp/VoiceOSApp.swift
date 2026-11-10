@@ -2598,8 +2598,13 @@ final class ControlCenter: ObservableObject {
 @MainActor
 final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     private var dictationKeyMonitor: Any?
+    private var appIconObservation: NSKeyValueObservation?
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationDidFinishLaunching(_ notification: Notification) {
+        AppBrand.applyApplicationIcon()
+        appIconObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
+            DispatchQueue.main.async { AppBrand.applyApplicationIcon() }
+        }
         // SwiftUI accepts only the import command on this scene, so Command-Shift-R is handled here.
         dictationKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
