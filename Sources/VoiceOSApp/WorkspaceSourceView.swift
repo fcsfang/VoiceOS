@@ -12,6 +12,7 @@ struct WorkspaceSourceView: View {
     let openDelivery:(String)->Void
     let openDiscussion:(String)->Void
     var openSource:(String)->Void = { _ in }
+    var openInitiation:(String)->Void = { _ in }
     var openFollowups:()->Void = {}
     var scroll: Binding<ScrollPosition>? = nil
     private var expression:RecordingExpression? {
@@ -167,6 +168,8 @@ struct WorkspaceSourceView: View {
                 HStack(spacing:12) {
                     Label(sourceStatus,systemImage:sourceStatusIcon).font(.system(size:13)).foregroundStyle(.secondary)
                     Spacer()
+                    Button("从这里启动",systemImage:"arrow.up.forward") { openInitiation(source.id) }
+                        .disabled(source.transcript == nil || source.origin != "user" || source.speaker != "user")
                     Button("更正原文",systemImage:"pencil") { editing=source }.disabled(source.transcript == nil)
                     Menu("更多") {
                         Button("修改标题") { naming=source }

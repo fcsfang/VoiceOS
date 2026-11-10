@@ -106,6 +106,7 @@ public actor VoiceOSStore {
         try Self.validateStoredTopicFeedback(db)
         try Self.validateStoredExternalTexts(db)
         try Self.validateStoredAssistantExecutions(db)
+        try Self.validateStoredTaskInitiations(db)
         try Self.validateStoredKnowledgeReviews(db)
         try Self.validateStoredProcessingIntents(db)
         try Self.validateStoredRecordingProcessingRequests(db)

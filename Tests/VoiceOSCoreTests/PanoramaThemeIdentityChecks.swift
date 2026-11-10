@@ -34,14 +34,14 @@ extension CoreFlowTests {
         return url
     }
 
-    func testPanoramaThemeSchemaReopensAt51() throws {
+    func testPanoramaThemeSchemaReopensAt52() throws {
         let directory = try themeDirectory("schema"), url = directory.appendingPathComponent("voiceos.sqlite")
         defer { try? FileManager.default.removeItem(at: directory) }
         var created: Database? = try Database(url)
-        XCTAssertEqual(try created?.query("PRAGMA user_version").first?["user_version"], "51")
+        XCTAssertEqual(try created?.query("PRAGMA user_version").first?["user_version"], "52")
         created = nil
         let reopened = try Database(url)
-        XCTAssertEqual(try reopened.query("PRAGMA user_version").first?["user_version"], "51")
+        XCTAssertEqual(try reopened.query("PRAGMA user_version").first?["user_version"], "52")
         for table in ["panorama_themes", "panorama_theme_batches", "panorama_theme_appearances"] {
             XCTAssertEqual(try reopened.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [table]).count, 1)
         }
