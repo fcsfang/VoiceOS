@@ -1,5 +1,5 @@
 ---
-status: started
+status: merged
 started: 2026-11-10
 updated: 2026-11-10
 branch: work/home-threads
@@ -51,4 +51,4 @@ owner: coordinator
 
 ## 进展
 
-- 2026-11-10 三个原型用真实 79 条比较，用户选 A；核心摘要、纯函数规则、视图与 9 项测试完成。分支 `work/home-threads`，PR 待审。
+- 2026-11-10 三个原型用真实 79 条比较，用户选 A；核心摘要、纯函数规则、视图与 9 项测试完成。合并 `0c3ef2a`（PR #129）；dist 从合并后 main 重建。
