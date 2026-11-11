@@ -1,5 +1,5 @@
 ---
-status: started
+status: merged
 started: 2026-11-10
 updated: 2026-11-11
 branch: work/app-logo
@@ -42,3 +42,7 @@ owner: coordinator
 - dist 构建后 `AppIcon.icns` 含 16、32、128、256、512 与各自 @2x 共 10 个尺寸；`VoiceOSLogoLight.png`、`VoiceOSLogoDark.png` 在 `Contents/Resources`；Info.plist `CFBundleIconFile=AppIcon`。
 - 隔离实例实机：浅色侧栏显示黑 V 与 VoiceOS，`/tmp/logo-light.png`；临时把外观设为深色后侧栏显示白 V，`/tmp/logo-dark-2.png`，随后恢复为 system。Dock 图标在浅色下是白底黑 V、深色下是黑底白 V，`/tmp/logo-full.png` 与 `/tmp/logo-dark-full.png`。
 - 限制：菜单栏快速入口仍是波形符号（两张标志是完整图块，缩到菜单栏会变成小方块）；Finder 使用浅色 `.icns`，标准 `.icns` 不随系统外观切换。
+
+## 进展
+
+- 2026-11-11 标志接入侧栏与 Dock，浅色与深色实机核对完成。合并 `6fca1a5`（PR #130）；dist 从合并后 main 重建。
