@@ -2596,15 +2596,17 @@ final class ControlCenter: ObservableObject {
 }
 
 @MainActor
-final class ApplicationDelegate: NSObject, NSApplicationDelegate {
+final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var dictationKeyMonitor: Any?
     private var appIconObservation: NSKeyValueObservation?
+    private var statusItem: NSStatusItem?
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppBrand.applyApplicationIcon()
         appIconObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
             DispatchQueue.main.async { AppBrand.applyApplicationIcon() }
         }
+        installStatusItem()
         // SwiftUI accepts only the import command on this scene, so Command-Shift-R is handled here.
         dictationKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -2623,6 +2625,58 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
             return handled ? nil : event
         }
     }
+
+    private func installStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        if let button = item.button {
+            button.image = AppBrand.menuBarImage() ?? NSImage(systemSymbolName: "waveform", accessibilityDescription: "VoiceOS")
+            button.toolTip = "VoiceOS"
+        }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        menu.delegate = self
+        let dictation = menu.addItem(withTitle: "开始口述并自动整理", action: #selector(toggleDictation), keyEquivalent: "")
+        dictation.target = self
+        menu.addItem(.separator())
+        let open = menu.addItem(withTitle: "打开 VoiceOS", action: #selector(openMainWindow), keyEquivalent: "")
+        open.target = self
+        let quit = menu.addItem(withTitle: "退出 VoiceOS", action: #selector(quitApplication), keyEquivalent: "")
+        quit.target = self
+        item.menu = menu
+        statusItem = item
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let dictation = menu.items.first else { return }
+        guard let model = ControlCenter.primary else {
+            dictation.title = "控制中心尚未准备好"
+            dictation.isEnabled = false
+            return
+        }
+        dictation.title = model.dictationActive ? "停止口述并整理" : "开始口述并自动整理"
+        dictation.isEnabled = model.canToggleCaptureDictation
+    }
+
+    @objc private func toggleDictation() {
+        ControlCenter.primary?.toggleCaptureDictation()
+    }
+
+    @objc private func openMainWindow() {
+        NSApp.activate(ignoringOtherApps: true)
+        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "control-center" || $0.title == "VoiceOS" }) {
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+        // A closed Window scene has no NSWindow instance. LaunchServices recreates
+        // it from the open event, which NSWorkspace does not deliver to a running
+        // instance of the same app, so ask the opener that does.
+        let opener = Process()
+        opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        opener.arguments = ["-a", Bundle.main.bundleURL.path]
+        try? opener.run()
+    }
+
+    @objc private func quitApplication() { NSApp.terminate(nil) }
 }
 @main
 struct VoiceOSApp: App {
@@ -2635,36 +2689,6 @@ struct VoiceOSApp: App {
             if let path = path.wrappedValue { RestoredLibraryView(path: path) }
         }
         .commands { CommandGroup(after: .newItem) { Button("导入音频或视频…") { focusedModel?.chooseFullRecording() }.keyboardShortcut("i").disabled(focusedModel?.initialized != true || focusedModel?.importing == true) } }
-        MenuBarExtra("VoiceOS", systemImage: "waveform") { MenuBarQuickView() }
-            .menuBarExtraStyle(.menu)
-    }
-}
-private struct MenuBarQuickView: View {
-    @Environment(\.openWindow) private var openWindow
-    var body: some View {
-        if let model = ControlCenter.primary {
-            MenuBarDictationItem(model: model)
-            Divider()
-            Button("打开 VoiceOS") { openMainWindow() }
-            Button("退出 VoiceOS") { NSApplication.shared.terminate(nil) }
-        } else {
-            Button("打开 VoiceOS") { openMainWindow() }
-            Text("控制中心尚未准备好").disabled(true)
-        }
-    }
-    private func openMainWindow() {
-        openWindow(id: "control-center")
-        NSApp.activate(ignoringOtherApps: true)
-        Task { @MainActor in
-            NSApp.windows.first { $0.identifier?.rawValue == "control-center" || $0.title == "VoiceOS" }?.makeKeyAndOrderFront(nil)
-        }
-    }
-}
-private struct MenuBarDictationItem: View {
-    @ObservedObject var model: ControlCenter
-    var body: some View {
-        Button(model.dictationActive ? "停止口述并整理" : "开始口述并自动整理") { model.toggleCaptureDictation() }
-            .disabled(!model.canToggleCaptureDictation)
     }
 }
 

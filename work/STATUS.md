@@ -1,12 +1,12 @@
 # 项目状态
 
-更新：2026-11-11T00:50+08
+更新：2026-11-12T01:05+08
 
 ## 当前基线
 
-- `main` 收在 PR #130 合并提交 `6fca1a5`，本地与远端一致。
+- `main` 收在记录提交 `c9ab26a`（PR #130 合并 `6fca1a5`），本地与远端一致；菜单栏标志修复在 `work/menubar-logo` 待审（PR #131）。
 - SQLite schema 52。
-- `swift build` 通过，`swift test -j 4` 91 项通过。
+- `swift build` 通过，`swift test -j 4` 95 项通过。
 - 仓库不使用自动 CI。日常迭代用 `swift build`，完整测试本地跑 `swift test`。
 - 本地与远端只剩 `main`。
 
@@ -185,9 +185,19 @@
 - 侧栏用 26pt 标志加 VoiceOS；Dock 图标按应用外观在两张之间切换；构建脚本从浅色标志生成 10 个尺寸的 `AppIcon.icns`，Info.plist 写 `CFBundleIconFile=AppIcon`，Finder 使用浅色版本。
 - 验证：91 项测试 0 失败；浅色与深色实机截图，Dock 图标同步切换。合并 `6fca1a5`（PR #130）；dist 从合并后 main 重建。
 
+## 菜单栏标志（2026-11-11 起，修复在审）
+
+- 用户要求菜单栏显示 LOGO，随后明确要「没有底色，只有核心的 V」。
+- 第一版用 `MenuBarExtra` 自定义 label 装整块图块，实机无图标，辅助功能树里该项在 -1。探针实验：普通 `NSStatusItem` 装同一张图正常出现在 `[951,4]`，菜单栏并没有满；`MenuBarExtra` 在这台系统上只接受系统符号 label，自定义图块、模板图、原色符号与纯文本 label 都无法创建状态项。
+- 修复：菜单栏改用 `NSStatusItem` 加 `NSMenu`。图标从浅色图块的墨色推导成模板遮罩（`MenuBarMark.derive`：亮度到透明度、裁剪到笔画边界），`isTemplate` 交给系统着色，浅色栏是黑 V，深色栏是白 V。菜单承接原三项：口述开关（每次打开按模型状态刷新标题与可用性）、打开 VoiceOS、退出 VoiceOS。
+- 窗口关闭后的「打开 VoiceOS」：SwiftUI 窗口场景销毁后实例不存在，`NSWorkspace.openApplication` 与自发 Apple Event 都不会重建，只有 LaunchServices 的打开请求会；改为以 `/usr/bin/open -a <bundle>` 发出同一请求。
+- 验证：95 项测试 0 失败（新增 4 项遮罩推导）；dist 隔离实例实拍黑色 V 无底色，菜单四项与状态正确，关窗后菜单项把窗口调回，退出项退出进程。深色菜单栏未能在本机截到，菜单栏跟随壁纸颜色，系统切深色时栏仍为浅色，白 V 由系统模板着色机制推断。两实例并存时辅助功能读取的状态项坐标为 -1，单实例时是真实坐标。
+- 分支 `work/menubar-logo`，PR #131 待审。
+
 ## 下一步
 
-- 应用标志 P1：菜单栏单色标志、Finder 深色图标变体。
+- 审阅并合并 `work/menubar-logo`；合并后 dist 从新 main 重建。
+- 应用标志 P1：Finder 深色图标变体。
 - 首页 P1：线索重命名与合并、跨材料的最近想法聚合、无想法来源的整理入口。
 - 任务启动 P1：任务恢复、执行器模板、偏好记忆、结果回流、启动包随资料库导出。
 - #66 核对分批与预算上限，用省成本方案跑完最后一段。
