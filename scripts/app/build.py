@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a local development app; no permissions request, install or daemon."""
 from pathlib import Path
-import argparse, hashlib, json, os, plistlib, shutil, subprocess
+import argparse, hashlib, json, os, plistlib, shutil, subprocess, tempfile
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser()
 parser.add_argument('--configuration', choices=['release', 'debug'], default='release', help='daily use defaults to optimized release; debug is opt-in')
@@ -60,7 +60,28 @@ if args.semantic_model:
     notice = app / 'Contents' / 'Resources' / 'ThirdParty' / 'BGE-MIT.txt'
     notice.parent.mkdir(parents=True,exist_ok=True)
     shutil.copy2(ROOT / 'docs' / 'licenses' / 'BGE-MIT.txt',notice)
-info = dict(CFBundleIdentifier='local.voiceos.app', CFBundleName='VoiceOS', CFBundleDisplayName='VoiceOS', CFBundleExecutable='VoiceOS', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.0', CFBundleVersion='1', LSMinimumSystemVersion='26.0', NSHighResolutionCapable=True, NSMicrophoneUsageDescription='VoiceOS 仅在你主动开始口述时录制麦克风，停止后封存原件并在本机转写；不会自动上传音频。', NSRemindersFullAccessUsageDescription='VoiceOS 在你明确选定的清单创建任务并回读完成状态；其他清单的任务不会读取或修改。')
+# Light and dark marks are supplied as full tiles. The bundle icon is the light
+# tile for Finder; the app swaps the Dock icon at runtime with the same files.
+light_logo = ROOT / 'logo' / 'voiceos-light.png'
+dark_logo = ROOT / 'logo' / 'voiceos-dark.png'
+for logo in (light_logo, dark_logo):
+    if not logo.is_file():
+        parser.error(f'Missing logo asset: {logo}')
+bundle_resources = app / 'Contents' / 'Resources'
+bundle_resources.mkdir(parents=True, exist_ok=True)
+shutil.copy2(light_logo, bundle_resources / 'VoiceOSLogoLight.png')
+shutil.copy2(dark_logo, bundle_resources / 'VoiceOSLogoDark.png')
+with tempfile.TemporaryDirectory() as scratch:
+    iconset = Path(scratch) / 'AppIcon.iconset'
+    iconset.mkdir()
+    for size in (16, 32, 128, 256, 512):
+        for suffix, pixels in (('', size), ('@2x', size * 2)):
+            subprocess.run(['sips', '-z', str(pixels), str(pixels), str(light_logo),
+                            '--out', str(iconset / f'icon_{size}x{size}{suffix}.png')],
+                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(['iconutil', '-c', 'icns', str(iconset),
+                    '-o', str(bundle_resources / 'AppIcon.icns')], check=True)
+info = dict(CFBundleIdentifier='local.voiceos.app', CFBundleName='VoiceOS', CFBundleDisplayName='VoiceOS', CFBundleExecutable='VoiceOS', CFBundleIconFile='AppIcon', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.0', CFBundleVersion='1', LSMinimumSystemVersion='26.0', NSHighResolutionCapable=True, NSMicrophoneUsageDescription='VoiceOS 仅在你主动开始口述时录制麦克风，停止后封存原件并在本机转写；不会自动上传音频。', NSRemindersFullAccessUsageDescription='VoiceOS 在你明确选定的清单创建任务并回读完成状态；其他清单的任务不会读取或修改。')
 if (ROOT / '.env').is_file(): info['VoiceOSModelConfigurationPath'] = str(ROOT / '.env')
 info['CFBundleURLTypes'] = [dict(CFBundleURLName='VoiceOS task', CFBundleURLSchemes=['voiceos'])]
 with (app / 'Contents' / 'Info.plist').open('wb') as f: plistlib.dump(info, f)
