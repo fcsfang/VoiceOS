@@ -2,7 +2,7 @@
 
 ## 2026-11-12
 
-- 菜单栏 V 标志修复：`MenuBarExtra` 在这台系统上只为系统符号 label 创建状态项，自定义 label 全部丢失；改为 `NSStatusItem` 加 `NSMenu`，图标从浅色 LOGO 推导成模板 V 遮罩（无底色，随菜单栏着色）。关窗后从菜单打开会用 `/usr/bin/open` 发出 LaunchServices 打开请求重建窗口。验证：95 项测试 0 失败；隔离实例实拍黑色 V、菜单四项、开窗与退出动作。PR #131（分支 `work/menubar-logo`）。
+- 菜单栏 V 标志修复：`MenuBarExtra` 在这台系统上只为系统符号 label 创建状态项，自定义 label 全部丢失；改为 `NSStatusItem` 加 `NSMenu`，图标从浅色 LOGO 推导成模板 V 遮罩（无底色，随菜单栏着色）。关窗后从菜单打开会用 `/usr/bin/open` 发出 LaunchServices 打开请求重建窗口。验证：95 项测试 0 失败；隔离实例实拍黑色 V、菜单四项、开窗与退出动作。合并 `f4b575b`（PR #131）；dist 从合并后 main 重建。
 
 ## 2026-11-11
 

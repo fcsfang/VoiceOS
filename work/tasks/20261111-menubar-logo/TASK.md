@@ -1,9 +1,10 @@
 ---
-status: started
+status: merged
 started: 2026-11-11
 updated: 2026-11-12
 branch: work/menubar-logo
 pr: 131
+merged: f4b575b
 owner: coordinator
 ---
 # 菜单栏标志：无底色的 V
@@ -42,4 +43,4 @@ owner: coordinator
 ## 进展
 
 - 2026-11-11 `MenuBarExtra` 自定义 label 版本完成并开 PR #131，实机无图标。
-- 2026-11-12 用户明确只要无底色的 V；探针定位 `MenuBarExtra` 限制后改用 `NSStatusItem`/`NSMenu` 与模板遮罩，补齐窗口重建与验证。
+- 2026-11-12 用户明确只要无底色的 V；探针定位 `MenuBarExtra` 限制后改用 `NSStatusItem`/`NSMenu` 与模板遮罩，补齐窗口重建与验证。合并 `f4b575b`（PR #131）；dist 从合并后 main 重建。
