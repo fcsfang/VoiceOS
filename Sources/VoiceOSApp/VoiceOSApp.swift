@@ -2635,8 +2635,26 @@ struct VoiceOSApp: App {
             if let path = path.wrappedValue { RestoredLibraryView(path: path) }
         }
         .commands { CommandGroup(after: .newItem) { Button("导入音频或视频…") { focusedModel?.chooseFullRecording() }.keyboardShortcut("i").disabled(focusedModel?.initialized != true || focusedModel?.importing == true) } }
-        MenuBarExtra("VoiceOS", systemImage: "waveform") { MenuBarQuickView() }
-            .menuBarExtraStyle(.menu)
+        MenuBarExtra {
+            MenuBarQuickView()
+        } label: {
+            MenuBarBrandLabel()
+        }
+        .menuBarExtraStyle(.menu)
+    }
+}
+private struct MenuBarBrandLabel: View {
+    @Environment(\.colorScheme) private var colorScheme
+    var body: some View {
+        Group {
+            if let image = AppBrand.image(for: colorScheme) {
+                Image(nsImage: image).resizable().interpolation(.high)
+            } else {
+                Image(systemName: "waveform")
+            }
+        }
+        .frame(width: 18, height: 18)
+        .accessibilityLabel("VoiceOS")
     }
 }
 private struct MenuBarQuickView: View {
