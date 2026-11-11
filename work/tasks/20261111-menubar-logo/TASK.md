@@ -3,7 +3,7 @@ status: started
 started: 2026-11-11
 updated: 2026-11-11
 branch: work/menubar-logo
-pr:
+pr: 131
 owner: coordinator
 ---
 # 菜单栏标志：用应用标志替换波形符号
