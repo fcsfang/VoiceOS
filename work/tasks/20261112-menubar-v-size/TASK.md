@@ -1,8 +1,10 @@
 ---
-status: started
+status: merged
 started: 2026-11-12
 updated: 2026-11-12
 branch: work/menubar-v-size
+pr: 132
+merged: 19b151a
 owner: coordinator
 ---
 # 菜单栏 V 尺寸：16 点调到 12 点
@@ -27,4 +29,4 @@ owner: coordinator
 
 ## 进展
 
-- 2026-11-12 完成，PR 待开。
+- 2026-11-12 完成，合并 `19b151a`（PR #132）；dist 从合并后 main 重建。
