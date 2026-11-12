@@ -72,11 +72,14 @@ bundle_resources.mkdir(parents=True, exist_ok=True)
 shutil.copy2(light_logo, bundle_resources / 'VoiceOSLogoLight.png')
 shutil.copy2(dark_logo, bundle_resources / 'VoiceOSLogoDark.png')
 with tempfile.TemporaryDirectory() as scratch:
+    padded = Path(scratch) / 'IconMaster.png'
+    subprocess.run(['xcrun', 'swift', str(ROOT / 'scripts' / 'app' / 'pad_icon.swift'),
+                    str(light_logo), str(padded), '0.91'], check=True)
     iconset = Path(scratch) / 'AppIcon.iconset'
     iconset.mkdir()
     for size in (16, 32, 128, 256, 512):
         for suffix, pixels in (('', size), ('@2x', size * 2)):
-            subprocess.run(['sips', '-z', str(pixels), str(pixels), str(light_logo),
+            subprocess.run(['sips', '-z', str(pixels), str(pixels), str(padded),
                             '--out', str(iconset / f'icon_{size}x{size}{suffix}.png')],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(['iconutil', '-c', 'icns', str(iconset),
