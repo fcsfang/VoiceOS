@@ -2,6 +2,7 @@
 
 ## 2026-11-12
 
+- 材料选择器排除回收站：主题页「关联其他材料」与问题解决「答案出处」两处选择器补 `!isTrashed`；同批核对其他选择器，跟进来源由 `!localOnly` 隐式排除，其余用白名单或已在标签过滤之后。验证：95 项测试 0 失败；实机核对因用户正在使用机器未能导航，列入手动核对。分支 `work/trashed-source-filters`。
 - Dock 图标尺寸：用户觉得 Dock 里的 V 比旁边图标大。按 Apple 图标网格把图块画进 91% 画布，运行时 Dock 图标与构建产出的 `AppIcon.icns` 用同一比例（`AppBrand.iconContentFraction` 与 `scripts/app/pad_icon.swift`）。验证：95 项测试 0 失败；Dock 截图前后对比有边距，icns 转 png 同样缩进。合并 `8fc0418`（PR #133）；dist 从合并后 main 重建。
 - 菜单栏 V 尺寸：按用户要求把目标高度从 16 点调到 12 点，宽度等比。验证：95 项测试 0 失败；dist 重启后菜单栏截图为更小的 V，状态项宽度 40 缩到 34。合并 `19b151a`（PR #132）；dist 从合并后 main 重建。
 - 菜单栏 V 标志修复：`MenuBarExtra` 在这台系统上只为系统符号 label 创建状态项，自定义 label 全部丢失；改为 `NSStatusItem` 加 `NSMenu`，图标从浅色 LOGO 推导成模板 V 遮罩（无底色，随菜单栏着色）。关窗后从菜单打开会用 `/usr/bin/open` 发出 LaunchServices 打开请求重建窗口。验证：95 项测试 0 失败；隔离实例实拍黑色 V、菜单四项、开窗与退出动作。合并 `f4b575b`（PR #131）；dist 从合并后 main 重建。
