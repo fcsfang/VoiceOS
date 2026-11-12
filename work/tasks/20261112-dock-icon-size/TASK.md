@@ -1,8 +1,10 @@
 ---
-status: started
+status: merged
 started: 2026-11-12
 updated: 2026-11-12
 branch: work/dock-icon-size
+pr: 133
+merged: 8fc0418
 owner: coordinator
 ---
 # Dock 图标尺寸：图块缩进到系统图标网格
@@ -32,4 +34,4 @@ owner: coordinator
 
 ## 进展
 
-- 2026-11-12 完成，PR 待开。
+- 2026-11-12 完成，合并 `8fc0418`（PR #133）；dist 从合并后 main 重建。
