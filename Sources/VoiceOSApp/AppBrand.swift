@@ -57,7 +57,7 @@ enum AppBrand {
             buffer[index * 4 + 3] = mask.alpha[index]
         }
         buffer.withUnsafeBufferPointer { maskPixels.update(from: $0.baseAddress!, count: buffer.count) }
-        let height: CGFloat = 16
+        let height: CGFloat = 12
         let image = NSImage(size: NSSize(width: height * CGFloat(mask.width) / CGFloat(mask.height), height: height))
         image.addRepresentation(maskRep)
         image.isTemplate = true
