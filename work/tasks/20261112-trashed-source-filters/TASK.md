@@ -1,8 +1,10 @@
 ---
-status: started
+status: merged
 started: 2026-11-12
 updated: 2026-11-12
 branch: work/trashed-source-filters
+pr: 134
+merged: ac18626
 owner: coordinator
 ---
 
@@ -31,4 +33,4 @@ owner: coordinator
 
 ## 进展
 
-- 2026-11-12 两处过滤完成，构建与测试通过，PR 待开。
+- 2026-11-12 两处过滤完成，构建与测试通过，合并 `ac18626`（PR #134）；dist 从合并后 main 重建。
