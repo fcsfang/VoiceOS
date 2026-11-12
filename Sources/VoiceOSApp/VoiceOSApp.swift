@@ -1472,6 +1472,15 @@ final class ControlCenter: ObservableObject {
             catch { followupStatus = error.localizedDescription }
         }
     }
+    func retryAllFailedFollowups() {
+        Task {
+            for receipt in workspaceFailedFollowups {
+                do { _ = try await store?.enqueueRecordingFollowup(sourceID: receipt.sourceID, retry: true) }
+                catch { followupStatus = error.localizedDescription }
+            }
+            await refresh(); resumeRecordingFollowups()
+        }
+    }
     func prepareEnglishPractice(current: SourceRecord, priorIDs: [String]) async {
         guard let store, !englishBusy else { return }
         englishBusy = true
@@ -3470,20 +3479,23 @@ extension ControlCenter {
             await refresh(); resumeKnowledgeReviews()
         } catch { knowledgeReviewStatus = error.localizedDescription }
     }
+    func retryAllFailedKnowledgeReviews() async {
+        guard let store, knowledgeReviewModel != nil else { return }
+        for review in knowledgeReviews.filter({ $0.validity == "current" && $0.state == "failed" }) {
+            do {
+                try await ensureTranscriptReviewed(sourceID: review.sourceID)
+                _ = try await store.enqueueKnowledgeReview(sourceID: review.sourceID, retry: true)
+            } catch { knowledgeReviewStatus = error.localizedDescription }
+        }
+        await refresh(); resumeKnowledgeReviews()
+    }
     private func resumeKnowledgeReviews() {
         guard initialized, let store, let port = knowledgeReviewModel, knowledgeReviewWorker == nil,
               !fullRecordingBusy, !dictationActive else { return }
         knowledgeReviewWorker = Task {
             defer { knowledgeReviewWorker = nil }
             do {
-                let sources = try await store.sources()
-                let claims = try await store.latestCandidateClaimsBySource()
-                for source in sources where source.origin == "user" && source.speaker == "user" &&
-                    ["saved", "reference_only"].contains(source.state) && !source.localOnly &&
-                    !source.needsTranscriptionReview && !(claims[source.id] ?? []).isEmpty {
-                    do { _ = try await store.enqueueKnowledgeReview(sourceID: source.id) }
-                    catch { knowledgeReviewStatus = "知识核查尚未排入：" + error.localizedDescription }
-                }
+                // New reviews enter the queue after recording organization or manual retry; this only drains it.
                 var attempted = Set<String>()
                 while let next = try await store.pendingKnowledgeReviews().first(where: { !attempted.contains($0.id) }) {
                     try Task.checkCancellation(); attempted.insert(next.id)
