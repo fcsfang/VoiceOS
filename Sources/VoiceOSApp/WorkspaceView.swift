@@ -541,7 +541,7 @@ struct WorkspaceView: View {
                 ForEach(expressions) { source in sourceRow(source,catalog:catalog);if source.id != expressions.last?.id { Divider() } }
             }
             DisclosureGroup("关联其他材料") {
-                ForEach(model.records.filter { !sourceIDs.contains($0.id) && !($0.transcript ?? "").isEmpty }) { source in
+                ForEach(model.records.filter { !sourceIDs.contains($0.id) && !$0.isTrashed && !($0.transcript ?? "").isEmpty }) { source in
                     Button(source.workspaceTitle) { Task { do { try await model.linkReflectionQuestionSource(questionID:topic.id,sourceID:source.id,linked:true);await model.refresh() } catch { self.error=error.localizedDescription } } }
                 }
             }

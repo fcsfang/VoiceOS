@@ -86,7 +86,7 @@ struct QuestionTransitionView: View {
                 Text("选择一份明确回答这个问题的个人表达，并引用连续原话。记录解决不改变认知的未验证状态。").font(.caption)
                 Picker("答案出处", selection: $answerSource) {
                     Text("请选择我的表达").tag("")
-                    ForEach(model.records.filter { $0.origin == "user" && $0.speaker == "user" && $0.transcriptVersionID != nil }) { source in Text(source.name).tag(source.id) }
+                    ForEach(model.records.filter { $0.origin == "user" && $0.speaker == "user" && $0.transcriptVersionID != nil && !$0.isTrashed }) { source in Text(source.name).tag(source.id) }
                 }
                 if let text = model.records.first(where: { $0.id == answerSource })?.transcript {
                     ScrollView { Text(text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 130)
