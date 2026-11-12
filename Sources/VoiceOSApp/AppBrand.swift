@@ -24,7 +24,22 @@ enum AppBrand {
         case .dark: appearance = NSAppearance(named: .darkAqua)
         }
         guard let appearance, let image = image(for: appearance) else { return }
-        NSApplication.shared.applicationIconImage = image
+        NSApplication.shared.applicationIconImage = dockTile(image)
+    }
+
+    /// The supplied tiles are full-bleed. Drawing them inside Apple's icon grid
+    /// keeps the Dock size in line with system apps; scripts/app/pad_icon.swift
+    /// applies the same fraction to the bundle icon.
+    static let iconContentFraction: CGFloat = 0.91
+
+    static func dockTile(_ source: NSImage) -> NSImage {
+        let side = source.size.width
+        let canvas = NSImage(size: source.size)
+        canvas.lockFocus()
+        let inset = side * iconContentFraction
+        source.draw(in: NSRect(x: (side - inset) / 2, y: (side - inset) / 2, width: inset, height: inset))
+        canvas.unlockFocus()
+        return canvas
     }
 
     /// The menu bar shows only the V mark. The mask comes from the light tile's
