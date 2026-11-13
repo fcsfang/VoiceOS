@@ -91,8 +91,8 @@ extension ControlCenter {
         !startupIssue.isEmpty || !workspacePausedTasks.isEmpty || records.contains { ["failed","blocked"].contains($0.jobState ?? "") || ["interrupted","quarantined"].contains($0.state) } ||
         workspaceUnfinishedIntents.contains { [.blocked,.unknown,.rejected].contains($0.state) } ||
         recordingRequests.contains { $0.state == "blocked" } || assistantExecutions.contains { $0.validity == "current" && $0.state == "failed" } ||
-        !workspaceFailedFollowups.isEmpty || records.contains { transcriptReviewIssue(for:$0) != nil } ||
-        reminderFieldIssue != nil || !assistantAssessmentIssues.isEmpty || knowledgeReviews.contains { $0.validity == "current" && $0.state == "failed" }
+        records.contains { transcriptReviewIssue(for:$0) != nil } ||
+        reminderFieldIssue != nil || !assistantAssessmentIssues.isEmpty
     }
 }
 
@@ -217,13 +217,18 @@ struct WorkspaceProcessingView: View {
                             if let error=receipt.error { reason(error) }
                             Button("立即重试") { model.refreshFollowup(receipt.sourceID) }.disabled(!model.modelConfigured || model.followupBusy)
                         }
+                        Button("全部重试（\(failedFollowups.count)）") { model.retryAllFailedFollowups() }.disabled(!model.modelConfigured || model.followupBusy)
                     }
                 }
-                ForEach(model.knowledgeReviews.filter { $0.validity == "current" && $0.state == "failed" }) { review in
-                    WorkspaceSection(title:"知识核查未完成",icon:"lightbulb") {
-                        WorkspaceRow(title:name(review.sourceID),subtitle:"当前理解与核查结论分别保留",trailing:"查看材料") { openSource(review.sourceID) }
-                        if let error=review.error { reason(error) }
-                        Button("重试知识核查") { Task { await model.reviewKnowledge(sourceID:review.sourceID,retry:true) } }.disabled(!model.modelConfigured || model.knowledgeReviewBusy)
+                let failedKnowledgeReviews=model.knowledgeReviews.filter { $0.validity == "current" && $0.state == "failed" }
+                if !failedKnowledgeReviews.isEmpty {
+                    WorkspaceSection(title:"知识核查未完成",icon:"lightbulb",count:failedKnowledgeReviews.count) {
+                        ForEach(failedKnowledgeReviews) { review in
+                            WorkspaceRow(title:name(review.sourceID),subtitle:"当前理解与核查结论分别保留",trailing:"查看材料") { openSource(review.sourceID) }
+                            if let error=review.error { reason(error) }
+                            Button("重试知识核查") { Task { await model.reviewKnowledge(sourceID:review.sourceID,retry:true) } }.disabled(!model.modelConfigured || model.knowledgeReviewBusy)
+                        }
+                        Button("全部重试（\(failedKnowledgeReviews.count)）") { Task { await model.retryAllFailedKnowledgeReviews() } }.disabled(!model.modelConfigured || model.knowledgeReviewBusy)
                     }
                 }
                 ForEach(model.assistantExecutions.filter { $0.validity == "current" && $0.state == "failed" }) { execution in
