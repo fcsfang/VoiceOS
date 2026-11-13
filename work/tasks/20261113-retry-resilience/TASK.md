@@ -3,7 +3,7 @@ status: open
 started: 2026-11-13
 updated: 2026-11-13
 branch: work/retry-resilience
-pr: pending
+pr: 138
 owner: coordinator
 ---
 
