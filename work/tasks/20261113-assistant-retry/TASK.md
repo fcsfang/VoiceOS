@@ -3,7 +3,7 @@ status: open
 started: 2026-11-13
 updated: 2026-11-13
 branch: work/assistant-retry
-pr: pending
+pr: 140
 owner: coordinator
 ---
 
