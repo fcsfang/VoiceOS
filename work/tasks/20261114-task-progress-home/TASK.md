@@ -1,9 +1,10 @@
 ---
-status: open
+status: merged
 started: 2026-11-13
 updated: 2026-11-14
 branch: work/task-progress-home
 pr: 141
+merged: 5721fff
 owner: coordinator
 ---
 
@@ -35,3 +36,5 @@ owner: coordinator
 ## 进展
 
 - 2026-11-14 实现与验证完成；分支从 main 独立开出。
+
+- 2026-11-14 合并 `5721fff`（PR #141）；dist 从合并后 main 重建并重启。阅读区样式与点击跳转由用户验收。
