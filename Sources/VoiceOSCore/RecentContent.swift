@@ -133,10 +133,12 @@ public struct RecentContentDigest: Equatable, Sendable {
     }
 
     private static func ranked(_ thoughts: [RecentContentThought]) -> [RecentContentThought] {
-        thoughts.enumerated().sorted { left, right in
-            let scores = (leadScore(left.element.statement), leadScore(right.element.statement))
-            return scores.0 == scores.1 ? left.offset < right.offset : scores.0 > scores.1
-        }.map(\.element)
+        let scored: [(offset: Int, thought: RecentContentThought, score: Double)] = thoughts.enumerated().map {
+            (offset: $0.offset, thought: $0.element, score: leadScore($0.element.statement))
+        }
+        return scored.sorted { left, right in
+            left.score == right.score ? left.offset < right.offset : left.score > right.score
+        }.map(\.thought)
     }
 
     private static func occurrences(of word: String, in text: String) -> Int {
