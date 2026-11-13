@@ -131,10 +131,18 @@ struct WorkspaceTaskView: View {
     }
     private var executions: [AssistantExecutionRecord] { model.assistantExecutions.filter { $0.actionID == action.id } }
     private var current: Bool { action.validity == "current" && action.state != "dismissed" }
+    private var reviewPairs: [ActionReviewPair] { model.actionReviewPairs(for: action) }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 WorkspaceHeading(eyebrow: current ? (action.state == "completed" ? "行动 · 已完成" : action.kind == "task" ? "行动 · 待跟进" : "问题与目标") : model.workspaceActionStatus(action), title: action.title)
+                if !reviewPairs.isEmpty {
+                    VStack(alignment:.leading,spacing:12) {
+                        ForEach(reviewPairs) { pair in ActionReviewResolutionControl(model:model,pair:pair) }
+                    }
+                    .padding(20).frame(maxWidth:.infinity,alignment:.leading)
+                    .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
+                }
                 if action.validity != "current" {
                     VStack(alignment:.leading,spacing:12) {
                         HStack(alignment:.center,spacing:12) {

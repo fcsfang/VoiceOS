@@ -92,6 +92,7 @@ public actor VoiceOSStore {
         try Self.validateStoredCognitiveFeedback(db)
         try Self.validateStoredRecordings(db)
         try Self.validateStoredExpressionActionReviews(db)
+        try Self.validateStoredActionReviewResolutions(db)
         try Self.validateStoredConversations(db)
         try Self.validateStoredDiscussionAttempts(db)
         try freezeDiscussionDerivations()

@@ -10,8 +10,9 @@ public enum WorkspaceActionPause {
                               sources: [SourceRecord],
                               claims: [CandidateClaim],
                               currentClaimsBySource: [String: [CandidateClaim]],
-                              actions: [ActionRecord]) -> WorkspaceActionPauseReason? {
-        if recordingReviewRequired(action: action, sources: sources, claims: claims) {
+                              actions: [ActionRecord],
+                              ledgers: [String: ActionReviewLedger] = [:]) -> WorkspaceActionPauseReason? {
+        if recordingReviewRequired(action: action, sources: sources, claims: claims, ledgers: ledgers) {
             return action.state == "open" ? .recordingActionReview : nil
         }
         guard action.validity != "current", action.state == "open" else { return nil }
@@ -30,12 +31,13 @@ public enum WorkspaceActionPause {
 
     public static func recordingReviewRequired(action: ActionRecord,
                                                sources: [SourceRecord],
-                                               claims: [CandidateClaim]) -> Bool {
+                                               claims: [CandidateClaim],
+                                               ledgers: [String: ActionReviewLedger] = [:]) -> Bool {
         let sourceIDs = Set(claims.first(where: { $0.id == action.claimID })?.references.map(\.sourceID) ?? [])
         return sources.contains { source in
             guard let expression = source.presentation?.expression else { return false }
-            return (sourceIDs.contains(source.id) || expression.previousActionIDs.contains(action.id))
-                && expression.requiresActionReview(actionID: action.id)
+            guard sourceIDs.contains(source.id) || expression.previousActionIDs.contains(action.id) else { return false }
+            return ledgers[expression.id]?.requiresReview(actionID: action.id) ?? true
         }
     }
 
@@ -43,7 +45,8 @@ public enum WorkspaceActionPause {
                                 sources: [SourceRecord],
                                 claims: [CandidateClaim],
                                 currentClaimsBySource: [String: [CandidateClaim]],
-                                actions: [ActionRecord]) -> (resolved: [String], remaining: [String], reasons: [String: WorkspaceActionPauseReason]) {
+                                actions: [ActionRecord],
+                                ledgers: [String: ActionReviewLedger] = [:]) -> (resolved: [String], remaining: [String], reasons: [String: WorkspaceActionPauseReason]) {
         let actionsByID = Dictionary(uniqueKeysWithValues: actions.map { ($0.id, $0) })
         var resolved: [String] = []
         var remaining: [String] = []
@@ -51,7 +54,8 @@ public enum WorkspaceActionPause {
         for id in actionIDs {
             guard let action = actionsByID[id],
                   let reason = reason(for: action, sources: sources, claims: claims,
-                                      currentClaimsBySource: currentClaimsBySource, actions: actions) else {
+                                      currentClaimsBySource: currentClaimsBySource, actions: actions,
+                                      ledgers: ledgers) else {
                 resolved.append(id)
                 continue
             }

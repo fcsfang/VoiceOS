@@ -50,7 +50,8 @@ public enum PausedActionBatch {
         var reasonByActionID: [String: WorkspaceActionPauseReason] = [:]
         for action in snapshot.actions where action.kind == "task" {
             if let reason = WorkspaceActionPause.reason(for: action, sources: snapshot.sources, claims: snapshot.claims,
-                                                        currentClaimsBySource: snapshot.currentClaimsBySource, actions: snapshot.actions) {
+                                                        currentClaimsBySource: snapshot.currentClaimsBySource, actions: snapshot.actions,
+                                                        ledgers: snapshot.actionReviewLedgers) {
                 reasonByActionID[action.id] = reason
             }
         }

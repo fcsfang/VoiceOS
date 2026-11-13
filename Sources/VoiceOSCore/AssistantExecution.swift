@@ -139,7 +139,14 @@ extension VoiceOSStore {
         if let instructionSourceID, !ids.contains(instructionSourceID) { ids.append(instructionSourceID) }
         try requireReviewedTranscriptions(sourceIDs:ids,destination:destination)
         let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
-        guard ids.allSatisfy({ id in catalog[id]?.presentation?.automaticInput == nil || (catalog[id]?.recordingExpression?.state == "completed" && catalog[id]?.recordingExpression?.taskReviewPending != true) }) else { throw VoiceOSError("连续表达仍在整体核对，AI 待办将在完成后继续") }
+        let ledgers = try actionReviewLedgers()
+        guard ids.allSatisfy({ id in
+            guard let source = catalog[id] else { return false }
+            guard source.presentation?.automaticInput != nil else { return true }
+            guard let expression = source.presentation?.expression, expression.state == "completed",
+                  let ledger = ledgers[expression.id], !ledger.requiresReview(actionID: actionID) else { return false }
+            return true
+        }) else { throw VoiceOSError("连续表达仍在整体核对，AI 待办将在完成后继续") }
         let budget = max(1, ids.reduce(0) { $0 + (catalog[$1]?.transcript?.unicodeScalars.count ?? 0) })
         let context = try prepareLocalTranscriptContext(sourceIDs: ids, scalarBudget: budget)
         guard claim.references.allSatisfy({ ref in context.sources.contains(where: { $0.sourceID == ref.sourceID && $0.transcriptVersionID == ref.transcriptVersionID && $0.origin == "user" && $0.speaker == "user" && $0.spans.contains(where: { $0.id == ref.spanID }) }) }),

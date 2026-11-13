@@ -127,10 +127,12 @@ extension VoiceOSStore {
     }
     func reminderSourceAllowed(_ action: ActionRecord) throws -> Bool {
         guard let claim = try candidateClaim(id: action.claimID), !claim.references.isEmpty else { return false }
+        let ledgers = try actionReviewLedgers()
         return try claim.references.allSatisfy { ref in
             guard let source=try db.query("SELECT local_only,presentation_json FROM sources WHERE id=?", [ref.sourceID]).first,source["local_only"] == "0" else { return false }
-            if let raw=source["presentation_json"],let expression=try JSONDecoder().decode(RecordingPresentation.self,from:Data(raw.utf8)).expression,
-               expression.requiresActionReview(actionID:action.id) { return false }
+            if let raw=source["presentation_json"],let expression=try JSONDecoder().decode(RecordingPresentation.self,from:Data(raw.utf8)).expression {
+                guard let ledger = ledgers[expression.id], !ledger.requiresReview(actionID: action.id) else { return false }
+            }
             return true
         }
     }

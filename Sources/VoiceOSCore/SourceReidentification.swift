@@ -45,7 +45,8 @@ extension VoiceOSStore {
             let evaluation = WorkspaceActionPause.evaluate(actionIDs: request.pausedActionIDs, sources: snapshot.sources,
                                                            claims: snapshot.claims,
                                                            currentClaimsBySource: snapshot.currentClaimsBySource,
-                                                           actions: snapshot.actions)
+                                                           actions: snapshot.actions,
+                                                           ledgers: snapshot.actionReviewLedgers)
             if evaluation.remaining.isEmpty { return .skipped(.noLongerPaused) }
         }
         let personal = source.origin == "user" && source.speaker == "user" && ["user_text", "audio"].contains(source.kind)
@@ -87,7 +88,8 @@ extension VoiceOSStore {
         let evaluation = WorkspaceActionPause.evaluate(actionIDs: request.pausedActionIDs, sources: snapshot.sources,
                                                        claims: snapshot.claims,
                                                        currentClaimsBySource: snapshot.currentClaimsBySource,
-                                                       actions: snapshot.actions)
+                                                       actions: snapshot.actions,
+                                                       ledgers: snapshot.actionReviewLedgers)
         return .completed(SourceReidentificationReport(
             claimIDs: snapshot.currentClaimsBySource[request.sourceID]?.map(\.id) ?? [],
             reused: reused,

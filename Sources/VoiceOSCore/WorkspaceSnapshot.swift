@@ -39,6 +39,7 @@ public struct WorkspaceSnapshot: Sendable {
     public var segmentedBatches: [SegmentedProcessingBatch] = []
     public var segmentedCognitiveCounts: [String: Int] = [:]
     public var segmentedAssociationStates: [String: String] = [:]
+    public var actionReviewLedgers: [String: ActionReviewLedger] = [:]
 }
 
 extension VoiceOSStore {
@@ -95,6 +96,11 @@ extension VoiceOSStore {
         result.currentClaimsBySource = try latestCandidateClaimsBySource(includeFrozen: true)
         result.attempts = try modelAttemptsBySource()
         result.sources = try sources()
+        result.actionReviewLedgers = ActionReviewLedger.buildMap(
+            expressions: try recordingExpressions(), actions: result.actions,
+            resolutions: try actionReviewResolutions(),
+            acknowledgements: try actionReviewAcknowledgements(),
+            linkedActionIDs: Set(result.reminderLinks.map(\.actionID)))
         return result
     }
 }
