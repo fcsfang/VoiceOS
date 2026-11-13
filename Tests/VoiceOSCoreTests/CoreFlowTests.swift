@@ -2668,7 +2668,7 @@ final class CoreFlowTests: XCTestCase {
         let semanticTransport = FlowFollowupTransport([wrongSelection, validSelection, semanticReply])
         do {
             _ = try await store.processRecordingFollowup(sourceID: currentID, using: nativePort(semanticTransport), retry: true)
-            XCTFail("Semantic rejection must remain terminal")
+            XCTFail("A semantic rejection must fail this attempt")
         } catch let failure as RecordingFollowupGenerationFailure {
             XCTAssertEqual(failure.responseIDs, ["accepted-selection"])
             XCTAssertEqual(failure.rejectedResponses.map(\.rawResponse), [wrongSelection.body, semanticReply.body])
@@ -2678,7 +2678,8 @@ final class CoreFlowTests: XCTestCase {
         let semanticReceipts = try await store.recordingFollowups()
         let semanticFailure = try XCTUnwrap(semanticReceipts.last { $0.sourceID == currentID })
         XCTAssertEqual(semanticFailure.responseIDs, ["accepted-selection"])
-        XCTAssertNil(semanticFailure.retryAt)
+        XCTAssertEqual(semanticFailure.retryCount, 1)
+        XCTAssertNotNil(semanticFailure.retryAt)
         let budgetTransport = FlowFollowupTransport([.init(status: 503, body: Data()), wrongSelection, .init(status: 503, body: Data())])
         do {
             _ = try await store.processRecordingFollowup(sourceID: currentID, using: nativePort(budgetTransport), retry: true)

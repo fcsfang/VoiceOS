@@ -150,6 +150,10 @@ public struct RecordingFollowupTransientError: LocalizedError {
     public let status: Int
     public var errorDescription: String? { "自动跟进模型 HTTP \(status)，服务暂时不可用，原件已保存" }
 }
+struct RecordingFollowupConformanceFailure: LocalizedError {
+    let underlying: Error
+    var errorDescription: String? { underlying.localizedDescription }
+}
 public protocol RecordingFollowupPort: Sendable {
     func generate(_ input: RecordingFollowupInput) async throws -> RecordingFollowupGeneration
 }
@@ -462,8 +466,9 @@ extension VoiceOSStore {
             receipt.rejectedResponses = rejections.isEmpty ? nil : rejections
             let result = generated.result, ids = generated.responseIDs
             try Task.checkCancellation()
-            guard !ids.isEmpty, ids.allSatisfy({ !$0.isEmpty }) else { throw VoiceOSError("跟进结果缺少模型回执") }
-            try Self.validateFollowupResult(result, input: input)
+            guard !ids.isEmpty, ids.allSatisfy({ !$0.isEmpty }) else { throw RecordingFollowupConformanceFailure(underlying: VoiceOSError("跟进结果缺少模型回执")) }
+            do { try Self.validateFollowupResult(result, input: input) }
+            catch { throw RecordingFollowupConformanceFailure(underlying: error) }
             receipt.result = result; receipt.responseIDs = ids; receipt.state = "completed"
             guard try recordingFollowupValidity(receipt).sourceCurrent else { throw VoiceOSError("录音原话或授权已变化，请重新生成跟进") }
             try saveRecordingFollowup(receipt)
@@ -475,21 +480,33 @@ extension VoiceOSStore {
                 receipt.rejectedResponses = rejections.isEmpty ? nil : rejections
             }
             receipt.state = "failed"; receipt.error = error.localizedDescription
-            if Self.isTransientFollowupError(error), (receipt.retryCount ?? 0) < 2 {
+            if Self.conformanceRetryScheduled(afterFailure: error, retryCount: receipt.retryCount) {
+                receipt.retryCount = 1
+                receipt.retryAt = Self.conformanceRetryAt()
+            } else if Self.isTransientFollowupError(error), (receipt.retryCount ?? 0) < 2 {
                 let nextCount = (receipt.retryCount ?? 0) + 1
                 receipt.retryCount = nextCount
-                receipt.retryAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(nextCount == 1 ? 60 : 300))
+                receipt.retryAt = Self.followupRetryAt(after: nextCount == 1 ? 60 : 300)
             }
             try saveRecordingFollowup(receipt)
             throw error
         }
+    }
+    static func conformanceRetryScheduled(afterFailure failure: Error, retryCount: Int?) -> Bool {
+        // The real port wraps its validation failure in a generation failure.
+        let error = (failure as? RecordingFollowupGenerationFailure)?.underlying ?? failure
+        return error is RecordingFollowupConformanceFailure && (retryCount ?? 0) < 1
+    }
+    static func conformanceRetryAt(now: Date = Date()) -> String { followupRetryAt(now: now, after: 60) }
+    static func followupRetryAt(now: Date = Date(), after seconds: TimeInterval) -> String {
+        ISO8601DateFormatter().string(from: now.addingTimeInterval(seconds))
     }
     private static func isTransientFollowupError(_ failure: Error) -> Bool {
         let error = (failure as? RecordingFollowupGenerationFailure)?.underlying ?? failure
         if let error = error as? RecordingFollowupTransientError { return error.status == 429 || (500...599).contains(error.status) }
         guard let error = error as? URLError else { return false }
         switch error.code {
-        case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed:
+        case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet, .dnsLookupFailed, .secureConnectionFailed:
             return true
         default: return false
         }
