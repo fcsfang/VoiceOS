@@ -126,6 +126,9 @@ struct WorkspaceSourceView: View {
                 if let expression,expression.sourceIDs.count > 1 {
                     WorkspaceSection(title:"整体理解",subtitle:expression.state == "completed" ? "AI 已将 \(expression.sourceIDs.count) 段录音合为一次表达，以下要点与行动结合全部分段理解。" : "已识别 \(expression.sourceIDs.count) 段连续录音，正在整体理解。",icon:"waveform.path",count:expression.sourceIDs.count) {
                         WorkspaceExpandableText(text:expression.summary,label:"整体摘要",size:16)
+                        if let ledger = model.actionReviewLedgers[expression.id], ledger.canAcknowledge {
+                            ActionReviewAcknowledgementControl(model:model,expressionID:expression.id)
+                        }
                         DisclosureGroup("本次表达的录音与合并依据") {
                             Text(expression.reason).font(.callout).foregroundStyle(.secondary).padding(.vertical,10)
                             ForEach(Array(expression.sourceIDs.enumerated()),id:\.element) { index,id in

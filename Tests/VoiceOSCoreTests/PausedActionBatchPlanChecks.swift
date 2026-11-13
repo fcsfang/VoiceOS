@@ -55,6 +55,9 @@ final class PausedActionBatchPlanChecks: XCTestCase {
         snapshot.processingIntents = processingIntents
         snapshot.segmentedBatches = segmentedBatches
         snapshot.recordingRequests = recordingRequests
+        snapshot.actionReviewLedgers = ActionReviewLedger.buildMap(
+            expressions: sources.compactMap { $0.presentation?.expression },
+            actions: actions, resolutions: [], acknowledgements: [], linkedActionIDs: [])
         return snapshot
     }
 

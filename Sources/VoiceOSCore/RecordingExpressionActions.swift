@@ -186,7 +186,7 @@ extension VoiceOSStore {
         guard action["title"] == current.title,action["note"] == current.quote,action["kind"] == current.kind.rawValue else { throw VoiceOSError("连续表达任务与最新理解不一致") }
         return history
     }
-    private func dismissExpressionAction(_ action:RecordingExpressionActionItem,note:String) throws {
+    func dismissExpressionAction(_ action:RecordingExpressionActionItem,note:String) throws {
         guard action.state == "open",let row=try db.query("SELECT version,state FROM actions WHERE id=?",[action.id]).first,row["version"] == String(action.version),row["state"] == "open" else { throw VoiceOSError("接续期间行动状态已变化") }
         let fingerprint=try Self.actionHash([action.id,String(action.version),"dismissed",note])
         try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'dismissed',?,'user',?,?,?)",[UUID().uuidString,action.id,String(action.version+1),String(action.version),note,"expression-dismiss:"+action.id+":"+String(action.version),fingerprint,Self.now()])

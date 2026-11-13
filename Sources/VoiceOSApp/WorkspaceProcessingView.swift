@@ -49,17 +49,9 @@ extension ControlCenter {
         }
     }
     func workspaceTaskRequiresReview(_ action: ActionRecord) -> Bool {
-        if recordingActionRequiresReview(action) { return action.state == "open" }
-        guard action.validity != "current", action.state == "open" else { return false }
-        if actionRecords.contains(where: { $0.claimID == action.claimID && $0.validity == "current" && $0.claimReviewVersion > action.claimReviewVersion }) { return false }
-        let refs = claims.first(where: { $0.id == action.claimID })?.references ?? []
-        // The latest completed extraction is shown at its source. Keep earlier records
-        // in history instead of making the same recording ask for repair forever.
-        let replaced = !refs.isEmpty && refs.allSatisfy { ref in
-            let latest = currentClaimsBySource[ref.sourceID] ?? []
-            return !latest.isEmpty && !latest.contains { $0.id == action.claimID }
-        }
-        return !replaced
+        WorkspaceActionPause.reason(for: action, sources: records, claims: claims,
+                                    currentClaimsBySource: currentClaimsBySource, actions: actionRecords,
+                                    ledgers: actionReviewLedgers) != nil
     }
     func workspaceActionStatus(_ action: ActionRecord) -> String {
         if action.intent?.followupState == "withdrawn" { return "已在后续录音中撤回 · 不再跟进" }
@@ -182,7 +174,7 @@ struct WorkspaceProcessingView: View {
                     }
                 }
                 if !model.workspacePausedTasks.isEmpty {
-                    WorkspaceSection(title:"这些待办需要核对",subtitle:"以下事项尚未登记完成，行动关系待核对或 AI 提取已暂停。打开任务查看依据与原因；确认原话有误后再更正文字或重新识别。",icon:"pause.circle",count:model.workspacePausedTasks.count) {
+                    WorkspaceSection(title:"这些待办需要核对",subtitle:"以下事项尚未登记完成，行动关系待核对或 AI 提取已暂停。逐条核对：同一件事会接回原记录，两件事会保留两条；核对后即可继续同步。",icon:"pause.circle",count:model.workspacePausedTasks.count) {
                         let ids=Set(model.workspacePausedTasks.flatMap { task in model.claims.first(where: { $0.id == task.claimID })?.references.map(\.sourceID) ?? [] })
                         ForEach(model.records.filter { ids.contains($0.id) }) { source in
                             WorkspaceRow(title:source.workspaceTitle,subtitle:"查看暂停原因、受影响的任务和处理按钮",trailing:"打开材料") { openSource(source.id) }
@@ -191,6 +183,9 @@ struct WorkspaceProcessingView: View {
                                     Text(task.title)
                                     Text(model.workspaceExternalCompletionNote(task) ?? model.workspaceActionStatus(task)).font(.caption).foregroundStyle(.secondary)
                                     WorkspaceExternalCompletionButton(model:model,action:task)
+                                    ForEach(model.actionReviewPairs(for:task)) { pair in
+                                        ActionReviewResolutionControl(model:model,pair:pair)
+                                    }
                                 }.padding(.leading,26).padding(.bottom,12)
                             }
                         }

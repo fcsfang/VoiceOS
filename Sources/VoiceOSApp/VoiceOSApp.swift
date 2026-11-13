@@ -589,6 +589,7 @@ final class ControlCenter: ObservableObject {
     @Published var claimHistory: [ClaimReviewVersion] = []
     @Published var reviewingClaim = false
     @Published var actionRecords: [ActionRecord] = []
+    @Published var actionReviewLedgers: [String: ActionReviewLedger] = [:]
     @Published var focusedTaskID: String?
     @Published var correctionImpacts: [CorrectionActionImpact] = []
     @Published var compensationPlans: [ReminderCompensationPlan] = []
@@ -625,8 +626,12 @@ final class ControlCenter: ObservableObject {
         let sourceIDs=Set(claims.first(where: { $0.id == action.claimID })?.references.map(\.sourceID) ?? [])
         return records.contains { source in
             guard let expression=source.presentation?.expression else { return false }
-            return (sourceIDs.contains(source.id) || expression.previousActionIDs.contains(action.id)) && expression.requiresActionReview(actionID:action.id)
+            guard sourceIDs.contains(source.id) || expression.previousActionIDs.contains(action.id) else { return false }
+            return actionReviewLedgers[expression.id]?.requiresReview(actionID:action.id) ?? true
         }
+    }
+    func actionReviewPairs(for action: ActionRecord) -> [ActionReviewPair] {
+        actionReviewLedgers.values.flatMap { $0.unresolvedPairs(for: action.id) }.sorted { $0.id < $1.id }
     }
     func reminderSourceAllowed(_ action: ActionRecord) -> Bool {
         guard let claim = claims.first(where: { $0.id == action.claimID }) else { return false }
@@ -850,6 +855,7 @@ final class ControlCenter: ObservableObject {
             claimOrigins = snapshot.claimOrigins
             outcomeOrigins = snapshot.outcomeOrigins
             actionRecords = snapshot.actions
+            actionReviewLedgers = snapshot.actionReviewLedgers
             assistantExecutions = snapshot.assistantExecutions
             assistantAssessmentIssues = snapshot.assistantAssessmentIssues
             taskInitiations = snapshot.taskInitiations
@@ -1619,6 +1625,7 @@ final class ControlCenter: ObservableObject {
         snapshot.claims = claims
         snapshot.currentClaimsBySource = currentClaimsBySource
         snapshot.actions = actionRecords
+        snapshot.actionReviewLedgers = actionReviewLedgers
         snapshot.processingIntents = processingIntents
         snapshot.segmentedBatches = segmentedBatches
         snapshot.recordingRequests = recordingRequests
@@ -1805,7 +1812,8 @@ final class ControlCenter: ObservableObject {
                   references[action.claimID]?.contains(where: { $0.sourceID == sourceID }) == true,
                   let reason = WorkspaceActionPause.reason(for: action, sources: records, claims: claims,
                                                            currentClaimsBySource: currentClaimsBySource,
-                                                           actions: actionRecords) else { return false }
+                                                           actions: actionRecords,
+                                                           ledgers: actionReviewLedgers) else { return false }
             return reason == .extractionPaused
         }.map(\.id).sorted()
     }
@@ -1815,7 +1823,8 @@ final class ControlCenter: ObservableObject {
         guard let store else { return ([], actionIDs, [:]) }
         guard let snapshot = try? await store.workspaceSnapshot() else { return ([], actionIDs, [:]) }
         return WorkspaceActionPause.evaluate(actionIDs: actionIDs, sources: snapshot.sources, claims: snapshot.claims,
-                                             currentClaimsBySource: snapshot.currentClaimsBySource, actions: snapshot.actions)
+                                             currentClaimsBySource: snapshot.currentClaimsBySource, actions: snapshot.actions,
+                                             ledgers: snapshot.actionReviewLedgers)
     }
 
     private func pauseExplanation(for sourceID: String) async -> String {
@@ -2572,6 +2581,49 @@ final class ControlCenter: ObservableObject {
             }
         } catch { status = error.localizedDescription }
         await refresh(); await queueActionFollowups([action.id])
+    }
+    func resolveActionReview(_ pair: ActionReviewPair, judgment: ActionReviewRelation) async -> Bool {
+        guard let store else { status = "资料库尚未打开，无法核对行动关系"; return false }
+        guard !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            let receipt = try await store.resolveActionReview(
+                expressionID: pair.expressionID,
+                judgment: .pair(oldActionID: pair.oldActionID, newActionID: pair.newActionID, relation: judgment),
+                expectedDecisionsDigest: pair.decisionsDigest,
+                commandID: "action-review-ui:\(pair.id):\(judgment.rawValue)")
+            await refresh()
+            requestReminderRefresh()
+            status = judgment == .same ? "已核对为同一件事 · 接回原记录" : "已核对为两件事 · 原记录保留为历史"
+            showTask(receipt.survivorActionID ?? pair.newActionID)
+            return true
+        } catch {
+            status = error.localizedDescription
+            await refresh()
+            return false
+        }
+    }
+    func acknowledgeActionReview(expressionID: String) async -> Bool {
+        guard let store else { status = "资料库尚未打开，无法核对当前理解"; return false }
+        guard let ledger = actionReviewLedgers[expressionID], ledger.canAcknowledge else {
+            status = "仍有行动关系需要逐条核对"; return false
+        }
+        guard !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            _ = try await store.resolveActionReview(
+                expressionID: expressionID, judgment: .acknowledgeExpression,
+                expectedDecisionsDigest: ledger.decisionsDigest,
+                commandID: "action-review-ack:\(expressionID):\(ledger.decisionsDigest)")
+            await refresh()
+            requestReminderRefresh()
+            status = "已核对当前理解 · AI 提取保持原样，不再因此暂停"
+            return true
+        } catch {
+            status = error.localizedDescription
+            await refresh()
+            return false
+        }
     }
     func confirmExternalCompletion(_ candidate: ExternalCompletionCandidate) async -> Bool {
         guard let store else { status = "资料库尚未打开，无法登记外部完成"; return false }
