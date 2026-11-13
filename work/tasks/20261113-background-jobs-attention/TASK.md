@@ -1,8 +1,10 @@
 ---
-status: started
+status: merged
 started: 2026-11-13
 updated: 2026-11-13
 branch: work/background-jobs-attention
+pr: 135
+merged: 11f62dd
 owner: coordinator
 ---
 
@@ -44,3 +46,7 @@ owner: coordinator
 ## 进展
 
 - 2026-11-13 实现完成，构建与测试通过，PR 待开。
+
+## 进展
+
+- 2026-11-13 合并 `11f62dd`（PR #135）：失败不再顶全局横幅，处理面板提供「全部重试（N）」；dist 从合并后 main 重建。
