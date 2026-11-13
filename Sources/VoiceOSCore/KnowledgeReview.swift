@@ -442,8 +442,8 @@ extension VoiceOSStore {
             if progress.selection == nil {
                 let selection = try await port.identify(input)
                 try validateKnowledgeReviewInput(input,destination:port.configuration.destination)
-                try Self.validateKnowledgeSelection(selection,input:input)
-                progress.selection=selection;responseIDs.append(selection.responseID)
+                let checked = try Self.validateKnowledgeSelection(selection,input:input)
+                progress.selection=checked;responseIDs.append(checked.responseID)
                 try saveKnowledgeProgress(progress,responseIDs:responseIDs,id:record.id)
             }
             for candidate in progress.selection!.candidates where !progress.checkedIDs.contains(candidate.id) {
@@ -481,9 +481,15 @@ extension VoiceOSStore {
         }
         return false
     }
-    static func validateKnowledgeSelection(_ selection: KnowledgeReviewSelection,input:KnowledgeReviewInput) throws {
-        guard !selection.responseID.isEmpty,Set(selection.candidates.map(\.id)).count == selection.candidates.count,
-              selection.candidates.allSatisfy({ !$0.id.isEmpty && !$0.quote.isEmpty && input.context.sources[0].text.contains($0.quote) }) else { throw VoiceOSError("知识核查候选缺少真实连续原话或身份") }
+    @discardableResult
+    static func validateKnowledgeSelection(_ selection: KnowledgeReviewSelection,input:KnowledgeReviewInput) throws -> KnowledgeReviewSelection {
+        guard !selection.responseID.isEmpty else { throw VoiceOSError("知识核查候选缺少真实连续原话或身份") }
+        let text = input.context.sources[0].text
+        var seen = Set<String>()
+        let candidates = selection.candidates.filter {
+            !$0.id.isEmpty && !$0.quote.isEmpty && text.contains($0.quote) && seen.insert($0.id).inserted
+        }
+        return .init(candidates: candidates, responseID: selection.responseID)
     }
     static func validateKnowledgeCheck(_ check:KnowledgeReviewCheck,candidate:KnowledgeReviewCandidate,input:KnowledgeReviewInput) throws {
         guard check.responseIDs.allSatisfy({ !$0.isEmpty }) else { throw VoiceOSError("知识核查缺少模型回执") }
@@ -521,7 +527,9 @@ extension VoiceOSStore {
             if let raw=row["result_json"] {
                 let progress=try JSONDecoder().decode(KnowledgeReviewProgress.self,from:Data(raw.utf8))
                 guard let selection=progress.selection else { throw VoiceOSError("知识核查缺少候选识别回执") }
-                try validateKnowledgeSelection(selection,input:input)
+                let normalized = try validateKnowledgeSelection(selection,input:input)
+                guard normalized.candidates.map(\.id) == selection.candidates.map(\.id),
+                      normalized.candidates.map(\.quote) == selection.candidates.map(\.quote) else { throw VoiceOSError("知识核查进度链不完整") }
                 guard responseIDs.contains(selection.responseID),Set(progress.checkedIDs).count == progress.checkedIDs.count,Set(progress.checkedIDs).isSubset(of:Set(selection.candidates.map(\.id))),Set(progress.issues.map(\.id)).count == progress.issues.count,
                       row["state"] != "completed" || Set(progress.checkedIDs) == Set(selection.candidates.map(\.id)) else { throw VoiceOSError("知识核查进度链不完整") }
                 for issue in progress.issues {

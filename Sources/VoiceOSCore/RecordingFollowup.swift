@@ -172,7 +172,7 @@ extension VoiceOSStore {
         return .init(id: claim.id, reviewVersion: claim.reviewVersion, statement: claim.statement, evidence: evidence)
     }
 
-    private func followupTasks(actions: [ActionRecord], claims: [String: CandidateClaim], catalog: [String: SourceRecord]) throws -> [FollowupTask] {
+    private func followupTasks(actions: [ActionRecord], claims: [String: CandidateClaim], catalog: [String: SourceRecord], goalIDByTaskID: [String: String]) throws -> [FollowupTask] {
         var feedback: [String: [String]] = [:]
         let versions = Dictionary(uniqueKeysWithValues: actions.map { ($0.id, $0.version) })
         for row in try db.query("""
@@ -191,8 +191,18 @@ extension VoiceOSStore {
         }
         return try actions.filter { $0.validity == "current" && $0.kind == "task" && $0.intentActor == "user" && $0.state != "dismissed" }.compactMap { action in
             guard let claim = claims[action.claimID], try rememberedThought(claim, catalog: catalog) != nil else { return nil }
-            return .init(id: action.id, version: action.version, title: action.title, state: action.state, goalID: action.intent?.goalID, feedback: feedback[action.id] ?? [])
+            return .init(id: action.id, version: action.version, title: action.title, state: action.state, goalID: action.intent?.goalID ?? goalIDByTaskID[action.id], feedback: feedback[action.id] ?? [])
         }.sorted { $0.id < $1.id }
+    }
+
+    private static func goalIDByTaskID(_ goals: [FollowupGoal]) -> [String: String] {
+        var result: [String: String] = [:]
+        for goal in goals {
+            for step in goal.previousPlan?.phases.flatMap(\.steps) ?? [] where !step.existingTaskID.isEmpty {
+                if result[step.existingTaskID] == nil { result[step.existingTaskID] = goal.id }
+            }
+        }
+        return result
     }
 
     public func prepareRecordingFollowup(sourceID: String) throws -> RecordingFollowupInput {
@@ -213,18 +223,21 @@ extension VoiceOSStore {
             guard let claim = byID[action.claimID], currentThought(claim), claim.reviewVersion == action.claimReviewVersion, let thought = try rememberedThought(claim, catalog: catalog) else { return nil }
             return .init(id: action.id, version: action.version, thought: thought, title: action.title)
         }
-        let tasks = try followupTasks(actions: actions, claims: byID, catalog: catalog)
         let priorFollowups = try recordingFollowups()
+        // Plan lookup compares against tasks before the plan-derived goal links,
+        // because those links are read back from the plans chosen in this loop.
+        let unlinkedTasks = try followupTasks(actions: actions, claims: byID, catalog: catalog, goalIDByTaskID: [:])
         for index in goals.indices {
             goals[index].previousPlan = priorFollowups.reversed().first(where: { prior in
                 guard prior.state == "completed", let original = catalog[prior.sourceID], !original.localOnly,!original.needsTranscriptionReview,
                       original.policyVersion == prior.input.policyVersion, original.transcriptVersionID == prior.input.current.sources[0].transcriptVersionID,
                       let oldGoal = prior.input.goals.first(where: { $0.id == goals[index].id }), oldGoal.version == goals[index].version,
                       (try? followupJSON(oldGoal.thought)) == (try? followupJSON(goals[index].thought)) else { return false }
-                return (prior.sourceID != sourceID || (try? followupJSON(prior.input.tasks)) != (try? followupJSON(tasks))) &&
+                return (prior.sourceID != sourceID || (try? followupJSON(prior.input.tasks)) != (try? followupJSON(unlinkedTasks))) &&
                        prior.result?.goalPlans.contains(where: { $0.goalID == goals[index].id }) == true
             })?.result?.goalPlans.first(where: { $0.goalID == goals[index].id })
         }
+        let tasks = try followupTasks(actions: actions, claims: byID, catalog: catalog, goalIDByTaskID: Self.goalIDByTaskID(goals))
         var practices: [PracticeHistory] = []
         for prior in priorFollowups.reversed() where prior.sourceID != sourceID && prior.state == "completed" && prior.result?.english.isPractice == true {
             guard !practices.contains(where: { $0.sourceID == prior.sourceID }), let old = catalog[prior.sourceID], !old.localOnly,
@@ -334,18 +347,21 @@ extension VoiceOSStore {
         let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
         let latest = try latestCandidateClaimsBySource().mapValues { Set($0.map(\.id)) }
         let actions = Dictionary(uniqueKeysWithValues: try actions(includeHistory: true).map { ($0.id, $0) })
-        let tasks = try followupTasks(actions: Array(actions.values), claims: claims, catalog: catalog)
         return try Dictionary(uniqueKeysWithValues: completed.map { receipt in
-            (receipt.id, try recordingFollowupValidity(receipt, catalog: catalog, claims: claims, latest: latest, actions: actions, tasks: tasks))
+            (receipt.id, try recordingFollowupValidity(receipt, catalog: catalog, claims: claims, latest: latest, actions: actions))
         })
     }
-    private func recordingFollowupValidity(_ receipt: RecordingFollowupReceipt, catalog: [String: SourceRecord], claims: [String: CandidateClaim], latest: [String: Set<String>], actions: [String: ActionRecord], tasks: [FollowupTask]) throws -> RecordingFollowupValidity {
+    private func recordingFollowupValidity(_ receipt: RecordingFollowupReceipt, catalog: [String: SourceRecord], claims: [String: CandidateClaim], latest: [String: Set<String>], actions: [String: ActionRecord]) throws -> RecordingFollowupValidity {
         guard receipt.state == "completed", receipt.result != nil,catalog[receipt.sourceID]?.needsTranscriptionReview != true,
               (try? validateLocalTranscriptContext(receipt.input.current)) != nil,
               (try? validateContinuousRecordingContext(receipt.input.continuousExpression,sourceID:receipt.sourceID)) != nil,
               (try? sourcePolicy(sourceID: receipt.sourceID).version) == receipt.input.policyVersion else {
             return .init(sourceCurrent: false, thoughtClaimIDs: [], goalIDs: [], english: false)
         }
+        // Rebuild the plan-derived links from the stored input so this comparison
+        // uses the same convention that produced input.tasks.
+        let tasks = try followupTasks(actions: Array(actions.values), claims: claims, catalog: catalog,
+                                      goalIDByTaskID: Self.goalIDByTaskID(receipt.input.goals))
         func thought(_ item: RememberedThought) throws {
             guard let claim = claims[item.id], let actual = try rememberedThought(claim, catalog: catalog), try followupJSON(actual) == followupJSON(item) else { throw VoiceOSError("历史观点或原话已变化") }
             if claim.reviewState != "endorsed" {
@@ -404,7 +420,7 @@ extension VoiceOSStore {
                   plan.phases.flatMap(\.steps).contains(where: { $0.title == plan.nextStep.title && $0.condition == plan.nextStep.condition && $0.existingTaskID == plan.nextStep.existingTaskID }) else { throw VoiceOSError("目标没有可执行的阶段和下一步") }
             for step in plan.phases.flatMap(\.steps) {
                 guard !step.title.isEmpty, step.title.unicodeScalars.count <= 2000 else { throw VoiceOSError("目标步骤为空或过长") }
-                if !step.existingTaskID.isEmpty { guard let task = tasks[step.existingTaskID], task.state == "open", task.title == step.title, task.goalID == plan.goalID else { throw VoiceOSError("下一步应沿用同一目标的未完成任务") } }
+                if !step.existingTaskID.isEmpty { guard let task = tasks[step.existingTaskID], task.state == "open", task.title == step.title, (task.goalID == nil || task.goalID == plan.goalID) else { throw VoiceOSError("下一步应沿用同一目标的未完成任务") } }
             }
         }
         let english = result.english

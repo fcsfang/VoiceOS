@@ -37,18 +37,26 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
         var goalIDs: [String]
         var taskIDs: [String]
         var practiceSourceIDs: [String]
-        func validate(_ input: RecordingFollowupInput) throws {
-            for (selected, available) in [(thoughtIDs, input.thoughts.map(\.id)), (goalIDs, input.goals.map(\.id)),
-                                           (taskIDs, input.tasks.map(\.id)), (practiceSourceIDs, input.practices.map(\.sourceID))] {
-                guard Set(selected).count == selected.count, Set(selected).isSubset(of: Set(available)) else { throw VoiceOSError("相关历史选择包含重复或不存在的资料") }
-            }
-        }
+    }
+    static func normalizedSelection(thoughtIDs: [String], goalIDs: [String], taskIDs: [String], practiceSourceIDs: [String],
+                                    availableThoughtIDs: Set<String>, availableGoalIDs: Set<String>, availableTaskIDs: Set<String>, availablePracticeSourceIDs: Set<String>)
+        -> (thoughtIDs: [String], goalIDs: [String], taskIDs: [String], practiceSourceIDs: [String]) {
+        (normalized(thoughtIDs, available: availableThoughtIDs), normalized(goalIDs, available: availableGoalIDs),
+         normalized(taskIDs, available: availableTaskIDs), normalized(practiceSourceIDs, available: availablePracticeSourceIDs))
+    }
+    private static func normalized(_ ids: [String], available: Set<String>) -> [String] {
+        var seen = Set<String>()
+        return ids.filter { available.contains($0) && seen.insert($0).inserted }
     }
     private func relevantInput(_ input: RecordingFollowupInput, evidence: inout RunEvidence) async throws -> RecordingFollowupInput {
         guard !input.thoughts.isEmpty || !input.goals.isEmpty || !input.tasks.isEmpty || !input.practices.isEmpty else { return input }
         let selected = try await selectHistory(input, evidence: &evidence)
-        let thoughts = Set(selected.thoughtIDs), practices = Set(selected.practiceSourceIDs)
-        var goals = Set(selected.goalIDs), tasks = Set(selected.taskIDs)
+        let selection = Self.normalizedSelection(thoughtIDs: selected.thoughtIDs, goalIDs: selected.goalIDs,
+            taskIDs: selected.taskIDs, practiceSourceIDs: selected.practiceSourceIDs,
+            availableThoughtIDs: Set(input.thoughts.map(\.id)), availableGoalIDs: Set(input.goals.map(\.id)),
+            availableTaskIDs: Set(input.tasks.map(\.id)), availablePracticeSourceIDs: Set(input.practices.map(\.sourceID)))
+        let thoughts = Set(selection.thoughtIDs), practices = Set(selection.practiceSourceIDs)
+        var goals = Set(selection.goalIDs), tasks = Set(selection.taskIDs)
         if let actionID = input.feedbackActionID {
             tasks.insert(actionID)
             if input.goals.contains(where: { $0.id == actionID }) { goals.insert(actionID) }
@@ -83,9 +91,7 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
             "practices": input.practices.map { ["sourceID": $0.sourceID, "feedback": $0.feedback] }]
         let instructions = Self.selectionInstructions + "\n如有continuousExpression，必须按完整连续表达理解当前片段后再选择历史，避免忽略后文修正。"
         return try await request(payload, instructions: instructions, schema: Self.selectionSchema,
-            name: "voiceos_followup_history", stage: .selectHistory, evidence: &evidence) {
-                try $0.validate(input)
-            }
+            name: "voiceos_followup_history", stage: .selectHistory, evidence: &evidence) { _ in }
     }
     private func call(_ input: RecordingFollowupInput, evidence: inout RunEvidence) async throws -> RecordingFollowupResult {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
