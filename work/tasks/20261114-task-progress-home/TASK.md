@@ -3,7 +3,7 @@ status: open
 started: 2026-11-13
 updated: 2026-11-14
 branch: work/task-progress-home
-pr: pending
+pr: 141
 owner: coordinator
 ---
 
