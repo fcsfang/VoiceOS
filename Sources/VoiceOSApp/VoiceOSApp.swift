@@ -589,6 +589,7 @@ final class ControlCenter: ObservableObject {
     @Published var claimHistory: [ClaimReviewVersion] = []
     @Published var reviewingClaim = false
     @Published var actionRecords: [ActionRecord] = []
+    @Published var homeSnapshot = RecentContentHomeSnapshot(days: [], digests: [:])
     @Published var actionReviewLedgers: [String: ActionReviewLedger] = [:]
     @Published var focusedTaskID: String?
     @Published var correctionImpacts: [CorrectionActionImpact] = []
@@ -841,6 +842,11 @@ final class ControlCenter: ObservableObject {
         refreshWorker = work
         await work.value
     }
+    /// Recompute the home snapshot from the published arrays it derives from,
+    /// so a render only reads it.
+    private func publishHomeSnapshot() {
+        homeSnapshot = RecentContentHomeSnapshot.build(sources: records, claims: claims, actions: actionRecords)
+    }
     private func reloadWorkspace() async {
         guard let store else { return }
         await panoramaChanged()
@@ -855,6 +861,7 @@ final class ControlCenter: ObservableObject {
             claimOrigins = snapshot.claimOrigins
             outcomeOrigins = snapshot.outcomeOrigins
             actionRecords = snapshot.actions
+            publishHomeSnapshot()
             actionReviewLedgers = snapshot.actionReviewLedgers
             assistantExecutions = snapshot.assistantExecutions
             assistantAssessmentIssues = snapshot.assistantAssessmentIssues
