@@ -3,7 +3,7 @@ status: open
 started: 2026-11-13
 updated: 2026-11-13
 branch: work/home-switch-perf
-pr: pending
+pr: 139
 owner: coordinator
 ---
 
