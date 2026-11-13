@@ -1,9 +1,10 @@
 ---
-status: open
+status: merged
 started: 2026-11-13
 updated: 2026-11-13
 branch: work/home-switch-perf
 pr: 139
+merged: 4a56d10
 owner: coordinator
 ---
 
@@ -44,3 +45,5 @@ owner: coordinator
 ## 进展
 
 - 2026-11-13 两轮修复与等价测试完成；分支从 main 独立开出。
+
+- 2026-11-13 合并 `4a56d10`（PR #139）：首页每渲染摘要计算 449.1 毫秒 → 17.1 微秒；dist 从合并后 main 重建并重启。

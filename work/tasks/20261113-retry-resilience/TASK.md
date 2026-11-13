@@ -1,9 +1,10 @@
 ---
-status: open
+status: merged
 started: 2026-11-13
 updated: 2026-11-13
 branch: work/retry-resilience
 pr: 138
+merged: 9a04bce
 owner: coordinator
 ---
 
@@ -47,3 +48,5 @@ owner: coordinator
 ## 进展
 
 - 2026-11-13 三项修复与 7 项测试完成；分支从 main 独立开出。
+
+- 2026-11-13 合并 `9a04bce`（PR #138）；dist 从合并后 main 重建并重启。
