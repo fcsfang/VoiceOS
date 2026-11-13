@@ -78,9 +78,20 @@ public struct ResponsesKnowledgeReviewPort: KnowledgeReviewPort {
         if research { payload["tools"]=[["type":"web_search"]];payload["tool_choice"]="required" }
         var request=URLRequest(url:endpoint,timeoutInterval:300);request.httpMethod="POST";request.httpBody=try JSONSerialization.data(withJSONObject:payload,options:[.sortedKeys])
         request.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization");request.setValue("application/json",forHTTPHeaderField:"Content-Type")
-        let reply=try await transport.send(request)
-        guard reply.status == 200 else { throw VoiceOSError("知识核查服务返回 HTTP \(reply.status)；需真实检索支持，可手动重试") }
-        try Task.checkCancellation()
-        return reply.body
+        // Same transient-status backoff as the followup port; a 502 here heals on retry.
+        for attempt in 1...3 {
+            let reply=try await transport.send(request)
+            if reply.status == 200 {
+                try Task.checkCancellation()
+                return reply.body
+            }
+            if attempt < 3, [429, 502, 503, 504].contains(reply.status) {
+                try Task.checkCancellation()
+                try await Task.sleep(for: .seconds(attempt == 1 ? 5 : 15))
+                continue
+            }
+            throw VoiceOSError("知识核查服务返回 HTTP \(reply.status)；需真实检索支持，可手动重试")
+        }
+        throw VoiceOSError("知识核查服务未返回结果")
     }
 }
