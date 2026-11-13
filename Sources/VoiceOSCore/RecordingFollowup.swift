@@ -493,7 +493,9 @@ extension VoiceOSStore {
         }
     }
     static func conformanceRetryScheduled(afterFailure failure: Error, retryCount: Int?) -> Bool {
-        failure is RecordingFollowupConformanceFailure && (retryCount ?? 0) < 1
+        // The real port wraps its validation failure in a generation failure.
+        let error = (failure as? RecordingFollowupGenerationFailure)?.underlying ?? failure
+        return error is RecordingFollowupConformanceFailure && (retryCount ?? 0) < 1
     }
     static func conformanceRetryAt(now: Date = Date()) -> String { followupRetryAt(now: now, after: 60) }
     static func followupRetryAt(now: Date = Date(), after seconds: TimeInterval) -> String {

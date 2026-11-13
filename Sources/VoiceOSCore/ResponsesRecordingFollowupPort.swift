@@ -99,8 +99,10 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
         let instructions = Self.instructions + "\ncontinuousExpression提供同一次表达按顺序排列的本人录音，以及origin=external的配对节目全文。外部内容仅作背景，不是用户观点或承诺，个人转述不等于认同；必须结合跨段补充、条件与后文修正理解current；不能孤立解释当前片段。引用与当前练习建议仍定位于current中的原话，不把另段原话冒充本段。"
         return try await request(payloadInput, instructions: instructions, schema: Self.schema,
             name: "voiceos_recording_followup", stage: .generateFollowup, evidence: &evidence) { result in
-                try VoiceOSStore.validateFollowupResult(result, input: input)
-                guard Set(result.goalPlans.map(\.goalID)) == Set(input.goals.map(\.id)) else { throw VoiceOSError("相关目标跟进有遗漏，结果未保存") }
+                do {
+                    try VoiceOSStore.validateFollowupResult(result, input: input)
+                    guard Set(result.goalPlans.map(\.goalID)) == Set(input.goals.map(\.id)) else { throw VoiceOSError("相关目标跟进有遗漏，结果未保存") }
+                } catch { throw RecordingFollowupConformanceFailure(underlying: error) }
             }
     }
     private func request<Output: Decodable>(_ payloadInput: [String: Any], instructions: String, schema: [String: Any],

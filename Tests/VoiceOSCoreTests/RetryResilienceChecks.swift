@@ -37,6 +37,20 @@ private actor ConformanceFollowup: RecordingFollowupPort {
     }
 }
 
+private actor WrappedConformanceFollowup: RecordingFollowupPort {
+    private(set) var calls = 0
+    func generate(_ input: RecordingFollowupInput) async throws -> RecordingFollowupGeneration {
+        calls += 1
+        if calls == 1 {
+            throw RecordingFollowupGenerationFailure(
+                underlying: RecordingFollowupConformanceFailure(underlying: VoiceOSError("跟进结果引用不是连续原话")),
+                stage: .generateFollowup, responseIDs: [], rejectedResponses: [])
+        }
+        let empty = PracticeFollowup(isPractice: false, evidenceQuote: "", suggestions: [], comparisons: [], nextExercise: "")
+        return .init(result: .init(thoughtUpdates: [], goalPlans: [], english: empty), responseIDs: ["fixture-ok"])
+    }
+}
+
 private struct PolicyFlipFollowup: RecordingFollowupPort {
     let store: VoiceOSStore
     func generate(_ input: RecordingFollowupInput) async throws -> RecordingFollowupGeneration {
@@ -169,9 +183,35 @@ final class RetryResilienceChecks: XCTestCase {
         XCTAssertTrue(VoiceOSStore.conformanceRetryScheduled(afterFailure: failure, retryCount: nil))
         XCTAssertFalse(VoiceOSStore.conformanceRetryScheduled(afterFailure: failure, retryCount: 1))
         XCTAssertFalse(VoiceOSStore.conformanceRetryScheduled(afterFailure: VoiceOSError("引用不符"), retryCount: nil))
+        let wrapped = RecordingFollowupGenerationFailure(underlying: failure, stage: .generateFollowup, responseIDs: [], rejectedResponses: [])
+        XCTAssertTrue(VoiceOSStore.conformanceRetryScheduled(afterFailure: wrapped, retryCount: nil))
+        XCTAssertFalse(VoiceOSStore.conformanceRetryScheduled(afterFailure: wrapped, retryCount: 1))
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let at = VoiceOSStore.conformanceRetryAt(now: now)
         XCTAssertEqual(ISO8601DateFormatter().date(from: at), now.addingTimeInterval(60))
+    }
+
+    func testPortWrappedConformanceFailureSchedulesRetry() async throws {
+        let store = try await makeStore()
+        let sourceID = try await cloudSource(store)
+        let port = WrappedConformanceFollowup()
+        do {
+            _ = try await store.processRecordingFollowup(sourceID: sourceID, using: port)
+            XCTFail("A port-wrapped validation failure must fail the receipt")
+        } catch { }
+        let receipts = try await store.recordingFollowups()
+        let failed = try XCTUnwrap(receipts.last { $0.sourceID == sourceID })
+        XCTAssertEqual(failed.state, "failed")
+        XCTAssertEqual(failed.retryCount, 1)
+        XCTAssertTrue(failed.error?.contains("跟进结果引用不是连续原话") == true)
+        let retryAt = try XCTUnwrap(failed.retryAt)
+        XCTAssertNotNil(ISO8601DateFormatter().date(from: retryAt))
+        try await store.expireFollowupRetry(failed.id)
+        let completed = try await store.processRecordingFollowup(sourceID: sourceID, using: port, retry: true)
+        XCTAssertEqual(completed.state, "completed")
+        XCTAssertEqual(completed.retryCount, 1)
+        let calls = await port.calls
+        XCTAssertEqual(calls, 2)
     }
 
     func testSourceValidityFailureDoesNotScheduleRetry() async throws {
