@@ -20,8 +20,8 @@ struct DiscussionView: View {
             }
             Picker("讨论历史",selection:Binding(get:{ model.discussionSession?.id ?? "" },set:{ id in text="";Task { await model.openDiscussion(id) } })) {
                 Text("请选择讨论，或从资料进入").tag("")
-                ForEach(model.discussionList) { session in
-                    Text(String(session.id.prefix(8))+" · "+(session.state == "ended" ? "已结束" : "进行中")+(session.validity == "frozen" ? " · 只读历史" : "")).tag(session.id)
+                ForEach(Array(model.discussionList.enumerated()),id:\.element.id) { index,session in
+                    Text("讨论 \(index+1) · "+(session.state == "ended" ? "已结束" : "进行中")+(session.validity == "frozen" ? " · 只读历史" : "")).tag(session.id)
                 }
             }.disabled(model.discussionSending || model.discussionSaving || model.discussionExtracting || model.dictationActive)
             if let session=model.discussionSession {
@@ -72,11 +72,10 @@ struct DiscussionView: View {
                                                     Text("待核对、未验证；保留不表示认可，也不创建行动。").font(.caption).foregroundStyle(.secondary)
                                                 }
                                                 ForEach(Array(part.references.enumerated()),id:\.offset) { _,ref in
-                                                    Button("查看引用原文 · "+String(ref.sourceID.prefix(8))) { inspectReference(ref) }
+                                                    Button("查看引用原文") { inspectReference(ref) }
                                                 }
                                             }.padding(10).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
                                         }
-                                        Text("输入 \(reply.usage?["input_tokens"].map(String.init) ?? "未知") / 输出 \(reply.usage?["output_tokens"].map(String.init) ?? "未知") tokens · 实际费用未知").font(.caption).foregroundStyle(.secondary)
                                     }
                                 }
                                 Divider()
@@ -118,7 +117,6 @@ struct DiscussionView: View {
                                     }
                                 }.padding(.vertical,8)
                             }
-                            Text("输入 \(outcome.usage?["input_tokens"].map(String.init) ?? "未知") / 输出 \(outcome.usage?["output_tokens"].map(String.init) ?? "未知") tokens · 实际费用未知").font(.caption).foregroundStyle(.secondary)
                         }
                     }.frame(maxWidth:.infinity,alignment:.leading).padding(.vertical,6)
                 }.frame(minHeight:180)
@@ -147,7 +145,7 @@ struct DiscussionView: View {
                     }
                     Picker("已有个人录音",selection:Binding(get:{ model.discussionRecordingID ?? "" },set:{ model.discussionRecordingID=$0.isEmpty ? nil : $0 })) {
                         Text("可选已转写的个人口述").tag("")
-                        ForEach(model.discussionRecordings) { record in Text(record.name).tag(record.id) }
+                        ForEach(model.discussionRecordings) { record in Text(record.displayTitle).tag(record.id) }
                     }.disabled(model.dictationActive || model.discussionSending || model.discussionSaving)
                     TextEditor(text:$text).frame(height:72).border(.secondary.opacity(0.3)).disabled(model.discussionSaving || model.discussionSending || model.dictationActive)
                     Toggle("允许本轮文字用于云端讨论；音频保留本机",isOn:$allowCloud).font(.caption).disabled(model.discussionSaving || model.discussionSending || model.dictationActive)
@@ -216,7 +214,7 @@ struct DiscussionView: View {
         } else if let turn=model.discussionTurns.first(where: { $0.sourceID == ref.sourceID && $0.transcriptVersionID == ref.transcriptVersionID }) {
             text=turn.text
         } else { text="此引用没有对应的历史原文；请核对资料，不以当前版本替代。" }
-        referencePreview=ReferencePreview(text:text,version:"来源 "+ref.sourceID+" · 逐字稿版本 "+ref.transcriptVersionID)
+        referencePreview=ReferencePreview(text:text,version:"来源："+(model.records.first { $0.id == ref.sourceID }?.displayTitle ?? "历史原文"))
     }
     private func outcomeParagraphClaim(_ reply:DiscussionAttemptRecord,index:Int,part:DiscussionPart)->String? {
         for outcome in model.discussionOutcomes where outcome.state == "completed" {
@@ -228,7 +226,7 @@ struct DiscussionView: View {
     }
     private func inspectReplyEvidence(_ evidence:OutcomeReplyEvidence) {
         guard let reply=model.discussionReplies.first(where: { $0.id == evidence.attemptID }),reply.parts.indices.contains(evidence.partIndex) else { return }
-        referencePreview=ReferencePreview(text:reply.parts[evidence.partIndex].text,version:"AI 调用 "+evidence.attemptID+" · 段落 "+String(evidence.partIndex+1))
+        referencePreview=ReferencePreview(text:reply.parts[evidence.partIndex].text,version:"AI 回复第 \(evidence.partIndex+1) 段")
     }
     private func replyLabel(_ reply:DiscussionAttemptRecord)->String {
         let state=reply.state == "completed" ? "AI回复" : (reply.state == "unknown" ? "调用结果未知 · 不自动重发" : (reply.state == "reserved" ? "正在等待结果" : "结果未接纳 · 不自动重发"))

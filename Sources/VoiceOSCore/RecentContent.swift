@@ -246,7 +246,7 @@ public enum RecentContentIndex {
             let excerpts = entries.sorted { $0.1 > $1.1 }.compactMap { $0.0.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
             guard !excerpts.isEmpty else { return nil }
             return RecentContentItem(id: "feedback-" + key, sourceIDs: entries.map(\.0.id), date: latest,
-                                     title: "\(entries.count) 条任务进展", summary: "", thoughts: [],
+                                     title: "任务进展", summary: "", thoughts: [],
                                      excerpts: excerpts, kind: .feedback)
         }
     }

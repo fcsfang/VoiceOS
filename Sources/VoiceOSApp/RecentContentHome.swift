@@ -37,8 +37,7 @@ struct RecentContentHome: View {
     private var empty: some View {
         VStack(spacing: 14) {
             Text("还没有可以回看的内容").font(.title3.weight(.medium))
-            Text("录一段想法，或写下几句。整理完成后，这里按时间显示你说过的想法。")
-                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 420)
+            Text("录一段，或写几句。").font(.callout).foregroundStyle(.secondary)
             Button("记录想法") { capture() }.buttonStyle(.borderedProminent)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -67,10 +66,6 @@ struct RecentContentHome: View {
                 Text(timeLabel(item.date)).font(.system(size: 11)).foregroundStyle(.secondary)
                 Text(item.title).font(.system(size: 13.5, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(palette.text).lineLimit(2).multilineTextAlignment(.leading)
-                let meta = feedbackMeta(item)
-                if !meta.isEmpty {
-                    Text(meta).font(.system(size: 11)).foregroundStyle(.secondary)
-                }
             } else {
                 Text(item.title).font(.system(size: 13.5, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(palette.text).lineLimit(2).multilineTextAlignment(.leading)
@@ -82,26 +77,15 @@ struct RecentContentHome: View {
         .background(isSelected ? palette.selection : .clear, in: RoundedRectangle(cornerRadius: 9))
     }
 
-    private func feedbackMeta(_ item: RecentContentItem) -> String {
-        var counts: [(label: String, count: Int)] = []
-        for row in model.homeSnapshot.progressRows[item.id] ?? [] {
-            if let index = counts.firstIndex(where: { $0.label == row.relationLabel }) { counts[index].count += 1 }
-            else { counts.append((row.relationLabel, 1)) }
-        }
-        return counts.map { "\($0.label) \($0.count)" }.joined(separator: " · ")
-    }
-
     private func rowMeta(_ item: RecentContentItem) -> String {
-        let digest = model.homeSnapshot.digests[item.id] ?? RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration)
-        guard digest.thoughtCount > 0 else { return timeLabel(item.date) }
-        return "\(timeLabel(item.date)) · \(digest.thoughtCount) 条想法 · \(digest.threads.count) 条线索"
+        timeLabel(item.date)
     }
 
     private var reader: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 if let item = selected {
-                    readerContent(item, scroll: proxy)
+                    readerContent(item)
                         .frame(maxWidth: 720, alignment: .leading)
                         .padding(30)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -116,11 +100,11 @@ struct RecentContentHome: View {
         }
     }
 
-    @ViewBuilder private func readerContent(_ item: RecentContentItem, scroll: ScrollViewProxy) -> some View {
+    @ViewBuilder private func readerContent(_ item: RecentContentItem) -> some View {
         if item.kind == .feedback {
             let rows = model.homeSnapshot.progressRows[item.id] ?? []
             VStack(alignment: .leading, spacing: 18) {
-                Text([dateLabel(item.date), timeLabel(item.date), "任务进展"].joined(separator: " · "))
+                Text([dateLabel(item.date), "任务进展"].joined(separator: " · "))
                     .font(.system(size: 12)).foregroundStyle(.secondary)
                 Text(item.title).font(.system(size: 27, weight: .semibold, design: .serif)).lineSpacing(4).textSelection(.enabled)
                 if rows.isEmpty {
@@ -140,7 +124,7 @@ struct RecentContentHome: View {
                 }
             }
         } else {
-            materialReader(item, scroll: scroll)
+            materialReader(item)
         }
     }
 
@@ -160,14 +144,12 @@ struct RecentContentHome: View {
         .disabled(!row.isTaskAvailable)
     }
 
-    private func materialReader(_ item: RecentContentItem, scroll: ScrollViewProxy) -> some View {
+    private func materialReader(_ item: RecentContentItem) -> some View {
         let digest = model.homeSnapshot.digests[item.id] ?? RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration)
         return VStack(alignment: .leading, spacing: 0) {
-            Text(readerMeta(item, digest: digest)).font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(readerMeta(item)).font(.system(size: 12)).foregroundStyle(.secondary)
             Text(item.title).font(.system(size: 27, weight: .semibold, design: .serif)).lineSpacing(4)
                 .padding(.top, 16).textSelection(.enabled)
-            Text(standfirst(digest)).font(.system(size: 14.5)).lineSpacing(5).foregroundStyle(.secondary).padding(.top, 18)
-            if !digest.threads.isEmpty { threadIndex(digest, scroll: scroll) }
             ForEach(Array(digest.threads.enumerated()), id: \.element.id) { index, thread in
                 threadSection(thread, number: index + 1)
                     .padding(.top, 44)
@@ -182,34 +164,11 @@ struct RecentContentHome: View {
         }
     }
 
-    private func readerMeta(_ item: RecentContentItem, digest: RecentContentDigest) -> String {
+    private func readerMeta(_ item: RecentContentItem) -> String {
         var parts = [dateLabel(item.date), timeLabel(item.date)]
         let duration = RecentContentDigest.durationLabel(item.duration)
         if !duration.isEmpty { parts.append(duration) }
-        parts.append("\(digest.thoughtCount) 条想法")
         return parts.joined(separator: " · ")
-    }
-
-    private func standfirst(_ digest: RecentContentDigest) -> String {
-        let duration = RecentContentDigest.durationLabel(digest.duration)
-        let opening = duration.isEmpty ? "这次留下 \(digest.thoughtCount) 条想法" : "这次录了 \(duration)，留下 \(digest.thoughtCount) 条想法"
-        return digest.threads.isEmpty ? opening + "。" : opening + "，可以归成 \(digest.threads.count) 条线索。"
-    }
-
-    private func threadIndex(_ digest: RecentContentDigest, scroll: ScrollViewProxy) -> some View {
-        HStack(spacing: 12) {
-            ForEach(Array(digest.threads.enumerated()), id: \.element.id) { index, thread in
-                if index > 0 { Text("·").font(.system(size: 12)).foregroundStyle(.tertiary) }
-                Button {
-                    withAnimation(.easeOut(duration: 0.3)) { scroll.scrollTo("home.thread.\(thread.id)", anchor: .top) }
-                } label: {
-                    HStack(spacing: 5) {
-                        Text(thread.title).font(.system(size: 12))
-                        Text("\(thread.thoughts.count)").font(.system(size: 10.5))
-                    }.foregroundStyle(.secondary).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-            }
-        }.padding(.top, 24)
     }
 
     private func threadSection(_ thread: RecentContentThread, number: Int) -> some View {
@@ -221,7 +180,6 @@ struct RecentContentHome: View {
                     .foregroundStyle(palette.accent).frame(width: 28, alignment: .leading)
                 Text(thread.title).font(.system(size: 15.5, weight: .semibold))
                 Spacer(minLength: 8)
-                Text("\(thread.thoughts.count) 条").font(.system(size: 11)).foregroundStyle(.secondary)
             }
             if let lead = thread.lead {
                 Text(lead.statement).font(.system(size: 19, design: .serif)).lineSpacing(7).textSelection(.enabled)
@@ -249,7 +207,7 @@ struct RecentContentHome: View {
                 .padding(.top, 20).padding(.leading, 42)
             }
             if thread.hiddenCount > 0 {
-                Button(expanded ? "收起" : "展开这一线索的 \(thread.hiddenCount) 条") {
+                Button(expanded ? "收起" : "展开 \(thread.hiddenCount) 条") {
                     withAnimation(.easeInOut(duration: 0.2)) {
                         if expanded { expandedThreads.remove(thread.id) } else { expandedThreads.insert(thread.id) }
                     }
@@ -283,7 +241,6 @@ struct RecentContentHome: View {
                             Circle().strokeBorder(palette.border, lineWidth: 1).frame(width: 14, height: 14).padding(.top, 4)
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(task.title).font(.system(size: 14.5)).lineSpacing(3).textSelection(.enabled)
-                                Text("来自这次录音 · 待办").font(.system(size: 11)).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 0)
                         }.padding(.vertical, 15)
@@ -305,7 +262,7 @@ struct RecentContentHome: View {
                 Text(item.summary).font(.system(size: 13.5)).lineSpacing(5).foregroundStyle(.secondary)
                     .textSelection(.enabled).frame(maxWidth: 640, alignment: .leading).padding(.top, 10)
             } label: {
-                Text("录音概览（AI 整理）").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text("概览").font(.system(size: 12)).foregroundStyle(.secondary)
             }.padding(.top, 44)
         }
     }

@@ -100,10 +100,10 @@ struct WorkspaceProcessingBar: View {
                 ProgressView().controlSize(.small)
                 VStack(alignment:.leading,spacing:3) {
                     Text(title).lineLimit(1)
-                    if let id=model.workspaceProcessingSourceID,let source=model.records.first(where: { $0.id == id }) { Text(source.workspaceTitle).foregroundStyle(.secondary).lineLimit(1) }
+                    if let id=model.workspaceProcessingSourceID,let source=model.records.first(where: { $0.id == id }) { Text(source.displayTitle).foregroundStyle(.secondary).lineLimit(1) }
                 }
             } else if model.workspaceNeedsAttention || inbox.pendingItems.contains(where: { $0.state == .needsAttention }) || !inbox.folderErrors.isEmpty {
-                Label("有事项需要查看，原文与历史保留",systemImage:"exclamationmark.circle").foregroundStyle(.orange)
+                Label("有事项需要查看",systemImage:"exclamationmark.circle").foregroundStyle(.orange)
             } else { Text(status.title).foregroundStyle(.secondary).lineLimit(1) }
             Spacer(minLength:8)
             if model.dictationActive { Button("停止并整理") { model.stopDictation() } }
@@ -133,7 +133,7 @@ struct WorkspaceProcessingView: View {
                 if let title = model.workspaceProcessingTitle {
                     WorkspaceSection(title:title,icon:"hourglass") {
                         if let id=model.workspaceProcessingSourceID,let source=model.records.first(where: { $0.id == id }) {
-                            WorkspaceRow(title:source.workspaceTitle,subtitle:"当前正在处理这份完整材料",trailing:"查看原文") { openSource(id) }
+                            WorkspaceRow(title:source.displayTitle,subtitle:"当前正在处理这份完整材料",trailing:"查看原文") { openSource(id) }
                         }
                         Text(model.transcriptReviewSourceID != nil ? model.transcriptReviewStatus : model.status).font(.callout).foregroundStyle(.secondary).textSelection(.enabled).padding(.top,12)
                         if !model.fullRecordingDetail.isEmpty,model.fullRecordingDetail != model.fullRecordingStatus {
@@ -158,7 +158,7 @@ struct WorkspaceProcessingView: View {
                 if !failedSources.isEmpty {
                     WorkspaceSection(title:"录音与转写需要查看",icon:"waveform",count:failedSources.count) {
                         ForEach(failedSources) { source in
-                            WorkspaceRow(title:source.workspaceTitle,subtitle:source.state == "interrupted" ? "录音被中断，已保存的片段仍保留" : source.state == "quarantined" ? "原件完整性待核对，已暂停后续处理" : "本地转写未完成，原件仍保留",trailing:"查看材料") { openSource(source.id) }
+                            WorkspaceRow(title:source.displayTitle,subtitle:source.state == "interrupted" ? "录音被中断，已保存的片段仍保留" : source.state == "quarantined" ? "原件完整性待核对，已暂停后续处理" : "本地转写未完成，原件仍保留",trailing:"查看材料") { openSource(source.id) }
                             if let error=source.error { reason(error) }
                             if source.state == "saved" { Button("重试本地转写") { Task { await model.retry(source) } }.disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil) }
                         }
@@ -177,7 +177,7 @@ struct WorkspaceProcessingView: View {
                     WorkspaceSection(title:"这些待办需要核对",subtitle:"以下事项尚未登记完成，行动关系待核对或 AI 提取已暂停。逐条核对：同一件事会接回原记录，两件事会保留两条；核对后即可继续同步。",icon:"pause.circle",count:model.workspacePausedTasks.count) {
                         let ids=Set(model.workspacePausedTasks.flatMap { task in model.claims.first(where: { $0.id == task.claimID })?.references.map(\.sourceID) ?? [] })
                         ForEach(model.records.filter { ids.contains($0.id) }) { source in
-                            WorkspaceRow(title:source.workspaceTitle,subtitle:"查看暂停原因、受影响的任务和处理按钮",trailing:"打开材料") { openSource(source.id) }
+                            WorkspaceRow(title:source.displayTitle,subtitle:"查看暂停原因、受影响的任务和处理按钮",trailing:"打开材料") { openSource(source.id) }
                             ForEach(model.workspacePausedTasks.filter { task in model.claims.first(where: { $0.id == task.claimID })?.references.contains { $0.sourceID == source.id } == true }) { task in
                                 VStack(alignment:.leading,spacing:5) {
                                     Text(task.title)
@@ -199,7 +199,7 @@ struct WorkspaceProcessingView: View {
                 }
                 ForEach(model.records.filter { model.transcriptReviewIssue(for:$0) != nil }) { source in
                     WorkspaceSection(title:"完整转写核对未完成",icon:"waveform.badge.exclamationmark") {
-                        WorkspaceRow(title:source.workspaceTitle,subtitle:"原音与原文保留，尚未进入云端理解",trailing:"查看材料") { openSource(source.id) }
+                        WorkspaceRow(title:source.displayTitle,subtitle:"原音与原文保留，尚未进入云端理解",trailing:"查看材料") { openSource(source.id) }
                         if let error=model.transcriptReviewIssue(for:source) { reason(error) }
                         Button("重试完整转写核对") { Task { await model.reviewTranscription(sourceID:source.id) } }.disabled(!model.modelConfigured || model.transcriptReviewSourceID != nil || model.fullRecordingBusy)
                     }
@@ -257,7 +257,7 @@ struct WorkspaceProcessingView: View {
             }.frame(maxWidth:860,alignment:.leading).padding(30).frame(maxWidth:.infinity,alignment:.top)
         }
     }
-    private func name(_ id:String) -> String { model.records.first(where: { $0.id == id })?.workspaceTitle ?? "已保存的材料" }
+    private func name(_ id:String) -> String { model.records.first(where: { $0.id == id })?.displayTitle ?? "已保存的材料" }
     private func reason(_ text:String) -> some View { DisclosureGroup("查看原因") { Text(text).font(.callout).textSelection(.enabled) }.padding(.bottom,12) }
     private func intentLabel(_ intent:ExpressionProcessingIntentRecord) -> String {
         switch intent.state {

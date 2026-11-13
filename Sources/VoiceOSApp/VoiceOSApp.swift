@@ -1559,7 +1559,7 @@ final class ControlCenter: ObservableObject {
                     guard let association = associationModel else { throw VoiceOSError("关联模型尚未配置；个人表达尚未排队") }
                     let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: record.id, cognition: port.configuration, association: association.configuration)
                     let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "understand:" + record.id + ":" + snapshot.contentDigest, cognition: port.configuration, association: association.configuration)
-                    status = intent.state == .queued ? "个人表达已排队 · 原始录音仍在本机" : "已有处理回执：\(intent.state.rawValue)；未重复排队"
+                    status = intent.state == .queued ? "个人表达已排队 · 原始录音仍在本机" : "已有处理回执：\(workspaceStateLabel(intent.state.rawValue))；未重复排队"
                     scheduleProcessing()
                 } else {
                     let result = try await store.continueSourceUnderstanding(sourceID: record.id, using: port)
@@ -1597,7 +1597,7 @@ final class ControlCenter: ObservableObject {
                     await associateUnderstoodExpression(record.id,segmentedBatchID:batch.id)
                     status="长表达认知已保存 · \(ids.count) 条候选；"+(associationStatuses[record.id] ?? "关联未完成")
                 }
-                else { status="分段处理记录：\(result.state.rawValue) · 未重复发送未知或已结束的请求" }
+                else { status="分段处理记录：\(workspaceStateLabel(result.state.rawValue)) · 未重复发送未知或已结束的请求" }
             } catch { status=error.localizedDescription }
             await refresh();requestReminderRefresh();resumeKnowledgeReviews()
             understandingSource=nil;understandingWorker=nil
@@ -1847,7 +1847,7 @@ final class ControlCenter: ObservableObject {
     }
 
     private func title(for sourceID: String) -> String {
-        records.first(where: { $0.id == sourceID })?.workspaceTitle ?? ""
+        records.first(where: { $0.id == sourceID })?.displayTitle ?? ""
     }
 
     private func applyUnderstandingContinuation(_ result: SourceUnderstandingContinuation, sourceID: String) async {
@@ -1909,7 +1909,7 @@ final class ControlCenter: ObservableObject {
             if current.localOnly { _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: current.policyVersion, localOnly: false) }
             let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: source, cognition: cognition.configuration, association: association.configuration)
             let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "process:" + commandID, cognition: cognition.configuration, association: association.configuration)
-            status = intent.state == .queued ? "原文已保存并排队处理 · 本次文字已允许云端" : "原文已保存 · 原处理回执：\(intent.state.rawValue)；未重复排队"
+            status = intent.state == .queued ? "原文已保存并排队处理 · 本次文字已允许云端" : "原文已保存 · 原处理回执：\(workspaceStateLabel(intent.state.rawValue))；未重复排队"
             await refresh(); scheduleProcessing(); return true
         } catch {
             status = (savedSourceID == nil ? "原文未保存：" : "原文已保存，处理未排队：") + error.localizedDescription
@@ -2071,7 +2071,7 @@ final class ControlCenter: ObservableObject {
                     }
                 } else if result.state == .frozen, result.phase == .association {
                     status = "当前文字的理解已保留 · 旧关联已冻结，未重发；请核对纠错后的依据"
-                } else { status = "表达处理状态：\(result.state.rawValue)" }
+                } else { status = "表达处理状态：\(workspaceStateLabel(result.state.rawValue))" }
                 requestReminderRefresh()
             } catch { status = error.localizedDescription; await refresh(); break }
             await refresh()
@@ -3009,7 +3009,7 @@ struct HistorySearchView: View {
             RelevanceSearchPanel(model:model,coordinator:model.relevance,question:$question,candidates:candidates,dismiss:dismiss)
             ScrollView {
                 if let result = model.retrievalResult {
-                    if result.hits.isEmpty { Text("未找到候选。不代表历史中一定没有相关内容，可以换个表述或关键词。").foregroundStyle(.secondary) }
+                    if result.hits.isEmpty { Text("未找到候选；可以换个说法或关键词。").foregroundStyle(.secondary) }
                     ForEach(result.hits) { hit in
                         VStack(alignment:.leading,spacing:6) {
                             Text(model.records.first(where: { $0.id == hit.document.sourceID })?.displayTitle ?? hit.document.name).font(.headline)
@@ -3018,7 +3018,7 @@ struct HistorySearchView: View {
                             })).disabled(!selectedIDs.contains(hit.id) && selectedIDs.count >= 8)
                             Text("\(hit.method == "exact" ? "文字匹配" : "语义候选 · 待核对") · \(hit.document.origin == "user" ? "用户原文" : "外部原文 · 说话人待核对") · \(hit.document.localOnly ? "仅本地" : "文本可用于云端")").font(.caption).foregroundStyle(.secondary)
                             Text(hit.document.text).textSelection(.enabled)
-                            Text(hit.document.createdAt).font(.caption).foregroundStyle(.secondary)
+                            Text(ConversationReflectionFocus.date(hit.document.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知").font(.caption).foregroundStyle(.secondary)
                             Button("查看原文与出处") { Task { if await model.openRetrievalHit(hit) { dismiss() } } }
                             Divider()
                         }.frame(maxWidth:.infinity,alignment:.leading)
@@ -3056,9 +3056,6 @@ struct RelevanceSearchPanel: View {
                 if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
             }
             Text(coordinator.status).font(.caption).accessibilityIdentifier("relevanceStatus")
-            if let usage = coordinator.usage {
-                Text("输入 \(usage["input_tokens"].map(String.init) ?? "未知") · 输出 \(usage["output_tokens"].map(String.init) ?? "未知") token · 账单费用未知").font(.caption).foregroundStyle(.secondary)
-            }
             if let hits = coordinator.hits {
                 ForEach(hits) { hit in
                     HStack(alignment:.top) {

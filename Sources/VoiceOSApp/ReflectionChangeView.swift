@@ -112,7 +112,7 @@ struct ReflectionChangeView: View {
             if sourceIDs.isEmpty { Text("请返回地图核对观点来源").font(.caption).foregroundStyle(.secondary) }
             ForEach(sourceIDs, id: \.self) { id in
                 if let source = model.records.first(where: { $0.id == id }) {
-                    Text(source.workspaceTitle).font(.caption.weight(.medium)).textSelection(.enabled)
+                    Text(source.displayTitle).font(.caption.weight(.medium)).textSelection(.enabled)
                     Text(source.origin == "user" ? "个人表达" : source.origin == "ai" ? "AI 材料" : "外部资料 · 不代表我的观点").font(.caption).foregroundStyle(.secondary)
                     if let date = source.expressedDate { Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
                 }

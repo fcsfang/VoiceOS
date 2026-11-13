@@ -148,7 +148,7 @@ struct PausedActionBatchControl: View {
     }
 
     private func title(_ sourceID: String) -> String {
-        model.records.first(where: { $0.id == sourceID })?.workspaceTitle ?? "已保存的材料"
+        model.records.first(where: { $0.id == sourceID })?.displayTitle ?? "已保存的材料"
     }
 
     private func skipLabel(_ reason: PausedActionBatchSkipReason) -> String {

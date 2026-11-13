@@ -82,8 +82,7 @@ struct TextCaptureView: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 17) {
             HStack(alignment: .top, spacing: 12) {
-                WorkspaceHero(eyebrow: "CAPTURE YOUR CONTEXT", title: "把文字，带进思考",
-                              subtitle: "可粘贴原文，或拖入一份 txt / md 文件；分别保留自己的表达与外部资料的真实归属。")
+                WorkspaceHero(eyebrow: "", title: "记录想法")
                 Button("导入文字文件") { chooseFile() }.disabled(draft.saving)
             }
             Text("⌘⇧R 开始或停止口述").font(.caption).foregroundStyle(.secondary)
@@ -91,7 +90,7 @@ struct TextCaptureView: View {
                 Text("我的表达").tag(TextCaptureOwnership.personal)
                 Text("外部资料").tag(TextCaptureOwnership.external)
             }.pickerStyle(.segmented).disabled(draft.saving)
-            Text(draft.ownership == .personal ? "仅选择你亲自表达的判断、想法或行动。摘录、文章和其他人的笔记请选外部资料。" : "文章、摘录和他人笔记作为外部资料；作者的观点与行动不会归为你的个人认识或待办。")
+            Text(draft.ownership == .personal ? "只选你亲自表达的判断、想法或行动。" : "文章、摘录和他人笔记；观点不归为你的个人认识或待办。")
                 .font(.callout).foregroundStyle(.secondary)
             TextField(draft.ownership == .personal ? "表达标题" : "资料标题 · 可填写作者与出处", text: $draft.title).textFieldStyle(.roundedBorder).focused($focus, equals: .title).disabled(draft.saving)
             VStack(alignment: .leading, spacing: 8) {
@@ -106,7 +105,7 @@ struct TextCaptureView: View {
                     .accessibilityLabel("完整原文")
             }.frame(maxHeight: .infinity)
             Toggle("允许这份完整原文用于云端理解", isOn: $draft.allowCloud).disabled(draft.saving)
-            Text(draft.allowCloud ? "点击“保存并理解全文”才会发送全文并整理观点与意图；点击“仅本地保存”不会发送，归属仍以以上选择为准。" : "这次只在本机保存。以后可在资料详情中允许云端理解。")
+            Text(draft.allowCloud ? "“保存并理解全文”会发送全文；“仅本地保存”不会发送。" : "这次只在本机保存。以后可在资料详情中允许云端理解。")
                 .font(.caption).foregroundStyle(.secondary)
             if draft.allowCloud && !model.modelConfigured { Text("尚未配置模型连接，仍可先保存完整原文。").font(.caption).foregroundStyle(.secondary) }
         }

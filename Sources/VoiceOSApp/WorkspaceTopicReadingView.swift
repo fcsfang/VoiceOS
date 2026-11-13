@@ -105,7 +105,7 @@ struct WorkspaceTopicReadingView: View {
     private var preparingCards: some View {
         VStack(alignment:.leading,spacing:12) {
             Label(model.organizingTopics ? "正在整理小主题与阅读卡片" : "这份主题尚未生成结构卡片",systemImage:"rectangle.3.group").font(.headline)
-            Text("完整材料已保留。整理后，每个小主题会展示自己的要点、原话和相关行动。").font(.callout).foregroundStyle(.secondary)
+            Text("完整材料已保留；整理后会显示要点、原话与行动。").font(.callout).foregroundStyle(.secondary)
             if model.organizingTopics { ProgressView().controlSize(.small) }
             else {
                 Button("整理主题卡片") { model.queueTopicOrganization(retry:true) }.disabled(!model.modelConfigured)
@@ -127,7 +127,6 @@ struct WorkspaceTopicReadingView: View {
             HStack {
                 VStack(alignment:.leading,spacing:5) {
                     Text("内容结构").font(.system(size:20,weight:.semibold))
-                    Text("点选一个小主题，阅读下方对应卡片").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if selectedSection != nil { Button("查看全部") { selectedSection=nil } }
@@ -173,7 +172,6 @@ struct WorkspaceTopicReadingView: View {
         let sectionActions=actions.filter { section.actionIDs.contains($0.id) }
         return VStack(alignment:.leading,spacing:16) {
             HStack {
-                Label("AI 整理",systemImage:"text.alignleft").font(.system(size:11,weight:.medium)).foregroundStyle(.secondary)
                 Spacer()
                 Text(String(format:"%02d",(sections.firstIndex { $0.id == section.id } ?? 0)+1)).font(.system(size:12,weight:.medium,design:.monospaced)).foregroundStyle(.secondary)
             }
@@ -206,7 +204,7 @@ struct WorkspaceTopicReadingView: View {
                     ForEach(Array(section.evidence.enumerated()),id:\.offset) { _,evidence in
                         VStack(alignment:.leading,spacing:8) {
                             Text(evidence.quote).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
-                            Button(model.records.first { $0.id == evidence.sourceID }?.workspaceTitle ?? "打开来源") { openSource(evidence.sourceID) }.font(.caption)
+                            Button(model.records.first { $0.id == evidence.sourceID }?.displayTitle ?? "打开来源") { openSource(evidence.sourceID) }.font(.caption)
                         }
                     }
                 }.padding(.top,12)
@@ -223,7 +221,7 @@ struct WorkspaceTopicReadingView: View {
     @ViewBuilder private var overviewActions: some View {
         let next=tasks.filter { $0.state == "open" }
         if !next.isEmpty {
-            WorkspaceSection(title:"可以接着做",subtitle:"你已记录的待办，完成情况单独保存",icon:"arrow.right.circle",count:next.count,actionTitle:"全部行动与结果",action:showActions) {
+            WorkspaceSection(title:"可以接着做",icon:"arrow.right.circle",count:next.count,actionTitle:"全部行动与结果",action:showActions) {
                 ForEach(Array(next.prefix(3))) { action in taskButton(action).padding(.vertical,10) }
             }
         }
@@ -240,8 +238,6 @@ struct WorkspaceTopicReadingView: View {
         if !questions.isEmpty {
             VStack(alignment:.leading,spacing:14) {
                     Text("值得继续的问题").font(.system(size:20,weight:.semibold))
-                    Text("AI 根据材料提出的讨论方向，可结合你的实际经历继续。")
-                        .font(.caption).foregroundStyle(.secondary)
                 ForEach(questions,id:\.self) { question in
                     Button { discuss(question) } label: {
                         HStack(alignment:.top,spacing:13) {
@@ -259,7 +255,7 @@ struct WorkspaceTopicReadingView: View {
 
     @ViewBuilder private var connectionsSection: some View {
         if !connections.isEmpty {
-            WorkspaceSection(title:"后来的表达接上了什么",subtitle:"AI 对前后原话的关联分析，保留双方依据",icon:"arrow.triangle.branch",count:connections.count,
+            WorkspaceSection(title:"后来的表达接上了什么",icon:"arrow.triangle.branch",count:connections.count,
                              actionTitle:mode == "概览" ? "完整脉络" : "",action:mode == "概览" ? showUnderstanding : nil) {
                 ForEach(mode == "概览" ? Array(connections.prefix(3)) : connections) { connection in
                     VStack(alignment:.leading,spacing:12) {
@@ -310,16 +306,16 @@ struct WorkspaceTopicReadingView: View {
                 WorkspaceSection(title:"待跟进",icon:"circle",count:open.count) { ForEach(open) { action in actionWithResults(action) } }
             }
             if !completed.isEmpty {
-                WorkspaceSection(title:"已完成的行动",subtitle:"完成记录与实际效果分别呈现",icon:"checkmark.circle",count:completed.count) { ForEach(completed) { action in actionWithResults(action) } }
+                WorkspaceSection(title:"已完成的行动",icon:"checkmark.circle",count:completed.count) { ForEach(completed) { action in actionWithResults(action) } }
             }
             let intentions=actions.filter { $0.kind != "task" }
             if !intentions.isEmpty {
-                WorkspaceSection(title:"探索意图",subtitle:"问题、目标和建议，尚未作为明确待办",icon:"lightbulb",count:intentions.count) { ForEach(intentions) { action in taskButton(action).padding(.vertical,12) } }
+                WorkspaceSection(title:"探索意图",icon:"lightbulb",count:intentions.count) { ForEach(intentions) { action in taskButton(action).padding(.vertical,12) } }
             }
             if !deliveries.isEmpty {
-                WorkspaceSection(title:"AI 的交付",subtitle:"可阅读和继续讨论，实际采纳与效果以你的记录为准",icon:"doc.text",count:deliveries.count) { ForEach(deliveries) { result in deliveryButton(result) } }
+                WorkspaceSection(title:"AI 的交付",icon:"doc.text",count:deliveries.count) { ForEach(deliveries) { result in deliveryButton(result) } }
             }
-            if !sections.isEmpty && actions.isEmpty && deliveries.isEmpty { Text("这个主题目前没有明确待办或结果。认识、疑问和感受仍保留在“认识与问题”，无需为了记录它们而创建任务。").foregroundStyle(.secondary) }
+            if !sections.isEmpty && actions.isEmpty && deliveries.isEmpty { Text("这个主题目前没有待办或结果。").foregroundStyle(.secondary) }
         }
     }
 

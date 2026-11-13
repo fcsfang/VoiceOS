@@ -90,7 +90,7 @@ final class RecentContentHomeSnapshotChecks: XCTestCase {
         let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: [], actions: actions, calendar: calendar)
 
         let feedback = snapshot.days.flatMap(\.items).filter { $0.kind == .feedback }
-        XCTAssertEqual(feedback.map(\.title), ["2 条任务进展"])
+        XCTAssertEqual(feedback.map(\.title), ["任务进展"])
         let rows = feedback.first.flatMap { snapshot.progressRows[$0.id] }
         XCTAssertEqual(rows?.map(\.id), ["f2", "f1"])
         XCTAssertEqual(rows?.map(\.actionID), ["a2", "a1"])
@@ -116,7 +116,7 @@ final class RecentContentHomeSnapshotChecks: XCTestCase {
 
         XCTAssertEqual(snapshot.days.map(\.id), ["2024-05-02", "2024-05-01"])
         let feedback = snapshot.days.flatMap(\.items).filter { $0.kind == .feedback }
-        XCTAssertEqual(feedback.map(\.title), ["1 条任务进展", "1 条任务进展"])
+        XCTAssertEqual(feedback.map(\.title), ["任务进展", "任务进展"])
 
         let newer = feedback.first.flatMap { snapshot.progressRows[$0.id] }?.first
         XCTAssertEqual(newer?.taskTitle, "任务已不可用")

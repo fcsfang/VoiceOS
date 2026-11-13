@@ -450,7 +450,7 @@ struct ReflectionQuestionsView: View {
     }
     private func openSource(_ id: String) { model.requestWorkspaceSource(id); dismiss(); dismissAtlas() }
     private func beginCreating() { editingQuestion = nil; title = ""; titleCloud = false; creating = true }
-    private func sourceTitle(_ id: String) -> String { model.records.first { $0.id == id }?.displayTitle ?? "历史来源 · \(id.prefix(8))" }
+    private func sourceTitle(_ id: String) -> String { model.records.first { $0.id == id }?.displayTitle ?? "历史来源" }
     private func date(_ text: String) -> String { ConversationReflectionFocus.date(text)?.formatted(date: .abbreviated, time: .shortened) ?? text }
     private func icon(_ kind: ReflectionQuestionEntryKind) -> String {
         switch kind { case .observation: "text.bubble"; case .change: "arrow.triangle.branch"; case .experiment: "flask"; case .result: "leaf" }

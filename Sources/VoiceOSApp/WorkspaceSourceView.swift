@@ -73,7 +73,7 @@ struct WorkspaceSourceView: View {
         case .loaded(let versions):
             if versions.isEmpty { Text("尚无原文版本。请先完成转写；原始录音仍已保存。").foregroundStyle(.secondary) }
             ForEach(versions) { version in
-                DisclosureGroup("第 \(version.number) 版 · " + version.createdAt) { Text(version.text).textSelection(.enabled) }
+                DisclosureGroup("第 \(version.number) 版 · " + (ConversationReflectionFocus.date(version.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知")) { Text(version.text).textSelection(.enabled) }
             }
         case .failed(let message): WorkspaceNoticeText(message:"原文版本读取失败：" + message,severity:.danger)
         }
@@ -122,9 +122,9 @@ struct WorkspaceSourceView: View {
     private var readingScrollView: some View {
         ScrollView {
             LazyVStack(alignment:.leading,spacing:30) {
-                WorkspaceHeading(eyebrow:(source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + " · " + source.recordingSubtitle,title:(expression?.sourceIDs.count ?? 0) > 1 ? expression!.title : source.workspaceTitle)
+                WorkspaceHeading(eyebrow:(source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + " · " + source.recordingSubtitle,title:(expression?.sourceIDs.count ?? 0) > 1 ? expression!.title : source.displayTitle)
                 if let expression,expression.sourceIDs.count > 1 {
-                    WorkspaceSection(title:"整体理解",subtitle:expression.state == "completed" ? "AI 已将 \(expression.sourceIDs.count) 段录音合为一次表达，以下要点与行动结合全部分段理解。" : "已识别 \(expression.sourceIDs.count) 段连续录音，正在整体理解。",icon:"waveform.path",count:expression.sourceIDs.count) {
+                    WorkspaceSection(title:"整体理解",icon:"waveform.path",count:expression.sourceIDs.count) {
                         WorkspaceExpandableText(text:expression.summary,label:"整体摘要",size:16)
                         if let ledger = model.actionReviewLedgers[expression.id], ledger.canAcknowledge {
                             ActionReviewAcknowledgementControl(model:model,expressionID:expression.id)
@@ -140,10 +140,10 @@ struct WorkspaceSourceView: View {
                     }
                 }
                 if !programPairs.isEmpty {
-                    WorkspaceSection(title:"节目与我的思考",subtitle:"节目保留外部归属；复述、赞同、质疑和补充按双方原话区分。",icon:"waveform",count:contextLinks.count) {
+                    WorkspaceSection(title:"节目与我的思考",icon:"waveform",count:contextLinks.count) {
                         ForEach(programPairs,id:\.externalSourceID) { pair in
                             if let external=model.records.first(where: { $0.id == pair.externalSourceID }) {
-                                WorkspaceRow(title:external.workspaceTitle,subtitle:pairingIsCurrent(pair) ? "同次录制的完整节目原文 · 可单独回听" : "节目原话或处理许可已变化，关联等待更新",icon:"headphones",trailing:"节目原文") { openSource(external.id) }
+                                WorkspaceRow(title:external.displayTitle,subtitle:pairingIsCurrent(pair) ? "同次录制的完整节目原文 · 可单独回听" : "节目原话或处理许可已变化，关联等待更新",icon:"headphones",trailing:"节目原文") { openSource(external.id) }
                             }
                         }
                         if !contextLinks.isEmpty {
@@ -157,13 +157,13 @@ struct WorkspaceSourceView: View {
                                         Text("我的表达").font(.caption).foregroundStyle(.secondary)
                                         Text(link.personalQuote).textSelection(.enabled)
                                         Button(contextPlaybackLabel(link.personalClaimID,role:"我的")) { Task { await playContextClaim(link.personalClaimID) } }
-                                        Text("AI 关联说明："+link.explanation).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                                        Text("AI 关联："+link.explanation).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
                                     }.padding(.vertical,16)
                                     Divider()
                                 }
                             }.padding(.top,12)
                         } else {
-                            Text(automaticallyUpdating ? "正在按当前原文重新核对节目与我的表达，完成后自动显示关联。" : programPairs.allSatisfy(pairingIsCurrent) ? "已保留完整节目背景；没有已核对的具体回应关系时，保留原文供继续讨论。" : "已保存的双方原文仍可回看，过期的关联暂不参与当前理解。").font(.callout).foregroundStyle(.secondary).padding(.top,10)
+                            Text(automaticallyUpdating ? "正在重新核对节目与我的表达。" : programPairs.allSatisfy(pairingIsCurrent) ? "已保留节目背景；还没有已核对的回应关系。" : "已保存的双方原文仍可回看。").font(.callout).foregroundStyle(.secondary).padding(.top,10)
                         }
                         if !contextIssue.isEmpty { Text(contextIssue).font(.caption).foregroundStyle(.secondary) }
                     }
@@ -230,7 +230,7 @@ struct WorkspaceSourceView: View {
                     RecordingFollowupSummary(receipt: followup, model: model, open: openFollowups)
                 }
                 if pausedThoughts.isEmpty && !pausedActions.isEmpty {
-                    WorkspaceSection(title:"观点已更正，关联待办需要重新确认",subtitle:"打开任务即可看到更正后的观点，并填写准确的待办；之前的任务记录保留。",icon:"pause.circle",count:pausedActions.count) {
+                    WorkspaceSection(title:"观点已更正，关联待办需要重新确认",icon:"pause.circle",count:pausedActions.count) {
                         ForEach(pausedActions) { action in
                             WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看与处理") { openTask(action.id) }
                             WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
@@ -243,7 +243,7 @@ struct WorkspaceSourceView: View {
                     }
                 }
                 if !thoughts.isEmpty {
-                    WorkspaceSection(title:"核心要点",subtitle:"先看主要认识，展开可追溯原话与调整理解",icon:"lightbulb",count:thoughts.count) {
+                    WorkspaceSection(title:"核心要点",icon:"lightbulb",count:thoughts.count) {
                         ForEach(Array((showAllThoughts ? thoughts : Array(thoughts.prefix(3))).enumerated()),id:\.element.id) { index,thought in
                             HStack(alignment:.top,spacing:14) {
                                 Text(String(format:"%02d",index+1)).font(.system(size:14,weight:.semibold,design:.monospaced)).foregroundStyle(.secondary).padding(.top,3)
@@ -286,19 +286,19 @@ struct WorkspaceSourceView: View {
                         }
                     }
                 } else if source.transcript != nil {
-                    if pausedThoughts.isEmpty { Text(source.localOnly ? "完整原文已保存。允许文字用于云端后，VoiceOS 可以理解并连接到主题。" : processing || model.fullRecordingBusy ? "正在整理完整内容，结果会自动呈现在这里。" : "原文已保留，整理结果尚未就绪。可在“更多”中继续或重试整理。").foregroundStyle(.secondary) }
+                    if pausedThoughts.isEmpty { Text(source.localOnly ? "完整原文已保存。允许云端后可理解并连接主题。" : processing || model.fullRecordingBusy ? "正在整理完整内容。" : "原文已保留，整理尚未就绪，可在“更多”中重试。").foregroundStyle(.secondary) }
                 }
                 if let review,!review.issues.isEmpty {
-                    WorkspaceSection(title:"理解有需要补充的地方",subtitle:"知识核查建议，适用边界可在下方展开",icon:"lightbulb",count:review.issues.count) {
+                    WorkspaceSection(title:"理解有需要补充的地方",icon:"lightbulb",count:review.issues.count) {
                         ForEach(review.issues) { issue in WorkspaceExpandableText(text:issue.betterUnderstanding,label:"完整建议",size:16).padding(.vertical,14) }
                     }
                 }
                 let currentActions = actions.filter { $0.validity == "current" }
                 if !currentActions.isEmpty {
-                    WorkspaceSection(title:"相关行动",subtitle:"从这份材料继续推进的事情",icon:"arrow.right.circle",count:currentActions.count) {
+                    WorkspaceSection(title:"相关行动",icon:"arrow.right.circle",count:currentActions.count) {
                         ForEach(currentActions) { action in
                             if let delivery=model.assistantExecutions.first(where: { $0.actionID == action.id && $0.validity == "current" && $0.state == "completed" }) {
-                                WorkspaceRow(title:action.title,subtitle:"AI 已交付 · 原任务完成情况单独保留",icon:"doc.text",trailing:"阅读结果") { openDelivery(delivery.id) }
+                                WorkspaceRow(title:action.title,subtitle:"AI 已交付",icon:"doc.text",trailing:"阅读结果") { openDelivery(delivery.id) }
                             } else { WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),icon:"circle") { openTask(action.id) } }
                             if action.id != currentActions.last?.id { Divider() }
                         }
@@ -310,11 +310,11 @@ struct WorkspaceSourceView: View {
                         ForEach(historyActions) { action in WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看记录") { openTask(action.id) } }
                     }
                 }
-                WorkspaceSection(title:"原话与依据",subtitle:"完整内容、来源核查与修订记录",icon:"quote.bubble") {
+                WorkspaceSection(title:"原话与依据",icon:"quote.bubble") {
                     DisclosureGroup("原话、来源与回听") {
                         VStack(alignment:.leading,spacing:16) {
                             if let transcript=source.transcript { Text(transcript).font(.system(size:16)).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
-                            else { Text("尚无可用转写 · " + (source.error ?? source.jobState ?? source.state)).foregroundStyle(.secondary) }
+                            else { Text("尚无可用转写 · " + (source.error ?? workspaceStateLabel(source.jobState ?? source.state))).foregroundStyle(.secondary) }
                             if source.state == "saved" { Button("打开保存的原件",systemImage:"play.circle") { Task { await model.play(source) } } }
                             ForEach(source.spans.filter { $0.startMS != nil && $0.endMS != nil }) { span in
                                 Button(time(span.startMS!) + "—" + time(span.endMS!) + " · 回听") { Task { _=await model.playSpan(source,milliseconds:span.startMS!,endMilliseconds:span.endMS!) } }
@@ -336,9 +336,9 @@ struct WorkspaceSourceView: View {
                             historyVersions
                             if source.transcript != nil { Button("查看原话分段") { Task { showingSegmentation = await model.previewSegmentation(source) } } }
                             ForEach(model.attempts[source.id] ?? []) { attempt in
-                                Text((attempt.state == "completed" ? "理解已完成" : "理解：" + attempt.state) + (attempt.contextState == "stale" ? " · 历史依据已变化" : "")).font(.caption).foregroundStyle(.secondary)
+                                Text((attempt.state == "completed" ? "理解已完成" : "理解：" + workspaceStateLabel(attempt.state)) + (attempt.contextState == "stale" ? " · 历史依据已变化" : "")).font(.caption).foregroundStyle(.secondary)
                             }
-                            ForEach(loadedDiscussions) { session in Button("打开讨论 · " + String(session.id.prefix(8))) { openDiscussion(session.id) } }
+                            ForEach(Array(loadedDiscussions.enumerated()),id:\.element.id) { index,session in Button("打开讨论 \(index+1)") { openDiscussion(session.id) } }
                         }.padding(.top,12)
                     }.padding(.vertical,16)
                     Divider()
@@ -350,7 +350,7 @@ struct WorkspaceSourceView: View {
                             }
                             if !source.localOnly { Button("重新整理当前内容",action:organize).disabled(source.transcript == nil || model.fullRecordingBusy || model.understandingSource != nil) }
                             ForEach(model.segmentedBatches.filter { $0.scope.plan.source.sourceID == source.id }) { batch in
-                                HStack { Text(batch.state.rawValue).font(.caption);if batch.state == .queued { Button("停止后续处理") { model.cancelSegmented(batch.id) } } }
+                                HStack { Text(workspaceStateLabel(batch.state.rawValue)).font(.caption);if batch.state == .queued { Button("停止后续处理") { model.cancelSegmented(batch.id) } } }
                                 if let error=batch.error { Text(error).font(.caption).foregroundStyle(.secondary) }
                             }
                             Text(model.fullRecordingStatus).font(.caption).foregroundStyle(.secondary)

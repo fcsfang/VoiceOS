@@ -19,7 +19,7 @@ struct MaterialManagementControls: View {
                 Button("取消",role:.cancel) {}
                 Button("移入回收站",role:.destructive) { update(.trashed) }
             } message: {
-                Text("“\(source.workspaceTitle)”\(count > 1 ? "包含 \(count) 段连续录音，将一起移入回收站" : "将从日常列表移除")。停止云端处理并暂停相关理解，原件、原话和任务历史保留，可恢复为仅本机材料。已连接的 Apple 提醒事项仍可能通知，请在提醒事项中单独处理。")
+                Text("“\(source.displayTitle)”\(count > 1 ? "包含 \(count) 段连续录音，将一起移入回收站" : "将从日常列表移除")。停止云端处理并暂停相关理解，原件、原话和任务历史保留，可恢复。已连接的 Apple 提醒事项需在提醒事项中单独处理。")
             }
     }
     private var fullControls: some View {
@@ -69,7 +69,7 @@ struct TrashedMaterialView: View {
     let source: SourceRecord
     var body: some View {
         VStack(alignment:.leading,spacing:22) {
-            WorkspaceHeading(eyebrow:"材料 · 回收站",title:source.workspaceTitle,subtitle:"原件和历史保留；这份材料已停止用于当前理解。")
+            WorkspaceHeading(eyebrow:"材料 · 回收站",title:source.displayTitle,subtitle:"原件和历史保留；这份材料已停止用于当前理解。")
             Text("恢复后仅本机保存。需要云端理解时，请重新允许并整理；之前的结论和任务不会自动重新启用。已连接的 Apple 提醒事项未被删除或取消。")
                 .foregroundStyle(.secondary)
             MaterialManagementControls(model:model,source:source)

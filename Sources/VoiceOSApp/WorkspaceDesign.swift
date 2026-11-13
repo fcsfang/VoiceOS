@@ -24,8 +24,10 @@ struct WorkspaceHero: View {
     var subtitle: String = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(eyebrow).font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2)
-                .textCase(.uppercase).foregroundStyle(palette.accent)
+            if !eyebrow.isEmpty {
+                Text(eyebrow).font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2)
+                    .textCase(.uppercase).foregroundStyle(palette.accent)
+            }
             Text(title).font(.system(size: 27, weight: .medium, design: .serif)).textSelection(.enabled)
                 .accessibilityAddTraits(.isHeader)
             if !subtitle.isEmpty {

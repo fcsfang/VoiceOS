@@ -37,8 +37,7 @@ struct TaskInitiationView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                WorkspaceHero(eyebrow: "START SOMETHING", title: "把事情启动起来",
-                              subtitle: "VoiceOS 只把你说的这句话变成可以开始的下一步：一份交接提示词、一份操作教程、一个问题，或仅记录。它不替你执行，不创建任务，也不写入提醒。")
+                WorkspaceHero(eyebrow: "", title: "启动")
                 composer
                 if let record = selected { package(record) }
                 history
@@ -64,7 +63,7 @@ struct TaskInitiationView: View {
     }
 
     private var composer: some View {
-        WorkspaceSection(title: "先说清楚要开始什么", subtitle: "一句不完整的目标、困难或想法就够；不用提前组织成提示词。", icon: "text.cursor") {
+        WorkspaceSection(title: "先说清楚要开始什么", icon: "text.cursor") {
             VStack(alignment: .leading, spacing: 14) {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $model.initiationText).font(.body).scrollContentBackground(.hidden).frame(minHeight: 120)
@@ -79,7 +78,7 @@ struct TaskInitiationView: View {
                     Menu("从最近材料带入") {
                         if materialSources.isEmpty { Button("还没有可用的个人原话") {}.disabled(true) }
                         ForEach(materialSources.prefix(20)) { source in
-                            Button(source.workspaceTitle) {
+                            Button(source.displayTitle) {
                                 model.initiationText = source.transcript ?? ""
                                 model.initiationSourceID = source.id
                             }
@@ -117,7 +116,7 @@ struct TaskInitiationView: View {
     }
 
     private func package(_ record: TaskInitiationRecord) -> some View {
-        WorkspaceSection(title: "这次要启动的事", subtitle: "内容只来自你的原话，以及明确标注的假设与待确认项。", icon: "arrow.up.forward") {
+        WorkspaceSection(title: "这次要启动的事", icon: "arrow.up.forward") {
             VStack(alignment: .leading, spacing: 16) {
                 sourceLine(record)
                 HStack(alignment: .top, spacing: 12) {
@@ -144,7 +143,7 @@ struct TaskInitiationView: View {
     }
 
     private func sourceLine(_ record: TaskInitiationRecord) -> some View {
-        let title = model.records.first(where: { $0.id == record.sourceID })?.workspaceTitle ?? "原话材料"
+        let title = model.records.first(where: { $0.id == record.sourceID })?.displayTitle ?? "原话材料"
         return Button("依据：" + title) { openSource(record.sourceID) }.buttonStyle(.borderless).font(.caption)
     }
 
