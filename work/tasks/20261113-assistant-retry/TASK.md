@@ -1,9 +1,10 @@
 ---
-status: open
+status: merged
 started: 2026-11-13
 updated: 2026-11-13
 branch: work/assistant-retry
 pr: 140
+merged: 05fc5ec
 owner: coordinator
 ---
 
@@ -39,3 +40,5 @@ owner: coordinator
 ## 进展
 
 - 2026-11-13 实现、测试、复核完成；分支从 main 独立开出。
+
+- 2026-11-13 合并 `05fc5ec`（PR #140）；dist 从合并后 main 重建并重启。用户在面板重试 6 条识别与 1 条代办核对恢复率。
