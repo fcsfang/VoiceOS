@@ -41,6 +41,7 @@ public struct SourceRecord: Identifiable, Sendable {
     public let feedbackActionID: String?
     public let feedbackActionVersion: Int?
     public let feedbackKind: String?
+    public let feedbackRelation: String?
     public let timeZone: String
     public let presentation: RecordingPresentation?
 }

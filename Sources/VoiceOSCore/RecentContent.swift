@@ -165,7 +165,7 @@ public enum RecentContentIndex {
         var materialItems: [RecentContentItem] = []
         var feedbackSources: [(SourceRecord, Date)] = []
         for source in usable {
-            let date = source.expressedDate ?? ConversationReflectionFocus.date(source.createdAt) ?? Date()
+            let date = date(of: source)
             if source.feedbackKind != nil || source.name.hasPrefix("行动反馈") {
                 feedbackSources.append((source, date))
                 continue
@@ -246,9 +246,13 @@ public enum RecentContentIndex {
             let excerpts = entries.sorted { $0.1 > $1.1 }.compactMap { $0.0.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
             guard !excerpts.isEmpty else { return nil }
             return RecentContentItem(id: "feedback-" + key, sourceIDs: entries.map(\.0.id), date: latest,
-                                     title: "\(entries.count) 条行动反馈", summary: "", thoughts: [],
+                                     title: "\(entries.count) 条任务进展", summary: "", thoughts: [],
                                      excerpts: excerpts, kind: .feedback)
         }
+    }
+
+    static func date(of source: SourceRecord) -> Date {
+        source.expressedDate ?? ConversationReflectionFocus.date(source.createdAt) ?? Date()
     }
 
     private static func dayKey(_ date: Date, calendar: Calendar) -> String {
@@ -257,16 +261,49 @@ public enum RecentContentIndex {
     }
 }
 
+/// One task feedback entry on the home page: the user's words plus the task
+/// they belong to, so the row can open that task.
+public struct RecentContentProgressRow: Identifiable, Equatable, Sendable {
+    public static let unavailableTaskTitle = "任务已不可用"
+    public let id: String
+    public let actionID: String
+    public let taskTitle: String
+    public let relationLabel: String
+    public let text: String
+    public let date: Date
+    public var isTaskAvailable: Bool { taskTitle != Self.unavailableTaskTitle }
+    public init(id: String, actionID: String, taskTitle: String, relationLabel: String, text: String, date: Date) {
+        self.id = id; self.actionID = actionID; self.taskTitle = taskTitle
+        self.relationLabel = relationLabel; self.text = text; self.date = date
+    }
+    /// The record's relation name when it has one; otherwise the kind's name.
+    static func relationLabel(_ relation: String?, kind: String?) -> String {
+        switch relation {
+        case "repeat": "再次提及"
+        case "progress": "实际进展"
+        case "outcome": "收获与结果"
+        default:
+            switch kind {
+            case "outcome": "实际结果"
+            case "reflection": "我的反思"
+            default: "进展"
+            }
+        }
+    }
+}
+
 /// The home content derived once per workspace reload: the day layout the
-/// timeline shows, and each material item's digest keyed by item id. A pure
-/// function of its inputs, so a render only reads it. Feedback items have no
-/// digest; the reader shows their excerpts directly.
+/// timeline shows, each material item's digest keyed by item id, and each
+/// feedback item's task progress rows keyed by item id. A pure function of its
+/// inputs, so a render only reads it.
 public struct RecentContentHomeSnapshot: Equatable, Sendable {
     public let days: [RecentContentDay]
     public let digests: [String: RecentContentDigest]
+    public let progressRows: [String: [RecentContentProgressRow]]
 
-    public init(days: [RecentContentDay], digests: [String: RecentContentDigest]) {
-        self.days = days; self.digests = digests
+    public init(days: [RecentContentDay], digests: [String: RecentContentDigest],
+                progressRows: [String: [RecentContentProgressRow]] = [:]) {
+        self.days = days; self.digests = digests; self.progressRows = progressRows
     }
 
     public static func build(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord],
@@ -280,6 +317,22 @@ public struct RecentContentHomeSnapshot: Equatable, Sendable {
                 .map { RecentContentTask(id: $0.id, title: $0.title) }
             digests[item.id] = RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration, tasks: tasks)
         }
-        return RecentContentHomeSnapshot(days: days, digests: digests)
+        var progressRows: [String: [RecentContentProgressRow]] = [:]
+        let sourcesByID = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let taskTitles = Dictionary(actions.map { ($0.id, $0.title) }, uniquingKeysWith: { first, _ in first })
+        for item in days.flatMap(\.items) where item.kind == .feedback {
+            let rows = item.sourceIDs.compactMap { sourcesByID[$0] }.compactMap { source -> RecentContentProgressRow? in
+                guard source.feedbackKind != nil, let actionID = source.feedbackActionID else { return nil }
+                return RecentContentProgressRow(id: source.id, actionID: actionID,
+                                                taskTitle: taskTitles[actionID] ?? RecentContentProgressRow.unavailableTaskTitle,
+                                                relationLabel: RecentContentProgressRow.relationLabel(source.feedbackRelation, kind: source.feedbackKind),
+                                                text: source.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+                                                date: RecentContentIndex.date(of: source))
+            }
+            progressRows[item.id] = rows.sorted { left, right in
+                left.date == right.date ? left.id < right.id : left.date > right.date
+            }
+        }
+        return RecentContentHomeSnapshot(days: days, digests: digests, progressRows: progressRows)
     }
 }

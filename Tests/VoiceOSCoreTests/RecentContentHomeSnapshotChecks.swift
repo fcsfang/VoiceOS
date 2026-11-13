@@ -3,12 +3,14 @@ import XCTest
 
 final class RecentContentHomeSnapshotChecks: XCTestCase {
     private func source(_ id: String, createdAt: String, transcript: String = "原话内容",
-                        feedbackKind: String? = nil) -> SourceRecord {
+                        feedbackKind: String? = nil, feedbackActionID: String? = nil,
+                        feedbackRelation: String? = nil) -> SourceRecord {
         SourceRecord(id: id, assetID: "asset-" + id, name: id, state: "saved", kind: "user_text", createdAt: createdAt,
                      bytes: 1, duration: nil, jobState: "completed", transcript: transcript, error: nil,
                      relativePath: "assets/" + id, transcriptVersionID: "t-" + id, transcriptionBackend: nil,
                      spans: [], localOnly: false, policyVersion: 1, origin: "user", speaker: "user",
-                     feedbackActionID: nil, feedbackActionVersion: nil, feedbackKind: feedbackKind,
+                     feedbackActionID: feedbackActionID, feedbackActionVersion: feedbackActionID == nil ? nil : 1,
+                     feedbackKind: feedbackKind, feedbackRelation: feedbackRelation,
                      timeZone: "Asia/Shanghai", presentation: nil)
     }
 
@@ -69,5 +71,63 @@ final class RecentContentHomeSnapshotChecks: XCTestCase {
         for item in feedback {
             XCTAssertNil(snapshot.digests[item.id], "feedback items carry no digest")
         }
+    }
+
+    func testFeedbackGroupsShowTaskProgressWithResolvedTaskContext() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let sources = [
+            source("f1", createdAt: "2024-05-01T10:00:00Z", transcript: "桌面已经整理完一半",
+                   feedbackKind: "reflection", feedbackActionID: "a1", feedbackRelation: "progress"),
+            source("f2", createdAt: "2024-05-01T11:00:00Z", transcript: "又想起要汇报",
+                   feedbackKind: "reflection", feedbackActionID: "a2", feedbackRelation: "repeat"),
+        ]
+        let actions = [
+            action("a1", claimID: "c1", title: "整理桌面"),
+            action("a2", claimID: "c1", title: "打磨汇报"),
+        ]
+
+        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: [], actions: actions, calendar: calendar)
+
+        let feedback = snapshot.days.flatMap(\.items).filter { $0.kind == .feedback }
+        XCTAssertEqual(feedback.map(\.title), ["2 条任务进展"])
+        let rows = feedback.first.flatMap { snapshot.progressRows[$0.id] }
+        XCTAssertEqual(rows?.map(\.id), ["f2", "f1"])
+        XCTAssertEqual(rows?.map(\.actionID), ["a2", "a1"])
+        XCTAssertEqual(rows?.map(\.taskTitle), ["打磨汇报", "整理桌面"])
+        XCTAssertEqual(rows?.map(\.relationLabel), ["再次提及", "实际进展"])
+        XCTAssertEqual(rows?.map(\.text), ["又想起要汇报", "桌面已经整理完一半"])
+        XCTAssertEqual(rows?.map(\.isTaskAvailable), [true, true])
+    }
+
+    func testFeedbackProgressRowsGroupByDayAndMarkMissingTasks() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let sources = [
+            source("f1", createdAt: "2024-05-01T10:00:00Z", transcript: "第一天的反馈",
+                   feedbackKind: "reflection", feedbackActionID: "a1", feedbackRelation: "repeat"),
+            source("f2", createdAt: "2024-05-02T10:00:00Z", transcript: "第二天的反馈",
+                   feedbackKind: "outcome", feedbackActionID: "gone"),
+        ]
+
+        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: [],
+                                                       actions: [action("a1", claimID: "c1", title: "整理桌面")],
+                                                       calendar: calendar)
+
+        XCTAssertEqual(snapshot.days.map(\.id), ["2024-05-02", "2024-05-01"])
+        let feedback = snapshot.days.flatMap(\.items).filter { $0.kind == .feedback }
+        XCTAssertEqual(feedback.map(\.title), ["1 条任务进展", "1 条任务进展"])
+
+        let newer = feedback.first.flatMap { snapshot.progressRows[$0.id] }?.first
+        XCTAssertEqual(newer?.taskTitle, "任务已不可用")
+        XCTAssertEqual(newer?.relationLabel, "实际结果")
+        XCTAssertEqual(newer?.text, "第二天的反馈")
+        XCTAssertEqual(newer?.isTaskAvailable, false)
+
+        let older = feedback.last.flatMap { snapshot.progressRows[$0.id] }?.first
+        XCTAssertEqual(older?.taskTitle, "整理桌面")
+        XCTAssertEqual(older?.relationLabel, "再次提及")
+        XCTAssertEqual(older?.text, "第一天的反馈")
+        XCTAssertEqual(older?.isTaskAvailable, true)
     }
 }
