@@ -133,10 +133,12 @@ public struct RecentContentDigest: Equatable, Sendable {
     }
 
     private static func ranked(_ thoughts: [RecentContentThought]) -> [RecentContentThought] {
-        thoughts.enumerated().sorted { left, right in
-            let scores = (leadScore(left.element.statement), leadScore(right.element.statement))
-            return scores.0 == scores.1 ? left.offset < right.offset : scores.0 > scores.1
-        }.map(\.element)
+        let scored: [(offset: Int, thought: RecentContentThought, score: Double)] = thoughts.enumerated().map {
+            (offset: $0.offset, thought: $0.element, score: leadScore($0.element.statement))
+        }
+        return scored.sorted { left, right in
+            left.score == right.score ? left.offset < right.offset : left.score > right.score
+        }.map(\.thought)
     }
 
     private static func occurrences(of word: String, in text: String) -> Int {
@@ -252,5 +254,32 @@ public enum RecentContentIndex {
     private static func dayKey(_ date: Date, calendar: Calendar) -> String {
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+}
+
+/// The home content derived once per workspace reload: the day layout the
+/// timeline shows, and each material item's digest keyed by item id. A pure
+/// function of its inputs, so a render only reads it. Feedback items have no
+/// digest; the reader shows their excerpts directly.
+public struct RecentContentHomeSnapshot: Equatable, Sendable {
+    public let days: [RecentContentDay]
+    public let digests: [String: RecentContentDigest]
+
+    public init(days: [RecentContentDay], digests: [String: RecentContentDigest]) {
+        self.days = days; self.digests = digests
+    }
+
+    public static func build(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord],
+                             calendar: Calendar = .current) -> RecentContentHomeSnapshot {
+        let days = RecentContentIndex.build(sources: sources, claims: claims, calendar: calendar)
+        var digests: [String: RecentContentDigest] = [:]
+        for item in days.flatMap(\.items) where item.kind == .material {
+            let claimIDs = Set(item.thoughts.map(\.claimID))
+            let tasks = actions
+                .filter { $0.state == "open" && $0.validity == "current" && $0.kind == "task" && claimIDs.contains($0.claimID) }
+                .map { RecentContentTask(id: $0.id, title: $0.title) }
+            digests[item.id] = RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration, tasks: tasks)
+        }
+        return RecentContentHomeSnapshot(days: days, digests: digests)
     }
 }

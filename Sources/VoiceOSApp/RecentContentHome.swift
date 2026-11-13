@@ -15,7 +15,7 @@ struct RecentContentHome: View {
     @State private var showsAllTasks = false
     private let topAnchor = "home.top"
 
-    private var days: [RecentContentDay] { RecentContentIndex.build(sources: model.records, claims: model.claims) }
+    private var days: [RecentContentDay] { model.homeSnapshot.days }
     private var items: [RecentContentItem] { days.flatMap(\.items) }
     private var selected: RecentContentItem? {
         items.first { $0.id == selectedID } ?? items.first { !$0.thoughts.isEmpty } ?? items.first
@@ -79,7 +79,7 @@ struct RecentContentHome: View {
     }
 
     private func rowMeta(_ item: RecentContentItem) -> String {
-        let digest = RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration)
+        let digest = model.homeSnapshot.digests[item.id] ?? RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration)
         guard digest.thoughtCount > 0 else { return timeLabel(item.date) }
         return "\(timeLabel(item.date)) · \(digest.thoughtCount) 条想法 · \(digest.threads.count) 条线索"
     }
@@ -122,7 +122,7 @@ struct RecentContentHome: View {
     }
 
     private func materialReader(_ item: RecentContentItem, scroll: ScrollViewProxy) -> some View {
-        let digest = RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration, tasks: tasks(for: item))
+        let digest = model.homeSnapshot.digests[item.id] ?? RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration)
         return VStack(alignment: .leading, spacing: 0) {
             Text(readerMeta(item, digest: digest)).font(.system(size: 12)).foregroundStyle(.secondary)
             Text(item.title).font(.system(size: 27, weight: .semibold, design: .serif)).lineSpacing(4)
@@ -269,13 +269,6 @@ struct RecentContentHome: View {
                 Text("录音概览（AI 整理）").font(.system(size: 12)).foregroundStyle(.secondary)
             }.padding(.top, 44)
         }
-    }
-
-    private func tasks(for item: RecentContentItem) -> [RecentContentTask] {
-        let claimIDs = Set(item.thoughts.map(\.claimID))
-        return model.actionRecords
-            .filter { $0.state == "open" && $0.validity == "current" && $0.kind == "task" && claimIDs.contains($0.claimID) }
-            .map { RecentContentTask(id: $0.id, title: $0.title) }
     }
 
     private func kindLabel(_ kind: RecentThoughtKind) -> String {
