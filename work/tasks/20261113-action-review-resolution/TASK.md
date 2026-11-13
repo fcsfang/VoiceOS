@@ -1,9 +1,10 @@
 ---
-status: open
+status: merged
 started: 2026-11-13
 updated: 2026-11-13
 branch: work/action-review-resolution
 pr: 137
+merged: f6af16b
 owner: coordinator
 ---
 
@@ -58,3 +59,5 @@ owner: coordinator
 ## 进展
 
 - 2026-11-13 根因确认、两案设计仲裁、实现、测试与副本/界面验证完成；分支从 main 独立开出，未合入。
+
+- 2026-11-13 合并 `f6af16b`（PR #137）：schema 52→53，迁移包 48；dist 从合并后 main 重建。实时库的两条待核对在换构建后由用户在界面确认。
