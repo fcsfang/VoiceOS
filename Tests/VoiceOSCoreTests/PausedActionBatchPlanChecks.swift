@@ -10,7 +10,7 @@ final class PausedActionBatchPlanChecks: XCTestCase {
                      bytes: 1, duration: nil, jobState: "completed", transcript: transcript, error: nil,
                      relativePath: "assets/" + id, transcriptVersionID: "t-" + id, transcriptionBackend: backend,
                      spans: [], localOnly: localOnly, policyVersion: 1, origin: origin, speaker: speaker,
-                     feedbackActionID: nil, feedbackActionVersion: nil, feedbackKind: nil,
+                     feedbackActionID: nil, feedbackActionVersion: nil, feedbackKind: nil, feedbackRelation: nil,
                      timeZone: "Asia/Shanghai", presentation: presentation)
     }
 

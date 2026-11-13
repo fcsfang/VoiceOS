@@ -353,7 +353,7 @@ struct WorkspaceView: View {
                             try await model.themeReply(briefing)
                         })
                 } else {
-                    RecentContentHome(model: model, openSource: { go(.source($0)) }, capture: { go(.capture) })
+                    RecentContentHome(model: model, openSource: { go(.source($0)) }, openTask: { go(.task($0)) }, capture: { go(.capture) })
                 }
             }
         case .themes: scrolled { themes }.id(navigationEntry)

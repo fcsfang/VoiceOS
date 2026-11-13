@@ -9,6 +9,7 @@ struct RecentContentHome: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let openSource: (String) -> Void
+    let openTask: (String) -> Void
     let capture: () -> Void
     @State private var selectedID: String?
     @State private var expandedThreads: Set<String> = []
@@ -66,7 +67,10 @@ struct RecentContentHome: View {
                 Text(timeLabel(item.date)).font(.system(size: 11)).foregroundStyle(.secondary)
                 Text(item.title).font(.system(size: 13.5, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(palette.text).lineLimit(2).multilineTextAlignment(.leading)
-                Text("\(item.excerpts.count) 段反馈").font(.system(size: 11)).foregroundStyle(.secondary)
+                let meta = feedbackMeta(item)
+                if !meta.isEmpty {
+                    Text(meta).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
             } else {
                 Text(item.title).font(.system(size: 13.5, weight: isSelected ? .semibold : .regular))
                     .foregroundStyle(palette.text).lineLimit(2).multilineTextAlignment(.leading)
@@ -76,6 +80,15 @@ struct RecentContentHome: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10).padding(.vertical, 8)
         .background(isSelected ? palette.selection : .clear, in: RoundedRectangle(cornerRadius: 9))
+    }
+
+    private func feedbackMeta(_ item: RecentContentItem) -> String {
+        var counts: [(label: String, count: Int)] = []
+        for row in model.homeSnapshot.progressRows[item.id] ?? [] {
+            if let index = counts.firstIndex(where: { $0.label == row.relationLabel }) { counts[index].count += 1 }
+            else { counts.append((row.relationLabel, 1)) }
+        }
+        return counts.map { "\($0.label) \($0.count)" }.joined(separator: " · ")
     }
 
     private func rowMeta(_ item: RecentContentItem) -> String {
@@ -105,20 +118,46 @@ struct RecentContentHome: View {
 
     @ViewBuilder private func readerContent(_ item: RecentContentItem, scroll: ScrollViewProxy) -> some View {
         if item.kind == .feedback {
+            let rows = model.homeSnapshot.progressRows[item.id] ?? []
             VStack(alignment: .leading, spacing: 18) {
-                Text([dateLabel(item.date), timeLabel(item.date), "行动反馈"].joined(separator: " · "))
+                Text([dateLabel(item.date), timeLabel(item.date), "任务进展"].joined(separator: " · "))
                     .font(.system(size: 12)).foregroundStyle(.secondary)
                 Text(item.title).font(.system(size: 27, weight: .semibold, design: .serif)).lineSpacing(4).textSelection(.enabled)
-                VStack(alignment: .leading, spacing: 12) {
-                    ForEach(Array(item.excerpts.enumerated()), id: \.offset) { index, excerpt in
-                        if index > 0 { Divider() }
-                        Text(excerpt).font(.system(size: 14.5)).lineSpacing(4).textSelection(.enabled)
+                if rows.isEmpty {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(item.excerpts.enumerated()), id: \.offset) { index, excerpt in
+                            if index > 0 { Divider() }
+                            Text(excerpt).font(.system(size: 14.5)).lineSpacing(4).textSelection(.enabled)
+                        }
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                            if index > 0 { Divider() }
+                            progressRow(row)
+                        }
                     }
                 }
             }
         } else {
             materialReader(item, scroll: scroll)
         }
+    }
+
+    private func progressRow(_ row: RecentContentProgressRow) -> some View {
+        Button { openTask(row.actionID) } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(row.taskTitle).font(.system(size: 14.5, weight: .semibold))
+                    Text(row.relationLabel).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                Text(row.text).font(.system(size: 14.5)).lineSpacing(4).textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!row.isTaskAvailable)
     }
 
     private func materialReader(_ item: RecentContentItem, scroll: ScrollViewProxy) -> some View {
