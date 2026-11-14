@@ -165,6 +165,8 @@ struct WorkspaceTaskView: View {
     @State private var scheduleAction: ActionRecord?
     @State private var replacementTitle = ""
     @State private var pauseReasons: [String] = []
+    @State private var undoMessage: String?
+    @State private var undoToken = UUID()
     private var correctedClaim: CandidateClaim? {
         model.claims.first { $0.id == action.claimID && $0.validity == "current" && $0.reviewState != "rejected" && $0.reviewVersion > action.claimReviewVersion }
     }
@@ -369,6 +371,23 @@ struct WorkspaceTaskView: View {
         } message: { Text("结果会接回这条任务，不会自动生成记录。") }
         .onDisappear { model.stopPlayback() }
         .onAppear { replacementTitle = action.title }
+        .overlay(alignment: .bottom) {
+            if let undoMessage {
+                HStack(spacing: 12) {
+                    Text(undoMessage).vosFont(14, weight: .medium)
+                    Button("撤销") { undo() }
+                }
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(palette.selection, in: Capsule())
+                .overlay { Capsule().strokeBorder(palette.border) }
+                .padding(.bottom, 24)
+            }
+        }
+        .task(id: undoToken) {
+            guard undoMessage != nil else { return }
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            undoMessage = nil
+        }
     }
     @State private var showingFeedback = false
     @ViewBuilder private var scheduleSection: some View {
@@ -446,8 +465,11 @@ struct WorkspaceTaskView: View {
             guard model.actionRecords.first(where: { $0.id == action.id })?.state == state.rawValue else { error=model.status; return }
             error=""
             if state == .completed {
+                showUndo("已完成")
                 await loadFeedback()
                 if feedbackHistory.isEmpty { askingForResult = true }
+            } else {
+                undoMessage = nil
             }
         }
     }
@@ -457,7 +479,18 @@ struct WorkspaceTaskView: View {
     private func stopFollowing() {
         Task {
             await model.changeAction(action, state: .dismissed)
-            if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.dismissed.rawValue { error = "" }
+            if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.dismissed.rawValue { error = "";showUndo("已不再跟进") }
+            else { error = model.status }
+        }
+    }
+    private func showUndo(_ message:String) {
+        undoMessage = message
+        undoToken = UUID()
+    }
+    private func undo() {
+        let id = action.id
+        Task {
+            if await model.undoActionState(actionID: id) { undoMessage = nil }
             else { error = model.status }
         }
     }
