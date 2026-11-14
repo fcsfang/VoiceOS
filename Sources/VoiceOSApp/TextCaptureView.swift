@@ -120,7 +120,7 @@ struct TextCaptureView: View {
                 Menu("模板") { templateMenu }.disabled(draft.saving)
             }
             Text("⌘⇧R 开始或停止口述").font(.caption).foregroundStyle(.secondary)
-            TextField(draft.ownership == .personal ? "表达标题 · 可留空，默认取正文首行" : "资料标题 · 可留空，默认取正文首行", text: $draft.title).textFieldStyle(.roundedBorder).focused($focus, equals: .title).disabled(draft.saving)
+            TextField(draft.ownership == .personal ? "表达标题 · 可留空，默认取正文首行" : "资料标题 · 可留空，默认取正文首行", text: $draft.title).textFieldStyle(.roundedBorder).focused($focus, equals: .title).disabled(draft.saving).accessibilityLabel("标题")
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("完整原文").font(.headline)
@@ -226,7 +226,7 @@ struct TextCaptureView: View {
     }
     private var templateNameSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("保存为模板").font(.title2)
+            Text("保存为模板").font(.title2).accessibilityAddTraits(.isHeader)
             Text("把当前完整原文保存为模板，之后可一键填入草稿。").font(.callout).foregroundStyle(.secondary)
             TextField("模板名称", text: $templateName).textFieldStyle(.roundedBorder)
                 .onChange(of: templateName) { _, value in
@@ -239,13 +239,14 @@ struct TextCaptureView: View {
                 Button(templateSaving ? "正在保存…" : "保存") { Task { await saveTemplate() } }
                     .buttonStyle(.borderedProminent)
                     .disabled(templateSaving || templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("保存为模板")
             }
         }.padding(24).frame(width: 420)
     }
     private var manageTemplatesSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("管理模板").font(.title2)
+                Text("管理模板").font(.title2).accessibilityAddTraits(.isHeader)
                 Spacer()
                 Button("完成") { showingManageTemplates = false }
             }
@@ -263,6 +264,7 @@ struct TextCaptureView: View {
                                 }
                                 Spacer(minLength: 8)
                                 Button("删除", role: .destructive) { pendingTemplateDelete = template }
+                                    .accessibilityLabel("删除模板：" + template.name)
                             }.padding(.vertical, 10)
                             if template.id != templates.last?.id { Divider() }
                         }
@@ -273,9 +275,9 @@ struct TextCaptureView: View {
     }
     private var linkImportSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("从链接导入正文").font(.title2)
+            Text("从链接导入正文").font(.title2).accessibilityAddTraits(.isHeader)
             Text("只支持 http 或 https 链接。抓取成功后填入当前草稿；当前草稿不为空时会先确认替换。").font(.callout).foregroundStyle(.secondary)
-            TextField("https://…", text: $linkText).textFieldStyle(.roundedBorder)
+            TextField("https://…", text: $linkText).textFieldStyle(.roundedBorder).accessibilityLabel("网页链接")
             HStack {
                 Button("取消") { showingLinkPrompt = false }
                 Spacer()

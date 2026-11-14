@@ -20,7 +20,7 @@ struct FeynmanPractice: View {
             if let feedback {
                 result(feedback)
             } else {
-                TextEditor(text: $response).frame(minHeight: 200).workspaceEditorSurface()
+                TextEditor(text: $response).frame(minHeight: 200).workspaceEditorSurface().accessibilityLabel("复述内容")
                 HStack {
                     Text("\(trimmed.count) 字").font(.caption).foregroundStyle(.secondary)
                     Spacer()
@@ -43,10 +43,10 @@ struct FeynmanPractice: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if !report.covered.isEmpty {
-                    Text("覆盖到的要点").vosFont(13, weight: .semibold)
+                    Text("覆盖到的要点").vosFont(13, weight: .semibold).accessibilityAddTraits(.isHeader)
                     Text(report.covered.joined(separator: "、")).vosFont(14).textSelection(.enabled)
                 }
-                Text("还没讲到的").vosFont(13, weight: .semibold)
+                Text("还没讲到的").vosFont(13, weight: .semibold).accessibilityAddTraits(.isHeader)
                 if report.missed.isEmpty {
                     Text("原话里的词都讲到了。").vosFont(13).foregroundStyle(.secondary)
                 } else {
