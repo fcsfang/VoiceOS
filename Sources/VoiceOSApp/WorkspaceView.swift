@@ -817,7 +817,7 @@ struct WorkspaceView: View {
         return WorkspaceRow(title:combined ? expression!.title : source.displayTitle,subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : ""),icon:source.kind.contains("text") ? "doc.text" : "waveform") { go(.source(source.id)) }
     }
     private func actionRowSubtitle(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> String {
-        let detail:String
+        var detail:String
         if let entry=timeEntry,entry.source == .localSchedule {
             if let due=entry.due { detail=(entry.isOverdue ? "已逾期 " : "到期 ") + due.summary } else { detail="" }
             if entry.needsLocalSyncLabel { detail=detail.isEmpty ? "本地未同步" : detail + " · 本地未同步" }
