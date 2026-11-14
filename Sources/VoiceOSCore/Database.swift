@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...59).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...60).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1123,6 +1123,31 @@ final class Database {
                     try execute("CREATE TRIGGER search_dirty_\(table) AFTER UPDATE ON \(table) BEGIN INSERT OR REPLACE INTO search_index_meta(key, value) VALUES('dirty', '1'); END")
                 }
                 try execute("PRAGMA user_version=59")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "59" {
+            try transaction {
+                try execute("""
+                CREATE TABLE action_recurrence (
+                  action_id TEXT PRIMARY KEY REFERENCES actions(id),
+                  series_id TEXT NOT NULL,
+                  period TEXT NOT NULL CHECK(period IN ('daily','weekly','biweekly','monthly')),
+                  created_at TEXT NOT NULL
+                )
+                """)
+                try execute("CREATE INDEX action_recurrence_series ON action_recurrence(series_id)")
+                try execute("""
+                CREATE TABLE source_entities (
+                  source_id TEXT NOT NULL REFERENCES sources(id),
+                  name TEXT NOT NULL,
+                  kind TEXT NOT NULL CHECK(kind IN ('person','organization','term')),
+                  sentence_ids TEXT NOT NULL,
+                  mention_count INTEGER NOT NULL,
+                  PRIMARY KEY(source_id, name)
+                )
+                """)
+                try execute("PRAGMA user_version=60")
             }
         }
 
