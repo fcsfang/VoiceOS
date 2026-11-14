@@ -133,7 +133,7 @@ struct ThoughtPanoramaView: View {
         let compact = width < 900
         let minimal = width < 720
         return HStack(spacing: minimal ? 6 : compact ? 8 : 12) {
-            Text("思考全景").font(.system(size: 16, weight: .semibold)).lineLimit(1)
+            Text("思考全景").vosFont(16, weight: .semibold).lineLimit(1)
             if let snapshot = state?.snapshot, snapshot.isPartial {
                 partialChip(snapshot, short: compact)
             }
@@ -155,7 +155,7 @@ struct ThoughtPanoramaView: View {
                 Spacer(minLength: 0)
             } else {
                 Text(toolbarMessage)
-                    .font(.system(size: 12))
+                    .vosFont(12)
                     .foregroundStyle(showsUnitFailure ? palette.warning : Color.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -195,7 +195,7 @@ struct ThoughtPanoramaView: View {
     private func readErrorBanner(_ text: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(palette.danger)
-            Text(text).font(.system(size: 12)).lineLimit(2)
+            Text(text).vosFont(12).lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button("重试", action: retryRefresh).controlSize(.small)
             Button { dismissReadError() } label: { Image(systemName: "xmark") }
@@ -213,7 +213,7 @@ struct ThoughtPanoramaView: View {
         let total = snapshot.workflow?.totalUnitCount ?? 0
         return Button { showCoverage = true } label: {
             Text(short ? "\(verified)/\(total)" : "部分全景 \(verified)/\(total)")
-                .font(.system(size: 12, weight: .medium))
+                .vosFont(12, weight: .medium)
                 .foregroundStyle(palette.warning)
                 .lineLimit(1)
                 .padding(.horizontal, 8)
@@ -279,7 +279,7 @@ struct ThoughtPanoramaView: View {
 
     private func searchMatchText(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11))
+            .vosFont(11)
             .foregroundStyle(searchMatches.count == 0 ? palette.warning : Color.secondary)
             .lineLimit(1)
             .fixedSize()
@@ -293,7 +293,7 @@ struct ThoughtPanoramaView: View {
 
     private var locateButton: some View {
         Button("定位") { recenterToken &+= 1 }
-            .font(.system(size: 11))
+            .vosFont(11)
             .buttonStyle(.borderless)
             .help(locateHelp)
             .accessibilityLabel(locateHelp)
@@ -398,7 +398,7 @@ struct ThoughtPanoramaView: View {
                         .padding(.leading, 8)
                         .padding(.top, 4)
                     } label: {
-                        Text(region.title).font(.system(size: 13, weight: .medium))
+                        Text(region.title).vosFont(13, weight: .medium)
                     }
                 }
                 Divider()
@@ -452,7 +452,7 @@ struct ThoughtPanoramaView: View {
             ZStack {
                 Ellipse().fill(palette.selection).frame(width: 300, height: 190).rotationEffect(.degrees(-15))
                 Ellipse().fill(palette.accent.opacity(0.08)).frame(width: 240, height: 160).offset(x: 110, y: 40)
-                Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 62, weight: .light)).foregroundStyle(.secondary)
+                Image(systemName: "point.3.connected.trianglepath.dotted").vosFont(62, weight: .light).foregroundStyle(.secondary)
             }.padding(.bottom, 20)
             Text(state?.snapshot != nil ? "材料已核对，尚未形成持续问题" : isGenerating ? "让完整表达连成脉络" : "从表达中发现持续探索的问题").font(.title2)
             Text(toolbarMessage).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 480).help(toolbarMessageHelp)
@@ -610,18 +610,18 @@ private struct RegionInspectorPanel: View {
                     if loadingReply {
                         HStack(spacing: 8) {
                             ProgressView().controlSize(.small)
-                            Text("正在读这件事…").font(.system(size: 12)).foregroundStyle(.secondary)
+                            Text("正在读这件事…").vosFont(12).foregroundStyle(.secondary)
                         }
                     } else if let reply {
                         Text(reply)
-                            .font(.system(size: 13))
+                            .vosFont(13)
                             .lineSpacing(4)
                             .textSelection(.enabled)
                     } else if let replyError {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(replyError).font(.system(size: 12)).foregroundStyle(palette.danger)
+                            Text(replyError).vosFont(12).foregroundStyle(palette.danger)
                             Button("重试") { Task { await loadReply(briefing) } }
-                                .font(.system(size: 12, weight: .medium))
+                                .vosFont(12, weight: .medium)
                                 .buttonStyle(.borderless)
                                 .foregroundStyle(palette.accent)
                         }
@@ -699,7 +699,7 @@ private struct RegionInspectorPanel: View {
     private func themeQuoteCard(_ quote: PanoramaThemeQuote) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("“" + quote.text + "”")
-                .font(.system(size: 13))
+                .vosFont(13)
                 .lineSpacing(3)
                 .lineLimit(5)
                 .multilineTextAlignment(.leading)
@@ -833,7 +833,7 @@ private struct RelationInspectorPanel: View {
                 )
                 Text(relation.label).font(.title3.weight(.semibold))
                 Text("AI 候选解释 · 尚待核对").font(.caption).foregroundStyle(palette.warning)
-                Text(relation.explanation).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(relation.explanation).vosFont(13).foregroundStyle(.secondary).textSelection(.enabled)
                 ReaderEvidenceBlock(
                     label: "一侧原话",
                     question: fromQuestion,
@@ -887,7 +887,7 @@ private struct ReaderEvidenceBlock: View {
             if let question, let openQuestion {
                 Button(action: openQuestion) {
                     Text(question.title)
-                        .font(.system(size: 11))
+                        .vosFont(11)
                         .foregroundStyle(palette.accent)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -898,7 +898,7 @@ private struct ReaderEvidenceBlock: View {
             if let first = pairs.first {
                 ReaderQuoteCard(item: first.item, source: first.source, claims: claims, lineLimit: firstLineLimit, actions: actions)
             } else {
-                Text("尚无原话").font(.system(size: 13)).foregroundStyle(.secondary)
+                Text("尚无原话").vosFont(13).foregroundStyle(.secondary)
             }
             if pairs.count > 1 {
                 ReaderDisclosure(title: "其他 \(pairs.count - 1) 处原话", expanded: $showsMore) {
@@ -926,7 +926,7 @@ private struct ReaderQuoteCard: View {
             Text(source.transcript.origin == "user" && source.transcript.speaker == "user" ? "我的原话" : "外部 / AI 来源 · 不代表本人认可")
                 .font(.caption.weight(.medium))
             Text("“" + item.quote + "”")
-                .font(.system(size: 13))
+                .vosFont(13)
                 .lineLimit(lineLimit)
                 .textSelection(.enabled)
             let date = panoramaShortDate(source.occurredAt)
@@ -1011,7 +1011,7 @@ private struct ReaderDisclosure<Content: View>: View {
                         .foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
+                        .vosFont(10, weight: .semibold)
                         .foregroundStyle(.tertiary)
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                         .accessibilityHidden(true)
@@ -1069,7 +1069,7 @@ private struct ReaderCappedText: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(text)
-                .font(.system(size: size))
+                .vosFont(size)
                 .foregroundStyle(.secondary)
                 .lineLimit(expanded ? nil : 3)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1092,7 +1092,7 @@ private struct ReaderQuestionRow: View {
         Button(action: select) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(question.title)
-                    .font(.system(size: 13, weight: .medium))
+                    .vosFont(13, weight: .medium)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1120,11 +1120,11 @@ private struct ReaderRelationRow: View {
         Button(action: select) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(relation.label)
-                    .font(.system(size: 12.5, weight: .medium))
+                    .vosFont(12.5, weight: .medium)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                 Text(fromTitle + " ↔ " + toTitle)
-                    .font(.system(size: 11))
+                    .vosFont(11)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.tail)

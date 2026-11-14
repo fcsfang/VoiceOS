@@ -13,7 +13,7 @@ struct TopicResurfacingCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("可以再看一眼", systemImage: "leaf").font(.caption).foregroundStyle(palette.accent)
-            Text(item.title).font(.system(size: 15, weight: .medium, design: .serif)).lineLimit(3)
+            Text(item.title).vosFont(15, weight: .medium, design: .serif).lineLimit(3)
             Text(item.quote).font(.callout).lineLimit(4).textSelection(.enabled)
             Text(item.reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {

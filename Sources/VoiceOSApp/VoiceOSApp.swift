@@ -576,6 +576,11 @@ final class ControlCenter: ObservableObject {
     private var understandingWorker: Task<Void, Never>?
     @Published var initialized = false
     @Published var workspaceLoaded = false
+    @Published var textSize: AppTextSize = AppTextSize(rawValue: UserDefaults.standard.string(forKey: "voiceos.textSize.v1") ?? "") ?? .standard
+    func setTextSize(_ value: AppTextSize) {
+        textSize = value
+        UserDefaults.standard.set(value.rawValue, forKey: "voiceos.textSize.v1")
+    }
     @Published var startupIssue = ""
     @Published var player: AVPlayer?
     private var playbackBoundary: Any?

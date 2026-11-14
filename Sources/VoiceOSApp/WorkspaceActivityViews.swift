@@ -238,9 +238,9 @@ struct WorkspaceTaskView: View {
                     WorkspaceSection(title:"实际进展与收获",icon:"checkmark.circle",count:feedbackHistory.count) {
                         ForEach(feedbackHistory) { record in
                             VStack(alignment: .leading, spacing: 12) {
-                                Text(record.label + (record.actionVersion == action.version && record.sourceState != "frozen" ? "" : " · 历史记录")).font(.system(size:13,weight:.medium)).foregroundStyle(.secondary)
+                                Text(record.label + (record.actionVersion == action.version && record.sourceState != "frozen" ? "" : " · 历史记录")).vosFont(13, weight: .medium).foregroundStyle(.secondary)
                                 WorkspaceExpandableText(text:record.text,label:"完整记录",size:16)
-                                Button("查看结果原话") { openSource(record.recordingSourceID ?? record.sourceID) }.font(.system(size:13))
+                                Button("查看结果原话") { openSource(record.recordingSourceID ?? record.sourceID) }.vosFont(13)
                             }.padding(.vertical,18)
                             if record.id != feedbackHistory.last?.id { Divider() }
                         }

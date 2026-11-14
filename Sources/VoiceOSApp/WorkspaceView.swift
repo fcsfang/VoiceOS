@@ -27,9 +27,9 @@ struct WorkspaceHeading: View {
     var subtitle: String = ""
     var body: some View {
         VStack(alignment:.leading,spacing:11) {
-            if !eyebrow.isEmpty { Text(eyebrow).font(.system(size:13,weight:.medium)).foregroundStyle(.secondary) }
-            Text(title).font(.system(size:30,weight:.semibold)).textSelection(.enabled).accessibilityAddTraits(.isHeader)
-            if !subtitle.isEmpty { Text(subtitle).font(.system(size:14)).foregroundStyle(.secondary).lineSpacing(4) }
+            if !eyebrow.isEmpty { Text(eyebrow).vosFont(13, weight: .medium).foregroundStyle(.secondary) }
+            Text(title).vosFont(30, weight: .semibold).textSelection(.enabled).accessibilityAddTraits(.isHeader)
+            if !subtitle.isEmpty { Text(subtitle).vosFont(14).foregroundStyle(.secondary).lineSpacing(4) }
         }.frame(maxWidth:.infinity,alignment:.leading)
     }
 }
@@ -64,14 +64,14 @@ struct WorkspaceRow: View {
     var body: some View {
         Button(action:open) {
             HStack(alignment:.top,spacing:14) {
-                Image(systemName:icon).font(.system(size:16)).foregroundStyle(palette.accent)
+                Image(systemName:icon).vosFont(16).foregroundStyle(palette.accent)
                     .frame(width:34,height:34).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius:8))
                 VStack(alignment:.leading,spacing:8) {
-                    Text(title).font(.system(size:16,weight:.semibold)).lineSpacing(3).lineLimit(3).fixedSize(horizontal:false,vertical:true).help(title)
-                    if !subtitle.isEmpty { Text(subtitle).font(.system(size:13)).foregroundStyle(.secondary).lineSpacing(3).lineLimit(2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
+                    Text(title).vosFont(16, weight: .semibold).lineSpacing(3).lineLimit(3).fixedSize(horizontal:false,vertical:true).help(title)
+                    if !subtitle.isEmpty { Text(subtitle).vosFont(13).foregroundStyle(.secondary).lineSpacing(3).lineLimit(2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
                 }
                 Spacer(minLength:8)
-                if !trailing.isEmpty { Text(trailing).font(.system(size:12,weight:.medium)).foregroundStyle(.secondary).padding(.top,3) }
+                if !trailing.isEmpty { Text(trailing).vosFont(12, weight: .medium).foregroundStyle(.secondary).padding(.top,3) }
                 Image(systemName:"chevron.right").font(.caption).foregroundStyle(.tertiary).padding(.top,3)
             }.padding(.vertical,18).padding(.horizontal,10).contentShape(RoundedRectangle(cornerRadius:9))
                 .background(hovered ? palette.selection.opacity(0.5) : .clear,in:RoundedRectangle(cornerRadius:9))
@@ -198,8 +198,10 @@ struct WorkspaceView: View {
                     .frame(minWidth:290,idealWidth:320,maxWidth:380)
             }
         }
-        .font(.system(size:15)).foregroundStyle(palette.text).background(palette.canvas).tint(palette.accent)
+        .vosFont(15).foregroundStyle(palette.text).background(palette.canvas).tint(palette.accent)
         .environment(\.workspacePalette, palette)
+        .environment(\.vosTextScale, model.textSize.scale)
+        .dynamicTypeSize(model.textSize.dynamicType)
         .preferredColorScheme(appearance.colorScheme)
         .frame(minWidth:980,minHeight:700)
         .onExitCommand { if !path.isEmpty { back() } }
@@ -281,9 +283,9 @@ struct WorkspaceView: View {
                     Image(nsImage: brandImage).resizable().interpolation(.high).frame(width: 26, height: 26)
                         .accessibilityHidden(true)
                 } else {
-                    Image(systemName:"waveform").font(.system(size:19,weight:.medium))
+                    Image(systemName:"waveform").vosFont(19, weight: .medium)
                 }
-                Text("VoiceOS").font(.system(size:19,weight:.medium))
+                Text("VoiceOS").vosFont(19, weight: .medium)
             }.padding(.horizontal,9)
             VStack(spacing:5) {
                 nav("首页",icon:"house",target:.home).keyboardShortcut("1",modifiers:.command)
@@ -308,7 +310,7 @@ struct WorkspaceView: View {
     }
     private func nav(_ title:String,icon:String,target:WorkspacePage) -> some View {
         Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
-            Label(title,systemImage:icon).font(.system(size:15,weight:section == title ? .semibold : .regular))
+            Label(title,systemImage:icon).vosFont(15, weight: section == title ? .semibold : .regular)
                 .frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,12).padding(.vertical,11)
                 .background(section == title ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:8))
                 // Plain buttons otherwise only hit-test the icon and text, leaving the padded row inert.
@@ -319,7 +321,7 @@ struct WorkspaceView: View {
         HStack(spacing:12) {
             if !path.isEmpty {
                 Button(action:back) {
-                    Image(systemName:"chevron.left").font(.system(size:15,weight:.medium))
+                    Image(systemName:"chevron.left").vosFont(15, weight: .medium)
                         .frame(width:44,height:44)
                         .background(palette.selection.opacity(0.5),in:RoundedRectangle(cornerRadius:8))
                         .contentShape(Rectangle())
@@ -644,7 +646,7 @@ struct WorkspaceView: View {
                     }
                     if overviewGoals.count > 3 {
                         Button("查看全部 \(overviewGoals.count)") { actionFilter = "问题与目标" }
-                            .buttonStyle(.plain).font(.system(size:12.5)).foregroundStyle(palette.accent).padding(.top,10)
+                            .buttonStyle(.plain).vosFont(12.5).foregroundStyle(palette.accent).padding(.top,10)
                     }
                 }
             }
@@ -715,6 +717,9 @@ struct WorkspaceView: View {
             Picker("显示模式",selection:$appearance) {
                 ForEach(WorkspaceAppearance.allCases) { option in Text(option.title).tag(option) }
             }.pickerStyle(.segmented).frame(maxWidth:360)
+            Picker("文字大小",selection:Binding(get:{ model.textSize },set:{ model.setTextSize($0) })) {
+                ForEach(AppTextSize.allCases) { option in Text(option.label).tag(option) }
+            }.pickerStyle(.segmented).frame(maxWidth:360)
             Text("配色即时生效，并在下次打开时沿用。").font(.caption).foregroundStyle(.secondary)
             Divider()
             sectionTitle("模型与服务")
@@ -772,7 +777,7 @@ struct WorkspaceView: View {
         default: WorkspaceProcessingView(model:model,inbox:model.recordingInbox,openSource:{ go(.source($0)) },openSettings:{ go(.settings) },openInbox:{ go(.tool("自动入口")) })
         }
     }
-    private func sectionTitle(_ title:String) -> some View { Text(title).font(.system(size:21,weight:.semibold)).accessibilityAddTraits(.isHeader) }
+    private func sectionTitle(_ title:String) -> some View { Text(title).vosFont(21, weight: .semibold).accessibilityAddTraits(.isHeader) }
     private func sourceNavigationTitle(_ id:String) -> String {
         guard let source=model.records.first(where: { $0.id == id }) else { return "材料" }
         if let expression=source.recordingExpression(in:Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })),expression.sourceIDs.count > 1,

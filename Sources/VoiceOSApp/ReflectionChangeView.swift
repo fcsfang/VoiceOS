@@ -79,7 +79,7 @@ struct ReflectionChangeView: View {
                 Spacer()
                 Text("AI 关系候选 · 待你核对").font(.caption).foregroundStyle(.secondary)
             }
-            Text(update.understanding).font(.system(size: 19, weight: .medium, design: .serif)).textSelection(.enabled)
+            Text(update.understanding).vosFont(19, weight: .medium, design: .serif).textSelection(.enabled)
             HStack(alignment: .top, spacing: 14) {
                 evidenceCard("此前原话", quote: update.historicalQuote, sourceIDs: historicalSources)
                 evidenceCard("这次原话", quote: update.currentQuote, sourceIDs: [connection.sourceID])
@@ -92,7 +92,7 @@ struct ReflectionChangeView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
             VStack(alignment: .leading, spacing: 10) {
-                Text("接着问清楚").font(.system(size: 20, weight: .medium, design: .serif))
+                Text("接着问清楚").vosFont(20, weight: .medium, design: .serif)
                 Text("这个联系成立的条件是什么？有没有相反经历？哪些变化是我明确表达的，哪些只是 AI 的解释？")
                     .font(.callout)
                 Button {

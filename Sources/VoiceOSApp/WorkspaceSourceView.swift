@@ -177,7 +177,7 @@ struct WorkspaceSourceView: View {
                     }
                 }
                 HStack(spacing:12) {
-                    Label(sourceStatus,systemImage:sourceStatusIcon).font(.system(size:13)).foregroundStyle(.secondary)
+                    Label(sourceStatus,systemImage:sourceStatusIcon).vosFont(13).foregroundStyle(.secondary)
                     Spacer()
                     Button("从这里启动",systemImage:"arrow.up.forward") { openInitiation(source.id) }
                         .disabled(source.transcript == nil || source.origin != "user" || source.speaker != "user")
@@ -254,10 +254,10 @@ struct WorkspaceSourceView: View {
                     WorkspaceSection(title:"核心要点",icon:"lightbulb",count:thoughts.count) {
                         ForEach(Array((showAllThoughts ? thoughts : Array(thoughts.prefix(3))).enumerated()),id:\.element.id) { index,thought in
                             HStack(alignment:.top,spacing:14) {
-                                Text(String(format:"%02d",index+1)).font(.system(size:14,weight:.semibold,design:.monospaced)).foregroundStyle(.secondary).padding(.top,3)
+                                Text(String(format:"%02d",index+1)).vosFont(14, weight: .semibold, design: .monospaced).foregroundStyle(.secondary).padding(.top,3)
                                 VStack(alignment:.leading,spacing:12) {
                                     WorkspaceExpandableText(text:thought.statement,label:"完整要点",lines:4,size:16)
-                                    Text(thought.ownership == "ai_candidate" ? "AI 分析与建议" : thought.ownership == "external" ? "外部观点" : "从我的表达中提取").font(.system(size:13)).foregroundStyle(.secondary)
+                                    Text(thought.ownership == "ai_candidate" ? "AI 分析与建议" : thought.ownership == "external" ? "外部观点" : "从我的表达中提取").vosFont(13).foregroundStyle(.secondary)
                                     HStack {
                                         Button("更正理解或归属",systemImage:"pencil") { claimEditor=thought }
                                         Button("停止使用") { pendingRejection=thought;confirmingRejection=true }
@@ -283,14 +283,14 @@ struct WorkspaceSourceView: View {
                                                 Button("查看原讨论") { openDiscussion(origin.conversationID) }
                                             }
                                         }.padding(.top,9)
-                                    }.font(.system(size:13))
+                                    }.vosFont(13)
                                 }
                             }.padding(.vertical,20)
                             if thought.id != (showAllThoughts ? thoughts.last?.id : thoughts.prefix(3).last?.id) { Divider() }
                         }
                         if thoughts.count > 3 {
                             Divider()
-                            Button(showAllThoughts ? "收起要点" : "展开全部 \(thoughts.count) 条要点",systemImage:showAllThoughts ? "chevron.up" : "chevron.down") { showAllThoughts.toggle() }.font(.system(size:14,weight:.medium)).buttonStyle(.borderless).padding(.top,18)
+                            Button(showAllThoughts ? "收起要点" : "展开全部 \(thoughts.count) 条要点",systemImage:showAllThoughts ? "chevron.up" : "chevron.down") { showAllThoughts.toggle() }.vosFont(14, weight: .medium).buttonStyle(.borderless).padding(.top,18)
                         }
                     }
                 } else if source.transcript != nil {
@@ -323,7 +323,7 @@ struct WorkspaceSourceView: View {
                 WorkspaceSection(title:"原话与依据",icon:"quote.bubble") {
                     DisclosureGroup("原话、来源与回听") {
                         VStack(alignment:.leading,spacing:16) {
-                            if let transcript=source.transcript { Text(transcript).font(.system(size:16)).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
+                            if let transcript=source.transcript { Text(transcript).vosFont(16).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
                             else { Text("尚无可用转写 · " + (source.error ?? workspaceStateLabel(source.jobState ?? source.state))).foregroundStyle(.secondary) }
                             if source.state == "saved" { Button("打开保存的原件",systemImage:"play.circle") { Task { await model.play(source) } } }
                             ForEach(source.spans.filter { $0.startMS != nil && $0.endMS != nil }) { span in
