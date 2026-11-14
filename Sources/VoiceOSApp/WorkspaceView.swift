@@ -793,13 +793,26 @@ struct WorkspaceView: View {
         return WorkspaceRow(title:combined ? expression!.title : source.displayTitle,subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : ""),icon:source.kind.contains("text") ? "doc.text" : "waveform") { go(.source(source.id)) }
     }
     private func actionRowSubtitle(_ action:ActionRecord) -> String {
-        if let note=model.workspaceExternalCompletionNote(action),!note.isEmpty { return note }
-        if action.intent?.followupState == "withdrawn" || action.validity != "current" || model.workspaceTaskRequiresReview(action) { return model.workspaceActionStatus(action) }
-        if action.state == "completed" { return "已登记完成" }
-        guard let due=model.reminderLinks.first(where: { link in
+        let detail:String
+        if let note=model.workspaceExternalCompletionNote(action),!note.isEmpty { detail=note }
+        else if action.intent?.followupState == "withdrawn" || action.validity != "current" || model.workspaceTaskRequiresReview(action) { detail=model.workspaceActionStatus(action) }
+        else if action.state == "completed" { detail="已登记完成" }
+        else if let due=model.reminderLinks.first(where: { link in
             link.actionID == action.id && link.state == "linked" && link.remoteDueDate.map({ $0 != .none }) == true
-        })?.remoteDueDate else { return "" }
-        return (reminderDueIsPast(due) ? "已逾期 " : "到期 ") + due.summary
+        })?.remoteDueDate { detail=(reminderDueIsPast(due) ? "已逾期 " : "到期 ") + due.summary }
+        else { detail="" }
+        guard let title=actionSourceTitle(action) else { return detail }
+        let shortened=title.count > 12 ? String(title.prefix(12)) + "…" : title
+        return detail.isEmpty ? "来自『\(shortened)』" : "来自『\(shortened)』 · " + detail
+    }
+    private func actionSourceTitle(_ action:ActionRecord) -> String? {
+        guard let claim=model.claims.first(where: { $0.id == action.claimID }) else { return nil }
+        for reference in claim.references {
+            guard let source=model.records.first(where: { $0.id == reference.sourceID }) else { continue }
+            let title=source.displayTitle.trimmingCharacters(in:.whitespacesAndNewlines)
+            if !title.isEmpty { return title }
+        }
+        return nil
     }
     private func reminderDueIsPast(_ due:ReminderDueDate) -> Bool {
         switch due {
