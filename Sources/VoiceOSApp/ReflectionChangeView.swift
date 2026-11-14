@@ -79,7 +79,7 @@ struct ReflectionChangeView: View {
                 Spacer()
                 Text("AI 关系候选 · 待你核对").font(.caption).foregroundStyle(.secondary)
             }
-            Text(update.understanding).font(.system(size: 19, weight: .medium, design: .serif)).textSelection(.enabled)
+            Text(update.understanding).vosFont(19, weight: .medium, design: .serif).textSelection(.enabled)
             HStack(alignment: .top, spacing: 14) {
                 evidenceCard("此前原话", quote: update.historicalQuote, sourceIDs: historicalSources)
                 evidenceCard("这次原话", quote: update.currentQuote, sourceIDs: [connection.sourceID])
@@ -92,7 +92,7 @@ struct ReflectionChangeView: View {
                 .font(.caption).foregroundStyle(.secondary)
             Divider()
             VStack(alignment: .leading, spacing: 10) {
-                Text("接着问清楚").font(.system(size: 20, weight: .medium, design: .serif))
+                Text("接着问清楚").vosFont(20, weight: .medium, design: .serif)
                 Text("这个联系成立的条件是什么？有没有相反经历？哪些变化是我明确表达的，哪些只是 AI 的解释？")
                     .font(.callout)
                 Button {
@@ -112,7 +112,7 @@ struct ReflectionChangeView: View {
             if sourceIDs.isEmpty { Text("请返回地图核对观点来源").font(.caption).foregroundStyle(.secondary) }
             ForEach(sourceIDs, id: \.self) { id in
                 if let source = model.records.first(where: { $0.id == id }) {
-                    Text(source.workspaceTitle).font(.caption.weight(.medium)).textSelection(.enabled)
+                    Text(source.displayTitle).font(.caption.weight(.medium)).textSelection(.enabled)
                     Text(source.origin == "user" ? "个人表达" : source.origin == "ai" ? "AI 材料" : "外部资料 · 不代表我的观点").font(.caption).foregroundStyle(.secondary)
                     if let date = source.expressedDate { Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
                 }

@@ -20,12 +20,12 @@ struct WorkspaceDeliveryView: View {
                     Label("依据已变化，这份交付作为历史保留。", systemImage: "pause.circle").foregroundStyle(palette.warning)
                 }
                 if let report = execution.report, !report.isEmpty {
-                    WorkspaceSection(title:"交付正文",subtitle:"AI 产出 · " + (ConversationReflectionFocus.date(execution.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? execution.createdAt),icon:"doc.text",actionTitle:"保存报告…",action:{ export(report) }) {
+                    WorkspaceSection(title:"交付正文",subtitle:ConversationReflectionFocus.date(execution.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知",icon:"doc.text",actionTitle:"保存报告…",action:{ export(report) }) {
                         AssistantReportView(report: report).padding(.top,14)
                     }
                     if !execution.references.isEmpty {
                         WorkspaceSection(title:"参考与来源",icon:"link",count:execution.references.count) {
-                            DisclosureGroup("参考来源（\(execution.references.count)）") {
+                            DisclosureGroup("参考来源") {
                                 VStack(alignment: .leading, spacing: 12) {
                                     ForEach(Array(execution.references.enumerated()), id: \.offset) { _, ref in
                                         if let url = URL(string: ref.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
@@ -72,7 +72,7 @@ struct WorkspaceDeliveryView: View {
                     }
                     DisclosureGroup("交付要求与记录") {
                         Text(execution.instruction).textSelection(.enabled).padding(.top, 8)
-                        Text("AI 产出 · " + execution.createdAt).font(.caption).foregroundStyle(.secondary)
+                        Text(ConversationReflectionFocus.date(execution.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知").font(.caption).foregroundStyle(.secondary)
                     }.padding(.vertical,14)
                 }
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
@@ -151,7 +151,7 @@ struct WorkspaceTaskView: View {
                         }
                         Text(action.state == "completed" ? "这项任务已有完成记录。AI 提取暂停不会撤销完成状态，也不需要你再完成一次。" : model.workspaceTaskRequiresReview(action) ? "AI 之前从材料中提取了这项待办，尚未登记完成；暂停也不代表识别有误。打开下方材料，查看具体原因及处理按钮。" : "这次提取仅作为历史保留。打开下方材料可查看最新识别的任务；本条记录的完成状态仍单独保留。").font(.callout).foregroundStyle(.secondary)
                         ForEach(pauseReasons,id:\.self) { Text($0).font(.callout).foregroundStyle(.secondary) }
-                        ForEach(sources) { source in Button("打开材料：" + source.workspaceTitle) { openSource(source.id) } }
+                        ForEach(sources) { source in Button("打开材料：" + source.displayTitle) { openSource(source.id) } }
                         if model.workspaceTaskRequiresReview(action), let claim = correctedClaim {
                             Text("你更正后的观点").font(.subheadline.bold())
                             Text(claim.statement).textSelection(.enabled)
@@ -238,9 +238,9 @@ struct WorkspaceTaskView: View {
                     WorkspaceSection(title:"实际进展与收获",icon:"checkmark.circle",count:feedbackHistory.count) {
                         ForEach(feedbackHistory) { record in
                             VStack(alignment: .leading, spacing: 12) {
-                                Text(record.label + (record.actionVersion == action.version && record.sourceState != "frozen" ? "" : " · 历史记录")).font(.system(size:13,weight:.medium)).foregroundStyle(.secondary)
+                                Text(record.label + (record.actionVersion == action.version && record.sourceState != "frozen" ? "" : " · 历史记录")).vosFont(13, weight: .medium).foregroundStyle(.secondary)
                                 WorkspaceExpandableText(text:record.text,label:"完整记录",size:16)
-                                Button("查看结果原话") { openSource(record.recordingSourceID ?? record.sourceID) }.font(.system(size:13))
+                                Button("查看结果原话") { openSource(record.recordingSourceID ?? record.sourceID) }.vosFont(13)
                             }.padding(.vertical,18)
                             if record.id != feedbackHistory.last?.id { Divider() }
                         }
@@ -265,7 +265,7 @@ struct WorkspaceTaskView: View {
                     }
                     DisclosureGroup("原话依据与安排") {
                         VStack(alignment: .leading, spacing: 14) {
-                            ForEach(sources) { source in WorkspaceRow(title: source.workspaceTitle, subtitle: "查看完整原话与出处", icon: "quote.bubble") { openSource(source.id) } }
+                            ForEach(sources) { source in WorkspaceRow(title: source.displayTitle, subtitle: "查看完整原话与出处", icon: "quote.bubble") { openSource(source.id) } }
                             if current {
                                 Button("回听任务原话") { Task { _ = await model.playActionOriginal(action) } }
                                 if let player = model.player { NativePlayerView(player: player).frame(height: 65) }

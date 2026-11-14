@@ -165,7 +165,7 @@ struct ReflectionTimelineView: View {
                     }.labelsHidden().pickerStyle(.segmented).frame(width: 130)
                     HStack(spacing: 8) {
                         Button { shift(-1) } label: { Image(systemName: "chevron.left") }.help("上一个周期").accessibilityLabel("上一个周期")
-                        Text(dateLabel).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        Text(dateLabel).vosFont(13, weight: .semibold).lineLimit(1)
                         Button { shift(1) } label: { Image(systemName: "chevron.right") }.help("下一个周期").accessibilityLabel("下一个周期")
                     }.buttonStyle(.plain)
                     DatePicker("选择日期", selection: $anchor, displayedComponents: .date).labelsHidden().frame(width: 100)
@@ -372,14 +372,14 @@ struct ReflectionTimelineView: View {
                         ForEach(Array(["表达与材料", "认知与问题", "行动与目标", "结果与反思"].enumerated()), id: \.offset) { lane, title in
                             HStack(spacing: 7) {
                                 Circle().fill(palette.graphColor(lane)).frame(width: 5, height: 5)
-                                Text(title).font(.system(size: 12, weight: .semibold))
+                                Text(title).vosFont(12, weight: .semibold)
                             }.position(x: CGFloat(112 + lane * 246), y: 30)
                         }
                         ForEach(visibleLinks) { edge in
                             if let from = items.first(where: { $0.id == edge.from }), let to = items.first(where: { $0.id == edge.to }) {
                                 let a = layout[from.id] ?? .zero, b = layout[to.id] ?? .zero
                                 Button { selection = edge.id } label: {
-                                    Text(edge.label).font(.system(size: 9, weight: .medium)).padding(4)
+                                    Text(edge.label).vosFont(9, weight: .medium).padding(4)
                                         .background(palette.canvas, in: Capsule())
                                 }.buttonStyle(.plain).help("查看关系与原话依据")
                                     .position(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
@@ -434,11 +434,11 @@ struct ReflectionTimelineView: View {
         Button { selection = node.id } label: {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 4) {
-                    Text(node.label).font(.system(size: 10, weight: .semibold)).lineLimit(1)
+                    Text(node.label).vosFont(10, weight: .semibold).lineLimit(1)
                     Spacer(minLength: 0)
-                    if node.context { Text("此前").font(.system(size: 9)).padding(.horizontal, 4).background(palette.canvas, in: Capsule()) }
+                    if node.context { Text("此前").vosFont(9).padding(.horizontal, 4).background(palette.canvas, in: Capsule()) }
                 }.foregroundStyle(palette.graphColor(node.lane))
-                Text(node.title).font(.system(size: 13, weight: .medium)).lineLimit(3).multilineTextAlignment(.leading)
+                Text(node.title).vosFont(13, weight: .medium).lineLimit(3).multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }.padding(13).frame(width: 196, height: 104, alignment: .topLeading)
                 .background(palette.surface.opacity(node.context ? 0.5 : 1), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
@@ -451,7 +451,7 @@ struct ReflectionTimelineView: View {
         let items = nodes(focus), links = edges(focus, nodes: items)
         return ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text(selection == nil ? (focus.isTopicOverview ? "这个主题的脉络" : "这个周期的线索") : "关系与依据").font(.system(size: 20, weight: .medium, design: .serif))
+                Text(selection == nil ? (focus.isTopicOverview ? "这个主题的脉络" : "这个周期的线索") : "关系与依据").vosFont(20, weight: .medium, design: .serif)
                 if let node = items.first(where: { $0.id == selection }) {
                     nodeDetails(node, focus: focus)
                     let connected = links.filter { $0.from == node.id || $0.to == node.id }
@@ -540,7 +540,7 @@ struct ReflectionTimelineView: View {
         HStack(alignment: .firstTextBaseline) {
             Text(title).font(.callout)
             Spacer()
-            Text(String(count)).font(.system(size: 28, weight: .medium, design: .serif)).foregroundStyle(color)
+            Text(String(count)).vosFont(28, weight: .medium, design: .serif).foregroundStyle(color)
         }
     }
     private func owner(_ value: String) -> String {

@@ -105,7 +105,18 @@ public extension SourceRecord {
     }
     var displayTitle: String {
         if let contentTitle { return contentTitle }
-        return ["audio", "video"].contains(kind) ? "录音 · " + recordingDateLabel : name
+        if ["audio", "video"].contains(kind) { return "录音 · " + recordingDateLabel }
+        if let text = transcript {
+            let line = text.drop(while: { $0 == "\n" }).prefix(49).prefix(while: { $0 != "\n" })
+            let cleaned = String(line.prefix(48)).trimmingCharacters(in: .whitespaces)
+            if !cleaned.isEmpty { return cleaned + (line.count > 48 ? "…" : "") }
+        }
+        switch kind {
+        case "user_text": return "未命名表达"
+        case "external_text": return "未命名外部资料"
+        case "ai_text": return "未命名 AI 资料"
+        default: return name
+        }
     }
     var recordingDateLabel: String {
         let expressed = expressedDate

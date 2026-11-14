@@ -62,7 +62,7 @@ struct EnglishPracticeView: View {
                 Picker("本次练习", selection: $currentID) {
                     Text("选择一份我的英文原话").tag("")
                     ForEach(sources) { source in
-                        Text(String((source.transcript ?? source.name).prefix(90))).tag(source.id)
+                        Text(String((source.transcript ?? source.displayTitle).prefix(90))).tag(source.id)
                     }
                 }
                 .disabled(model.englishBusy)
@@ -78,7 +78,7 @@ struct EnglishPracticeView: View {
                             else { priorIDs.remove(source.id) }
                             model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
                         })) {
-                            VStack(alignment: .leading) { Text(source.name); Text(source.transcript ?? "").lineLimit(2).font(.caption).foregroundStyle(.secondary) }
+                            VStack(alignment: .leading) { Text(source.displayTitle); Text(source.transcript ?? "").lineLimit(2).font(.caption).foregroundStyle(.secondary) }
                         }.disabled(model.englishBusy || (!priorIDs.contains(source.id) && priorIDs.count >= 2))
                     }
                 }.frame(maxHeight: model.englishAttempts.isEmpty ? 210 : 110)
@@ -100,14 +100,13 @@ struct EnglishPracticeView: View {
                 ScrollView {
                 ForEach(model.englishAttempts) { attempt in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("\(attempt.state == "completed" ? "已保存" : attempt.state == "reserved" ? "等待结果" : "未完成 · 不自动重发") · \(attempt.createdAt)").font(.caption)
+                        Text("\(attempt.state == "completed" ? "已保存" : attempt.state == "reserved" ? "等待结果" : "未完成 · 不自动重发") · \(ConversationReflectionFocus.date(attempt.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知")").font(.caption)
                         if let reason = attempt.error { Text(reason).font(.caption).foregroundStyle(.secondary) }
-                        Text("用量：\(attempt.inputTokens.map(String.init) ?? "未知") / \(attempt.outputTokens.map(String.init) ?? "未知") tokens · 费用未知").font(.caption).foregroundStyle(.secondary)
                         if attempt.validity == "frozen" { Text("历史反馈 · 依据或授权已变化，暂停当前使用").font(.caption).foregroundStyle(palette.warning) }
                         if let result = attempt.result {
                             ForEach(Array(result.suggestions.enumerated()), id: \.offset) { index, suggestion in
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text("建议 \(index + 1) · \(suggestion.kind.rawValue)").font(.callout.bold())
+                                    Text("建议 \(index + 1) · \(suggestionKindLabel(suggestion.kind))").font(.callout.bold())
                                     Text("原句：\(suggestion.original.quote)").textSelection(.enabled)
                                     Text("建议：\(suggestion.suggestedText)").textSelection(.enabled)
                                     Text(suggestion.explanation).font(.caption).foregroundStyle(.secondary)
@@ -138,5 +137,8 @@ struct EnglishPracticeView: View {
             model.englishSnapshot = nil
             model.englishStatus = "已选择，准备并核对文字。"
         }
+    }
+    private func suggestionKindLabel(_ kind: EnglishSuggestionKind) -> String {
+        switch kind { case .grammar: "语法"; case .organisation: "结构"; case .reusablePattern: "可复用表达" }
     }
 }

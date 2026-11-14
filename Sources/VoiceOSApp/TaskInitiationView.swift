@@ -37,8 +37,7 @@ struct TaskInitiationView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                WorkspaceHero(eyebrow: "START SOMETHING", title: "把事情启动起来",
-                              subtitle: "VoiceOS 只把你说的这句话变成可以开始的下一步：一份交接提示词、一份操作教程、一个问题，或仅记录。它不替你执行，不创建任务，也不写入提醒。")
+                WorkspaceHero(eyebrow: "", title: "启动")
                 composer
                 if let record = selected { package(record) }
                 history
@@ -64,7 +63,7 @@ struct TaskInitiationView: View {
     }
 
     private var composer: some View {
-        WorkspaceSection(title: "先说清楚要开始什么", subtitle: "一句不完整的目标、困难或想法就够；不用提前组织成提示词。", icon: "text.cursor") {
+        WorkspaceSection(title: "先说清楚要开始什么", icon: "text.cursor") {
             VStack(alignment: .leading, spacing: 14) {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $model.initiationText).font(.body).scrollContentBackground(.hidden).frame(minHeight: 120)
@@ -79,7 +78,7 @@ struct TaskInitiationView: View {
                     Menu("从最近材料带入") {
                         if materialSources.isEmpty { Button("还没有可用的个人原话") {}.disabled(true) }
                         ForEach(materialSources.prefix(20)) { source in
-                            Button(source.workspaceTitle) {
+                            Button(source.displayTitle) {
                                 model.initiationText = source.transcript ?? ""
                                 model.initiationSourceID = source.id
                             }
@@ -117,14 +116,14 @@ struct TaskInitiationView: View {
     }
 
     private func package(_ record: TaskInitiationRecord) -> some View {
-        WorkspaceSection(title: "这次要启动的事", subtitle: "内容只来自你的原话，以及明确标注的假设与待确认项。", icon: "arrow.up.forward") {
+        WorkspaceSection(title: "这次要启动的事", icon: "arrow.up.forward") {
             VStack(alignment: .leading, spacing: 16) {
                 sourceLine(record)
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(taskInitiationRouteLabel(record.route)).font(.caption).foregroundStyle(palette.accent)
                         Text(record.proposal.title.isEmpty ? "尚未命名这次启动" : record.proposal.title)
-                            .font(.system(size: 21, weight: .semibold)).textSelection(.enabled)
+                            .vosFont(21, weight: .semibold).textSelection(.enabled)
                     }
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 6) {
@@ -144,7 +143,7 @@ struct TaskInitiationView: View {
     }
 
     private func sourceLine(_ record: TaskInitiationRecord) -> some View {
-        let title = model.records.first(where: { $0.id == record.sourceID })?.workspaceTitle ?? "原话材料"
+        let title = model.records.first(where: { $0.id == record.sourceID })?.displayTitle ?? "原话材料"
         return Button("依据：" + title) { openSource(record.sourceID) }.buttonStyle(.borderless).font(.caption)
     }
 
@@ -161,7 +160,7 @@ struct TaskInitiationView: View {
 
     private func clarify(_ record: TaskInitiationRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(record.proposal.clarifyQuestion).font(.system(size: 18, weight: .semibold)).textSelection(.enabled)
+            Text(record.proposal.clarifyQuestion).vosFont(18, weight: .semibold).textSelection(.enabled)
             Text("先回答这一个问题会更准确；也可以跳过，按显式假设给出草稿。").font(.callout).foregroundStyle(.secondary)
             TextEditor(text: $answer).font(.body).scrollContentBackground(.hidden).frame(minHeight: 100)
                 .workspaceEditorSurface().accessibilityLabel("澄清回答")
@@ -202,7 +201,7 @@ struct TaskInitiationView: View {
             if record.editedArtifact != nil {
                 Text("材料已手动编辑，偏好不再自动调整。").font(.caption).foregroundStyle(.secondary)
             }
-            TextEditor(text: $artifactDraft).font(.system(size: 14)).frame(minHeight: 360)
+            TextEditor(text: $artifactDraft).vosFont(14).frame(minHeight: 360)
                 .workspaceEditorSurface().accessibilityLabel("启动材料")
             if let warning = TaskInitiationComposer.secretWarning(in: artifactDraft) {
                 WorkspaceNoticeText(message: warning, severity: .warning)
@@ -234,7 +233,7 @@ struct TaskInitiationView: View {
     }
 
     private func statusChip(_ text: String) -> some View {
-        Text(text).font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+        Text(text).vosFont(12, weight: .medium).foregroundStyle(.secondary)
             .padding(.horizontal, 9).padding(.vertical, 4)
             .background(palette.selection, in: Capsule())
     }
@@ -256,7 +255,7 @@ struct TaskInitiationView: View {
                         HStack(alignment: .top, spacing: 14) {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(record.proposal.title.isEmpty ? "未命名启动" : record.proposal.title)
-                                    .font(.system(size: 15, weight: .semibold)).lineLimit(2)
+                                    .vosFont(15, weight: .semibold).lineLimit(2)
                                 Text(historySubtitle(record))
                                     .font(.caption).foregroundStyle(.secondary)
                             }

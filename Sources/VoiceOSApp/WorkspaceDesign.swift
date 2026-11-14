@@ -24,12 +24,14 @@ struct WorkspaceHero: View {
     var subtitle: String = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(eyebrow).font(.system(size: 10, weight: .semibold, design: .monospaced)).tracking(2)
-                .textCase(.uppercase).foregroundStyle(palette.accent)
-            Text(title).font(.system(size: 27, weight: .medium, design: .serif)).textSelection(.enabled)
+            if !eyebrow.isEmpty {
+                Text(eyebrow).vosFont(10, weight: .semibold, design: .monospaced).tracking(2)
+                    .textCase(.uppercase).foregroundStyle(palette.accent)
+            }
+            Text(title).vosFont(27, weight: .medium, design: .serif).textSelection(.enabled)
                 .accessibilityAddTraits(.isHeader)
             if !subtitle.isEmpty {
-                Text(subtitle).font(.system(size: 14)).foregroundStyle(.secondary).lineSpacing(4)
+                Text(subtitle).vosFont(14).foregroundStyle(.secondary).lineSpacing(4)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -44,14 +46,14 @@ struct WorkspaceSearchField: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Image(systemName: "magnifyingglass").font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
+            Image(systemName: "magnifyingglass").vosFont(13, weight: .medium).foregroundStyle(.secondary)
             field
             if !text.isEmpty {
                 Button {
                     text = ""
                     focus?.wrappedValue = true
                 } label: {
-                    Image(systemName: "xmark.circle.fill").font(.system(size: 13)).foregroundStyle(.tertiary)
+                    Image(systemName: "xmark.circle.fill").vosFont(13).foregroundStyle(.tertiary)
                 }.buttonStyle(.plain).accessibilityLabel("清空搜索")
             }
         }
@@ -62,10 +64,10 @@ struct WorkspaceSearchField: View {
 
     @ViewBuilder private var field: some View {
         if let focus {
-            TextField(placeholder, text: $text).textFieldStyle(.plain).font(.system(size: 15)).focused(focus)
+            TextField(placeholder, text: $text).textFieldStyle(.plain).vosFont(15).focused(focus)
                 .onSubmit { submit?() }
         } else {
-            TextField(placeholder, text: $text).textFieldStyle(.plain).font(.system(size: 15))
+            TextField(placeholder, text: $text).textFieldStyle(.plain).vosFont(15)
                 .onSubmit { submit?() }
         }
     }
@@ -103,7 +105,7 @@ struct WorkspaceIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage).font(.system(size: 14, weight: .medium))
+            Image(systemName: systemImage).vosFont(14, weight: .medium)
                 .frame(width: WorkspaceMetrics.iconButtonSize, height: WorkspaceMetrics.iconButtonSize)
                 .background(hovered ? palette.selection.opacity(0.6) : .clear, in: RoundedRectangle(cornerRadius: 7))
                 .contentShape(Rectangle())

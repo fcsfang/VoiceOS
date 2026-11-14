@@ -37,20 +37,16 @@ public struct RecentContentItem: Identifiable, Equatable, Sendable {
     }
 }
 
-/// One readable thread of a recording: its lead quote, up to two supporting
-/// thoughts, every goal, and everything else behind an in-place expander.
+/// One readable thread of a recording: its title and every thought in the
+/// order it was recorded. Goals are a derived subset the page may group.
 public struct RecentContentThread: Identifiable, Equatable, Sendable {
     public let id: String
     public let title: String
     public let thoughts: [RecentContentThought]
-    public let lead: RecentContentThought?
-    public let supporting: [RecentContentThought]
-    public let goals: [RecentContentThought]
-    public var remaining: [RecentContentThought] {
-        let shown = Set(([lead].compactMap { $0 } + supporting + Array(goals.prefix(2))).map(\.id))
-        return thoughts.filter { !shown.contains($0.id) }
+    public var goals: [RecentContentThought] { thoughts.filter { $0.kind == .goal } }
+    public init(id: String, title: String, thoughts: [RecentContentThought]) {
+        self.id = id; self.title = title; self.thoughts = thoughts
     }
-    public var hiddenCount: Int { remaining.count }
 }
 
 public struct RecentContentTask: Identifiable, Equatable, Sendable {
@@ -89,19 +85,13 @@ public struct RecentContentDigest: Equatable, Sendable {
                    keywords: ["自信", "自卑", "悲观", "勇敢", "改变", "藏锋", "犯错", "思考", "自我", "探索", "值得", "价值", "逃避", "谦虚"]),
     ]
 
-    private static let reflectingWords = ["认为", "觉得", "应该", "不应", "不必", "意识", "发现", "长期", "过去", "改变", "学习", "值得", "重要", "可能", "包容", "自信", "自卑", "勇气", "完美", "交付", "汇报", "沟通", "思考", "逃避", "价值", "成长", "更好", "真正"]
-    private static let concreteWords = ["项目是", "功能", "AirPods", "网易云", "耳机", "第一个", "第二个", "今天", "明天", "下周", "上周", "提醒事项", "PPT", "答辩"]
     private static let timeMarkers = ["今天", "明天", "后天", "下周", "周一", "周二", "周三", "周四", "周五", "周末", "今晚"]
 
     public static func build(thoughts: [RecentContentThought], duration: TimeInterval, tasks: [RecentContentTask] = []) -> RecentContentDigest {
         let grouped = Dictionary(grouping: thoughts) { threadID(for: $0.statement) }
         let threads = rules.sorted { $0.displayOrder < $1.displayOrder }.compactMap { rule -> RecentContentThread? in
             guard let own = grouped[rule.id], !own.isEmpty else { return nil }
-            let insights = own.filter { $0.kind == .insight }
-            let lead = ranked(insights.isEmpty ? own.filter { $0.kind != .goal } : insights).first
-            let supporting = lead.map { lead in Array(ranked(insights.filter { $0.id != lead.id }).prefix(2)) } ?? []
-            return RecentContentThread(id: rule.id, title: rule.title, thoughts: own, lead: lead,
-                                       supporting: supporting, goals: own.filter { $0.kind == .goal })
+            return RecentContentThread(id: rule.id, title: rule.title, thoughts: own)
         }
         return RecentContentDigest(threads: threads, tasks: orderedTasks(tasks), duration: duration, thoughtCount: thoughts.count)
     }
@@ -112,12 +102,6 @@ public struct RecentContentDigest: Equatable, Sendable {
 
     public static func threadTitle(_ id: String) -> String {
         rules.first { $0.id == id }?.title ?? id
-    }
-
-    public static func leadScore(_ statement: String) -> Double {
-        let positive = reflectingWords.reduce(0) { $0 + occurrences(of: $1, in: statement) * 3 }
-        let negative = concreteWords.reduce(0) { $0 + occurrences(of: $1, in: statement) * 4 }
-        return Double(positive - negative) + Double(min(statement.count, 40)) / 10
     }
 
     public static func orderedTasks(_ tasks: [RecentContentTask]) -> [RecentContentTask] {
@@ -132,23 +116,6 @@ public struct RecentContentDigest: Equatable, Sendable {
         return minutes < 60 ? "\(minutes) 分钟" : "\(minutes / 60) 小时 \(minutes % 60) 分"
     }
 
-    private static func ranked(_ thoughts: [RecentContentThought]) -> [RecentContentThought] {
-        let scored: [(offset: Int, thought: RecentContentThought, score: Double)] = thoughts.enumerated().map {
-            (offset: $0.offset, thought: $0.element, score: leadScore($0.element.statement))
-        }
-        return scored.sorted { left, right in
-            left.score == right.score ? left.offset < right.offset : left.score > right.score
-        }.map(\.thought)
-    }
-
-    private static func occurrences(of word: String, in text: String) -> Int {
-        var count = 0, remainder = text[...]
-        while let range = remainder.range(of: word) {
-            count += 1
-            remainder = remainder[range.upperBound...]
-        }
-        return count
-    }
 }
 
 public struct RecentContentDay: Identifiable, Equatable, Sendable {
@@ -246,7 +213,7 @@ public enum RecentContentIndex {
             let excerpts = entries.sorted { $0.1 > $1.1 }.compactMap { $0.0.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
             guard !excerpts.isEmpty else { return nil }
             return RecentContentItem(id: "feedback-" + key, sourceIDs: entries.map(\.0.id), date: latest,
-                                     title: "\(entries.count) 条任务进展", summary: "", thoughts: [],
+                                     title: "任务进展", summary: "", thoughts: [],
                                      excerpts: excerpts, kind: .feedback)
         }
     }

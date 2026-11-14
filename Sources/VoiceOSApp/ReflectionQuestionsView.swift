@@ -122,7 +122,7 @@ struct ReflectionQuestionsView: View {
                             Task { await visitTopic(question.id) }
                         } label: {
                             VStack(alignment: .leading, spacing: 8) {
-                                Text(question.title).font(.system(size: 14, weight: .medium)).multilineTextAlignment(.leading).lineLimit(4)
+                                Text(question.title).vosFont(14, weight: .medium).multilineTextAlignment(.leading).lineLimit(4)
                                 Text("更新于 " + date(question.updatedAt)).font(.caption).foregroundStyle(.secondary)
                             }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
                                 .background(selectedID == question.id ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
@@ -136,7 +136,7 @@ struct ReflectionQuestionsView: View {
     }
     private func detail(_ question: ReflectionQuestion) -> some View {
         VStack(alignment: .leading, spacing: 15) {
-            Text(question.title).font(.system(size: 22, weight: .medium, design: .serif)).textSelection(.enabled)
+            Text(question.title).vosFont(22, weight: .medium, design: .serif).textSelection(.enabled)
             HStack {
                 Button("关联资料 · \(sourceIDs.count)") { managingSources = true }.disabled(busy)
                 Button("查看标题原文") { openSource(question.sourceID) }.disabled(busy)
@@ -450,7 +450,7 @@ struct ReflectionQuestionsView: View {
     }
     private func openSource(_ id: String) { model.requestWorkspaceSource(id); dismiss(); dismissAtlas() }
     private func beginCreating() { editingQuestion = nil; title = ""; titleCloud = false; creating = true }
-    private func sourceTitle(_ id: String) -> String { model.records.first { $0.id == id }?.displayTitle ?? "历史来源 · \(id.prefix(8))" }
+    private func sourceTitle(_ id: String) -> String { model.records.first { $0.id == id }?.displayTitle ?? "历史来源" }
     private func date(_ text: String) -> String { ConversationReflectionFocus.date(text)?.formatted(date: .abbreviated, time: .shortened) ?? text }
     private func icon(_ kind: ReflectionQuestionEntryKind) -> String {
         switch kind { case .observation: "text.bubble"; case .change: "arrow.triangle.branch"; case .experiment: "flask"; case .result: "leaf" }

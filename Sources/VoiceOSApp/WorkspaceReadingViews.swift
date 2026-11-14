@@ -23,7 +23,7 @@ struct WorkspaceTabs: View {
 
     private func tab(_ title: String, fill: Bool = false) -> some View {
         Button { selection = title } label: {
-            Text(title).font(.system(size: 17, weight: .semibold)).lineLimit(1)
+            Text(title).vosFont(17, weight: .semibold).lineLimit(1)
                 .foregroundStyle(selection == title ? palette.canvas : palette.text)
                 .frame(maxWidth: fill ? .infinity : nil)
                 .padding(.horizontal, 20).padding(.vertical, 13)
@@ -50,21 +50,21 @@ struct WorkspaceSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
                 if !icon.isEmpty {
-                    Image(systemName: icon).font(.system(size: 19, weight: .medium)).frame(width: 26, height: 28)
+                    Image(systemName: icon).vosFont(19, weight: .medium).frame(width: 26, height: 28)
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 9) {
-                        Text(title).font(.system(size: 21, weight: .semibold)).accessibilityAddTraits(.isHeader)
+                        Text(title).vosFont(21, weight: .semibold).accessibilityAddTraits(.isHeader)
                         if let count {
-                            Text(String(count)).font(.system(size: 13, weight: .semibold)).monospacedDigit()
+                            Text(String(count)).vosFont(13, weight: .semibold, monospacedDigit: true)
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .background(palette.selection, in: Capsule()).foregroundStyle(.secondary)
                         }
                     }
-                    if !subtitle.isEmpty { Text(subtitle).font(.system(size: 13)).foregroundStyle(.secondary).lineSpacing(3) }
+                    if !subtitle.isEmpty { Text(subtitle).vosFont(13).foregroundStyle(.secondary).lineSpacing(3) }
                 }
                 Spacer(minLength: 0)
-                if let action { Button(actionTitle, action: action).font(.system(size: 13, weight: .medium)).buttonStyle(.borderless).padding(.top, 4) }
+                if let action { Button(actionTitle, action: action).vosFont(13, weight: .medium).buttonStyle(.borderless).padding(.top, 4) }
             }.padding(.bottom, 18)
             Rectangle().fill(palette.border).frame(height: 1)
             LazyVStack(alignment: .leading, spacing: 0, content: content).padding(.top, 8)
@@ -84,11 +84,11 @@ struct WorkspaceExpandableText: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(text).font(.system(size: size)).lineSpacing(6).textSelection(.enabled)
+            Text(text).vosFont(size).lineSpacing(6).textSelection(.enabled)
                 .lineLimit(canCollapse && !expanded ? lines : nil).fixedSize(horizontal: false, vertical: true)
             if canCollapse {
                 Button(expanded ? "收起" + label : "展开" + label, systemImage: expanded ? "chevron.up" : "chevron.down") { expanded.toggle() }
-                    .font(.system(size: 13, weight: .medium)).buttonStyle(.borderless)
+                    .vosFont(13, weight: .medium).buttonStyle(.borderless)
                     .accessibilityValue(expanded ? "已展开" : "已收起")
             }
         }.frame(maxWidth: .infinity, alignment: .leading)

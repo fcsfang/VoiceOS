@@ -131,7 +131,7 @@ struct AssistantExecutionView: View {
                                     selectedID = execution.id; questionID = execution.questionID ?? ""; error = ""
                                 } label: {
                                     VStack(alignment: .leading, spacing: 7) {
-                                        Text(.init(execution.title)).font(.system(size: 14, weight: .medium)).lineLimit(3)
+                                        Text(.init(execution.title)).vosFont(14, weight: .medium).lineLimit(3)
                                         Text(assistantExecutionLabel(execution)).font(.caption).foregroundStyle(execution.state == "failed" ? palette.warning : .secondary)
                                     }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
                                         .background(selected?.id == execution.id ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
@@ -166,7 +166,7 @@ struct AssistantExecutionView: View {
     }
     private func detail(_ execution: AssistantExecutionRecord) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(.init(execution.title)).font(.system(size: 22, weight: .medium, design: .serif)).textSelection(.enabled)
+            Text(.init(execution.title)).vosFont(22, weight: .medium, design: .serif).textSelection(.enabled)
             HStack {
                 Label(assistantExecutionLabel(execution), systemImage: execution.state == "completed" ? "doc.text" : execution.state == "failed" ? "exclamationmark.circle" : "hourglass")
                     .font(.callout).foregroundStyle(palette.accent)
@@ -245,7 +245,7 @@ struct AssistantExecutionView: View {
                     }.buttonStyle(.borderedProminent).tint(palette.accent)
                         .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive || saving)
                 }
-                if execution.questionID != nil { Text("成果已关联主题；仍保留 AI 产出归属。").font(.caption).foregroundStyle(.secondary) }
+                if execution.questionID != nil { Text("成果已关联主题。").font(.caption).foregroundStyle(.secondary) }
             }
             if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger).textSelection(.enabled) }
         }.padding(22).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -323,13 +323,13 @@ struct AssistantReportView: View {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 if block.literal {
                     ScrollView(.horizontal) {
-                        Text(verbatim: block.text).font(.system(size:14, design: .monospaced)).lineSpacing(5).textSelection(.enabled)
+                        Text(verbatim: block.text).vosFont(14, design: .monospaced).lineSpacing(5).textSelection(.enabled)
                             .padding(16)
                     }.background(palette.canvas, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border,lineWidth:1) }
                 } else {
                     Text(inline(block.text))
-                        .font(.system(size:block.heading == 1 ? 25 : block.heading == 2 ? 21 : block.heading == 3 ? 18 : 16,weight:block.heading > 0 ? .semibold : .regular))
+                        .vosFont(block.heading == 1 ? 25 : block.heading == 2 ? 21 : block.heading == 3 ? 18 : 16, weight: block.heading > 0 ? .semibold : .regular)
                         .lineSpacing(block.heading > 0 ? 3 : 6)
                         .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, block.heading > 0 ? 18 : 0)

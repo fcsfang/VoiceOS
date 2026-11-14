@@ -14,7 +14,6 @@ struct OutcomeFollowupView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("完成后的结果与收获").font(.title2)
-                    Text("愿意时留下一句实际结果或反思，也可以跳过。").foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text("\(actions.count) 项").font(.callout).foregroundStyle(.secondary)
@@ -23,7 +22,7 @@ struct OutcomeFollowupView: View {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     if actions.isEmpty {
                         ContentUnavailableView("暂无待记录的结果", systemImage: "checkmark.circle",
-                                               description: Text("记录过结果或选择跳过的事项会从这里收起。"))
+                                               description: Text("记录或跳过的事项会从这里收起。"))
                     }
                     ForEach(actions) { action in
                         VStack(alignment: .leading, spacing: 8) {

@@ -122,7 +122,6 @@ struct KnowledgeReviewSection: View {
                     }
                 }
             }
-            Text("AI 核查建议 · 尚不代表你接受了修正").font(.caption).foregroundStyle(.secondary)
         }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }

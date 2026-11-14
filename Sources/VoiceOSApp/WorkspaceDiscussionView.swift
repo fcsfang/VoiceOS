@@ -17,7 +17,7 @@ struct WorkspaceDiscussionView: View {
     private var contextTitle: String {
         if let title = model.discussionReflection?.question?.title { return title }
         if model.discussionHistory.count == 1, let id = model.discussionHistory.first?.sourceID,
-           let source = model.records.first(where: { $0.id == id }) { return source.workspaceTitle }
+           let source = model.records.first(where: { $0.id == id }) { return source.displayTitle }
         return "\(model.discussionHistory.count) 份材料的讨论"
     }
     var body: some View {
