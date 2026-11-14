@@ -71,6 +71,7 @@ bundle_resources = app / 'Contents' / 'Resources'
 bundle_resources.mkdir(parents=True, exist_ok=True)
 shutil.copy2(light_logo, bundle_resources / 'VoiceOSLogoLight.png')
 shutil.copy2(dark_logo, bundle_resources / 'VoiceOSLogoDark.png')
+shutil.copy2(ROOT / 'Resources' / 'PrivacyInfo.xcprivacy', bundle_resources / 'PrivacyInfo.xcprivacy')
 with tempfile.TemporaryDirectory() as scratch:
     padded = Path(scratch) / 'IconMaster.png'
     subprocess.run(['xcrun', 'swift', str(ROOT / 'scripts' / 'app' / 'pad_icon.swift'),
@@ -87,6 +88,10 @@ with tempfile.TemporaryDirectory() as scratch:
 info = dict(CFBundleIdentifier='local.voiceos.app', CFBundleName='VoiceOS', CFBundleDisplayName='VoiceOS', CFBundleExecutable='VoiceOS', CFBundleIconFile='AppIcon', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.0', CFBundleVersion='1', LSMinimumSystemVersion='26.0', NSHighResolutionCapable=True, NSMicrophoneUsageDescription='VoiceOS 仅在你主动开始口述时录制麦克风，停止后封存原件并在本机转写；不会自动上传音频。', NSRemindersFullAccessUsageDescription='VoiceOS 在你明确选定的清单创建任务并回读完成状态；其他清单的任务不会读取或修改。')
 if (ROOT / '.env').is_file(): info['VoiceOSModelConfigurationPath'] = str(ROOT / '.env')
 info['CFBundleURLTypes'] = [dict(CFBundleURLName='VoiceOS task', CFBundleURLSchemes=['voiceos'])]
+info['NSServices'] = [
+    dict(NSMenuItem=dict(default='存入 VoiceOS（文字）'), NSMessage='captureText', NSPortName='VoiceOS', NSSendTypes=['NSStringPboardType', 'public.utf8-plain-text']),
+    dict(NSMenuItem=dict(default='存入 VoiceOS（文件）'), NSMessage='captureFile', NSPortName='VoiceOS', NSSendTypes=['NSFilenamesPboardType', 'public.file-url']),
+]
 with (app / 'Contents' / 'Info.plist').open('wb') as f: plistlib.dump(info, f)
 subprocess.run(['codesign', '--force', '--sign', signing_identity, str(app)], check=True)
 subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)
