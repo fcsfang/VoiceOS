@@ -1,11 +1,18 @@
 import Foundation
 
+public struct ReminderLocation: Codable, Sendable, Equatable {
+    public enum Proximity: String, Codable, Sendable { case enter, leave }
+    public var title: String
+    public var proximity: Proximity
+    public init(title: String, proximity: Proximity) { self.title = title; self.proximity = proximity }
+}
 public struct ReminderFields: Codable, Sendable, Equatable {
     public var due: ReminderDueDate
     public var alerts: [String]
     public var priority: Int
-    public init(due: ReminderDueDate = .none, alerts: [String] = [], priority: Int = 0) {
-        self.due = due; self.alerts = alerts; self.priority = priority
+    public var location: ReminderLocation?
+    public init(due: ReminderDueDate = .none, alerts: [String] = [], priority: Int = 0, location: ReminderLocation? = nil) {
+        self.due = due; self.alerts = alerts; self.priority = priority; self.location = location
     }
     public static func timestamp(_ date: Date) -> String {
         let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -45,6 +52,11 @@ public struct ReminderFields: Codable, Sendable, Equatable {
     }
     public func validate() throws {
         try due.validate()
+        if let location {
+            let name = location.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { throw VoiceOSError("请填写地点名称") }
+            guard name.count <= 120 else { throw VoiceOSError("地点名称不能超过 120 字") }
+        }
         guard (0...9).contains(priority), alerts.allSatisfy({ Self.date($0).map { Self.timestamp($0) } == $0 }) else { throw VoiceOSError("提醒时间或优先级无效") }
     }
     public var summary: String {

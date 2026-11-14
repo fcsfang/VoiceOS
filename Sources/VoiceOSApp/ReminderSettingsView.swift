@@ -12,6 +12,8 @@ struct ReminderSettingsView: View {
     @State private var hasAlert = false
     @State private var alert = Date()
     @State private var priority = 0
+    @State private var hasLocation = false
+    @State private var locationName = ""
     @State private var error = ""
     private var zone: TimeZone {
         if case let .instant(_, zone) = snapshot.fields?.due { return TimeZone(identifier: zone) ?? .current }
@@ -59,6 +61,11 @@ struct ReminderSettingsView: View {
                 Text("无").tag(0); Text("高").tag(1); Text("中").tag(5); Text("低").tag(9)
                 if ![0, 1, 5, 9].contains(priority) { Text("当前优先级（\(priority)）").tag(priority) }
             }
+            Toggle("地点提醒", isOn: $hasLocation)
+            if hasLocation {
+                TextField("地点名称", text: $locationName).textFieldStyle(.roundedBorder)
+                Text("到达该地点时提醒，仅按名称写入，不联网搜索。").font(.caption).foregroundStyle(.secondary)
+            }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {
                 Button("取消", action: dismiss).disabled(model.reminderFieldEditing)
@@ -90,6 +97,7 @@ struct ReminderSettingsView: View {
             if let date = ReminderFields.date(utc) { due = date; hasDate = true; hasTime = true }
         }
         if let first = fields.alerts.first.flatMap(ReminderFields.date) { alert = first; hasAlert = true }
+        if let location = fields.location { hasLocation = true; locationName = location.title }
     }
     private func chosenFields() throws -> ReminderFields {
         var fields = snapshot.fields ?? ReminderFields(); fields.priority = priority
@@ -105,6 +113,8 @@ struct ReminderSettingsView: View {
             if value != snapshot.fields?.alerts.first, alert <= Date() { throw VoiceOSError("请选择未来的通知时间") }
             fields.alerts = ([value] + Array((snapshot.fields?.alerts ?? []).dropFirst())).sorted()
         } else { fields.alerts = [] }
+        if hasLocation { fields.location = ReminderLocation(title: locationName.trimmingCharacters(in: .whitespacesAndNewlines), proximity: .enter) }
+        else { fields.location = nil }
         fields = fields.withDefaultAlert(now: Date(), calendar: alertCalendar)
         try fields.validate(); return fields
     }
