@@ -203,4 +203,12 @@ final class QuickWinsStorageChecks: XCTestCase {
             XCTFail("来源不存在时不能写入抓取元数据")
         } catch {}
     }
+
+    func testCapturedTextWritesSourceURLMetadata() async throws {
+        let store = try await openStore()
+        let sourceID = try await store.recordCapturedText("网页选区正文", title: "选区标题", ownership: .external, sourceURL: "https://example.com/selection")
+        let metadata = try await store.captureMetadata()
+        XCTAssertEqual(metadata[sourceID]?.url, "https://example.com/selection")
+        XCTAssertFalse(metadata[sourceID]?.capturedAt.isEmpty ?? true)
+    }
 }
