@@ -67,14 +67,14 @@ private struct QuickNoteView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let context { Text("来自 " + context).font(.caption).foregroundStyle(.secondary) }
-            TextField("标题 · 可留空", text: $title).textFieldStyle(.roundedBorder).disabled(saving)
-            TextEditor(text: $text).font(.body).frame(minHeight: 180).focused($editing).disabled(saving)
+            TextField("标题 · 可留空", text: $title).textFieldStyle(.roundedBorder).disabled(saving).accessibilityLabel("标题")
+            TextEditor(text: $text).font(.body).frame(minHeight: 180).focused($editing).disabled(saving).accessibilityLabel("正文")
             if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
                 Button("取消") { close() }.keyboardShortcut(.cancelAction).disabled(saving)
                 Spacer()
                 if saving { ProgressView().controlSize(.small) }
-                Button("保存") { save() }.keyboardShortcut(.defaultAction).disabled(!valid || saving)
+                Button("保存") { save() }.keyboardShortcut(.defaultAction).disabled(!valid || saving).accessibilityLabel("保存速记")
             }
         }
         .padding(20)
