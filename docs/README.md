@@ -5,6 +5,8 @@
 [产品愿景 v1.1](VoiceOS：产品愿景与概念设计文档%20v1.1/VoiceOS_产品愿景与概念设计文档_v1.1.md)
 是产品依据，重点是表达、忠实理解、知识和行动、后续反馈形成持续循环。
 
+[产品参照](product/reference-products.md) 记录三段结构可借的成熟做法。新界面动手前先查，找不到参照的地方才需要原创设计。
+
 `product/`、`architecture/`、`adr/`、`engineering/`、`research/`、`testing/` 和
 `planning/` 保留原时点的设计与实施历史。仅在定位相关问题时按需查询；其中的测试数量、
 审查要求、探针命令和阶段门槛不作为当前开发要求。
