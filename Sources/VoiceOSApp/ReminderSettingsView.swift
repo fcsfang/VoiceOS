@@ -44,7 +44,7 @@ struct ReminderSettingsView: View {
                 Toggle("具体时刻", isOn: $hasTime)
                 if hasTime { DatePicker("时刻", selection: $due, displayedComponents: [.hourAndMinute]) }
                 if !hasTime {
-                    Text("仅日期任务默认在 09:00 通知").font(.caption).foregroundStyle(.secondary)
+                    Text("仅日期任务固定 09:00 提醒（当前不可关闭）").font(.caption).foregroundStyle(.secondary)
                     if let text = defaultAlertText { Text("实际通知时间 " + text).font(.caption).foregroundStyle(.secondary) }
                 }
             }

@@ -7,7 +7,7 @@ extension ControlCenter {
         do {
             let verified = try await store.reverifySource(id: record.id)
             await refresh()
-            if verified { status = "已重新核对「\(record.displayTitle)」的原件" }
+            if verified { status = "原件已恢复。已有理解仍暂停；打开材料点『重新识别观点和任务』才会更新" }
             return verified
         } catch {
             status = error.localizedDescription
@@ -22,8 +22,12 @@ struct ReverifyControls: View {
     @ObservedObject var model: ControlCenter
     @State private var runningID: String?
     @State private var failures: [String: String] = [:]
+    @State private var restored: Set<String> = []
     private var sources: [SourceRecord] {
-        model.records.filter { $0.state == "quarantined" || ($0.state == "saved" && ($0.error ?? "").contains("核对失败")) }
+        let pending = model.records.filter { $0.state == "quarantined" || ($0.state == "saved" && ($0.error ?? "").contains("核对失败")) }
+        let done = model.records.filter { restored.contains($0.id) }
+        var seen = Set<String>()
+        return (pending + done).filter { seen.insert($0.id).inserted }
     }
     var body: some View {
         let rows = sources
@@ -37,11 +41,17 @@ struct ReverifyControls: View {
                                 Text(workspaceStateLabel(source.state)).font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer(minLength:8)
-                            Button(runningID == source.id ? "正在核对…" : "重新核对") { reverify(source) }
-                                .disabled(runningID != nil)
+                            if restored.contains(source.id) {
+                                Button("打开材料") { model.requestWorkspaceSource(source.id) }
+                            } else {
+                                Button(runningID == source.id ? "正在核对…" : "重新核对") { reverify(source) }
+                                    .disabled(runningID != nil)
+                            }
                         }
                         if let failure = failures[source.id] {
                             Text(failure).font(.caption).foregroundStyle(palette.danger).textSelection(.enabled)
+                        } else if restored.contains(source.id) {
+                            Text("原件已恢复。已有理解仍暂停；打开材料点『重新识别观点和任务』才会更新").font(.caption).foregroundStyle(.secondary)
                         } else if let error = source.error {
                             Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                         }
@@ -57,7 +67,8 @@ struct ReverifyControls: View {
         failures[source.id] = nil
         Task {
             let verified = await model.reverifySource(source)
-            if !verified {
+            if verified { restored.insert(source.id) }
+            else {
                 failures[source.id] = model.records.first(where: { $0.id == source.id })?.error ?? (model.status.isEmpty ? "原件核对失败，可在处理情况页重试" : model.status)
             }
             runningID = nil
