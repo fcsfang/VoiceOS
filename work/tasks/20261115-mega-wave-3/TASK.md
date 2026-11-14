@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-3
@@ -138,5 +138,6 @@ F0 先合入，随后 G1、F1 到 F4、G2、H3。完成路径的接线（`change
 
 ## 链接
 
+- 2026-11-15 已合并为 `877a147`（PR #158）。
 - `docs/product/reference-products.md` 第 9.3、9.4、9.5 节
 - 2026-11-15 第二批任务卡 `work/tasks/20261115-mega-wave-2/TASK.md`
