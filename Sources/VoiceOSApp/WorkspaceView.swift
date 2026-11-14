@@ -174,167 +174,189 @@ struct WorkspaceView: View {
         return false
     }
     var body: some View {
+        alertContent
+    }
+    private var chrome: some View {
         HStack(spacing:0) {
             sidebar
             Divider()
-            VStack(spacing:0) {
-                header
-                Divider()
-                if let message = model.workspaceLastError {
-                    HStack(alignment:.firstTextBaseline,spacing:12) {
-                        Label(message,systemImage:"exclamationmark.triangle.fill").font(.callout).foregroundStyle(palette.danger).textSelection(.enabled)
-                        Spacer(minLength:8)
-                        if model.workspaceLastErrorRetry != nil { Button("重试") { model.retryWorkspaceError() } }
-                        Button { model.clearWorkspaceError() } label: { Image(systemName:"xmark").font(.caption) }
-                            .buttonStyle(.plain).accessibilityLabel("关闭错误提示")
-                    }.padding(.horizontal,20).padding(.vertical,10).background(palette.surface)
-                }
-                Group {
-                    if !model.startupIssue.isEmpty {
-                        ContentUnavailableView {
-                            Label("资料库尚未打开",systemImage:"exclamationmark.triangle")
-                        } description: {
-                            Text(model.startupIssue).textSelection(.enabled)
-                        } actions: {
-                            Button("重试打开资料库") { Task { await model.start() } }.buttonStyle(.borderedProminent)
-                            Button("打开其他资料库",action:chooseLibrary)
-                        }
-                    } else if !model.initialized || !model.workspaceLoaded {
-                        ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
-                    } else { pageContent }
-                }.frame(maxWidth:.infinity,maxHeight:.infinity)
-                if !error.isEmpty { Text(error).font(.callout).foregroundStyle(palette.danger).textSelection(.enabled).padding(12) }
-                WorkspaceProcessingBar(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
-            }.frame(minWidth:440)
+            mainColumn
             if discussionIsPresented {
                 Divider()
                 WorkspaceDiscussionView(model:model,draft:$discussionDraft,close:{ showingDiscussion=false },openSource:{ go(.source($0)) })
                     .frame(minWidth:290,idealWidth:320,maxWidth:380)
             }
         }
-        .vosFont(15).foregroundStyle(palette.text).background(palette.canvas).tint(palette.accent)
-        .environment(\.workspacePalette, palette)
-        .environment(\.vosTextScale, model.textSize.scale)
-        .dynamicTypeSize(model.textSize.dynamicType)
-        .preferredColorScheme(appearance.colorScheme)
-        .frame(minWidth:980,minHeight:700)
-        .onExitCommand { if !path.isEmpty { back() } }
-        .navigationTitle(model.libraryTitle)
-        .focusedSceneValue(\.voiceOSController,model)
-        .task { await model.start() }
-        .task(id:model.initialized) { if model.initialized { readingStates = await model.readingStates() } }
-        .task(id:model.initialized) { if model.initialized { savedViews = await model.savedWorkspaceViews() } }
-        .task { await model.setPanoramaVisible(page == .home && homeShowsPanorama) }
-        .task(id:topicLoadKey) {
-            guard page == .themes, let id=topicID else { topicFocus=nil; return }
-            do { let focus=try await model.loadTopicReflection(id); if topicID == id && !Task.isCancelled { topicFocus=focus } }
-            catch { if topicID == id && !Task.isCancelled { topicFocus=nil; self.error=error.localizedDescription } }
-        }
-        .onChange(of:page) { _, next in
-            model.stopPlayback()
-            if next != .search { searchFocused = false }
-            if case .source(let id) = next { model.selected = id }
-            Task { await model.setPanoramaVisible(next == .home && homeShowsPanorama) }
-        }
-        .onChange(of:homeShowsPanorama) { _, show in
-            Task { await model.setPanoramaVisible(page == .home && show) }
-        }
-        .onChange(of:model.selected) { _, id in
-            model.stopPlayback()
-            Task { await model.refreshSourceDiscussions(); await model.refreshAssociationSelection() }
-        }
-        .onChange(of:model.pendingWorkspaceSourceID) { _, id in
-            guard let id else { return }
-            model.pendingWorkspaceSourceID = nil
-            go(.source(id))
-        }
-        .onChange(of:model.taskPresentation) { _, _ in
-            if let id=model.focusedTaskID { go(.task(id)) } else { go(.actions) }
-        }
-        .onChange(of:model.fullRecordingInput?.id) { _, id in
-            if id != nil { go(.tool("导入录音")); showingDiscussion=false }
-            else if page == .tool("导入录音") { back() }
-        }
-        .onChange(of:page) { _, next in if next != .actions { exitActionSelection() } }
-        .onChange(of:actionFilter) { _, filter in if !["全部","我的待办"].contains(filter) { exitActionSelection() } }
-        .onOpenURL { url in if model.initialized { routeExternalURL(url) } else { pendingURL=url } }
-        .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;routeExternalURL(url) } }
-        .onDisappear { Task { await model.setPanoramaVisible(false) } }
-        .sheet(isPresented:$model.choosingReminderCalendar) {
-            VStack(alignment:.leading,spacing:16) {
-                Text("选择提醒事项清单").font(.title2)
-                ForEach(model.reminderCalendars) { calendar in Button(calendar.title) { Task { model.proposedReminderCalendarID=calendar.id; await model.saveReminderConnection() } } }
-                Button("取消") { model.choosingReminderCalendar=false }
-            }.padding(24).frame(width:440)
-        }
-        .sheet(item: $panoramaSourceEditor) { source in
-            WorkspaceTranscriptEditor(model: model, source: source) { panoramaSourceEditor = nil }
-        }
-        .sheet(item: $panoramaClaimEditor) { claim in
-            ClaimCorrectionView(claim: claim, model: model) { panoramaClaimEditor = nil }
-        }
-        .sheet(item:$model.pendingScheduleEffect) { effect in ReminderScheduleConfirmationView(effect:effect,model:model) { model.pendingScheduleEffect=nil } }
-        .sheet(isPresented:$showingOutcome) {
-            OutcomeFollowupView(actions:model.visibleOutcomeFollowups,
-                onRecord:{ action in showingOutcome=false;go(.task(action.id)) },
-                onOpen:{ action in showingOutcome=false;go(.task(action.id)) },
-                onSkip:{ model.skipOutcome($0) },
-                onDone:{ showingOutcome=false })
-        }
-        .sheet(isPresented:$showingWeeklyReview) {
-            WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) })
-        }
-        .sheet(isPresented:$showingSaveView) {
-            VStack(alignment:.leading,spacing:16) {
-                Text("保存当前视图").font(.title2)
-                Text(saveViewPage == .materials ? "材料 · " + saveViewFilter : "行动 · " + saveViewFilter).font(.caption).foregroundStyle(.secondary)
-                TextField("视图名称",text:$newViewName).textFieldStyle(.roundedBorder)
-                    .onChange(of:newViewName) { _, value in if value.count > ControlCenter.savedViewNameLimit { newViewName = String(value.prefix(ControlCenter.savedViewNameLimit)) } }
-                if savedViews.count >= ControlCenter.savedViewsLimit {
-                    Text("最多保存 \(ControlCenter.savedViewsLimit) 个视图，可先删除一个。").font(.caption).foregroundStyle(palette.danger)
-                } else if savedViews.contains(where: { $0.name == trimmedNewViewName }) {
-                    Text("已有同名视图，请换一个名称。").font(.caption).foregroundStyle(palette.danger)
-                }
-                HStack {
-                    Spacer()
-                    Button("取消") { showingSaveView=false }
-                    Button("保存") { Task { await saveView() } }.buttonStyle(.borderedProminent).disabled(!canSaveView || savingView)
-                }
-            }.padding(24).frame(width:400)
-        }
-        .alert("无法导入录音或视频", isPresented: Binding(
-            get: { model.fullRecordingImportIssue != nil },
-            set: { if !$0 { model.fullRecordingImportIssue = nil } }
-        )) {
-            Button("好") { model.fullRecordingImportIssue = nil }
-        } message: {
-            Text(model.fullRecordingImportIssue ?? "")
-        }
-        .alert(batchConfirmTitle, isPresented: Binding(
-            get: { pendingBatchState != nil },
-            set: { if !$0 { pendingBatchState = nil } }
-        )) {
-            Button("取消", role: .cancel) { pendingBatchState = nil }
-            Button(pendingBatchState == .dismissed ? "不再跟进" : "标为完成") {
-                guard let state = pendingBatchState else { return }
-                pendingBatchState = nil
-                Task { await applyActionBatch(state) }
+    }
+    private var styledContent: some View {
+        chrome
+            .vosFont(15).foregroundStyle(palette.text).background(palette.canvas).tint(palette.accent)
+            .environment(\.workspacePalette, palette)
+            .environment(\.vosTextScale, model.textSize.scale)
+            .dynamicTypeSize(model.textSize.dynamicType)
+            .preferredColorScheme(appearance.colorScheme)
+            .frame(minWidth:980,minHeight:700)
+            .onExitCommand { if !path.isEmpty { back() } }
+            .navigationTitle(model.libraryTitle)
+            .focusedSceneValue(\.voiceOSController,model)
+    }
+    private var lifecycleContent: some View {
+        styledContent
+            .task { await model.start() }
+            .task(id:model.initialized) { if model.initialized { readingStates = await model.readingStates() } }
+            .task(id:model.initialized) { if model.initialized { savedViews = await model.savedWorkspaceViews() } }
+            .task { await model.setPanoramaVisible(page == .home && homeShowsPanorama) }
+            .task(id:topicLoadKey) {
+                guard page == .themes, let id=topicID else { topicFocus=nil; return }
+                do { let focus=try await model.loadTopicReflection(id); if topicID == id && !Task.isCancelled { topicFocus=focus } }
+                catch { if topicID == id && !Task.isCancelled { topicFocus=nil; self.error=error.localizedDescription } }
             }
-        } message: {
-            Text(batchConfirmMessage)
-        }
-        .alert("删除视图？", isPresented: Binding(
-            get: { pendingDeleteView != nil },
-            set: { if !$0 { pendingDeleteView = nil } }
-        )) {
-            Button("取消", role: .cancel) { pendingDeleteView = nil }
-            Button("删除", role: .destructive) {
-                guard let view = pendingDeleteView else { return }
-                pendingDeleteView = nil
-                deleteSavedView(view)
+            .onChange(of:page) { _, next in
+                model.stopPlayback()
+                if next != .search { searchFocused = false }
+                if case .source(let id) = next { model.selected = id }
+                Task { await model.setPanoramaVisible(next == .home && homeShowsPanorama) }
             }
-        } message: {
-            Text(pendingDeleteView.map { "会从侧栏移除「\($0.name)」，材料与行动不受影响。" } ?? "")
+            .onChange(of:homeShowsPanorama) { _, show in
+                Task { await model.setPanoramaVisible(page == .home && show) }
+            }
+            .onChange(of:model.selected) { _, id in
+                model.stopPlayback()
+                Task { await model.refreshSourceDiscussions(); await model.refreshAssociationSelection() }
+            }
+            .onChange(of:model.pendingWorkspaceSourceID) { _, id in
+                guard let id else { return }
+                model.pendingWorkspaceSourceID = nil
+                go(.source(id))
+            }
+            .onChange(of:model.taskPresentation) { _, _ in
+                if let id=model.focusedTaskID { go(.task(id)) } else { go(.actions) }
+            }
+            .onChange(of:model.fullRecordingInput?.id) { _, id in
+                if id != nil { go(.tool("导入录音")); showingDiscussion=false }
+                else if page == .tool("导入录音") { back() }
+            }
+            .onChange(of:page) { _, next in if next != .actions { exitActionSelection() } }
+            .onChange(of:actionFilter) { _, filter in if !["全部","我的待办"].contains(filter) { exitActionSelection() } }
+            .onOpenURL { url in if model.initialized { routeExternalURL(url) } else { pendingURL=url } }
+            .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;routeExternalURL(url) } }
+            .onDisappear { Task { await model.setPanoramaVisible(false) } }
+    }
+    private var sheetContent: some View {
+        lifecycleContent
+            .sheet(isPresented:$model.choosingReminderCalendar) {
+                VStack(alignment:.leading,spacing:16) {
+                    Text("选择提醒事项清单").font(.title2)
+                    ForEach(model.reminderCalendars) { calendar in Button(calendar.title) { Task { model.proposedReminderCalendarID=calendar.id; await model.saveReminderConnection() } } }
+                    Button("取消") { model.choosingReminderCalendar=false }
+                }.padding(24).frame(width:440)
+            }
+            .sheet(item: $panoramaSourceEditor) { source in
+                WorkspaceTranscriptEditor(model: model, source: source) { panoramaSourceEditor = nil }
+            }
+            .sheet(item: $panoramaClaimEditor) { claim in
+                ClaimCorrectionView(claim: claim, model: model) { panoramaClaimEditor = nil }
+            }
+            .sheet(item:$model.pendingScheduleEffect) { effect in ReminderScheduleConfirmationView(effect:effect,model:model) { model.pendingScheduleEffect=nil } }
+            .sheet(isPresented:$showingOutcome) {
+                OutcomeFollowupView(actions:model.visibleOutcomeFollowups,
+                    onRecord:{ action in showingOutcome=false;go(.task(action.id)) },
+                    onOpen:{ action in showingOutcome=false;go(.task(action.id)) },
+                    onSkip:{ model.skipOutcome($0) },
+                    onDone:{ showingOutcome=false })
+            }
+            .sheet(isPresented:$showingWeeklyReview) {
+                WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) })
+            }
+            .sheet(isPresented:$showingSaveView) { saveViewSheet }
+    }
+    private var alertContent: some View {
+        sheetContent
+            .alert("无法导入录音或视频", isPresented: importIssueAlertPresented) {
+                Button("好") { model.fullRecordingImportIssue = nil }
+            } message: {
+                Text(model.fullRecordingImportIssue ?? "")
+            }
+            .alert(batchConfirmTitle, isPresented: batchAlertPresented) {
+                Button("取消", role: .cancel) { pendingBatchState = nil }
+                Button(pendingBatchState == .dismissed ? "不再跟进" : "标为完成") {
+                    guard let state = pendingBatchState else { return }
+                    pendingBatchState = nil
+                    Task { await applyActionBatch(state) }
+                }
+            } message: {
+                Text(batchConfirmMessage)
+            }
+            .alert("删除视图？", isPresented: deleteViewAlertPresented) {
+                Button("取消", role: .cancel) { pendingDeleteView = nil }
+                Button("删除", role: .destructive) {
+                    guard let view = pendingDeleteView else { return }
+                    pendingDeleteView = nil
+                    deleteSavedView(view)
+                }
+            } message: {
+                Text(pendingDeleteView.map { "会从侧栏移除「\($0.name)」，材料与行动不受影响。" } ?? "")
+            }
+    }
+    private var saveViewSheet: some View {
+        VStack(alignment:.leading,spacing:16) {
+            Text("保存当前视图").font(.title2)
+            Text(saveViewPage == .materials ? "材料 · " + saveViewFilter : "行动 · " + saveViewFilter).font(.caption).foregroundStyle(.secondary)
+            TextField("视图名称",text:$newViewName).textFieldStyle(.roundedBorder)
+                .onChange(of:newViewName) { _, value in if value.count > ControlCenter.savedViewNameLimit { newViewName = String(value.prefix(ControlCenter.savedViewNameLimit)) } }
+            if savedViews.count >= ControlCenter.savedViewsLimit {
+                Text("最多保存 \(ControlCenter.savedViewsLimit) 个视图，可先删除一个。").font(.caption).foregroundStyle(palette.danger)
+            } else if savedViews.contains(where: { $0.name == trimmedNewViewName }) {
+                Text("已有同名视图，请换一个名称。").font(.caption).foregroundStyle(palette.danger)
+            }
+            HStack {
+                Spacer()
+                Button("取消") { showingSaveView=false }
+                Button("保存") { Task { await saveView() } }.buttonStyle(.borderedProminent).disabled(!canSaveView || savingView)
+            }
+        }.padding(24).frame(width:400)
+    }
+    private var importIssueAlertPresented: Binding<Bool> {
+        Binding(get: { model.fullRecordingImportIssue != nil }, set: { if !$0 { model.fullRecordingImportIssue = nil } })
+    }
+    private var batchAlertPresented: Binding<Bool> {
+        Binding(get: { pendingBatchState != nil }, set: { if !$0 { pendingBatchState = nil } })
+    }
+    private var deleteViewAlertPresented: Binding<Bool> {
+        Binding(get: { pendingDeleteView != nil }, set: { if !$0 { pendingDeleteView = nil } })
+    }
+    private var mainColumn: some View {
+        VStack(spacing:0) {
+            header
+            Divider()
+            workspaceErrorBanner
+            Group {
+                if !model.startupIssue.isEmpty {
+                    ContentUnavailableView {
+                        Label("资料库尚未打开",systemImage:"exclamationmark.triangle")
+                    } description: {
+                        Text(model.startupIssue).textSelection(.enabled)
+                    } actions: {
+                        Button("重试打开资料库") { Task { await model.start() } }.buttonStyle(.borderedProminent)
+                        Button("打开其他资料库",action:chooseLibrary)
+                    }
+                } else if !model.initialized || !model.workspaceLoaded {
+                    ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
+                } else { pageContent }
+            }.frame(maxWidth:.infinity,maxHeight:.infinity)
+            if !error.isEmpty { Text(error).font(.callout).foregroundStyle(palette.danger).textSelection(.enabled).padding(12) }
+            WorkspaceProcessingBar(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
+        }.frame(minWidth:440)
+    }
+    @ViewBuilder private var workspaceErrorBanner: some View {
+        if let message = model.workspaceLastError {
+            HStack(alignment:.firstTextBaseline,spacing:12) {
+                Label(message,systemImage:"exclamationmark.triangle.fill").font(.callout).foregroundStyle(palette.danger).textSelection(.enabled)
+                Spacer(minLength:8)
+                if model.workspaceLastErrorRetry != nil { Button("重试") { model.retryWorkspaceError() } }
+                Button { model.clearWorkspaceError() } label: { Image(systemName:"xmark").font(.caption) }
+                    .buttonStyle(.plain).accessibilityLabel("关闭错误提示")
+            }.padding(.horizontal,20).padding(.vertical,10).background(palette.surface)
         }
     }
     private var topicLoadKey: String {
@@ -1069,7 +1091,7 @@ struct WorkspaceView: View {
             let current=states[id] ?? .unread
             readingStates[id]=current
             guard current == .unread else { return }
-            if await model.setReadingState(sourceID:id,state:.reading) { readingStates[id]=.reading }
+            if await model.setReadingState(sourceID:id,state:.reading) { readingStates[id] = .reading }
             else { error=model.status }
         }
     }

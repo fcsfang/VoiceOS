@@ -37,9 +37,15 @@ struct WorkspaceSourceView: View {
         }
     }
     private var contextReadKey:String {
-        source.id+programPairs.map { pair in
-            pair.personalVersionID+pair.externalVersionID+String(pair.personalPolicyVersion)+String(pair.externalPolicyVersion)+(model.records.first { $0.id == pair.externalSourceID }?.transcriptVersionID ?? "")+String(model.records.first { $0.id == pair.externalSourceID }?.policyVersion ?? 0)
-        }.joined()+model.records.filter { expressionIDs.contains($0.id) }.flatMap { $0.presentation?.contextLinks ?? [] }.map { $0.personalClaimID+$0.externalClaimID+$0.responseIDs.joined() }.joined()
+        let pairs = programPairs.map { pair -> String in
+            let external = model.records.first { $0.id == pair.externalSourceID }
+            return pair.personalVersionID + pair.externalVersionID + String(pair.personalPolicyVersion) + String(pair.externalPolicyVersion)
+                + (external?.transcriptVersionID ?? "") + String(external?.policyVersion ?? 0)
+        }.joined()
+        let filteredRecords = model.records.filter { expressionIDs.contains($0.id) }
+        let linkValues = filteredRecords.flatMap { $0.presentation?.contextLinks ?? [] }
+        let links = linkValues.map { $0.personalClaimID + $0.externalClaimID + $0.responseIDs.joined() }.joined()
+        return source.id + pairs + links
     }
     @State private var editing:SourceRecord?
     @State private var naming:SourceRecord?
