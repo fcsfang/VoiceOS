@@ -54,6 +54,27 @@ private enum PackageLayout {
     static let version45Tables = version44Tables + ["knowledge_reviews"]
     static let version46Tables = version45Tables + ["workspace_briefing"]
     static let version48Tables = version46Tables + ["action_review_resolutions", "expression_review_acknowledgements"]
+    static let version49Tables = version48Tables + ["action_clarifications", "action_focus", "source_reading_states", "claim_notes", "topic_claim_confirmations", "source_capture_metadata", "source_attachments", "action_subtasks", "action_estimates", "source_chapters", "capture_templates", "action_recurrence", "source_entities"]
+    static let optionalTables: Set<String> = ["action_recurrence", "source_entities"]
+    static let identityColumns: [String: [String]] = [
+        "action_clarifications": ["action_id"],
+        "action_focus": ["action_id"],
+        "source_reading_states": ["source_id"],
+        "claim_notes": ["claim_id"],
+        "topic_claim_confirmations": ["topic_id", "claim_id"],
+        "source_capture_metadata": ["source_id"],
+        "source_attachments": ["source_id"],
+        "action_estimates": ["action_id"],
+        "source_chapters": ["source_id", "ordinal"],
+        "action_recurrence": ["action_id"],
+        "source_entities": ["source_id", "name"]
+    ]
+    static func keys(_ table: String) -> [String] { identityColumns[table] ?? ["id"] }
+    static func identity(_ table: String, _ row: [String: String]) -> String? {
+        let values = keys(table).compactMap { row[$0] }
+        guard values.count == keys(table).count else { return nil }
+        return values.joined(separator: "\u{1F}")
+    }
     static func tables(for version: Int) -> [String] {
         switch version {
         case 1: return legacyTables
@@ -95,10 +116,11 @@ private enum PackageLayout {
         case 45: return version45Tables
         case 46, 47: return version46Tables
         case 48: return version48Tables
+        case 49: return version49Tables
         default: return tables
         }
     }
-    static let integerFields: Set<String> = ["attempted", "save_acknowledged", "schedule_version", "base_action_version", "access_version", "producer_sequence", "part_index", "conversation_version", "auto_send", "sequence", "action_version", "completed", "marker_valid", "claim_review_version", "review_version", "policy_version", "from_version", "to_version", "from_local_only", "to_local_only", "ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts"]
+    static let integerFields: Set<String> = ["attempted", "save_acknowledged", "schedule_version", "base_action_version", "access_version", "producer_sequence", "part_index", "conversation_version", "auto_send", "sequence", "action_version", "completed", "marker_valid", "claim_review_version", "review_version", "policy_version", "from_version", "to_version", "from_local_only", "to_local_only", "ordinal", "version", "version_no", "expected_bytes", "local_only", "bytes", "attempts", "minutes", "start_ms", "mention_count", "done"]
     static func json(_ row: [String: String]) -> [String: Any] {
         row.reduce(into: [String: Any]()) { out, pair in
             if integerFields.contains(pair.key), let number = Int64(pair.value) { out[pair.key] = number }
@@ -131,7 +153,7 @@ extension VoiceOSStore {
         let file = try PackageLayout.safeFile(package, "manifest.json")
         guard let size = try file.resourceValues(forKeys:[.fileSizeKey]).fileSize, size > 0, size <= 1048576 else { throw VoiceOSError("迁移清单过大或为空") }
         let manifest = try JSONDecoder().decode(PackageManifest.self,from:Data(contentsOf:file))
-        guard manifest.format == "VoiceOS-local-package", (1...48).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
+        guard manifest.format == "VoiceOS-local-package", (1...49).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
               let count = manifest.counts["sources"], count >= 0, manifest.counts.values.allSatisfy({ $0 >= 0 && $0 <= 1000000 }) else { throw VoiceOSError("不支持此迁移包格式或记录数量") }
         return PackageSummary(version:manifest.version,createdAt:manifest.createdAt,sourceCount:count,omittedAssetCount:manifest.omittedAssetIDs.count,mediaIncluded:manifest.mediaIncluded)
     }
@@ -140,10 +162,11 @@ extension VoiceOSStore {
     public func exportPackage(to destination: URL, includeMedia: Bool = false) throws {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("导出目录已存在，请选择新目录") }
         guard try db.query("SELECT id FROM sources WHERE input_fingerprint LIKE 'microphone-v1:%' AND state='receiving' AND expected_bytes=0").isEmpty else { throw VoiceOSError("请先停止并封存录制，再导出资料") }
-        let exportTables = PackageLayout.version48Tables
+        let existingTables = Set(try db.query("SELECT name FROM sqlite_master WHERE type='table'").compactMap { $0["name"] })
+        let exportTables = PackageLayout.version49Tables.filter { existingTables.contains($0) }
         var rows: [String: [[String: String]]] = [:]
         try db.transaction {
-            for table in exportTables { rows[table] = try db.query("SELECT * FROM \(table) ORDER BY id") }
+            for table in exportTables { rows[table] = try db.query("SELECT * FROM \(table) ORDER BY \(PackageLayout.keys(table).joined(separator: ","))") }
         }
         if includeMedia {
             for source in rows["sources"]! where source["input_fingerprint"] == "microphone-v1:"+source["id"]! && source["expected_bytes"] == "0" {
@@ -172,7 +195,8 @@ extension VoiceOSStore {
                 try syncFile(file)
                 files.append(try PackageLayout.digest(file, path: name)); counts[table] = rows[table]!.count
             }
-            if includeMedia { try FileManager.default.createDirectory(at: temporary.appendingPathComponent("assets"), withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700]) }
+            let attachments = rows["source_attachments"] ?? []
+            if includeMedia || !attachments.isEmpty { try FileManager.default.createDirectory(at: temporary.appendingPathComponent("assets"), withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700]) }
             for asset in rows["assets"]! {
                 guard includeMedia, mediaSourceIDs.contains(asset["source_id"]!) else { omissions.append(asset["id"]!); continue }
                 let sourceFile = try PackageLayout.safeFile(root, asset["relative_path"]!)
@@ -184,8 +208,21 @@ extension VoiceOSStore {
                 guard verified.sha256 == actual.1, verified.bytes == actual.0 else { throw VoiceOSError("导出副本校验失败") }
                 files.append(verified)
             }
-            if includeMedia { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 48, databaseSchema: 48, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            for attachment in attachments {
+                guard let relative = attachment["relative_path"], let bytes = attachment["bytes"].flatMap(Int64.init),
+                      relative.hasPrefix("assets/"), relative.split(separator: "/").count == 2 else { throw VoiceOSError("附件记录损坏") }
+                guard bytes <= SourceAttachment.byteLimit else { throw VoiceOSError("附件过大") }
+                let sourceFile = try PackageLayout.safeFile(root, relative)
+                let actual = try DurableFiles.hash(sourceFile)
+                guard actual.0 == bytes else { throw VoiceOSError("附件记录与文件不一致") }
+                let output = try PackageLayout.safeFile(temporary, relative)
+                try DurableFiles.copy(sourceFile, to: output, checkpoint: { _ in })
+                let verified = try PackageLayout.digest(output, path: relative)
+                guard verified.bytes == actual.0, verified.sha256 == actual.1 else { throw VoiceOSError("附件副本校验失败") }
+                files.append(verified)
+            }
+            if includeMedia || !attachments.isEmpty { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 49, databaseSchema: 49, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)
@@ -202,7 +239,7 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("恢复目标必须是新的空目录；现有资料库不会被覆盖") }
         let manifestURL = try PackageLayout.safeFile(package, "manifest.json")
         let manifest = try JSONDecoder().decode(PackageManifest.self, from: Data(contentsOf: manifestURL))
-        guard manifest.format == "VoiceOS-local-package", (1...48).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
+        guard manifest.format == "VoiceOS-local-package", (1...49).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
         guard manifest.version >= 26 || !manifest.files.contains(where: { $0.path == "recording_processing_requests.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带录制处理请求") }
         guard manifest.version >= 27 || !manifest.files.contains(where: { $0.path == "segmented_processing_batches.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带分段批次") }
         guard manifest.version >= 28 || !manifest.files.contains(where: { $0.path == "segmented_extraction_attempts.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带片段尝试") }
@@ -218,12 +255,14 @@ extension VoiceOSStore {
         guard manifest.version >= 38 || !manifest.files.contains(where: { $0.path.hasPrefix("reminder_compensation_") }) else { throw VoiceOSError("旧迁移格式不能携带补偿计划、许可或尝试") }
         guard manifest.version >= 42 || !manifest.files.contains(where: { $0.path.hasPrefix("reflection_question") }) else { throw VoiceOSError("旧迁移格式不能携带长期问题记录") }
         guard manifest.version >= 48 || !manifest.files.contains(where: { ["action_review_resolutions.jsonl","expression_review_acknowledgements.jsonl"].contains($0.path) }) else { throw VoiceOSError("旧迁移格式不能携带行动关系核对记录") }
+        guard manifest.version >= 49 || !manifest.files.contains(where: { $0.path.hasSuffix(".jsonl") && PackageLayout.version49Tables.contains(String($0.path.dropLast(6))) }) else { throw VoiceOSError("旧迁移格式不能携带新表记录") }
         var tables = PackageLayout.tables(for: manifest.version)
         // A newer package can be relabeled as an older compatibility fixture. The
         // additive queue table is safe to carry through that validation path.
         if manifest.version < 24, manifest.files.contains(where: { $0.path == "processing_intents.jsonl" }), !tables.contains("processing_intents") {
             tables.append("processing_intents")
         }
+        if manifest.version >= 49 { tables = tables.filter { !PackageLayout.optionalTables.contains($0) || manifest.counts[$0] != nil } }
         guard Set(manifest.files.map(\.path)).count == manifest.files.count,
               Set(manifest.counts.keys) == Set(tables),
               Set(manifest.omittedAssetIDs).count == manifest.omittedAssetIDs.count else { throw VoiceOSError("迁移清单重复或缺少记录") }
@@ -249,12 +288,13 @@ extension VoiceOSStore {
                 }
                 records.append(record)
             }
-            guard records.count == manifest.counts[table], Set(records.compactMap { $0["id"] }).count == records.count else { throw VoiceOSError("迁移包记录数量或身份重复") }
+            guard records.count == manifest.counts[table], Set(records.compactMap { PackageLayout.identity(table, $0) }).count == records.count else { throw VoiceOSError("迁移包记录数量或身份重复") }
             rows[table] = records
         }
         for table in tables {
+            let columns = PackageLayout.keys(table)
             for row in rows[table]! {
-                guard let id = row["id"], UUID(uuidString: id) != nil else { throw VoiceOSError("迁移包对象身份格式错误") }
+                guard let key = PackageLayout.identity(table, row), columns != ["id"] || UUID(uuidString: key) != nil else { throw VoiceOSError("迁移包对象身份格式错误") }
             }
         }
         for source in rows["sources"]! {
@@ -302,6 +342,20 @@ extension VoiceOSStore {
                 let copied = try DurableFiles.hash(output)
                 guard copied.0 == actual.0, copied.1 == actual.1 else { throw VoiceOSError("恢复副本完整性校验失败") }
             }
+            for attachment in rows["source_attachments"] ?? [] {
+                guard let sourceID = attachment["source_id"], sources[sourceID] != nil,
+                      let relative = attachment["relative_path"], relative.hasPrefix("assets/"), relative.split(separator: "/").count == 2,
+                      let bytes = attachment["bytes"].flatMap(Int64.init) else { throw VoiceOSError("迁移包附件记录损坏") }
+                guard bytes <= SourceAttachment.byteLimit else { throw VoiceOSError("附件过大") }
+                guard let input = verifiedFiles[relative] else { throw VoiceOSError("迁移包缺少附件文件") }
+                expectedPaths.insert(relative)
+                let actual = try DurableFiles.hash(input)
+                guard actual.0 == bytes else { throw VoiceOSError("迁移包附件与记录不一致") }
+                let output = try PackageLayout.safeFile(temporary, relative)
+                try DurableFiles.copy(input, to: output, checkpoint: { _ in })
+                let copied = try DurableFiles.hash(output)
+                guard copied.0 == actual.0, copied.1 == actual.1 else { throw VoiceOSError("恢复附件完整性校验失败") }
+            }
             guard Set(verifiedFiles.keys) == expectedPaths else { throw VoiceOSError("迁移清单包含不受支持的文件") }
             try populateRestore(temporary, rows: rows, omittedSources: omittedSources, tables: tables, packageVersion: manifest.version)
             try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets"))
@@ -316,8 +370,9 @@ extension VoiceOSStore {
         try database.transaction {
             for table in tables {
                 let columns = Set(try database.query("PRAGMA table_info(\(table))").compactMap { $0["name"] })
+                if columns.isEmpty, PackageLayout.optionalTables.contains(table) { continue }
                 for var row in rows[table]! {
-                    guard Set(row.keys).isSubset(of: columns), row["id"] != nil else { throw VoiceOSError("迁移包有未知字段或缺少身份") }
+                    guard Set(row.keys).isSubset(of: columns), PackageLayout.identity(table, row) != nil else { throw VoiceOSError("迁移包有未知字段或缺少身份") }
                     if table == "sources", omittedSources.contains(row["id"]!) {
                         if row["state"] == "trashed" {
                             var presentation = try row["presentation_json"].map { try JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8)) } ?? RecordingPresentation()

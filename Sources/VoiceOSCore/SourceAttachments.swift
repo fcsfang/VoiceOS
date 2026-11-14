@@ -9,6 +9,7 @@ public struct SourceAttachment: Sendable {
 }
 
 extension SourceAttachment {
+    static let byteLimit: Int64 = 200 * 1024 * 1024
     public static func mime(forFileExtension fileExtension: String) -> String? {
         switch fileExtension.lowercased() {
         case "png": return "image/png"
@@ -27,7 +28,11 @@ extension VoiceOSStore {
         guard try db.query("SELECT id FROM sources WHERE id=?", [sourceID]).first != nil else { throw VoiceOSError("来源不存在") }
         let ext = fileURL.pathExtension.lowercased()
         guard let mime = SourceAttachment.mime(forFileExtension: ext) else { throw VoiceOSError("仅支持 png、jpg、jpeg、heic、tiff 图片与 pdf 文件") }
+        let size = try fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+        guard Int64(size) <= SourceAttachment.byteLimit else { throw VoiceOSError("附件过大") }
         let data = try Data(contentsOf: fileURL)
+        guard Int64(data.count) <= SourceAttachment.byteLimit else { throw VoiceOSError("附件过大") }
+        let previous = try db.query("SELECT relative_path FROM source_attachments WHERE source_id=?", [sourceID]).first?["relative_path"]
         let asset = UUID().uuidString, relative = "assets/\(asset).\(ext)"
         let staged = root.appendingPathComponent("staging/\(asset).part.\(ext)")
         let final = try assetURL(relativePath: relative)
@@ -41,6 +46,7 @@ extension VoiceOSStore {
         INSERT INTO source_attachments(source_id,relative_path,mime,bytes,created_at) VALUES(?,?,?,?,?)
         ON CONFLICT(source_id) DO UPDATE SET relative_path=excluded.relative_path,mime=excluded.mime,bytes=excluded.bytes,created_at=excluded.created_at
         """, [sourceID, relative, mime, String(data.count), createdAt])
+        if let previous, previous != relative, let old = try? assetURL(relativePath: previous) { try? FileManager.default.removeItem(at: old) }
         return SourceAttachment(sourceID: sourceID, relativePath: relative, mime: mime, bytes: Int64(data.count), createdAt: createdAt)
     }
 
@@ -48,6 +54,7 @@ extension VoiceOSStore {
         guard let row = try db.query("SELECT relative_path,mime,bytes,created_at FROM source_attachments WHERE source_id=?", [sourceID]).first else { return nil }
         guard let relative = row["relative_path"], let mime = row["mime"], let rawBytes = row["bytes"],
               let bytes = Int64(rawBytes), let createdAt = row["created_at"] else { throw VoiceOSError("图片来源记录损坏") }
+        guard bytes <= SourceAttachment.byteLimit else { throw VoiceOSError("附件过大") }
         return SourceAttachment(sourceID: sourceID, relativePath: relative, mime: mime, bytes: bytes, createdAt: createdAt)
     }
 }
