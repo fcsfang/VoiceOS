@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: merge-ready
 started: 2026-11-14
 updated: 2026-11-14
 branch: work/capture-1
@@ -60,6 +60,27 @@ A1 先合入根分支，随后 A2。A1 与 A2 都改 `VoiceOSApp.swift`，A2 必
 - PDF 只取文本层，扫描版不含 OCR；本轮不做页码跳回。
 - 文件夹监听只监听一层目录，不递归。
 - 分享扩展、App Intents、邮件入口、Quick Note、播客章节、语言识别与语音命令不在本批。
+
+## 结果
+
+2026-11-14 两个单元集成到 `work/capture-1`。A1 `ec14c67`，A2 `d06196b`，热键参数修复 `0dcefcc`。
+
+`swift build -j 2` 通过，`swift test -j 2` 181 项 0 失败。新增 ArticleExtractor、PDFText、FolderWatch 与附件 PDF 用例。
+
+## 实机核对
+
+隔离资料库副本，无模型配置。
+
+- 文件夹监听：预置监听路径后启动应用，往目录里放入一份 txt，材料页出现该文件，标记外部资料、仅本地。
+- 全局热键：终端在前台时按 ⌥⌘V，剪贴板文字变成一份材料，材料页可见。
+- 材料页显示两份新抓取，均为外部资料、仅本地。
+
+## 未取到的实机证据
+
+- PDF 的界面导入没有点通，PDFText 由测试覆盖，入口路径由代码审查覆盖。
+- 网页链接的界面导入没有点通，ArticleExtractor 由测试覆盖，WebArticle 网络边界由代码审查覆盖。
+- 菜单栏新增项没有截图核对，代码审查通过。
+- ⌥⌘D 会开启麦克风录制，未实机触发。
 
 ## 链接
 
