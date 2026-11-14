@@ -240,19 +240,32 @@ public actor VoiceOSStore {
         return url
     }
     public func reverifySource(id: String) async throws -> Bool {
-        guard let row = try db.query("SELECT * FROM sources WHERE id=? AND state='saved'", [id]).first,
+        guard let row = try db.query("SELECT * FROM sources WHERE id=? AND state IN ('saved','quarantined')", [id]).first,
               let expectedBytes = Int64(row["expected_bytes"]!) else { return false }
         do {
             let file = try assetURL(relativePath: row["relative_path"]!)
             guard FileManager.default.fileExists(atPath: file.path) else { throw VoiceOSError("原件缺失") }
             let actual = try DurableFiles.hash(file)
             guard actual.0 == expectedBytes, actual.1 == row["expected_hash"] else { throw VoiceOSError("原件完整性核对失败") }
-            _ = try await inspectSource(file, kind: row["kind"]!)
-            try db.execute("UPDATE sources SET error=NULL WHERE id=?", [id])
+            let info = try await inspectSource(file, kind: row["kind"]!)
+            try restoreVerifiedOriginal(row, info: info)
             return true
         } catch {
             try db.execute("UPDATE sources SET error=? WHERE id=?", [Self.verificationFailureMessage, id])
             return false
+        }
+    }
+    private func restoreVerifiedOriginal(_ row: [String: String], info: MediaInfo) throws {
+        let id = row["id"]!
+        try db.transaction {
+            try db.execute("UPDATE sources SET state='saved',duration=?,kind=?,error=NULL WHERE id=?", [String(info.duration), info.kind, id])
+            try db.execute("INSERT OR IGNORE INTO assets(id,source_id,relative_path,bytes,sha256,role) VALUES(?,?,?,?,?,'original')", [row["asset_id"], id, row["relative_path"], row["expected_bytes"], row["expected_hash"]])
+            let transcripts = try db.query("SELECT 1 FROM transcripts WHERE source_id=? LIMIT 1", [id])
+            let activeJobs = try db.query("SELECT 1 FROM jobs WHERE source_id=? AND stage='transcription' AND state IN ('queued','running') LIMIT 1", [id])
+            if transcripts.isEmpty, activeJobs.isEmpty, ["audio", "video"].contains(info.kind) {
+                try db.execute("INSERT OR IGNORE INTO jobs(id,source_id,input_version_id,stage,config,state) VALUES(?,?,?,'transcription','pending-local-speech-v1','queued')", [UUID().uuidString, id, row["version_id"]])
+                try db.execute("UPDATE jobs SET state='queued',lease_token=NULL,error=NULL WHERE source_id=? AND input_version_id=? AND stage='transcription' AND config='pending-local-speech-v1' AND state NOT IN ('queued','running')", [id, row["version_id"]])
+            }
         }
     }
     private func verifiedHash(_ url: URL) throws -> (Int64, String) {

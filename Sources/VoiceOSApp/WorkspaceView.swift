@@ -958,6 +958,7 @@ struct WorkspaceView: View {
         ForEach(model.processingIntents.filter { [.blocked,.unknown].contains($0.state) }) { intent in
             Text("表达处理：" + workspaceStateLabel(intent.state.rawValue)).font(.caption).foregroundStyle(.secondary)
         }
+        ReverifyControls(model:model)
     }
     @ViewBuilder private func tool(_ name:String) -> some View {
         switch name {
