@@ -7,6 +7,7 @@ enum WorkspaceMetrics {
     static let readerWidth: CGFloat = 720
     static let pagePadding: CGFloat = 30
     static let controlPadding: CGFloat = 12
+    static let toolbarPadding: CGFloat = 16
     static let sectionRadius: CGFloat = 14
     static let panelRadius: CGFloat = 12
     static let controlRadius: CGFloat = 8
