@@ -4,15 +4,15 @@
 
 ## 当前基线
 
-- `main` 收在合并提交 `b32b61c`（PR #149 快速赢面第三批；其下 `cc24e9e` 是 #148 第二批，`2b67352` 是 #147 第一批），本地与远端一致。
-- SQLite schema 56（新增图片来源表），迁移包格式 48。
-- `swift build -j 2` 通过，`swift test -j 2` 167 项通过。
+- `main` 收在合并提交 `13cdd15`（PR #151 抓取层第一批；其下 `2b7fc2d` 是快速赢面收尾，#149 到 #147 为三批快速赢面），本地与远端一致。
+- SQLite schema 56，迁移包格式 48。
+- `swift build -j 2` 通过，`swift test -j 2` 181 项通过。
 - 仓库不使用自动 CI。日常迭代用 `swift build`，完整测试本地跑 `swift test`。
 - 本地与远端仍有历史 codex/work/worktree 分支未清理，正式分支只有 `main`。
 
 ## 分支在审
 
-- `work/capture-1` 抓取层第一批，任务卡 `work/tasks/20261114-capture-wave/TASK.md`。PDF 文本层与原件附件、从链接抓取正文、⌥⌘D 与 ⌥⌘V 全局热键、剪贴板捕获、文件夹监听。`swift build -j 2` 通过，`swift test -j 2` 181 项 0 失败。实机已核对文件夹监听与剪贴板热键；PDF 与网页入口没有实机证据。PR 待开。
+- `work/capture-1` 抓取层第一批，PR #151 已合并为 `13cdd15`。PDF 文本层与原件附件、从链接抓取正文、⌥⌘D 与 ⌥⌘V 全局热键、剪贴板捕获、文件夹监听。
 - `work/quick-wins-1` 快速赢面第一批，PR #147 已合并为 `2b67352`。十项：macOS 服务、菜单栏拖放、网页选区、x-callback-url、隐私清单、稍后预设、撤销条、专注旗标、旁注、未链接引用。schema 55。
 - `work/quick-wins-2` 快速赢面第二批，PR #148 已合并为 `cc24e9e`。阅读状态与过滤、行动批量选择、悬停预览、逐句高亮、讨论追问建议、侧栏保存视图。
 - `work/quick-wins-3` 快速赢面第三批，PR #149 已合并为 `b32b61c`。图片 OCR、原图入口、全文选读与选中三项动作。schema 56。
