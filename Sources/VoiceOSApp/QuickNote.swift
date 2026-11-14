@@ -10,25 +10,24 @@ extension GlobalHotKey {
 @MainActor
 final class QuickNoteController: NSObject, NSWindowDelegate {
     static let shared = QuickNoteController()
-    private var panel: NSPanel?
+    private var panel: QuickNotePanel?
     private var previousApplication: NSRunningApplication?
 
     func show() {
         if let panel {
-            NSApp.activate()
+            NSApp.activate(ignoringOtherApps: true)
             panel.makeKeyAndOrderFront(nil)
+            panel.makeKey()
             return
         }
         guard let model = ControlCenter.primary else { return }
         let context = FrontContextReader.current()
         previousApplication = NSWorkspace.shared.frontmostApplication
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 480, height: 340),
+        let panel = QuickNotePanel(contentRect: NSRect(x: 0, y: 0, width: 480, height: 340),
                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         panel.title = "速记"
-        panel.isFloatingPanel = true
         panel.level = .floating
         panel.hidesOnDeactivate = false
-        panel.becomesKeyOnlyIfNeeded = false
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.delegate = self
@@ -37,8 +36,9 @@ final class QuickNoteController: NSObject, NSWindowDelegate {
         })
         panel.center()
         self.panel = panel
-        NSApp.activate()
+        NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
+        panel.makeKey()
     }
 
     private func close() {
@@ -95,4 +95,10 @@ private struct QuickNoteView: View {
             if saved { close() } else { error = model.status.isEmpty ? "保存失败，请稍后重试" : model.status }
         }
     }
+}
+
+@MainActor
+private final class QuickNotePanel: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
 }
