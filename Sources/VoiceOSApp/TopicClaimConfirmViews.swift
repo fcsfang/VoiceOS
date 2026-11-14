@@ -52,22 +52,30 @@ struct TopicUnlinkedReferencesSection: View {
     }
 
     private func reload() {
-        do { confirmedIDs = try model.confirmedTopicClaimIDs(topicID:topic.id); error = "" }
+        Task { await loadConfirmed() }
+    }
+
+    private func loadConfirmed() async {
+        do { confirmedIDs = try await model.confirmedTopicClaimIDs(topicID:topic.id); error = "" }
         catch { self.error = error.localizedDescription }
     }
 
     private func confirm(_ claim: CandidateClaim) {
         busyClaimID = claim.id
-        defer { busyClaimID = nil }
-        do { _ = try model.confirmTopicClaim(topicID:topic.id, claimID:claim.id); reload() }
-        catch { self.error = error.localizedDescription }
+        Task {
+            defer { busyClaimID = nil }
+            do { _ = try await model.confirmTopicClaim(topicID:topic.id, claimID:claim.id); await loadConfirmed() }
+            catch { self.error = error.localizedDescription }
+        }
     }
 
     private func unconfirm(_ claim: CandidateClaim) {
         busyClaimID = claim.id
-        defer { busyClaimID = nil }
-        do { try model.unconfirmTopicClaim(topicID:topic.id, claimID:claim.id); reload() }
-        catch { self.error = error.localizedDescription }
+        Task {
+            defer { busyClaimID = nil }
+            do { try await model.unconfirmTopicClaim(topicID:topic.id, claimID:claim.id); await loadConfirmed() }
+            catch { self.error = error.localizedDescription }
+        }
     }
 }
 
@@ -83,19 +91,19 @@ extension ControlCenter {
         )
     }
 
-    func confirmedTopicClaimIDs(topicID: String) throws -> [String] {
+    func confirmedTopicClaimIDs(topicID: String) async throws -> [String] {
         guard let store else { return [] }
-        return try store.confirmedTopicClaimIDs(topicID: topicID)
+        return try await store.confirmedTopicClaimIDs(topicID: topicID)
     }
 
     @discardableResult
-    func confirmTopicClaim(topicID: String, claimID: String) throws -> Bool {
+    func confirmTopicClaim(topicID: String, claimID: String) async throws -> Bool {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
-        return try store.confirmTopicClaim(topicID: topicID, claimID: claimID)
+        return try await store.confirmTopicClaim(topicID: topicID, claimID: claimID)
     }
 
-    func unconfirmTopicClaim(topicID: String, claimID: String) throws {
+    func unconfirmTopicClaim(topicID: String, claimID: String) async throws {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
-        try store.unconfirmTopicClaim(topicID: topicID, claimID: claimID)
+        try await store.unconfirmTopicClaim(topicID: topicID, claimID: claimID)
     }
 }

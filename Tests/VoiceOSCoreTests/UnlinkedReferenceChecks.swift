@@ -19,7 +19,7 @@ final class UnlinkedReferenceChecks: XCTestCase {
 
     func testSplitsTopicWordsOnChineseAndSlashSeparators() {
         let result = candidates([
-            claim("c1", "深度工作很重要", sourceIDs: ["s1"]),
+            claim("c1", "深度工作", sourceIDs: ["s1"]),
             claim("c2", "专注需要时间", sourceIDs: ["s1"]),
             claim("c3", "A 很重要", sourceIDs: ["s1"]),
         ], topicTitle: "A与深度工作", sectionTitles: ["专注、休息"])

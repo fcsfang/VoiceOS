@@ -298,7 +298,7 @@ final class TaskInitiationChecks: XCTestCase {
         XCTAssertEqual(rows.first?.state, "draft")
         XCTAssertEqual(rows.first?.basisChanged, false)
         let database = try Database(root.appendingPathComponent("voiceos.sqlite"))
-        XCTAssertEqual(try database.query("PRAGMA user_version").first?["user_version"], "54")
+        XCTAssertEqual(try database.query("PRAGMA user_version").first?["user_version"], "55")
         XCTAssertEqual(try database.query("SELECT name FROM sqlite_master WHERE name='task_initiations'").count, 1)
         for table in ["action_review_resolutions", "expression_review_acknowledgements"] {
             XCTAssertEqual(try database.query("SELECT name FROM sqlite_master WHERE name=?", [table]).count, 1)

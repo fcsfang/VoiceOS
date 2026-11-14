@@ -1738,7 +1738,7 @@ final class CoreFlowTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let url=root.appendingPathComponent("panorama-schema.sqlite")
         var created: Database?=try Database(url)
-        XCTAssertEqual(try created?.query("PRAGMA user_version").first?["user_version"], "54")
+        XCTAssertEqual(try created?.query("PRAGMA user_version").first?["user_version"], "55")
         created=nil
         let reopened=try Database(url)
         for table in ["action_review_resolutions", "expression_review_acknowledgements"] {
