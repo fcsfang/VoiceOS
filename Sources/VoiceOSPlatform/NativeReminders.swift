@@ -6,6 +6,17 @@ public struct ReminderCalendar: Identifiable, Sendable {
     public let id: String
     public let title: String
 }
+public struct ReminderLocationLabel {
+    public static func text(title: String, proximity: EKAlarmProximity) -> String? {
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+        switch proximity {
+        case .enter: return "到达 " + name + " 时提醒"
+        case .leave: return "离开 " + name + " 时提醒"
+        default: return nil
+        }
+    }
+}
 /// All EventKit objects stay on MainActor and are reacquired for each operation.
 @MainActor
 public final class NativeReminders: RemindersSchedulingPort, RemindersFieldsPort, RecordingExpressionRemindersPort {
@@ -35,6 +46,16 @@ public final class NativeReminders: RemindersSchedulingPort, RemindersFieldsPort
         return result
     }
     public var isAuthorized: Bool { EKEventStore.authorizationStatus(for: .reminder) == .fullAccess }
+    public static func structuredLocationLabel(externalID: String) async -> String? {
+        guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess else { return nil }
+        let fresh = EKEventStore()
+        fresh.refreshSourcesIfNecessary()
+        guard let item = fresh.calendarItem(withIdentifier: externalID) as? EKReminder else { return nil }
+        for alarm in item.alarms ?? [] {
+            if let label = ReminderLocationLabel.text(title: alarm.structuredLocation?.title ?? "", proximity: alarm.proximity) { return label }
+        }
+        return nil
+    }
     public func observeChanges(_ handler: @escaping @MainActor () -> Void) -> NSObjectProtocol {
         NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: store, queue: .main) { _ in Task { @MainActor in handler() } }
     }
