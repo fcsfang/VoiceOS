@@ -108,6 +108,11 @@ struct WorkspaceView: View {
     @State private var materialFilter = "日常材料"
     @State private var actionFilter = "全部"
     @State private var focusedActionIDs: Set<String> = []
+    @State private var readingStates: [String: SourceReadingState] = [:]
+    @State private var selectingActions = false
+    @State private var selectedActionIDs: Set<String> = []
+    @State private var pendingBatchState: LocalActionState?
+    @State private var batchRunning = false
     @State private var query = ""
     @FocusState private var searchFocused: Bool
     @State private var taskFeedbackDrafts: [String: TaskFeedbackDraft] = [:]
@@ -210,6 +215,7 @@ struct WorkspaceView: View {
         .navigationTitle(model.libraryTitle)
         .focusedSceneValue(\.voiceOSController,model)
         .task { await model.start() }
+        .task(id:model.initialized) { if model.initialized { readingStates = await model.readingStates() } }
         .task { await model.setPanoramaVisible(page == .home && homeShowsPanorama) }
         .task(id:topicLoadKey) {
             guard page == .themes, let id=topicID else { topicFocus=nil; return }
@@ -241,6 +247,8 @@ struct WorkspaceView: View {
             if id != nil { go(.tool("导入录音")); showingDiscussion=false }
             else if page == .tool("导入录音") { back() }
         }
+        .onChange(of:page) { _, next in if next != .actions { exitActionSelection() } }
+        .onChange(of:actionFilter) { _, filter in if !["全部","我的待办"].contains(filter) { exitActionSelection() } }
         .onOpenURL { url in if model.initialized { routeExternalURL(url) } else { pendingURL=url } }
         .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;routeExternalURL(url) } }
         .onDisappear { Task { await model.setPanoramaVisible(false) } }
@@ -275,6 +283,19 @@ struct WorkspaceView: View {
             Button("好") { model.fullRecordingImportIssue = nil }
         } message: {
             Text(model.fullRecordingImportIssue ?? "")
+        }
+        .alert(batchConfirmTitle, isPresented: Binding(
+            get: { pendingBatchState != nil },
+            set: { if !$0 { pendingBatchState = nil } }
+        )) {
+            Button("取消", role: .cancel) { pendingBatchState = nil }
+            Button(pendingBatchState == .dismissed ? "不再跟进" : "标为完成") {
+                guard let state = pendingBatchState else { return }
+                pendingBatchState = nil
+                Task { await applyActionBatch(state) }
+            }
+        } message: {
+            Text(batchConfirmMessage)
         }
     }
     private var topicLoadKey: String {
@@ -378,7 +399,9 @@ struct WorkspaceView: View {
             }
         case .themes: scrolled { themes }.id(navigationEntry)
         case .materials: scrolled { materials }
-        case .actions: scrolled { actions }
+        case .actions:
+            scrolled { actions }
+                .overlay(alignment:.bottom) { if selectingActions { actionSelectionBar } }
         case .initiate: TaskInitiationView(model:model,openSource:{ go(.source($0)) })
         case .source(let id):
             if let source=model.records.first(where: { $0.id == id }) {
@@ -464,7 +487,13 @@ struct WorkspaceView: View {
     private var readingMaterials: [SourceRecord] {
         let catalog=Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })
         let selected=model.records.filter { source in
-            materialFilter == "回收站" ? source.isTrashed : materialFilter == "已归档" ? source.isArchived : !source.isArchived && !source.isTrashed
+            switch materialFilter {
+            case "回收站": return source.isTrashed
+            case "已归档": return source.isArchived
+            case "未读": return !source.isArchived && !source.isTrashed && (readingStates[source.id] ?? .unread) == .unread
+            case "在读": return !source.isArchived && !source.isTrashed && readingStates[source.id] == .reading
+            default: return !source.isArchived && !source.isTrashed
+            }
         }
         let selectedIDs=Set(selected.map(\.id))
         let attachedContextIDs=Set(selected.compactMap { contextSourceID($0,catalog:catalog) }).intersection(selectedIDs)
@@ -489,14 +518,22 @@ struct WorkspaceView: View {
         let catalog = recordCatalog
         return LazyVStack(alignment:.leading,spacing:24) {
             WorkspaceHeading(eyebrow:"",title:"材料",subtitle:"\(rows.count) 份")
-            WorkspaceTabs(selection:$materialFilter,titles:["日常材料","已归档","回收站"])
-            if materialFilter != "日常材料" {
+            WorkspaceTabs(selection:$materialFilter,titles:["日常材料","未读","在读","已归档","回收站"])
+            if ["已归档","回收站"].contains(materialFilter) {
                 Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留，不用于当前理解；恢复后仅本机保存。Apple 提醒事项未被删除或取消。").font(.callout).foregroundStyle(.secondary)
             }
             if rows.isEmpty {
                 if materialFilter == "日常材料" {
                     WorkspaceEmptyState(title: model.records.isEmpty ? "还没有材料" : "日常材料是空的", systemImage:"tray", description: model.records.isEmpty ? "可以先记录想法，或导入一段录音、视频。" : "其他材料在已归档或回收站里，可以切换查看。") {
                         Button("添加材料") { go(.capture) }.buttonStyle(.borderedProminent)
+                    }
+                } else if materialFilter == "未读" {
+                    WorkspaceEmptyState(title:"没有未读材料",systemImage:"eye",description:"新材料默认未读，打开后会标为在读。") {
+                        Button("查看日常材料") { materialFilter="日常材料" }
+                    }
+                } else if materialFilter == "在读" {
+                    WorkspaceEmptyState(title:"没有在读的材料",systemImage:"book",description:"打开未读材料后会自动出现在这里。") {
+                        Button("查看日常材料") { materialFilter="日常材料" }
                     }
                 } else {
                     WorkspaceEmptyState(title:"这里暂时没有材料",systemImage:materialFilter == "回收站" ? "trash" : "archivebox",description:materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。") {
@@ -606,6 +643,9 @@ struct WorkspaceView: View {
         LazyVStack(alignment:.leading,spacing:24) {
             HStack(alignment:.top) {
                 WorkspaceHeading(eyebrow:"",title:"行动")
+                if ["全部","我的待办"].contains(actionFilter) {
+                    Button(selectingActions ? "取消选择" : "选择") { if selectingActions { exitActionSelection() } else { selectingActions=true } }.buttonStyle(.bordered).disabled(batchRunning)
+                }
                 Button("每周回顾",systemImage:"calendar.badge.clock") { showingWeeklyReview=true }.buttonStyle(.bordered)
             }
             WorkspaceTabs(selection:$actionFilter,titles:["全部","我的待办","AI 助理","已完成","问题与目标","待核对","历史记录"])
@@ -826,7 +866,25 @@ struct WorkspaceView: View {
         let combined=(expression?.sourceIDs.count ?? 0) > 1
         let first=combined ? expression!.sourceIDs.first.flatMap { catalog[$0] } ?? source : source
         let origin=source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料"
-        return WorkspaceRow(title:combined ? expression!.title : source.displayTitle,subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : ""),icon:source.kind.contains("text") ? "doc.text" : "waveform") { go(.source(source.id)) }
+        return WorkspaceRow(title:combined ? expression!.title : source.displayTitle,subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:materialReadingLabel(source.id)) { go(.source(source.id)) }
+            .contextMenu {
+                Button("标为未读") { setMaterialReading(source.id,.unread) }
+                Button("标为在读") { setMaterialReading(source.id,.reading) }
+                Button("标为已读") { setMaterialReading(source.id,.read) }
+            }
+    }
+    private func materialReadingLabel(_ id:String) -> String {
+        switch readingStates[id] ?? .unread {
+        case .unread: return ""
+        case .reading: return "在读"
+        case .read: return "已读"
+        }
+    }
+    private func setMaterialReading(_ id:String,_ state:SourceReadingState) {
+        Task {
+            if await model.setReadingState(sourceID:id,state:state) { readingStates[id]=state }
+            else { error=model.status }
+        }
     }
     private func actionRowSubtitle(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> String {
         var detail:String
@@ -875,12 +933,20 @@ struct WorkspaceView: View {
         }
     }
     private func actionRow(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> some View {
-        WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action,timeEntry:timeEntry),icon:action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : "circle") { go(.task(action.id)) }
-            .contextMenu {
-                if page == .actions, action.state == "open", action.validity == "current" {
-                    Button(focusedActionIDs.contains(action.id) ? "移出专注" : "加入专注") { toggleFocus(action.id) }
-                }
+        let selectable=action.state == "open" && action.validity == "current"
+        let selected=selectedActionIDs.contains(action.id)
+        let icon=selectingActions && selectable ? (selected ? "checkmark.circle.fill" : "circle") : action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : "circle"
+        return WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action,timeEntry:timeEntry),icon:icon,trailing:selectingActions && selected ? "已选" : "") {
+            if selectingActions {
+                guard selectable else { return }
+                if selected { selectedActionIDs.remove(action.id) } else { selectedActionIDs.insert(action.id) }
+            } else { go(.task(action.id)) }
+        }
+        .contextMenu {
+            if page == .actions, action.state == "open", action.validity == "current" {
+                Button(focusedActionIDs.contains(action.id) ? "移出专注" : "加入专注") { toggleFocus(action.id) }
             }
+        }
     }
     private func toggleFocus(_ id:String) {
         Task {
@@ -889,12 +955,60 @@ struct WorkspaceView: View {
             error = ""
         }
     }
+    private var batchEligibleActions: [ActionRecord] {
+        let ids=selectedActionIDs
+        return model.actionRecords.filter { ids.contains($0.id) && $0.state == "open" && $0.validity == "current" }
+    }
+    private var batchConfirmTitle: String {
+        (pendingBatchState == .dismissed ? "不再跟进 " : "标为完成 ") + "\(batchEligibleActions.count) 条行动？"
+    }
+    private var batchConfirmMessage: String {
+        "只更新仍为待办且有效的行动，失败的会合并成一条提示。"
+    }
+    private func exitActionSelection() {
+        selectingActions=false;selectedActionIDs=[]
+    }
+    private func applyActionBatch(_ state:LocalActionState) async {
+        guard !batchRunning else { return }
+        batchRunning=true
+        defer { batchRunning=false }
+        var failures=0
+        for record in batchEligibleActions {
+            await model.changeAction(record,state:state)
+            if model.actionRecords.first(where: { $0.id == record.id })?.state != state.rawValue { failures += 1 }
+        }
+        exitActionSelection()
+        error=failures == 0 ? "" : "有 \(failures) 条行动未能更新，请稍后重试。"
+    }
+    private var actionSelectionBar: some View {
+        HStack(spacing:12) {
+            Text(batchRunning ? "正在更新…" : "已选 \(selectedActionIDs.count) 条").vosFont(13, weight: .medium)
+            Button("标为完成") { pendingBatchState = .completed }.buttonStyle(.borderedProminent).disabled(batchRunning || batchEligibleActions.isEmpty)
+            Button("不再跟进") { pendingBatchState = .dismissed }.buttonStyle(.bordered).disabled(batchRunning || batchEligibleActions.isEmpty)
+            Button("取消") { exitActionSelection() }.buttonStyle(.borderless).disabled(batchRunning)
+        }.padding(.horizontal,18).padding(.vertical,11)
+            .background(palette.surface,in:Capsule())
+            .overlay(Capsule().strokeBorder(palette.selection,lineWidth:1))
+            .shadow(color:.black.opacity(0.18),radius:14,y:6)
+            .padding(.bottom,16)
+    }
     private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
     private var navigationEntry: WorkspaceNavigationEntry { .init(page:page,topicID:topicID,topicTab:topicTab,topicReadingMode:topicReadingMode) }
     private func go(_ next:WorkspacePage) {
         if page != next { path.append(navigationEntry);if next.isTopLevel { scrollPositions.removeAll() };page=next }
         error=""
+        if case .source(let id)=next { markSourceOpened(id) }
+    }
+    private func markSourceOpened(_ id:String) {
+        Task {
+            let states=await model.readingStates()
+            let current=states[id] ?? .unread
+            readingStates[id]=current
+            guard current == .unread else { return }
+            if await model.setReadingState(sourceID:id,state:.reading) { readingStates[id]=.reading }
+            else { error=model.status }
+        }
     }
     private func back() {
         if let entry=path.popLast() {
