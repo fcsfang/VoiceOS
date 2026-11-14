@@ -1,19 +1,24 @@
 import SwiftUI
 import VoiceOSCore
 
-/// Read-only weekly review over the action workspace. Each section caps at five
-/// rows and opens the task it names; the panel itself never writes.
+/// Weekly review over the action workspace. Each section caps at five rows and
+/// opens the task it names; only the daily close section changes a task state.
 struct WeeklyReviewView: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: ControlCenter
     let openTask: (String) -> Void
+    @State private var actionError = ""
 
     private var openTasks: [ActionRecord] {
         model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" }
     }
     private var surface: ActionTimeSurface {
         ActionTimeSurface.build(actions: openTasks, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
+    }
+    private var dailyReview: DailyReview {
+        DailyReview.build(actions: model.actionRecords, schedules: model.scheduleIntents,
+                          links: model.reminderLinks, now: Date(), calendar: .current)
     }
     private var todayEntries: [ActionTimeEntry] { Array(surface.today.prefix(5)) }
     private var staleTasks: [ActionRecord] {
@@ -45,15 +50,17 @@ struct WeeklyReviewView: View {
             .filter { seen.insert($0.id).inserted }
     }
     private var isEmpty: Bool {
-        todayEntries.isEmpty && staleTasks.isEmpty && unclarifiedTasks.isEmpty && weekProgress.isEmpty && pausedTasks.isEmpty
+        dailyReview.today.isEmpty && dailyReview.overdue.isEmpty && dailyReview.remaining.isEmpty &&
+            staleTasks.isEmpty && unclarifiedTasks.isEmpty && weekProgress.isEmpty && pausedTasks.isEmpty
     }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(alignment: .top) {
-                    WorkspaceHeading(eyebrow: "行动 · 每周回顾", title: "这一周，行动走到了哪里", subtitle: "只读回顾；点开任意一条查看任务、原话与结果。")
+                    WorkspaceHeading(eyebrow: "行动 · 每周回顾", title: "这一周，行动走到了哪里", subtitle: "今天收尾可直接完成或不再跟进；点开任意一条查看任务、原话与结果。")
                     Button("关闭") { dismiss() }
                 }
+                dailyCloseSection
                 if isEmpty {
                     Text("这一周没有需要回顾的行动。").font(.callout).foregroundStyle(.secondary)
                 }
@@ -65,6 +72,96 @@ struct WeeklyReviewView: View {
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding)
         }
         .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 560)
+    }
+
+    private var dailyCloseSection: some View {
+        let review = dailyReview
+        return WorkspaceSection(title: "今天收尾", subtitle: "逐条完成或不再跟进；改天仍到任务页处理。", icon: "checkmark.circle", count: review.remainingCount) {
+            if review.isClear {
+                Text("今天没有未收尾的行动").font(.callout).foregroundStyle(.secondary).padding(.vertical, 10)
+            }
+            if !review.today.isEmpty {
+                ForEach(Array(review.today.enumerated()), id: \.element.id) { index, entry in
+                    if index > 0 { Divider() }
+                    dailyRow(entry, overdue: false)
+                }
+            }
+            if !review.overdue.isEmpty {
+                if !review.today.isEmpty { Divider() }
+                Text("逾期").vosFont(13, weight: .semibold).foregroundStyle(palette.warning)
+                    .padding(.top, 12).padding(.bottom, 2)
+                ForEach(Array(review.overdue.enumerated()), id: \.element.id) { index, entry in
+                    if index > 0 { Divider() }
+                    dailyRow(entry, overdue: true)
+                }
+            }
+            if review.completedCount + review.dismissedCount > 0 {
+                Text("已完成 \(review.completedCount) 条，已放下 \(review.dismissedCount) 条。")
+                    .vosFont(12).foregroundStyle(.secondary).padding(.top, 10)
+            }
+            if !actionError.isEmpty {
+                Text(actionError).vosFont(12).foregroundStyle(palette.warning).padding(.top, 10)
+            }
+        }
+    }
+
+    private func dailyRow(_ entry: ActionTimeEntry, overdue: Bool) -> some View {
+        let subtitle = dailySubtitle(entry)
+        return HStack(alignment: .top, spacing: 12) {
+            Button { openTask(entry.action.id) } label: {
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: overdue ? "exclamationmark.circle" : "circle").vosFont(16)
+                        .foregroundStyle(overdue ? palette.warning : palette.accent)
+                        .frame(width: 34, height: 34)
+                        .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(entry.action.title).vosFont(16, weight: .semibold).lineLimit(2).multilineTextAlignment(.leading)
+                        if !subtitle.isEmpty {
+                            Text(subtitle).vosFont(13).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                        }
+                    }
+                    Spacer(minLength: 8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }.buttonStyle(.plain)
+            if overdue {
+                Text("逾期").vosFont(12, weight: .medium).foregroundStyle(palette.warning).padding(.top, 5)
+            }
+            Button("完成") { apply(entry, .completed) }
+                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+            Button("不再跟进") { apply(entry, .dismissed) }
+                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+        }
+        .padding(.vertical, 10).padding(.horizontal, 10)
+    }
+
+    private func apply(_ entry: ActionTimeEntry, _ state: LocalActionState) {
+        Task {
+            await model.changeAction(entry.action, state: state)
+            let current = model.actionRecords.first { $0.id == entry.action.id }
+            actionError = current?.state == state.rawValue ? "" : "状态未能更新，请到任务页核对"
+        }
+    }
+
+    private func dailySubtitle(_ entry: ActionTimeEntry) -> String {
+        var parts: [String] = []
+        if let title = actionSourceTitle(entry.action) {
+            let shortened = title.count > 12 ? String(title.prefix(12)) + "…" : title
+            parts.append("来自『\(shortened)』")
+        }
+        if let due = entry.due { parts.append(due.summary) }
+        return parts.joined(separator: " · ")
+    }
+
+    private func actionSourceTitle(_ action: ActionRecord) -> String? {
+        guard let claim = model.claims.first(where: { $0.id == action.claimID }) else { return nil }
+        for reference in claim.references {
+            guard let source = model.records.first(where: { $0.id == reference.sourceID }) else { continue }
+            let title = source.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !title.isEmpty { return title }
+        }
+        return nil
     }
 
     private var todaySection: some View {
