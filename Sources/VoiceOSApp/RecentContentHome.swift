@@ -12,7 +12,6 @@ struct RecentContentHome: View {
     let openTask: (String) -> Void
     let capture: () -> Void
     @State private var selectedID: String?
-    @State private var expandedThreads: Set<String> = []
     @State private var showsAllTasks = false
     private let topAnchor = "home.top"
 
@@ -93,7 +92,6 @@ struct RecentContentHome: View {
                 }
             }
             .onChange(of: selected?.id) { _, _ in
-                expandedThreads = []
                 showsAllTasks = false
                 proxy.scrollTo(topAnchor, anchor: .top)
             }
@@ -172,7 +170,7 @@ struct RecentContentHome: View {
     }
 
     private func threadSection(_ thread: RecentContentThread, number: Int) -> some View {
-        let expanded = expandedThreads.contains(thread.id)
+        let notes = thread.thoughts.filter { $0.kind != .goal }
         return VStack(alignment: .leading, spacing: 0) {
             Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 18)
             HStack(alignment: .firstTextBaseline, spacing: 14) {
@@ -181,23 +179,21 @@ struct RecentContentHome: View {
                 Text(thread.title).font(.system(size: 15.5, weight: .semibold))
                 Spacer(minLength: 8)
             }
-            if let lead = thread.lead {
-                Text(lead.statement).font(.system(size: 19, design: .serif)).lineSpacing(7).textSelection(.enabled)
-                    .padding(.leading, 16)
-                    .overlay(alignment: .leading) { Rectangle().fill(palette.accent).frame(width: 2) }
-                    .padding(.top, 20).padding(.leading, 42)
-            }
-            if !thread.supporting.isEmpty {
-                VStack(alignment: .leading, spacing: 13) {
-                    ForEach(thread.supporting) { thought in
-                        Text(thought.statement).font(.system(size: 14.5)).lineSpacing(5).textSelection(.enabled)
+            if !notes.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(notes) { thought in
+                        HStack(alignment: .top, spacing: 10) {
+                            Text(kindLabel(thought.kind)).font(.system(size: 10)).tracking(0.8)
+                                .foregroundStyle(.secondary).frame(width: 30, alignment: .leading).padding(.top, 2)
+                            Text(thought.statement).font(.system(size: 14.5)).lineSpacing(5).textSelection(.enabled)
+                        }
                     }
-                }.padding(.top, 20).padding(.leading, 42)
+                }.padding(.top, 16).padding(.leading, 42)
             }
             if !thread.goals.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("想慢慢做到").font(.system(size: 10)).tracking(1.4).foregroundStyle(palette.accent)
-                    ForEach(Array(thread.goals.prefix(2))) { thought in
+                    ForEach(thread.goals) { thought in
                         Text(thought.statement).font(.system(size: 14)).lineSpacing(4).textSelection(.enabled)
                     }
                 }
@@ -205,26 +201,6 @@ struct RecentContentHome: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
                 .padding(.top, 20).padding(.leading, 42)
-            }
-            if thread.hiddenCount > 0 {
-                Button(expanded ? "收起" : "展开 \(thread.hiddenCount) 条") {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        if expanded { expandedThreads.remove(thread.id) } else { expandedThreads.insert(thread.id) }
-                    }
-                }.buttonStyle(.plain).font(.system(size: 12.5)).foregroundStyle(palette.accent)
-                    .padding(.top, 15).padding(.leading, 42)
-                    .accessibilityIdentifier("home.thread.expand")
-            }
-            if expanded {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(thread.remaining) { thought in
-                        HStack(alignment: .top, spacing: 10) {
-                            Text(kindLabel(thought.kind)).font(.system(size: 10)).tracking(0.8)
-                                .foregroundStyle(.secondary).frame(width: 30, alignment: .leading).padding(.top, 2)
-                            Text(thought.statement).font(.system(size: 13.5)).lineSpacing(4).textSelection(.enabled)
-                        }
-                    }
-                }.padding(.top, 13).padding(.leading, 42)
             }
         }.accessibilityIdentifier("home.thread")
     }

@@ -35,23 +35,25 @@ final class RecentContentDigestChecks: XCTestCase {
         XCTAssertEqual(digest.thoughtCount, thoughts.count)
     }
 
-    func testLeadPrefersReflectionOverConcreteFacts() {
+    func testAllThoughtsAreShownInOriginalOrder() {
         let thoughts = makeThoughts([
             ("第二个实习项目是给老系统补功能", .insight),
             ("完成比完美更重要，先把成果交付出去", .insight),
         ])
         let digest = RecentContentDigest.build(thoughts: thoughts, duration: 0)
-        XCTAssertEqual(digest.threads.first?.lead?.statement, "完成比完美更重要，先把成果交付出去")
+        XCTAssertEqual(digest.threads.first?.thoughts.map(\.statement),
+                       ["第二个实习项目是给老系统补功能", "完成比完美更重要，先把成果交付出去"])
     }
 
-    func testFamilyLeadIsTheReflectiveStatement() {
+    func testFamilyThreadKeepsEveryStatement() {
         let thoughts = makeThoughts([
             ("与父母长谈很愉快", .insight),
             ("过去对父亲的了解有偏差", .insight),
         ])
         let digest = RecentContentDigest.build(thoughts: thoughts, duration: 0)
         XCTAssertEqual(digest.threads.first?.id, "family")
-        XCTAssertEqual(digest.threads.first?.lead?.statement, "过去对父亲的了解有偏差")
+        XCTAssertEqual(digest.threads.first?.thoughts.map(\.statement),
+                       ["与父母长谈很愉快", "过去对父亲的了解有偏差"])
     }
 
     func testLifeSignalsOutrankWorkAndFamilyComesFirst() {
@@ -68,7 +70,7 @@ final class RecentContentDigestChecks: XCTestCase {
         XCTAssertEqual(byID["career"], ["学习通用网关隧道服务的实现方法"])
     }
 
-    func testSupportingGoalsAndRemainingPartitionTheThread() {
+    func testGoalsAreADerivedSubsetAndEveryThoughtIsKept() {
         let thoughts = makeThoughts([
             ("完成比完美更重要", .insight),
             ("交付前要主动汇报进度", .insight),
@@ -79,16 +81,12 @@ final class RecentContentDigestChecks: XCTestCase {
         ])
         let digest = RecentContentDigest.build(thoughts: thoughts, duration: 0)
         guard let thread = digest.threads.first(where: { $0.id == "work" }) else { return XCTFail("work thread missing") }
-        XCTAssertEqual(thread.lead?.statement, "交付前要主动汇报进度")
-        XCTAssertEqual(thread.supporting.map(\.statement), ["完成比完美更重要", "每周整理一次汇报材料"])
+        XCTAssertEqual(thread.thoughts.map(\.statement), [
+            "完成比完美更重要", "交付前要主动汇报进度", "把项目拆成小步再打磨",
+            "每周整理一次汇报材料", "慢慢做到先交付再完善", "把汇报频率提高到每周",
+        ])
         XCTAssertEqual(thread.goals.map(\.statement), ["慢慢做到先交付再完善", "把汇报频率提高到每周"])
-        XCTAssertEqual(thread.remaining.map(\.statement), ["把项目拆成小步再打磨"])
-        XCTAssertEqual(thread.hiddenCount, 1)
-        let shown = Set(([thread.lead].compactMap { $0 } + thread.supporting + Array(thread.goals.prefix(2))).map(\.id))
-        let remaining = Set(thread.remaining.map(\.id))
-        XCTAssertTrue(shown.isDisjoint(with: remaining))
-        XCTAssertEqual(shown.union(remaining), Set(thread.thoughts.map(\.id)))
-        XCTAssertTrue(shown.union(remaining).isSuperset(of: Set(thoughts.map(\.id))))
+        XCTAssertEqual(thread.thoughts.filter { $0.kind != .goal }.count, 4)
     }
 
     func testTaskOrderingPutsDatedTitlesFirst() {
@@ -111,9 +109,8 @@ final class RecentContentDigestChecks: XCTestCase {
         XCTAssertEqual(RecentContentDigest.durationLabel(3600), "1 小时 0 分")
     }
 
-    func testThreadTitlesAndLeadScore() {
+    func testThreadTitlesAndGrouping() {
         XCTAssertEqual(RecentContentDigest.threadTitle("work"), "实习与交付")
         XCTAssertEqual(RecentContentDigest.threadID(for: "这周录了一期播客"), "life")
-        XCTAssertGreaterThan(RecentContentDigest.leadScore("完成比完美更重要"), RecentContentDigest.leadScore("第二个项目是补功能"))
     }
 }
