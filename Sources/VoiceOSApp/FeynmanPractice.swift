@@ -39,20 +39,20 @@ struct FeynmanPractice: View {
             catch { errorText = error.localizedDescription }
         }
     }
-    @ViewBuilder private func result(_ feedback: FeynmanFeedback) -> some View {
+    @ViewBuilder private func result(_ report: FeynmanFeedback) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                if !feedback.covered.isEmpty {
+                if !report.covered.isEmpty {
                     Text("覆盖到的要点").vosFont(13, weight: .semibold)
-                    Text(feedback.covered.joined(separator: "、")).vosFont(14).textSelection(.enabled)
+                    Text(report.covered.joined(separator: "、")).vosFont(14).textSelection(.enabled)
                 }
                 Text("还没讲到的").vosFont(13, weight: .semibold)
-                if feedback.missed.isEmpty {
+                if report.missed.isEmpty {
                     Text("原话里的词都讲到了。").vosFont(13).foregroundStyle(.secondary)
                 } else {
-                    Text(feedback.missed.joined(separator: "、")).vosFont(14).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(report.missed.joined(separator: "、")).vosFont(14).foregroundStyle(.secondary).textSelection(.enabled)
                 }
-                if let vague = feedback.vague { WorkspaceNoticeText(message: vague, severity: .warning) }
+                if let vague = report.vague { WorkspaceNoticeText(message: vague, severity: .warning) }
                 DisclosureGroup("展开原话核对", isExpanded: $showsOriginal) {
                     Text(claim).vosFont(14).lineSpacing(4).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)

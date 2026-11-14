@@ -907,7 +907,7 @@ final class ControlCenter: ObservableObject {
                     return (try? copy.write(sources: sources, claims: claims, actions: actions)) == true ? copy : nil
                 }.value
                 if let written { self.markdownMirror = written }
-            } while self.mirrorPending && !Task.isCancelled
+            } while (self?.mirrorPending ?? false) && !Task.isCancelled
         }
     }
     private func updateSpotlightIndex() {
@@ -922,7 +922,7 @@ final class ControlCenter: ObservableObject {
                 await Task.detached(priority: .utility) {
                     await indexer.index(sources: sources, claims: claims, actions: actions)
                 }.value
-            } while self.spotlightPending && !Task.isCancelled
+            } while (self?.spotlightPending ?? false) && !Task.isCancelled
         }
     }
     /// Recompute the home snapshot from the published arrays it derives from,
@@ -1996,7 +1996,7 @@ final class ControlCenter: ObservableObject {
             return value
         }
         let commandID = CaptureDedupe.commandID(text: body)
-        let previousID = try? store.importedSourceID(commandID: commandID)
+        let previousID = try? await store.importedSourceID(commandID: commandID)
         do {
             let id = try await store.recordCapturedText(body, title: title ?? "", ownership: .external, sourceURL: metadataURL, captureContext: context, commandID: commandID)
             let policy = try await store.sourcePolicy(sourceID: id)
@@ -2835,9 +2835,11 @@ final class ControlCenter: ObservableObject {
                           let current = try await store.actions(includeHistory: true).first(where: { $0.id == action.id }), current.validity == "current", current.version == action.version else { throw VoiceOSError("任务或连接已变化，请重新核对") }
                 }
                 try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: reminders, expectedAccessVersion: access.version)
+                if state == .completed { _ = try await store.completeActionWithRecurrence(id: action.id) }
                 status = "完成状态已同步并回读；可以补充实际结果或收获"
             } else {
-                _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state)
+                if state == .completed { _ = try await store.completeActionWithRecurrence(id: action.id) }
+                else { _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state) }
                 status = "行动状态已保存"
             }
             changed = true

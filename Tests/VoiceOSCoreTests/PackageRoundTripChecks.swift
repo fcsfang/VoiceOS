@@ -33,7 +33,7 @@ final class PackageRoundTripChecks: XCTestCase {
 
     private func makeFixture(_ store: VoiceOSStore) async throws -> (sourceID: String, claimID: String, actionID: String, attachment: SourceAttachment) {
         let text = "第一段观点。第二段说明。"
-        let sourceID = try await store.recordCapturedText(text, title: "往返来源", ownership: .external)
+        let sourceID = try await store.recordUserExpression(text)
         let context = try await store.prepareLocalTranscriptContext(sourceIDs: [sourceID])
         let source = try XCTUnwrap(context.sources.first)
         let span = try XCTUnwrap(source.spans.first)

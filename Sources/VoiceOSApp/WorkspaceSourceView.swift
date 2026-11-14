@@ -133,11 +133,17 @@ struct WorkspaceSourceView: View {
         return expressionIDs.sorted().flatMap { model.currentClaimsBySource[$0] ?? [] }.filter { $0.validity == "current" && $0.reviewState != "rejected" && seen.insert($0.id).inserted }
     }
     private var entityGroups:[SourceEntityGroup] {
-        [("person","人物"),("organization","机构"),("term","术语")].compactMap { kind,title in
-            let items=entities.filter { $0.kind == kind }.sorted { $0.mentionCount == $1.mentionCount ? $0.name < $1.name : $0.mentionCount > $1.mentionCount }
-            guard !items.isEmpty else { return nil }
-            return SourceEntityGroup(kind:kind,title:title,entities:Array(items.prefix(8)))
+        let kinds:[(SourceEntityKind,String)] = [(.person,"人物"),(.organization,"机构"),(.term,"术语")]
+        var groups:[SourceEntityGroup] = []
+        for (kind,title) in kinds {
+            var items = entities.filter { $0.kind == kind }
+            items.sort { lhs, rhs in
+                if lhs.mentionCount != rhs.mentionCount { return lhs.mentionCount > rhs.mentionCount }
+                return lhs.name < rhs.name
+            }
+            if !items.isEmpty { groups.append(SourceEntityGroup(kind:kind.rawValue,title:title,entities:Array(items.prefix(8)))) }
         }
+        return groups
     }
     private var actions:[ActionRecord] {
         let ids=Set(model.claims.filter { !$0.references.allSatisfy { !expressionIDs.contains($0.sourceID) } }.map(\.id))

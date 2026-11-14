@@ -54,7 +54,8 @@ private enum PackageLayout {
     static let version45Tables = version44Tables + ["knowledge_reviews"]
     static let version46Tables = version45Tables + ["workspace_briefing"]
     static let version48Tables = version46Tables + ["action_review_resolutions", "expression_review_acknowledgements"]
-    static let version49Tables = version48Tables + ["action_clarifications", "action_focus", "source_reading_states", "claim_notes", "topic_claim_confirmations", "source_capture_metadata", "source_attachments", "action_subtasks", "action_estimates", "source_chapters", "capture_templates", "action_recurrence", "source_entities"]
+    static let addedIn49Tables = ["action_clarifications", "action_focus", "source_reading_states", "claim_notes", "topic_claim_confirmations", "source_capture_metadata", "source_attachments", "action_subtasks", "action_estimates", "source_chapters", "capture_templates", "action_recurrence", "source_entities"]
+    static let version49Tables = version48Tables + addedIn49Tables
     static let optionalTables: Set<String> = ["action_recurrence", "source_entities"]
     static let identityColumns: [String: [String]] = [
         "action_clarifications": ["action_id"],
@@ -255,7 +256,7 @@ extension VoiceOSStore {
         guard manifest.version >= 38 || !manifest.files.contains(where: { $0.path.hasPrefix("reminder_compensation_") }) else { throw VoiceOSError("旧迁移格式不能携带补偿计划、许可或尝试") }
         guard manifest.version >= 42 || !manifest.files.contains(where: { $0.path.hasPrefix("reflection_question") }) else { throw VoiceOSError("旧迁移格式不能携带长期问题记录") }
         guard manifest.version >= 48 || !manifest.files.contains(where: { ["action_review_resolutions.jsonl","expression_review_acknowledgements.jsonl"].contains($0.path) }) else { throw VoiceOSError("旧迁移格式不能携带行动关系核对记录") }
-        guard manifest.version >= 49 || !manifest.files.contains(where: { $0.path.hasSuffix(".jsonl") && PackageLayout.version49Tables.contains(String($0.path.dropLast(6))) }) else { throw VoiceOSError("旧迁移格式不能携带新表记录") }
+        guard manifest.version >= 49 || !manifest.files.contains(where: { $0.path.hasSuffix(".jsonl") && PackageLayout.addedIn49Tables.contains(String($0.path.dropLast(6))) }) else { throw VoiceOSError("旧迁移格式不能携带新表记录") }
         var tables = PackageLayout.tables(for: manifest.version)
         // A newer package can be relabeled as an older compatibility fixture. The
         // additive queue table is safe to carry through that validation path.

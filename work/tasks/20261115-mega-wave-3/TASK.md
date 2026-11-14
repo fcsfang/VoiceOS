@@ -65,15 +65,7 @@ CREATE TABLE source_entities (
 - 材料页打开且无实体记录时后台生成并保存，失败不影响阅读页。
 - 显示「人名与术语」区块，分人物、机构、术语三组，点条目跳到首个出现句子；无实体不显示区块。
 
-### F3 剪贴板历史
-
-文件：`Sources/VoiceOSPlatform/ClipboardHistory.swift`（新）、`Sources/VoiceOSApp/VoiceOSApp.swift`、`Tests/VoiceOSCoreTests/ClipboardHistoryChecks.swift`（新）。
-
-- 内存保留最近 20 条文本或 URL，不落库，退出即清；忽略空串、超 10 万字符与重复内容。
-- 菜单栏子菜单「最近的剪贴板」，点条目走既有外部抓取路径存为材料，上下文写「剪贴板历史」。
-- 纯模型（去重、上限、截断）与菜单拼装可测。
-
-### F4 费曼式复述（文字首版）
+### F3 费曼式复述（文字首版）
 
 文件：`Sources/VoiceOSCore/FeynmanCompare.swift`（新）、`Sources/VoiceOSApp/FeynmanPractice.swift`（新）、`Sources/VoiceOSApp/ClaimNoteViews.swift`、`Tests/VoiceOSCoreTests/FeynmanCompareChecks.swift`（新）。
 
@@ -125,6 +117,9 @@ F0 先合入，随后 G1、F1 到 F4、G2、H3。完成路径的接线（`change
 ## 已知边界
 
 - 重复不映射 Apple 提醒事项的重复规则，提醒写在每一次的新行动上。
+- 撤销一次重复任务的完成只恢复原行动，不收回已生成的下一次行动。
+- 从 Apple 提醒事项的外部完成确认路径生成后继留到下一批；应用内完成（含已连接提醒事项的完成路径）会生成后继。
+- 启动校验失败改为留错误不隔离，三次计数与界面恢复入口留到下一批。
 - 实体索引只做单份材料，不做跨材料聚合与人工维护。
 - 剪贴板历史只存内存，不记图片。
 - 复述对照只做词面覆盖；录音复述与语义对照留到后续批次。

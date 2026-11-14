@@ -62,10 +62,12 @@ extension VoiceOSStore {
         let version = Int(row["version"]!)!
         let commandID = "recurrence-complete:" + id
         guard let series = try db.query("SELECT * FROM action_recurrence WHERE action_id=?", [id]).first else {
+            if row["state"] == "completed" { return nil }
             try setActionState(actionID: id, expectedVersion: version, state: .completed, commandID: commandID)
             return nil
         }
-        guard row["validity"] == "current", row["state"] == "open",
+        let alreadyCompleted = row["state"] == "completed"
+        guard row["validity"] == "current", alreadyCompleted || row["state"] == "open",
               let period = series["period"].flatMap(RecurrencePeriod.init(rawValue:)), let seriesID = series["series_id"] else {
             throw VoiceOSError("行动版本或依据已变化，请重新核对")
         }
@@ -74,8 +76,10 @@ extension VoiceOSStore {
         let revisionHash = try Self.actionHash([id, String(version), LocalActionState.completed.rawValue, ""])
         var successorID: String?
         try db.transaction {
-            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'completed','','user',?,?,?)", [UUID().uuidString, id, String(version + 1), String(version), commandID, revisionHash, stamp])
-            try db.execute("UPDATE actions SET state='completed',version=? WHERE id=?", [String(version + 1), id])
+            if !alreadyCompleted {
+                try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'completed','','user',?,?,?)", [UUID().uuidString, id, String(version + 1), String(version), commandID, revisionHash, stamp])
+                try db.execute("UPDATE actions SET state='completed',version=? WHERE id=?", [String(version + 1), id])
+            }
             try db.execute("DELETE FROM action_recurrence WHERE action_id=?", [id])
             if let metadata, let fields = metadata.reminderFields?.desired, fields.due != .none {
                 guard let newDue = Self.nextRecurrenceDue(due: fields.due, period: period, now: now) else { throw VoiceOSError("下一次到期无法计算") }
@@ -98,7 +102,7 @@ extension VoiceOSStore {
                 let claimID = row["claim_id"]!, reviewVersion = row["claim_review_version"]!, title = row["title"]!, kind = row["kind"]!, actor = row["intent_actor"]!, note = row["note"]!
                 let fingerprint = try Self.actionHash([claimID, reviewVersion, title, kind, actor, note])
                 let nextCommand = "recurrence:" + id + ":" + Self.recurrenceToken(newDue)
-                try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,intent_json) VALUES(?,?,?,?,?,?,?,'open','current',?,?,?,?)", [newID, claimID, reviewVersion, title, kind, actor, note, nextCommand, fingerprint, stamp, String(decoding: try JSONEncoder().encode(intent), as: UTF8.self)])
+                try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,intent_json,auto_send) VALUES(?,?,?,?,?,?,?,'open','current',?,?,?,?,?)", [newID, claimID, reviewVersion, title, kind, actor, note, nextCommand, fingerprint, stamp, String(decoding: try JSONEncoder().encode(intent), as: UTF8.self), row["auto_send"]!])
                 try db.execute("INSERT INTO action_recurrence(action_id,series_id,period,created_at) VALUES(?,?,?,?)", [newID, seriesID, period.rawValue, stamp])
                 successorID = newID
             }
