@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-14
 updated: 2026-11-14
 branch: work/capture-1
@@ -84,4 +84,5 @@ A1 先合入根分支，随后 A2。A1 与 A2 都改 `VoiceOSApp.swift`，A2 必
 
 ## 链接
 
+- 2026-11-14 已合并为 `13cdd15`（PR #151）。
 - `docs/product/reference-products.md` 第 9.2 节
