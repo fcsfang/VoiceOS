@@ -84,8 +84,8 @@ struct RecentContentHome: View {
             ScrollView {
                 if let item = selected {
                     readerContent(item)
-                        .frame(maxWidth: 720, alignment: .leading)
-                        .padding(30)
+                        .frame(maxWidth: WorkspaceMetrics.readerWidth, alignment: .leading)
+                        .padding(WorkspaceMetrics.pagePadding)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
                         .id(topAnchor)
                 }

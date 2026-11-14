@@ -4,6 +4,7 @@ import SwiftUI
 // sizes, widths and container shapes, so a page cannot drift from its siblings.
 enum WorkspaceMetrics {
     static let pageWidth: CGFloat = 860
+    static let readerWidth: CGFloat = 720
     static let pagePadding: CGFloat = 30
     static let sectionRadius: CGFloat = 14
     static let panelRadius: CGFloat = 12
