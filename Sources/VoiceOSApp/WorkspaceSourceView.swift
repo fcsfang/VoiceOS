@@ -7,6 +7,12 @@ import VoiceOSPlatform
 private enum SourceHistoryState {
     case idle, loading, loaded([TranscriptVersion]), failed(String)
 }
+private struct SourceEntityGroup:Identifiable {
+    let kind:String
+    let title:String
+    let entities:[SourceEntity]
+    var id:String { kind }
+}
 struct WorkspaceSourceView: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model:ControlCenter
@@ -74,6 +80,8 @@ struct WorkspaceSourceView: View {
     @State private var selectedText=""
     @State private var selectedRange=NSRange(location:0,length:0)
     @State private var fullTextExpanded=false
+    @State private var originalExpanded=false
+    @State private var entities:[SourceEntity]=[]
     @State private var chapters:[SourceChapter]=[]
     private var sourceStatus: String {
         if source.transcript == nil { return source.jobState == "failed" ? "转写失败 · 原件已保存" : "尚未完成转写 · 原件已保存" }
@@ -123,6 +131,13 @@ struct WorkspaceSourceView: View {
     private var thoughts:[CandidateClaim] {
         var seen=Set<String>()
         return expressionIDs.sorted().flatMap { model.currentClaimsBySource[$0] ?? [] }.filter { $0.validity == "current" && $0.reviewState != "rejected" && seen.insert($0.id).inserted }
+    }
+    private var entityGroups:[SourceEntityGroup] {
+        [("person","人物"),("organization","机构"),("term","术语")].compactMap { kind,title in
+            let items=entities.filter { $0.kind == kind }.sorted { $0.mentionCount == $1.mentionCount ? $0.name < $1.name : $0.mentionCount > $1.mentionCount }
+            guard !items.isEmpty else { return nil }
+            return SourceEntityGroup(kind:kind,title:title,entities:Array(items.prefix(8)))
+        }
     }
     private var actions:[ActionRecord] {
         let ids=Set(model.claims.filter { !$0.references.allSatisfy { !expressionIDs.contains($0.sourceID) } }.map(\.id))
@@ -416,6 +431,21 @@ struct WorkspaceSourceView: View {
                         }
                     }
                 }
+                if !entities.isEmpty {
+                    WorkspaceSection(title:"人名与术语",icon:"person.2",count:entities.count) {
+                        ForEach(entityGroups) { group in
+                            Text(group.title).vosFont(13, weight: .semibold).foregroundStyle(.secondary).padding(.top,12)
+                            ForEach(group.entities,id:\.name) { entity in
+                                Button { openEntity(entity) } label: {
+                                    HStack(spacing:8) {
+                                        Text(entity.name + " · " + String(entity.mentionCount) + " 次").vosFont(15).multilineTextAlignment(.leading)
+                                        Spacer(minLength:0)
+                                    }.padding(.horizontal,8).padding(.vertical,6).contentShape(Rectangle())
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
                 WorkspaceSection(title:"原话与依据",icon:"quote.bubble") {
                     let outline=outlineSections
                     if !outline.isEmpty {
@@ -437,7 +467,7 @@ struct WorkspaceSourceView: View {
                         }.padding(.vertical,16)
                         Divider()
                     }
-                    DisclosureGroup("原话、来源与回听") {
+                    DisclosureGroup("原话、来源与回听",isExpanded:$originalExpanded) {
                         VStack(alignment:.leading,spacing:16) {
                             if let transcript=source.transcript { Text(transcript).vosFont(16).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
                             else { Text("尚无可用转写 · " + (source.error ?? workspaceStateLabel(source.jobState ?? source.state))).foregroundStyle(.secondary) }
@@ -450,7 +480,7 @@ struct WorkspaceSourceView: View {
                                         .padding(.horizontal,8).padding(.vertical,3)
                                         .background(active ? palette.selection : .clear, in: RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
                                         .contentShape(Rectangle())
-                                }.buttonStyle(.plain)
+                                }.buttonStyle(.plain).id("source-span-"+span.id)
                             }
                             if let player=model.player { NativePlayerView(player:player).frame(height:source.kind == "video" ? 240 : 70) }
                             Text("原文件：" + source.name).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
@@ -559,6 +589,17 @@ struct WorkspaceSourceView: View {
                 attachmentURL=attachment?.url;attachmentMime=attachment?.mime
             }
             catch { self.error="原件读取失败：" + error.localizedDescription }
+        }
+        .task(id: source.id) {
+            entities=[]
+            guard source.transcript != nil,let store=model.store else { return }
+            if let loaded=try? await store.entities(sourceID:source.id),!loaded.isEmpty {
+                entities=loaded
+                return
+            }
+            _=try? await store.refreshEntities(sourceID:source.id)
+            if Task.isCancelled { return }
+            entities=(try? await store.entities(sourceID:source.id)) ?? []
         }
         .task(id: source.id + source.kind) {
             chapters=[]
@@ -684,6 +725,21 @@ struct WorkspaceSourceView: View {
                 error=model.status.isEmpty ? "无法回听这一章" : model.status
             }
         }
+    }
+    private func openEntity(_ entity:SourceEntity) {
+        let timed=entity.sentenceIDs.compactMap { id in source.spans.first { $0.id == id && $0.startMS != nil && $0.endMS != nil } }.first
+        if let span=timed {
+            if !originalExpanded { originalExpanded=true }
+            if ["audio","video"].contains(source.kind),let start=span.startMS { Task { _=await model.playSpan(source,milliseconds:start) } }
+            let anchor="source-span-"+span.id
+            Task { @MainActor in
+                await Task.yield()
+                if let scroll { scroll.wrappedValue.scrollTo(id:anchor,anchor:.center) }
+            }
+            return
+        }
+        if !originalExpanded { originalExpanded=true }
+        if let scroll { scroll.wrappedValue.scrollTo(edge:.top) }
     }
     private func readingLayerRow(_ title:String,_ text:String) -> some View {
         VStack(alignment:.leading,spacing:7) {
