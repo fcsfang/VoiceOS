@@ -149,14 +149,14 @@ struct ThoughtPanoramaView: View {
             searchMatchStatus(width: width)
             if compact {
                 Image(systemName: "info.circle")
-                    .foregroundStyle(showsUnitFailure ? palette.warning : palette.text)
+                    .foregroundStyle(showsUnitFailure ? palette.warning : palette.secondaryText)
                     .help(toolbarMessageHelp)
                     .accessibilityLabel(toolbarMessage)
                 Spacer(minLength: 0)
             } else {
                 Text(toolbarMessage)
                     .vosFont(12)
-                    .foregroundStyle(showsUnitFailure ? palette.warning : palette.text)
+                    .foregroundStyle(showsUnitFailure ? palette.warning : palette.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(toolbarMessageHelp)
@@ -280,7 +280,7 @@ struct ThoughtPanoramaView: View {
     private func searchMatchText(_ text: String) -> some View {
         Text(text)
             .vosFont(11)
-            .foregroundStyle(searchMatches.count == 0 ? palette.warning : palette.text)
+            .foregroundStyle(searchMatches.count == 0 ? palette.warning : palette.secondaryText)
             .lineLimit(1)
             .fixedSize()
             .help(searchMatchHelp)
@@ -711,7 +711,7 @@ private struct RegionInspectorPanel: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.selection, in: RoundedRectangle(cornerRadius: 8))
+        .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
     }
 
     private func themeMeta(_ quote: PanoramaThemeQuote) -> String {
@@ -946,7 +946,7 @@ private struct ReaderQuoteCard: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.selection.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
+        .background(palette.selection.opacity(0.5), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }
 
     @ViewBuilder
