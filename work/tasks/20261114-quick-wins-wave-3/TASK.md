@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-14
 updated: 2026-11-14
 branch: work/quick-wins-3
@@ -87,6 +87,7 @@ CREATE TABLE source_attachments (
 
 ## 链接
 
+- 2026-11-14 已合并为 `b32b61c`（PR #149）。
 - `docs/product/reference-products.md` 第 9.1 节
 - 第一批任务卡 `work/tasks/20261114-quick-wins-wave-1/TASK.md`
 - 第二批任务卡 `work/tasks/20261114-quick-wins-wave-2/TASK.md`

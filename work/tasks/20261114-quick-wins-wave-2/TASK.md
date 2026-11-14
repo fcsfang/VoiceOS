@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-14
 updated: 2026-11-14
 branch: work/quick-wins-2
@@ -106,5 +106,6 @@ Y1、Y2、Y3 并行。Y1 先合入根分支，随后 Y2、Y3，再派 Y4，最�
 
 ## 链接
 
+- 2026-11-14 已合并为 `cc24e9e`（PR #148）。
 - `docs/product/reference-products.md` 第 9.1 节
 - 第一批任务卡 `work/tasks/20261114-quick-wins-wave-1/TASK.md`
