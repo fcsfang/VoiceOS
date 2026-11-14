@@ -12,8 +12,8 @@
 
 ## 分支在审
 
-- `work/capture-2` 抓取层第二批与承诺层第一批，任务卡 `work/tasks/20261114-capture-wave-2/TASK.md` 与 `work/tasks/20261114-commitment-wave/TASK.md`。前台上下文、⌥⌘N 速记、剪贴板带上下文、每周回顾的今天收尾。schema 57。`swift build -j 2` 通过，`swift test -j 2` 191 项 0 失败。实机确认速记面板带「来自 终端」打开，双实例下键盘焦点无法证实。PR 待开。
-- `work/capture-1` 抓取层第一批，PR #151 已合并为 `13cdd15`。PDF 文本层与原件附件、从链接抓取正文、⌥⌘D 与 ⌥⌘V 全局热键、剪贴板捕获、文件夹监听。
+- `work/mega-1` 并行大波，任务卡 `work/tasks/20261114-mega-wave/TASK.md`。schema 58 与四个存储；安排今天、键盘处理、逾期迁移、子任务、时长、逐字稿大纲、音文同步、逐层读、下周先做、Spotlight、备份、Markdown 镜像。`swift build -j 2` 通过，`swift test -j 2` 202 项 0 失败。实机核对 schema 58、备份完整性与镜像目录；界面交互在双实例环境没有实机证据。PR 待开。
+- `work/capture-2` 抓取层第二批与承诺层第一批，PR #153 已合并为 `e068013`。前台上下文、⌥⌘N 速记、剪贴板带上下文、每周回顾的今天收尾。schema 57。
 - `work/quick-wins-1` 快速赢面第一批，PR #147 已合并为 `2b67352`。十项：macOS 服务、菜单栏拖放、网页选区、x-callback-url、隐私清单、稍后预设、撤销条、专注旗标、旁注、未链接引用。schema 55。
 - `work/quick-wins-2` 快速赢面第二批，PR #148 已合并为 `cc24e9e`。阅读状态与过滤、行动批量选择、悬停预览、逐句高亮、讨论追问建议、侧栏保存视图。
 - `work/quick-wins-3` 快速赢面第三批，PR #149 已合并为 `b32b61c`。图片 OCR、原图入口、全文选读与选中三项动作。schema 56。

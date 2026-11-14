@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: merge-ready
 started: 2026-11-14
 updated: 2026-11-14
 branch: work/mega-1
@@ -115,6 +115,14 @@ D0 先合入根分支，随后 D1 到 D5。D1、D2、D3、D4 依赖 D0 的 API �
 - 逐字稿大纲按时间间隔切，不是语义章节。
 - Markdown 镜像是单向导出，不反向导入。
 - Spotlight 与备份不做界面管理入口。
+
+## 结果
+
+2026-11-15 六个单元集成到 `work/mega-1`。D0 `d5f262d`，D1 `5c9d9fb`，D2 `9db3a52`，D3 `eb9c197`，D4 `6c24ef5`，D5 `0cd7041`。
+
+`swift build -j 2` 通过，`swift test -j 2` 202 项 0 失败。新增存储、备份、镜像与逐层读的测试。
+
+实机：隔离副本 schema 58，四张新表存在；启动后 `Backups/` 生成带时间的备份，`PRAGMA integrity_check` 为 ok；`Mirror/` 建立 materials、claims、actions 三个目录。界面点击在本机双实例环境里没有落到测试实例，安排今天、子任务与时长、大纲与逐层、向前选、Spotlight 搜索没有实机核对，由存储测试与代码审查覆盖。
 
 ## 链接
 
