@@ -154,6 +154,7 @@ struct WorkspaceSourceView: View {
                 WorkspaceHeading(eyebrow:(source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + " · " + source.recordingSubtitle,title:(expression?.sourceIDs.count ?? 0) > 1 ? expression!.title : source.displayTitle)
                 if let captureInfo {
                     HStack(spacing:14) {
+                        if let context=captureInfo.context,!context.isEmpty { Text("来自 " + context) }
                         if let link=captureLink(captureInfo.url) { Link(link.host ?? "来源链接", destination: link) }
                         if let date=ConversationReflectionFocus.date(captureInfo.capturedAt) { Text("抓取于 " + date.formatted(date:.abbreviated,time:.shortened)) }
                         else { Text("抓取于 " + captureInfo.capturedAt) }
