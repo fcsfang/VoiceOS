@@ -240,8 +240,8 @@ struct WorkspaceView: View {
             if id != nil { go(.tool("导入录音")); showingDiscussion=false }
             else if page == .tool("导入录音") { back() }
         }
-        .onOpenURL { url in if model.initialized { openReminder(url) } else { pendingURL=url } }
-        .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;openReminder(url) } }
+        .onOpenURL { url in if model.initialized { routeExternalURL(url) } else { pendingURL=url } }
+        .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;routeExternalURL(url) } }
         .onDisappear { Task { await model.setPanoramaVisible(false) } }
         .sheet(isPresented:$model.choosingReminderCalendar) {
             VStack(alignment:.leading,spacing:16) {
@@ -889,6 +889,10 @@ struct WorkspaceView: View {
             else { let created=try await model.createReflectionQuestion(newTopicTitle,allowCloud:true);topicID=created.id }
             creatingTopic=false;newTopicTitle="";model.queueTopicOrganization()
         } catch { self.error=error.localizedDescription }
+    }
+    private func routeExternalURL(_ url:URL) {
+        if CaptureLink.isCapture(url) { Task { await model.acceptCaptureURL(url) } }
+        else { openReminder(url) }
     }
     private func openReminder(_ url:URL) { Task { if await model.focusReminder(url) { if let id=model.focusedTaskID { go(.task(id)) } else { go(.actions) } } } }
     private func chooseLibrary() {
