@@ -19,6 +19,11 @@ extension ControlCenter {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
         return try await store.captureMetadata()[sourceID]
     }
+    func claimStatement(claimID:String) async throws -> String {
+        guard let store else { throw VoiceOSError("资料库尚未打开") }
+        guard let claim = try await store.candidateClaims().first(where: { $0.id == claimID }) else { throw VoiceOSError("观点不存在") }
+        return claim.statement
+    }
 }
 
 struct ClaimNoteRow:View {
@@ -30,6 +35,7 @@ struct ClaimNoteRow:View {
     @State private var draft=""
     @State private var saving=false
     @State private var errorText=""
+    @State private var practicing=false
     private var note:ClaimNote? { notes[claimID] }
     private var trimmed:String { draft.trimmingCharacters(in:.whitespacesAndNewlines) }
     private var tooLong:Bool { trimmed.count > 1000 }
@@ -45,20 +51,25 @@ struct ClaimNoteRow:View {
                     Button("保存") { Task { await save() } }.disabled(saving || trimmed.isEmpty || tooLong)
                 }.font(.caption)
                 if !errorText.isEmpty { Text(errorText).font(.caption).foregroundStyle(palette.danger) }
-            } else if let note {
-                HStack(alignment:.top,spacing:10) {
-                    Text("旁注").vosFont(12, weight:.medium).foregroundStyle(.secondary)
-                    Text(note.body).vosFont(13).foregroundStyle(.secondary).lineSpacing(3).textSelection(.enabled)
-                    Spacer(minLength:8)
-                    Button("编辑",systemImage:"pencil") { draft=note.body;editing=true;errorText="" }.font(.caption)
-                }
-                .padding(10)
-                .frame(maxWidth:.infinity,alignment:.leading)
-                .background(palette.selection.opacity(0.35),in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
             } else {
-                Button("添加旁注",systemImage:"square.and.pencil") { draft="";editing=true;errorText="" }.font(.caption)
+                HStack(spacing:12) {
+                    Button("复述一遍",systemImage:"text.bubble") { practicing=true }.font(.caption)
+                    if note == nil { Button("添加旁注",systemImage:"square.and.pencil") { draft="";editing=true;errorText="" }.font(.caption) }
+                }
+                if let note {
+                    HStack(alignment:.top,spacing:10) {
+                        Text("旁注").vosFont(12, weight:.medium).foregroundStyle(.secondary)
+                        Text(note.body).vosFont(13).foregroundStyle(.secondary).lineSpacing(3).textSelection(.enabled)
+                        Spacer(minLength:8)
+                        Button("编辑",systemImage:"pencil") { draft=note.body;editing=true;errorText="" }.font(.caption)
+                    }
+                    .padding(10)
+                    .frame(maxWidth:.infinity,alignment:.leading)
+                    .background(palette.selection.opacity(0.35),in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+                }
             }
         }
+        .sheet(isPresented:$practicing) { FeynmanPractice(model:model,claimID:claimID) { practicing=false } }
     }
     private func save() async {
         saving=true

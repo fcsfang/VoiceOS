@@ -16,6 +16,10 @@ final class ControlCenter: ObservableObject {
     private var panoramaModel: ResponsesPanoramaPort?
     private let spotlightIndexer = SpotlightIndexer()
     private var markdownMirror: MarkdownMirror?
+    private var mirrorWorker: Task<Void, Never>?
+    private var mirrorPending = false
+    private var spotlightWorker: Task<Void, Never>?
+    private var spotlightPending = false
     @Published var textCaptureDraft = TextCaptureDraft() {
         didSet { if !textCaptureDraft.hasSameContents(as: oldValue) { scheduleDraftSave() } }
     }
@@ -272,6 +276,8 @@ final class ControlCenter: ObservableObject {
         query.isEmpty ? records : records.filter { $0.displayTitle.localizedCaseInsensitiveContains(query) || $0.name.localizedCaseInsensitiveContains(query) || ($0.transcript?.localizedCaseInsensitiveContains(query) ?? false) }
     }
     @Published var status = "正在检查资料库…"
+    @Published var backupStatusText = ""
+    @Published var lastBackupAt: Date?
     @Published var workspaceLastError: String?
     @Published var workspaceLastErrorRetry: WorkspaceErrorRetry?
     @Published var exporting = false
@@ -754,7 +760,7 @@ final class ControlCenter: ObservableObject {
         defer { dictationBusy = false }
         if success && !dictationInterrupted {
             do { try await store.sealDictation(sourceID:id); status = "口述原件已保存 · 本地转写随后处理" }
-            catch { try? await store.interruptDictation(sourceID:id); status = "录制封存未完成，请重开或核对片段；未报告保存成功" }
+            catch { try? await store.interruptDictation(sourceID:id); status = "录制封存未完成：" + error.localizedDescription + "；片段保留待核对，未报告保存成功" }
         } else {
             try? await store.interruptDictation(sourceID:id); status = "录制未正常结束，片段保留待核对；未报告保存成功"
         }
@@ -863,23 +869,61 @@ final class ControlCenter: ObservableObject {
         writeMarkdownMirror()
         updateSpotlightIndex()
     }
+    func retryBackup() {
+        guard let root = libraryRoot else { return }
+        backupLibrary(at: root)
+    }
     private func backupLibrary(at root: URL) {
         let database = root.appendingPathComponent("voiceos.sqlite")
         let directory = root.appendingPathComponent("Backups", isDirectory: true)
-        Task.detached(priority: .utility) {
-            do { _ = try DatabaseBackup.create(database: database, directory: directory) }
-            catch { NSLog("VoiceOS 数据库备份失败：\(error.localizedDescription)") }
+        Task.detached(priority: .utility) { [weak self] in
+            do {
+                _ = try DatabaseBackup.create(database: database, directory: directory)
+                let at = Date()
+                await MainActor.run { self?.recordBackupSuccess(at: at) }
+            } catch {
+                NSLog("VoiceOS 数据库备份失败：\(error.localizedDescription)")
+                await MainActor.run { self?.backupStatusText = DatabaseBackup.failureText(error) }
+            }
         }
     }
+    private func recordBackupSuccess(at date: Date) {
+        lastBackupAt = date
+        backupStatusText = DatabaseBackup.successText(at: date)
+    }
     private func writeMarkdownMirror() {
-        guard var mirror = markdownMirror else { return }
-        do {
-            try mirror.write(sources: records, claims: claims, actions: actionRecords)
-            markdownMirror = mirror
-        } catch { NSLog("VoiceOS Markdown 镜像失败：\(error.localizedDescription)") }
+        guard markdownMirror != nil else { return }
+        mirrorPending = true
+        guard mirrorWorker == nil else { return }
+        mirrorWorker = Task { [weak self] in
+            defer { self?.mirrorWorker = nil }
+            repeat {
+                guard let self else { return }
+                self.mirrorPending = false
+                guard let mirror = self.markdownMirror else { return }
+                let sources = self.records, claims = self.claims, actions = self.actionRecords
+                let written = await Task.detached(priority: .utility) { () -> MarkdownMirror? in
+                    var copy = mirror
+                    return (try? copy.write(sources: sources, claims: claims, actions: actions)) == true ? copy : nil
+                }.value
+                if let written { self.markdownMirror = written }
+            } while (self?.mirrorPending ?? false) && !Task.isCancelled
+        }
     }
     private func updateSpotlightIndex() {
-        spotlightIndexer.index(sources: records, claims: claims, actions: actionRecords)
+        spotlightPending = true
+        guard spotlightWorker == nil else { return }
+        spotlightWorker = Task { [weak self] in
+            defer { self?.spotlightWorker = nil }
+            repeat {
+                guard let self else { return }
+                self.spotlightPending = false
+                let indexer = self.spotlightIndexer, sources = self.records, claims = self.claims, actions = self.actionRecords
+                await Task.detached(priority: .utility) {
+                    await indexer.index(sources: sources, claims: claims, actions: actions)
+                }.value
+            } while (self?.spotlightPending ?? false) && !Task.isCancelled
+        }
     }
     /// Recompute the home snapshot from the published arrays it derives from,
     /// so a render only reads it.
@@ -1951,13 +1995,15 @@ final class ControlCenter: ObservableObject {
             guard let scheme = URL(string: value)?.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
             return value
         }
+        let commandID = CaptureDedupe.commandID(text: body)
+        let previousID = try? await store.importedSourceID(commandID: commandID)
         do {
-            let id = try await store.recordCapturedText(body, title: title ?? "", ownership: .external, sourceURL: metadataURL, captureContext: context)
+            let id = try await store.recordCapturedText(body, title: title ?? "", ownership: .external, sourceURL: metadataURL, captureContext: context, commandID: commandID)
             let policy = try await store.sourcePolicy(sourceID: id)
             if !policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: true) }
             await refresh()
             if let successURL, let callback = CaptureLink.successCallback(successURL, sourceID: id) { NSWorkspace.shared.open(callback) }
-            status = "已存入外部资料，仅本机保存"
+            status = previousID == nil ? "已存入外部资料，仅本机保存" : "与刚才的内容相同，已合并"
             return true
         } catch {
             status = "抓取未保存：" + error.localizedDescription
@@ -1970,6 +2016,9 @@ final class ControlCenter: ObservableObject {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { status = "剪贴板没有文字"; return }
         let context = FrontContextReader.current()?.display
         Task { _ = await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil, context: context) }
+    }
+    func captureClipboardHistory(_ text: String) {
+        Task { _ = await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil, context: "剪贴板历史") }
     }
     func chooseWatchFolder() {
         guard makeFolderWatch() != nil else { status = "资料库尚未打开，无法监听文件夹"; return }
@@ -2000,46 +2049,47 @@ final class ControlCenter: ObservableObject {
         guard store != nil, let root = libraryRoot else { return nil }
         let watch = FolderWatch(root: root)
         watch.onFiles = { [weak self] urls in
-            guard let self else { return }
-            self.acceptDroppedFiles(urls)
+            guard let self else { return false }
+            return await self.acceptDroppedFiles(urls)
         }
         folderWatch = watch
         return watch
     }
-    func acceptDroppedFiles(_ urls: [URL]) {
-        Task {
-            var media: [URL] = [], textFiles: [URL] = [], images: [URL] = [], pdfs: [URL] = [], unsupported: [String] = []
-            for url in urls {
-                let ext = url.pathExtension.lowercased()
-                if ext == "txt" || ext == "md" { textFiles.append(url) }
-                else if ext == "pdf" { pdfs.append(url) }
-                else if SourceAttachment.mime(forFileExtension: ext) != nil { images.append(url) }
-                else if let type = UTType(filenameExtension: ext), type.conforms(to: .audio) || type.conforms(to: .movie) { media.append(url) }
-                else { unsupported.append(url.lastPathComponent) }
-            }
-            if !media.isEmpty { await importFiles(media) }
-            for url in textFiles { await importCapturedTextFile(url) }
-            for url in pdfs { await acceptPDFCapture(url) }
-            for url in images { await acceptImageCapture(url) }
-            if !unsupported.isEmpty { status = "暂不支持这些文件类型：" + unsupported.joined(separator: "、") }
+    @discardableResult
+    func acceptDroppedFiles(_ urls: [URL]) async -> Bool {
+        var media: [URL] = [], textFiles: [URL] = [], images: [URL] = [], pdfs: [URL] = [], unsupported: [String] = []
+        for url in urls {
+            let ext = url.pathExtension.lowercased()
+            if ext == "txt" || ext == "md" { textFiles.append(url) }
+            else if ext == "pdf" { pdfs.append(url) }
+            else if SourceAttachment.mime(forFileExtension: ext) != nil { images.append(url) }
+            else if let type = UTType(filenameExtension: ext), type.conforms(to: .audio) || type.conforms(to: .movie) { media.append(url) }
+            else { unsupported.append(url.lastPathComponent) }
         }
+        var succeeded = true
+        if !media.isEmpty, !(await importFiles(media)) { succeeded = false }
+        for url in textFiles { if !(await importCapturedTextFile(url)) { succeeded = false } }
+        for url in pdfs { if !(await acceptPDFCapture(url)) { succeeded = false } }
+        for url in images { if !(await acceptImageCapture(url)) { succeeded = false } }
+        if !unsupported.isEmpty { status = "暂不支持这些文件类型：" + unsupported.joined(separator: "、") }
+        return succeeded
     }
-    private func importCapturedTextFile(_ url: URL) async {
+    private func importCapturedTextFile(_ url: URL) async -> Bool {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         do {
             let text = try String(contentsOf: url, encoding: .utf8)
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { status = "文字文件为空，未保存"; return }
-            _ = await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil)
-        } catch { status = "无法读取文字文件：" + error.localizedDescription }
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { status = "文字文件为空，未保存"; return true }
+            return await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil)
+        } catch { status = "无法读取文字文件：" + error.localizedDescription; return false }
     }
-    private func acceptImageCapture(_ url: URL) async {
-        guard let store else { status = "资料库尚未打开，未保存"; return }
+    private func acceptImageCapture(_ url: URL) async -> Bool {
+        guard let store else { status = "资料库尚未打开，未保存"; return false }
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         let text: String
         do { text = try await ImageOCR.recognize(fileURL: url) }
-        catch { status = "图片识别失败：" + error.localizedDescription; return }
+        catch { status = "图片识别失败：" + error.localizedDescription; return false }
         do {
             let title = String(url.deletingPathExtension().lastPathComponent.prefix(100))
             let id = try await store.recordCapturedText(text, title: title, ownership: .external, commandID: UUID().uuidString)
@@ -2050,18 +2100,20 @@ final class ControlCenter: ObservableObject {
                 _ = try await store.attachSourceFile(sourceID: id, fileURL: url)
                 status = "已识别图片文字，仅本机保存"
             } catch { status = "已识别图片文字，原图保存失败：" + error.localizedDescription }
+            return true
         } catch {
             status = error.localizedDescription
             await refresh()
+            return false
         }
     }
-    private func acceptPDFCapture(_ url: URL) async {
-        guard let store else { status = "资料库尚未打开，未保存"; return }
+    private func acceptPDFCapture(_ url: URL) async -> Bool {
+        guard let store else { status = "资料库尚未打开，未保存"; return false }
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         let text: String
         do { text = try await Task.detached(priority: .userInitiated) { try PDFText.extract(fileURL: url).text }.value }
-        catch { status = "PDF 读取失败：" + error.localizedDescription; return }
+        catch { status = "PDF 读取失败：" + error.localizedDescription; return false }
         do {
             let title = String(url.deletingPathExtension().lastPathComponent.prefix(100))
             let id = try await store.recordCapturedText(text, title: title, ownership: .external, commandID: UUID().uuidString)
@@ -2072,9 +2124,11 @@ final class ControlCenter: ObservableObject {
                 _ = try await store.attachSourceFile(sourceID: id, fileURL: url)
                 status = "已读取 PDF「\(url.lastPathComponent)」的文字，仅本机保存"
             } catch { status = "已读取 PDF 文字，原件保存失败：" + error.localizedDescription }
+            return true
         } catch {
             status = error.localizedDescription
             await refresh()
+            return false
         }
     }
     func ocrImage(_ url: URL) async -> (text: String, title: String)? {
@@ -2155,8 +2209,9 @@ final class ControlCenter: ObservableObject {
             Task { await self.importFiles(urls, personalAudio: personalAudio) }
         }
     }
-    func importFiles(_ urls: [URL], personalAudio: Bool = false) async {
-        guard let store, !importing else { return }
+    @discardableResult
+    func importFiles(_ urls: [URL], personalAudio: Bool = false) async -> Bool {
+        guard let store, !importing else { return false }
         importing = true
         defer { importing = false }
         var failures = 0
@@ -2171,6 +2226,7 @@ final class ControlCenter: ObservableObject {
         if failures == 0 { status = "已可靠保存 \(urls.count) 个原件 · 正在本地转写" }
         scheduleProcessing()
         if failures == 0 { status = "导入完成 · 可查看原件和转写状态" }
+        return failures == 0
     }
     private func scheduleProcessing() {
         guard worker == nil, !fullRecordingBusy, !dictationActive,
@@ -2779,9 +2835,11 @@ final class ControlCenter: ObservableObject {
                           let current = try await store.actions(includeHistory: true).first(where: { $0.id == action.id }), current.validity == "current", current.version == action.version else { throw VoiceOSError("任务或连接已变化，请重新核对") }
                 }
                 try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: reminders, expectedAccessVersion: access.version)
+                if state == .completed { _ = try await store.completeActionWithRecurrence(id: action.id) }
                 status = "完成状态已同步并回读；可以补充实际结果或收获"
             } else {
-                _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state)
+                if state == .completed { _ = try await store.completeActionWithRecurrence(id: action.id) }
+                else { _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state) }
                 status = "行动状态已保存"
             }
             changed = true
@@ -2884,6 +2942,8 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     private var statusItem: NSStatusItem?
     private var dictationMenuItem: NSMenuItem?
     private var clipboardMenuItem: NSMenuItem?
+    private let clipboardMonitor = ClipboardMonitor()
+    private var clipboardHistoryMenuItem: NSMenuItem?
     private var quickNoteMenuItem: NSMenuItem?
     private var watchMenuItem: NSMenuItem?
     private var stopWatchMenuItem: NSMenuItem?
@@ -2895,6 +2955,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
             DispatchQueue.main.async { AppBrand.applyApplicationIcon() }
         }
         installStatusItem()
+        clipboardMonitor.start()
         NSApp.servicesProvider = self
         // SwiftUI accepts only the import command on this scene, so Command-Shift-R is handled here.
         dictationKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -2934,6 +2995,10 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         let clipboard = menu.addItem(withTitle: "捕获剪贴板文字（⌥⌘V）", action: #selector(captureClipboard), keyEquivalent: "")
         clipboard.target = self
         clipboardMenuItem = clipboard
+        let history = menu.addItem(withTitle: "最近的剪贴板", action: nil, keyEquivalent: "")
+        history.submenu = NSMenu(title: "最近的剪贴板")
+        history.submenu?.autoenablesItems = false
+        clipboardHistoryMenuItem = history
         let note = menu.addItem(withTitle: "速记（⌥⌘N）", action: #selector(openQuickNote), keyEquivalent: "")
         note.target = self
         quickNoteMenuItem = note
@@ -2954,7 +3019,9 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        rebuildClipboardHistoryMenu()
         guard let model = ControlCenter.primary else {
+            clipboardHistoryMenuItem?.isEnabled = false
             dictationMenuItem?.title = "控制中心尚未准备好"
             dictationMenuItem?.isEnabled = false
             clipboardMenuItem?.isEnabled = false
@@ -2972,7 +3039,8 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     }
 
     private func acceptDroppedFiles(_ urls: [URL]) {
-        ControlCenter.primary?.acceptDroppedFiles(urls)
+        guard let model = ControlCenter.primary else { return }
+        Task { _ = await model.acceptDroppedFiles(urls) }
     }
 
     @objc func captureText(_ pboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
@@ -2997,7 +3065,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
             error.pointee = "VoiceOS 尚未准备好" as NSString
             return
         }
-        model.acceptDroppedFiles(urls)
+        Task { _ = await model.acceptDroppedFiles(urls) }
     }
 
     @objc private func toggleDictation() {
@@ -3056,6 +3124,31 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     }
 
     @objc private func quitApplication() { NSApp.terminate(nil) }
+
+    private func rebuildClipboardHistoryMenu() {
+        guard let item = clipboardHistoryMenuItem, let submenu = item.submenu else { return }
+        submenu.removeAllItems()
+        let recent = Array(clipboardMonitor.history.entries.prefix(10))
+        item.isEnabled = !recent.isEmpty
+        guard !recent.isEmpty else {
+            let empty = submenu.addItem(withTitle: "暂无记录", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            return
+        }
+        for entry in recent {
+            let title = entry.text.replacingOccurrences(of: "\r\n", with: " ")
+                .replacingOccurrences(of: "\n", with: " ")
+                .replacingOccurrences(of: "\r", with: " ")
+            let row = submenu.addItem(withTitle: title.count > 60 ? String(title.prefix(60)) + "…" : title, action: #selector(captureClipboardHistory(_:)), keyEquivalent: "")
+            row.target = self
+            row.representedObject = entry.text
+        }
+    }
+
+    @objc private func captureClipboardHistory(_ sender: NSMenuItem) {
+        guard let text = sender.representedObject as? String else { return }
+        ControlCenter.primary?.captureClipboardHistory(text)
+    }
 }
 @main
 struct VoiceOSApp: App {

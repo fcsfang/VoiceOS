@@ -20,7 +20,8 @@ final class FolderWatch {
     private var enabled: Bool
     private var pending: [String: String] = [:]
     private var scanWork: DispatchWorkItem?
-    var onFiles: (([URL]) -> Void)?
+    private var scanning = false
+    var onFiles: (([URL]) async -> Bool)?
 
     init(root: URL, defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -103,6 +104,7 @@ final class FolderWatch {
     private func scan() {
         scanWork = nil
         guard let folder else { return }
+        guard !scanning else { scheduleScan(after: 1.0); return }
         let current = entries(in: folder)
         if !ledger.initialized {
             ledger.adoptBaseline(current)
@@ -120,13 +122,27 @@ final class FolderWatch {
                 pending[candidate.path] = candidate.fingerprint
             }
         }
-        if !ready.isEmpty {
-            ledger.record(ready)
-            for entry in ready { pending[entry.path] = nil }
-            persist()
-            onFiles?(ready.map { URL(fileURLWithPath: $0.path) })
+        guard !ready.isEmpty else {
+            if !pending.isEmpty { scheduleScan(after: 1.0) }
+            return
         }
-        if !pending.isEmpty { scheduleScan(after: 1.0) }
+        scanning = true
+        Task { [weak self] in
+            guard let self else { return }
+            var recorded = false, failed = false
+            for entry in ready {
+                if await self.onFiles?([URL(fileURLWithPath: entry.path)]) == true {
+                    self.ledger.record([entry])
+                    self.pending[entry.path] = nil
+                    recorded = true
+                } else {
+                    failed = true
+                }
+            }
+            if recorded { self.persist() }
+            self.scanning = false
+            if failed || !self.pending.isEmpty { self.scheduleScan(after: 1.0) }
+        }
     }
 
     private func entries(in folder: URL) -> [FolderWatchEntry] {

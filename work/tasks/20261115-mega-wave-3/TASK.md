@@ -1,5 +1,5 @@
 ---
-status: draft
+status: merge-ready
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-3
@@ -12,7 +12,7 @@ owner: coordinator
 
 五条互不重叠的线：本地重复任务、任务页重复与地点回读、实体索引、剪贴板历史、费曼式复述文字首版。同时收口第二批审查发现的缺陷。写入代理只写不编译，集成后单次编译与测试。
 
-基线为第二批合并后的 `main`，schema 59，测试数在第二批合并后填入。
+基线 `main` 为 `38472b3`，schema 59，224 项测试。
 
 ## 数据形状（schema 60，F0 独占）
 
@@ -65,15 +65,7 @@ CREATE TABLE source_entities (
 - 材料页打开且无实体记录时后台生成并保存，失败不影响阅读页。
 - 显示「人名与术语」区块，分人物、机构、术语三组，点条目跳到首个出现句子；无实体不显示区块。
 
-### F3 剪贴板历史
-
-文件：`Sources/VoiceOSPlatform/ClipboardHistory.swift`（新）、`Sources/VoiceOSApp/VoiceOSApp.swift`、`Tests/VoiceOSCoreTests/ClipboardHistoryChecks.swift`（新）。
-
-- 内存保留最近 20 条文本或 URL，不落库，退出即清；忽略空串、超 10 万字符与重复内容。
-- 菜单栏子菜单「最近的剪贴板」，点条目走既有外部抓取路径存为材料，上下文写「剪贴板历史」。
-- 纯模型（去重、上限、截断）与菜单拼装可测。
-
-### F4 费曼式复述（文字首版）
+### F3 费曼式复述（文字首版）
 
 文件：`Sources/VoiceOSCore/FeynmanCompare.swift`（新）、`Sources/VoiceOSApp/FeynmanPractice.swift`（新）、`Sources/VoiceOSApp/ClaimNoteViews.swift`、`Tests/VoiceOSCoreTests/FeynmanCompareChecks.swift`（新）。
 
@@ -125,12 +117,26 @@ F0 先合入，随后 G1、F1 到 F4、G2、H3。完成路径的接线（`change
 ## 已知边界
 
 - 重复不映射 Apple 提醒事项的重复规则，提醒写在每一次的新行动上。
+- 撤销一次重复任务的完成只恢复原行动，不收回已生成的下一次行动。
+- 从 Apple 提醒事项的外部完成确认路径生成后继留到下一批；应用内完成（含已连接提醒事项的完成路径）会生成后继。
+- 启动校验失败改为留错误不隔离，三次计数与界面恢复入口留到下一批。
 - 实体索引只做单份材料，不做跨材料聚合与人工维护。
 - 剪贴板历史只存内存，不记图片。
 - 复述对照只做词面覆盖；录音复述与语义对照留到后续批次。
 - 启动校验的「重新核对原件」入口本批只做存储方法，界面入口留到下一批。
 - Apple 端侧模型候选因本机 `deviceNotEligible` 划掉，不再排期；App Intents 等工具链元数据处理可行，单独成批。
 
+## 结果
+
+2026-11-15 七个单元集成到 `work/mega-3`：F0 `8a06f85`，G1 `a760ce7`，F1 `a50c537`，F2 `760bc5d`，F3 `9cf2ecf`，G2 `f086631`，H3 `ec787ac`。集成修复 `e54ba42`。
+
+`swift build -j 2` 修复八处集成错误后通过；`swift test -j 2` 262 项 0 失败（新增 Recurrence、EntityIndex、FeynmanCompare、ClipboardHistory、ImportRecovery、PackageRoundTrip、ReminderLocation 等 38 项）。
+
+集成期修复：`SourceEntityKind` 与字符串比较导致的类型推断超时、复述组件参数遮蔽、镜像与 Spotlight 弱引用可选值、抓取去重的 actor await；完成路径接上后继生成（含提醒事项联动路径）且后继沿用 auto_send；启动校验失败改为留错误不隔离（两处既有测试同步更新）；设置页显示备份状态与重试；导出包 48 兼容守卫只拦新增 13 张表，往返测试夹具改用本人口述来源。
+
+实机（隔离副本，实时库 sqlite 备份，起点 schema 59）：启动迁移到 60，`action_recurrence`、`source_entities` 与既有 `search_index`、`search_index_meta` 并存；新备份 283MB 且 `PRAGMA integrity_check` 为 ok，上一代备份保留；`Mirror/materials` 维持 78 份；索引在首次检索时重建。机器处于锁屏，窗口级核对不可得。
+
 ## 链接
 
 - `docs/product/reference-products.md` 第 9.3、9.4、9.5 节
+- 2026-11-15 第二批任务卡 `work/tasks/20261115-mega-wave-2/TASK.md`

@@ -926,6 +926,10 @@ struct WorkspaceView: View {
                 Button("导出资料与原件") { model.export(includeMedia:true) }
                 if model.exporting { ProgressView().controlSize(.small) }
             }.disabled(model.exporting)
+            HStack(spacing:12) {
+                Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText).font(.caption).foregroundStyle(.secondary)
+                Button("重试备份") { model.retryBackup() }.font(.caption)
+            }
             HStack { Button("打开已有资料库") { chooseLibrary() };Button("从迁移包恢复") { go(.tool("恢复资料")) } }
             sectionTitle("回顾与查找")
             WorkspaceRow(title:"静默回顾",subtitle:"看到相关原文",icon:"text.bubble") { go(.tool("静默回顾")) }

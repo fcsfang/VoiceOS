@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 import VoiceOSCore
+import VoiceOSPlatform
 
 struct WorkspaceDeliveryView: View {
     @Environment(\.workspacePalette) private var palette
@@ -177,6 +178,9 @@ struct WorkspaceTaskView: View {
     @State private var subtaskTitle = ""
     @State private var actionEstimate: Int?
     @State private var planBusy = false
+    @State private var recurrence: RecurrencePeriod?
+    @State private var recurrenceBusy = false
+    @State private var locationLabel: String?
     private var correctedClaim: CandidateClaim? {
         model.claims.first { $0.id == action.claimID && $0.validity == "current" && $0.reviewState != "rejected" && $0.reviewVersion > action.claimReviewVersion }
     }
@@ -198,10 +202,44 @@ struct WorkspaceTaskView: View {
         guard !subtasks.isEmpty else { return "把任务拆成可勾选的小步。" }
         return "已完成 " + String(subtasks.filter(\.done).count) + "/" + String(subtasks.count)
     }
+    private var hasDue: Bool {
+        guard let due = action.intent?.reminderFields?.desired?.due else { return false }
+        return due != .none
+    }
+    private var recurrenceEditable: Bool { action.state == "open" && hasDue }
+    private var currentDue: ReminderDueDate? {
+        if let due = model.reminderLinks.first(where: { $0.actionID == action.id && $0.state == "linked" })?.remoteDueDate, due != .none { return due }
+        if let due = action.intent?.reminderFields?.desired?.due, due != .none { return due }
+        return nil
+    }
+    private var recurrenceSelection: Binding<RecurrencePeriod?> {
+        Binding(get: { self.recurrence }, set: { value in
+            let previous = self.recurrence
+            guard value != previous else { return }
+            self.recurrence = value
+            self.recurrenceBusy = true
+            Task {
+                defer { self.recurrenceBusy = false }
+                do {
+                    try await self.model.saveActionRecurrence(self.action.id, period: value)
+                    self.error = ""
+                } catch {
+                    self.recurrence = previous
+                    self.error = "保存重复失败：" + error.localizedDescription
+                }
+            }
+        })
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 WorkspaceHeading(eyebrow: current ? (action.state == "completed" ? "行动 · 已完成" : action.kind == "task" ? "行动 · 待跟进" : "问题与目标") : model.workspaceActionStatus(action), title: action.title)
+                if let recurrence {
+                    HStack(spacing: 12) {
+                        Label("重复 · " + recurrence.display, systemImage: "repeat").font(.callout)
+                        if let due = currentDue { Text("当前到期 " + due.summary).font(.callout).foregroundStyle(.secondary) }
+                    }
+                }
                 if current || actionEstimate != nil {
                     HStack(spacing: 14) {
                         Text("预计时长").font(.callout).foregroundStyle(.secondary)
@@ -256,6 +294,7 @@ struct WorkspaceTaskView: View {
                     Label((overdue ? "已逾期 " : "到期 ") + due.summary, systemImage: "calendar").font(.callout)
                         .foregroundStyle(overdue ? palette.warning : palette.text)
                 }
+                if let locationLabel { Label("地点提醒 · " + locationLabel, systemImage: "mappin.and.ellipse").font(.callout).foregroundStyle(.secondary) }
                 if current, action.kind == "task" {
                     VStack(alignment:.leading,spacing:8) {
                         if let link=model.reminderLinks.first(where: { $0.actionID == action.id }) {
@@ -294,6 +333,19 @@ struct WorkspaceTaskView: View {
                     Button("取消", role: .cancel) {}
                 } message: {
                     Text("会移入历史记录，之后仍可找回。Apple 提醒事项中的提醒需单独处理。")
+                }
+                if action.kind == "task" || recurrence != nil {
+                    WorkspaceSection(title:"重复",subtitle:recurrence.map { "完成后按「" + $0.display + "」生成下一次行动。" } ?? "这次完成后不再生成新的行动。",icon:"repeat") {
+                        HStack(spacing: 14) {
+                            Picker("重复", selection: recurrenceSelection) {
+                                Text("不重复").tag(RecurrencePeriod?.none)
+                                ForEach(RecurrencePeriod.allCases, id: \.self) { period in Text(period.display).tag(Optional(period)) }
+                            }.pickerStyle(.menu).labelsHidden().fixedSize().disabled(recurrenceBusy || !recurrenceEditable)
+                            if !hasDue { Text("先设置日期").font(.caption).foregroundStyle(.secondary) }
+                            else if action.state != "open" { Text("仅未完成的任务可调整重复。").font(.caption).foregroundStyle(.secondary) }
+                            if recurrenceBusy { ProgressView().controlSize(.small) }
+                        }.padding(.vertical, 12)
+                    }
                 }
                 if current || !subtasks.isEmpty {
                     WorkspaceSection(title:"子任务",subtitle:subtaskSummary,icon:"checklist",count:subtasks.isEmpty ? nil : subtasks.count) {
@@ -419,6 +471,10 @@ struct WorkspaceTaskView: View {
         }
         .task(id: action.id + String(action.version) + String(model.recentOutcomes.count)) { await loadFeedback() }
         .task(id: action.id + String(action.version)) { await loadPlan() }
+        .task(id: action.id + String(action.version)) {
+            recurrence = await model.actionRecurrence(action.id)
+            locationLabel = await model.actionLocationLabel(action.id)
+        }
         .sheet(isPresented: $confirming) { ConfirmTaskView(action: action, model: model) { confirming = false } }
         .sheet(isPresented: $showingSettings) { if let settings { ReminderSettingsView(action: action, snapshot: settings, model: model) { showingSettings = false } } }
         .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
@@ -667,5 +723,21 @@ struct WorkspaceTaskView: View {
             formatter.dateFormat = "yyyy-MM-dd"
             return localDate < formatter.string(from: Date())
         }
+    }
+}
+
+extension ControlCenter {
+    func actionRecurrence(_ actionID: String) async -> RecurrencePeriod? {
+        guard let store else { return nil }
+        return ((try? await store.actionRecurrences()) ?? [:])[actionID]
+    }
+    func saveActionRecurrence(_ actionID: String, period: RecurrencePeriod?) async throws {
+        guard let store else { throw VoiceOSError("资料库尚未打开") }
+        if let period { try await store.setRecurrence(actionID: actionID, period: period) }
+        else { try await store.clearRecurrence(actionID: actionID) }
+    }
+    func actionLocationLabel(_ actionID: String) async -> String? {
+        guard let link = reminderLinks.first(where: { $0.actionID == actionID && $0.state == "linked" }), let externalID = link.externalID else { return nil }
+        return await NativeReminders.structuredLocationLabel(externalID: externalID)
     }
 }

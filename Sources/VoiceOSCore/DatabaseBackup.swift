@@ -2,6 +2,14 @@ import Foundation
 import CSQLite
 
 public enum DatabaseBackup {
+    public static func successText(at date: Date) -> String {
+        "最近备份 " + date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    public static func failureText(_ error: Error) -> String {
+        "备份失败：" + error.localizedDescription
+    }
+
     @discardableResult
     public static func create(database: URL, directory: URL, retain: Int = 7, now: Date = Date()) throws -> URL {
         guard retain >= 1 else { throw VoiceOSError("备份保留数量至少为 1") }

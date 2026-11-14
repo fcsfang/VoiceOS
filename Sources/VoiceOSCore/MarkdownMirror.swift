@@ -1,6 +1,6 @@
 import Foundation
 
-public struct MarkdownMirror {
+public struct MarkdownMirror: Sendable {
     public let directory: URL
     public let minimumInterval: TimeInterval
     private var lastWrite: Date?

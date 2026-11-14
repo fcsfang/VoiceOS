@@ -5,6 +5,15 @@ public enum TextCaptureOwnership: String, CaseIterable, Identifiable, Codable, S
     public var id: String { rawValue }
 }
 
+public enum CaptureDedupe {
+    public static let bucketLength: TimeInterval = 600
+
+    public static func commandID(text: String, now: Date = Date()) -> String {
+        let bucket = Int(floor(now.timeIntervalSince1970 / bucketLength))
+        return "capture:" + String(VoiceOSStore.relevanceHash(Data(text.utf8)).prefix(16)) + ":" + String(bucket)
+    }
+}
+
 extension VoiceOSStore {
     /// Full text is saved before any cloud processing. Attribution is chosen explicitly,
     /// and imported external text never becomes a personal expression by extraction.

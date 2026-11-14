@@ -1738,7 +1738,7 @@ final class CoreFlowTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let url=root.appendingPathComponent("panorama-schema.sqlite")
         var created: Database?=try Database(url)
-        XCTAssertEqual(try created?.query("PRAGMA user_version").first?["user_version"], "59")
+        XCTAssertEqual(try created?.query("PRAGMA user_version").first?["user_version"], "60")
         created=nil
         let reopened=try Database(url)
         for table in ["action_review_resolutions", "expression_review_acknowledgements"] {
@@ -2255,7 +2255,8 @@ final class CoreFlowTests: XCTestCase {
         let unavailable = try await store.latestCandidateClaims(for: sourceID)
         XCTAssertTrue(unavailable.isEmpty, "定向读取仍须核对原件，不能因优化而复用已损坏的依据")
         let invalidated = try await store.workspaceSnapshot()
-        XCTAssertEqual(invalidated.sources.first?.state, "quarantined")
+        XCTAssertEqual(invalidated.sources.first?.state, "saved")
+        XCTAssertTrue(invalidated.sources.first?.error?.contains("核对失败") == true)
         XCTAssertTrue(invalidated.claims.allSatisfy { $0.validity == "frozen" })
     }
 
@@ -2493,7 +2494,8 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(frozenClaims.first { $0.references.contains { $0.sourceID == sourceID } }?.validity, "frozen")
         XCTAssertEqual(frozenActions.first?.validity, "frozen")
         let damagedSources = try await reopened.sources()
-        XCTAssertEqual(damagedSources.first { $0.id == sourceID }?.state, "quarantined")
+        XCTAssertEqual(damagedSources.first { $0.id == sourceID }?.state, "saved")
+        XCTAssertTrue(damagedSources.first { $0.id == sourceID }?.error?.contains("核对失败") == true)
     }
 
     func testRecordingFollowupConnectsThoughtGoalAndRepeatedEnglishPractice() async throws {
