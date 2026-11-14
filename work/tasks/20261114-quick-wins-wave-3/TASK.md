@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: merge-ready
 started: 2026-11-14
 updated: 2026-11-14
 branch: work/quick-wins-3
@@ -63,6 +63,27 @@ CREATE TABLE source_attachments (
 - 抓取页的图片预览不附原图，只有菜单栏拖放入口保留。
 - 重复写入的旧图片文件不清理。
 - 迁移包格式 48 不含 source_attachments。
+
+## 结果
+
+2026-11-14 三个单元集成到 `work/quick-wins-3`。Z1 `785b4fe`，Z2 `cd8843c`，Z3 `69ceece`，集成修复 `888cc3e`。
+
+`swift build -j 2` 通过，`swift test -j 2` 167 项 0 失败。新增 OCR 测试用 AppKit 渲染白底黑字的 VoiceOS，Vision 识别通过。
+
+集成修复两处。`SelectableText` 的 `CGFloat.greatestFiniteMagnitude` 补类型标注。原图路径扩展补 actor 的 `await`。
+
+## 实机核对
+
+隔离资料库副本。
+
+- 保存一段文字材料后，材料页出现「全文选读」，观点与添加旁注正常。
+- 给材料挂一张原图后，状态行出现「查看原图」。
+
+## 未取到的实机证据
+
+- 菜单栏拖入图片的端到端没有触发，合成拖放不可用。OCR 函数由测试覆盖，入口路径由代码审查覆盖。
+- 全文选读的鼠标拖选没有实机验证，原生选择回调只做过 SDK 静态核对。
+- 选中后的三个动作没有实机点通，原因同上。
 
 ## 链接
 
