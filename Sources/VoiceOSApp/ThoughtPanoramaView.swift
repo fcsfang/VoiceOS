@@ -149,14 +149,14 @@ struct ThoughtPanoramaView: View {
             searchMatchStatus(width: width)
             if compact {
                 Image(systemName: "info.circle")
-                    .foregroundStyle(showsUnitFailure ? palette.warning : Color.secondary)
+                    .foregroundStyle(showsUnitFailure ? palette.warning : palette.text)
                     .help(toolbarMessageHelp)
                     .accessibilityLabel(toolbarMessage)
                 Spacer(minLength: 0)
             } else {
                 Text(toolbarMessage)
                     .vosFont(12)
-                    .foregroundStyle(showsUnitFailure ? palette.warning : Color.secondary)
+                    .foregroundStyle(showsUnitFailure ? palette.warning : palette.text)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(toolbarMessageHelp)
@@ -167,9 +167,9 @@ struct ThoughtPanoramaView: View {
             coverageToolbarButton
             materialsToolbarButton
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, WorkspaceMetrics.toolbarPadding)
         .frame(maxWidth: .infinity)
-        .frame(height: 52)
+        .frame(minHeight: 52)
     }
 
     // Core reports unit failures as "N 个完整单元未能核对" plus raw unit IDs.
@@ -280,7 +280,7 @@ struct ThoughtPanoramaView: View {
     private func searchMatchText(_ text: String) -> some View {
         Text(text)
             .vosFont(11)
-            .foregroundStyle(searchMatches.count == 0 ? palette.warning : Color.secondary)
+            .foregroundStyle(searchMatches.count == 0 ? palette.warning : palette.text)
             .lineLimit(1)
             .fixedSize()
             .help(searchMatchHelp)
