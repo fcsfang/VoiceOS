@@ -614,6 +614,8 @@ final class ControlCenter: ObservableObject {
     @Published var pendingScheduleEffect: ReminderScheduleEffect?
     @Published var schedulePreviews: [String: ReminderScheduleDecision] = [:]
     @Published var savingAction = false
+    @Published var actionUndoStack = ActionUndoStack()
+    var isUndoingActionChange = false
     @Published var actionVersions: [ActionRevision] = []
     @Published var feedbackRecords: [ActionFeedbackRecord] = []
     @Published var activeActionTitle = ""
@@ -2760,6 +2762,7 @@ final class ControlCenter: ObservableObject {
     func changeAction(_ action: ActionRecord, state: LocalActionState) async {
         guard let store, !savingAction else { return }
         savingAction = true; defer { savingAction = false }
+        var changed = false
         do {
             if state != .dismissed, let link = reminderLinks.first(where: { $0.actionID == action.id }), let id = link.externalID {
                 guard let access = reminderAccess, access.enabled, access.calendarID == link.calendarID, !remindersBusy else { throw VoiceOSError("请先恢复提醒事项连接，或在 Apple 提醒事项中更改完成状态") }
@@ -2774,7 +2777,11 @@ final class ControlCenter: ObservableObject {
                 _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state)
                 status = "行动状态已保存"
             }
+            changed = true
         } catch { status = error.localizedDescription }
+        if changed, !isUndoingActionChange, let previous = LocalActionState(rawValue: action.state) {
+            recordActionChange(action, from: previous, to: state)
+        }
         await refresh(); await queueActionFollowups([action.id])
     }
     func clarifyAction(_ action: ActionRecord, decision: ActionClarificationDecision) async -> Bool {
@@ -3053,7 +3060,10 @@ struct VoiceOSApp: App {
         WindowGroup("独立资料库", id: "restored-library", for: String.self) { path in
             if let path = path.wrappedValue { RestoredLibraryView(path: path) }
         }
-        .commands { CommandGroup(after: .newItem) { Button("导入音频或视频…") { focusedModel?.chooseFullRecording() }.keyboardShortcut("i").disabled(focusedModel?.initialized != true || focusedModel?.importing == true) } }
+        .commands {
+            CommandGroup(after: .newItem) { Button("导入音频或视频…") { focusedModel?.chooseFullRecording() }.keyboardShortcut("i").disabled(focusedModel?.initialized != true || focusedModel?.importing == true) }
+            CommandGroup(after: .undoRedo) { Button("撤销上一次行动变更") { Task { await focusedModel?.undoLastActionChange() } }.keyboardShortcut("z").disabled(focusedModel?.canUndoActionChange != true) }
+        }
     }
 }
 
