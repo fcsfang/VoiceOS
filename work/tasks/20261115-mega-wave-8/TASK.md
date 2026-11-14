@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: merge-ready
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-8
@@ -49,6 +49,14 @@ owner: coordinator
 - 译文不落库、不缓存跨会话；不覆盖原文。
 - 地点搜索依赖系统能力，取不到时纯文本名称。
 - 口述意图只做开始/停止，不做参数化。
+
+## 结果
+
+2026-11-15 三条线集成到 `work/mega-8`：M1 `db48fcb`，M2 `88ee529`，M3 `3d146b3`；协调者修正译文模型名从配置读取。
+
+`swift build -j 2` 通过（EventKit 的 `EKAlarm()` 与 `EKStructuredLocation()` 默认构造通过类型检查）；`swift test -j 2` 299 项 0 失败（新增双语切段 14 项、地点校验 7 项）。
+
+实机：锁屏，材料页译文对照两态、地点提醒写入回读与意图口述不可得；元数据步骤在合并后发行构建中验证四个意图。
 
 ## 链接
 
