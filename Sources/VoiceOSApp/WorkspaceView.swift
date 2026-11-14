@@ -107,6 +107,7 @@ struct WorkspaceView: View {
     @State private var showingOutcome = false
     @State private var materialFilter = "日常材料"
     @State private var actionFilter = "全部"
+    @State private var focusedActionIDs: Set<String> = []
     @State private var query = ""
     @FocusState private var searchFocused: Bool
     @State private var taskFeedbackDrafts: [String: TaskFeedbackDraft] = [:]
@@ -240,8 +241,8 @@ struct WorkspaceView: View {
             if id != nil { go(.tool("导入录音")); showingDiscussion=false }
             else if page == .tool("导入录音") { back() }
         }
-        .onOpenURL { url in if model.initialized { openReminder(url) } else { pendingURL=url } }
-        .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;openReminder(url) } }
+        .onOpenURL { url in if model.initialized { routeExternalURL(url) } else { pendingURL=url } }
+        .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;routeExternalURL(url) } }
         .onDisappear { Task { await model.setPanoramaVisible(false) } }
         .sheet(isPresented:$model.choosingReminderCalendar) {
             VStack(alignment:.leading,spacing:16) {
@@ -631,6 +632,11 @@ struct WorkspaceView: View {
             let visible = visibleActions
             let executions = model.assistantExecutions.filter { $0.state != "cancelled" }
             let paused = model.workspacePausedTasks
+            if ["全部","我的待办"].contains(actionFilter), !focusedActions.isEmpty {
+                WorkspaceSection(title:"专注",icon:"pin",count:focusedActions.count) {
+                    ForEach(focusedActions) { action in actionRow(action);if action.id != focusedActions.last?.id { Divider() } }
+                }
+            }
             if actionFilter == "我的待办", !visible.isEmpty {
                 let surface = ActionTimeSurface.build(actions: visible, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
                 if !surface.today.isEmpty {
@@ -690,7 +696,13 @@ struct WorkspaceView: View {
             }
             if actionFilter == "待核对" { processingIssues }
             HStack { Button("同步提醒事项") { Task { await model.refreshTaskReminders() } }.disabled(model.reminderAccess?.enabled != true || model.remindersBusy);Spacer();Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-        }
+        }.task(id: focusRefreshKey) { focusedActionIDs = await model.focusedActionIDs() }
+    }
+    private var focusedActions: [ActionRecord] {
+        Array(model.actionRecords.filter { focusedActionIDs.contains($0.id) && $0.state == "open" && $0.validity == "current" }.prefix(3))
+    }
+    private var focusRefreshKey: String {
+        model.actionRecords.map { $0.id + String($0.version) + $0.state + $0.validity }.joined(separator: "|")
     }
     private var visibleActions: [ActionRecord] {
         model.actionRecords.filter { action in
@@ -862,7 +874,21 @@ struct WorkspaceView: View {
             return date < Date()
         }
     }
-    private func actionRow(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> some View { WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action,timeEntry:timeEntry),icon:action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : "circle") { go(.task(action.id)) } }
+    private func actionRow(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> some View {
+        WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action,timeEntry:timeEntry),icon:action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : "circle") { go(.task(action.id)) }
+            .contextMenu {
+                if page == .actions, action.state == "open", action.validity == "current" {
+                    Button(focusedActionIDs.contains(action.id) ? "移出专注" : "加入专注") { toggleFocus(action.id) }
+                }
+            }
+    }
+    private func toggleFocus(_ id:String) {
+        Task {
+            guard let next = await model.toggleActionFocus(actionID: id) else { error = model.status; return }
+            focusedActionIDs = next
+            error = ""
+        }
+    }
     private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
     private var navigationEntry: WorkspaceNavigationEntry { .init(page:page,topicID:topicID,topicTab:topicTab,topicReadingMode:topicReadingMode) }
@@ -889,6 +915,10 @@ struct WorkspaceView: View {
             else { let created=try await model.createReflectionQuestion(newTopicTitle,allowCloud:true);topicID=created.id }
             creatingTopic=false;newTopicTitle="";model.queueTopicOrganization()
         } catch { self.error=error.localizedDescription }
+    }
+    private func routeExternalURL(_ url:URL) {
+        if CaptureLink.isCapture(url) { Task { await model.acceptCaptureURL(url) } }
+        else { openReminder(url) }
     }
     private func openReminder(_ url:URL) { Task { if await model.focusReminder(url) { if let id=model.focusedTaskID { go(.task(id)) } else { go(.actions) } } } }
     private func chooseLibrary() {

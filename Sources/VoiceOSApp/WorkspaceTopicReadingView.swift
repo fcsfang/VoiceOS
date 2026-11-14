@@ -58,6 +58,7 @@ struct WorkspaceTopicReadingView: View {
                     } else { readingCards }
                 }
                 connectionsSection
+                TopicUnlinkedReferencesSection(model:model,topic:topic)
                 if mode == "认识与问题" { questions; personalEntries }
             }
             if mode == "概览" { overviewActions; questions }

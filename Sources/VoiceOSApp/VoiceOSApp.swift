@@ -1907,6 +1907,55 @@ final class ControlCenter: ObservableObject {
             return id
         } catch { status = error.localizedDescription; await refresh(); return nil }
     }
+    func acceptCaptureURL(_ url: URL) async -> Bool {
+        guard let link = CaptureLink.parse(url) else { status = "抓取链接无效，未保存"; return false }
+        return await acceptCaptureRequest(text: link.text, title: link.title, url: link.url, successURL: link.successURL)
+    }
+    func acceptCaptureRequest(text: String?, title: String?, url: String?, successURL: URL?) async -> Bool {
+        guard let store else { status = "资料库尚未打开，未保存"; return false }
+        let body = [text, url].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
+        guard let body else { status = "抓取内容为空，未保存"; return false }
+        let metadataURL = url.flatMap { value -> String? in
+            guard let scheme = URL(string: value)?.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
+            return value
+        }
+        do {
+            let id = try await store.recordCapturedText(body, title: title ?? "", ownership: .external, sourceURL: metadataURL)
+            let policy = try await store.sourcePolicy(sourceID: id)
+            if !policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: true) }
+            await refresh()
+            if let successURL, let callback = CaptureLink.successCallback(successURL, sourceID: id) { NSWorkspace.shared.open(callback) }
+            status = "已存入外部资料，仅本机保存"
+            return true
+        } catch {
+            status = "抓取未保存：" + error.localizedDescription
+            await refresh()
+            return false
+        }
+    }
+    func acceptDroppedFiles(_ urls: [URL]) {
+        Task {
+            var media: [URL] = [], textFiles: [URL] = [], unsupported: [String] = []
+            for url in urls {
+                let ext = url.pathExtension.lowercased()
+                if ext == "txt" || ext == "md" { textFiles.append(url) }
+                else if let type = UTType(filenameExtension: ext), type.conforms(to: .audio) || type.conforms(to: .movie) { media.append(url) }
+                else { unsupported.append(url.lastPathComponent) }
+            }
+            if !media.isEmpty { await importFiles(media) }
+            for url in textFiles { await importCapturedTextFile(url) }
+            if !unsupported.isEmpty { status = "暂不支持这些文件类型：" + unsupported.joined(separator: "、") }
+        }
+    }
+    private func importCapturedTextFile(_ url: URL) async {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let text = try String(contentsOf: url, encoding: .utf8)
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { status = "文字文件为空，未保存"; return }
+            _ = await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil)
+        } catch { status = "无法读取文字文件：" + error.localizedDescription }
+    }
     func saveAndProcessExpression(_ text: String, commandID: String) async -> Bool {
         guard let store, let cognition = textModel, let association = associationModel else {
             status = "文本模型或关联模型尚未配置；原文仍可先本地保存"; return false
@@ -1974,7 +2023,7 @@ final class ControlCenter: ObservableObject {
             Task { await self.importFiles(urls, personalAudio: personalAudio) }
         }
     }
-    private func importFiles(_ urls: [URL], personalAudio: Bool = false) async {
+    func importFiles(_ urls: [URL], personalAudio: Bool = false) async {
         guard let store, !importing else { return }
         importing = true
         defer { importing = false }
@@ -2697,6 +2746,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
             DispatchQueue.main.async { AppBrand.applyApplicationIcon() }
         }
         installStatusItem()
+        NSApp.servicesProvider = self
         // SwiftUI accepts only the import command on this scene, so Command-Shift-R is handled here.
         dictationKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -2721,6 +2771,10 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         if let button = item.button {
             button.image = AppBrand.menuBarImage() ?? NSImage(systemSymbolName: "waveform", accessibilityDescription: "VoiceOS")
             button.toolTip = "VoiceOS"
+            let drop = StatusItemDropView(frame: button.bounds)
+            drop.autoresizingMask = [.width, .height]
+            drop.onDrop = { [weak self] urls in self?.acceptDroppedFiles(urls) }
+            button.addSubview(drop)
         }
         let menu = NSMenu()
         menu.autoenablesItems = false
@@ -2745,6 +2799,35 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         }
         dictation.title = model.dictationActive ? "停止口述并整理" : "开始口述并自动整理"
         dictation.isEnabled = model.canToggleCaptureDictation
+    }
+
+    private func acceptDroppedFiles(_ urls: [URL]) {
+        ControlCenter.primary?.acceptDroppedFiles(urls)
+    }
+
+    @objc func captureText(_ pboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        guard let text = pboard.string(forType: .string), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            error.pointee = "没有可保存的文字" as NSString
+            return
+        }
+        guard let model = ControlCenter.primary else {
+            error.pointee = "VoiceOS 尚未准备好" as NSString
+            return
+        }
+        Task { _ = await model.acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil) }
+    }
+
+    @objc func captureFile(_ pboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>) {
+        let urls = pboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        guard !urls.isEmpty else {
+            error.pointee = "没有可保存的文件" as NSString
+            return
+        }
+        guard let model = ControlCenter.primary else {
+            error.pointee = "VoiceOS 尚未准备好" as NSString
+            return
+        }
+        model.acceptDroppedFiles(urls)
     }
 
     @objc private func toggleDictation() {
