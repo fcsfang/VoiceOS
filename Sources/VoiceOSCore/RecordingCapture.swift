@@ -32,6 +32,8 @@ extension VoiceOSStore {
               row["input_fingerprint"] == "microphone-v1:"+sourceID else { throw VoiceOSError("录制身份不符") }
         if row["state"] == "receiving", row["expected_bytes"] == "0" {
             try db.execute("UPDATE sources SET state='interrupted',error='录制未正常封存，片段保留待核对；未显示保存成功' WHERE id=?",[sourceID])
+        } else if row["state"] == "sealed" {
+            try db.execute("UPDATE sources SET state='interrupted',error='录制未正常封存，片段保留待核对；未显示保存成功' WHERE id=?",[sourceID])
         }
     }
     /// Normal finish or explicit recovery of an interrupted draft. A decodable fragment can be
@@ -40,6 +42,7 @@ extension VoiceOSStore {
         guard ready, let row = try db.query("SELECT * FROM sources WHERE id=?",[sourceID]).first,
               row["input_fingerprint"] == "microphone-v1:"+sourceID else { throw VoiceOSError("录制不存在") }
         if row["state"] == "saved" { _ = try playableURL(sourceID:sourceID); return }
+        if row["state"] == "sealed" { try await resumeSealedDictation(row); return }
         guard ["receiving","interrupted"].contains(row["state"] ?? ""), row["expected_bytes"] == "0",
               !activeCaptures.contains(sourceID) else { throw VoiceOSError("录制已封存或正在核对") }
         activeCaptures.insert(sourceID); defer { activeCaptures.remove(sourceID) }
@@ -59,6 +62,21 @@ extension VoiceOSStore {
         try place(file,try assetURL(relativePath:row["relative_path"]!)); try checkpoint(.renamed)
         let sealed = try db.query("SELECT * FROM sources WHERE id=?",[sourceID]).first!
         try sealAndQueue(sealed,info:info); try checkpoint(.savedCommitted)
+    }
+    private func resumeSealedDictation(_ row:[String:String]) async throws {
+        let sourceID = row["id"]!
+        guard !activeCaptures.contains(sourceID) else { throw VoiceOSError("录制已封存或正在核对") }
+        guard let duration = row["duration"].flatMap(Double.init), let kind = row["kind"],
+              let final = try? assetURL(relativePath: row["relative_path"]!) else { throw VoiceOSError("录制封存信息不完整") }
+        let staging = try recordingIntent(row).stagingURL
+        let file = FileManager.default.fileExists(atPath: final.path) ? final : staging
+        guard FileManager.default.fileExists(atPath: file.path) else { throw VoiceOSError("录制原件缺失，无法续作封存") }
+        activeCaptures.insert(sourceID); defer { activeCaptures.remove(sourceID) }
+        if file == staging { try place(staging, final) }
+        try checkpoint(.renamed)
+        let sealed = try db.query("SELECT * FROM sources WHERE id=?",[sourceID]).first!
+        try sealAndQueue(sealed,info: MediaInfo(duration: duration, kind: kind))
+        try checkpoint(.savedCommitted)
     }
     static func isPersonalAudioImport(_ row: [String: String]) -> Bool {
         guard let path = row["relative_path"], let hash = row["expected_hash"], let bytes = row["expected_bytes"], let name = row["name"] else { return false }
