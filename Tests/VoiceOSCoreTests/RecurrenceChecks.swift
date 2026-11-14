@@ -217,4 +217,66 @@ final class RecurrenceChecks: XCTestCase {
         XCTAssertEqual(try db.query("SELECT count(*) AS n FROM actions").first?["n"], "2")
         XCTAssertEqual(try db.query("SELECT count(*) AS n FROM action_recurrence").first?["n"], "1")
     }
+
+    func testReopenDeletesUntouchedSuccessorAndRestoresSeries() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let zone = calendar("Asia/Shanghai")
+        let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"))
+        try await store.setRecurrence(actionID: action, period: .weekly)
+        let seriesID = try XCTUnwrap(try db.query("SELECT series_id FROM action_recurrence WHERE action_id=?", [action]).first?["series_id"])
+        let successorRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
+        let successor = try XCTUnwrap(successorRaw)
+        let kept = try await store.reopenActionWithRecurrence(id: action, successorID: successor)
+        XCTAssertNil(kept)
+        let reopened = try XCTUnwrap(try db.query("SELECT state,version FROM actions WHERE id=?", [action]).first)
+        XCTAssertEqual(reopened["state"], "open")
+        XCTAssertEqual(reopened["version"], "3")
+        XCTAssertEqual(try db.query("SELECT id FROM actions WHERE id=?", [successor]).count, 0)
+        let successorRecurrence = try await store.recurrence(actionID: successor)
+        let actionRecurrence = try await store.recurrence(actionID: action)
+        XCTAssertNil(successorRecurrence)
+        XCTAssertEqual(actionRecurrence, .weekly)
+        XCTAssertEqual(try db.query("SELECT series_id FROM action_recurrence WHERE action_id=?", [action]).first?["series_id"], seriesID)
+        XCTAssertEqual(try db.query("SELECT count(*) AS n FROM action_recurrence").first?["n"], "1")
+    }
+
+    func testReopenFindsSuccessorByCommandPrefix() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let zone = calendar("Asia/Shanghai")
+        let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"))
+        try await store.setRecurrence(actionID: action, period: .weekly)
+        let successorRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
+        let successor = try XCTUnwrap(successorRaw)
+        let kept = try await store.reopenActionWithRecurrence(id: action)
+        XCTAssertNil(kept)
+        XCTAssertEqual(try db.query("SELECT id FROM actions WHERE id=?", [successor]).count, 0)
+        let restored = try await store.recurrence(actionID: action)
+        XCTAssertEqual(restored, .weekly)
+    }
+
+    func testReopenKeepsModifiedSuccessor() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let zone = calendar("Asia/Shanghai")
+        let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"))
+        try await store.setRecurrence(actionID: action, period: .weekly)
+        let successorRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
+        let successor = try XCTUnwrap(successorRaw)
+        _ = try await store.setActionState(actionID: successor, expectedVersion: 1, state: .dismissed)
+        let kept = try await store.reopenActionWithRecurrence(id: action, successorID: successor)
+        XCTAssertEqual(kept, successor)
+        XCTAssertEqual(try db.query("SELECT state FROM actions WHERE id=?", [successor]).first?["state"], "dismissed")
+        let successorRecurrence = try await store.recurrence(actionID: successor)
+        let actionRecurrence = try await store.recurrence(actionID: action)
+        XCTAssertEqual(successorRecurrence, .weekly)
+        XCTAssertNil(actionRecurrence)
+        XCTAssertEqual(try db.query("SELECT state FROM actions WHERE id=?", [action]).first?["state"], "open")
+    }
+
+    func testRecurrenceSuccessorsBypassLinkedTitleBarrier() {
+        XCTAssertTrue(VoiceOSStore.bypassesLinkedTitleBarrier(commandID: "recurrence:abc:2026-11-22"))
+        XCTAssertFalse(VoiceOSStore.bypassesLinkedTitleBarrier(commandID: "extracted:abc"))
+    }
 }

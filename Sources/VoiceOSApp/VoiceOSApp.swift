@@ -2827,11 +2827,13 @@ final class ControlCenter: ObservableObject {
             return true
         } catch { status = error.localizedDescription; await refresh(); return false }
     }
-    func changeAction(_ action: ActionRecord, state: LocalActionState) async {
-        guard let store else { return }
-        guard !savingAction else { status = "正在保存其他更改，请稍后重试"; return }
+    @discardableResult
+    func changeAction(_ action: ActionRecord, state: LocalActionState, successorID: String? = nil) async -> ActionChangeReceipt? {
+        guard let store else { return nil }
+        guard !savingAction else { status = "正在保存其他更改，请稍后重试"; return nil }
         savingAction = true; defer { savingAction = false }
         var changed = false
+        var receipt: ActionChangeReceipt?
         do {
             if state != .dismissed, let link = reminderLinks.first(where: { $0.actionID == action.id }), let id = link.externalID {
                 guard let access = reminderAccess, access.enabled, access.calendarID == link.calendarID, !remindersBusy else { throw VoiceOSError("请先恢复提醒事项连接，或在 Apple 提醒事项中更改完成状态") }
@@ -2841,19 +2843,35 @@ final class ControlCenter: ObservableObject {
                           let current = try await store.actions(includeHistory: true).first(where: { $0.id == action.id }), current.validity == "current", current.version == action.version else { throw VoiceOSError("任务或连接已变化，请重新核对") }
                 }
                 try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: reminders, expectedAccessVersion: access.version)
-                if state == .completed { _ = try await store.completeActionWithRecurrence(id: action.id) }
-                status = "完成状态已同步并回读；可以补充实际结果或收获"
+                if state == .completed {
+                    receipt = ActionChangeReceipt(successorID: try await store.completeActionWithRecurrence(id: action.id), keptSuccessorID: nil)
+                    status = "完成状态已同步并回读；可以补充实际结果或收获"
+                } else if state == .open {
+                    let kept = try await store.reopenActionWithRecurrence(id: action.id, successorID: successorID)
+                    receipt = ActionChangeReceipt(successorID: nil, keptSuccessorID: kept)
+                    status = kept == nil ? "行动状态已保存" : "已重新跟进 · 下一次已保留"
+                } else {
+                    status = "行动状态已保存"
+                }
             } else {
-                if state == .completed { _ = try await store.completeActionWithRecurrence(id: action.id) }
-                else { _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state) }
-                status = "行动状态已保存"
+                if state == .completed {
+                    receipt = ActionChangeReceipt(successorID: try await store.completeActionWithRecurrence(id: action.id), keptSuccessorID: nil)
+                } else if state == .open {
+                    let kept = try await store.reopenActionWithRecurrence(id: action.id, successorID: successorID)
+                    receipt = ActionChangeReceipt(successorID: nil, keptSuccessorID: kept)
+                    if kept != nil { status = "已重新跟进 · 下一次已保留" } else { status = "行动状态已保存" }
+                } else {
+                    _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state)
+                    status = "行动状态已保存"
+                }
             }
             changed = true
         } catch { status = error.localizedDescription }
         if changed, !isUndoingActionChange, let previous = LocalActionState(rawValue: action.state) {
-            recordActionChange(action, from: previous, to: state)
+            recordActionChange(action, from: previous, to: state, successorID: receipt?.successorID)
         }
         await refresh(); await queueActionFollowups([action.id])
+        return receipt
     }
     func clarifyAction(_ action: ActionRecord, decision: ActionClarificationDecision) async -> Bool {
         guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
@@ -4039,8 +4057,14 @@ extension ControlCenter {
 
 extension ApplicationDelegate: VoiceOSIntentEndpoint {
     @MainActor func captureVoiceOSIntent(text: String, title: String?) async -> Bool {
-        guard let model = ControlCenter.primary else { return false }
-        return await model.acceptCaptureRequest(text: text, title: title, url: nil, successURL: nil, context: "快捷指令")
+        let deadline = Date().addingTimeInterval(8)
+        while true {
+            if let model = ControlCenter.primary, model.initialized {
+                return await model.acceptCaptureRequest(text: text, title: title, url: nil, successURL: nil, context: "快捷指令")
+            }
+            guard Date() < deadline else { return false }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
     }
     @MainActor func openTodayActions() -> Bool {
         guard let model = ControlCenter.primary else { return false }

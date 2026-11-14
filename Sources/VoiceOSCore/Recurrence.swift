@@ -111,6 +111,43 @@ extension VoiceOSStore {
         try checkpoint(.actionStateCommitted)
         return successorID
     }
+    @discardableResult
+    public func reopenActionWithRecurrence(id: String, successorID: String? = nil) throws -> String? {
+        guard let row = try db.query("SELECT * FROM actions WHERE id=?", [id]).first else { throw VoiceOSError("行动不存在") }
+        guard row["validity"] == "current" else { throw VoiceOSError("行动版本或依据已变化，请重新核对") }
+        guard row["state"] != "open" else { return nil }
+        let version = Int(row["version"]!)!
+        let resolved = successorID ?? (try db.query("SELECT id FROM actions WHERE command_id LIKE ? ORDER BY created_at DESC LIMIT 1", ["recurrence:" + id + ":%"]).first?["id"])
+        var keptSuccessorID: String?
+        try db.transaction {
+            if let resolved {
+                let command = try db.query("SELECT command_id FROM actions WHERE id=?", [resolved]).first?["command_id"]
+                if command?.hasPrefix("recurrence:" + id + ":") == true {
+                    if try successorIsUntouched(resolved), let recurrence = try db.query("SELECT * FROM action_recurrence WHERE action_id=?", [resolved]).first {
+                        try db.execute("DELETE FROM action_recurrence WHERE action_id=?", [resolved])
+                        try db.execute("DELETE FROM actions WHERE id=?", [resolved])
+                        try db.execute("INSERT OR REPLACE INTO action_recurrence(action_id,series_id,period,created_at) VALUES(?,?,?,?)", [id, recurrence["series_id"]!, recurrence["period"]!, recurrence["created_at"]!])
+                    } else {
+                        keptSuccessorID = resolved
+                    }
+                }
+            }
+            let commandID = "recurrence-reopen:" + id + ":" + String(version)
+            let hash = try Self.actionHash([id, String(version), LocalActionState.open.rawValue, ""])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'open','','user',?,?,?)", [UUID().uuidString, id, String(version + 1), String(version), commandID, hash, ISO8601DateFormatter().string(from: Date())])
+            try db.execute("UPDATE actions SET state='open',version=? WHERE id=?", [String(version + 1), id])
+            try checkpoint(.actionStateUncommitted)
+        }
+        try checkpoint(.actionStateCommitted)
+        return keptSuccessorID
+    }
+    private func successorIsUntouched(_ id: String) throws -> Bool {
+        guard let row = try db.query("SELECT * FROM actions WHERE id=?", [id]).first, row["state"] == "open", row["version"] == "1", row["note"] == "" else { return false }
+        for table in ["action_revisions","action_feedback","reminder_links","action_schedule_intents","reminder_compensation_plans","assistant_executions","assistant_assessments","action_clarifications","action_focus","action_subtasks","action_estimates"] {
+            if !(try db.query("SELECT 1 AS present FROM \(table) WHERE action_id=? LIMIT 1", [id])).isEmpty { return false }
+        }
+        return true
+    }
     static func nextRecurrenceDue(due: ReminderDueDate, period: RecurrencePeriod, now: Date) -> ReminderDueDate? {
         switch due {
         case .none:
@@ -144,6 +181,22 @@ extension VoiceOSStore {
         case .none: return "none"
         case let .dateOnly(localDate, _): return localDate
         case let .instant(utc, _): return utc
+        }
+    }
+}
+
+public extension ReminderDueDate {
+    var shortLabel: String {
+        switch self {
+        case .none: return ""
+        case let .dateOnly(localDate, _): return String(localDate.dropFirst(5))
+        case let .instant(utc, zone):
+            guard let date = ReminderFields.date(utc) else { return "" }
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(identifier: zone) ?? .current
+            formatter.dateFormat = "MM-dd"
+            return formatter.string(from: date)
         }
     }
 }

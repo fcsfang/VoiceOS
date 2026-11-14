@@ -3,12 +3,14 @@ public struct ActionUndoEntry: Equatable, Sendable {
     public let title: String
     public let from: LocalActionState
     public let to: LocalActionState
+    public let successorID: String?
 
-    public init(actionID: String, title: String, from: LocalActionState, to: LocalActionState) {
+    public init(actionID: String, title: String, from: LocalActionState, to: LocalActionState, successorID: String? = nil) {
         self.actionID = actionID
         self.title = title
         self.from = from
         self.to = to
+        self.successorID = successorID
     }
 }
 

@@ -7,6 +7,7 @@ public struct ReminderAccess: Sendable {
     public let enabled: Bool
 }
 extension VoiceOSStore {
+    static func bypassesLinkedTitleBarrier(commandID: String) -> Bool { commandID.hasPrefix("recurrence:") }
     public func reminderAccess() throws -> ReminderAccess? {
         try db.query("SELECT * FROM reminder_access ORDER BY version DESC LIMIT 1").first.map {
             ReminderAccess(version: Int($0["version"]!)!, calendarID: $0["calendar_id"]!, title: $0["title"]!, enabled: $0["enabled"] == "1")
@@ -49,7 +50,7 @@ extension VoiceOSStore {
         let pending = try actions().filter { action in
             guard action.kind == "task", action.intentActor == "user", !linked.contains(action.id), currentClaimIDs.contains(action.claimID), let claim = claims[action.claimID] else { return false }
             guard !requireReviewedFields || action.intent?.reminderFields?.desired != nil else { return false }
-            guard !claim.references.contains(where: { linkedTitleSources.contains(action.title + "|" + $0.sourceID) }) else { return false }
+            guard VoiceOSStore.bypassesLinkedTitleBarrier(commandID: action.commandID) || !claim.references.contains(where: { linkedTitleSources.contains(action.title + "|" + $0.sourceID) }) else { return false }
             // P01 grants the assistant autonomy for user-owned task actions.
             // The model may conservatively set autoSend=false; that flag is
             // advisory here. Ambiguous material remains an opportunity and is
