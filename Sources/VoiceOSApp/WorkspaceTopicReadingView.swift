@@ -85,20 +85,9 @@ struct WorkspaceTopicReadingView: View {
             } else {
                 Text("在这里接续这个主题的认识、问题和实践。").vosFont(19, weight: .medium)
             }
-            if !sections.isEmpty {
-                HStack(spacing:18) {
-                    metric("内容小节",value:sections.count,icon:"square.grid.2x2")
-                    metric("待办",value:tasks.filter { $0.state == "open" }.count,icon:"circle")
-                    metric("完成记录",value:tasks.filter { $0.state == "completed" }.count,icon:"checkmark.circle")
-                }
-            }
         }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
             .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
             .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
-    }
-
-    private func metric(_ title:String,value:Int,icon:String) -> some View {
-        Label("\(value) " + title,systemImage:icon).vosFont(12, weight: .medium).foregroundStyle(.secondary)
     }
 
     private var preparingCards: some View {
@@ -218,11 +207,14 @@ struct WorkspaceTopicReadingView: View {
     }
 
     @ViewBuilder private var overviewActions: some View {
-        let next=tasks.filter { $0.state == "open" }
-        if !next.isEmpty {
-            WorkspaceSection(title:"可以接着做",icon:"arrow.right.circle",count:next.count,actionTitle:"全部行动与结果",action:showActions) {
-                ForEach(Array(next.prefix(3))) { action in taskButton(action).padding(.vertical,10) }
-            }
+        let open=tasks.filter { $0.state == "open" }
+        if !open.isEmpty {
+            Button { showActions() } label: {
+                HStack(spacing:6) {
+                    Text("查看 \(open.count) 条开放行动")
+                    Image(systemName:"chevron.right").font(.caption2)
+                }.vosFont(13, weight: .medium).foregroundStyle(palette.accent).contentShape(Rectangle())
+            }.buttonStyle(.plain)
         }
         if !outcomes.isEmpty || !deliveries.isEmpty {
             WorkspaceSection(title:"最近带回来的结果",icon:"tray.and.arrow.down",actionTitle:"查看全部",action:showActions) {
