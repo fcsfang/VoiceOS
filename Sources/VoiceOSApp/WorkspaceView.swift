@@ -875,28 +875,21 @@ struct WorkspaceView: View {
         }
     }
     private var search: some View {
-        LazyVStack(alignment:.leading,spacing:24) {
+        let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
+        return LazyVStack(alignment:.leading,spacing:24) {
             WorkspaceHeading(eyebrow:"",title:"搜索")
             WorkspaceSearchField(text:$query,placeholder:"搜索标题、原话、理解或行动",focus:$searchFocused)
                 .task {
                     // Wait until the lazy field is attached to its native window.
                     do { try await Task.sleep(for:.milliseconds(100)); searchFocused = true } catch {}
                 }
-            let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
-            let matchingActions=model.actionRecords.filter { !term.isEmpty && ($0.title+"\n"+$0.note).localizedCaseInsensitiveContains(term) }
-            if !matchingActions.isEmpty { sectionTitle("行动 · \(matchingActions.count)") }
-            ForEach(matchingActions) { actionRow($0) }
-            let matchingClaims=model.claims.filter { !term.isEmpty && $0.validity == "current" && $0.reviewState != "rejected" && $0.statement.localizedCaseInsensitiveContains(term) }
-            if !matchingClaims.isEmpty { sectionTitle("理解 · \(matchingClaims.count)") }
-            ForEach(matchingClaims) { thoughtRow($0) }
-            let sources=model.records.filter { !$0.isTrashed && (term.isEmpty || ($0.displayTitle+"\n"+$0.name+"\n"+($0.transcript ?? "")).localizedCaseInsensitiveContains(term)) }
-            if !sources.isEmpty { sectionTitle("材料与原话 · \(sources.count)") }
-            let catalog=recordCatalog
-            ForEach(sources) { sourceRow($0,catalog:catalog);Divider() }
-            if !term.isEmpty && sources.isEmpty && matchingActions.isEmpty && matchingClaims.isEmpty {
-                WorkspaceEmptyState(title:"没有找到相关内容",systemImage:"magnifyingglass",description:"换个关键词，或清空搜索查看全部材料。") {
-                    Button("清空搜索") { query="";searchFocused=true }
-                }
+            if term.isEmpty {
+                let sources=model.records.filter { !$0.isTrashed }
+                if !sources.isEmpty { sectionTitle("材料与原话 · \(sources.count)") }
+                let catalog=recordCatalog
+                ForEach(sources) { sourceRow($0,catalog:catalog);Divider() }
+            } else {
+                SearchResultsView(model:model,query:term,openMaterial:{ go(.source($0)) },openTask:{ go(.task($0)) },clearQuery:{ query="";searchFocused=true })
             }
         }
     }
