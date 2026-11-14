@@ -103,7 +103,7 @@ extension VoiceOSStore {
         return try db.query("SELECT * FROM action_schedule_intents \(clause) ORDER BY action_id,schedule_version").map { row in
             let latest = try db.query("SELECT MAX(schedule_version) AS n FROM action_schedule_intents WHERE action_id=?", [row["action_id"]]).first?["n"]
             let action = actions[row["action_id"]!]
-            return try Self.scheduleIntent(row, baseOperationID: db.query("SELECT operation_id FROM reminder_schedule_bases WHERE intent_id=?", [row["id"]]).first?["operation_id"], eligible: row["validity"] == "current" && row["schedule_version"] == latest && action?.state == "open" && action?.validity == "current" && row["action_version"] == action.map { String($0.version) })
+            return try Self.scheduleIntent(row, baseOperationID: db.query("SELECT operation_id FROM reminder_schedule_bases WHERE intent_id=?", [row["id"]]).first?["operation_id"], eligible: row["validity"] == "current" && row["schedule_version"] == latest && action?.kind == "task" && action?.state == "open" && action?.validity == "current" && row["action_version"] == action.map { String($0.version) })
         }
     }
 
@@ -167,12 +167,13 @@ extension VoiceOSStore {
     }
 
     static func validateStoredActionSchedules(_ db: Database) throws {
+        let clarifiedOpportunities = try clarifiedOpportunityActionIDs(db)
         for action in try db.query("SELECT * FROM actions") {
             var prior: ActionScheduleIntent?
             var priorBaseSequence = 0
             for (index,row) in try db.query("SELECT * FROM action_schedule_intents WHERE action_id=? ORDER BY schedule_version", [action["id"]]).enumerated() {
                 let intent = try scheduleIntent(row, eligible: false)
-                guard action["kind"] == "task", intent.version == index+1, intent.actionVersion >= 1,
+                guard (action["kind"] == "task" || clarifiedOpportunities.contains(action["id"]!)), intent.version == index+1, intent.actionVersion >= 1,
                       intent.actionVersion <= Int(action["version"]!)!,
                       intent.actionVersion >= (prior?.actionVersion ?? 1),
                       intent.actor != .ai || prior?.authority != .userCommitment else { throw VoiceOSError("排期版本链或承诺保护不一致") }

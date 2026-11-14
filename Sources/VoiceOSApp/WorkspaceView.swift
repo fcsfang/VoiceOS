@@ -65,7 +65,7 @@ struct WorkspaceRow: View {
         Button(action:open) {
             HStack(alignment:.top,spacing:14) {
                 Image(systemName:icon).vosFont(16).foregroundStyle(palette.accent)
-                    .frame(width:34,height:34).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius:8))
+                    .frame(width:34,height:34).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 VStack(alignment:.leading,spacing:8) {
                     Text(title).vosFont(16, weight: .semibold).lineSpacing(3).lineLimit(3).fixedSize(horizontal:false,vertical:true).help(title)
                     if !subtitle.isEmpty { Text(subtitle).vosFont(13).foregroundStyle(.secondary).lineSpacing(3).lineLimit(2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
@@ -117,6 +117,7 @@ struct WorkspaceView: View {
     @State private var reviewPeriod = ReflectionPeriod.week
     @State private var reviewAnchor = Date()
     @State private var error = ""
+    @State private var showingWeeklyReview = false
     @Environment(\.openWindow) private var openWindow
     private var discussionIsPresented: Bool {
         showingDiscussion && discussionDraftSessionID != nil && discussionDraftSessionID == model.discussionSession?.id
@@ -168,7 +169,7 @@ struct WorkspaceView: View {
                 Divider()
                 if let message = model.workspaceLastError {
                     HStack(alignment:.firstTextBaseline,spacing:12) {
-                        Label(message,systemImage:"exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange).textSelection(.enabled)
+                        Label(message,systemImage:"exclamationmark.triangle.fill").font(.callout).foregroundStyle(palette.danger).textSelection(.enabled)
                         Spacer(minLength:8)
                         if model.workspaceLastErrorRetry != nil { Button("重试") { model.retryWorkspaceError() } }
                         Button { model.clearWorkspaceError() } label: { Image(systemName:"xmark").font(.caption) }
@@ -189,7 +190,7 @@ struct WorkspaceView: View {
                         ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
                     } else { pageContent }
                 }.frame(maxWidth:.infinity,maxHeight:.infinity)
-                if !error.isEmpty { Text(error).font(.callout).foregroundStyle(.orange).textSelection(.enabled).padding(12) }
+                if !error.isEmpty { Text(error).font(.callout).foregroundStyle(palette.danger).textSelection(.enabled).padding(12) }
                 WorkspaceProcessingBar(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
             }.frame(minWidth:440)
             if discussionIsPresented {
@@ -263,6 +264,9 @@ struct WorkspaceView: View {
                 onSkip:{ model.skipOutcome($0) },
                 onDone:{ showingOutcome=false })
         }
+        .sheet(isPresented:$showingWeeklyReview) {
+            WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) })
+        }
         .alert("无法导入录音或视频", isPresented: Binding(
             get: { model.fullRecordingImportIssue != nil },
             set: { if !$0 { model.fullRecordingImportIssue = nil } }
@@ -312,7 +316,7 @@ struct WorkspaceView: View {
         Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
             Label(title,systemImage:icon).vosFont(15, weight: section == title ? .semibold : .regular)
                 .frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,12).padding(.vertical,11)
-                .background(section == title ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:8))
+                .background(section == title ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 // Plain buttons otherwise only hit-test the icon and text, leaving the padded row inert.
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityIdentifier("workspace.nav."+title)
@@ -323,7 +327,7 @@ struct WorkspaceView: View {
                 Button(action:back) {
                     Image(systemName:"chevron.left").vosFont(15, weight: .medium)
                         .frame(width:44,height:44)
-                        .background(palette.selection.opacity(0.5),in:RoundedRectangle(cornerRadius:8))
+                        .background(palette.selection.opacity(0.5),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("返回").help("返回上一页").keyboardShortcut("[",modifiers:.command)
             }
@@ -334,7 +338,7 @@ struct WorkspaceView: View {
             Button { Task { await toggleDiscussion() } } label: { Label("讨论",systemImage:"sidebar.right") }
                 .buttonStyle(.borderless).disabled(model.discussionSaving || model.discussionSending)
                 .accessibilityIdentifier("workspace.discussion")
-        }.padding(.horizontal,26).frame(height:58).background(palette.canvas)
+        }.padding(.horizontal,26).frame(minHeight:58).background(palette.canvas)
     }
     private var breadcrumb: String {
         switch page {
@@ -411,7 +415,7 @@ struct WorkspaceView: View {
                     }
                     if let issue = model.recordingModelIssue {
                         HStack(spacing:10) {
-                            Text(issue).font(.caption).foregroundStyle(.orange)
+                            Text(issue).font(.caption).foregroundStyle(palette.warning)
                             if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.controlSize(.small) }
                             if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.controlSize(.small) }
                         }
@@ -599,7 +603,10 @@ struct WorkspaceView: View {
     }
     private var actions: some View {
         LazyVStack(alignment:.leading,spacing:24) {
-            WorkspaceHeading(eyebrow:"",title:"行动")
+            HStack(alignment:.top) {
+                WorkspaceHeading(eyebrow:"",title:"行动")
+                Button("每周回顾",systemImage:"calendar.badge.clock") { showingWeeklyReview=true }.buttonStyle(.bordered)
+            }
             WorkspaceTabs(selection:$actionFilter,titles:["全部","我的待办","AI 助理","已完成","问题与目标","待核对","历史记录"])
             if !model.visibleOutcomeFollowups.isEmpty {
                 WorkspaceSection(title:"完成后的结果",icon:"checkmark.seal",count:model.visibleOutcomeFollowups.count) {
@@ -624,7 +631,24 @@ struct WorkspaceView: View {
             let visible = visibleActions
             let executions = model.assistantExecutions.filter { $0.state != "cancelled" }
             let paused = model.workspacePausedTasks
-            if actionFilter != "AI 助理",!visible.isEmpty {
+            if actionFilter == "我的待办", !visible.isEmpty {
+                let surface = ActionTimeSurface.build(actions: visible, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
+                if !surface.today.isEmpty {
+                    WorkspaceSection(title:"今天",subtitle:"逾期与今天到期",icon:"sun.max",count:surface.today.count) {
+                        ForEach(surface.today) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != surface.today.last?.id { Divider() } }
+                    }
+                }
+                if !surface.soon.isEmpty {
+                    WorkspaceSection(title:"即将",subtitle:"7 天内",icon:"calendar",count:surface.soon.count) {
+                        ForEach(surface.soon) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != surface.soon.last?.id { Divider() } }
+                    }
+                }
+                if !surface.anytime.isEmpty {
+                    WorkspaceSection(title:"随时",subtitle:"没有日期或更远",icon:"tray",count:surface.anytime.count) {
+                        ForEach(surface.anytime) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != surface.anytime.last?.id { Divider() } }
+                    }
+                }
+            } else if actionFilter != "AI 助理",!visible.isEmpty {
                 WorkspaceSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,icon:"checkmark.circle",count:visible.count) {
                     ForEach(visible) { action in actionRow(action);if action.id != visible.last?.id { Divider() } }
                 }
@@ -672,7 +696,7 @@ struct WorkspaceView: View {
         model.actionRecords.filter { action in
             switch actionFilter {
             case "已完成": return action.state == "completed"
-            case "历史记录": return action.validity != "current" && !model.workspaceTaskRequiresReview(action)
+            case "历史记录": return action.state == "dismissed" || (action.validity != "current" && !model.workspaceTaskRequiresReview(action))
             case "待核对": return model.workspaceTaskRequiresReview(action) || action.validity == "current" && (action.intent?.uncertain == true || action.intent?.followupState == "needs_review")
             case "问题与目标": return action.kind != "task" && action.state != "dismissed" && action.validity == "current"
             default: return action.kind == "task" && action.state == "open" && action.validity == "current" && !model.workspaceTaskRequiresReview(action)
@@ -792,14 +816,31 @@ struct WorkspaceView: View {
         let origin=source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料"
         return WorkspaceRow(title:combined ? expression!.title : source.displayTitle,subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : ""),icon:source.kind.contains("text") ? "doc.text" : "waveform") { go(.source(source.id)) }
     }
-    private func actionRowSubtitle(_ action:ActionRecord) -> String {
-        if let note=model.workspaceExternalCompletionNote(action),!note.isEmpty { return note }
-        if action.intent?.followupState == "withdrawn" || action.validity != "current" || model.workspaceTaskRequiresReview(action) { return model.workspaceActionStatus(action) }
-        if action.state == "completed" { return "已登记完成" }
-        guard let due=model.reminderLinks.first(where: { link in
+    private func actionRowSubtitle(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> String {
+        var detail:String
+        if let entry=timeEntry,entry.source == .localSchedule {
+            if let due=entry.due { detail=(entry.isOverdue ? "已逾期 " : "到期 ") + due.summary } else { detail="" }
+            if entry.needsLocalSyncLabel { detail=detail.isEmpty ? "本地未同步" : detail + " · 本地未同步" }
+        } else if let note=model.workspaceExternalCompletionNote(action),!note.isEmpty { detail=note }
+        else if action.state == "dismissed" { detail="已放下" }
+        else if action.intent?.followupState == "withdrawn" || action.validity != "current" || model.workspaceTaskRequiresReview(action) { detail=model.workspaceActionStatus(action) }
+        else if action.state == "completed" { detail="已登记完成" }
+        else if let due=model.reminderLinks.first(where: { link in
             link.actionID == action.id && link.state == "linked" && link.remoteDueDate.map({ $0 != .none }) == true
-        })?.remoteDueDate else { return "" }
-        return (reminderDueIsPast(due) ? "已逾期 " : "到期 ") + due.summary
+        })?.remoteDueDate { detail=(reminderDueIsPast(due) ? "已逾期 " : "到期 ") + due.summary }
+        else { detail="" }
+        guard let title=actionSourceTitle(action) else { return detail }
+        let shortened=title.count > 12 ? String(title.prefix(12)) + "…" : title
+        return detail.isEmpty ? "来自『\(shortened)』" : "来自『\(shortened)』 · " + detail
+    }
+    private func actionSourceTitle(_ action:ActionRecord) -> String? {
+        guard let claim=model.claims.first(where: { $0.id == action.claimID }) else { return nil }
+        for reference in claim.references {
+            guard let source=model.records.first(where: { $0.id == reference.sourceID }) else { continue }
+            let title=source.displayTitle.trimmingCharacters(in:.whitespacesAndNewlines)
+            if !title.isEmpty { return title }
+        }
+        return nil
     }
     private func reminderDueIsPast(_ due:ReminderDueDate) -> Bool {
         switch due {
@@ -821,7 +862,7 @@ struct WorkspaceView: View {
             return date < Date()
         }
     }
-    private func actionRow(_ action:ActionRecord) -> some View { WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action),icon:action.state == "completed" ? "checkmark.circle" : "circle") { go(.task(action.id)) } }
+    private func actionRow(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> some View { WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action,timeEntry:timeEntry),icon:action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : "circle") { go(.task(action.id)) } }
     private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
     private var navigationEntry: WorkspaceNavigationEntry { .init(page:page,topicID:topicID,topicTab:topicTab,topicReadingMode:topicReadingMode) }
@@ -939,9 +980,9 @@ private struct WorkspaceTopicEntry: View {
         DisclosureGroup("留下认识、实践或结果") {
             VStack(alignment:.leading,spacing:13) {
                 Picker("记录类型",selection:$kind) { ForEach(ReflectionQuestionEntryKind.allCases,id:\.self) { Text($0.label).tag($0) } }.pickerStyle(.menu)
-                TextEditor(text:$text).frame(minHeight:100).padding(8).background(palette.surface,in:RoundedRectangle(cornerRadius:8))
+                TextEditor(text:$text).frame(minHeight:100).padding(8).background(palette.surface,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 Button("保存并接回主题") { saving=true;Task { do { try await model.saveReflectionQuestionEntry(questionID:topic.id,kind:kind,text:text,sourceIDs:sourceIDs,allowCloud:true);text="";error="" } catch { self.error=error.localizedDescription };saving=false } }.disabled(saving || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
-                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.orange) }
+                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger) }
             }.padding(.top,12)
         }
     }

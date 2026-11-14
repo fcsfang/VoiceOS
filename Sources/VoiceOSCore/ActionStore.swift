@@ -4,6 +4,7 @@ import CryptoKit
 public enum ActionKind: String, Codable, Sendable { case task, opportunity, aiSuggestion = "ai_suggestion" }
 public enum ActionIntentActor: String, Sendable { case user, ai }
 public enum LocalActionState: String, Sendable { case open, completed, dismissed }
+public enum ActionClarificationDecision: String, Sendable { case commit, opportunity, not }
 public struct ActionIntentMetadata: Codable, Sendable {
     public let intentType: String
     public let followupState: String
@@ -28,6 +29,9 @@ public struct ActionRecord: Identifiable, Sendable {
     public let version: Int
     public let autoSend: Bool
     public let intent: ActionIntentMetadata?
+    public let commandID: String
+    public let createdAt: String
+    public var isExtracted: Bool { commandID.hasPrefix("extracted:") }
 }
 public struct ActionRevision: Identifiable, Codable, Sendable {
     public let id: String
@@ -63,7 +67,7 @@ extension VoiceOSStore {
         return try db.query("SELECT * FROM actions \(clause) ORDER BY created_at,id").map(Self.actionRecord)
     }
     private static func actionRecord(_ row: [String: String]) throws -> ActionRecord {
-        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1", intent: try row["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self, from: Data($0.utf8)) })
+        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1", intent: try row["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self, from: Data($0.utf8)) }, commandID: row["command_id"]!, createdAt: row["created_at"]!)
     }
     @discardableResult
     public func confirmOpportunityAsTask(actionID: String, expectedVersion: Int, title: String, commandID: String = UUID().uuidString) throws -> String {
@@ -111,6 +115,54 @@ extension VoiceOSStore {
         try checkpoint(.actionStateCommitted)
         return next
     }
+    /// Receipts are authoritative; the revision marker also keeps restored
+    /// packages valid, because the older package format omits the receipt table.
+    static func clarifiedOpportunityActionIDs(_ db: Database) throws -> Set<String> {
+        var ids = Set(try db.query("SELECT action_id FROM action_clarifications WHERE decision='opportunity'").compactMap { $0["action_id"] })
+        ids.formUnion(try db.query("SELECT action_id FROM action_revisions WHERE command_id LIKE 'clarify:%' AND note='澄清为问题与目标'").compactMap { $0["action_id"] })
+        return ids
+    }
+    /// One additive clarification per extracted action. The receipt is the
+    /// idempotency boundary; opportunity and not also append a revision so the
+    /// action version chain stays complete.
+    @discardableResult
+    public func clarifyAction(actionID: String, expectedVersion: Int, decision: ActionClarificationDecision, commandID: String = UUID().uuidString) throws -> Int {
+        if let receipt = try db.query("SELECT action_id,decision FROM action_clarifications WHERE command_id=?", [commandID]).first {
+            guard receipt["action_id"] == actionID, receipt["decision"] == decision.rawValue else { throw VoiceOSError("同一澄清命令不能更换行动或判断") }
+            return try db.query("SELECT version FROM actions WHERE id=?", [actionID]).first?["version"].flatMap(Int.init) ?? expectedVersion
+        }
+        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+              action.isExtracted, action.state == "open", action.validity == "current", action.version == expectedVersion else {
+            throw VoiceOSError("只有抽取得到且仍有效的未完成行动可以澄清")
+        }
+        guard try db.query("SELECT action_id FROM action_clarifications WHERE action_id=?", [actionID]).isEmpty else {
+            throw VoiceOSError("这条行动已经澄清过一次")
+        }
+        let now = ISO8601DateFormatter().string(from: Date())
+        try db.transaction {
+            try db.execute("INSERT INTO action_clarifications(action_id,decision,command_id,created_at) VALUES(?,?,?,?)", [actionID,decision.rawValue,commandID,now])
+            guard decision != .commit else { return }
+            guard decision != .opportunity || action.kind != "opportunity" else { return }
+            let next = expectedVersion + 1
+            let state = decision == .opportunity ? "open" : "dismissed"
+            let note = decision == .opportunity ? "澄清为问题与目标" : "澄清后不再跟进"
+            let revisionCommand = "clarify:" + commandID
+            let hash = try Self.actionHash([actionID,String(expectedVersion),decision.rawValue,note])
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),state,note,revisionCommand,hash,now])
+            if decision == .opportunity {
+                let actor = action.intentActor == "ai" ? "user" : action.intentActor
+                try db.execute("UPDATE reminder_compensation_plans SET validity='frozen' WHERE action_id=? AND validity='current'", [actionID])
+                try db.execute("UPDATE actions SET kind='opportunity',intent_actor=?,version=? WHERE id=?", [actor,String(next),actionID])
+            } else {
+                try db.execute("UPDATE actions SET state='dismissed',version=? WHERE id=?", [String(next),actionID])
+            }
+        }
+        let bumped = decision == .not || (decision == .opportunity && action.kind != "opportunity")
+        return bumped ? expectedVersion + 1 : expectedVersion
+    }
+    public func actionClarifications() throws -> [String: String] {
+        Dictionary(uniqueKeysWithValues: try db.query("SELECT action_id,decision FROM action_clarifications").map { ($0["action_id"]!, $0["decision"]!) })
+    }
     public func actionHistory(actionID: String) throws -> [ActionRevision] {
         guard let initial = try db.query("SELECT * FROM actions WHERE id=?", [actionID]).first else { throw VoiceOSError("行动不存在") }
         return [ActionRevision(id: actionID, version: 1, state: "open", note: initial["note"]!, createdAt: initial["created_at"]!, actor: initial["intent_actor"]!)] + (try db.query("SELECT * FROM action_revisions WHERE action_id=? ORDER BY version", [actionID])).map {
@@ -136,8 +188,12 @@ extension VoiceOSStore {
             guard action["version"] == String(revisions.count+1) else { throw VoiceOSError("迁移行动状态历史不完整") }
             var state = "open"
             for (index, revision) in revisions.enumerated() {
-                guard revision["version"] == String(index+2), revision["from_version"] == String(index+1), let next = revision["state"], next != state,
+                let kindClarification = revision["state"] == state && revision["command_id"]?.hasPrefix("clarify:") == true
+                guard revision["version"] == String(index+2), revision["from_version"] == String(index+1), let next = revision["state"], next != state || kindClarification,
                       next != "completed" || action["kind"] == "task", (revision["note"]?.unicodeScalars.count ?? 2001) <= 2000 else { throw VoiceOSError("迁移行动状态链不一致") }
+                if kindClarification, revision["note"] != "澄清为问题与目标" {
+                    throw VoiceOSError("行动版本升级缺少澄清依据")
+                }
                 state = next
             }
             guard state == action["state"] else { throw VoiceOSError("迁移行动当前状态与历史不一致") }

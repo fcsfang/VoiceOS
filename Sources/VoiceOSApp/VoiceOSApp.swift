@@ -30,7 +30,7 @@ final class ControlCenter: ObservableObject {
                 try FileManager.default.copyItem(at: file, to: backup)
                 textCaptureDraftIssue = "旧草稿读取失败，原文件已另存保留；可以继续记录。"
             } catch {
-                textCaptureDraftIssue = "旧草稿无法读取或另存，暂未覆盖；这次请使用仅本地保存。"
+                textCaptureDraftIssue = "旧草稿无法读取或另存，暂未覆盖；可以继续记录。"
                 return
             }
         }
@@ -50,7 +50,7 @@ final class ControlCenter: ObservableObject {
         draftSaveWorker?.cancel(); draftSaveWorker = nil
         guard draftNeedsSave, let file = textCaptureDraftFile else { return }
         do { try textCaptureDraft.save(to: file); draftNeedsSave = false; textCaptureDraftIssue = "" }
-        catch { textCaptureDraftIssue = "草稿暂未自动保存：" + error.localizedDescription + "；请先使用仅本地保存。" }
+        catch { textCaptureDraftIssue = "草稿暂未自动保存：" + error.localizedDescription + "；请先保存当前草稿。" }
     }
     @Published var records: [SourceRecord] = []
     @Published var recordingTitleStatus = ""
@@ -595,6 +595,7 @@ final class ControlCenter: ObservableObject {
     @Published var claimHistory: [ClaimReviewVersion] = []
     @Published var reviewingClaim = false
     @Published var actionRecords: [ActionRecord] = []
+    @Published var actionClarifications: [String: String] = [:]
     @Published var homeSnapshot = RecentContentHomeSnapshot(days: [], digests: [:])
     @Published var actionReviewLedgers: [String: ActionReviewLedger] = [:]
     @Published var focusedTaskID: String?
@@ -867,6 +868,7 @@ final class ControlCenter: ObservableObject {
             claimOrigins = snapshot.claimOrigins
             outcomeOrigins = snapshot.outcomeOrigins
             actionRecords = snapshot.actions
+            actionClarifications = snapshot.actionClarifications
             publishHomeSnapshot()
             actionReviewLedgers = snapshot.actionReviewLedgers
             assistantExecutions = snapshot.assistantExecutions
@@ -1885,19 +1887,20 @@ final class ControlCenter: ObservableObject {
     var canUnderstandCapturedText: Bool { modelConfigured && understandingWorker == nil && !discussionExtracting }
     func saveCapturedText(_ text: String, title: String, ownership: TextCaptureOwnership, allowCloud: Bool, commandID: String) async -> String? {
         guard let store else { return nil }
-        guard !allowCloud || canUnderstandCapturedText else {
-            status = "其他内容正在整理或模型尚未就绪，草稿已保留；可先仅本地保存。"; return nil
-        }
+        let process = allowCloud && canUnderstandCapturedText
         do {
             let id = try await store.recordCapturedText(text, title: title, ownership: ownership, commandID: commandID)
             let policy = try await store.sourcePolicy(sourceID: id)
-            if policy.localOnly != !allowCloud {
-                _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: !allowCloud)
+            if policy.localOnly != !process {
+                _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: !process)
             }
             await refresh()
-            guard allowCloud else { status = "完整原文已保存 · 仅本机"; return id }
+            guard process else {
+                status = allowCloud ? "完整原文已保存 · 仅本机；模型暂不可用" : "完整原文已保存 · 仅本机"
+                return id
+            }
             guard canUnderstandCapturedText, let record = records.first(where: { $0.id == id }) else {
-                status = "完整原文已保存；其他内容正在整理，草稿保留，可稍后重试理解。"; return nil
+                status = "完整原文已保存；模型暂不可用，可稍后从资料页整理。"; return id
             }
             if ownership == .personal, text.unicodeScalars.count > 4000 { understandSegmented(record) }
             else { understand(record) }
@@ -2595,6 +2598,18 @@ final class ControlCenter: ObservableObject {
             }
         } catch { status = error.localizedDescription }
         await refresh(); await queueActionFollowups([action.id])
+    }
+    func clarifyAction(_ action: ActionRecord, decision: ActionClarificationDecision) async -> Bool {
+        guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            _ = try await store.clarifyAction(actionID: action.id, expectedVersion: action.version, decision: decision,
+                                              commandID: "workspace-clarify:" + action.id + ":" + decision.rawValue)
+            await refresh()
+            guard actionClarifications[action.id] == decision.rawValue else { throw VoiceOSError("澄清未能保存，请重试") }
+            status = decision == .commit ? "已记为承诺" : decision == .opportunity ? "已放到问题与目标" : "已放下这条行动"
+            return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
     }
     func resolveActionReview(_ pair: ActionReviewPair, judgment: ActionReviewRelation) async -> Bool {
         guard let store else { status = "资料库尚未打开，无法核对行动关系"; return false }

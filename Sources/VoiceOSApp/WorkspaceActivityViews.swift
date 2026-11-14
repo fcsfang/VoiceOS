@@ -101,6 +101,47 @@ struct TaskFeedbackDraft {
     var expanded = false
 }
 
+private struct ActionOriginalQuotes: View {
+    @ObservedObject var model: ControlCenter
+    let action: ActionRecord
+    let openSource: (String) -> Void
+    private var references: [ClaimReference] {
+        model.claims.first { $0.id == action.claimID }?.references ?? []
+    }
+    var body: some View {
+        ForEach(Array(references.enumerated()), id: \.offset) { _, reference in
+            if let source = model.records.first(where: { $0.id == reference.sourceID }),
+               source.transcriptVersionID == reference.transcriptVersionID,
+               let span = source.spans.first(where: { $0.id == reference.spanID }),
+               let transcript = source.transcript {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(source.displayTitle).vosFont(12, weight: .medium).foregroundStyle(.secondary)
+                    Text(quote(span, text: transcript)).vosFont(15).lineSpacing(4).textSelection(.enabled)
+                    HStack(spacing: 14) {
+                        Button("打开材料") { openSource(source.id) }
+                        if let start = span.startMS, let end = span.endMS {
+                            Button("回听这段原话", systemImage: "play.circle") { Task { _ = await model.playSpan(source, milliseconds: start, endMilliseconds: end) } }
+                        }
+                    }.font(.caption)
+                }
+            } else if let source = model.records.first(where: { $0.id == reference.sourceID }) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(source.displayTitle).vosFont(12, weight: .medium).foregroundStyle(.secondary)
+                    Text("原话版本已变化，打开材料查看当前原文。").font(.caption).foregroundStyle(.secondary)
+                    Button("打开材料") { openSource(source.id) }.font(.caption)
+                }
+            } else {
+                Text("来源已不可用。").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+    private func quote(_ span: TranscriptSpan, text: String) -> String {
+        let scalars = Array(text.unicodeScalars)
+        guard span.textStart >= 0, span.textEnd <= scalars.count, span.textStart < span.textEnd else { return "原文范围已变化" }
+        return String(String.UnicodeScalarView(scalars[span.textStart..<span.textEnd]))
+    }
+}
+
 struct WorkspaceTaskView: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
@@ -117,6 +158,8 @@ struct WorkspaceTaskView: View {
     @State private var error = ""
     @State private var saving = false
     @State private var confirming = false
+    @State private var askingForResult = false
+    @State private var confirmingDismiss = false
     @State private var settings: ReminderSnapshot?
     @State private var showingSettings = false
     @State private var scheduleAction: ActionRecord?
@@ -131,11 +174,28 @@ struct WorkspaceTaskView: View {
     }
     private var executions: [AssistantExecutionRecord] { model.assistantExecutions.filter { $0.actionID == action.id } }
     private var current: Bool { action.validity == "current" && action.state != "dismissed" }
+    private var showsClarification: Bool {
+        guard action.isExtracted, action.state == "open", action.validity == "current",
+              model.actionClarifications[action.id] == nil,
+              let created = ConversationReflectionFocus.date(action.createdAt),
+              created >= Date().addingTimeInterval(-14 * 24 * 60 * 60) else { return false }
+        return true
+    }
     private var reviewPairs: [ActionReviewPair] { model.actionReviewPairs(for: action) }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 WorkspaceHeading(eyebrow: current ? (action.state == "completed" ? "行动 · 已完成" : action.kind == "task" ? "行动 · 待跟进" : "问题与目标") : model.workspaceActionStatus(action), title: action.title)
+                if showsClarification {
+                    VStack(alignment:.leading,spacing:12) {
+                        Text("这条行动来自你的原话。要把它当作承诺吗？").font(.callout)
+                        HStack(spacing:10) {
+                            Button("这是我的承诺") { clarify(.commit) }.buttonStyle(.borderedProminent)
+                            Button("放到问题与目标") { clarify(.opportunity) }
+                            Button("不是") { clarify(.not) }
+                        }.disabled(model.savingAction)
+                    }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
+                }
                 if !reviewPairs.isEmpty {
                     VStack(alignment:.leading,spacing:12) {
                         ForEach(reviewPairs) { pair in ActionReviewResolutionControl(model:model,pair:pair) }
@@ -184,6 +244,10 @@ struct WorkspaceTaskView: View {
                     if current, action.kind == "task" {
                         Button(action.state == "completed" ? "重新跟进" : "标记已完成") { changeState() }
                             .buttonStyle(.borderedProminent).disabled(model.savingAction || model.remindersBusy)
+                        if action.state == "open" {
+                            Button("改天") { openReminderSettings() }.disabled(model.savingAction || model.remindersBusy)
+                            Button("不再跟进", role: .destructive) { confirmingDismiss = true }.disabled(model.savingAction)
+                        }
                     } else if current, action.intentActor == "user" { Button("核对为待办") { confirming = true } }
                     if current {
                         Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
@@ -196,6 +260,11 @@ struct WorkspaceTaskView: View {
                             }
                         }
                     }
+                }.alert("不再跟进这项任务？", isPresented: $confirmingDismiss) {
+                    Button("不再跟进", role: .destructive) { stopFollowing() }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("会移入历史记录，之后仍可找回。Apple 提醒事项中的提醒需单独处理。")
                 }
                 if !action.note.isEmpty {
                     WorkspaceSection(title:"任务说明",icon:"text.alignleft") {
@@ -265,12 +334,12 @@ struct WorkspaceTaskView: View {
                     }
                     DisclosureGroup("原话依据与安排") {
                         VStack(alignment: .leading, spacing: 14) {
-                            ForEach(sources) { source in WorkspaceRow(title: source.displayTitle, subtitle: "查看完整原话与出处", icon: "quote.bubble") { openSource(source.id) } }
+                            ActionOriginalQuotes(model: model, action: action, openSource: openSource)
                             if current {
                                 Button("回听任务原话") { Task { _ = await model.playActionOriginal(action) } }
                                 if let player = model.player { NativePlayerView(player: player).frame(height: 65) }
                                 if action.kind == "task", action.state == "open" {
-                                    Button("日期、提醒与优先级") { Task { if let snapshot = await model.loadReminderSettings(action) { settings = snapshot; showingSettings = true } else { error = model.status } } }.disabled(model.remindersBusy)
+                                    Button("日期、提醒与优先级") { openReminderSettings() }.disabled(model.remindersBusy)
                                 }
                             }
                             scheduleSection
@@ -294,6 +363,10 @@ struct WorkspaceTaskView: View {
         .sheet(isPresented: $showingSettings) { if let settings { ReminderSettingsView(action: action, snapshot: settings, model: model) { showingSettings = false } } }
         .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
         .sheet(isPresented: $showingFeedback, onDismiss: { Task { await loadFeedback() } }) { ActionFeedbackView(action: action, model: model) { showingFeedback = false } }
+        .alert("已完成。要记一句结果吗？", isPresented: $askingForResult) {
+            Button("记录结果") { showingFeedback = true }
+            Button("完成", role: .cancel) {}
+        } message: { Text("结果会接回这条任务，不会自动生成记录。") }
         .onDisappear { model.stopPlayback() }
         .onAppear { replacementTitle = action.title }
     }
@@ -345,6 +418,9 @@ struct WorkspaceTaskView: View {
             }
         }
     }
+    private func clarify(_ decision: ActionClarificationDecision) {
+        Task { if await model.clarifyAction(action, decision: decision) { error = "" } else { error = model.status } }
+    }
     private func saveReplacement(_ claim: CandidateClaim) {
         guard let store=model.store else { return }
         saving=true
@@ -367,7 +443,22 @@ struct WorkspaceTaskView: View {
         let state:LocalActionState=action.state == "completed" ? .open : .completed
         Task {
             await model.changeAction(action,state:state)
-            error=model.actionRecords.first { $0.id == action.id }?.state == state.rawValue ? "" : model.status
+            guard model.actionRecords.first(where: { $0.id == action.id })?.state == state.rawValue else { error=model.status; return }
+            error=""
+            if state == .completed {
+                await loadFeedback()
+                if feedbackHistory.isEmpty { askingForResult = true }
+            }
+        }
+    }
+    private func openReminderSettings() {
+        Task { if let snapshot = await model.loadReminderSettings(action) { settings = snapshot; showingSettings = true } else { error = model.status } }
+    }
+    private func stopFollowing() {
+        Task {
+            await model.changeAction(action, state: .dismissed)
+            if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.dismissed.rawValue { error = "" }
+            else { error = model.status }
         }
     }
     private func saveFeedback() {
