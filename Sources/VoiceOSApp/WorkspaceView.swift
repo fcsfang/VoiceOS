@@ -672,7 +672,7 @@ struct WorkspaceView: View {
         model.actionRecords.filter { action in
             switch actionFilter {
             case "已完成": return action.state == "completed"
-            case "历史记录": return action.validity != "current" && !model.workspaceTaskRequiresReview(action)
+            case "历史记录": return action.state == "dismissed" || (action.validity != "current" && !model.workspaceTaskRequiresReview(action))
             case "待核对": return model.workspaceTaskRequiresReview(action) || action.validity == "current" && (action.intent?.uncertain == true || action.intent?.followupState == "needs_review")
             case "问题与目标": return action.kind != "task" && action.state != "dismissed" && action.validity == "current"
             default: return action.kind == "task" && action.state == "open" && action.validity == "current" && !model.workspaceTaskRequiresReview(action)
@@ -795,6 +795,7 @@ struct WorkspaceView: View {
     private func actionRowSubtitle(_ action:ActionRecord) -> String {
         let detail:String
         if let note=model.workspaceExternalCompletionNote(action),!note.isEmpty { detail=note }
+        else if action.state == "dismissed" { detail="已放下" }
         else if action.intent?.followupState == "withdrawn" || action.validity != "current" || model.workspaceTaskRequiresReview(action) { detail=model.workspaceActionStatus(action) }
         else if action.state == "completed" { detail="已登记完成" }
         else if let due=model.reminderLinks.first(where: { link in
@@ -834,7 +835,7 @@ struct WorkspaceView: View {
             return date < Date()
         }
     }
-    private func actionRow(_ action:ActionRecord) -> some View { WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action),icon:action.state == "completed" ? "checkmark.circle" : "circle") { go(.task(action.id)) } }
+    private func actionRow(_ action:ActionRecord) -> some View { WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action),icon:action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : "circle") { go(.task(action.id)) } }
     private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
     private var navigationEntry: WorkspaceNavigationEntry { .init(page:page,topicID:topicID,topicTab:topicTab,topicReadingMode:topicReadingMode) }

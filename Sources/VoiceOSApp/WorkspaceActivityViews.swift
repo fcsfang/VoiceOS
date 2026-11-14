@@ -159,6 +159,7 @@ struct WorkspaceTaskView: View {
     @State private var saving = false
     @State private var confirming = false
     @State private var askingForResult = false
+    @State private var confirmingDismiss = false
     @State private var settings: ReminderSnapshot?
     @State private var showingSettings = false
     @State private var scheduleAction: ActionRecord?
@@ -226,6 +227,10 @@ struct WorkspaceTaskView: View {
                     if current, action.kind == "task" {
                         Button(action.state == "completed" ? "重新跟进" : "标记已完成") { changeState() }
                             .buttonStyle(.borderedProminent).disabled(model.savingAction || model.remindersBusy)
+                        if action.state == "open" {
+                            Button("改天") { openReminderSettings() }.disabled(model.savingAction || model.remindersBusy)
+                            Button("不再跟进", role: .destructive) { confirmingDismiss = true }.disabled(model.savingAction)
+                        }
                     } else if current, action.intentActor == "user" { Button("核对为待办") { confirming = true } }
                     if current {
                         Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
@@ -238,6 +243,11 @@ struct WorkspaceTaskView: View {
                             }
                         }
                     }
+                }.alert("不再跟进这项任务？", isPresented: $confirmingDismiss) {
+                    Button("不再跟进", role: .destructive) { stopFollowing() }
+                    Button("取消", role: .cancel) {}
+                } message: {
+                    Text("会移入历史记录，之后仍可找回。Apple 提醒事项中的提醒需单独处理。")
                 }
                 if !action.note.isEmpty {
                     WorkspaceSection(title:"任务说明",icon:"text.alignleft") {
@@ -312,7 +322,7 @@ struct WorkspaceTaskView: View {
                                 Button("回听任务原话") { Task { _ = await model.playActionOriginal(action) } }
                                 if let player = model.player { NativePlayerView(player: player).frame(height: 65) }
                                 if action.kind == "task", action.state == "open" {
-                                    Button("日期、提醒与优先级") { Task { if let snapshot = await model.loadReminderSettings(action) { settings = snapshot; showingSettings = true } else { error = model.status } } }.disabled(model.remindersBusy)
+                                    Button("日期、提醒与优先级") { openReminderSettings() }.disabled(model.remindersBusy)
                                 }
                             }
                             scheduleSection
@@ -419,6 +429,16 @@ struct WorkspaceTaskView: View {
                 await loadFeedback()
                 if feedbackHistory.isEmpty { askingForResult = true }
             }
+        }
+    }
+    private func openReminderSettings() {
+        Task { if let snapshot = await model.loadReminderSettings(action) { settings = snapshot; showingSettings = true } else { error = model.status } }
+    }
+    private func stopFollowing() {
+        Task {
+            await model.changeAction(action, state: .dismissed)
+            if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.dismissed.rawValue { error = "" }
+            else { error = model.status }
         }
     }
     private func saveFeedback() {
