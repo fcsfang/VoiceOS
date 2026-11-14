@@ -148,13 +148,19 @@ struct RecentContentHome: View {
             Text(readerMeta(item)).font(.system(size: 12)).foregroundStyle(.secondary)
             Text(item.title).font(.system(size: 27, weight: .semibold, design: .serif)).lineSpacing(4)
                 .padding(.top, 16).textSelection(.enabled)
-            ForEach(Array(digest.threads.enumerated()), id: \.element.id) { index, thread in
-                threadSection(thread, number: index + 1)
+            if !item.summary.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("AI 概览").font(.system(size: 10)).tracking(1.4).foregroundStyle(palette.accent)
+                    Text(item.summary).font(.system(size: 14.5)).lineSpacing(5)
+                        .foregroundStyle(.secondary).textSelection(.enabled)
+                }.padding(.top, 22)
+            }
+            ForEach(digest.threads) { thread in
+                threadSection(thread)
                     .padding(.top, 44)
                     .id("home.thread.\(thread.id)")
             }
             nextSection(digest.tasks)
-            overview(item)
             if let first = item.sourceIDs.first {
                 Button("打开材料") { openSource(first) }.buttonStyle(.plain)
                     .font(.system(size: 13)).foregroundStyle(palette.accent).padding(.top, 40)
@@ -169,26 +175,25 @@ struct RecentContentHome: View {
         return parts.joined(separator: " · ")
     }
 
-    private func threadSection(_ thread: RecentContentThread, number: Int) -> some View {
+    private func threadSection(_ thread: RecentContentThread) -> some View {
         let notes = thread.thoughts.filter { $0.kind != .goal }
         return VStack(alignment: .leading, spacing: 0) {
             Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 18)
             HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text(String(format: "%02d", number)).font(.system(size: 13, design: .serif)).tracking(1.2)
-                    .foregroundStyle(palette.accent).frame(width: 28, alignment: .leading)
                 Text(thread.title).font(.system(size: 15.5, weight: .semibold))
                 Spacer(minLength: 8)
             }
             if !notes.isEmpty {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(notes) { thought in
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(notes.enumerated()), id: \.element.id) { index, thought in
                         HStack(alignment: .top, spacing: 10) {
-                            Text(kindLabel(thought.kind)).font(.system(size: 10)).tracking(0.8)
-                                .foregroundStyle(.secondary).frame(width: 30, alignment: .leading).padding(.top, 2)
+                            Text("\(index + 1)").font(.system(size: 10.5).monospacedDigit())
+                                .foregroundStyle(.tertiary).frame(width: 18, alignment: .trailing)
+                                .padding(.top, 3)
                             Text(thought.statement).font(.system(size: 14.5)).lineSpacing(5).textSelection(.enabled)
                         }
                     }
-                }.padding(.top, 16).padding(.leading, 42)
+                }.padding(.top, 18).padding(.leading, 42)
             }
             if !thread.goals.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
@@ -229,25 +234,6 @@ struct RecentContentHome: View {
                     }.buttonStyle(.plain).font(.system(size: 12.5)).foregroundStyle(palette.accent).padding(.top, 14)
                 }
             }.padding(.top, 54)
-        }
-    }
-
-    @ViewBuilder private func overview(_ item: RecentContentItem) -> some View {
-        if !item.summary.isEmpty {
-            DisclosureGroup {
-                Text(item.summary).font(.system(size: 13.5)).lineSpacing(5).foregroundStyle(.secondary)
-                    .textSelection(.enabled).frame(maxWidth: 640, alignment: .leading).padding(.top, 10)
-            } label: {
-                Text("概览").font(.system(size: 12)).foregroundStyle(.secondary)
-            }.padding(.top, 44)
-        }
-    }
-
-    private func kindLabel(_ kind: RecentThoughtKind) -> String {
-        switch kind {
-        case .insight: "观点"
-        case .goal: "目标"
-        case .note: "想法"
         }
     }
 
