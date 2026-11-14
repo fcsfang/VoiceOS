@@ -45,7 +45,7 @@ owner: coordinator
 ## 已知边界
 
 - 今日一览只读，不提供完成操作。
-- WidgetKit 小组件未实现，待评估签名与容器约束。
+- WidgetKit 小组件不实现：小组件必须是沙盒 .appex，并靠 App Group 受限 entitlement 与应用共享数据；本机只有 Apple Development 签名、没有 provisioning profile，按现有签名链评估为高成本高风险（评估，非实测）。菜单栏今日一览承接「扫一眼今天的任务」的价值。
 - 两个只读审查的修复留到下一批。
 
 ## 链接
