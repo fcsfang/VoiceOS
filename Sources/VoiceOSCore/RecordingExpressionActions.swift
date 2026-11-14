@@ -159,6 +159,7 @@ extension VoiceOSStore {
     // link to another real extraction and the two independent model receipts.
     static func validatedExpressionHistory(_ database:Database,action:[String:String]) throws -> [ExpressionActionAdoption] {
         guard let raw=action["intent_json"],let history=try JSONDecoder().decode(ActionIntentMetadata.self,from:Data(raw.utf8)).expressionHistory,!history.isEmpty else { return [] }
+        let clarified = try Self.clarifiedOpportunityActionIDs(database).contains(action["id"] ?? "")
         var prior:String?,seen=Set<String>()
         for (index,step) in history.enumerated() {
             guard prior == nil || prior == step.fromClaimID,seen.insert(step.fromClaimID).inserted,
@@ -170,7 +171,8 @@ extension VoiceOSStore {
                   replacement["claim_id"] == step.toClaimID,replacement["command_id"] == "extracted:"+to["attempt_id"]!+":"+to["ordinal"]! else { throw VoiceOSError("连续表达的任务接续链缺少真实提取依据") }
             let next=try JSONDecoder().decode(ExtractedAction.self,from:Data(json.utf8))
             if index == 0,action["command_id"]?.hasPrefix("extracted:") != true {
-                let fingerprint=try actionHash([step.fromClaimID,String(step.fromReviewVersion),step.fromTitle,step.fromKind,action["intent_actor"] ?? "",step.fromNote])
+                let actor = clarified && step.fromKind == ActionKind.aiSuggestion.rawValue ? "ai" : (action["intent_actor"] ?? "")
+                let fingerprint=try actionHash([step.fromClaimID,String(step.fromReviewVersion),step.fromTitle,step.fromKind,actor,step.fromNote])
                 guard action["input_fingerprint"] == fingerprint,!step.fromAutoSend else { throw VoiceOSError("连续表达的原用户任务身份不一致") }
             } else {
                 guard let raw=from["action_json"] else { throw VoiceOSError("连续表达的任务提取缺失") }
@@ -183,7 +185,7 @@ extension VoiceOSStore {
         guard let last=history.last,action["claim_id"] == last.toClaimID,
               let json=try database.query("SELECT action_json FROM claims WHERE id=?",[last.toClaimID]).first?["action_json"] else { throw VoiceOSError("连续表达任务的当前依据缺失") }
         let current=try JSONDecoder().decode(ExtractedAction.self,from:Data(json.utf8))
-        guard action["title"] == current.title,action["note"] == current.quote,action["kind"] == current.kind.rawValue else { throw VoiceOSError("连续表达任务与最新理解不一致") }
+        guard action["title"] == current.title,action["note"] == current.quote,clarified || action["kind"] == current.kind.rawValue else { throw VoiceOSError("连续表达任务与最新理解不一致") }
         return history
     }
     func dismissExpressionAction(_ action:RecordingExpressionActionItem,note:String) throws {

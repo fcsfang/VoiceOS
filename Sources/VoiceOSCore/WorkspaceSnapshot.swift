@@ -12,6 +12,7 @@ public struct WorkspaceSnapshot: Sendable {
     public var claimOrigins: [DiscussionClaimDerivation] = []
     public var outcomeOrigins: [ConversationOutcomeOrigin] = []
     public var actions: [ActionRecord] = []
+    public var actionClarifications: [String: String] = [:]
     public var assistantExecutions: [AssistantExecutionRecord] = []
     public var assistantAssessmentIssues: [AssistantAssessmentIssue] = []
     public var taskInitiations: [TaskInitiationRecord] = []
@@ -89,6 +90,7 @@ extension VoiceOSStore {
             }
         }
         result.actions = try actions(includeHistory: true)
+        result.actionClarifications = try actionClarifications()
         if result.actions.contains(where: { $0.kind == "task" && $0.state == "completed" }) {
             result.outcomeFollowups = try pendingOutcomeFollowups()
         }

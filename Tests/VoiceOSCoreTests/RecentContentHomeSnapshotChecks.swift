@@ -25,7 +25,7 @@ final class RecentContentHomeSnapshotChecks: XCTestCase {
                         validity: String = "current", kind: String = "task") -> ActionRecord {
         ActionRecord(id: id, claimID: claimID, claimReviewVersion: 1, title: title, kind: kind,
                      intentActor: "user", note: "", state: state, validity: validity, version: 1,
-                     autoSend: true, intent: nil)
+                     autoSend: true, intent: nil, commandID: "test:" + id, createdAt: "2026-01-01T00:00:00Z")
     }
 
     func testSnapshotMatchesDirectIndexAndDigestBuild() {

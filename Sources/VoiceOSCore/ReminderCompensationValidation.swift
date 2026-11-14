@@ -2,13 +2,14 @@ import Foundation
 
 extension VoiceOSStore {
     static func validateReminderCompensations(_ db: Database) throws {
+        let clarifiedOpportunities = try clarifiedOpportunityActionIDs(db)
         for row in try db.query("SELECT * FROM reminder_compensation_plans") {
             let before = try scheduleBefore(row), desired = try compensationDesired(row)
             let roots = try compensationIDs(row["roots_json"]!), operationIDs = try compensationIDs(row["operations_json"]!)
             guard roots == roots.sorted(),
                   let action = try db.query("SELECT * FROM actions WHERE id=?", [row["action_id"]]).first,
                   let link = try db.query("SELECT * FROM reminder_links WHERE id=?", [row["link_id"]]).first,
-                  link["action_id"] == action["id"], action["kind"] == "task",
+                  link["action_id"] == action["id"], (action["kind"] == "task" || clarifiedOpportunities.contains(action["id"]!)),
                   let actionVersion = row["action_version"].flatMap(Int.init), actionVersion <= Int(action["version"]!)!,
                   let scheduleVersion = row["schedule_version"].flatMap(Int.init),
                   let access = row["access_version"].flatMap(Int.init), access > 0,

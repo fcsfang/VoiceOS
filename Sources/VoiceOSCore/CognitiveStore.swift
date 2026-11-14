@@ -363,6 +363,7 @@ extension VoiceOSStore {
         }
         try validateStoredUserExpressions(db)
         try validateStoredActionFeedback(db)
+        let clarifiedOpportunities = try Self.clarifiedOpportunityActionIDs(db)
         for claim in try db.query("SELECT * FROM claims WHERE action_json IS NOT NULL") {
             let proposal = try JSONDecoder().decode(ExtractedAction.self, from: Data(claim["action_json"]!.utf8))
             let command = "extracted:" + claim["attempt_id"]! + ":" + claim["ordinal"]!
@@ -370,10 +371,13 @@ extension VoiceOSStore {
             guard rows.count == 1,let action=rows.first else { throw VoiceOSError("行动提取缺少原始身份") }
             let history=try validatedExpressionHistory(db,action:action)
             let origin=history.first
+            let clarified = clarifiedOpportunities.contains(action["id"]!)
+            let effectiveKind = clarified ? proposal.kind.rawValue : action["kind"]
+            let effectiveActor = clarified ? (proposal.kind == .aiSuggestion ? "ai" : "user") : action["intent_actor"]
             guard (origin?.fromClaimID ?? action["claim_id"]) == claim["id"],
-                  (origin?.fromTitle ?? action["title"]) == proposal.title,(origin?.fromKind ?? action["kind"]) == proposal.kind.rawValue,
+                  (origin?.fromTitle ?? action["title"]) == proposal.title,(origin?.fromKind ?? effectiveKind) == proposal.kind.rawValue,
                   (origin?.fromNote ?? action["note"]) == proposal.quote,
-                  action["intent_actor"] == (proposal.kind == .aiSuggestion ? "ai" : "user"),
+                  effectiveActor == (proposal.kind == .aiSuggestion ? "ai" : "user"),
                   (origin?.fromAutoSend ?? (action["auto_send"] == "1")) == proposal.autoSend else { throw VoiceOSError("行动提取结果与原始调用不一致") }
             let pinned = origin?.fromReviewVersion ?? (Int(action["claim_review_version"] ?? "") ?? -1)
             let reviews = try db.query("SELECT reason FROM claim_reviews WHERE claim_id=? AND version<=CAST(? AS INTEGER)", [claim["id"],String(pinned)])
