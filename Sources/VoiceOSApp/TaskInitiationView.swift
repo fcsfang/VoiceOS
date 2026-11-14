@@ -261,13 +261,15 @@ struct TaskInitiationView: View {
                             }
                             Spacer(minLength: 8)
                             if record.id == selected?.id {
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.accent)
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.accent).accessibilityHidden(true)
                             }
                         }
                         .padding(.vertical, 12).padding(.horizontal, 10)
                         .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        .accessibilityElement(children: .combine)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityValue(record.id == selected?.id ? "当前选中" : "未选中")
                     .accessibilityIdentifier("initiation.history.item")
                     .workspaceHoverHighlight()
                     if record.id != records.last?.id { Divider() }
