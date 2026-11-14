@@ -5,6 +5,7 @@ public enum MaterialDisposition: Equatable, Sendable { case active, archived, tr
 public extension SourceRecord {
     var isArchived: Bool { state != "trashed" && presentation?.archived == true }
     var isTrashed: Bool { state == "trashed" }
+    var disposition: MaterialDisposition { isTrashed ? .trashed : isArchived ? .archived : .active }
 }
 
 extension VoiceOSStore {
