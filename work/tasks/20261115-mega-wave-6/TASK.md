@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-6
@@ -66,5 +66,7 @@ owner: coordinator
 实机：机器锁屏，提醒事项内完成重复任务的实机勾选、列表提示与设置快捷键小节目视不可得；联动逻辑由存储测试与代码审查覆盖。
 
 ## 链接
+
+- 2026-11-15 已合并为 `d57b415`（PR #165）。
 
 - `docs/product/reference-products.md` 第 9.2、9.4、9.5 节
