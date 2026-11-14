@@ -121,15 +121,20 @@ struct DiscussionView: View {
                     }.frame(maxWidth:.infinity,alignment:.leading).padding(.vertical,6)
                 }.frame(minHeight:180)
                 if model.discussionWritable {
-                    if model.discussionReflection != nil {
-                        HStack {
-                            Text("接着想").font(.caption).foregroundStyle(.secondary)
-                            ForEach(ReflectionReviewFollowup.allCases, id: \.self) { followup in
-                                Button(followup.label) {
-                                    text += (text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n") + followup.prompt
-                                }.help("将追问加入可编辑草稿，保存后再发送")
+                    if !followupSuggestions.isEmpty {
+                        VStack(alignment:.leading,spacing:6) {
+                            Text("可以接着问").font(.caption).foregroundStyle(.secondary)
+                            HStack(alignment:.top,spacing:12) {
+                                ForEach(followupSuggestions) { suggestion in
+                                    VStack(alignment:.leading,spacing:4) {
+                                        Button(suggestion.title) {
+                                            text += (text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : "\n\n") + suggestion.prompt
+                                        }.help("将追问加入可编辑草稿，保存后再发送")
+                                        Text("出处：" + suggestion.sourceTitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                }
+                                Spacer()
                             }
-                            Spacer()
                         }.disabled(model.discussionSaving || model.discussionSending || model.dictationActive)
                     }
                     HStack {
@@ -191,6 +196,12 @@ struct DiscussionView: View {
                 HStack { Spacer();Button("完成") { referencePreview=nil } }
             }.padding(24).frame(width:640,height:420)
         }
+    }
+    private var followupSuggestions: [FollowupSuggestion] {
+        let sourceIDs = Set(model.discussionHistory.map(\.sourceID)).union(model.discussionTurns.map(\.sourceID))
+        let claims = model.claims.filter { claim in claim.references.contains { sourceIDs.contains($0.sourceID) } }
+        let sources = model.records.filter { sourceIDs.contains($0.id) }
+        return FollowupSuggestions.suggest(claims: claims, sources: sources)
     }
     private func outcomeTitle(_ state:String)->String {
         switch state {
