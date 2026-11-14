@@ -3056,7 +3056,7 @@ struct VoiceOSApp: App {
     @StateObject private var model = ControlCenter()
     @FocusedValue(\.voiceOSController) private var focusedModel
     var body: some Scene {
-        Window("VoiceOS", id: "control-center") { WorkspaceView(model: model) }
+        Window("VoiceOS", id: "control-center") { WorkspaceView(model: model).onboarding(model: model) }
         WindowGroup("独立资料库", id: "restored-library", for: String.self) { path in
             if let path = path.wrappedValue { RestoredLibraryView(path: path) }
         }
