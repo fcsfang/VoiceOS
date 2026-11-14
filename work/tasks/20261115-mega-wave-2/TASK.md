@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: merge-ready
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-2
@@ -21,7 +21,7 @@ CREATE VIRTUAL TABLE search_index USING fts5(kind UNINDEXED, ref_id UNINDEXED, t
 CREATE TABLE search_index_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ```
 
-迁移 58 到 59 先尝试 trigram，失败回退 unicode61。`SearchHit` 含 kind（material/claim/action）、refID、title、snippet。`search(query:limit:)` 用 MATCH，查询词转义后加引号；空查询返回空。`rebuildSearchIndexIfNeeded()` 用三类数据的行数与最大时间做指纹，写入 meta；`rebuildSearchIndex()` 清空重建材料标题与转写、观点陈述、行动标题与备注。五处 schema 断言从 58 改为 59。
+迁移 58 到 59 先尝试 trigram，失败回退 unicode61；另建四个 UPDATE 触发器（sources、claims、actions、transcripts）写 `dirty` 标记，重建时清除。材料索引排除回收站。`SearchHit` 含 kind（material/claim/action）、refID、title、snippet。`search(query:limit:)` 用 MATCH，查询词转义后加引号；空查询返回空。`rebuildSearchIndexIfNeeded()` 用三类数据的行数与最大时间做指纹，写入 meta；`rebuildSearchIndex()` 清空重建材料标题与转写、观点陈述、行动标题与备注。五处 schema 断言从 58 改为 59。
 
 ## 单元
 
@@ -67,6 +67,17 @@ CREATE TABLE search_index_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 - 章节依赖文件内嵌章节，不解析外部描述。
 - 模板只作用于文字草稿。
 
+## 结果
+
+2026-11-15 五个单元集成到 `work/mega-2`：E0 `2800a6a`，E1 `93256fa`，E2 `0459190`、`42f8584`、`0eb3d5c`，E3 `48223fc`，E4 `e742ec8`。集成修复 `83e38dd`、`95ee8c4`。
+
+`swift build -j 2` 一次通过；`swift test -j 2` 224 项 0 失败（新增 SearchIndex 9 项、ActionUndoStack 5 项、ReminderDefaultAlert 9 项）。
+
+集成期修复两轮只读审查的当场项：两字查询 LIKE 回退与多词令牌 AND；脏标记触发器补齐行动备注、来源改名与转写版本变化后的索引刷新；回收站材料不进索引；撤销快捷键改 ⌥⌘Z 让出文本撤销；引导只对空资料库出现；模板覆盖非空草稿前确认；播放交错崩溃（代际令牌）、轮询只在值变化时写状态、结果草稿按行动 id 保留、每周回顾关闭后重取专注、提醒清单选择显示进度与错误、主题改名绑定目标、存为问题防重复提交；仅日期默认通知在逾期日期上顺延到下一个 09:00，语音提取与手动保存共用默认，设置页对仅日期任务不再显示会失效的通知开关；Markdown 镜像不再删除游离文档。
+
+实机（隔离副本，实时库的 sqlite 备份，78 份材料、1051 条观点、523 条行动）：启动从 schema 54 连续迁移到 59，`search_index`、`search_index_meta` 与四个 `search_dirty_*` 触发器就位；`Backups/` 生成 271MB 备份且 `PRAGMA integrity_check` 为 ok；`Mirror/materials` 写出 78 份文档。机器处于锁屏（01:45），窗口级核对本轮不可得；副本只带数据库未带 assets，启动校验把 78 份材料全部隔离，这是副本缺口不是产品回归，但同时复现了「一次校验失败即永久隔离」的机制，已列入第三批 G2。
+
 ## 链接
 
 - `docs/product/reference-products.md` 第 9.3、9.4、9.5 节
+- 2026-11-15 第三批任务卡 `work/tasks/20261115-mega-wave-3/TASK.md`
