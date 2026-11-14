@@ -10,7 +10,7 @@ owner: coordinator
 
 ## 目标
 
-四条互不重叠的线：处理情况页的重新核对入口、任务页重新跟进、迁移包 v50 补任务启动记录、捕获主流程的无障碍标签。App Intents 由协调者单独推进，因为构建脚本与 Intent 元数据处理需要反复编译验证，不放进写入代理。
+四条互不重叠的线：处理情况页的重新核对入口、任务页重新跟进、迁移包 v50 补任务启动记录、捕获主流程的无障碍标签。App Intents 由协调者单独推进（构建脚本与 Intent 元数据处理需要反复编译验证），已完成并并入本分支，记录在 `work/tasks/20261115-app-intents/TASK.md`。
 
 基线 `main` 为 `877a147`，schema 60，262 项测试。
 
@@ -65,3 +65,4 @@ owner: coordinator
 ## 链接
 
 - `docs/product/reference-products.md` 第 9.2、9.5 节
+- App Intents 任务卡 `work/tasks/20261115-app-intents/TASK.md`
