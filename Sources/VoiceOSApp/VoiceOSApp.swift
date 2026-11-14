@@ -1916,7 +1916,7 @@ final class ControlCenter: ObservableObject {
         guard let link = CaptureLink.parse(url) else { status = "抓取链接无效，未保存"; return false }
         return await acceptCaptureRequest(text: link.text, title: link.title, url: link.url, successURL: link.successURL)
     }
-    func acceptCaptureRequest(text: String?, title: String?, url: String?, successURL: URL?) async -> Bool {
+    func acceptCaptureRequest(text: String?, title: String?, url: String?, successURL: URL?, context: String? = nil) async -> Bool {
         guard let store else { status = "资料库尚未打开，未保存"; return false }
         let body = [text, url].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
         guard let body else { status = "抓取内容为空，未保存"; return false }
@@ -1925,7 +1925,7 @@ final class ControlCenter: ObservableObject {
             return value
         }
         do {
-            let id = try await store.recordCapturedText(body, title: title ?? "", ownership: .external, sourceURL: metadataURL)
+            let id = try await store.recordCapturedText(body, title: title ?? "", ownership: .external, sourceURL: metadataURL, captureContext: context)
             let policy = try await store.sourcePolicy(sourceID: id)
             if !policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: true) }
             await refresh()
@@ -1941,7 +1941,8 @@ final class ControlCenter: ObservableObject {
     func captureClipboardText() {
         let text = NSPasteboard.general.string(forType: .string) ?? ""
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { status = "剪贴板没有文字"; return }
-        Task { _ = await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil) }
+        let context = FrontContextReader.current()?.display
+        Task { _ = await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil, context: context) }
     }
     func chooseWatchFolder() {
         guard makeFolderWatch() != nil else { status = "资料库尚未打开，无法监听文件夹"; return }
@@ -2845,6 +2846,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     private var statusItem: NSStatusItem?
     private var dictationMenuItem: NSMenuItem?
     private var clipboardMenuItem: NSMenuItem?
+    private var quickNoteMenuItem: NSMenuItem?
     private var watchMenuItem: NSMenuItem?
     private var stopWatchMenuItem: NSMenuItem?
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -2894,6 +2896,9 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         let clipboard = menu.addItem(withTitle: "捕获剪贴板文字（⌥⌘V）", action: #selector(captureClipboard), keyEquivalent: "")
         clipboard.target = self
         clipboardMenuItem = clipboard
+        let note = menu.addItem(withTitle: "速记（⌥⌘N）", action: #selector(openQuickNote), keyEquivalent: "")
+        note.target = self
+        quickNoteMenuItem = note
         menu.addItem(.separator())
         let watch = menu.addItem(withTitle: "监听文件夹…", action: #selector(chooseWatchFolder), keyEquivalent: "")
         watch.target = self
@@ -2915,6 +2920,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
             dictationMenuItem?.title = "控制中心尚未准备好"
             dictationMenuItem?.isEnabled = false
             clipboardMenuItem?.isEnabled = false
+            quickNoteMenuItem?.isEnabled = false
             watchMenuItem?.isEnabled = false
             stopWatchMenuItem?.isEnabled = false
             return
@@ -2922,6 +2928,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         dictationMenuItem?.title = (model.dictationActive ? "停止口述并整理" : "开始口述并自动整理") + "（⌥⌘D）"
         dictationMenuItem?.isEnabled = model.canToggleCaptureDictation
         clipboardMenuItem?.isEnabled = true
+        quickNoteMenuItem?.isEnabled = true
         watchMenuItem?.isEnabled = true
         stopWatchMenuItem?.isEnabled = model.folderWatchActive
     }
@@ -2963,6 +2970,10 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         ControlCenter.primary?.captureClipboardText()
     }
 
+    @objc private func openQuickNote() {
+        QuickNoteController.shared.show()
+    }
+
     @objc private func chooseWatchFolder() {
         ControlCenter.primary?.chooseWatchFolder()
     }
@@ -2982,6 +2993,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         center.register(.captureClipboard) {
             MainActor.assumeIsolated {
                 if let model = ControlCenter.primary { model.captureClipboardText() }
+            }
+        }
+        center.register(.quickNote) {
+            MainActor.assumeIsolated {
+                QuickNoteController.shared.show()
             }
         }
     }
