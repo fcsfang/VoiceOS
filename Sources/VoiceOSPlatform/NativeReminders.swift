@@ -17,6 +17,24 @@ public struct ReminderLocationLabel {
         }
     }
 }
+public struct ReminderLocationSpec: Equatable {
+    public let title: String
+    public let proximity: EKAlarmProximity
+    public init?(title: String, proximity: EKAlarmProximity) {
+        let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 120, proximity == .enter || proximity == .leave else { return nil }
+        self.title = name; self.proximity = proximity
+    }
+    public var structuredLocation: EKStructuredLocation {
+        let value = EKStructuredLocation(); value.title = title; return value
+    }
+    public var alarm: EKAlarm {
+        let value = EKAlarm(); value.structuredLocation = structuredLocation; value.proximity = proximity; return value
+    }
+}
+extension ReminderLocation.Proximity {
+    var eventKitProximity: EKAlarmProximity { self == .enter ? .enter : .leave }
+}
 /// All EventKit objects stay on MainActor and are reacquired for each operation.
 @MainActor
 public final class NativeReminders: RemindersSchedulingPort, RemindersFieldsPort, RecordingExpressionRemindersPort {
@@ -90,9 +108,34 @@ public final class NativeReminders: RemindersSchedulingPort, RemindersFieldsPort
     private func snapshot(_ item: EKReminder) -> ReminderSnapshot {
         let due = ReminderDueDate.reading(item.dueDateComponents)
         let alarms = item.alarms ?? []
-        let dates = alarms.compactMap(\.absoluteDate).map(ReminderFields.timestamp).sorted()
-        let fields = due.flatMap { due in dates.count == alarms.count ? ReminderFields(due: due, alerts: dates, priority: Int(item.priority)) : nil }
+        let absolute = alarms.filter { $0.absoluteDate != nil }
+        let located = alarms.filter { $0.structuredLocation != nil }
+        let location = located.count == 1 ? located.first.flatMap(reminderLocation) : nil
+        let fields = due.flatMap { due -> ReminderFields? in
+            guard absolute.count + located.count == alarms.count, located.count <= 1, located.isEmpty || location != nil else { return nil }
+            return ReminderFields(due: due, alerts: absolute.compactMap(\.absoluteDate).map(ReminderFields.timestamp).sorted(), priority: Int(item.priority), location: location)
+        }
         return .init(id: item.calendarItemIdentifier, title: item.title ?? "", completed: item.isCompleted, marker: marker(item), dueDate: due, fields: fields)
+    }
+    private func reminderLocation(_ alarm: EKAlarm) -> ReminderLocation? {
+        guard let raw = alarm.structuredLocation?.title else { return nil }
+        let title = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard (1...120).contains(title.count) else { return nil }
+        let proximity: ReminderLocation.Proximity
+        switch alarm.proximity {
+        case .enter: proximity = .enter
+        case .leave: proximity = .leave
+        default: return nil
+        }
+        return ReminderLocation(title: title, proximity: proximity)
+    }
+    private func nativeAlarms(_ fields: ReminderFields) throws -> [EKAlarm] {
+        var result = fields.alerts.compactMap(ReminderFields.date).map { EKAlarm(absoluteDate: $0) }
+        if let location = fields.location {
+            guard let spec = ReminderLocationSpec(title: location.title, proximity: location.proximity.eventKitProximity) else { throw VoiceOSError("地点名称无效") }
+            result.append(spec.alarm)
+        }
+        return result
     }
     public func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
         try Task.checkCancellation()
@@ -135,7 +178,7 @@ public final class NativeReminders: RemindersSchedulingPort, RemindersFieldsPort
         item.url = URL(string: link)
         item.dueDateComponents = try fields.due.writableComponents()
         item.priority = fields.priority
-        item.alarms = fields.alerts.compactMap(ReminderFields.date).map { EKAlarm(absoluteDate: $0) }
+        item.alarms = try nativeAlarms(fields)
         do { try store.save(item, commit: true) }
         catch { throw VoiceOSError("提醒事项写入结果未知") }
     }
@@ -179,7 +222,7 @@ public final class NativeReminders: RemindersSchedulingPort, RemindersFieldsPort
               item.calendar.calendarIdentifier == calendarID, snapshot(item) == expected else { throw VoiceOSError("保存前提醒设置已变化，未覆盖修改") }
         item.dueDateComponents = try desired.due.writableComponents()
         item.priority = desired.priority
-        item.alarms = desired.alerts.compactMap(ReminderFields.date).map { EKAlarm(absoluteDate: $0) }
+        item.alarms = try nativeAlarms(desired)
         // One native save. Titles, user notes, completion and unsupported fields stay on the item.
         try store.save(item, commit: true)
     }
