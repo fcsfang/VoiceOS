@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-14
 updated: 2026-11-14
 branch: work/mega-1
@@ -126,4 +126,5 @@ D0 先合入根分支，随后 D1 到 D5。D1、D2、D3、D4 依赖 D0 的 API �
 
 ## 链接
 
+- 2026-11-15 已合并为 `260aa3b`（PR #154）。
 - `docs/product/reference-products.md` 第 9.3、9.4、9.5 节
