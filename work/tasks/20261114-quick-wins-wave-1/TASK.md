@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-14
 updated: 2026-11-14
 branch: work/quick-wins-1
@@ -182,5 +182,6 @@ W1 先合入根分支，随后 W2、W3、W4、W5 依次 cherry-pick。W2 与 W3 
 
 ## 链接
 
+- 2026-11-14 已合并为 `2b67352`（PR #147）。
 - `docs/product/reference-products.md` 第 9.1 节
 - 根分支 `work/quick-wins-1`
