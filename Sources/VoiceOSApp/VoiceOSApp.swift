@@ -88,7 +88,11 @@ final class ControlCenter: ObservableObject {
     }
     func renameRecording(_ record: SourceRecord, title: String?) async -> Bool {
         do {
-            try await store?.renameRecording(sourceID: record.id, title: title)
+            if let store {
+                try await store.renameRecording(sourceID: record.id, title: title)
+                actionUndoStack.record(.materialTitle(MaterialTitleChange(sourceID: record.id, title: record.displayTitle,
+                    from: record.presentation?.manualTitle, to: title?.trimmingCharacters(in: .whitespacesAndNewlines))))
+            }
             await refresh(); queueRecordingTitles(); return true
         } catch { recordingTitleStatus = error.localizedDescription; return false }
     }
@@ -98,6 +102,7 @@ final class ControlCenter: ObservableObject {
             let catalog=Dictionary(uniqueKeysWithValues:records.map { ($0.id,$0) })
             let ids=record.recordingExpression(in:catalog)?.sourceIDs ?? [record.id]
             try await store.setMaterialDisposition(sourceIDs:ids,disposition:disposition)
+            actionUndoStack.record(.materialDisposition(MaterialDispositionChange(sourceIDs:ids,title:record.displayTitle,from:record.disposition,to:disposition)))
             await refresh()
             switch disposition {
             case .archived: status="材料已归档，可在材料页的“已归档”中恢复；历史依据仍保留。"
@@ -3240,7 +3245,7 @@ struct VoiceOSApp: App {
         }
         .commands {
             CommandGroup(after: .newItem) { Button("导入音频或视频…") { focusedModel?.chooseFullRecording() }.keyboardShortcut("i").disabled(focusedModel?.initialized != true || focusedModel?.importing == true) }
-            CommandGroup(after: .undoRedo) { Button("撤销上一次行动变更") { Task { await focusedModel?.undoLastActionChange() } }.keyboardShortcut("z", modifiers: [.command, .option]).disabled(focusedModel?.canUndoActionChange != true) }
+            CommandGroup(after: .undoRedo) { Button("撤销上一次变更") { Task { await focusedModel?.undoLastChange() } }.keyboardShortcut("z", modifiers: [.command, .option]).disabled(focusedModel?.canUndoChange != true) }
         }
     }
 }
