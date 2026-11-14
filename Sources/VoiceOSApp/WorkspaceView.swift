@@ -242,6 +242,8 @@ struct WorkspaceView: View {
                 model.pendingWorkspaceSourceID = nil
                 go(.source(id))
             }
+            .onChange(of:model.pendingWorkspaceRoute) { _, _ in consumePendingNavigation() }
+            .onChange(of:model.pendingWorkspaceTaskID) { _, _ in consumePendingNavigation() }
             .onChange(of:model.taskPresentation) { _, _ in
                 if let id=model.focusedTaskID { go(.task(id)) } else { go(.actions) }
             }
@@ -253,6 +255,7 @@ struct WorkspaceView: View {
             .onChange(of:actionFilter) { _, filter in actionKeyboardHighlightID=nil;if !["全部","我的待办"].contains(filter) { exitActionSelection() } }
             .onOpenURL { url in if model.initialized { routeExternalURL(url) } else { pendingURL=url } }
             .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;routeExternalURL(url) } }
+            .onAppear { consumePendingNavigation() }
             .onDisappear { Task { await model.setPanoramaVisible(false) } }
     }
     private var sheetContent: some View {
@@ -1381,6 +1384,19 @@ struct WorkspaceView: View {
         case .actions: actionFilter=view.filter;page = .actions
         }
         error=""
+    }
+    private func consumePendingNavigation() {
+        if let route = model.pendingWorkspaceRoute {
+            model.pendingWorkspaceRoute = nil
+            switch route {
+            case .actions: go(.actions)
+            case .search: if page == .search { searchFocused = true } else { go(.search) }
+            }
+        }
+        if let id = model.pendingWorkspaceTaskID {
+            model.pendingWorkspaceTaskID = nil
+            go(.task(id))
+        }
     }
     private func routeExternalURL(_ url:URL) {
         if CaptureLink.isCapture(url) { Task { await model.acceptCaptureURL(url) } }
