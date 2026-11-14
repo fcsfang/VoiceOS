@@ -3,6 +3,7 @@ status: merge-ready
 started: 2026-11-14
 updated: 2026-11-14
 branch: work/quick-wins-1
+pr: 147
 owner: coordinator
 ---
 
