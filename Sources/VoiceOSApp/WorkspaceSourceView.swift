@@ -60,6 +60,11 @@ struct WorkspaceSourceView: View {
     @State private var claimEditor:CandidateClaim?
     @State private var actionClaim:CandidateClaim?
     @State private var showingSegmentation=false
+    @State private var showingBilingual=false
+    @State private var bilingualExcerpt=BilingualExcerpt(paragraphs:[],truncated:false)
+    @State private var bilingualTranslations:[String?]=[]
+    @State private var bilingualPhase=BilingualPhase.idle
+    @State private var bilingualTask: Task<Void, Never>?
     @State private var showAllThoughts=false
     @State private var historyState = SourceHistoryState.idle
     @State private var historyTask: Task<Void, Never>?
@@ -248,6 +253,8 @@ struct WorkspaceSourceView: View {
                         Button(attachmentMime == "application/pdf" ? "查看原件" : "查看原图",systemImage:attachmentMime == "application/pdf" ? "doc.richtext" : "photo") { if !NSWorkspace.shared.open(attachmentURL) { error="无法打开原件" } }
                     }
                     Spacer()
+                    Button("译文对照",systemImage:"character.bubble") { showingBilingual=true }
+                        .disabled(source.transcript == nil)
                     Button("从这里启动",systemImage:"arrow.up.forward") { openInitiation(source.id) }
                         .disabled(source.transcript == nil || source.origin != "user" || source.speaker != "user")
                     Button("更正原文",systemImage:"pencil") { editing=source }.disabled(source.transcript == nil)
@@ -542,7 +549,7 @@ struct WorkspaceSourceView: View {
                 }
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
             }.frame(maxWidth:WorkspaceMetrics.pageWidth,alignment:.leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth:.infinity,alignment:.top)
-        }.onDisappear { historyTask?.cancel() }
+        }.onDisappear { historyTask?.cancel();bilingualTask?.cancel() }
     }
     var body:some View {
         readingContent
@@ -551,6 +558,9 @@ struct WorkspaceSourceView: View {
         .sheet(item:$claimEditor) { claim in ClaimCorrectionView(claim:claim,model:model) { claimEditor=nil } }
         .sheet(item:$actionClaim) { claim in ActionCreationView(claim:claim,model:model) { actionClaim=nil } }
         .sheet(isPresented:$showingSegmentation) { TranscriptSegmentationView(model:model) { showingSegmentation=false } }
+        .sheet(isPresented:$showingBilingual) {
+            BilingualView(model:model,source:source,excerpt:bilingualExcerpt,translations:bilingualTranslations,phase:bilingualPhase,generate:generateBilingual,dismiss:{ showingBilingual=false })
+        }
         .sheet(isPresented:$showingOriginal) {
             VStack(alignment:.leading,spacing:16) {
                 Text("完整文字").font(.title2)
@@ -631,7 +641,7 @@ struct WorkspaceSourceView: View {
             catch { self.error="旁注读取失败：" + error.localizedDescription }
         }
         .onChange(of:source.id) { _,_ in showingOriginal=false;clearSelection() }
-        .onChange(of:source.transcript) { _,_ in clearSelection() }
+        .onChange(of:source.transcript) { _,_ in clearSelection();resetBilingual() }
         .onChange(of:fullTextExpanded) { _,_ in if !fullTextExpanded { clearSelection() } }
         .task {
             while !Task.isCancelled {
@@ -668,6 +678,35 @@ struct WorkspaceSourceView: View {
     private func organize() {
         guard let current=model.records.first(where: { $0.id == source.id }),!current.localOnly else { return }
         model.reidentify(current)
+    }
+    private func generateBilingual() {
+        guard bilingualPhase != .loading,let transcript=source.transcript else { return }
+        guard !source.localOnly,!source.needsTranscriptionReview else { return }
+        let excerpt=Bilingual.paragraphs(from:transcript,spans:source.spans)
+        guard !excerpt.isEmpty else { bilingualPhase = .failed("这份材料没有可对照的文字。");return }
+        bilingualExcerpt=excerpt
+        bilingualTranslations=Array(repeating:nil,count:excerpt.paragraphs.count)
+        bilingualPhase = .loading
+        let paragraphs=excerpt.paragraphs
+        bilingualTask?.cancel()
+        bilingualTask=Task {
+            do {
+                let client=try BilingualClient()
+                let lines=try await client.translate(paragraphs)
+                try Task.checkCancellation()
+                bilingualTranslations=lines
+                bilingualPhase = .ready
+            } catch is CancellationError {
+            } catch {
+                if !Task.isCancelled { bilingualPhase = .failed(error.localizedDescription) }
+            }
+        }
+    }
+    private func resetBilingual() {
+        bilingualTask?.cancel()
+        bilingualExcerpt=BilingualExcerpt(paragraphs:[],truncated:false)
+        bilingualTranslations=[]
+        bilingualPhase = .idle
     }
     private func saveSelectionAsQuestion() {
         let text=selectedText
