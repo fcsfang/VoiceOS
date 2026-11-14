@@ -12,6 +12,7 @@ extension VoiceOSStore {
     @discardableResult
     public func recordCapturedText(_ text: String, title: String, ownership: TextCaptureOwnership,
                                    sourceURL: String? = nil,
+                                   captureContext: String? = nil,
                                    commandID: String = UUID().uuidString) throws -> String {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceOSError("请填写完整原文") }
@@ -24,7 +25,7 @@ extension VoiceOSStore {
             }
             let sourceID = try recordUserExpression(text, commandID: commandID)
             try renameRecording(sourceID: sourceID, title: resolvedTitle)
-            if let sourceURL { try attachCaptureMetadata(sourceID: sourceID, url: sourceURL) }
+            if sourceURL != nil || captureContext != nil { try attachCaptureMetadata(sourceID: sourceID, url: sourceURL, context: captureContext) }
             return sourceID
         }
         let data = Data(text.utf8), hash = Self.relevanceHash(data), fingerprint = "external-text-v1:" + hash
@@ -32,7 +33,7 @@ extension VoiceOSStore {
             guard previous["input_fingerprint"] == fingerprint, previous["origin"] == "external", previous["speaker"] == "unknown" else { throw VoiceOSError("同一次保存不能更换原文或归属") }
             guard ["saved", "reference_only"].contains(previous["state"] ?? "") else { throw VoiceOSError("文字保存尚未完成，请重新打开核对") }
             try renameRecording(sourceID: previous["id"]!, title: resolvedTitle)
-            if let sourceURL { try attachCaptureMetadata(sourceID: previous["id"]!, url: sourceURL) }
+            if sourceURL != nil || captureContext != nil { try attachCaptureMetadata(sourceID: previous["id"]!, url: sourceURL, context: captureContext) }
             return previous["id"]!
         }
         let id = UUID().uuidString, asset = UUID().uuidString, version = UUID().uuidString
@@ -54,7 +55,7 @@ extension VoiceOSStore {
         let row = try db.query("SELECT * FROM sources WHERE id=?", [id]).first!
         try sealAndQueue(row, info: MediaInfo(duration: 0, kind: "external_text"))
         try checkpoint(.savedCommitted)
-        if let sourceURL { try attachCaptureMetadata(sourceID: id, url: sourceURL) }
+        if sourceURL != nil || captureContext != nil { try attachCaptureMetadata(sourceID: id, url: sourceURL, context: captureContext) }
         return id
     }
 
