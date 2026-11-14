@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-5
@@ -61,5 +61,7 @@ owner: coordinator
 留到第六批：重复任务与提醒事项联动的两处语义缺陷（外部完成不生成后继的上游路径、同标题屏障拦截后继同步）、重复完成后的撤销级联、意图冷启动就绪等待、全景六表进迁移包、产品文案与可发现性十条。
 
 ## 链接
+
+- 2026-11-15 已合并为 `118e0bb`（PR #162）。
 
 - `docs/product/reference-products.md` 第 9.2、9.4、9.5 节

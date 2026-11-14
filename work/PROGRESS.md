@@ -110,4 +110,6 @@
 
 - 并行大波第四批（PR #160，合并 `a4de038`）：处理情况页重新核对、任务页重新跟进、迁移包 v50（任务启动记录）、捕获主流程无障碍；App Intents 文字捕获接入 Shortcuts 与 Siri（元数据进 bundle）。验证：`swift build -j 2` 通过，`swift test -j 2` 263 项 0 失败；发行包 `extract.actionsdata` 含 `VoiceOSApp.CaptureTextIntent`；隔离副本冒烟启动正常；锁屏挡住 Shortcuts 与 VoiceOver 界面核对。
 
-- 并行大波第五批（`work/mega-5`，PR 待开）：菜单栏今日一览、外部完成确认的重复后继、App Intents 扩展意图；两轮只读审查返回 12 条缺陷与 10 条产品问题，当场修复 9 项（冻结态后继、Spotlight 清域、文件夹监听退避、恢复校验、实体刷新、构建容错等），其余排入第六批。验证：`swift build -j 2` 通过，`swift test -j 2` 264 项 0 失败；发行包含三个意图；隔离副本冒烟正常；锁屏挡住界面核对。WidgetKit 评估为高成本高风险（沙盒与受限 entitlement），菜单栏今日一览承接其价值。
+- 并行大波第五批（PR #162，合并 `118e0bb`）：菜单栏今日一览、外部完成确认的重复后继、App Intents 扩展意图；两轮只读审查返回 12 条缺陷与 10 条产品问题，当场修复 9 项（冻结态后继、Spotlight 清域、文件夹监听退避、恢复校验、实体刷新、构建容错等），其余排入第六批。验证：`swift build -j 2` 通过，`swift test -j 2` 264 项 0 失败；发行包含三个意图；隔离副本冒烟正常；锁屏挡住界面核对。WidgetKit 评估为高成本高风险（沙盒与受限 entitlement），菜单栏今日一览承接其价值。
+
+- 第六批开工（`work/mega-6`）：重复任务与提醒事项联动语义、撤销级联与重新跟进、全景六表进迁移包 v51、产品文案与快捷键可发现性。
