@@ -56,6 +56,8 @@ struct WorkspaceSourceView: View {
     @State private var pendingRejection: CandidateClaim?
     @State private var confirmingRejection = false
     @State private var error=""
+    @State private var claimNotes:[String:ClaimNote]=[:]
+    @State private var captureInfo:CaptureMetadata?
     private var sourceStatus: String {
         if source.transcript == nil { return source.jobState == "failed" ? "转写失败 · 原件已保存" : "尚未完成转写 · 原件已保存" }
         if source.localOnly { return "仅本机保存" }
@@ -131,6 +133,13 @@ struct WorkspaceSourceView: View {
         ScrollView {
             LazyVStack(alignment:.leading,spacing:30) {
                 WorkspaceHeading(eyebrow:(source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + " · " + source.recordingSubtitle,title:(expression?.sourceIDs.count ?? 0) > 1 ? expression!.title : source.displayTitle)
+                if let captureInfo {
+                    HStack(spacing:14) {
+                        if let link=captureLink(captureInfo.url) { Link(link.host ?? "来源链接", destination: link) }
+                        if let date=ConversationReflectionFocus.date(captureInfo.capturedAt) { Text("抓取于 " + date.formatted(date:.abbreviated,time:.shortened)) }
+                        else { Text("抓取于 " + captureInfo.capturedAt) }
+                    }.font(.caption).foregroundStyle(.secondary)
+                }
                 if let expression,expression.sourceIDs.count > 1 {
                     WorkspaceSection(title:"整体理解",icon:"waveform.path",count:expression.sourceIDs.count) {
                         WorkspaceExpandableText(text:expression.summary,label:"整体摘要",size:16)
@@ -263,6 +272,7 @@ struct WorkspaceSourceView: View {
                                         Button("停止使用") { pendingRejection=thought;confirmingRejection=true }
                                         Button("记录行动意图") { actionClaim=thought }.disabled(thought.validity == "frozen" || thought.reviewState == "rejected")
                                     }.font(.caption).disabled(model.reviewingClaim)
+                                    ClaimNoteRow(model:model,claimID:thought.id,notes:$claimNotes)
                                     DisclosureGroup("原话依据与调整") {
                                         VStack(alignment:.leading,spacing:10) {
                                             ForEach(Array(thought.references.enumerated()),id:\.offset) { _,ref in
@@ -417,7 +427,23 @@ struct WorkspaceSourceView: View {
                 try Task.checkCancellation();loadedContextLinks=links
             } catch is CancellationError {} catch { contextIssue=error.localizedDescription }
         }
+        .task(id: source.id) {
+            captureInfo=try? await model.sourceCaptureMetadata(sourceID:source.id)
+        }
+        .task(id: source.id + thoughts.map(\.id).joined()) {
+            guard model.store != nil else { return }
+            do {
+                let loaded=try await model.claimNoteMap()
+                try Task.checkCancellation()
+                claimNotes=loaded
+            } catch is CancellationError {}
+            catch { self.error="旁注读取失败：" + error.localizedDescription }
+        }
         .onChange(of:source.id) { _,_ in showingOriginal=false }
+    }
+    private func captureLink(_ value:String?)->URL? {
+        guard let value,let url=URL(string:value),let scheme=url.scheme?.lowercased(),scheme=="http" || scheme=="https" else { return nil }
+        return url
     }
     private func contextRelation(_ relation:String)->String {
         ["summary":"复述或总结 · 不代表赞同","agreement":"表达赞同","disagreement":"提出不同看法","qualification":"补充适用条件","application":"联系实际情境","question":"由节目引出的疑问","uncertain":"AI 推测的联系 · 尚不确定"][relation] ?? "AI 关联分析"
