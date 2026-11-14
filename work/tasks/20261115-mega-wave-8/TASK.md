@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-8
@@ -59,5 +59,7 @@ owner: coordinator
 实机：锁屏，材料页译文对照两态、地点提醒写入回读与意图口述不可得；元数据步骤在合并后发行构建中验证四个意图。
 
 ## 链接
+
+- 2026-11-15 已合并为 `3e17362`（PR #169）。
 
 - `docs/product/reference-products.md` 第 9.3、9.4、9.2 节
