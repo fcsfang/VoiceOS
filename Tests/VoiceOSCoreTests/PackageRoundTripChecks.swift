@@ -6,6 +6,7 @@ import VoiceOSPlatform
 final class PackageRoundTripChecks: XCTestCase {
     private static let newTables = ["action_clarifications", "action_focus", "source_reading_states", "claim_notes", "topic_claim_confirmations", "source_capture_metadata", "source_attachments", "action_subtasks", "action_estimates", "source_chapters", "capture_templates"]
     private static let optionalTables = ["action_recurrence", "source_entities"]
+    private static let addedIn50Tables = ["task_initiations"]
     private var base: URL!
     private var root: URL!
     private var input: URL!
@@ -61,11 +62,35 @@ final class PackageRoundTripChecks: XCTestCase {
         return (sourceID, claimID, actionID, attachment)
     }
 
+    private func insertTaskInitiation(_ store: VoiceOSStore, sourceID: String) async throws -> String {
+        let sources = try await store.sources()
+        let source = try XCTUnwrap(sources.first { $0.id == sourceID })
+        let versionID = try XCTUnwrap(source.transcriptVersionID)
+        let text = try XCTUnwrap(source.transcript)
+        let db = await store.db
+        let input = TaskInitiationInput(sourceID: sourceID, transcriptVersionID: versionID, text: text,
+                                        answer: "", mode: .direct, preferredRoute: nil,
+                                        recordedAt: "2026-11-15T00:00:00Z", timeZone: "Asia/Shanghai")
+        let proposal = TaskInitiationProposal(isTaskInitiation: true, route: .guidedStart, title: "迁移往返启动包",
+                                              objective: "验证任务启动记录随迁移包往返", firstAction: "打开终端",
+                                              verification: "恢复后记录仍在")
+        let id = UUID().uuidString
+        try db.execute("""
+        INSERT INTO task_initiations(id,command_id,source_id,transcript_version_id,state,route,input_json,proposal_json,created_at,updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?)
+        """, [id, "package-round-trip-initiation", sourceID, versionID, "draft", "guided_start",
+              String(decoding: try JSONEncoder().encode(input), as: UTF8.self),
+              String(decoding: try JSONEncoder().encode(proposal), as: UTF8.self),
+              "2026-11-15T00:00:00Z", "2026-11-15T00:00:00Z"])
+        return id
+    }
+
     func testPackageVersion49RoundTripPreservesNewTablesAndAttachments() async throws {
         let store = try await openStore()
         let fixture = try await makeFixture(store)
         let package = base.appendingPathComponent("package")
         try await store.exportPackage(to: package, includeMedia: true)
+        try rewriteAsVersion49(package)
         let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: package.appendingPathComponent("manifest.json"))) as? [String: Any]
         XCTAssertEqual(manifest?["version"] as? Int, 49)
         XCTAssertEqual(manifest?["databaseSchema"] as? Int, 49)
@@ -113,6 +138,38 @@ final class PackageRoundTripChecks: XCTestCase {
         let original = try Data(contentsOf: root.appendingPathComponent(fixture.attachment.relativePath))
         let copied = try Data(contentsOf: restoredRoot.appendingPathComponent(fixture.attachment.relativePath))
         XCTAssertEqual(copied, original)
+    }
+
+    func testPackageVersion50RoundTripPreservesTaskInitiations() async throws {
+        let store = try await openStore()
+        let fixture = try await makeFixture(store)
+        let initiationID = try await insertTaskInitiation(store, sourceID: fixture.sourceID)
+        let package = base.appendingPathComponent("package50")
+        try await store.exportPackage(to: package, includeMedia: true)
+        let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: package.appendingPathComponent("manifest.json"))) as? [String: Any]
+        XCTAssertEqual(manifest?["version"] as? Int, 50)
+        XCTAssertEqual(manifest?["databaseSchema"] as? Int, 50)
+        XCTAssertEqual((manifest?["counts"] as? [String: Any])?["task_initiations"] as? Int, 1)
+
+        let restoredRoot = base.appendingPathComponent("restored50")
+        try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
+        let restored = try await openStore(restoredRoot)
+        let records = try await restored.taskInitiations()
+        XCTAssertEqual(records.map(\.id), [initiationID])
+        XCTAssertEqual(records.first?.state, "draft")
+        XCTAssertEqual(records.first?.route, TaskInitiationRoute.guidedStart)
+        XCTAssertEqual(records.first?.sourceID, fixture.sourceID)
+        XCTAssertEqual(records.first?.proposal.title, "迁移往返启动包")
+        XCTAssertEqual(records.first?.basisChanged, false)
+
+        try rewriteAsVersion49(package)
+        let olderRoot = base.appendingPathComponent("restored49")
+        try await VoiceOSStore.restorePackage(from: package, to: olderRoot, inspector: NativeMediaInspector())
+        let older = try await openStore(olderRoot)
+        let olderRecords = try await older.taskInitiations()
+        XCTAssertTrue(olderRecords.isEmpty)
+        let olderDB = await older.db
+        XCTAssertEqual(try olderDB.query("SELECT count(*) AS n FROM task_initiations").first?["n"], "0")
     }
 
     func testVersion48PackageStillRestoresAndLeavesNewTablesEmpty() async throws {
@@ -172,22 +229,29 @@ final class PackageRoundTripChecks: XCTestCase {
     }
 
     private func rewriteAsVersion48(_ package: URL, attachment: SourceAttachment) throws {
+        try rewriteManifest(package, version: 48, dropping: Self.newTables + Self.optionalTables + Self.addedIn50Tables, removing: [attachment.relativePath])
+    }
+
+    private func rewriteAsVersion49(_ package: URL) throws {
+        try rewriteManifest(package, version: 49, dropping: Self.addedIn50Tables, removing: [])
+    }
+
+    private func rewriteManifest(_ package: URL, version: Int, dropping tables: [String], removing paths: [String]) throws {
         let manifestURL = package.appendingPathComponent("manifest.json")
         guard var manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any],
               var counts = manifest["counts"] as? [String: Any],
               var files = manifest["files"] as? [[String: Any]] else { XCTFail("迁移清单格式错误"); return }
-        let dropped = Self.newTables + Self.optionalTables
-        for table in dropped {
+        for table in tables {
             counts.removeValue(forKey: table)
             try? FileManager.default.removeItem(at: package.appendingPathComponent("\(table).jsonl"))
         }
         files.removeAll { entry in
             guard let path = entry["path"] as? String else { return false }
-            return dropped.contains(String(path.dropLast(6))) || path == attachment.relativePath
+            return tables.contains(String(path.dropLast(6))) || paths.contains(path)
         }
-        try? FileManager.default.removeItem(at: package.appendingPathComponent(attachment.relativePath))
-        manifest["version"] = 48
-        manifest["databaseSchema"] = 48
+        for path in paths { try? FileManager.default.removeItem(at: package.appendingPathComponent(path)) }
+        manifest["version"] = version
+        manifest["databaseSchema"] = version
         manifest["counts"] = counts
         manifest["files"] = files
         try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys]).write(to: manifestURL)

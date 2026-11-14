@@ -167,6 +167,8 @@ struct WorkspaceTaskView: View {
     @State private var confirming = false
     @State private var askingForResult = false
     @State private var confirmingDismiss = false
+    @State private var confirmingReopen = false
+    @State private var undoReopen = false
     @State private var settings: ReminderSnapshot?
     @State private var showingSettings = false
     @State private var scheduleAction: ActionRecord?
@@ -316,6 +318,14 @@ struct WorkspaceTaskView: View {
                             Button("改天") { openReminderSettings() }.disabled(model.savingAction || model.remindersBusy)
                             Button("不再跟进", role: .destructive) { confirmingDismiss = true }.disabled(model.savingAction)
                         }
+                    } else if action.validity == "current", action.state == "dismissed" {
+                        Button("重新跟进") { confirmingReopen = true }.buttonStyle(.borderedProminent).disabled(model.savingAction)
+                            .alert("重新跟进这条行动？", isPresented: $confirmingReopen) {
+                                Button("重新跟进") { reopen() }
+                                Button("取消", role: .cancel) {}
+                            } message: {
+                                Text("会恢复为待办，历史记录保留。")
+                            }
                     } else if current, action.intentActor == "user" { Button("核对为待办") { confirming = true } }
                     if current {
                         Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
@@ -668,12 +678,29 @@ struct WorkspaceTaskView: View {
             else { error = model.status }
         }
     }
+    private func reopen() {
+        Task {
+            await model.changeAction(action, state: .open)
+            if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.open.rawValue { error = "";showUndo("已重新跟进");undoReopen = true }
+            else { error = model.status }
+        }
+    }
     private func showUndo(_ message:String) {
+        undoReopen = false
         undoMessage = message
         undoToken = UUID()
     }
     private func undo() {
         let id = action.id
+        if undoReopen {
+            undoReopen = false
+            undoMessage = nil
+            Task {
+                await model.changeAction(action, state: .dismissed)
+                if model.actionRecords.first(where: { $0.id == id })?.state != LocalActionState.dismissed.rawValue { error = model.status }
+            }
+            return
+        }
         Task {
             if await model.undoActionState(actionID: id) { undoMessage = nil }
             else { error = model.status }

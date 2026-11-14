@@ -15,7 +15,7 @@ struct SelectionActions: View {
     var body: some View {
         HStack(spacing: 10) {
             Button("存为问题", systemImage: "questionmark.bubble", action: onSave)
-            Button("复制", systemImage: "doc.on.doc", action: onCopy)
+            Button("复制", systemImage: "doc.on.doc", action: onCopy).accessibilityLabel("复制选中文字")
             Button("回听选中段", systemImage: "play.circle", action: onPlay).disabled(!canPlay)
         }
         .vosFont(13, weight: .medium)

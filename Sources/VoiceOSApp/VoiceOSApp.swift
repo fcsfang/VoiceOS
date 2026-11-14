@@ -3976,3 +3976,10 @@ extension ControlCenter {
         }
     }
 }
+
+extension ApplicationDelegate: VoiceOSIntentEndpoint {
+    @MainActor func captureVoiceOSIntent(text: String, title: String?) async -> Bool {
+        guard let model = ControlCenter.primary else { return false }
+        return await model.acceptCaptureRequest(text: text, title: title, url: nil, successURL: nil, context: "快捷指令")
+    }
+}
