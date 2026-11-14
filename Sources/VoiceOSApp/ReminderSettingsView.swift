@@ -23,6 +23,11 @@ struct ReminderSettingsView: View {
             Text("日期、提醒与优先级").font(.title2)
             Text(action.title).font(.headline)
             Text("读取的是 Apple 提醒事项当前设置。保存时会再次核对，其他设备刚改过的内容不会被旧设置覆盖。").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                ForEach(SnoozePreset.allCases, id: \.self) { preset in
+                    Button(preset.title) { apply(preset) }
+                }
+            }
             Toggle("安排日期", isOn: $hasDate)
             if hasDate {
                 DatePicker("日期", selection: $due, displayedComponents: [.date])
@@ -85,6 +90,13 @@ struct ReminderSettingsView: View {
             fields.alerts = ([value] + Array((snapshot.fields?.alerts ?? []).dropFirst())).sorted()
         } else { fields.alerts = [] }
         try fields.validate(); return fields
+    }
+    private func apply(_ preset: SnoozePreset) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = zone
+        due = preset.dueDate(now: Date(), calendar: calendar)
+        hasDate = true
+        hasTime = true
     }
     private func minute(_ date: Date) -> Date {
         Date(timeIntervalSince1970: floor(date.timeIntervalSince1970 / 60) * 60)
