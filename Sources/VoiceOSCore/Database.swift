@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...54).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...55).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1001,6 +1001,49 @@ final class Database {
                 )
                 """)
                 try execute("PRAGMA user_version=54")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "54" {
+            try transaction {
+                try execute("""
+                CREATE TABLE action_focus (
+                  action_id TEXT PRIMARY KEY REFERENCES actions(id),
+                  created_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE source_reading_states (
+                  source_id TEXT PRIMARY KEY REFERENCES sources(id),
+                  state TEXT NOT NULL CHECK(state IN ('unread','reading','read')),
+                  updated_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE claim_notes (
+                  claim_id TEXT PRIMARY KEY REFERENCES claims(id),
+                  body TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE topic_claim_confirmations (
+                  topic_id TEXT NOT NULL,
+                  claim_id TEXT NOT NULL REFERENCES claims(id),
+                  command_id TEXT NOT NULL UNIQUE,
+                  created_at TEXT NOT NULL,
+                  PRIMARY KEY(topic_id, claim_id)
+                )
+                """)
+                try execute("""
+                CREATE TABLE source_capture_metadata (
+                  source_id TEXT PRIMARY KEY REFERENCES sources(id),
+                  source_url TEXT,
+                  captured_at TEXT NOT NULL
+                )
+                """)
+                try execute("PRAGMA user_version=55")
             }
         }
 
