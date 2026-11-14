@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: merge-ready
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-3
@@ -126,6 +126,17 @@ F0 先合入，随后 G1、F1 到 F4、G2、H3。完成路径的接线（`change
 - 启动校验的「重新核对原件」入口本批只做存储方法，界面入口留到下一批。
 - Apple 端侧模型候选因本机 `deviceNotEligible` 划掉，不再排期；App Intents 等工具链元数据处理可行，单独成批。
 
+## 结果
+
+2026-11-15 七个单元集成到 `work/mega-3`：F0 `8a06f85`，G1 `a760ce7`，F1 `a50c537`，F2 `760bc5d`，F3 `9cf2ecf`，G2 `f086631`，H3 `ec787ac`。集成修复 `e54ba42`。
+
+`swift build -j 2` 修复八处集成错误后通过；`swift test -j 2` 262 项 0 失败（新增 Recurrence、EntityIndex、FeynmanCompare、ClipboardHistory、ImportRecovery、PackageRoundTrip、ReminderLocation 等 38 项）。
+
+集成期修复：`SourceEntityKind` 与字符串比较导致的类型推断超时、复述组件参数遮蔽、镜像与 Spotlight 弱引用可选值、抓取去重的 actor await；完成路径接上后继生成（含提醒事项联动路径）且后继沿用 auto_send；启动校验失败改为留错误不隔离（两处既有测试同步更新）；设置页显示备份状态与重试；导出包 48 兼容守卫只拦新增 13 张表，往返测试夹具改用本人口述来源。
+
+实机（隔离副本，实时库 sqlite 备份，起点 schema 59）：启动迁移到 60，`action_recurrence`、`source_entities` 与既有 `search_index`、`search_index_meta` 并存；新备份 283MB 且 `PRAGMA integrity_check` 为 ok，上一代备份保留；`Mirror/materials` 维持 78 份；索引在首次检索时重建。机器处于锁屏，窗口级核对不可得。
+
 ## 链接
 
 - `docs/product/reference-products.md` 第 9.3、9.4、9.5 节
+- 2026-11-15 第二批任务卡 `work/tasks/20261115-mega-wave-2/TASK.md`
