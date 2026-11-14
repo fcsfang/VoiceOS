@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: merge-ready
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-5
@@ -47,6 +47,18 @@ owner: coordinator
 - 今日一览只读，不提供完成操作。
 - WidgetKit 小组件不实现：小组件必须是沙盒 .appex，并靠 App Group 受限 entitlement 与应用共享数据；本机只有 Apple Development 签名、没有 provisioning profile，按现有签名链评估为高成本高风险（评估，非实测）。菜单栏今日一览承接「扫一眼今天的任务」的价值。
 - 两个只读审查的修复留到下一批。
+
+## 结果
+
+2026-11-15 J1 与协调者修复集成到 `work/mega-5`：J1 `2d72791`（原 `755bf9b`），协调者修复与测试修正随后。两轮只读审查返回 12 条缺陷与 10 条产品问题。
+
+集成期直接修复：外部完成的冻结态行动允许生成重复后继；重新核对不复活已回收来源；抓取提交后标题与元数据失败降级为日志；Spotlight 首次索引前清理域内旧条目；文件夹监听连续失败三次后跳过并指数退避；恢复包校验 `task_initiations`；实体索引随转写版本刷新并可自愈；待核对空状态与处理问题分离；构建脚本元数据步骤容错并修正版本解析。
+
+`swift build -j 2` 通过；`swift test -j 2` 264 项 0 失败（新增外部完成等价后继测试）。
+
+发行构建：元数据零告警，`extract.actionsdata` 含 `CaptureTextIntent`、`OpenTodayActionsIntent`、`OpenSearchIntent` 三个意图；隔离副本冒烟启动正常。锁屏环境下菜单今日一览点击、Shortcuts 动作发现与 VoiceOver 不可得。
+
+留到第六批：重复任务与提醒事项联动的两处语义缺陷（外部完成不生成后继的上游路径、同标题屏障拦截后继同步）、重复完成后的撤销级联、意图冷启动就绪等待、全景六表进迁移包、产品文案与可发现性十条。
 
 ## 链接
 
