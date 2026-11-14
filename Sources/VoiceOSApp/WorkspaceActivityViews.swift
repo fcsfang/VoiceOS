@@ -174,11 +174,28 @@ struct WorkspaceTaskView: View {
     }
     private var executions: [AssistantExecutionRecord] { model.assistantExecutions.filter { $0.actionID == action.id } }
     private var current: Bool { action.validity == "current" && action.state != "dismissed" }
+    private var showsClarification: Bool {
+        guard action.isExtracted, action.state == "open", action.validity == "current",
+              model.actionClarifications[action.id] == nil,
+              let created = ConversationReflectionFocus.date(action.createdAt),
+              created >= Date().addingTimeInterval(-14 * 24 * 60 * 60) else { return false }
+        return true
+    }
     private var reviewPairs: [ActionReviewPair] { model.actionReviewPairs(for: action) }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 WorkspaceHeading(eyebrow: current ? (action.state == "completed" ? "行动 · 已完成" : action.kind == "task" ? "行动 · 待跟进" : "问题与目标") : model.workspaceActionStatus(action), title: action.title)
+                if showsClarification {
+                    VStack(alignment:.leading,spacing:12) {
+                        Text("这条行动来自你的原话。要把它当作承诺吗？").font(.callout)
+                        HStack(spacing:10) {
+                            Button("这是我的承诺") { clarify(.commit) }.buttonStyle(.borderedProminent)
+                            Button("放到问题与目标") { clarify(.opportunity) }
+                            Button("不是") { clarify(.not) }
+                        }.disabled(model.savingAction)
+                    }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
+                }
                 if !reviewPairs.isEmpty {
                     VStack(alignment:.leading,spacing:12) {
                         ForEach(reviewPairs) { pair in ActionReviewResolutionControl(model:model,pair:pair) }
@@ -400,6 +417,9 @@ struct WorkspaceTaskView: View {
                 }
             }
         }
+    }
+    private func clarify(_ decision: ActionClarificationDecision) {
+        Task { if await model.clarifyAction(action, decision: decision) { error = "" } else { error = model.status } }
     }
     private func saveReplacement(_ claim: CandidateClaim) {
         guard let store=model.store else { return }

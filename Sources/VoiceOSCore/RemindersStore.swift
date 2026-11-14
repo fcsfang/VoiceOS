@@ -225,6 +225,7 @@ extension VoiceOSStore {
         for _ in confirmedCompensations { try checkpoint(.compensationOperationCommitted) }
     }
     static func validateStoredReminders(_ db: Database) throws {
+        let clarifiedOpportunities = try clarifiedOpportunityActionIDs(db)
         for link in try db.query("SELECT l.*,a.kind,a.title,a.state AS action_state,a.intent_json,a.version AS latest_version FROM reminder_links l JOIN actions a ON a.id=l.action_id") {
             let metadata=try link["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self,from:Data($0.utf8)) }
             let historicTitle=metadata?.expressionHistory?.contains { $0.fromTitle == link["desired_title"] } == true
@@ -235,7 +236,7 @@ extension VoiceOSStore {
                let original=try db.query("SELECT v.text,v.reason FROM transcript_versions v JOIN transcripts t ON t.id=v.transcript_id WHERE v.id=? AND t.source_id=?",[version,decision.sourceID]).first {
                 withdrawn=link["action_state"] == "dismissed" && link["desired_title"] == "已撤回 · "+(link["title"] ?? "") && (original["text"]?.contains(decision.quote) == true || original["reason"] == "ai_superseded")
             }
-            guard link["kind"] == "task", link["marker"] == "voiceos-action:" + link["id"]!,
+            guard (link["kind"] == "task" || clarifiedOpportunities.contains(link["action_id"]!)), link["marker"] == "voiceos-action:" + link["id"]!,
                   let pin = link["action_version"].flatMap(Int.init), let latest = link["latest_version"].flatMap(Int.init), pin <= latest,
                   (link["desired_title"] == link["title"] || historicTitle || withdrawn), !(link["calendar_id"] ?? "").isEmpty else { throw VoiceOSError("迁移提醒事项身份或行动版本不一致") }
             if pin > 1 { guard try db.query("SELECT id FROM action_revisions WHERE action_id=? AND version=?", [link["action_id"],String(pin)]).count == 1 else { throw VoiceOSError("迁移提醒事项缺少行动版本") } }
