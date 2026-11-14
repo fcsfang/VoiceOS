@@ -8,26 +8,28 @@ public enum TextCaptureOwnership: String, CaseIterable, Identifiable, Codable, S
 extension VoiceOSStore {
     /// Full text is saved before any cloud processing. Attribution is chosen explicitly,
     /// and imported external text never becomes a personal expression by extraction.
+    /// A blank title is taken from the first non-empty line, capped at 100 characters.
     @discardableResult
     public func recordCapturedText(_ text: String, title: String, ownership: TextCaptureOwnership,
                                    commandID: String = UUID().uuidString) throws -> String {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
-        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanTitle.isEmpty, cleanTitle.count <= 100, !cleanTitle.contains(where: \.isNewline) else { throw VoiceOSError("请填写一行、不超过 100 字的来源标题") }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceOSError("请填写完整原文") }
+        let cleanTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedTitle = cleanTitle.isEmpty ? Self.capturedTextTitle(from: text) : cleanTitle
+        guard !resolvedTitle.isEmpty, resolvedTitle.count <= 100, !resolvedTitle.contains(where: \.isNewline) else { throw VoiceOSError("请填写一行、不超过 100 字的来源标题") }
         if ownership == .personal {
             if let previous = try db.query("SELECT origin,speaker FROM sources WHERE command_id=?", [commandID]).first {
                 guard previous["origin"] == "user", previous["speaker"] == "user" else { throw VoiceOSError("同一次保存不能改变原文归属") }
             }
             let sourceID = try recordUserExpression(text, commandID: commandID)
-            try renameRecording(sourceID: sourceID, title: cleanTitle)
+            try renameRecording(sourceID: sourceID, title: resolvedTitle)
             return sourceID
         }
         let data = Data(text.utf8), hash = Self.relevanceHash(data), fingerprint = "external-text-v1:" + hash
         if let previous = try db.query("SELECT * FROM sources WHERE command_id=?", [commandID]).first {
             guard previous["input_fingerprint"] == fingerprint, previous["origin"] == "external", previous["speaker"] == "unknown" else { throw VoiceOSError("同一次保存不能更换原文或归属") }
             guard ["saved", "reference_only"].contains(previous["state"] ?? "") else { throw VoiceOSError("文字保存尚未完成，请重新打开核对") }
-            try renameRecording(sourceID: previous["id"]!, title: cleanTitle)
+            try renameRecording(sourceID: previous["id"]!, title: resolvedTitle)
             return previous["id"]!
         }
         let id = UUID().uuidString, asset = UUID().uuidString, version = UUID().uuidString
@@ -36,7 +38,7 @@ extension VoiceOSStore {
         try db.execute("""
         INSERT INTO sources(id,command_id,input_fingerprint,asset_id,version_id,name,kind,speaker,origin,state,created_at,timezone,expected_bytes,expected_hash,relative_path)
         VALUES(?,?,?,?,?,?,'external_text','unknown','external','receiving',?,?,?,?,?)
-        """, [id,commandID,fingerprint,asset,version,cleanTitle,now,TimeZone.current.identifier,String(data.count),hash,relative])
+        """, [id,commandID,fingerprint,asset,version,resolvedTitle,now,TimeZone.current.identifier,String(data.count),hash,relative])
         try checkpoint(.intent)
         try data.write(to: staged, options: .withoutOverwriting)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: staged.path)
@@ -50,6 +52,14 @@ extension VoiceOSStore {
         try sealAndQueue(row, info: MediaInfo(duration: 0, kind: "external_text"))
         try checkpoint(.savedCommitted)
         return id
+    }
+
+    static func capturedTextTitle(from text: String) -> String {
+        let line = text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty }
+        guard let line else { return "" }
+        return line.count > 100 ? String(line.prefix(99)) + "…" : line
     }
 
     static func inspectExternalText(_ file: URL) throws -> MediaInfo {

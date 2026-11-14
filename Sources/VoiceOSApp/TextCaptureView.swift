@@ -17,13 +17,17 @@ struct TextCaptureView: View {
     @FocusState private var focus: CaptureField?
     private enum CaptureField: Hashable { case title, text }
     private var validationIssue: String? {
-        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if title.isEmpty { return "填写标题和完整原文后即可保存。" }
-        if title.count > 100 || title.contains(where: \.isNewline) { return "标题需为一行、不超过 100 字；完整原文无需缩短。" }
         if draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "填写完整原文后即可保存。" }
+        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty && (title.count > 100 || title.contains(where: \.isNewline)) { return "标题需为一行、不超过 100 字；留空则取正文首行。" }
         return nil
     }
     private var valid: Bool { validationIssue == nil }
+    private var saveExplanation: String {
+        if draft.allowCloud && model.canUnderstandCapturedText { return "保存后同时整理观点与任务。" }
+        if draft.allowCloud { return "保存后先留在本机；稍后可在资料页允许云端整理。" }
+        return "保存后只留在本机，不发送云端。"
+    }
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -40,16 +44,13 @@ struct TextCaptureView: View {
                 Text("草稿自动保存在本机，切页或重开应用可继续；保存成功后清空。").font(.caption).foregroundStyle(.secondary)
                 if let validationIssue { Text(validationIssue).font(.caption).foregroundStyle(.secondary) }
                 if importing { ProgressView("正在读取完整文件…").controlSize(.small) }
-                if model.modelConfigured && !model.canUnderstandCapturedText {
-                    Text("其他内容正在整理，可先仅本地保存。").font(.caption).foregroundStyle(.secondary)
-                }
+                Text(saveExplanation).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("稍后继续", action: dismiss).disabled(draft.saving)
                     Spacer()
                     if draft.saving { ProgressView().controlSize(.small) }
-                    Button("仅本地保存") { save(process: false) }.disabled(draft.saving || !valid)
-                    Button("保存并理解全文") { save(process: true) }.buttonStyle(.borderedProminent).tint(palette.accent)
-                        .disabled(draft.saving || !valid || !draft.allowCloud || !model.canUnderstandCapturedText)
+                    Button("保存") { save() }.buttonStyle(.borderedProminent).tint(palette.accent)
+                        .disabled(draft.saving || !valid)
                 }
             }.padding(20).background(palette.canvas)
         }.foregroundStyle(palette.text).background(palette.canvas).interactiveDismissDisabled(draft.saving).disabled(!model.initialized || importing)
@@ -76,7 +77,7 @@ struct TextCaptureView: View {
                 Button("保留当前草稿", role: .cancel) { pendingImport = nil }
                 Button("用文件替换", role: .destructive) { applyImport() }
             } message: {
-                Text("导入将替换当前标题和完整原文。若要保留两份内容，请先取消并仅本地保存当前草稿，再导入文件。")
+                Text("导入将替换当前标题和完整原文。若要保留两份内容，请先取消并保存当前草稿，再导入文件。")
             }
     }
     private var content: some View {
@@ -86,13 +87,7 @@ struct TextCaptureView: View {
                 Button("导入文字文件") { chooseFile() }.disabled(draft.saving)
             }
             Text("⌘⇧R 开始或停止口述").font(.caption).foregroundStyle(.secondary)
-            Picker("原文归属", selection: $draft.ownership) {
-                Text("我的表达").tag(TextCaptureOwnership.personal)
-                Text("外部资料").tag(TextCaptureOwnership.external)
-            }.pickerStyle(.segmented).disabled(draft.saving)
-            Text(draft.ownership == .personal ? "只选你亲自表达的判断、想法或行动。" : "文章、摘录和他人笔记；观点不归为你的个人认识或待办。")
-                .font(.callout).foregroundStyle(.secondary)
-            TextField(draft.ownership == .personal ? "表达标题" : "资料标题 · 可填写作者与出处", text: $draft.title).textFieldStyle(.roundedBorder).focused($focus, equals: .title).disabled(draft.saving)
+            TextField(draft.ownership == .personal ? "表达标题 · 可留空，默认取正文首行" : "资料标题 · 可留空，默认取正文首行", text: $draft.title).textFieldStyle(.roundedBorder).focused($focus, equals: .title).disabled(draft.saving)
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("完整原文").font(.headline)
@@ -104,10 +99,19 @@ struct TextCaptureView: View {
                     .workspaceEditorSurface().focused($focus, equals: .text).disabled(draft.saving)
                     .accessibilityLabel("完整原文")
             }.frame(maxHeight: .infinity)
-            Toggle("允许这份完整原文用于云端理解", isOn: $draft.allowCloud).disabled(draft.saving)
-            Text(draft.allowCloud ? "“保存并理解全文”会发送全文；“仅本地保存”不会发送。" : "这次只在本机保存。以后可在资料详情中允许云端理解。")
-                .font(.caption).foregroundStyle(.secondary)
-            if draft.allowCloud && !model.modelConfigured { Text("尚未配置模型连接，仍可先保存完整原文。").font(.caption).foregroundStyle(.secondary) }
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 10) {
+                    Picker("原文归属", selection: $draft.ownership) {
+                        Text("我的表达").tag(TextCaptureOwnership.personal)
+                        Text("外部资料").tag(TextCaptureOwnership.external)
+                    }.pickerStyle(.segmented).disabled(draft.saving)
+                    Toggle("允许云端理解全文", isOn: $draft.allowCloud).disabled(draft.saving)
+                    Text("手打默认我的表达；导入文件默认外部资料并仅本地。").font(.caption).foregroundStyle(.secondary)
+                }.padding(.top, 8)
+            } label: {
+                Text("保存选项 · \(draft.ownership == .personal ? "我的表达" : "外部资料") · \(draft.allowCloud ? "允许云端" : "仅本地")")
+                    .font(.callout)
+            }
         }
     }
     private func chooseFile() {
@@ -153,11 +157,13 @@ struct TextCaptureView: View {
         draft.ownership = .external; draft.allowCloud = false; draft.error = ""; draft.commandID = UUID().uuidString
         pendingImport = nil
     }
-    private func save(process: Bool) {
+    private func save() {
+        guard valid else { return }
         draft.saving = true; draft.error = ""
         let input = draft
+        let process = input.allowCloud && model.canUnderstandCapturedText
         Task {
-            if let id = await model.saveCapturedText(input.text, title: input.title, ownership: input.ownership, allowCloud: process && input.allowCloud, commandID: input.commandID) {
+            if let id = await model.saveCapturedText(input.text, title: input.title, ownership: input.ownership, allowCloud: process, commandID: input.commandID) {
                 draft = TextCaptureDraft()
                 onSaved(id)
             }
