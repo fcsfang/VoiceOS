@@ -1,14 +1,17 @@
 import SwiftUI
 import VoiceOSCore
 
-/// Weekly review over the action workspace. Each section caps at five rows and
-/// opens the task it names; only the daily close section changes a task state.
 struct WeeklyReviewView: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: ControlCenter
     let openTask: (String) -> Void
     @State private var actionError = ""
+    @State private var focusError = ""
+    @State private var focusedIDs: Set<String> = []
+    @State private var selectedFocusIDs: Set<String> = []
+    @State private var focusSaving = false
+    @State private var focusLoaded = false
 
     private var openTasks: [ActionRecord] {
         model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" }
@@ -21,6 +24,13 @@ struct WeeklyReviewView: View {
                           links: model.reminderLinks, now: Date(), calendar: .current)
     }
     private var todayEntries: [ActionTimeEntry] { Array(surface.today.prefix(5)) }
+    private var nextWeekEntries: [ActionTimeEntry] { surface.soon + surface.anytime }
+    private var nextWeekCandidates: [ActionTimeEntry] {
+        let focused = nextWeekEntries.filter { focusedIDs.contains($0.action.id) }
+        let rest = nextWeekEntries.filter { !focusedIDs.contains($0.action.id) }
+        return focused + rest
+    }
+    private var focusSlots: Int { max(0, 3 - focusedIDs.count) }
     private var staleTasks: [ActionRecord] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: Date()) ?? .distantPast
         return openTasks.filter { action in
@@ -51,7 +61,8 @@ struct WeeklyReviewView: View {
     }
     private var isEmpty: Bool {
         dailyReview.today.isEmpty && dailyReview.overdue.isEmpty && dailyReview.remaining.isEmpty &&
-            staleTasks.isEmpty && unclarifiedTasks.isEmpty && weekProgress.isEmpty && pausedTasks.isEmpty
+            staleTasks.isEmpty && unclarifiedTasks.isEmpty && weekProgress.isEmpty && pausedTasks.isEmpty &&
+            nextWeekEntries.isEmpty
     }
     var body: some View {
         ScrollView {
@@ -65,6 +76,7 @@ struct WeeklyReviewView: View {
                     Text("这一周没有需要回顾的行动。").font(.callout).foregroundStyle(.secondary)
                 }
                 if !todayEntries.isEmpty { todaySection }
+                if !nextWeekEntries.isEmpty { nextWeekSection }
                 if !staleTasks.isEmpty { staleSection }
                 if !unclarifiedTasks.isEmpty { unclarifiedSection }
                 if !weekProgress.isEmpty { progressSection }
@@ -72,6 +84,10 @@ struct WeeklyReviewView: View {
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding)
         }
         .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 560)
+        .task {
+            focusedIDs = await model.focusedActionIDs()
+            focusLoaded = true
+        }
     }
 
     private var dailyCloseSection: some View {
@@ -162,6 +178,88 @@ struct WeeklyReviewView: View {
             if !title.isEmpty { return title }
         }
         return nil
+    }
+
+    private var nextWeekSection: some View {
+        let rows = Array(nextWeekCandidates.prefix(5))
+        return WorkspaceSection(title: "下周先做", subtitle: "从即将与随时里挑最多 3 条，确认后加入专注。", icon: "calendar.badge.plus", count: nextWeekEntries.count) {
+            if focusSlots == 0 {
+                Text("已有 3 条专注，先到行动页移出。").vosFont(12).foregroundStyle(palette.warning).padding(.top, 8)
+            }
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, entry in
+                if index > 0 { Divider() }
+                nextWeekRow(entry)
+            }
+            HStack(spacing: 10) {
+                Text(selectedFocusIDs.isEmpty ? "最多还能加入 \(focusSlots) 条" : "已选 \(selectedFocusIDs.count) 条")
+                    .vosFont(12).foregroundStyle(.secondary)
+                Spacer()
+                Button("加入专注") { applyNextWeekFocus() }
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .disabled(selectedFocusIDs.isEmpty || focusSaving)
+            }.padding(.top, 10)
+            if !focusError.isEmpty {
+                Text(focusError).vosFont(12).foregroundStyle(palette.warning).padding(.top, 10)
+            }
+        }
+    }
+
+    private func nextWeekRow(_ entry: ActionTimeEntry) -> some View {
+        let focused = focusedIDs.contains(entry.action.id)
+        let selected = selectedFocusIDs.contains(entry.action.id)
+        let subtitle = dueLabel(entry)
+        return Button {
+            guard focusLoaded, !focused, !focusSaving else { return }
+            if selected {
+                selectedFocusIDs.remove(entry.action.id)
+                focusError = ""
+            } else if focusSlots == 0 {
+                focusError = "已有 3 条专注，先到行动页移出"
+            } else if selectedFocusIDs.count >= focusSlots {
+                focusError = "最多还能加入 \(focusSlots) 条"
+            } else {
+                selectedFocusIDs.insert(entry.action.id)
+                focusError = ""
+            }
+        } label: {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: focused ? "pin.fill" : selected ? "checkmark.circle.fill" : "circle").vosFont(16)
+                    .foregroundStyle(focused || selected ? palette.accent : Color.secondary)
+                    .frame(width: 34, height: 34)
+                    .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(entry.action.title).vosFont(16, weight: .semibold).lineLimit(2).multilineTextAlignment(.leading)
+                    Text(subtitle.isEmpty ? "随时" : subtitle).vosFont(13).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 8)
+                if focused {
+                    Text("已专注").vosFont(12, weight: .medium).foregroundStyle(palette.accent).padding(.top, 5)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain)
+        .padding(.vertical, 10).padding(.horizontal, 10)
+    }
+
+    private func applyNextWeekFocus() {
+        guard !selectedFocusIDs.isEmpty, !focusSaving else { return }
+        let selected = selectedFocusIDs
+        focusSaving = true
+        Task {
+            let current = await model.focusedActionIDs()
+            focusedIDs = current
+            var failure = ""
+            for id in selected where !current.contains(id) {
+                if await model.toggleActionFocus(actionID: id) == nil, failure.isEmpty {
+                    failure = model.status
+                }
+            }
+            focusedIDs = await model.focusedActionIDs()
+            selectedFocusIDs.removeAll()
+            focusSaving = false
+            focusError = failure
+        }
     }
 
     private var todaySection: some View {
