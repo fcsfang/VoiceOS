@@ -602,7 +602,7 @@ struct WorkspaceSourceView: View {
             let loaded=(try? await store.entities(sourceID:source.id)) ?? []
             entities=loaded
             let spanIDs=Set(source.spans.map(\.id))
-            let stale=!loaded.isEmpty && loaded.allSatisfy { $0.sentenceIDs.allSatisfy { !spanIDs.contains($0) } }
+            let stale = !loaded.isEmpty && loaded.allSatisfy { $0.sentenceIDs.allSatisfy { !spanIDs.contains($0) } }
             guard loaded.isEmpty || stale else { return }
             _=try? await store.refreshEntities(sourceID:source.id)
             if Task.isCancelled { return }

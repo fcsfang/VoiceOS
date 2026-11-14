@@ -3158,7 +3158,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
             appendTodayOverviewSection("今天", entries: dueToday, to: &items)
         }
         items.append(.separator())
-        let index = menu.indexOfItem(clipboard) + 1
+        let index = menu.index(of: clipboard) + 1
         for (offset, item) in items.enumerated() { menu.insertItem(item, at: index + offset) }
         todayOverviewMenuItems = items
     }
