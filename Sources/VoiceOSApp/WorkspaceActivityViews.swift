@@ -656,11 +656,11 @@ struct WorkspaceTaskView: View {
     private func changeState() {
         let state:LocalActionState=action.state == "completed" ? .open : .completed
         Task {
-            await model.changeAction(action,state:state)
+            let receipt = await model.changeAction(action,state:state)
             guard model.actionRecords.first(where: { $0.id == action.id })?.state == state.rawValue else { error=model.status; return }
             error=""
             if state == .completed {
-                showUndo("已完成")
+                showUndo("已完成" + (await model.recurrenceDueLabel(receipt?.successorID)))
                 await loadFeedback()
                 if feedbackHistory.isEmpty { askingForResult = true }
             } else {
