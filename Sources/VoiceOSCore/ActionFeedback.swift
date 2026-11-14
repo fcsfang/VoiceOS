@@ -9,6 +9,24 @@ struct FeedbackIntent: Codable, Sendable {
     var organizedClaimID: String? = nil
     var relation: String? = nil
 }
+
+/// One label for every place that names why a feedback entry exists.
+public enum ActionFeedbackLabel {
+    public static func text(relation: String?, kind: String?) -> String {
+        switch relation {
+        case "repeat": "再次提及"
+        case "progress": "实际进展"
+        case "outcome": "收获与结果"
+        default:
+            switch kind {
+            case "outcome": "实际结果"
+            case "reflection": "我的反思"
+            default: "进展"
+            }
+        }
+    }
+}
+
 public struct ActionFeedbackRecord: Identifiable, Codable, Sendable {
     public let id: String
     public let actionID: String
@@ -20,14 +38,7 @@ public struct ActionFeedbackRecord: Identifiable, Codable, Sendable {
     public let createdAt: String
     public let recordingSourceID: String?
     public let relation: String?
-    public var label: String {
-        switch relation {
-        case "repeat": "再次提及"
-        case "progress": "实际进展"
-        case "outcome": "收获与结果"
-        default: kind == "outcome" ? "实际结果" : "我的反思"
-        }
-    }
+    public var label: String { ActionFeedbackLabel.text(relation: relation, kind: kind) }
 }
 extension VoiceOSStore {
     /// Reuse the ordinary durable expression flow for explicitly authorized

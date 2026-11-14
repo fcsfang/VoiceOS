@@ -243,20 +243,6 @@ public struct RecentContentProgressRow: Identifiable, Equatable, Sendable {
         self.id = id; self.actionID = actionID; self.taskTitle = taskTitle
         self.relationLabel = relationLabel; self.text = text; self.date = date
     }
-    /// The record's relation name when it has one; otherwise the kind's name.
-    static func relationLabel(_ relation: String?, kind: String?) -> String {
-        switch relation {
-        case "repeat": "再次提及"
-        case "progress": "实际进展"
-        case "outcome": "收获与结果"
-        default:
-            switch kind {
-            case "outcome": "实际结果"
-            case "reflection": "我的反思"
-            default: "进展"
-            }
-        }
-    }
 }
 
 /// The home content derived once per workspace reload: the day layout the
@@ -292,7 +278,7 @@ public struct RecentContentHomeSnapshot: Equatable, Sendable {
                 guard source.feedbackKind != nil, let actionID = source.feedbackActionID else { return nil }
                 return RecentContentProgressRow(id: source.id, actionID: actionID,
                                                 taskTitle: taskTitles[actionID] ?? RecentContentProgressRow.unavailableTaskTitle,
-                                                relationLabel: RecentContentProgressRow.relationLabel(source.feedbackRelation, kind: source.feedbackKind),
+                                                relationLabel: ActionFeedbackLabel.text(relation: source.feedbackRelation, kind: source.feedbackKind),
                                                 text: source.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
                                                 date: RecentContentIndex.date(of: source))
             }
