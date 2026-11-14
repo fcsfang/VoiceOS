@@ -1935,15 +1935,17 @@ final class ControlCenter: ObservableObject {
     }
     func acceptDroppedFiles(_ urls: [URL]) {
         Task {
-            var media: [URL] = [], textFiles: [URL] = [], unsupported: [String] = []
+            var media: [URL] = [], textFiles: [URL] = [], images: [URL] = [], unsupported: [String] = []
             for url in urls {
                 let ext = url.pathExtension.lowercased()
                 if ext == "txt" || ext == "md" { textFiles.append(url) }
+                else if SourceAttachment.mime(forFileExtension: ext) != nil { images.append(url) }
                 else if let type = UTType(filenameExtension: ext), type.conforms(to: .audio) || type.conforms(to: .movie) { media.append(url) }
                 else { unsupported.append(url.lastPathComponent) }
             }
             if !media.isEmpty { await importFiles(media) }
             for url in textFiles { await importCapturedTextFile(url) }
+            for url in images { await acceptImageCapture(url) }
             if !unsupported.isEmpty { status = "暂不支持这些文件类型：" + unsupported.joined(separator: "、") }
         }
     }
@@ -1955,6 +1957,39 @@ final class ControlCenter: ObservableObject {
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { status = "文字文件为空，未保存"; return }
             _ = await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil)
         } catch { status = "无法读取文字文件：" + error.localizedDescription }
+    }
+    private func acceptImageCapture(_ url: URL) async {
+        guard let store else { status = "资料库尚未打开，未保存"; return }
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        let text: String
+        do { text = try await ImageOCR.recognize(fileURL: url) }
+        catch { status = "图片识别失败：" + error.localizedDescription; return }
+        do {
+            let title = String(url.deletingPathExtension().lastPathComponent.prefix(100))
+            let id = try await store.recordCapturedText(text, title: title, ownership: .external, commandID: UUID().uuidString)
+            let policy = try await store.sourcePolicy(sourceID: id)
+            if !policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: true) }
+            await refresh()
+            do {
+                _ = try await store.attachSourceFile(sourceID: id, fileURL: url)
+                status = "已识别图片文字，仅本机保存"
+            } catch { status = "已识别图片文字，原图保存失败：" + error.localizedDescription }
+        } catch {
+            status = error.localizedDescription
+            await refresh()
+        }
+    }
+    func ocrImage(_ url: URL) async -> (text: String, title: String)? {
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        do {
+            let text = try await ImageOCR.recognize(fileURL: url)
+            return (text, String(url.deletingPathExtension().lastPathComponent.prefix(100)))
+        } catch {
+            status = "图片识别失败：" + error.localizedDescription
+            return nil
+        }
     }
     func saveAndProcessExpression(_ text: String, commandID: String) async -> Bool {
         guard let store, let cognition = textModel, let association = associationModel else {
