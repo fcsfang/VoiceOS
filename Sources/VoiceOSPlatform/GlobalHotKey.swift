@@ -64,7 +64,7 @@ public final class GlobalHotKeyCenter {
 private func globalHotKeyEventHandler(_ call: EventHandlerCallRef?, _ event: EventRef?, _ userData: UnsafeMutableRawPointer?) -> OSStatus {
     guard let event, let userData else { return OSStatus(eventNotHandledErr) }
     var identifier = EventHotKeyID()
-    let status = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, UInt(MemoryLayout<EventHotKeyID>.size), nil, &identifier)
+    let status = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID), nil, MemoryLayout<EventHotKeyID>.size, nil, &identifier)
     guard status == noErr else { return status }
     Unmanaged<GlobalHotKeyCenter>.fromOpaque(userData).takeUnretainedValue().dispatch(identifier.id)
     return noErr
