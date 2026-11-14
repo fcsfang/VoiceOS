@@ -12,7 +12,6 @@ struct RecentContentHome: View {
     let openTask: (String) -> Void
     let capture: () -> Void
     @State private var selectedID: String?
-    @State private var showsAllTasks = false
     private let topAnchor = "home.top"
 
     private var days: [RecentContentDay] { model.homeSnapshot.days }
@@ -92,7 +91,6 @@ struct RecentContentHome: View {
                 }
             }
             .onChange(of: selected?.id) { _, _ in
-                showsAllTasks = false
                 proxy.scrollTo(topAnchor, anchor: .top)
             }
         }
@@ -158,7 +156,7 @@ struct RecentContentHome: View {
                     .padding(.top, 44)
                     .id("home.thread.\(thread.id)")
             }
-            nextSection(digest.tasks)
+            tasksSummary(digest.tasks)
             if let first = item.sourceIDs.first {
                 Button("打开材料") { openSource(first) }.buttonStyle(.plain)
                     .vosFont(13).foregroundStyle(palette.accent).padding(.top, 40)
@@ -208,28 +206,18 @@ struct RecentContentHome: View {
         }.accessibilityIdentifier("home.thread")
     }
 
-    @ViewBuilder private func nextSection(_ tasks: [RecentContentTask]) -> some View {
-        if !tasks.isEmpty {
-            let visible = showsAllTasks ? tasks : Array(tasks.prefix(4))
+    @ViewBuilder private func tasksSummary(_ tasks: [RecentContentTask]) -> some View {
+        if let first = tasks.first {
             VStack(alignment: .leading, spacing: 0) {
-                Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 24)
-                Text("接下来").vosFont(10.5).tracking(1.6).foregroundStyle(.secondary)
-                ForEach(Array(visible.enumerated()), id: \.element.id) { index, task in
-                    VStack(spacing: 0) {
-                        HStack(alignment: .top, spacing: 15) {
-                            Circle().strokeBorder(palette.border, lineWidth: 1).frame(width: 14, height: 14).padding(.top, 4)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(task.title).vosFont(14.5).lineSpacing(3).textSelection(.enabled)
-                            }
-                            Spacer(minLength: 0)
-                        }.padding(.vertical, 15)
-                        if index < visible.count - 1 { Rectangle().fill(palette.border).frame(height: 1) }
-                    }.accessibilityIdentifier("home.task")
-                }
-                if tasks.count > 4 {
-                    Button(showsAllTasks ? "收起" : "全部 \(tasks.count) 条") {
-                        withAnimation(.easeInOut(duration: 0.2)) { showsAllTasks.toggle() }
-                    }.buttonStyle(.plain).vosFont(12.5).foregroundStyle(palette.accent).padding(.top, 14)
+                Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 20)
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("这条材料带出了 \(tasks.count) 条待办").vosFont(13.5).foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                    Button("查看") { openTask(first.id) }
+                        .buttonStyle(.plain)
+                        .vosFont(13, weight: .medium)
+                        .foregroundStyle(palette.accent)
+                        .accessibilityIdentifier("home.tasks.view")
                 }
             }.padding(.top, 54)
         }
