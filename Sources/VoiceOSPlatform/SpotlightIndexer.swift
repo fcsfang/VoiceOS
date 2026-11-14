@@ -3,62 +3,71 @@ import CoreSpotlight
 import UniformTypeIdentifiers
 import VoiceOSCore
 
-@MainActor
-public final class SpotlightIndexer {
-    private struct Entry {
+public actor SpotlightIndexer {
+    private struct Entry: Sendable {
         let id: String
         let title: String
         let summary: String
+        let modified: String
+        var fingerprint: String { id + "\u{1F}" + modified }
     }
 
     public static let domainIdentifier = "VoiceOS"
     private let minimumInterval: TimeInterval
     private var lastIndexedAt: Date?
-    private var lastPayload = ""
-    private var lastIdentifiers: Set<String> = []
+    private var fingerprints: [String: String] = [:]
 
     public init(minimumInterval: TimeInterval = 60) {
         self.minimumInterval = minimumInterval
     }
 
-    public func index(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord]) {
+    public func index(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord]) async {
         guard CSSearchableIndex.isIndexingAvailable() else { return }
         let entries = makeEntries(sources: sources, claims: claims, actions: actions)
-        let payload = entries.map { $0.id + "\u{1F}" + $0.title + "\u{1F}" + $0.summary }.joined(separator: "\u{1E}")
-        if payload == lastPayload { return }
+        let current = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.fingerprint) })
+        let changed = entries.filter { fingerprints[$0.id] != $0.fingerprint }
+        let removed = Set(fingerprints.keys).subtracting(current.keys)
+        guard !changed.isEmpty || !removed.isEmpty else { return }
         let now = Date()
         if let lastIndexedAt, now.timeIntervalSince(lastIndexedAt) < minimumInterval { return }
-        let identifiers = Set(entries.map { $0.id })
-        let removed = lastIdentifiers.subtracting(identifiers)
-        let items = entries.map { entry -> CSSearchableItem in
-            let attributes = CSSearchableItemAttributeSet(contentType: .plainText)
-            attributes.title = entry.title
-            attributes.contentDescription = entry.summary
-            return CSSearchableItem(uniqueIdentifier: entry.id, domainIdentifier: Self.domainIdentifier, attributeSet: attributes)
+        if !changed.isEmpty {
+            let items = changed.map { entry -> CSSearchableItem in
+                let attributes = CSSearchableItemAttributeSet(contentType: .plainText)
+                attributes.title = entry.title
+                attributes.contentDescription = entry.summary
+                return CSSearchableItem(uniqueIdentifier: entry.id, domainIdentifier: Self.domainIdentifier, attributeSet: attributes)
+            }
+            do { try await submit(items) }
+            catch {
+                NSLog("VoiceOS Spotlight 索引失败：\(error.localizedDescription)")
+                return
+            }
+            for entry in changed { fingerprints[entry.id] = entry.fingerprint }
         }
-        guard !items.isEmpty else {
-            finish(payload: payload, identifiers: identifiers, removed: removed)
-            return
+        if !removed.isEmpty {
+            do { try await delete(Array(removed)) }
+            catch {
+                NSLog("VoiceOS Spotlight 清理失败：\(error.localizedDescription)")
+                return
+            }
+            for id in removed { fingerprints[id] = nil }
         }
-        CSSearchableIndex.default().indexSearchableItems(items) { [weak self] error in
-            Task { @MainActor in
-                guard let self else { return }
-                if let error {
-                    NSLog("VoiceOS Spotlight 索引失败：\(error.localizedDescription)")
-                    return
-                }
-                self.finish(payload: payload, identifiers: identifiers, removed: removed)
+        lastIndexedAt = now
+    }
+
+    private func submit(_ items: [CSSearchableItem]) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            CSSearchableIndex.default().indexSearchableItems(items) { error in
+                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
             }
         }
     }
 
-    private func finish(payload: String, identifiers: Set<String>, removed: Set<String>) {
-        lastPayload = payload
-        lastIdentifiers = identifiers
-        lastIndexedAt = Date()
-        guard !removed.isEmpty else { return }
-        CSSearchableIndex.default().deleteSearchableItems(withIdentifiers: Array(removed)) { error in
-            if let error { NSLog("VoiceOS Spotlight 清理失败：\(error.localizedDescription)") }
+    private func delete(_ identifiers: [String]) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            CSSearchableIndex.default().deleteSearchableItems(withIdentifiers: identifiers) { error in
+                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+            }
         }
     }
 
@@ -66,14 +75,17 @@ public final class SpotlightIndexer {
         var entries: [Entry] = []
         for source in sources where ["saved", "reference_only"].contains(source.state) {
             let excerpt = excerpt(from: source.transcript ?? "", limit: 200)
-            entries.append(Entry(id: "source-" + source.id, title: singleLine(source.name), summary: excerpt.isEmpty ? "材料" : excerpt))
+            entries.append(Entry(id: "source-" + source.id, title: singleLine(source.name), summary: excerpt.isEmpty ? "材料" : excerpt,
+                                 modified: [source.createdAt, source.state, source.transcriptVersionID ?? "", source.name].joined(separator: "\u{1F}")))
         }
         for claim in claims where claim.validity == "current" {
-            entries.append(Entry(id: "claim-" + claim.id, title: singleLine(claim.statement), summary: "观点"))
+            entries.append(Entry(id: "claim-" + claim.id, title: singleLine(claim.statement), summary: "观点",
+                                 modified: [String(claim.reviewVersion), claim.validity, claim.statement].joined(separator: "\u{1F}")))
         }
         for action in actions where action.state == "open" && action.validity == "current" {
             let note = singleLine(action.note)
-            entries.append(Entry(id: "action-" + action.id, title: singleLine(action.title), summary: note.isEmpty ? "开放行动" : note))
+            entries.append(Entry(id: "action-" + action.id, title: singleLine(action.title), summary: note.isEmpty ? "开放行动" : note,
+                                 modified: [String(action.version), action.state, action.validity, action.title, action.note].joined(separator: "\u{1F}")))
         }
         return entries
     }
