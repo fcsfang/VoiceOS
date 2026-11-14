@@ -57,6 +57,7 @@ struct WorkspaceSourceView: View {
     @State private var showAllThoughts=false
     @State private var historyState = SourceHistoryState.idle
     @State private var historyTask: Task<Void, Never>?
+    @State private var savingQuestion = false
     @State private var historyClaimID: String?
     @State private var loadedClaimHistory: [ClaimReviewVersion] = []
     @State private var loadedDiscussions: [ConversationRecord] = []
@@ -528,7 +529,6 @@ struct WorkspaceSourceView: View {
             Text("确定后，这份理解将不再用于当前阅读与行动。原文与处理历史会保留。")
         }
         .task(id: source.id + pausedThoughts.map(\.id).joined() + (source.transcriptVersionID ?? "") + String(source.policyVersion) + source.state) {
-            historyTask?.cancel(); historyState = .idle
             guard !pausedThoughts.isEmpty,let store=model.store else { return }
             do { pauseExplanation = try await store.understandingPause(sourceID:source.id).summary }
             catch { pauseExplanation = "暂时无法读取暂停原因：" + error.localizedDescription }
@@ -623,8 +623,10 @@ struct WorkspaceSourceView: View {
     }
     private func saveSelectionAsQuestion() {
         let text=selectedText
-        guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }
+        guard !savingQuestion, !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }
+        savingQuestion = true
         Task { @MainActor in
+            defer { savingQuestion = false }
             if let id=await model.saveCapturedText(text,title:selectionQuestionTitle(text),ownership:.personal,allowCloud:false,commandID:UUID().uuidString) {
                 clearSelection()
                 openSource(id)
@@ -690,9 +692,12 @@ struct WorkspaceSourceView: View {
         }
     }
     private func refreshPlaybackPosition() {
-        guard let player=model.player,player.timeControlStatus == .playing else { playbackMS=nil; return }
-        let seconds=player.currentTime().seconds
-        playbackMS=seconds.isFinite ? Int((seconds*1000).rounded()) : nil
+        var next: Int?
+        if let player=model.player,player.timeControlStatus == .playing {
+            let seconds=player.currentTime().seconds
+            next = seconds.isFinite ? Int((seconds*1000).rounded()) : nil
+        }
+        if next != playbackMS { playbackMS = next }
     }
 }
 struct WorkspaceTranscriptEditor:View {

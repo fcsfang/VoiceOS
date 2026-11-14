@@ -54,6 +54,13 @@ final class ReminderDefaultAlertChecks: XCTestCase {
         XCTAssertEqual(fields.withDefaultAlert(now: date(zone, 2026, 11, 15, 8, 0), calendar: zone), fields)
     }
 
+    func testOverdueDateUsesNextNineOClock() {
+        let zone = calendar("Asia/Shanghai")
+        let due = ReminderDueDate.dateOnly(localDate: "2026-11-01", timeZone: nil)
+        XCTAssertEqual(ReminderFields.nextDefaultAlert(due: due, now: date(zone, 2026, 11, 15, 10, 30), calendar: zone), date(zone, 2026, 11, 16, 9, 0))
+        XCTAssertEqual(ReminderFields.nextDefaultAlert(due: due, now: date(zone, 2026, 11, 15, 7, 0), calendar: zone), date(zone, 2026, 11, 15, 9, 0))
+    }
+
     func testTimedAndEmptyDueGetNoDefault() {
         let zone = calendar("Asia/Shanghai")
         let now = date(zone, 2026, 11, 15, 8, 0)

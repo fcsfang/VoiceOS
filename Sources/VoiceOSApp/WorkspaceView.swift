@@ -138,6 +138,7 @@ struct WorkspaceView: View {
     @State private var creatingTopic = false
     @State private var savingTopic = false
     @State private var newTopicTitle = ""
+    @State private var editingTopicID: String? = nil
     @State private var topicFocus: ConversationReflectionFocus?
     @State private var reviewPeriod = ReflectionPeriod.week
     @State private var reviewAnchor = Date()
@@ -259,7 +260,8 @@ struct WorkspaceView: View {
             .sheet(isPresented:$model.choosingReminderCalendar) {
                 VStack(alignment:.leading,spacing:16) {
                     Text("选择提醒事项清单").font(.title2)
-                    ForEach(model.reminderCalendars) { calendar in Button(calendar.title) { Task { model.proposedReminderCalendarID=calendar.id; await model.saveReminderConnection() } } }
+                    ForEach(model.reminderCalendars) { calendar in Button(calendar.title) { Task { model.proposedReminderCalendarID=calendar.id; await model.saveReminderConnection() } }.disabled(model.remindersBusy) }
+                    if !model.status.isEmpty { Text(model.status).font(.caption).foregroundStyle(.secondary) }
                     Button("取消") { model.choosingReminderCalendar=false }
                 }.padding(24).frame(width:440)
             }
@@ -280,6 +282,7 @@ struct WorkspaceView: View {
             .sheet(isPresented:$showingWeeklyReview) {
                 WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) })
             }
+            .onChange(of:showingWeeklyReview) { _, shown in if !shown { Task { focusedActionIDs = await model.focusedActionIDs() } } }
             .sheet(isPresented:$showingSaveView) { saveViewSheet }
             .sheet(isPresented:$showingPlanToday) { planTodaySheet }
             .sheet(item:$reminderSettingsTarget) { target in
@@ -527,8 +530,8 @@ struct WorkspaceView: View {
         case .task(let id):
             if let action=model.actionRecords.first(where: { $0.id == id }) {
                 WorkspaceTaskView(model:model,action:action,draft:Binding(
-                    get: { taskFeedbackDrafts[id + ":" + String(action.version)] ?? TaskFeedbackDraft() },
-                    set: { taskFeedbackDrafts[id + ":" + String(action.version)] = $0 }
+                    get: { taskFeedbackDrafts[id] ?? TaskFeedbackDraft() },
+                    set: { taskFeedbackDrafts[id] = $0 }
                 ),openSource:{ go(.source($0)) },openDelivery:{ go(.delivery($0)) },discuss:{ Task { await toggleDiscussion(force:true) } })
                     .id(id)
             } else { unavailable("任务暂时不可用",description:"可以回到行动查看当前事项。") }
@@ -664,13 +667,13 @@ struct WorkspaceView: View {
         let catalog = recordCatalog
         return LazyVStack(alignment:.leading,spacing:24) {
             if let topic {
-                HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil } };Spacer(); Menu("调整主题") { Button("修改主题名称") { newTopicTitle=topic.title;creatingTopic=true };Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) } } }
+                HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil };creatingTopic=false;newTopicTitle="";editingTopicID=nil };Spacer(); Menu("调整主题") { Button("修改主题名称") { newTopicTitle=topic.title;editingTopicID=topic.id;creatingTopic=true };Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) } } }
                 WorkspaceHeading(eyebrow:"",title:topic.title,subtitle:"\(topicSources.count) 份材料")
                 WorkspaceTabs(selection:$topicTab,titles:["概览","认识与问题","行动与结果","材料"])
                 topicContent(topic)
             } else {
                 HStack { WorkspaceHeading(eyebrow:"",title:"主题")
-                    Spacer();Button("新建主题") { newTopicTitle="";creatingTopic=true }
+                    Spacer();Button("新建主题") { newTopicTitle="";editingTopicID=nil;creatingTopic=true }
                 }
                 if !model.workspaceTopics.isEmpty {
                     LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing:16)],alignment:.leading,spacing:16) {
@@ -690,7 +693,7 @@ struct WorkspaceView: View {
                 VStack(alignment:.leading,spacing:14) {
                     TextField("你持续关心的主题或问题",text:$newTopicTitle).textFieldStyle(.roundedBorder)
                     HStack {
-                        Button("取消") { creatingTopic=false }
+                        Button("取消") { creatingTopic=false;editingTopicID=nil }
                         Button("保存主题") { Task { await saveTopic() } }.buttonStyle(.borderedProminent).disabled(newTopicTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || savingTopic)
                     }
                 }.padding(18).background(palette.selection,in:RoundedRectangle(cornerRadius:9))
@@ -1330,16 +1333,16 @@ struct WorkspaceView: View {
     }
     private func selectTopic(_ id:String) {
         if page == .themes { path.append(navigationEntry) }
-        go(.themes);topicID=id;topicTab="概览";topicReadingMode="卡片";topicFocus=nil
+        go(.themes);topicID=id;topicTab="概览";topicReadingMode="卡片";topicFocus=nil;creatingTopic=false;newTopicTitle="";editingTopicID=nil
     }
     private func saveTopic() async {
         guard !savingTopic else { return }
         savingTopic = true
         defer { savingTopic = false }
         do {
-            if let topic, creatingTopic, !newTopicTitle.isEmpty { try await model.renameReflectionQuestion(topic.id,title:newTopicTitle,allowCloud:true) }
+            if let editingTopicID, creatingTopic, !newTopicTitle.isEmpty { try await model.renameReflectionQuestion(editingTopicID,title:newTopicTitle,allowCloud:true) }
             else { let created=try await model.createReflectionQuestion(newTopicTitle,allowCloud:true);topicID=created.id }
-            creatingTopic=false;newTopicTitle="";model.queueTopicOrganization()
+            creatingTopic=false;newTopicTitle="";self.editingTopicID=nil;model.queueTopicOrganization()
         } catch { self.error=error.localizedDescription }
     }
     private var trimmedNewViewName: String { newViewName.trimmingCharacters(in:.whitespacesAndNewlines) }
@@ -1378,7 +1381,7 @@ struct WorkspaceView: View {
         if CaptureLink.isCapture(url) { Task { await model.acceptCaptureURL(url) } }
         else { openReminder(url) }
     }
-    private func openReminder(_ url:URL) { Task { if await model.focusReminder(url) { if let id=model.focusedTaskID { go(.task(id)) } else { go(.actions) } } } }
+    private func openReminder(_ url:URL) { Task { if await model.focusReminder(url) { if let id=model.focusedTaskID { go(.task(id)) } else { go(.actions) } } else { error = model.status.isEmpty ? "这条提醒无法定位到当前资料库" : model.status } } }
     private func chooseLibrary() {
         let panel=NSOpenPanel();panel.title="打开已有 VoiceOS 资料库";panel.canChooseDirectories=true;panel.canChooseFiles=false
         panel.begin { response in guard response == .OK,let url=panel.url else { return };guard FileManager.default.fileExists(atPath:url.appendingPathComponent("voiceos.sqlite").path) else { error="所选目录不是 VoiceOS 资料库";return };openWindow(id:"restored-library",value:url.path) }

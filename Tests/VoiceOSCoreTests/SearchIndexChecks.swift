@@ -129,4 +129,37 @@ final class SearchIndexChecks: XCTestCase {
         let firstHits = try await store.search(query: "第一阶段")
         XCTAssertEqual(firstHits.map(\.refID), [first])
     }
+
+    func testShortChineseQueryFallsBackToSubstring() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let claim = try insertClaim(db, statement: "项目复盘的关键结论")
+        try await store.rebuildSearchIndex()
+        let hits = try await store.search(query: "复盘")
+        XCTAssertEqual(hits.map(\.refID), [claim])
+        XCTAssertTrue(hits.first?.snippet.contains("复盘") == true)
+    }
+
+    func testInPlaceActionEditRefreshesIndex() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let claim = try insertClaim(db, statement: "整理材料")
+        let action = try insertAction(db, claimID: claim, title: "整理材料", note: "旧备注")
+        try await store.rebuildSearchIndex()
+        try db.execute("UPDATE actions SET note='新的驻留词汇' WHERE id=?", [action])
+        let hits = try await store.search(query: "驻留词汇")
+        XCTAssertEqual(hits.map(\.refID), [action])
+    }
+
+    func testTrashedMaterialLeavesIndex() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let material = try insertSource(db, name: "回收站材料", transcript: "独特回收站词汇")
+        try await store.rebuildSearchIndex()
+        let before = try await store.search(query: "独特回收站词汇")
+        XCTAssertFalse(before.isEmpty)
+        try db.execute("UPDATE sources SET state='trashed' WHERE id=?", [material])
+        let after = try await store.search(query: "独特回收站词汇")
+        XCTAssertTrue(after.isEmpty)
+    }
 }

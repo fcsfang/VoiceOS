@@ -45,13 +45,15 @@ struct ReminderSettingsView: View {
                 if hasTime { DatePicker("时刻", selection: $due, displayedComponents: [.hourAndMinute]) }
                 if !hasTime {
                     Text("仅日期任务默认在 09:00 通知").font(.caption).foregroundStyle(.secondary)
-                    if !hasAlert, let text = defaultAlertText { Text("实际通知时间 " + text).font(.caption).foregroundStyle(.secondary) }
+                    if let text = defaultAlertText { Text("实际通知时间 " + text).font(.caption).foregroundStyle(.secondary) }
                 }
             }
-            Toggle("发送通知", isOn: $hasAlert)
-            if hasAlert {
-                DatePicker("提醒我", selection: $alert, displayedComponents: [.date, .hourAndMinute])
-                Text("通知时间独立于安排日期。其他已有通知会保留。").font(.caption).foregroundStyle(.secondary)
+            if hasTime {
+                Toggle("发送通知", isOn: $hasAlert)
+                if hasAlert {
+                    DatePicker("提醒我", selection: $alert, displayedComponents: [.date, .hourAndMinute])
+                    Text("通知时间独立于安排日期。其他已有通知会保留。").font(.caption).foregroundStyle(.secondary)
+                }
             }
             Picker("优先级", selection: $priority) {
                 Text("无").tag(0); Text("高").tag(1); Text("中").tag(5); Text("低").tag(9)

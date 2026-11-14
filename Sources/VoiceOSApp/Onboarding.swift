@@ -65,6 +65,10 @@ private struct OnboardingPresenter: ViewModifier {
         content
             .task(id: model.initialized) {
                 guard model.initialized, !completed else { return }
+                guard model.records.isEmpty, model.actionRecords.isEmpty else {
+                    completed = true
+                    return
+                }
                 showing = true
             }
             .sheet(isPresented: $showing) {

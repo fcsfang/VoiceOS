@@ -1119,6 +1119,9 @@ final class Database {
                     try execute("CREATE VIRTUAL TABLE search_index USING fts5(kind UNINDEXED, ref_id UNINDEXED, title, body, tokenize='unicode61')")
                 }
                 try execute("CREATE TABLE search_index_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+                for table in ["sources", "claims", "actions", "transcripts"] {
+                    try execute("CREATE TRIGGER search_dirty_\(table) AFTER UPDATE ON \(table) BEGIN INSERT OR REPLACE INTO search_index_meta(key, value) VALUES('dirty', '1'); END")
+                }
                 try execute("PRAGMA user_version=59")
             }
         }

@@ -27,6 +27,8 @@ struct TextCaptureView: View {
     @State private var templateSaving = false
     @State private var showingManageTemplates = false
     @State private var pendingTemplateDelete: CaptureTemplate?
+    @State private var pendingTemplateApply: CaptureTemplate?
+    @State private var templateApplyAlertPresented = false
     private var validationIssue: String? {
         if draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "填写完整原文后即可保存。" }
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -94,6 +96,10 @@ struct TextCaptureView: View {
             .sheet(isPresented: $showingLinkPrompt) { linkImportSheet }
             .sheet(isPresented: $showingTemplateName) { templateNameSheet }
             .sheet(isPresented: $showingManageTemplates) { manageTemplatesSheet }
+            .alert("替换当前草稿？", isPresented: $templateApplyAlertPresented) {
+                Button("替换", role: .destructive) { if let template = pendingTemplateApply { fillTemplate(template) }; pendingTemplateApply = nil }
+                Button("取消", role: .cancel) { pendingTemplateApply = nil }
+            } message: { Text(pendingTemplateApply.map { "应用「\($0.name)」会覆盖草稿里已有的 \(draft.text.count) 字。" } ?? "") }
             .alert("删除模板？", isPresented: templateDeleteAlertPresented) {
                 Button("取消", role: .cancel) { pendingTemplateDelete = nil }
                 Button("删除", role: .destructive) {
@@ -305,6 +311,15 @@ struct TextCaptureView: View {
         pendingImport = nil
     }
     private func applyTemplate(_ template: CaptureTemplate) {
+        let current = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !current.isEmpty, current != template.body.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            fillTemplate(template)
+            return
+        }
+        pendingTemplateApply = template
+        templateApplyAlertPresented = true
+    }
+    private func fillTemplate(_ template: CaptureTemplate) {
         draft.text = template.body
         draft.error = ""
         focus = .text
