@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-7
@@ -62,5 +62,7 @@ owner: coordinator
 实机：锁屏，⌥⌘Z 材料撤销与 VoiceOver 走查不可得；逻辑由测试覆盖。
 
 ## 链接
+
+- 2026-11-15 已合并为 `9f8b969`（PR #167）。
 
 - `docs/product/reference-products.md` 第 9.5 节
