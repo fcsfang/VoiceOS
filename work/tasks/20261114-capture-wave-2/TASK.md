@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: merge-ready
 started: 2026-11-14
 updated: 2026-11-14
 branch: work/capture-2
@@ -58,7 +58,16 @@ ALTER TABLE source_capture_metadata ADD COLUMN context TEXT;
 - 语音命令需要流式识别，当前在停止后转写，本轮不做。
 - 播客章节、分享扩展、App Intents、邮件入口不在本批。分享扩展需要 .appex 与容器共享，App Intents 需要 SwiftPM 之外的 Intent 元数据处理，邮件需要收信服务或 IMAP 凭据。
 
+## 结果
+
+2026-11-14 B1 与承诺层 C1 集成到 `work/capture-2`。B1 `e6cecc8`，C1 `7e7caa6`，修复 `3e3b20f`、`6a87043`。
+
+`swift build -j 2` 通过，`swift test -j 2` 191 项 0 失败。
+
+实机：终端前台按 ⌥⌘N 打开速记面板，显示「来自 终端」。键盘输入在双实例环境下无法证实，实时实例与测试实例共用 bundle，前台激活落到另一个实例。面板已改为可成为 key 的窗口子类并强制激活。
+
 ## 链接
 
+- 2026-11-14 与承诺层第一批同一 PR 合并。
 - `docs/product/reference-products.md` 第 9.2 节
 - 抓取层第一批任务卡 `work/tasks/20261114-capture-wave/TASK.md`
