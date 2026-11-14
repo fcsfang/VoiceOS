@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a local development app; no permissions request, install or daemon."""
 from pathlib import Path
-import argparse, hashlib, json, os, plistlib, shutil, subprocess, tempfile
+import argparse, hashlib, json, os, platform, plistlib, shutil, subprocess, tempfile
 ROOT = Path(__file__).resolve().parents[2]
 parser = argparse.ArgumentParser()
 parser.add_argument('--configuration', choices=['release', 'debug'], default='release', help='daily use defaults to optimized release; debug is opt-in')
@@ -95,38 +95,43 @@ info['NSServices'] = [
 with (app / 'Contents' / 'Info.plist').open('wb') as f: plistlib.dump(info, f)
 # App Intents metadata: Shortcuts and Siri read Contents/Resources/Metadata.appintents.
 # SwiftPM has no step for it, so replicate the compiler const-values pass and the processor.
-sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
-toolchain = subprocess.check_output(['xcode-select', '-p'], text=True).strip() + '/Toolchains/XcodeDefault.xctoolchain'
-xcode_version = subprocess.check_output(['xcodebuild', '-version', '-build'], text=True).strip().split()[-1]
-intents_source = ROOT / 'Sources' / 'VoiceOSApp' / 'AppIntents.swift'
-with tempfile.TemporaryDirectory() as scratch:
-    protocols = Path(scratch) / 'protocols.json'
-    protocols.write_text(json.dumps(['AppIntent', 'AppShortcutsProvider', 'AppEntity', 'AppEnum']))
-    const_values = Path(scratch) / 'AppIntents.swiftconstvalues'
-    subprocess.run(['xcrun', '--sdk', 'macosx', 'swiftc', '-typecheck', '-module-name', 'VoiceOSApp',
-                    '-sdk', sdk, '-target', 'arm64-apple-macos26.0',
-                    '-Xfrontend', '-const-gather-protocols-file', '-Xfrontend', str(protocols),
-                    '-Xfrontend', '-emit-const-values-path', '-Xfrontend', str(const_values),
-                    str(intents_source)], check=True)
-    values_list = Path(scratch) / 'constvalues.txt'
-    values_list.write_text(str(const_values) + '\n')
-    sources_list = Path(scratch) / 'sources.txt'
-    sources_list.write_text(str(intents_source) + '\n')
-    output = Path(scratch) / 'Metadata'
-    subprocess.run(['xcrun', 'appintentsmetadataprocessor',
-                    '--output', str(output),
-                    '--toolchain-dir', toolchain,
-                    '--module-name', 'VoiceOSApp',
-                    '--sdk-root', sdk,
-                    '--xcode-version', xcode_version,
-                    '--platform-family', 'macos',
-                    '--deployment-target', '26.0',
-                    '--target-triple', 'arm64-apple-macos26.0',
-                    '--source-file-list', str(sources_list),
-                    '--swift-const-vals-list', str(values_list)], check=True)
-    target = bundle_resources / 'Metadata.appintents'
-    if target.exists(): shutil.rmtree(target)
-    shutil.copytree(output / 'Metadata.appintents', target)
+# A metadata failure must not block signing or replace the previous good app with an unsigned one.
+try:
+    sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
+    toolchain = subprocess.check_output(['xcode-select', '-p'], text=True).strip() + '/Toolchains/XcodeDefault.xctoolchain'
+    xcode_version = subprocess.check_output(['xcodebuild', '-version'], text=True).split()[1]
+    target_triple = platform.machine() + '-apple-macos26.0'
+    intents_source = ROOT / 'Sources' / 'VoiceOSApp' / 'AppIntents.swift'
+    with tempfile.TemporaryDirectory() as scratch:
+        protocols = Path(scratch) / 'protocols.json'
+        protocols.write_text(json.dumps(['AppIntent', 'AppShortcutsProvider', 'AppEntity', 'AppEnum']))
+        const_values = Path(scratch) / 'AppIntents.swiftconstvalues'
+        subprocess.run(['xcrun', '--sdk', 'macosx', 'swiftc', '-typecheck', '-module-name', 'VoiceOSApp',
+                        '-sdk', sdk, '-target', target_triple,
+                        '-Xfrontend', '-const-gather-protocols-file', '-Xfrontend', str(protocols),
+                        '-Xfrontend', '-emit-const-values-path', '-Xfrontend', str(const_values),
+                        str(intents_source)], check=True)
+        values_list = Path(scratch) / 'constvalues.txt'
+        values_list.write_text(str(const_values) + '\n')
+        sources_list = Path(scratch) / 'sources.txt'
+        sources_list.write_text(str(intents_source) + '\n')
+        output = Path(scratch) / 'Metadata'
+        subprocess.run(['xcrun', 'appintentsmetadataprocessor',
+                        '--output', str(output),
+                        '--toolchain-dir', toolchain,
+                        '--module-name', 'VoiceOSApp',
+                        '--sdk-root', sdk,
+                        '--xcode-version', xcode_version,
+                        '--platform-family', 'macos',
+                        '--deployment-target', '26.0',
+                        '--target-triple', target_triple,
+                        '--source-file-list', str(sources_list),
+                        '--swift-const-vals-list', str(values_list)], check=True)
+        target = bundle_resources / 'Metadata.appintents'
+        if target.exists(): shutil.rmtree(target)
+        shutil.copytree(output / 'Metadata.appintents', target)
+except subprocess.CalledProcessError as error:
+    print(f'warning: App Intents metadata skipped: {error}')
 subprocess.run(['codesign', '--force', '--sign', signing_identity, str(app)], check=True)
 subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)
 register = Path('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister')

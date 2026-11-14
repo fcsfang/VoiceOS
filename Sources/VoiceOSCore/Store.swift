@@ -248,16 +248,18 @@ public actor VoiceOSStore {
             let actual = try DurableFiles.hash(file)
             guard actual.0 == expectedBytes, actual.1 == row["expected_hash"] else { throw VoiceOSError("原件完整性核对失败") }
             let info = try await inspectSource(file, kind: row["kind"]!)
-            try restoreVerifiedOriginal(row, info: info)
-            return true
+            return try restoreVerifiedOriginal(row, info: info)
         } catch {
             try db.execute("UPDATE sources SET error=? WHERE id=?", [Self.verificationFailureMessage, id])
             return false
         }
     }
-    private func restoreVerifiedOriginal(_ row: [String: String], info: MediaInfo) throws {
+    private func restoreVerifiedOriginal(_ row: [String: String], info: MediaInfo) throws -> Bool {
         let id = row["id"]!
+        var restored = false
         try db.transaction {
+            guard let state = try db.query("SELECT state FROM sources WHERE id=?", [id]).first?["state"], ["saved", "quarantined"].contains(state) else { return }
+            restored = true
             try db.execute("UPDATE sources SET state='saved',duration=?,kind=?,error=NULL WHERE id=?", [String(info.duration), info.kind, id])
             try db.execute("INSERT OR IGNORE INTO assets(id,source_id,relative_path,bytes,sha256,role) VALUES(?,?,?,?,?,'original')", [row["asset_id"], id, row["relative_path"], row["expected_bytes"], row["expected_hash"]])
             let transcripts = try db.query("SELECT 1 FROM transcripts WHERE source_id=? LIMIT 1", [id])
@@ -267,6 +269,7 @@ public actor VoiceOSStore {
                 try db.execute("UPDATE jobs SET state='queued',lease_token=NULL,error=NULL WHERE source_id=? AND input_version_id=? AND stage='transcription' AND config='pending-local-speech-v1' AND state NOT IN ('queued','running')", [id, row["version_id"]])
             }
         }
+        return restored
     }
     private func verifiedHash(_ url: URL) throws -> (Int64, String) {
         // Session-only reuse. ctime also changes if equal-size contents are edited

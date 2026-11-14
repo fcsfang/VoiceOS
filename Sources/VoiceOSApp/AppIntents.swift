@@ -5,6 +5,8 @@ import Foundation
 @MainActor
 protocol VoiceOSIntentEndpoint {
     func captureVoiceOSIntent(text: String, title: String?) async -> Bool
+    func openTodayActions() -> Bool
+    func openSearch() -> Bool
 }
 
 enum VoiceOSIntentError: Error, CustomLocalizedStringResourceConvertible {
@@ -36,5 +38,29 @@ struct CaptureTextIntent: AppIntent {
         guard let endpoint else { throw VoiceOSIntentError.notReady }
         guard await endpoint.captureVoiceOSIntent(text: text, title: title) else { throw VoiceOSIntentError.failed }
         return .result(dialog: "已存入 VoiceOS")
+    }
+}
+
+struct OpenTodayActionsIntent: AppIntent {
+    static let title: LocalizedStringResource = "打开今天的行动"
+    static let description: IntentDescription = IntentDescription("在 VoiceOS 打开今天与逾期的行动列表。")
+    static let openAppWhenRun: Bool = true
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let endpoint = await MainActor.run { NSApp.delegate as? VoiceOSIntentEndpoint }
+        guard let endpoint else { throw VoiceOSIntentError.notReady }
+        guard await endpoint.openTodayActions() else { throw VoiceOSIntentError.notReady }
+        return .result(dialog: "已打开今天的行动")
+    }
+}
+
+struct OpenSearchIntent: AppIntent {
+    static let title: LocalizedStringResource = "在 VoiceOS 搜索"
+    static let description: IntentDescription = IntentDescription("在 VoiceOS 打开搜索，查找标题、原话、理解或行动。")
+    static let openAppWhenRun: Bool = true
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let endpoint = await MainActor.run { NSApp.delegate as? VoiceOSIntentEndpoint }
+        guard let endpoint else { throw VoiceOSIntentError.notReady }
+        guard await endpoint.openSearch() else { throw VoiceOSIntentError.notReady }
+        return .result(dialog: "已打开 VoiceOS 搜索")
     }
 }

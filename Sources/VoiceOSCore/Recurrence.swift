@@ -67,7 +67,7 @@ extension VoiceOSStore {
             return nil
         }
         let alreadyCompleted = row["state"] == "completed"
-        guard row["validity"] == "current", alreadyCompleted || row["state"] == "open",
+        guard alreadyCompleted || row["validity"] == "current", alreadyCompleted || row["state"] == "open",
               let period = series["period"].flatMap(RecurrencePeriod.init(rawValue:)), let seriesID = series["series_id"] else {
             throw VoiceOSError("行动版本或依据已变化，请重新核对")
         }

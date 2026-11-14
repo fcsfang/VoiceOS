@@ -596,13 +596,14 @@ struct WorkspaceSourceView: View {
             }
             catch { self.error="原件读取失败：" + error.localizedDescription }
         }
-        .task(id: source.id) {
+        .task(id: source.id + (source.transcriptVersionID ?? "")) {
             entities=[]
             guard source.transcript != nil,let store=model.store else { return }
-            if let loaded=try? await store.entities(sourceID:source.id),!loaded.isEmpty {
-                entities=loaded
-                return
-            }
+            let loaded=(try? await store.entities(sourceID:source.id)) ?? []
+            entities=loaded
+            let spanIDs=Set(source.spans.map(\.id))
+            let stale=!loaded.isEmpty && loaded.allSatisfy { $0.sentenceIDs.allSatisfy { !spanIDs.contains($0) } }
+            guard loaded.isEmpty || stale else { return }
             _=try? await store.refreshEntities(sourceID:source.id)
             if Task.isCancelled { return }
             entities=(try? await store.entities(sourceID:source.id)) ?? []

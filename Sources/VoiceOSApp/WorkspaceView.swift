@@ -242,6 +242,8 @@ struct WorkspaceView: View {
                 model.pendingWorkspaceSourceID = nil
                 go(.source(id))
             }
+            .onChange(of:model.pendingWorkspaceRoute) { _, _ in consumePendingNavigation() }
+            .onChange(of:model.pendingWorkspaceTaskID) { _, _ in consumePendingNavigation() }
             .onChange(of:model.taskPresentation) { _, _ in
                 if let id=model.focusedTaskID { go(.task(id)) } else { go(.actions) }
             }
@@ -253,6 +255,7 @@ struct WorkspaceView: View {
             .onChange(of:actionFilter) { _, filter in actionKeyboardHighlightID=nil;if !["全部","我的待办"].contains(filter) { exitActionSelection() } }
             .onOpenURL { url in if model.initialized { routeExternalURL(url) } else { pendingURL=url } }
             .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;routeExternalURL(url) } }
+            .onAppear { consumePendingNavigation() }
             .onDisappear { Task { await model.setPanoramaVisible(false) } }
     }
     private var sheetContent: some View {
@@ -849,9 +852,9 @@ struct WorkspaceView: View {
             }
             if visible.isEmpty && (actionFilter == "AI 助理" || actionFilter == "全部" ? executions.isEmpty : true) && !(actionFilter == "全部" && (!paused.isEmpty || !overviewGoals.isEmpty)) {
                 WorkspaceEmptyState(
-                    title: actionFilter == "历史记录" ? "还没有历史任务记录" : actionFilter == "已完成" ? "还没有已完成的事项" : actionFilter == "AI 助理" ? "还没有 AI 代办" : actionFilter == "待核对" ? "当前没有需要核对的行动" : actionFilter == "问题与目标" ? "还没有问题与目标" : "目前没有可执行的待办",
+                    title: actionFilter == "历史记录" ? "还没有历史任务记录" : actionFilter == "已完成" ? "还没有已完成的事项" : actionFilter == "AI 助理" ? "还没有 AI 代办" : actionFilter == "待核对" ? "没有待核对的行动" : actionFilter == "问题与目标" ? "还没有问题与目标" : "目前没有可执行的待办",
                     systemImage:"checkmark.circle",
-                    description: actionFilter == "AI 助理" ? "在一项待办中选择“交给 AI”，编辑要求后开始执行。" : "已暂停的历史、问题与目标分别保留，可通过上方分类查看。"
+                    description: actionFilter == "AI 助理" ? "在一项待办中选择“交给 AI”，编辑要求后开始执行。" : actionFilter == "待核对" ? "下方处理问题里的事项仍需要查看。" : "已暂停的历史、问题与目标分别保留，可通过上方分类查看。"
                 ) {
                     HStack { Button("记录想法") { go(.capture) };if actionFilter != "问题与目标" { Button("查看问题与目标") { actionFilter="问题与目标" } } }
                 }
@@ -1381,6 +1384,19 @@ struct WorkspaceView: View {
         case .actions: actionFilter=view.filter;page = .actions
         }
         error=""
+    }
+    private func consumePendingNavigation() {
+        if let route = model.pendingWorkspaceRoute {
+            model.pendingWorkspaceRoute = nil
+            switch route {
+            case .actions: go(.actions)
+            case .search: if page == .search { searchFocused = true } else { go(.search) }
+            }
+        }
+        if let id = model.pendingWorkspaceTaskID {
+            model.pendingWorkspaceTaskID = nil
+            go(.task(id))
+        }
     }
     private func routeExternalURL(_ url:URL) {
         if CaptureLink.isCapture(url) { Task { await model.acceptCaptureURL(url) } }

@@ -193,4 +193,28 @@ final class RecurrenceChecks: XCTestCase {
         XCTAssertEqual(try db.query("SELECT count(*) AS n FROM action_recurrence").first?["n"], "0")
         XCTAssertFalse(try db.query("SELECT id FROM action_revisions WHERE action_id=? AND command_id=?", [action, "recurrence-complete:" + action]).isEmpty)
     }
+
+    func testExternalCompletionEquivalentCreatesOneSuccessor() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let zone = calendar("Asia/Shanghai")
+        let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"))
+        try await store.setRecurrence(actionID: action, period: .weekly)
+        _ = try await store.setActionState(actionID: action, expectedVersion: 1, state: .completed)
+        let successorRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
+        let successor = try XCTUnwrap(successorRaw)
+        let old = try XCTUnwrap(try db.query("SELECT state,version FROM actions WHERE id=?", [action]).first)
+        XCTAssertEqual(old["state"], "completed")
+        XCTAssertEqual(old["version"], "2")
+        let row = try XCTUnwrap(try db.query("SELECT state,validity,title FROM actions WHERE id=?", [successor]).first)
+        XCTAssertEqual(row["state"], "open")
+        XCTAssertEqual(row["validity"], "current")
+        XCTAssertEqual(row["title"], "每周复盘")
+        let successorPeriod = try await store.recurrence(actionID: successor)
+        XCTAssertEqual(successorPeriod, .weekly)
+        let repeated = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 9, 8, 0))
+        XCTAssertNil(repeated)
+        XCTAssertEqual(try db.query("SELECT count(*) AS n FROM actions").first?["n"], "2")
+        XCTAssertEqual(try db.query("SELECT count(*) AS n FROM action_recurrence").first?["n"], "1")
+    }
 }
