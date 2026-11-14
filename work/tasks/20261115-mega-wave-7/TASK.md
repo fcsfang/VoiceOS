@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: merge-ready
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-7
@@ -50,6 +50,16 @@ owner: coordinator
 - 撤销栈仍是单会话内存，重启即清。
 - 无障碍只做标签与分组，不做 VoiceOver 实机走查。
 - 基线脚本只测固定操作，不做 UI 帧率。
+
+## 结果
+
+2026-11-15 三条线集成到 `work/mega-7`：L1 `7db8a34`，L2 `79d6ca0`，L3 `e4ce19c`。
+
+`swift build -j 2` 一次通过；`swift test -j 2` 278 项 0 失败（新增撤销栈混合条目、材料处置与改名逆操作、跳过原因等 8 项）。
+
+性能基线实测（副本 284MB，7 次中位）：打开 130.7ms（首跑冷缓存 877.8ms），FTS 重建并检索 215.0ms（区间约 20%），证据含 integrity ok 与 1652 行索引。`snapshot` 与 `mirror` 需 Swift 运行时，脚本输出 null。
+
+实机：锁屏，⌥⌘Z 材料撤销与 VoiceOver 走查不可得；逻辑由测试覆盖。
 
 ## 链接
 
