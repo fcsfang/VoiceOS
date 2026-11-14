@@ -7,6 +7,7 @@ protocol VoiceOSIntentEndpoint {
     func captureVoiceOSIntent(text: String, title: String?) async -> Bool
     func openTodayActions() -> Bool
     func openSearch() -> Bool
+    func toggleDictation() async -> Bool?
 }
 
 enum VoiceOSIntentError: Error, CustomLocalizedStringResourceConvertible {
@@ -62,5 +63,17 @@ struct OpenSearchIntent: AppIntent {
         guard let endpoint else { throw VoiceOSIntentError.notReady }
         guard await endpoint.openSearch() else { throw VoiceOSIntentError.notReady }
         return .result(dialog: "已打开 VoiceOS 搜索")
+    }
+}
+
+struct ToggleDictationIntent: AppIntent {
+    static let title: LocalizedStringResource = "开始或停止口述"
+    static let description: IntentDescription = IntentDescription("在 VoiceOS 开始或停止一次口述，录音只在本机处理。")
+    static let openAppWhenRun: Bool = true
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let endpoint = await MainActor.run { NSApp.delegate as? VoiceOSIntentEndpoint }
+        guard let endpoint else { throw VoiceOSIntentError.notReady }
+        guard let started = await endpoint.toggleDictation() else { throw VoiceOSIntentError.notReady }
+        return .result(dialog: started ? "口述已开始" : "口述已停止")
     }
 }

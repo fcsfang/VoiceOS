@@ -4061,15 +4061,17 @@ extension ControlCenter {
 }
 
 extension ApplicationDelegate: VoiceOSIntentEndpoint {
-    @MainActor func captureVoiceOSIntent(text: String, title: String?) async -> Bool {
+    private func readyControlCenter() async -> ControlCenter? {
         let deadline = Date().addingTimeInterval(8)
         while true {
-            if let model = ControlCenter.primary, model.initialized {
-                return await model.acceptCaptureRequest(text: text, title: title, url: nil, successURL: nil, context: "快捷指令")
-            }
-            guard Date() < deadline else { return false }
+            if let model = ControlCenter.primary, model.initialized { return model }
+            guard Date() < deadline else { return nil }
             try? await Task.sleep(for: .milliseconds(100))
         }
+    }
+    @MainActor func captureVoiceOSIntent(text: String, title: String?) async -> Bool {
+        guard let model = await readyControlCenter() else { return false }
+        return await model.acceptCaptureRequest(text: text, title: title, url: nil, successURL: nil, context: "快捷指令")
     }
     @MainActor func openTodayActions() -> Bool {
         guard let model = ControlCenter.primary else { return false }
@@ -4082,5 +4084,17 @@ extension ApplicationDelegate: VoiceOSIntentEndpoint {
         openMainWindow()
         model.pendingWorkspaceRoute = .search
         return true
+    }
+    @MainActor func toggleDictation() async -> Bool? {
+        guard let model = await readyControlCenter(), model.canToggleCaptureDictation else { return nil }
+        let wasActive = model.dictationActive
+        model.toggleCaptureDictation()
+        if wasActive { return false }
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            if model.dictationActive { return true }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        return nil
     }
 }
