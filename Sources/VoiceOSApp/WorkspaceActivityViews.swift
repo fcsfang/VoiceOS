@@ -115,8 +115,12 @@ private struct ActionOriginalQuotes: View {
                let span = source.spans.first(where: { $0.id == reference.spanID }),
                let transcript = source.transcript {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text(source.displayTitle).vosFont(12, weight: .medium).foregroundStyle(.secondary)
-                    Text(quote(span, text: transcript)).vosFont(15).lineSpacing(4).textSelection(.enabled)
+                    QuoteHoverPreview(sourceTitle: source.displayTitle, snippet: quote(span, text: transcript), open: { openSource(source.id) }) {
+                        Text(source.displayTitle).vosFont(12, weight: .medium).foregroundStyle(.secondary)
+                    }
+                    QuoteHoverPreview(sourceTitle: source.displayTitle, snippet: quote(span, text: transcript), open: { openSource(source.id) }) {
+                        Text(quote(span, text: transcript)).vosFont(15).lineSpacing(4).textSelection(.enabled)
+                    }
                     HStack(spacing: 14) {
                         Button("打开材料") { openSource(source.id) }
                         if let start = span.startMS, let end = span.endMS {
@@ -126,7 +130,9 @@ private struct ActionOriginalQuotes: View {
                 }
             } else if let source = model.records.first(where: { $0.id == reference.sourceID }) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(source.displayTitle).vosFont(12, weight: .medium).foregroundStyle(.secondary)
+                    QuoteHoverPreview(sourceTitle: source.displayTitle, snippet: "原话版本已变化，打开材料查看当前原文。", open: { openSource(source.id) }) {
+                        Text(source.displayTitle).vosFont(12, weight: .medium).foregroundStyle(.secondary)
+                    }
                     Text("原话版本已变化，打开材料查看当前原文。").font(.caption).foregroundStyle(.secondary)
                     Button("打开材料") { openSource(source.id) }.font(.caption)
                 }

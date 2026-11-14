@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import VoiceOSCore
 
 private enum SourceHistoryState {
@@ -58,6 +59,7 @@ struct WorkspaceSourceView: View {
     @State private var error=""
     @State private var claimNotes:[String:ClaimNote]=[:]
     @State private var captureInfo:CaptureMetadata?
+    @State private var playbackMS:Int?
     private var sourceStatus: String {
         if source.transcript == nil { return source.jobState == "failed" ? "转写失败 · 原件已保存" : "尚未完成转写 · 原件已保存" }
         if source.localOnly { return "仅本机保存" }
@@ -278,7 +280,11 @@ struct WorkspaceSourceView: View {
                                             ForEach(Array(thought.references.enumerated()),id:\.offset) { _,ref in
                                                 if let member=model.records.first(where: { $0.id == ref.sourceID }),expressionIDs.contains(member.id),ref.transcriptVersionID == member.transcriptVersionID,
                                                    let span=member.spans.first(where: { $0.id == ref.spanID }),let text=member.transcript {
-                                                    if expressionIDs.count > 1 { Text(member.name).font(.caption).foregroundStyle(.secondary) }
+                                                    if expressionIDs.count > 1 {
+                                                        QuoteHoverPreview(sourceTitle:member.displayTitle,snippet:quote(span,text:text),open:{ openSource(member.id) }) {
+                                                            Text(member.name).font(.caption).foregroundStyle(.secondary)
+                                                        }
+                                                    }
                                                     Text(quote(span,text:text)).foregroundStyle(.secondary).textSelection(.enabled)
                                                     if let start=span.startMS,let end=span.endMS { Button("回听这段原话",systemImage:"play.circle") { Task { _=await model.playSpan(member,milliseconds:start,endMilliseconds:end) } } }
                                                 }
@@ -337,7 +343,14 @@ struct WorkspaceSourceView: View {
                             else { Text("尚无可用转写 · " + (source.error ?? workspaceStateLabel(source.jobState ?? source.state))).foregroundStyle(.secondary) }
                             if source.state == "saved" { Button("打开保存的原件",systemImage:"play.circle") { Task { await model.play(source) } } }
                             ForEach(source.spans.filter { $0.startMS != nil && $0.endMS != nil }) { span in
-                                Button(time(span.startMS!) + "—" + time(span.endMS!) + " · 回听") { Task { _=await model.playSpan(source,milliseconds:span.startMS!,endMilliseconds:span.endMS!) } }
+                                let active=spanIsPlaying(span)
+                                Button { Task { _=await model.playSpan(source,milliseconds:span.startMS!,endMilliseconds:span.endMS!) } } label: {
+                                    Text(time(span.startMS!) + "—" + time(span.endMS!) + " · 回听")
+                                        .vosFont(13, weight:active ? .semibold : .regular)
+                                        .padding(.horizontal,8).padding(.vertical,3)
+                                        .background(active ? palette.selection : .clear, in: RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+                                        .contentShape(Rectangle())
+                                }.buttonStyle(.plain)
                             }
                             if let player=model.player { NativePlayerView(player:player).frame(height:source.kind == "video" ? 240 : 70) }
                             Text("原文件：" + source.name).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
@@ -440,6 +453,12 @@ struct WorkspaceSourceView: View {
             catch { self.error="旁注读取失败：" + error.localizedDescription }
         }
         .onChange(of:source.id) { _,_ in showingOriginal=false }
+        .task {
+            while !Task.isCancelled {
+                refreshPlaybackPosition()
+                do { try await Task.sleep(for:.milliseconds(300)) } catch { return }
+            }
+        }
     }
     private func captureLink(_ value:String?)->URL? {
         guard let value,let url=URL(string:value),let scheme=url.scheme?.lowercased(),scheme=="http" || scheme=="https" else { return nil }
@@ -472,6 +491,15 @@ struct WorkspaceSourceView: View {
     }
     private func quote(_ span:TranscriptSpan,text:String) -> String { let s=Array(text.unicodeScalars);guard span.textStart>=0,span.textEnd<=s.count else { return "原文范围已变化" };return String(String.UnicodeScalarView(s[span.textStart..<span.textEnd])) }
     private func time(_ ms:Int)->String { String(format:"%02d:%02d",ms/60000,ms/1000%60) }
+    private func spanIsPlaying(_ span:TranscriptSpan)->Bool {
+        guard let ms=playbackMS,let start=span.startMS,let end=span.endMS else { return false }
+        return ms>=start && ms<end
+    }
+    private func refreshPlaybackPosition() {
+        guard let player=model.player,player.timeControlStatus == .playing else { playbackMS=nil; return }
+        let seconds=player.currentTime().seconds
+        playbackMS=seconds.isFinite ? Int((seconds*1000).rounded()) : nil
+    }
 }
 struct WorkspaceTranscriptEditor:View {
     @ObservedObject var model:ControlCenter
