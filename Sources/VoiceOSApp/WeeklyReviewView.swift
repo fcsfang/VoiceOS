@@ -108,7 +108,7 @@ struct WeeklyReviewView: View {
             }
             if !review.overdue.isEmpty {
                 if !review.today.isEmpty { Divider() }
-                Text("逾期").vosFont(13, weight: .semibold).foregroundStyle(palette.warning)
+                Text("逾期").vosFont(13, weight: .semibold).foregroundStyle(palette.warning).accessibilityAddTraits(.isHeader)
                     .padding(.top, 12).padding(.bottom, 2)
                 ForEach(Array(review.overdue.enumerated()), id: \.element.id) { index, entry in
                     if index > 0 { Divider() }
@@ -134,6 +134,7 @@ struct WeeklyReviewView: View {
                         .foregroundStyle(overdue ? palette.warning : palette.accent)
                         .frame(width: 34, height: 34)
                         .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 6) {
                         Text(entry.action.title).vosFont(16, weight: .semibold).lineLimit(2).multilineTextAlignment(.leading)
                         if !subtitle.isEmpty {
@@ -144,14 +145,17 @@ struct WeeklyReviewView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
             }.buttonStyle(.plain)
             if overdue {
                 Text("逾期").vosFont(12, weight: .medium).foregroundStyle(palette.warning).padding(.top, 5)
             }
             Button("完成") { apply(entry, .completed) }
                 .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .accessibilityLabel("完成：" + entry.action.title)
             Button("不再跟进") { apply(entry, .dismissed) }
                 .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .accessibilityLabel("不再跟进：" + entry.action.title)
         }
         .padding(.vertical, 10).padding(.horizontal, 10)
     }
@@ -232,6 +236,7 @@ struct WeeklyReviewView: View {
                     .foregroundStyle(focused || selected ? palette.accent : Color.secondary)
                     .frame(width: 34, height: 34)
                     .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(entry.action.title).vosFont(16, weight: .semibold).lineLimit(2).multilineTextAlignment(.leading)
                     Text(subtitle.isEmpty ? "随时" : subtitle).vosFont(13).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
@@ -243,7 +248,9 @@ struct WeeklyReviewView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+            .accessibilityElement(children: .combine)
         }.buttonStyle(.plain)
+        .accessibilityValue(focused ? "已专注" : selected ? "已选" : "未选")
         .padding(.vertical, 10).padding(.horizontal, 10)
     }
 
@@ -330,6 +337,7 @@ struct WeeklyReviewView: View {
                 Image(systemName: icon).vosFont(16).foregroundStyle(palette.accent)
                     .frame(width: 34, height: 34)
                     .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(title).vosFont(16, weight: .semibold).lineLimit(2).multilineTextAlignment(.leading)
                     if !subtitle.isEmpty {
@@ -343,10 +351,11 @@ struct WeeklyReviewView: View {
                 if !trailing.isEmpty {
                     Text(trailing).vosFont(12, weight: .medium).foregroundStyle(trailingColor ?? Color.secondary).padding(.top, 3)
                 }
-                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary).padding(.top, 3)
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
             }
             .padding(.vertical, 14).padding(.horizontal, 10)
             .contentShape(Rectangle())
+            .accessibilityElement(children: .combine)
         }.buttonStyle(.plain).disabled(!enabled)
     }
     private func dueLabel(_ entry: ActionTimeEntry) -> String {
