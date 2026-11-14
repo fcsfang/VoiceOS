@@ -101,6 +101,47 @@ struct TaskFeedbackDraft {
     var expanded = false
 }
 
+private struct ActionOriginalQuotes: View {
+    @ObservedObject var model: ControlCenter
+    let action: ActionRecord
+    let openSource: (String) -> Void
+    private var references: [ClaimReference] {
+        model.claims.first { $0.id == action.claimID }?.references ?? []
+    }
+    var body: some View {
+        ForEach(Array(references.enumerated()), id: \.offset) { _, reference in
+            if let source = model.records.first(where: { $0.id == reference.sourceID }),
+               source.transcriptVersionID == reference.transcriptVersionID,
+               let span = source.spans.first(where: { $0.id == reference.spanID }),
+               let transcript = source.transcript {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(source.displayTitle).vosFont(12, weight: .medium).foregroundStyle(.secondary)
+                    Text(quote(span, text: transcript)).vosFont(15).lineSpacing(4).textSelection(.enabled)
+                    HStack(spacing: 14) {
+                        Button("打开材料") { openSource(source.id) }
+                        if let start = span.startMS, let end = span.endMS {
+                            Button("回听这段原话", systemImage: "play.circle") { Task { _ = await model.playSpan(source, milliseconds: start, endMilliseconds: end) } }
+                        }
+                    }.font(.caption)
+                }
+            } else if let source = model.records.first(where: { $0.id == reference.sourceID }) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(source.displayTitle).vosFont(12, weight: .medium).foregroundStyle(.secondary)
+                    Text("原话版本已变化，打开材料查看当前原文。").font(.caption).foregroundStyle(.secondary)
+                    Button("打开材料") { openSource(source.id) }.font(.caption)
+                }
+            } else {
+                Text("来源已不可用。").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+    private func quote(_ span: TranscriptSpan, text: String) -> String {
+        let scalars = Array(text.unicodeScalars)
+        guard span.textStart >= 0, span.textEnd <= scalars.count, span.textStart < span.textEnd else { return "原文范围已变化" }
+        return String(String.UnicodeScalarView(scalars[span.textStart..<span.textEnd]))
+    }
+}
+
 struct WorkspaceTaskView: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
@@ -117,6 +158,7 @@ struct WorkspaceTaskView: View {
     @State private var error = ""
     @State private var saving = false
     @State private var confirming = false
+    @State private var askingForResult = false
     @State private var settings: ReminderSnapshot?
     @State private var showingSettings = false
     @State private var scheduleAction: ActionRecord?
@@ -265,7 +307,7 @@ struct WorkspaceTaskView: View {
                     }
                     DisclosureGroup("原话依据与安排") {
                         VStack(alignment: .leading, spacing: 14) {
-                            ForEach(sources) { source in WorkspaceRow(title: source.displayTitle, subtitle: "查看完整原话与出处", icon: "quote.bubble") { openSource(source.id) } }
+                            ActionOriginalQuotes(model: model, action: action, openSource: openSource)
                             if current {
                                 Button("回听任务原话") { Task { _ = await model.playActionOriginal(action) } }
                                 if let player = model.player { NativePlayerView(player: player).frame(height: 65) }
@@ -294,6 +336,10 @@ struct WorkspaceTaskView: View {
         .sheet(isPresented: $showingSettings) { if let settings { ReminderSettingsView(action: action, snapshot: settings, model: model) { showingSettings = false } } }
         .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
         .sheet(isPresented: $showingFeedback, onDismiss: { Task { await loadFeedback() } }) { ActionFeedbackView(action: action, model: model) { showingFeedback = false } }
+        .alert("已完成。要记一句结果吗？", isPresented: $askingForResult) {
+            Button("记录结果") { showingFeedback = true }
+            Button("完成", role: .cancel) {}
+        } message: { Text("结果会接回这条任务，不会自动生成记录。") }
         .onDisappear { model.stopPlayback() }
         .onAppear { replacementTitle = action.title }
     }
@@ -367,7 +413,12 @@ struct WorkspaceTaskView: View {
         let state:LocalActionState=action.state == "completed" ? .open : .completed
         Task {
             await model.changeAction(action,state:state)
-            error=model.actionRecords.first { $0.id == action.id }?.state == state.rawValue ? "" : model.status
+            guard model.actionRecords.first(where: { $0.id == action.id })?.state == state.rawValue else { error=model.status; return }
+            error=""
+            if state == .completed {
+                await loadFeedback()
+                if feedbackHistory.isEmpty { askingForResult = true }
+            }
         }
     }
     private func saveFeedback() {
