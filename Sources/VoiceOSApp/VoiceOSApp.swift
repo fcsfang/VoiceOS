@@ -1935,16 +1935,18 @@ final class ControlCenter: ObservableObject {
     }
     func acceptDroppedFiles(_ urls: [URL]) {
         Task {
-            var media: [URL] = [], textFiles: [URL] = [], images: [URL] = [], unsupported: [String] = []
+            var media: [URL] = [], textFiles: [URL] = [], images: [URL] = [], pdfs: [URL] = [], unsupported: [String] = []
             for url in urls {
                 let ext = url.pathExtension.lowercased()
                 if ext == "txt" || ext == "md" { textFiles.append(url) }
+                else if ext == "pdf" { pdfs.append(url) }
                 else if SourceAttachment.mime(forFileExtension: ext) != nil { images.append(url) }
                 else if let type = UTType(filenameExtension: ext), type.conforms(to: .audio) || type.conforms(to: .movie) { media.append(url) }
                 else { unsupported.append(url.lastPathComponent) }
             }
             if !media.isEmpty { await importFiles(media) }
             for url in textFiles { await importCapturedTextFile(url) }
+            for url in pdfs { await acceptPDFCapture(url) }
             for url in images { await acceptImageCapture(url) }
             if !unsupported.isEmpty { status = "暂不支持这些文件类型：" + unsupported.joined(separator: "、") }
         }
@@ -1975,6 +1977,28 @@ final class ControlCenter: ObservableObject {
                 _ = try await store.attachSourceFile(sourceID: id, fileURL: url)
                 status = "已识别图片文字，仅本机保存"
             } catch { status = "已识别图片文字，原图保存失败：" + error.localizedDescription }
+        } catch {
+            status = error.localizedDescription
+            await refresh()
+        }
+    }
+    private func acceptPDFCapture(_ url: URL) async {
+        guard let store else { status = "资料库尚未打开，未保存"; return }
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        let text: String
+        do { text = try await Task.detached(priority: .userInitiated) { try PDFText.extract(fileURL: url).text }.value }
+        catch { status = "PDF 读取失败：" + error.localizedDescription; return }
+        do {
+            let title = String(url.deletingPathExtension().lastPathComponent.prefix(100))
+            let id = try await store.recordCapturedText(text, title: title, ownership: .external, commandID: UUID().uuidString)
+            let policy = try await store.sourcePolicy(sourceID: id)
+            if !policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: true) }
+            await refresh()
+            do {
+                _ = try await store.attachSourceFile(sourceID: id, fileURL: url)
+                status = "已读取 PDF「\(url.lastPathComponent)」的文字，仅本机保存"
+            } catch { status = "已读取 PDF 文字，原件保存失败：" + error.localizedDescription }
         } catch {
             status = error.localizedDescription
             await refresh()
