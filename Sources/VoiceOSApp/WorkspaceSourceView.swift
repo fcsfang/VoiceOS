@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import AVFoundation
 import VoiceOSCore
+import VoiceOSPlatform
 
 private enum SourceHistoryState {
     case idle, loading, loaded([TranscriptVersion]), failed(String)
@@ -72,6 +73,7 @@ struct WorkspaceSourceView: View {
     @State private var selectedText=""
     @State private var selectedRange=NSRange(location:0,length:0)
     @State private var fullTextExpanded=false
+    @State private var chapters:[SourceChapter]=[]
     private var sourceStatus: String {
         if source.transcript == nil { return source.jobState == "failed" ? "转写失败 · 原件已保存" : "尚未完成转写 · 原件已保存" }
         if source.localOnly { return "仅本机保存" }
@@ -397,6 +399,22 @@ struct WorkspaceSourceView: View {
                         ForEach(historyActions) { action in WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看记录") { openTask(action.id) } }
                     }
                 }
+                if !chapters.isEmpty {
+                    WorkspaceSection(title:"章节",icon:"list.number",count:chapters.count) {
+                        ForEach(chapters,id:\.ordinal) { chapter in
+                            let active=chapterIsPlaying(chapter)
+                            Button { playChapter(chapter) } label: {
+                                HStack(alignment:.top,spacing:10) {
+                                    Text(time(chapter.startMS)).vosFont(12, weight:.medium, design:.monospaced).foregroundStyle(.secondary)
+                                    Text(chapter.title).vosFont(14, weight:active ? .semibold : .regular).multilineTextAlignment(.leading)
+                                    Spacer(minLength:0)
+                                }.padding(.horizontal,8).padding(.vertical,6)
+                                    .background(active ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+                                    .contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }
                 WorkspaceSection(title:"原话与依据",icon:"quote.bubble") {
                     let outline=outlineSections
                     if !outline.isEmpty {
@@ -542,6 +560,19 @@ struct WorkspaceSourceView: View {
             }
             catch { self.error="原件读取失败：" + error.localizedDescription }
         }
+        .task(id: source.id + source.kind) {
+            chapters=[]
+            guard ["audio","video"].contains(source.kind),let store=model.store else { return }
+            do { chapters=try await store.chapters(sourceID:source.id) }
+            catch { chapters=[] }
+            guard chapters.isEmpty,let url=try? await store.playableURL(sourceID:source.id) else { return }
+            let found=await MediaChapters.read(url)
+            guard !found.isEmpty else { return }
+            do {
+                try await store.replaceChapters(sourceID:source.id,entries:found.map { (title:$0.title,startMS:$0.startMS) })
+                chapters=try await store.chapters(sourceID:source.id)
+            } catch { chapters=[] }
+        }
         .task(id: source.id + thoughts.map(\.id).joined()) {
             guard model.store != nil else { return }
             do {
@@ -637,6 +668,18 @@ struct WorkspaceSourceView: View {
         Task { @MainActor in
             if !(await model.playSpan(source,milliseconds:section.startMS,endMilliseconds:section.endMS)) {
                 error=model.status.isEmpty ? "无法回听这一节" : model.status
+            }
+        }
+    }
+    private func chapterIsPlaying(_ chapter:SourceChapter)->Bool {
+        guard let ms=playbackMS else { return false }
+        let next=chapters.first { $0.ordinal == chapter.ordinal + 1 }?.startMS ?? Int.max
+        return ms>=chapter.startMS && ms<next
+    }
+    private func playChapter(_ chapter:SourceChapter) {
+        Task { @MainActor in
+            if !(await model.playSpan(source,milliseconds:chapter.startMS)) {
+                error=model.status.isEmpty ? "无法回听这一章" : model.status
             }
         }
     }
