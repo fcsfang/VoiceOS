@@ -66,6 +66,7 @@ struct WorkspaceSourceView: View {
     @State private var error=""
     @State private var claimNotes:[String:ClaimNote]=[:]
     @State private var captureInfo:CaptureMetadata?
+    @State private var attachmentURL:URL?
     @State private var playbackMS:Int?
     @State private var selectedText=""
     @State private var selectedRange=NSRange(location:0,length:0)
@@ -204,6 +205,9 @@ struct WorkspaceSourceView: View {
                 }
                 HStack(spacing:12) {
                     Label(sourceStatus,systemImage:sourceStatusIcon).vosFont(13).foregroundStyle(.secondary)
+                    if let attachmentURL {
+                        Button("查看原图",systemImage:"photo") { if !NSWorkspace.shared.open(attachmentURL) { error="无法打开原图" } }
+                    }
                     Spacer()
                     Button("从这里启动",systemImage:"arrow.up.forward") { openInitiation(source.id) }
                         .disabled(source.transcript == nil || source.origin != "user" || source.speaker != "user")
@@ -468,7 +472,10 @@ struct WorkspaceSourceView: View {
             } catch is CancellationError {} catch { contextIssue=error.localizedDescription }
         }
         .task(id: source.id) {
+            attachmentURL=nil
             captureInfo=try? await model.sourceCaptureMetadata(sourceID:source.id)
+            do { attachmentURL=try await model.sourceAttachmentURL(sourceID:source.id) }
+            catch { self.error="原图读取失败：" + error.localizedDescription }
         }
         .task(id: source.id + thoughts.map(\.id).joined()) {
             guard model.store != nil else { return }
@@ -601,5 +608,13 @@ struct ClaimCorrectionView:View {
             Text(model.status).font(.caption).foregroundStyle(.secondary)
             HStack { Button("取消",action:dismiss);Spacer();Button("更新理解") { Task { if await model.review(claim,action:.correct,statement:text,ownership:CandidateOwnership(rawValue:ownership),note:note) { dismiss() } } }.disabled(model.reviewingClaim || (text == claim.statement && ownership == claim.ownership) || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || note.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty) }
         }.padding(24).frame(width:620)
+    }
+}
+
+extension ControlCenter {
+    func sourceAttachmentURL(sourceID:String) async throws -> URL? {
+        guard let store else { throw VoiceOSError("资料库尚未打开") }
+        guard let attachment=try store.sourceAttachment(sourceID:sourceID) else { return nil }
+        return store.root.appendingPathComponent(attachment.relativePath)
     }
 }
