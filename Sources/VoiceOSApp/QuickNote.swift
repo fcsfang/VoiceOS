@@ -58,17 +58,17 @@ private struct QuickNoteView: View {
     let context: String?
     let close: () -> Void
     @State private var title = ""
-    @State private var body = ""
+    @State private var text = ""
     @State private var saving = false
     @State private var error = ""
     @FocusState private var editing: Bool
-    private var valid: Bool { !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var valid: Bool { !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             if let context { Text("来自 " + context).font(.caption).foregroundStyle(.secondary) }
             TextField("标题 · 可留空", text: $title).textFieldStyle(.roundedBorder).disabled(saving)
-            TextEditor(text: $body).font(.body).frame(minHeight: 180).focused($editing).disabled(saving)
+            TextEditor(text: $text).font(.body).frame(minHeight: 180).focused($editing).disabled(saving)
             if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.red) }
             HStack {
                 Button("取消") { close() }.keyboardShortcut(.cancelAction).disabled(saving)
@@ -90,7 +90,7 @@ private struct QuickNoteView: View {
         saving = true
         error = ""
         Task {
-            let saved = await model.acceptCaptureRequest(text: body, title: title, url: nil, successURL: nil, context: context)
+            let saved = await model.acceptCaptureRequest(text: text, title: title, url: nil, successURL: nil, context: context)
             saving = false
             if saved { close() } else { error = model.status.isEmpty ? "保存失败，请稍后重试" : model.status }
         }
