@@ -575,6 +575,7 @@ final class ControlCenter: ObservableObject {
     private var followupWorker: Task<Void, Never>?
     private var understandingWorker: Task<Void, Never>?
     @Published var initialized = false
+    @Published var workspaceLoaded = false
     @Published var startupIssue = ""
     @Published var player: AVPlayer?
     private var playbackBoundary: Any?
@@ -820,7 +821,7 @@ final class ControlCenter: ObservableObject {
                     self.organizeAutomaticRecordings(batch,finished:finished)
                 })
         } catch {
-            store = nil; initialized = false
+            store = nil; initialized = false; workspaceLoaded = false
             startupIssue = error.localizedDescription
             status = "资料库尚未打开：" + error.localizedDescription
         }
@@ -914,6 +915,7 @@ final class ControlCenter: ObservableObject {
         catch { status = error.localizedDescription }
         resumeAssistantExecutions()
         queueTopicOrganization()
+        workspaceLoaded = true
     }
     func setPanoramaVisible(_ visible: Bool) async {
         guard panoramaPolicy.setVisible(visible) else { return }

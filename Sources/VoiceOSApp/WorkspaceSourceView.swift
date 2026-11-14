@@ -78,6 +78,14 @@ struct WorkspaceSourceView: View {
         case .failed(let message): WorkspaceNoticeText(message:"原文版本读取失败：" + message,severity:.danger)
         }
     }
+    @ViewBuilder private func relatedActionRow(_ action: ActionRecord, in list: [ActionRecord]) -> some View {
+        if let delivery=model.assistantExecutions.first(where: { $0.actionID == action.id && $0.validity == "current" && $0.state == "completed" }) {
+            WorkspaceRow(title:action.title,subtitle:"AI 已交付",icon:"doc.text",trailing:"阅读结果") { openDelivery(delivery.id) }
+        } else {
+            WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),icon:"circle") { openTask(action.id) }
+        }
+        if action.id != list.last?.id { Divider() }
+    }
     private func loadHistory() {
         historyTask?.cancel()
         guard source.transcript != nil else { historyState = .loaded([]); return }
@@ -294,14 +302,16 @@ struct WorkspaceSourceView: View {
                     }
                 }
                 let currentActions = actions.filter { $0.validity == "current" }
-                if !currentActions.isEmpty {
-                    WorkspaceSection(title:"相关行动",icon:"arrow.right.circle",count:currentActions.count) {
-                        ForEach(currentActions) { action in
-                            if let delivery=model.assistantExecutions.first(where: { $0.actionID == action.id && $0.validity == "current" && $0.state == "completed" }) {
-                                WorkspaceRow(title:action.title,subtitle:"AI 已交付",icon:"doc.text",trailing:"阅读结果") { openDelivery(delivery.id) }
-                            } else { WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),icon:"circle") { openTask(action.id) } }
-                            if action.id != currentActions.last?.id { Divider() }
-                        }
+                let currentTasks = currentActions.filter { $0.kind == "task" }
+                let currentGoals = currentActions.filter { $0.kind != "task" }
+                if !currentTasks.isEmpty {
+                    WorkspaceSection(title:"待办",icon:"checkmark.circle",count:currentTasks.count) {
+                        ForEach(currentTasks) { action in relatedActionRow(action, in: currentTasks) }
+                    }
+                }
+                if !currentGoals.isEmpty {
+                    WorkspaceSection(title:"问题与目标",subtitle:"不计为已承诺待办。",icon:"lightbulb",count:currentGoals.count) {
+                        ForEach(currentGoals) { action in relatedActionRow(action, in: currentGoals) }
                     }
                 }
                 let historyActions = actions.filter { $0.validity != "current" && !model.workspaceTaskRequiresReview($0) }

@@ -185,7 +185,7 @@ struct WorkspaceView: View {
                             Button("重试打开资料库") { Task { await model.start() } }.buttonStyle(.borderedProminent)
                             Button("打开其他资料库",action:chooseLibrary)
                         }
-                    } else if !model.initialized {
+                    } else if !model.initialized || !model.workspaceLoaded {
                         ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
                     } else { pageContent }
                 }.frame(maxWidth:.infinity,maxHeight:.infinity)
@@ -633,12 +633,27 @@ struct WorkspaceView: View {
                     if model.pausedActionBatch == nil { PausedActionBatchControl(model:model) }
                 }
             }
+            let overviewGoals = actionFilter == "全部"
+                ? model.actionRecords.filter { $0.kind != "task" && $0.state != "dismissed" && $0.validity == "current" }
+                : []
+            if !overviewGoals.isEmpty {
+                WorkspaceSection(title:"问题与目标",subtitle:"不计为已承诺待办。",icon:"lightbulb",count:overviewGoals.count) {
+                    ForEach(overviewGoals.prefix(3)) { action in
+                        actionRow(action)
+                        if action.id != overviewGoals.prefix(3).last?.id { Divider() }
+                    }
+                    if overviewGoals.count > 3 {
+                        Button("查看全部 \(overviewGoals.count)") { actionFilter = "问题与目标" }
+                            .buttonStyle(.plain).font(.system(size:12.5)).foregroundStyle(palette.accent).padding(.top,10)
+                    }
+                }
+            }
             if model.pausedActionBatch != nil {
                 WorkspaceSection(title:"批量重新识别",icon:"arrow.triangle.2.circlepath") {
                     PausedActionBatchControl(model:model)
                 }
             }
-            if visible.isEmpty && (actionFilter == "AI 助理" || actionFilter == "全部" ? executions.isEmpty : true) && !(actionFilter == "全部" && !paused.isEmpty) {
+            if visible.isEmpty && (actionFilter == "AI 助理" || actionFilter == "全部" ? executions.isEmpty : true) && !(actionFilter == "全部" && (!paused.isEmpty || !overviewGoals.isEmpty)) {
                 WorkspaceEmptyState(
                     title: actionFilter == "历史记录" ? "还没有历史任务记录" : actionFilter == "已完成" ? "还没有已完成的事项" : actionFilter == "AI 助理" ? "还没有 AI 代办" : actionFilter == "待核对" ? "当前没有需要核对的行动" : actionFilter == "问题与目标" ? "还没有问题与目标" : "目前没有可执行的待办",
                     systemImage:"checkmark.circle",
@@ -657,7 +672,7 @@ struct WorkspaceView: View {
             case "已完成": return action.state == "completed"
             case "历史记录": return action.validity != "current" && !model.workspaceTaskRequiresReview(action)
             case "待核对": return model.workspaceTaskRequiresReview(action) || action.validity == "current" && (action.intent?.uncertain == true || action.intent?.followupState == "needs_review")
-            case "问题与目标": return action.kind != "task" && action.state != "dismissed"
+            case "问题与目标": return action.kind != "task" && action.state != "dismissed" && action.validity == "current"
             default: return action.kind == "task" && action.state == "open" && action.validity == "current" && !model.workspaceTaskRequiresReview(action)
             }
         }
