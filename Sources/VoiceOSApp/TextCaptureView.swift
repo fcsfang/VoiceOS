@@ -20,6 +20,13 @@ struct TextCaptureView: View {
     @State private var linkText = ""
     @FocusState private var focus: CaptureField?
     private enum CaptureField: Hashable { case title, text }
+    @State private var templates: [CaptureTemplate] = []
+    @State private var showingTemplateName = false
+    @State private var templateName = ""
+    @State private var templateError = ""
+    @State private var templateSaving = false
+    @State private var showingManageTemplates = false
+    @State private var pendingTemplateDelete: CaptureTemplate?
     private var validationIssue: String? {
         if draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "填写完整原文后即可保存。" }
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -85,6 +92,18 @@ struct TextCaptureView: View {
                 Text("导入将替换当前标题和完整原文。若要保留两份内容，请先取消并保存当前草稿，再导入文件。")
             }
             .sheet(isPresented: $showingLinkPrompt) { linkImportSheet }
+            .sheet(isPresented: $showingTemplateName) { templateNameSheet }
+            .sheet(isPresented: $showingManageTemplates) { manageTemplatesSheet }
+            .alert("删除模板？", isPresented: templateDeleteAlertPresented) {
+                Button("取消", role: .cancel) { pendingTemplateDelete = nil }
+                Button("删除", role: .destructive) {
+                    guard let template = pendingTemplateDelete else { return }
+                    Task { await deleteTemplate(template) }
+                }
+            } message: {
+                Text(pendingTemplateDelete.map { "会删除模板「\($0.name)」，已保存的草稿不受影响。" } ?? "")
+            }
+            .task { templates = await model.captureTemplates() }
     }
     private var content: some View {
         VStack(alignment: .leading, spacing: 17) {
@@ -92,6 +111,7 @@ struct TextCaptureView: View {
                 WorkspaceHero(eyebrow: "", title: "记录想法")
                 Button("导入文字文件") { chooseFile() }.disabled(draft.saving)
                 Button("从链接导入正文") { linkText = ""; showingLinkPrompt = true }.disabled(draft.saving)
+                Menu("模板") { templateMenu }.disabled(draft.saving)
             }
             Text("⌘⇧R 开始或停止口述").font(.caption).foregroundStyle(.secondary)
             TextField(draft.ownership == .personal ? "表达标题 · 可留空，默认取正文首行" : "资料标题 · 可留空，默认取正文首行", text: $draft.title).textFieldStyle(.roundedBorder).focused($focus, equals: .title).disabled(draft.saving)
@@ -184,6 +204,67 @@ struct TextCaptureView: View {
             else { applyImport() }
         }
     }
+    @ViewBuilder private var templateMenu: some View {
+        if templates.isEmpty {
+            Button("暂无模板，先保存当前草稿。") {}.disabled(true)
+        } else {
+            ForEach(templates) { template in
+                Button(template.name) { applyTemplate(template) }
+            }
+        }
+        Divider()
+        Button("保存当前草稿为模板…") { beginTemplateSave() }
+            .disabled(draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        Button("管理模板…") { templateError = ""; showingManageTemplates = true }
+            .disabled(templates.isEmpty)
+    }
+    private var templateNameSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("保存为模板").font(.title2)
+            Text("把当前完整原文保存为模板，之后可一键填入草稿。").font(.callout).foregroundStyle(.secondary)
+            TextField("模板名称", text: $templateName).textFieldStyle(.roundedBorder)
+                .onChange(of: templateName) { _, value in
+                    if value.unicodeScalars.count > 40 { templateName = String(value.unicodeScalars.prefix(40)) }
+                }
+            if !templateError.isEmpty { WorkspaceNoticeText(message: templateError, severity: .danger) }
+            HStack {
+                Spacer()
+                Button("取消") { showingTemplateName = false }
+                Button(templateSaving ? "正在保存…" : "保存") { Task { await saveTemplate() } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(templateSaving || templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }.padding(24).frame(width: 420)
+    }
+    private var manageTemplatesSheet: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("管理模板").font(.title2)
+                Spacer()
+                Button("完成") { showingManageTemplates = false }
+            }
+            if !templateError.isEmpty { WorkspaceNoticeText(message: templateError, severity: .danger) }
+            if templates.isEmpty {
+                Text("还没有模板。写好正文后，从「模板」菜单保存。").font(.callout).foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(templates) { template in
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(template.name).vosFont(15, weight: .medium)
+                                    Text(template.body).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                                Spacer(minLength: 8)
+                                Button("删除", role: .destructive) { pendingTemplateDelete = template }
+                            }.padding(.vertical, 10)
+                            if template.id != templates.last?.id { Divider() }
+                        }
+                    }
+                }.frame(maxHeight: 360)
+            }
+        }.padding(24).frame(width: 520)
+    }
     private var linkImportSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("从链接导入正文").font(.title2)
@@ -223,6 +304,43 @@ struct TextCaptureView: View {
         draft.ownership = .external; draft.allowCloud = false; draft.error = ""; draft.commandID = UUID().uuidString
         pendingImport = nil
     }
+    private func applyTemplate(_ template: CaptureTemplate) {
+        draft.text = template.body
+        draft.error = ""
+        focus = .text
+    }
+    private func beginTemplateSave() {
+        templateName = ""
+        templateError = ""
+        showingTemplateName = true
+    }
+    private func saveTemplate() async {
+        guard !templateSaving else { return }
+        let name = templateName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        templateSaving = true
+        defer { templateSaving = false }
+        guard let saved = await model.saveCaptureTemplate(name: name, body: draft.text) else {
+            templateError = model.status.isEmpty ? "模板未能保存，请稍后重试。" : model.status
+            return
+        }
+        templates.append(saved)
+        templateError = ""
+        templateName = ""
+        showingTemplateName = false
+    }
+    private func deleteTemplate(_ template: CaptureTemplate) async {
+        pendingTemplateDelete = nil
+        if await model.deleteCaptureTemplate(id: template.id) {
+            templates.removeAll { $0.id == template.id }
+            templateError = ""
+        } else {
+            templateError = model.status.isEmpty ? "模板未能删除，请稍后重试。" : model.status
+        }
+    }
+    private var templateDeleteAlertPresented: Binding<Bool> {
+        Binding(get: { pendingTemplateDelete != nil }, set: { if !$0 { pendingTemplateDelete = nil } })
+    }
     private func save() {
         guard valid else { return }
         draft.saving = true; draft.error = ""
@@ -235,6 +353,29 @@ struct TextCaptureView: View {
             }
             else { draft.error = model.status }
             draft.saving = false
+        }
+    }
+}
+
+private extension ControlCenter {
+    func captureTemplates() async -> [CaptureTemplate] {
+        guard let store else { status = "资料库尚未打开"; return [] }
+        do { return try await store.captureTemplates() }
+        catch { status = error.localizedDescription; return [] }
+    }
+    func saveCaptureTemplate(name: String, body: String) async -> CaptureTemplate? {
+        guard let store else { status = "资料库尚未打开"; return nil }
+        do { return try await store.saveCaptureTemplate(name: name, body: body) }
+        catch { status = error.localizedDescription; return nil }
+    }
+    func deleteCaptureTemplate(id: String) async -> Bool {
+        guard let store else { status = "资料库尚未打开"; return false }
+        do {
+            try await store.deleteCaptureTemplate(id: id)
+            return true
+        } catch {
+            status = error.localizedDescription
+            return false
         }
     }
 }
