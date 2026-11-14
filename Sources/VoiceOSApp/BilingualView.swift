@@ -87,8 +87,8 @@ struct BilingualView: View {
 }
 
 struct BilingualClient {
-    static let model = "gpt-6.1-sol"
     private let endpoint: URL
+    private let model: String
     private let apiKey: String
     private let transport: any ModelHTTPTransport
 
@@ -99,13 +99,14 @@ struct BilingualClient {
         let settings = try Self.settings(from: URL(fileURLWithPath: path))
         endpoint = settings.0.appendingPathComponent("responses")
         apiKey = settings.1
+        model = settings.2 ?? "gpt-6.1-sol"
         self.transport = transport
     }
 
     func translate(_ paragraphs: [BilingualParagraph]) async throws -> [String?] {
         let prompt = Bilingual.requestPrompt(paragraphs: paragraphs, target: Bilingual.target)
         let payload: [String: Any] = [
-            "model": Self.model,
+            "model": model,
             "store": false,
             "max_output_tokens": 16384,
             "input": [["role": "user", "content": prompt]]
@@ -121,7 +122,7 @@ struct BilingualClient {
         return Bilingual.combine(text, paragraphCount: paragraphs.count)
     }
 
-    private static func settings(from file: URL) throws -> (URL, String) {
+    private static func settings(from file: URL) throws -> (URL, String, String?) {
         let data: Data
         do { data = try Data(contentsOf: file) }
         catch { throw VoiceOSError("无法读取文本模型配置") }
@@ -136,7 +137,7 @@ struct BilingualClient {
                   let key = options["apiKey"] as? String, !key.isEmpty, key != "REPLACE_LOCALLY" else {
                 throw VoiceOSError("文本模型配置缺少连接信息")
             }
-            return (address, key)
+            return (address, key, options["model"] as? String)
         }
         var values: [String: String] = [:]
         for raw in text.split(separator: "\n") {
@@ -150,6 +151,6 @@ struct BilingualClient {
               let key = values["OPENAI_API_KEY"], !key.isEmpty, key != "REPLACE_LOCALLY" else {
             throw VoiceOSError("文本模型配置缺少连接信息")
         }
-        return (address, key)
+        return (address, key, values["OPENAI_MODEL"])
     }
 }
