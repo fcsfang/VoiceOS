@@ -15,6 +15,18 @@ public struct ReminderFields: Codable, Sendable, Equatable {
         let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.date(from: timestamp)
     }
+    public static func nextDefaultAlert(due: ReminderDueDate, now: Date, calendar: Calendar) -> Date? {
+        guard case let .dateOnly(localDate, _) = due else { return nil }
+        let parts = localDate.split(separator: "-", omittingEmptySubsequences: false).compactMap { Int($0) }
+        guard parts.count == 3, let day = calendar.date(from: DateComponents(timeZone: calendar.timeZone, year: parts[0], month: parts[1], day: parts[2])) else { return nil }
+        guard let nine = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: calendar.startOfDay(for: day)) else { return nil }
+        if nine > now { return nine }
+        return calendar.date(byAdding: .day, value: 1, to: nine)
+    }
+    public func withDefaultAlert(now: Date, calendar: Calendar) -> ReminderFields {
+        guard alerts.isEmpty, let date = Self.nextDefaultAlert(due: due, now: now, calendar: calendar) else { return self }
+        var copy = self; copy.alerts = [Self.timestamp(date)]; return copy
+    }
     public static func relativeDates(expressedAt: String?, timeZone: String) -> [String: String] {
         let plain = ISO8601DateFormatter()
         guard let text = expressedAt, let instant = date(text) ?? plain.date(from: text),
