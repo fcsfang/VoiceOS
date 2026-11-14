@@ -588,7 +588,7 @@ private struct RegionInspectorPanel: View {
                 HStack(spacing: 8) {
                     ReaderKicker(
                         dot: area.map { RegionIdentity.color(index: $0.identityIndex, scheme: colorScheme) } ?? palette.accent,
-                        text: area.map { "大区 · " + $0.title } ?? "探索区域 · AI 归纳"
+                        text: area.map { "大区 · " + $0.title } ?? "探索区域"
                     )
                     Spacer(minLength: 0)
                     WorkspaceIconButton(systemImage: "xmark", label: "关闭主题") { focusedRegionID = nil }
@@ -661,7 +661,6 @@ private struct RegionInspectorPanel: View {
                         }
                     }
                 }
-                Text("AI 归纳，尚未表示本人认可").font(.caption).foregroundStyle(.tertiary)
             }
             .padding(20)
         }
@@ -756,7 +755,7 @@ private struct QuestionInspectorPanel: View {
                     }
                 }
                 Text(question.title).font(.title3.weight(.semibold))
-                Text("AI 归纳 · 未表示本人认可 · \(question.evidence.count) 处原话")
+                Text("\(question.evidence.count) 处原话")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 ReaderCappedText(text: question.summary, size: 13)

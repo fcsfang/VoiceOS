@@ -149,11 +149,9 @@ struct RecentContentHome: View {
             Text(item.title).font(.system(size: 27, weight: .semibold, design: .serif)).lineSpacing(4)
                 .padding(.top, 16).textSelection(.enabled)
             if !item.summary.isEmpty {
-                VStack(alignment: .leading, spacing: 9) {
-                    Text("AI 概览").font(.system(size: 10)).tracking(1.4).foregroundStyle(palette.accent)
-                    Text(item.summary).font(.system(size: 16, design: .serif)).lineSpacing(6)
-                        .textSelection(.enabled)
-                }.padding(.top, 24)
+                Text(item.summary).font(.system(size: 16, design: .serif)).lineSpacing(6)
+                    .textSelection(.enabled)
+                    .padding(.top, 24)
             }
             ForEach(digest.threads) { thread in
                 threadSection(thread)

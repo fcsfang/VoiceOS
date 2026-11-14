@@ -92,7 +92,6 @@ struct WorkspaceTopicReadingView: View {
                     metric("完成记录",value:tasks.filter { $0.state == "completed" }.count,icon:"checkmark.circle")
                 }
             }
-            Text("AI 综合整理 · 每张卡片保留原话入口").font(.caption).foregroundStyle(.secondary)
         }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
             .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
             .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }

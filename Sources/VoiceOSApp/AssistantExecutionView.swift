@@ -245,7 +245,7 @@ struct AssistantExecutionView: View {
                     }.buttonStyle(.borderedProminent).tint(palette.accent)
                         .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive || saving)
                 }
-                if execution.questionID != nil { Text("成果已关联主题；仍保留 AI 产出归属。").font(.caption).foregroundStyle(.secondary) }
+                if execution.questionID != nil { Text("成果已关联主题。").font(.caption).foregroundStyle(.secondary) }
             }
             if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger).textSelection(.enabled) }
         }.padding(22).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
