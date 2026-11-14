@@ -16,6 +16,7 @@ public actor SpotlightIndexer {
     private let minimumInterval: TimeInterval
     private var lastIndexedAt: Date?
     private var fingerprints: [String: String] = [:]
+    private var purged = false
 
     public init(minimumInterval: TimeInterval = 60) {
         self.minimumInterval = minimumInterval
@@ -23,6 +24,10 @@ public actor SpotlightIndexer {
 
     public func index(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord]) async {
         guard CSSearchableIndex.isIndexingAvailable() else { return }
+        if !purged {
+            purged = true
+            do { try await purgeDomain() } catch { NSLog("VoiceOS Spotlight 清理旧索引失败：\(error.localizedDescription)") }
+        }
         let entries = makeEntries(sources: sources, claims: claims, actions: actions)
         let current = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.fingerprint) })
         let changed = entries.filter { fingerprints[$0.id] != $0.fingerprint }
@@ -58,6 +63,14 @@ public actor SpotlightIndexer {
     private func submit(_ items: [CSSearchableItem]) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             CSSearchableIndex.default().indexSearchableItems(items) { error in
+                if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+            }
+        }
+    }
+
+    private func purgeDomain() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            CSSearchableIndex.default().deleteSearchableItems(withDomainIdentifiers: [Self.domainIdentifier]) { error in
                 if let error { continuation.resume(throwing: error) } else { continuation.resume() }
             }
         }

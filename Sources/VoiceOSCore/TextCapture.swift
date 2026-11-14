@@ -33,8 +33,8 @@ extension VoiceOSStore {
                 guard previous["origin"] == "user", previous["speaker"] == "user" else { throw VoiceOSError("同一次保存不能改变原文归属") }
             }
             let sourceID = try recordUserExpression(text, commandID: commandID)
-            try renameRecording(sourceID: sourceID, title: resolvedTitle)
-            if sourceURL != nil || captureContext != nil { try attachCaptureMetadata(sourceID: sourceID, url: sourceURL, context: captureContext) }
+            do { try renameRecording(sourceID: sourceID, title: resolvedTitle) } catch { NSLog("VoiceOS 标题未写入：\(error.localizedDescription)") }
+            if sourceURL != nil || captureContext != nil { do { try attachCaptureMetadata(sourceID: sourceID, url: sourceURL, context: captureContext) } catch { NSLog("VoiceOS 抓取元数据未写入：\(error.localizedDescription)") } }
             return sourceID
         }
         let data = Data(text.utf8), hash = Self.relevanceHash(data), fingerprint = "external-text-v1:" + hash
@@ -42,7 +42,7 @@ extension VoiceOSStore {
             guard previous["input_fingerprint"] == fingerprint, previous["origin"] == "external", previous["speaker"] == "unknown" else { throw VoiceOSError("同一次保存不能更换原文或归属") }
             guard ["saved", "reference_only"].contains(previous["state"] ?? "") else { throw VoiceOSError("文字保存尚未完成，请重新打开核对") }
             try renameRecording(sourceID: previous["id"]!, title: resolvedTitle)
-            if sourceURL != nil || captureContext != nil { try attachCaptureMetadata(sourceID: previous["id"]!, url: sourceURL, context: captureContext) }
+            if sourceURL != nil || captureContext != nil { do { try attachCaptureMetadata(sourceID: previous["id"]!, url: sourceURL, context: captureContext) } catch { NSLog("VoiceOS 抓取元数据未写入：\(error.localizedDescription)") } }
             return previous["id"]!
         }
         let id = UUID().uuidString, asset = UUID().uuidString, version = UUID().uuidString
@@ -64,7 +64,7 @@ extension VoiceOSStore {
         let row = try db.query("SELECT * FROM sources WHERE id=?", [id]).first!
         try sealAndQueue(row, info: MediaInfo(duration: 0, kind: "external_text"))
         try checkpoint(.savedCommitted)
-        if sourceURL != nil || captureContext != nil { try attachCaptureMetadata(sourceID: id, url: sourceURL, context: captureContext) }
+        if sourceURL != nil || captureContext != nil { do { try attachCaptureMetadata(sourceID: id, url: sourceURL, context: captureContext) } catch { NSLog("VoiceOS 抓取元数据未写入：\(error.localizedDescription)") } }
         return id
     }
 

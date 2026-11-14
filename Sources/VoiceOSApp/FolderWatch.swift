@@ -18,6 +18,8 @@ final class FolderWatch {
     private var ledger: FolderWatchLedger
     private var storedFolderPath: String?
     private var enabled: Bool
+    private var failureCounts: [String: Int] = [:]
+    private var scanBackoff: Double = 1.0
     private var pending: [String: String] = [:]
     private var scanWork: DispatchWorkItem?
     private var scanning = false
@@ -134,14 +136,29 @@ final class FolderWatch {
                 if await self.onFiles?([URL(fileURLWithPath: entry.path)]) == true {
                     self.ledger.record([entry])
                     self.pending[entry.path] = nil
+                    self.failureCounts[entry.path] = nil
                     recorded = true
                 } else {
-                    failed = true
+                    let count = (self.failureCounts[entry.path] ?? 0) + 1
+                    if count >= 3 {
+                        self.ledger.record([entry])
+                        self.pending[entry.path] = nil
+                        self.failureCounts[entry.path] = nil
+                        NSLog("VoiceOS 文件夹监听跳过连续失败的文件：\(entry.path)")
+                    } else {
+                        self.failureCounts[entry.path] = count
+                        failed = true
+                    }
                 }
             }
             if recorded { self.persist() }
             self.scanning = false
-            if failed || !self.pending.isEmpty { self.scheduleScan(after: 1.0) }
+            if failed || !self.pending.isEmpty {
+                self.scanBackoff = min(self.scanBackoff * 2, 30)
+                self.scheduleScan(after: self.scanBackoff)
+            } else {
+                self.scanBackoff = 1
+            }
         }
     }
 

@@ -852,9 +852,9 @@ struct WorkspaceView: View {
             }
             if visible.isEmpty && (actionFilter == "AI 助理" || actionFilter == "全部" ? executions.isEmpty : true) && !(actionFilter == "全部" && (!paused.isEmpty || !overviewGoals.isEmpty)) {
                 WorkspaceEmptyState(
-                    title: actionFilter == "历史记录" ? "还没有历史任务记录" : actionFilter == "已完成" ? "还没有已完成的事项" : actionFilter == "AI 助理" ? "还没有 AI 代办" : actionFilter == "待核对" ? "当前没有需要核对的行动" : actionFilter == "问题与目标" ? "还没有问题与目标" : "目前没有可执行的待办",
+                    title: actionFilter == "历史记录" ? "还没有历史任务记录" : actionFilter == "已完成" ? "还没有已完成的事项" : actionFilter == "AI 助理" ? "还没有 AI 代办" : actionFilter == "待核对" ? "没有待核对的行动" : actionFilter == "问题与目标" ? "还没有问题与目标" : "目前没有可执行的待办",
                     systemImage:"checkmark.circle",
-                    description: actionFilter == "AI 助理" ? "在一项待办中选择“交给 AI”，编辑要求后开始执行。" : "已暂停的历史、问题与目标分别保留，可通过上方分类查看。"
+                    description: actionFilter == "AI 助理" ? "在一项待办中选择“交给 AI”，编辑要求后开始执行。" : actionFilter == "待核对" ? "下方处理问题里的事项仍需要查看。" : "已暂停的历史、问题与目标分别保留，可通过上方分类查看。"
                 ) {
                     HStack { Button("记录想法") { go(.capture) };if actionFilter != "问题与目标" { Button("查看问题与目标") { actionFilter="问题与目标" } } }
                 }

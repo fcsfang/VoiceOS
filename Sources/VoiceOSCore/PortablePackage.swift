@@ -481,6 +481,7 @@ extension VoiceOSStore {
             try VoiceOSStore.validateStoredRelevance(database)
             try VoiceOSStore.validateStoredCognitiveFeedback(database)
             try VoiceOSStore.validateStoredRecordings(database)
+            if tables.contains("task_initiations") { try VoiceOSStore.validateStoredTaskInitiations(database) }
             try VoiceOSStore.validateStoredExpressionActionReviews(database)
             try VoiceOSStore.validateStoredActionReviewResolutions(database)
             try VoiceOSStore.validateStoredConversations(database)
