@@ -955,15 +955,16 @@ struct WorkspaceView: View {
             error = ""
         }
     }
-    private var batchEligibleActions: [ActionRecord] {
+    private func batchActions(for state:LocalActionState) -> [ActionRecord] {
         let ids=selectedActionIDs
-        return model.actionRecords.filter { ids.contains($0.id) && $0.state == "open" && $0.validity == "current" }
+        return model.actionRecords.filter { ids.contains($0.id) && $0.state == "open" && $0.validity == "current" && (state != .completed || $0.kind == "task") }
     }
     private var batchConfirmTitle: String {
-        (pendingBatchState == .dismissed ? "不再跟进 " : "标为完成 ") + "\(batchEligibleActions.count) 条行动？"
+        let count = pendingBatchState.map { batchActions(for: $0).count } ?? 0
+        return (pendingBatchState == .dismissed ? "不再跟进 " : "标为完成 ") + "\(count) 条行动？"
     }
     private var batchConfirmMessage: String {
-        "只更新仍为待办且有效的行动，失败的会合并成一条提示。"
+        "只更新仍为待办且有效的行动。问题与目标只支持不再跟进，失败的会合并成一条提示。"
     }
     private func exitActionSelection() {
         selectingActions=false;selectedActionIDs=[]
@@ -973,7 +974,7 @@ struct WorkspaceView: View {
         batchRunning=true
         defer { batchRunning=false }
         var failures=0
-        for record in batchEligibleActions {
+        for record in batchActions(for: state) {
             await model.changeAction(record,state:state)
             if model.actionRecords.first(where: { $0.id == record.id })?.state != state.rawValue { failures += 1 }
         }
@@ -983,8 +984,8 @@ struct WorkspaceView: View {
     private var actionSelectionBar: some View {
         HStack(spacing:12) {
             Text(batchRunning ? "正在更新…" : "已选 \(selectedActionIDs.count) 条").vosFont(13, weight: .medium)
-            Button("标为完成") { pendingBatchState = .completed }.buttonStyle(.borderedProminent).disabled(batchRunning || batchEligibleActions.isEmpty)
-            Button("不再跟进") { pendingBatchState = .dismissed }.buttonStyle(.bordered).disabled(batchRunning || batchEligibleActions.isEmpty)
+            Button("标为完成") { pendingBatchState = .completed }.buttonStyle(.borderedProminent).disabled(batchRunning || batchActions(for: .completed).isEmpty)
+            Button("不再跟进") { pendingBatchState = .dismissed }.buttonStyle(.bordered).disabled(batchRunning || batchActions(for: .dismissed).isEmpty)
             Button("取消") { exitActionSelection() }.buttonStyle(.borderless).disabled(batchRunning)
         }.padding(.horizontal,18).padding(.vertical,11)
             .background(palette.surface,in:Capsule())
