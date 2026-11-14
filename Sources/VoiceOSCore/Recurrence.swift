@@ -117,7 +117,8 @@ extension VoiceOSStore {
         guard row["validity"] == "current" else { throw VoiceOSError("行动版本或依据已变化，请重新核对") }
         guard row["state"] != "open" else { return nil }
         let version = Int(row["version"]!)!
-        let resolved = successorID ?? (try db.query("SELECT id FROM actions WHERE command_id LIKE ? ORDER BY created_at DESC LIMIT 1", ["recurrence:" + id + ":%"]).first?["id"])
+        let fallback = try db.query("SELECT id FROM actions WHERE command_id LIKE ? ORDER BY created_at DESC LIMIT 1", ["recurrence:" + id + ":%"]).first?["id"]
+        let resolved = successorID ?? fallback
         var keptSuccessorID: String?
         try db.transaction {
             if let resolved {
