@@ -65,7 +65,7 @@ struct WorkspaceRow: View {
         Button(action:open) {
             HStack(alignment:.top,spacing:14) {
                 Image(systemName:icon).vosFont(16).foregroundStyle(palette.accent)
-                    .frame(width:34,height:34).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius:8))
+                    .frame(width:34,height:34).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 VStack(alignment:.leading,spacing:8) {
                     Text(title).vosFont(16, weight: .semibold).lineSpacing(3).lineLimit(3).fixedSize(horizontal:false,vertical:true).help(title)
                     if !subtitle.isEmpty { Text(subtitle).vosFont(13).foregroundStyle(.secondary).lineSpacing(3).lineLimit(2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
@@ -169,7 +169,7 @@ struct WorkspaceView: View {
                 Divider()
                 if let message = model.workspaceLastError {
                     HStack(alignment:.firstTextBaseline,spacing:12) {
-                        Label(message,systemImage:"exclamationmark.triangle.fill").font(.callout).foregroundStyle(.orange).textSelection(.enabled)
+                        Label(message,systemImage:"exclamationmark.triangle.fill").font(.callout).foregroundStyle(palette.danger).textSelection(.enabled)
                         Spacer(minLength:8)
                         if model.workspaceLastErrorRetry != nil { Button("重试") { model.retryWorkspaceError() } }
                         Button { model.clearWorkspaceError() } label: { Image(systemName:"xmark").font(.caption) }
@@ -190,7 +190,7 @@ struct WorkspaceView: View {
                         ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
                     } else { pageContent }
                 }.frame(maxWidth:.infinity,maxHeight:.infinity)
-                if !error.isEmpty { Text(error).font(.callout).foregroundStyle(.orange).textSelection(.enabled).padding(12) }
+                if !error.isEmpty { Text(error).font(.callout).foregroundStyle(palette.danger).textSelection(.enabled).padding(12) }
                 WorkspaceProcessingBar(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
             }.frame(minWidth:440)
             if discussionIsPresented {
@@ -316,7 +316,7 @@ struct WorkspaceView: View {
         Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
             Label(title,systemImage:icon).vosFont(15, weight: section == title ? .semibold : .regular)
                 .frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,12).padding(.vertical,11)
-                .background(section == title ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:8))
+                .background(section == title ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 // Plain buttons otherwise only hit-test the icon and text, leaving the padded row inert.
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityIdentifier("workspace.nav."+title)
@@ -327,7 +327,7 @@ struct WorkspaceView: View {
                 Button(action:back) {
                     Image(systemName:"chevron.left").vosFont(15, weight: .medium)
                         .frame(width:44,height:44)
-                        .background(palette.selection.opacity(0.5),in:RoundedRectangle(cornerRadius:8))
+                        .background(palette.selection.opacity(0.5),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("返回").help("返回上一页").keyboardShortcut("[",modifiers:.command)
             }
@@ -338,7 +338,7 @@ struct WorkspaceView: View {
             Button { Task { await toggleDiscussion() } } label: { Label("讨论",systemImage:"sidebar.right") }
                 .buttonStyle(.borderless).disabled(model.discussionSaving || model.discussionSending)
                 .accessibilityIdentifier("workspace.discussion")
-        }.padding(.horizontal,26).frame(height:58).background(palette.canvas)
+        }.padding(.horizontal,26).frame(minHeight:58).background(palette.canvas)
     }
     private var breadcrumb: String {
         switch page {
@@ -415,7 +415,7 @@ struct WorkspaceView: View {
                     }
                     if let issue = model.recordingModelIssue {
                         HStack(spacing:10) {
-                            Text(issue).font(.caption).foregroundStyle(.orange)
+                            Text(issue).font(.caption).foregroundStyle(palette.warning)
                             if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.controlSize(.small) }
                             if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.controlSize(.small) }
                         }
@@ -980,9 +980,9 @@ private struct WorkspaceTopicEntry: View {
         DisclosureGroup("留下认识、实践或结果") {
             VStack(alignment:.leading,spacing:13) {
                 Picker("记录类型",selection:$kind) { ForEach(ReflectionQuestionEntryKind.allCases,id:\.self) { Text($0.label).tag($0) } }.pickerStyle(.menu)
-                TextEditor(text:$text).frame(minHeight:100).padding(8).background(palette.surface,in:RoundedRectangle(cornerRadius:8))
+                TextEditor(text:$text).frame(minHeight:100).padding(8).background(palette.surface,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 Button("保存并接回主题") { saving=true;Task { do { try await model.saveReflectionQuestionEntry(questionID:topic.id,kind:kind,text:text,sourceIDs:sourceIDs,allowCloud:true);text="";error="" } catch { self.error=error.localizedDescription };saving=false } }.disabled(saving || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
-                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(.orange) }
+                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger) }
             }.padding(.top,12)
         }
     }

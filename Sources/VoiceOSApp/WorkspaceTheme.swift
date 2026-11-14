@@ -36,6 +36,8 @@ struct WorkspacePalette {
     var surface: Color { theme == .graphite ? adaptive(0xF7F7F8, 0x292929) : adaptive(0xFFFFFF, 0x242925) }
     var sidebar: Color { theme == .graphite ? adaptive(0xF3F3F3, 0x181818) : adaptive(0xF0F2ED, 0x181D19) }
     var text: Color { theme == .graphite ? adaptive(0x202020, 0xECECEC) : adaptive(0x26352D, 0xE5EBE4) }
+    /// Secondary toolbar and metadata copy; one step quieter than `text`.
+    var secondaryText: Color { text.opacity(0.62) }
     var accent: Color { theme == .graphite ? adaptive(0x282828, 0xE5E5E5) : adaptive(0x315F49, 0xB8D9BF) }
     var selection: Color { theme == .graphite ? adaptive(0xE7E7E7, 0x333333) : adaptive(0xE6EEE5, 0x303F33) }
     var border: Color { theme == .graphite ? adaptive(0xDEDEDE, 0x424242) : adaptive(0xD8E1D7, 0x405044) }
