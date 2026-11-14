@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/app-intents
@@ -35,5 +35,7 @@ owner: coordinator
 2026-11-15 提交 `7535729`，随第四批合并。单文件类型检查与目标编译通过；发行包 `extract.actionsdata` 含 `VoiceOSApp.CaptureTextIntent` 与参数定义。Shortcuts 界面发现与 Siri 调用因锁屏不可得。
 
 ## 链接
+
+- 2026-11-15 随第四批合并为 `a4de038`（PR #160）。
 
 - `docs/product/reference-products.md` 第 9.2 节

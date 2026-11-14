@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-4
@@ -71,6 +71,8 @@ owner: coordinator
 发行构建：`scripts/app/build.py` 的元数据步骤产出 `Contents/Resources/Metadata.appintents/extract.actionsdata`，`VoiceOSApp.CaptureTextIntent`、参数与 `openAppWhenRun` 齐备；隔离副本冒烟启动正常（schema 60、78 份材料）。锁屏环境下 Shortcuts 动作发现、Siri 调用与 VoiceOver 走查不可得。
 
 ## 链接
+
+- 2026-11-15 已合并为 `a4de038`（PR #160）。
 
 - `docs/product/reference-products.md` 第 9.2、9.5 节
 - App Intents 任务卡 `work/tasks/20261115-app-intents/TASK.md`
