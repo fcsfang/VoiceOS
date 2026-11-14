@@ -588,6 +588,7 @@ final class ControlCenter: ObservableObject {
     @Published var startupIssue = ""
     @Published var player: AVPlayer?
     private var playbackBoundary: Any?
+    private var playbackGeneration = 0
     @Published var history: [TranscriptVersion] = []
     @Published var claims: [CandidateClaim] = []
     /// Source-facing claims use only the newest completed producer for that
@@ -614,6 +615,8 @@ final class ControlCenter: ObservableObject {
     @Published var pendingScheduleEffect: ReminderScheduleEffect?
     @Published var schedulePreviews: [String: ReminderScheduleDecision] = [:]
     @Published var savingAction = false
+    @Published var actionUndoStack = ActionUndoStack()
+    var isUndoingActionChange = false
     @Published var actionVersions: [ActionRevision] = []
     @Published var feedbackRecords: [ActionFeedbackRecord] = []
     @Published var activeActionTitle = ""
@@ -2294,6 +2297,7 @@ final class ControlCenter: ObservableObject {
         } catch { status = error.localizedDescription; await refresh() }
     }
     func stopPlayback() {
+        playbackGeneration += 1
         guard let player else { return }
         player.pause()
         if let playbackBoundary { player.removeTimeObserver(playbackBoundary); self.playbackBoundary = nil }
@@ -2304,9 +2308,11 @@ final class ControlCenter: ObservableObject {
         do {
             guard let url = try await store?.playableURL(sourceID: record.id) else { return false }
             stopPlayback()
+            let generation = playbackGeneration
             let playback = AVPlayer(url: url)
             player = playback
             await playback.seek(to: CMTime(value: Int64(milliseconds), timescale: 1000), toleranceBefore: .zero, toleranceAfter: .zero)
+            guard playbackGeneration == generation, player === playback else { return false }
             if let end = endMilliseconds, end > milliseconds {
                 playbackBoundary = playback.addBoundaryTimeObserver(forTimes: [NSValue(time: CMTime(value: Int64(end), timescale: 1000))], queue: .main) { [weak playback] in playback?.pause() }
             }
@@ -2447,7 +2453,9 @@ final class ControlCenter: ObservableObject {
         }
     }
     func saveReminderConnection() async {
+        guard !remindersBusy else { return }
         guard let store, let calendar = reminderCalendars.first(where: { $0.id == proposedReminderCalendarID }) else { return }
+        remindersBusy = true; defer { remindersBusy = false }
         do {
             reminderAccess = try await store.setReminderAccess(calendarID: calendar.id, title: calendar.title, enabled: true, expectedVersion: reminderAccess?.version ?? 0)
             choosingReminderCalendar = false
@@ -2758,8 +2766,10 @@ final class ControlCenter: ObservableObject {
         } catch { status = error.localizedDescription; await refresh(); return false }
     }
     func changeAction(_ action: ActionRecord, state: LocalActionState) async {
-        guard let store, !savingAction else { return }
+        guard let store else { return }
+        guard !savingAction else { status = "正在保存其他更改，请稍后重试"; return }
         savingAction = true; defer { savingAction = false }
+        var changed = false
         do {
             if state != .dismissed, let link = reminderLinks.first(where: { $0.actionID == action.id }), let id = link.externalID {
                 guard let access = reminderAccess, access.enabled, access.calendarID == link.calendarID, !remindersBusy else { throw VoiceOSError("请先恢复提醒事项连接，或在 Apple 提醒事项中更改完成状态") }
@@ -2774,7 +2784,11 @@ final class ControlCenter: ObservableObject {
                 _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: state)
                 status = "行动状态已保存"
             }
+            changed = true
         } catch { status = error.localizedDescription }
+        if changed, !isUndoingActionChange, let previous = LocalActionState(rawValue: action.state) {
+            recordActionChange(action, from: previous, to: state)
+        }
         await refresh(); await queueActionFollowups([action.id])
     }
     func clarifyAction(_ action: ActionRecord, decision: ActionClarificationDecision) async -> Bool {
@@ -3049,11 +3063,14 @@ struct VoiceOSApp: App {
     @StateObject private var model = ControlCenter()
     @FocusedValue(\.voiceOSController) private var focusedModel
     var body: some Scene {
-        Window("VoiceOS", id: "control-center") { WorkspaceView(model: model) }
+        Window("VoiceOS", id: "control-center") { WorkspaceView(model: model).onboarding(model: model) }
         WindowGroup("独立资料库", id: "restored-library", for: String.self) { path in
             if let path = path.wrappedValue { RestoredLibraryView(path: path) }
         }
-        .commands { CommandGroup(after: .newItem) { Button("导入音频或视频…") { focusedModel?.chooseFullRecording() }.keyboardShortcut("i").disabled(focusedModel?.initialized != true || focusedModel?.importing == true) } }
+        .commands {
+            CommandGroup(after: .newItem) { Button("导入音频或视频…") { focusedModel?.chooseFullRecording() }.keyboardShortcut("i").disabled(focusedModel?.initialized != true || focusedModel?.importing == true) }
+            CommandGroup(after: .undoRedo) { Button("撤销上一次行动变更") { Task { await focusedModel?.undoLastActionChange() } }.keyboardShortcut("z", modifiers: [.command, .option]).disabled(focusedModel?.canUndoActionChange != true) }
+        }
     }
 }
 

@@ -15,6 +15,20 @@ public struct ReminderFields: Codable, Sendable, Equatable {
         let formatter = ISO8601DateFormatter(); formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.date(from: timestamp)
     }
+    public static func nextDefaultAlert(due: ReminderDueDate, now: Date, calendar: Calendar) -> Date? {
+        guard case let .dateOnly(localDate, _) = due else { return nil }
+        let parts = localDate.split(separator: "-", omittingEmptySubsequences: false).compactMap { Int($0) }
+        guard parts.count == 3, let day = calendar.date(from: DateComponents(timeZone: calendar.timeZone, year: parts[0], month: parts[1], day: parts[2])) else { return nil }
+        guard let nine = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: calendar.startOfDay(for: day)) else { return nil }
+        if nine > now { return nine }
+        guard let todayNine = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: calendar.startOfDay(for: now)) else { return nil }
+        if todayNine > now { return todayNine }
+        return calendar.date(byAdding: .day, value: 1, to: todayNine)
+    }
+    public func withDefaultAlert(now: Date, calendar: Calendar) -> ReminderFields {
+        guard alerts.isEmpty, let date = Self.nextDefaultAlert(due: due, now: now, calendar: calendar) else { return self }
+        var copy = self; copy.alerts = [Self.timestamp(date)]; return copy
+    }
     public static func relativeDates(expressedAt: String?, timeZone: String) -> [String: String] {
         let plain = ISO8601DateFormatter()
         guard let text = expressedAt, let instant = date(text) ?? plain.date(from: text),
@@ -221,6 +235,10 @@ extension VoiceOSStore {
         if proposal.priority != 0 { _ = try evidence(proposal.priorityQuote, proposal.prioritySourceID) }
         result.priority = proposal.priority
         if task.isSuggestedStep, result != ReminderFields() { throw VoiceOSError("目标的时间不能直接当作新建议步骤的承诺") }
+        if case .dateOnly = result.due, result.alerts.isEmpty, let now = ReminderFields.date(input.processingAt) {
+            var calendar = Calendar(identifier: .gregorian); calendar.timeZone = .current
+            result = result.withDefaultAlert(now: now, calendar: calendar)
+        }
         try result.validate(); return result
     }
     public func saveReminderFields(actionID: String, expectedVersion: Int, fields: ReminderFields) throws {

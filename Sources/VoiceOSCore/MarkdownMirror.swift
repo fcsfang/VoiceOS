@@ -27,13 +27,8 @@ public struct MarkdownMirror {
     }
 
     private func writeDocuments(_ documents: [(String, String)], to folder: URL) throws {
-        let ids = Set(documents.map { $0.0 })
         for (id, text) in documents {
             try Data(text.utf8).write(to: folder.appendingPathComponent(id + ".md"), options: .atomic)
-        }
-        let existing = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
-        for file in existing where file.pathExtension == "md" && !ids.contains(file.deletingPathExtension().lastPathComponent) {
-            try FileManager.default.removeItem(at: file)
         }
     }
 

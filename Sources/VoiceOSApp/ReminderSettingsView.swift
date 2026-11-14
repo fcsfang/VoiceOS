@@ -18,6 +18,16 @@ struct ReminderSettingsView: View {
         if case let .dateOnly(_, zone) = snapshot.fields?.due { return zone.flatMap(TimeZone.init(identifier:)) ?? .current }
         return .current
     }
+    private var alertCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = zone
+        return calendar
+    }
+    private var defaultAlertText: String? {
+        let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd"; formatter.timeZone = zone
+        guard let defaultAlert = ReminderFields.nextDefaultAlert(due: .dateOnly(localDate: formatter.string(from: due), timeZone: nil), now: Date(), calendar: alertCalendar) else { return nil }
+        formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "MM-dd HH:mm"
+        return formatter.string(from: defaultAlert)
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("日期、提醒与优先级").font(.title2)
@@ -33,11 +43,17 @@ struct ReminderSettingsView: View {
                 DatePicker("日期", selection: $due, displayedComponents: [.date])
                 Toggle("具体时刻", isOn: $hasTime)
                 if hasTime { DatePicker("时刻", selection: $due, displayedComponents: [.hourAndMinute]) }
+                if !hasTime {
+                    Text("仅日期任务默认在 09:00 通知").font(.caption).foregroundStyle(.secondary)
+                    if let text = defaultAlertText { Text("实际通知时间 " + text).font(.caption).foregroundStyle(.secondary) }
+                }
             }
-            Toggle("发送通知", isOn: $hasAlert)
-            if hasAlert {
-                DatePicker("提醒我", selection: $alert, displayedComponents: [.date, .hourAndMinute])
-                Text("通知时间独立于安排日期。其他已有通知会保留。").font(.caption).foregroundStyle(.secondary)
+            if hasTime {
+                Toggle("发送通知", isOn: $hasAlert)
+                if hasAlert {
+                    DatePicker("提醒我", selection: $alert, displayedComponents: [.date, .hourAndMinute])
+                    Text("通知时间独立于安排日期。其他已有通知会保留。").font(.caption).foregroundStyle(.secondary)
+                }
             }
             Picker("优先级", selection: $priority) {
                 Text("无").tag(0); Text("高").tag(1); Text("中").tag(5); Text("低").tag(9)
@@ -89,6 +105,7 @@ struct ReminderSettingsView: View {
             if value != snapshot.fields?.alerts.first, alert <= Date() { throw VoiceOSError("请选择未来的通知时间") }
             fields.alerts = ([value] + Array((snapshot.fields?.alerts ?? []).dropFirst())).sorted()
         } else { fields.alerts = [] }
+        fields = fields.withDefaultAlert(now: Date(), calendar: alertCalendar)
         try fields.validate(); return fields
     }
     private func apply(_ preset: SnoozePreset) {
