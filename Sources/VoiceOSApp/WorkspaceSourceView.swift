@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import AVFoundation
 import VoiceOSCore
@@ -60,6 +61,9 @@ struct WorkspaceSourceView: View {
     @State private var claimNotes:[String:ClaimNote]=[:]
     @State private var captureInfo:CaptureMetadata?
     @State private var playbackMS:Int?
+    @State private var selectedText=""
+    @State private var selectedRange=NSRange(location:0,length:0)
+    @State private var fullTextExpanded=false
     private var sourceStatus: String {
         if source.transcript == nil { return source.jobState == "failed" ? "转写失败 · 原件已保存" : "尚未完成转写 · 原件已保存" }
         if source.localOnly { return "仅本机保存" }
@@ -128,6 +132,11 @@ struct WorkspaceSourceView: View {
     private var automaticallyUpdating:Bool { pendingUnderstanding && model.fullRecordingBusy }
     private var pausedThoughts: [CandidateClaim] { (model.currentClaimsBySource[source.id] ?? []).filter { $0.validity != "current" } }
     private var pausedActions: [ActionRecord] { actions.filter { model.workspaceTaskRequiresReview($0) } }
+    private var selectedSpan:TranscriptSpan? {
+        guard !selectedText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,let transcript=source.transcript,
+              let offset=SelectableText.scalarOffset(ofUTF16Offset:selectedRange.location,in:transcript) else { return nil }
+        return source.spans.first { $0.textStart <= offset && offset < $0.textEnd && $0.startMS != nil && $0.endMS != nil }
+    }
     @ViewBuilder private var readingContent:some View {
         if let scroll { readingScrollView.scrollPosition(scroll) } else { readingScrollView }
     }
@@ -357,6 +366,18 @@ struct WorkspaceSourceView: View {
                         }.padding(.top,13)
                     }.padding(.vertical,16)
                     Divider()
+                    if let transcript=source.transcript {
+                        DisclosureGroup("全文选读",isExpanded:$fullTextExpanded) {
+                            VStack(alignment:.leading,spacing:12) {
+                                SelectionActions(selection:selectedText,canPlay:selectedSpan != nil,onSave:saveSelectionAsQuestion,onCopy:copySelectedText,onPlay:playSelectedSpan)
+                                SelectableText(text:transcript) { text, range in
+                                    selectedText=text
+                                    selectedRange=range
+                                }.frame(minHeight:240)
+                            }.padding(.top,12)
+                        }.padding(.vertical,16)
+                        Divider()
+                    }
                     DisclosureGroup("核对依据与适用边界") { KnowledgeReviewSection(model:model,sourceIDs:[source.id]).padding(.top,12) }.padding(.vertical,16)
                     Divider()
                     DisclosureGroup("文字校正、理解与修订历史") {
@@ -452,7 +473,9 @@ struct WorkspaceSourceView: View {
             } catch is CancellationError {}
             catch { self.error="旁注读取失败：" + error.localizedDescription }
         }
-        .onChange(of:source.id) { _,_ in showingOriginal=false }
+        .onChange(of:source.id) { _,_ in showingOriginal=false;clearSelection() }
+        .onChange(of:source.transcript) { _,_ in clearSelection() }
+        .onChange(of:fullTextExpanded) { _,_ in if !fullTextExpanded { clearSelection() } }
         .task {
             while !Task.isCancelled {
                 refreshPlaybackPosition()
@@ -488,6 +511,39 @@ struct WorkspaceSourceView: View {
     private func organize() {
         guard let current=model.records.first(where: { $0.id == source.id }),!current.localOnly else { return }
         model.reidentify(current)
+    }
+    private func saveSelectionAsQuestion() {
+        let text=selectedText
+        guard !text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }
+        Task { @MainActor in
+            if let id=await model.saveCapturedText(text,title:selectionQuestionTitle(text),ownership:.personal,allowCloud:false,commandID:UUID().uuidString) {
+                clearSelection()
+                openSource(id)
+            } else {
+                error=model.status.isEmpty ? "保存失败，请稍后重试" : model.status
+            }
+        }
+    }
+    private func selectionQuestionTitle(_ text:String)->String {
+        let firstLine=text.split(whereSeparator:{ $0.isNewline }).map { $0.trimmingCharacters(in:.whitespaces) }.first { !$0.isEmpty }
+        return "问题 · " + String((firstLine ?? text.trimmingCharacters(in:.whitespacesAndNewlines)).prefix(60))
+    }
+    private func copySelectedText() {
+        let board=NSPasteboard.general
+        board.clearContents()
+        if !board.setString(selectedText,forType:.string) { error="复制失败，请重试" }
+    }
+    private func playSelectedSpan() {
+        guard let span=selectedSpan,let start=span.startMS,let end=span.endMS else { return }
+        Task { @MainActor in
+            if !(await model.playSpan(source,milliseconds:start,endMilliseconds:end)) {
+                error=model.status.isEmpty ? "无法回听这段原话" : model.status
+            }
+        }
+    }
+    private func clearSelection() {
+        selectedText=""
+        selectedRange=NSRange(location:0,length:0)
     }
     private func quote(_ span:TranscriptSpan,text:String) -> String { let s=Array(text.unicodeScalars);guard span.textStart>=0,span.textEnd<=s.count else { return "原文范围已变化" };return String(String.UnicodeScalarView(s[span.textStart..<span.textEnd])) }
     private func time(_ ms:Int)->String { String(format:"%02d:%02d",ms/60000,ms/1000%60) }
