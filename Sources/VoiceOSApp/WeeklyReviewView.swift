@@ -64,6 +64,9 @@ struct WeeklyReviewView: View {
             staleTasks.isEmpty && unclarifiedTasks.isEmpty && weekProgress.isEmpty && pausedTasks.isEmpty &&
             nextWeekEntries.isEmpty
     }
+    private var undoHint: some View {
+        Text("完成后可在任务页撤销，或按 ⌥⌘Z").vosFont(12).foregroundStyle(.secondary)
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
@@ -93,6 +96,7 @@ struct WeeklyReviewView: View {
     private var dailyCloseSection: some View {
         let review = dailyReview
         return WorkspaceSection(title: "今天收尾", subtitle: "逐条完成或不再跟进；改天仍到任务页处理。", icon: "checkmark.circle", count: review.remainingCount) {
+            undoHint
             if review.isClear {
                 Text("今天没有未收尾的行动").font(.callout).foregroundStyle(.secondary).padding(.vertical, 10)
             }
@@ -183,6 +187,7 @@ struct WeeklyReviewView: View {
     private var nextWeekSection: some View {
         let rows = Array(nextWeekCandidates.prefix(5))
         return WorkspaceSection(title: "下周先做", subtitle: "从即将与随时里挑最多 3 条，确认后加入专注。", icon: "calendar.badge.plus", count: nextWeekEntries.count) {
+            undoHint
             if focusSlots == 0 {
                 Text("已有 3 条专注，先到行动页移出。").vosFont(12).foregroundStyle(palette.warning).padding(.top, 8)
             }
@@ -264,6 +269,7 @@ struct WeeklyReviewView: View {
 
     private var todaySection: some View {
         WorkspaceSection(title: "今天与逾期", subtitle: "按本地排期与提醒事项回读，今天到期和已经过去的期限。", icon: "sun.max", count: todayEntries.count) {
+            undoHint
             ForEach(Array(todayEntries.enumerated()), id: \.element.id) { index, entry in
                 if index > 0 { Divider() }
                 reviewRow(title: entry.action.title, subtitle: dueLabel(entry),
@@ -276,6 +282,7 @@ struct WeeklyReviewView: View {
     private var staleSection: some View {
         let rows = Array(staleTasks.prefix(5))
         return WorkspaceSection(title: "长期未动", subtitle: "创建超过 14 天，仍是未完成状态。", icon: "hourglass", count: staleTasks.count) {
+            undoHint
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
                 reviewRow(title: action.title, subtitle: staleLabel(action), trailing: "搁置", icon: "hourglass") { openTask(action.id) }
@@ -285,6 +292,7 @@ struct WeeklyReviewView: View {
     private var unclarifiedSection: some View {
         let rows = Array(unclarifiedTasks.prefix(5))
         return WorkspaceSection(title: "待确认", subtitle: "最近 14 天从原话抽取，还没有确认是承诺、问题与目标，还是不是。", icon: "questionmark.circle", count: unclarifiedTasks.count) {
+            undoHint
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
                 reviewRow(title: action.title, subtitle: "打开任务页完成一次三选一澄清。", trailing: "待确认", icon: "questionmark.circle") { openTask(action.id) }
@@ -294,6 +302,7 @@ struct WeeklyReviewView: View {
     private var progressSection: some View {
         let rows = Array(weekProgress.prefix(5))
         return WorkspaceSection(title: "本周完成与结果", subtitle: "最近 7 天记录的完成、进展与结果。", icon: "checkmark.seal", count: weekProgress.count) {
+            undoHint
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 if index > 0 { Divider() }
                 reviewRow(title: row.taskTitle, subtitle: row.relationLabel, detail: row.text,
@@ -304,6 +313,7 @@ struct WeeklyReviewView: View {
     private var pausedSection: some View {
         let rows = Array(pausedTasks.prefix(5))
         return WorkspaceSection(title: "暂停与冻结", subtitle: "AI 提取暂停或不再随当前理解更新的行动，状态保留。", icon: "pause.circle", count: pausedTasks.count) {
+            undoHint
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
                 reviewRow(title: action.title, subtitle: model.workspaceActionStatus(action),

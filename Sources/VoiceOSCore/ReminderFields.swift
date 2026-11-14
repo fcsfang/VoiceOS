@@ -51,8 +51,11 @@ public struct ReminderFields: Codable, Sendable, Equatable {
         var parts: [String] = []
         if due != .none { parts.append(due.summary) }
         if !alerts.isEmpty {
-            let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "MM-dd HH:mm"
-            parts.append("提醒 " + alerts.compactMap(Self.date).map(formatter.string).joined(separator: "、"))
+            if case .dateOnly = due { parts.append("默认 09:00 提醒") }
+            else {
+                let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "MM-dd HH:mm"
+                parts.append("提醒 " + alerts.compactMap(Self.date).map(formatter.string).joined(separator: "、"))
+            }
         }
         if priority > 0 { parts.append(priority <= 4 ? "高优先级" : priority == 5 ? "中优先级" : "低优先级") }
         return parts.joined(separator: " · ")
