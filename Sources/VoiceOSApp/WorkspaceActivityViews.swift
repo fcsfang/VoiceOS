@@ -173,6 +173,10 @@ struct WorkspaceTaskView: View {
     @State private var pauseReasons: [String] = []
     @State private var undoMessage: String?
     @State private var undoToken = UUID()
+    @State private var subtasks: [ActionSubtask] = []
+    @State private var subtaskTitle = ""
+    @State private var actionEstimate: Int?
+    @State private var planBusy = false
     private var correctedClaim: CandidateClaim? {
         model.claims.first { $0.id == action.claimID && $0.validity == "current" && $0.reviewState != "rejected" && $0.reviewVersion > action.claimReviewVersion }
     }
@@ -190,10 +194,27 @@ struct WorkspaceTaskView: View {
         return true
     }
     private var reviewPairs: [ActionReviewPair] { model.actionReviewPairs(for: action) }
+    private var subtaskSummary: String {
+        guard !subtasks.isEmpty else { return "把任务拆成可勾选的小步。" }
+        return "已完成 " + String(subtasks.filter(\.done).count) + "/" + String(subtasks.count)
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 WorkspaceHeading(eyebrow: current ? (action.state == "completed" ? "行动 · 已完成" : action.kind == "task" ? "行动 · 待跟进" : "问题与目标") : model.workspaceActionStatus(action), title: action.title)
+                if current || actionEstimate != nil {
+                    HStack(spacing: 14) {
+                        Text("预计时长").font(.callout).foregroundStyle(.secondary)
+                        ForEach([15, 30, 60], id: \.self) { minutes in
+                            Button { setEstimate(minutes) } label: {
+                                Label(String(minutes) + " 分钟", systemImage: actionEstimate == minutes ? "checkmark.circle.fill" : "circle").font(.callout)
+                            }.buttonStyle(.borderless).disabled(!current || planBusy)
+                        }
+                        if actionEstimate != nil {
+                            Button("清除") { clearEstimate() }.buttonStyle(.borderless).font(.callout).disabled(!current || planBusy)
+                        }
+                    }
+                }
                 if showsClarification {
                     VStack(alignment:.leading,spacing:12) {
                         Text("这条行动来自你的原话。要把它当作承诺吗？").font(.callout)
@@ -273,6 +294,36 @@ struct WorkspaceTaskView: View {
                     Button("取消", role: .cancel) {}
                 } message: {
                     Text("会移入历史记录，之后仍可找回。Apple 提醒事项中的提醒需单独处理。")
+                }
+                if current || !subtasks.isEmpty {
+                    WorkspaceSection(title:"子任务",subtitle:subtaskSummary,icon:"checklist",count:subtasks.isEmpty ? nil : subtasks.count) {
+                        ForEach(subtasks, id: \.id) { subtask in
+                            HStack(spacing: 12) {
+                                Button { toggleSubtask(subtask) } label: {
+                                    Image(systemName: subtask.done ? "checkmark.circle.fill" : "circle")
+                                        .vosFont(17).foregroundStyle(subtask.done ? palette.accent : palette.secondaryText)
+                                }.buttonStyle(.plain).disabled(!current || planBusy)
+                                    .accessibilityLabel(subtask.done ? "标为未完成" : "标为已完成")
+                                Text(subtask.title).font(.callout).lineSpacing(3).textSelection(.enabled)
+                                    .strikethrough(subtask.done).foregroundStyle(subtask.done ? palette.secondaryText : palette.text)
+                                Spacer(minLength: 8)
+                                if current {
+                                    Button { deleteSubtask(subtask) } label: { Image(systemName:"trash").vosFont(13) }
+                                        .buttonStyle(.borderless).foregroundStyle(palette.secondaryText)
+                                        .accessibilityLabel("删除子任务").disabled(planBusy)
+                                }
+                            }.padding(.vertical, 10).padding(.horizontal, 4)
+                            if subtask.id != subtasks.last?.id { Divider() }
+                        }
+                        if current {
+                            HStack(spacing: 10) {
+                                TextField("添加子任务", text: $subtaskTitle).textFieldStyle(.roundedBorder)
+                                    .onSubmit { addSubtask() }
+                                Button("添加") { addSubtask() }.buttonStyle(.borderedProminent)
+                                    .disabled(planBusy || subtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            }.padding(.top, 12)
+                        }
+                    }
                 }
                 if !action.note.isEmpty {
                     WorkspaceSection(title:"任务说明",icon:"text.alignleft") {
@@ -367,6 +418,7 @@ struct WorkspaceTaskView: View {
             pauseReasons = reasons
         }
         .task(id: action.id + String(action.version) + String(model.recentOutcomes.count)) { await loadFeedback() }
+        .task(id: action.id + String(action.version)) { await loadPlan() }
         .sheet(isPresented: $confirming) { ConfirmTaskView(action: action, model: model) { confirming = false } }
         .sheet(isPresented: $showingSettings) { if let settings { ReminderSettingsView(action: action, snapshot: settings, model: model) { showingSettings = false } } }
         .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
@@ -463,6 +515,77 @@ struct WorkspaceTaskView: View {
         guard let store = model.store else { feedbackError = "资料库尚未打开，无法读取反馈历史"; return }
         do { feedbackHistory = try await store.actionFeedback(actionID: action.id); feedbackError = nil }
         catch { feedbackError = "读取反馈历史失败：" + error.localizedDescription }
+    }
+    private func loadPlan() async {
+        guard let store = model.store else { error = "资料库尚未打开，无法读取子任务"; return }
+        do {
+            subtasks = try await store.subtasks(actionID: action.id)
+            let estimates = try await store.actionEstimates()
+            actionEstimate = estimates[action.id]
+        } catch { self.error = "读取子任务失败：" + error.localizedDescription }
+    }
+    private func addSubtask() {
+        let title = subtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        planBusy = true
+        Task {
+            defer { planBusy = false }
+            guard let store = model.store else { error = "资料库尚未打开"; return }
+            do {
+                _ = try await store.addSubtask(actionID: action.id, title: title)
+                subtasks = try await store.subtasks(actionID: action.id)
+                subtaskTitle = ""
+                error = ""
+            } catch { self.error = "添加子任务失败：" + error.localizedDescription }
+        }
+    }
+    private func toggleSubtask(_ subtask: ActionSubtask) {
+        planBusy = true
+        Task {
+            defer { planBusy = false }
+            guard let store = model.store else { error = "资料库尚未打开"; return }
+            do {
+                _ = try await store.setSubtaskDone(id: subtask.id, done: !subtask.done)
+                subtasks = try await store.subtasks(actionID: action.id)
+                error = ""
+            } catch { self.error = "更新子任务失败：" + error.localizedDescription }
+        }
+    }
+    private func deleteSubtask(_ subtask: ActionSubtask) {
+        planBusy = true
+        Task {
+            defer { planBusy = false }
+            guard let store = model.store else { error = "资料库尚未打开"; return }
+            do {
+                _ = try await store.deleteSubtask(id: subtask.id)
+                subtasks = try await store.subtasks(actionID: action.id)
+                error = ""
+            } catch { self.error = "删除子任务失败：" + error.localizedDescription }
+        }
+    }
+    private func setEstimate(_ minutes: Int) {
+        planBusy = true
+        Task {
+            defer { planBusy = false }
+            guard let store = model.store else { error = "资料库尚未打开"; return }
+            do {
+                _ = try await store.setActionEstimate(actionID: action.id, minutes: minutes)
+                actionEstimate = minutes
+                error = ""
+            } catch { self.error = "保存预计时长失败：" + error.localizedDescription }
+        }
+    }
+    private func clearEstimate() {
+        planBusy = true
+        Task {
+            defer { planBusy = false }
+            guard let store = model.store else { error = "资料库尚未打开"; return }
+            do {
+                _ = try await store.clearActionEstimate(actionID: action.id)
+                actionEstimate = nil
+                error = ""
+            } catch { self.error = "清除预计时长失败：" + error.localizedDescription }
+        }
     }
     private func changeState() {
         let state:LocalActionState=action.state == "completed" ? .open : .completed
