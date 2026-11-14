@@ -21,6 +21,11 @@ private struct WorkspaceNavigationEntry: Hashable {
     let topicReadingMode: String
     var listFilter: String = ""
 }
+private struct WorkspaceReminderSettingsTarget: Identifiable {
+    let action: ActionRecord
+    let snapshot: ReminderSnapshot
+    var id: String { action.id }
+}
 struct WorkspaceHeading: View {
     let eyebrow: String
     let title: String
@@ -115,6 +120,13 @@ struct WorkspaceView: View {
     @State private var saveViewFilter = ""
     @State private var pendingDeleteView: SavedWorkspaceView?
     @State private var focusedActionIDs: Set<String> = []
+    @State private var showingPlanToday = false
+    @State private var planningToday = false
+    @State private var planSelection: [String] = []
+    @State private var planLimitHint = ""
+    @State private var reminderSettingsTarget: WorkspaceReminderSettingsTarget?
+    @State private var actionKeyboardHighlightID: String?
+    @FocusState private var actionListFocused: Bool
     @State private var readingStates: [String: SourceReadingState] = [:]
     @State private var selectingActions = false
     @State private var selectedActionIDs: Set<String> = []
@@ -237,7 +249,7 @@ struct WorkspaceView: View {
                 else if page == .tool("导入录音") { back() }
             }
             .onChange(of:page) { _, next in if next != .actions { exitActionSelection() } }
-            .onChange(of:actionFilter) { _, filter in if !["全部","我的待办"].contains(filter) { exitActionSelection() } }
+            .onChange(of:actionFilter) { _, filter in actionKeyboardHighlightID=nil;if !["全部","我的待办"].contains(filter) { exitActionSelection() } }
             .onOpenURL { url in if model.initialized { routeExternalURL(url) } else { pendingURL=url } }
             .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;routeExternalURL(url) } }
             .onDisappear { Task { await model.setPanoramaVisible(false) } }
@@ -269,6 +281,10 @@ struct WorkspaceView: View {
                 WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) })
             }
             .sheet(isPresented:$showingSaveView) { saveViewSheet }
+            .sheet(isPresented:$showingPlanToday) { planTodaySheet }
+            .sheet(item:$reminderSettingsTarget) { target in
+                ReminderSettingsView(action:target.action,snapshot:target.snapshot,model:model) { reminderSettingsTarget=nil }
+            }
     }
     private var alertContent: some View {
         sheetContent
@@ -480,8 +496,17 @@ struct WorkspaceView: View {
         case .themes: scrolled { themes }.id(navigationEntry)
         case .materials: scrolled { materials }
         case .actions:
-            scrolled { actions }
-                .overlay(alignment:.bottom) { if selectingActions { actionSelectionBar } }
+            ScrollViewReader { proxy in
+                scrolled { actions }
+                    .focusable()
+                    .focused($actionListFocused)
+                    .focusEffectDisabled()
+                    .onKeyPress { handleActionListKey($0) }
+                    .onChange(of:actionKeyboardHighlightID) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
+                    .onChange(of:showingPlanToday) { _, shown in if !shown { requestActionListFocus() } }
+                    .onAppear { requestActionListFocus() }
+                    .overlay(alignment:.bottom) { if selectingActions { actionSelectionBar } }
+            }
         case .initiate: TaskInitiationView(model:model,openSource:{ go(.source($0)) })
         case .source(let id):
             if let source=model.records.first(where: { $0.id == id }) {
@@ -729,6 +754,9 @@ struct WorkspaceView: View {
                 if ["全部","我的待办"].contains(actionFilter) {
                     Button(selectingActions ? "取消选择" : "选择") { if selectingActions { exitActionSelection() } else { selectingActions=true } }.buttonStyle(.bordered).disabled(batchRunning)
                 }
+                if actionFilter == "我的待办" {
+                    Button("安排今天",systemImage:"sun.max") { beginPlanningToday() }.buttonStyle(.bordered)
+                }
                 Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.actions,filter:actionFilter) }.buttonStyle(.bordered)
                 Button("每周回顾",systemImage:"calendar.badge.clock") { showingWeeklyReview=true }.buttonStyle(.bordered)
             }
@@ -763,9 +791,16 @@ struct WorkspaceView: View {
             }
             if actionFilter == "我的待办", !visible.isEmpty {
                 let surface = ActionTimeSurface.build(actions: visible, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
-                if !surface.today.isEmpty {
-                    WorkspaceSection(title:"今天",subtitle:"逾期与今天到期",icon:"sun.max",count:surface.today.count) {
-                        ForEach(surface.today) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != surface.today.last?.id { Divider() } }
+                let overdue = surface.today.filter(\.isOverdue)
+                let dueToday = surface.today.filter { !$0.isOverdue }
+                if !overdue.isEmpty {
+                    WorkspaceSection(title:"逾期",subtitle:"已过期限。改天需要提醒事项链接。",icon:"exclamationmark.circle",count:overdue.count) {
+                        ForEach(overdue) { entry in overdueRow(entry);if entry.id != overdue.last?.id { Divider() } }
+                    }
+                }
+                if !dueToday.isEmpty {
+                    WorkspaceSection(title:"今天",subtitle:"今天到期",icon:"sun.max",count:dueToday.count) {
+                        ForEach(dueToday) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != dueToday.last?.id { Divider() } }
                     }
                 }
                 if !surface.soon.isEmpty {
@@ -1019,6 +1054,7 @@ struct WorkspaceView: View {
     private func actionRow(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> some View {
         let selectable=action.state == "open" && action.validity == "current"
         let selected=selectedActionIDs.contains(action.id)
+        let keyboardHighlighted=page == .actions && !selectingActions && actionKeyboardHighlightID == action.id
         let icon=selectingActions && selectable ? (selected ? "checkmark.circle.fill" : "circle") : action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : "circle"
         return WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action,timeEntry:timeEntry),icon:icon,trailing:selectingActions && selected ? "已选" : "") {
             if selectingActions {
@@ -1026,6 +1062,8 @@ struct WorkspaceView: View {
                 if selected { selectedActionIDs.remove(action.id) } else { selectedActionIDs.insert(action.id) }
             } else { go(.task(action.id)) }
         }
+        .background(keyboardHighlighted ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:9))
+        .overlay { if keyboardHighlighted { RoundedRectangle(cornerRadius:9).strokeBorder(palette.accent.opacity(0.5),lineWidth:1) } }
         .contextMenu {
             if page == .actions, action.state == "open", action.validity == "current" {
                 Button(focusedActionIDs.contains(action.id) ? "移出专注" : "加入专注") { toggleFocus(action.id) }
@@ -1037,6 +1075,202 @@ struct WorkspaceView: View {
             guard let next = await model.toggleActionFocus(actionID: id) else { error = model.status; return }
             focusedActionIDs = next
             error = ""
+        }
+    }
+    private func overdueRow(_ entry:ActionTimeEntry) -> some View {
+        let focused=focusedActionIDs.contains(entry.action.id)
+        return HStack(alignment:.top,spacing:8) {
+            actionRow(entry.action,timeEntry:entry)
+            HStack(spacing:6) {
+                Button("改天") { openReminderSettings(entry.action) }
+                    .disabled(!hasLinkedReminder(entry.action) || model.savingAction || model.remindersBusy)
+                    .help("改天用提醒事项的日期设置；没有提醒链接时不可用")
+                Button("移到随时") { toggleFocus(entry.action.id) }
+                    .disabled(!focused || model.savingAction)
+                    .help(focused ? "只移出专注，不改提醒日期" : "这条行动不在专注中")
+                Button("不再跟进") { dismissAction(entry.action) }
+                    .disabled(model.savingAction)
+            }.controlSize(.small).padding(.top,16)
+        }
+    }
+    private func hasLinkedReminder(_ action:ActionRecord) -> Bool {
+        model.reminderLinks.contains { $0.actionID == action.id && $0.state == "linked" }
+    }
+    private func openReminderSettings(_ action:ActionRecord) {
+        Task {
+            if let snapshot = await model.loadReminderSettings(action) {
+                reminderSettingsTarget=WorkspaceReminderSettingsTarget(action:action,snapshot:snapshot)
+            } else { error=model.status }
+        }
+    }
+    private func dismissAction(_ action:ActionRecord) {
+        applyActionState(action,to:.dismissed)
+    }
+    private func applyActionState(_ action:ActionRecord,to state:LocalActionState,nextHighlight:String? = nil) {
+        Task {
+            await model.changeAction(action,state:state)
+            guard model.actionRecords.first(where: { $0.id == action.id })?.state == state.rawValue else {
+                error=model.status.isEmpty ? "状态未能更新，请稍后重试。" : model.status
+                return
+            }
+            error=""
+            if let nextHighlight { actionKeyboardHighlightID=nextHighlight }
+        }
+    }
+    private var planRemainingSlots: Int { max(0,3 - focusedActions.count) }
+    private var planCandidates: [ActionTimeEntry] {
+        let surface=ActionTimeSurface.build(actions:visibleActions,schedules:model.scheduleIntents,links:model.reminderLinks,now:Date(),calendar:.current)
+        let focused=Set(focusedActions.map(\.id))
+        return (surface.soon + surface.anytime).filter { !focused.contains($0.action.id) }
+    }
+    private func beginPlanningToday() {
+        planSelection=[];planLimitHint="";showingPlanToday=true
+    }
+    private func togglePlanSelection(_ id:String) {
+        if let index=planSelection.firstIndex(of:id) { planSelection.remove(at:index);planLimitHint="";return }
+        guard planSelection.count < planRemainingSlots else {
+            planLimitHint="专注最多 3 条，先移出一条再选。"
+            return
+        }
+        planSelection.append(id);planLimitHint=""
+    }
+    private func confirmPlanToday() async {
+        guard !planningToday, !planSelection.isEmpty else { return }
+        planningToday=true
+        defer { planningToday=false }
+        let current=await model.focusedActionIDs()
+        var failure=""
+        for id in planSelection where !current.contains(id) {
+            guard let next=await model.toggleActionFocus(actionID:id) else { failure=model.status;break }
+            focusedActionIDs=next
+        }
+        focusedActionIDs=await model.focusedActionIDs()
+        if failure.isEmpty { showingPlanToday=false;planSelection=[];planLimitHint="";error="" }
+        else { planLimitHint=failure }
+    }
+    private var planTodaySheet: some View {
+        let candidates=planCandidates
+        return VStack(alignment:.leading,spacing:16) {
+            HStack(alignment:.top,spacing:12) {
+                VStack(alignment:.leading,spacing:6) {
+                    Text("安排今天").font(.title2)
+                    Text("从即将与随时里挑选，最多 3 条进入专注。").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength:8)
+                Button("取消") { showingPlanToday=false }
+            }
+            if !focusedActions.isEmpty {
+                Text("已在专注").vosFont(13, weight:.medium).foregroundStyle(.secondary)
+                ForEach(focusedActions) { action in
+                    HStack(spacing:10) {
+                        Image(systemName:"pin").foregroundStyle(palette.accent).frame(width:22,alignment:.leading)
+                        Text(action.title).vosFont(15, weight:.medium).lineLimit(2)
+                        Spacer(minLength:8)
+                        Text("已专注").vosFont(12).foregroundStyle(.secondary)
+                    }.padding(.vertical,5)
+                }
+            }
+            Text("即将与随时").vosFont(13, weight:.medium).foregroundStyle(.secondary)
+            if candidates.isEmpty {
+                Text("没有可安排的任务。").font(.callout).foregroundStyle(.secondary)
+            } else {
+                ScrollView {
+                    VStack(spacing:0) {
+                        ForEach(candidates) { entry in
+                            planCandidateRow(entry)
+                            if entry.id != candidates.last?.id { Divider() }
+                        }
+                    }
+                }.frame(maxHeight:320)
+            }
+            if planRemainingSlots == 0 { WorkspaceNoticeText(message:"专注已有 3 条，先移出一条再安排。",severity:.warning) }
+            else if !planLimitHint.isEmpty { WorkspaceNoticeText(message:planLimitHint,severity:.warning) }
+            HStack {
+                Text("已选 \(planSelection.count) 条").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button(planningToday ? "正在安排…" : "加入专注") { Task { await confirmPlanToday() } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(planSelection.isEmpty || planningToday)
+            }
+        }.padding(24).frame(width:560)
+    }
+    private func planCandidateRow(_ entry:ActionTimeEntry) -> some View {
+        let selected=planSelection.contains(entry.action.id)
+        return Button { togglePlanSelection(entry.action.id) } label: {
+            HStack(alignment:.top,spacing:12) {
+                Image(systemName:selected ? "checkmark.circle.fill" : "circle")
+                    .vosFont(16).foregroundStyle(selected ? palette.accent : Color.secondary).padding(.top,2)
+                VStack(alignment:.leading,spacing:4) {
+                    Text(entry.action.title).vosFont(15, weight:.medium).lineLimit(2).multilineTextAlignment(.leading)
+                    if let due=entry.due { Text(due.summary).vosFont(12).foregroundStyle(.secondary) }
+                }
+                Spacer(minLength:8)
+            }.padding(.vertical,9).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+    }
+    private var actionKeyboardOrder: [ActionRecord] {
+        var rows:[ActionRecord]=[]
+        var seen=Set<String>()
+        func add<S:Sequence>(_ actions:S) where S.Element == ActionRecord {
+            for action in actions where seen.insert(action.id).inserted { rows.append(action) }
+        }
+        if ["全部","我的待办"].contains(actionFilter) { add(focusedActions) }
+        if actionFilter == "我的待办" {
+            let surface=ActionTimeSurface.build(actions:visibleActions,schedules:model.scheduleIntents,links:model.reminderLinks,now:Date(),calendar:.current)
+            add(surface.today.map(\.action))
+            add(surface.soon.map(\.action))
+            add(surface.anytime.map(\.action))
+        } else if actionFilter != "AI 助理" {
+            add(visibleActions)
+        }
+        if actionFilter == "全部" {
+            add(model.workspacePausedTasks)
+            add(model.actionRecords.filter { $0.kind != "task" && $0.state != "dismissed" && $0.validity == "current" }.prefix(3))
+        }
+        return rows
+    }
+    private func handleActionListKey(_ press:KeyPress) -> KeyPress.Result {
+        guard page == .actions, actionListFocused, !selectingActions,
+              press.modifiers.isDisjoint(with: [.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let order=actionKeyboardOrder
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard !order.isEmpty else { return .ignored }
+            let current=actionKeyboardHighlightID.flatMap { id in order.firstIndex { $0.id == id } }
+            let next: Int
+            if press.key == .upArrow { next=current.map { max(0,$0 - 1) } ?? order.count - 1 }
+            else { next=current.map { min(order.count - 1,$0 + 1) } ?? 0 }
+            actionKeyboardHighlightID=order[next].id
+            return .handled
+        case .return:
+            guard let id=actionKeyboardHighlightID,order.contains(where: { $0.id == id }) else { return .ignored }
+            go(.task(id))
+            return .handled
+        default:
+            break
+        }
+        guard let id=actionKeyboardHighlightID,
+              let index=order.firstIndex(where: { $0.id == id }),
+              order[index].state == "open", order[index].validity == "current" else { return .ignored }
+        let action=order[index]
+        let nextHighlight:String?=order.indices.contains(index + 1) ? order[index + 1].id : (index > 0 ? order[index - 1].id : nil)
+        switch press.characters.lowercased() {
+        case "x" where action.kind == "task":
+            applyActionState(action,to:.completed,nextHighlight:nextHighlight)
+            return .handled
+        case "z":
+            applyActionState(action,to:.dismissed,nextHighlight:nextHighlight)
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+    private func requestActionListFocus() {
+        Task {
+            try? await Task.sleep(for:.milliseconds(100))
+            guard page == .actions, !selectingActions, !showingPlanToday else { return }
+            actionListFocused=true
         }
     }
     private func batchActions(for state:LocalActionState) -> [ActionRecord] {

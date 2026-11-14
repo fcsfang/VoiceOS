@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...57).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...58).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1066,6 +1066,48 @@ final class Database {
             try transaction {
                 try execute("ALTER TABLE source_capture_metadata ADD COLUMN context TEXT")
                 try execute("PRAGMA user_version=57")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "57" {
+            try transaction {
+                try execute("""
+                CREATE TABLE action_subtasks (
+                  id TEXT PRIMARY KEY,
+                  action_id TEXT NOT NULL REFERENCES actions(id),
+                  title TEXT NOT NULL,
+                  done INTEGER NOT NULL DEFAULT 0,
+                  ordinal INTEGER NOT NULL,
+                  created_at TEXT NOT NULL,
+                  completed_at TEXT
+                )
+                """)
+                try execute("CREATE INDEX action_subtask_action ON action_subtasks(action_id, ordinal)")
+                try execute("""
+                CREATE TABLE action_estimates (
+                  action_id TEXT PRIMARY KEY REFERENCES actions(id),
+                  minutes INTEGER NOT NULL CHECK(minutes IN (15,30,60)),
+                  updated_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE source_chapters (
+                  source_id TEXT NOT NULL REFERENCES sources(id),
+                  ordinal INTEGER NOT NULL,
+                  title TEXT NOT NULL,
+                  start_ms INTEGER NOT NULL,
+                  PRIMARY KEY(source_id, ordinal)
+                )
+                """)
+                try execute("""
+                CREATE TABLE capture_templates (
+                  id TEXT PRIMARY KEY,
+                  name TEXT NOT NULL UNIQUE,
+                  body TEXT NOT NULL,
+                  created_at TEXT NOT NULL
+                )
+                """)
+                try execute("PRAGMA user_version=58")
             }
         }
 

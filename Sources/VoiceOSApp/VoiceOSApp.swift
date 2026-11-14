@@ -14,6 +14,8 @@ final class ControlCenter: ObservableObject {
     let panorama = PanoramaScreenModel()
     private var panoramaPolicy = PanoramaRefreshPolicy()
     private var panoramaModel: ResponsesPanoramaPort?
+    private let spotlightIndexer = SpotlightIndexer()
+    private var markdownMirror: MarkdownMirror?
     @Published var textCaptureDraft = TextCaptureDraft() {
         didSet { if !textCaptureDraft.hasSameContents(as: oldValue) { scheduleDraftSave() } }
     }
@@ -791,6 +793,8 @@ final class ControlCenter: ObservableObject {
             let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
             self.store = store
             try await store.recover()
+            markdownMirror = MarkdownMirror(directory: root.appendingPathComponent("Mirror", isDirectory: true))
+            backupLibrary(at: root)
             restoreTextCaptureDraft(at: root)
             initialized = true; status = "准备就绪 · 媒体只在本机处理"
             restoreSpeechSelection()
@@ -853,6 +857,26 @@ final class ControlCenter: ObservableObject {
         }
         refreshWorker = work
         await work.value
+        writeMarkdownMirror()
+        updateSpotlightIndex()
+    }
+    private func backupLibrary(at root: URL) {
+        let database = root.appendingPathComponent("voiceos.sqlite")
+        let directory = root.appendingPathComponent("Backups", isDirectory: true)
+        Task.detached(priority: .utility) {
+            do { _ = try DatabaseBackup.create(database: database, directory: directory) }
+            catch { NSLog("VoiceOS 数据库备份失败：\(error.localizedDescription)") }
+        }
+    }
+    private func writeMarkdownMirror() {
+        guard var mirror = markdownMirror else { return }
+        do {
+            try mirror.write(sources: records, claims: claims, actions: actionRecords)
+            markdownMirror = mirror
+        } catch { NSLog("VoiceOS Markdown 镜像失败：\(error.localizedDescription)") }
+    }
+    private func updateSpotlightIndex() {
+        spotlightIndexer.index(sources: records, claims: claims, actions: actionRecords)
     }
     /// Recompute the home snapshot from the published arrays it derives from,
     /// so a render only reads it.
