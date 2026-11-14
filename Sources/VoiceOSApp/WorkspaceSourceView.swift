@@ -125,6 +125,19 @@ struct WorkspaceSourceView: View {
         let ids=Set(model.claims.filter { !$0.references.allSatisfy { !expressionIDs.contains($0.sourceID) } }.map(\.id))
         return model.actionRecords.filter { ids.contains($0.claimID) && $0.state != "dismissed" }
     }
+    private var outlineSections:[SourceOutlineSection] {
+        guard let transcript=source.transcript else { return [] }
+        return SourceOutline.sections(spans:source.spans,transcript:transcript)
+    }
+    private var readingDigest:ReadingDigest {
+        ReadingLayers.digest(transcript:source.transcript,thoughts:thoughts,summary:overallSummaryText)
+    }
+    private var overallSummaryText:String? {
+        if let expression,expression.sourceIDs.count > 1,!expression.summary.isEmpty { return expression.summary }
+        if let summary=source.contentSummary,!summary.isEmpty { return summary }
+        if let summary=expression?.summary,!summary.isEmpty { return summary }
+        return nil
+    }
     private var review:KnowledgeReviewRecord? { model.knowledgeReviews.filter { $0.sourceID == source.id && $0.validity == "current" }.sorted { $0.createdAt > $1.createdAt }.first }
     private var processing:Bool { model.fullRecordingBusy && model.fullRecordingSourceID.map { expressionIDs.contains($0) } == true || model.understandingSource == source.id || model.processingIntents.contains { $0.sourceID == source.id && [.queued,.running].contains($0.state) } }
     private var organizationStatusText:String {
@@ -284,6 +297,27 @@ struct WorkspaceSourceView: View {
                 }
                 if !thoughts.isEmpty {
                     WorkspaceSection(title:"核心要点",icon:"lightbulb",count:thoughts.count) {
+                        let digest=readingDigest
+                        if !digest.isEmpty {
+                            DisclosureGroup("逐层读") {
+                                VStack(alignment:.leading,spacing:16) {
+                                    if let excerpt=digest.excerpt { readingLayerRow("原文摘录",excerpt) }
+                                    if !digest.points.isEmpty {
+                                        VStack(alignment:.leading,spacing:8) {
+                                            Text("要点").vosFont(13, weight: .semibold).foregroundStyle(.secondary)
+                                            ForEach(Array(digest.points.enumerated()),id:\.offset) { _,point in
+                                                HStack(alignment:.top,spacing:8) {
+                                                    Text("·").foregroundStyle(.secondary)
+                                                    Text(point).vosFont(15).lineSpacing(4).fixedSize(horizontal:false,vertical:true).textSelection(.enabled)
+                                                }
+                                            }
+                                        }
+                                    }
+                                    if let sentence=digest.sentence { readingLayerRow("一句话",sentence) }
+                                }.padding(.top,12)
+                            }.padding(.bottom,14)
+                            Divider()
+                        }
                         ForEach(Array((showAllThoughts ? thoughts : Array(thoughts.prefix(3))).enumerated()),id:\.element.id) { index,thought in
                             HStack(alignment:.top,spacing:14) {
                                 Text(String(format:"%02d",index+1)).vosFont(14, weight: .semibold, design: .monospaced).foregroundStyle(.secondary).padding(.top,3)
@@ -306,7 +340,13 @@ struct WorkspaceSourceView: View {
                                                             Text(member.name).font(.caption).foregroundStyle(.secondary)
                                                         }
                                                     }
-                                                    Text(quote(span,text:text)).foregroundStyle(.secondary).textSelection(.enabled)
+                                                    if let start=span.startMS,let end=span.endMS {
+                                                        Button { Task { _=await model.playSpan(member,milliseconds:start,endMilliseconds:end) } } label: {
+                                                            Text(quote(span,text:text)).foregroundStyle(.secondary).multilineTextAlignment(.leading).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+                                                        }.buttonStyle(.plain)
+                                                    } else {
+                                                        Text(quote(span,text:text)).foregroundStyle(.secondary).textSelection(.enabled)
+                                                    }
                                                     if let start=span.startMS,let end=span.endMS { Button("回听这段原话",systemImage:"play.circle") { Task { _=await model.playSpan(member,milliseconds:start,endMilliseconds:end) } } }
                                                 }
                                             }
@@ -358,6 +398,26 @@ struct WorkspaceSourceView: View {
                     }
                 }
                 WorkspaceSection(title:"原话与依据",icon:"quote.bubble") {
+                    let outline=outlineSections
+                    if !outline.isEmpty {
+                        DisclosureGroup("逐字稿大纲") {
+                            VStack(alignment:.leading,spacing:4) {
+                                ForEach(outline) { section in
+                                    let active=outlineSectionIsPlaying(section)
+                                    Button { playOutlineSection(section) } label: {
+                                        HStack(alignment:.top,spacing:10) {
+                                            Text(time(section.startMS)).vosFont(12, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
+                                            Text(section.title).vosFont(14, weight:active ? .semibold : .regular).multilineTextAlignment(.leading)
+                                            Spacer(minLength:0)
+                                        }.padding(.horizontal,8).padding(.vertical,6)
+                                            .background(active ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+                                            .contentShape(Rectangle())
+                                    }.buttonStyle(.plain)
+                                }
+                            }.padding(.top,10)
+                        }.padding(.vertical,16)
+                        Divider()
+                    }
                     DisclosureGroup("原话、来源与回听") {
                         VStack(alignment:.leading,spacing:16) {
                             if let transcript=source.transcript { Text(transcript).vosFont(16).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
@@ -563,11 +623,28 @@ struct WorkspaceSourceView: View {
         selectedText=""
         selectedRange=NSRange(location:0,length:0)
     }
-    private func quote(_ span:TranscriptSpan,text:String) -> String { let s=Array(text.unicodeScalars);guard span.textStart>=0,span.textEnd<=s.count else { return "原文范围已变化" };return String(String.UnicodeScalarView(s[span.textStart..<span.textEnd])) }
+    private func quote(_ span:TranscriptSpan,text:String) -> String { SourceText.quote(span,in:text) }
     private func time(_ ms:Int)->String { String(format:"%02d:%02d",ms/60000,ms/1000%60) }
     private func spanIsPlaying(_ span:TranscriptSpan)->Bool {
         guard let ms=playbackMS,let start=span.startMS,let end=span.endMS else { return false }
         return ms>=start && ms<end
+    }
+    private func outlineSectionIsPlaying(_ section:SourceOutlineSection)->Bool {
+        guard let ms=playbackMS else { return false }
+        return ms>=section.startMS && ms<section.endMS
+    }
+    private func playOutlineSection(_ section:SourceOutlineSection) {
+        Task { @MainActor in
+            if !(await model.playSpan(source,milliseconds:section.startMS,endMilliseconds:section.endMS)) {
+                error=model.status.isEmpty ? "无法回听这一节" : model.status
+            }
+        }
+    }
+    private func readingLayerRow(_ title:String,_ text:String) -> some View {
+        VStack(alignment:.leading,spacing:7) {
+            Text(title).vosFont(13, weight: .semibold).foregroundStyle(.secondary)
+            Text(text).vosFont(15).lineSpacing(4).textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
+        }
     }
     private func refreshPlaybackPosition() {
         guard let player=model.player,player.timeControlStatus == .playing else { playbackMS=nil; return }
