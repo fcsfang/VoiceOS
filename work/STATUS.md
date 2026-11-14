@@ -12,6 +12,7 @@
 
 ## 分支在审
 
+- `work/capture-1` 抓取层第一批，任务卡 `work/tasks/20261114-capture-wave/TASK.md`。PDF 文本层与原件附件、从链接抓取正文、⌥⌘D 与 ⌥⌘V 全局热键、剪贴板捕获、文件夹监听。`swift build -j 2` 通过，`swift test -j 2` 181 项 0 失败。实机已核对文件夹监听与剪贴板热键；PDF 与网页入口没有实机证据。PR 待开。
 - `work/quick-wins-1` 快速赢面第一批，PR #147 已合并为 `2b67352`。十项：macOS 服务、菜单栏拖放、网页选区、x-callback-url、隐私清单、稍后预设、撤销条、专注旗标、旁注、未链接引用。schema 55。
 - `work/quick-wins-2` 快速赢面第二批，PR #148 已合并为 `cc24e9e`。阅读状态与过滤、行动批量选择、悬停预览、逐句高亮、讨论追问建议、侧栏保存视图。
 - `work/quick-wins-3` 快速赢面第三批，PR #149 已合并为 `b32b61c`。图片 OCR、原图入口、全文选读与选中三项动作。schema 56。

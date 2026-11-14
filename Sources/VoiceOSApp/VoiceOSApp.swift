@@ -285,6 +285,8 @@ final class ControlCenter: ObservableObject {
     private var fullRecordingLog: URL?
     private(set) var fullRecordingSourceID: String?
     let recordingInbox: RecordingInbox
+    private var folderWatch: FolderWatch?
+    var folderWatchActive: Bool { folderWatch?.isWatching == true }
     private var textConfigurationFile: URL?
     @Published var changingPolicy = false
     @Published var understandingSource: String?
@@ -647,6 +649,7 @@ final class ControlCenter: ObservableObject {
     }
     static weak var primary: ControlCenter?
     private let rootOverride: URL?
+    private(set) var libraryRoot: URL?
     var libraryTitle: String { rootOverride == nil ? "VoiceOS" : "独立资料库 · " + rootOverride!.lastPathComponent }
     init(root: URL? = nil) {
         rootOverride=root
@@ -782,6 +785,7 @@ final class ControlCenter: ObservableObject {
             if let override = rootOverride { root = override }
             else if let path = ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"] { root = URL(fileURLWithPath: path, isDirectory: true) }
             else { root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("VoiceOS", isDirectory: true) }
+            libraryRoot = root
             outcomePreferenceKey = "voiceos.outcomeFollowup.skipped:" + root.standardizedFileURL.path
             skippedOutcomeKeys = Set(UserDefaults.standard.stringArray(forKey: outcomePreferenceKey) ?? [])
             let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
@@ -816,6 +820,7 @@ final class ControlCenter: ObservableObject {
             dictationObservers.append(NotificationCenter.default.addObserver(forName:NSApplication.willTerminateNotification,object:nil,queue:.main) { [weak self] _ in MainActor.assumeIsolated { self?.flushTextCaptureDraft(); self?.stopDictation(interrupted:true) } })
             requestReminderRefresh()
             resumeRecordingFollowups()
+            resumeFolderWatch()
             queueRecordingTitles()
                 recordingInbox.start(canProcess: { [weak self] in
                     guard let self else { return false }
@@ -1933,18 +1938,60 @@ final class ControlCenter: ObservableObject {
             return false
         }
     }
+    func captureClipboardText() {
+        let text = NSPasteboard.general.string(forType: .string) ?? ""
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { status = "剪贴板没有文字"; return }
+        Task { _ = await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil) }
+    }
+    func chooseWatchFolder() {
+        guard makeFolderWatch() != nil else { status = "资料库尚未打开，无法监听文件夹"; return }
+        let panel = NSOpenPanel(); panel.title = "选择要监听的文件夹"; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.startWatchingFolder(url)
+            }
+        }
+    }
+    func stopWatchingFolder() {
+        guard folderWatch?.isWatching == true else { return }
+        folderWatch?.stop()
+        status = "已停止监听文件夹"
+    }
+    private func startWatchingFolder(_ url: URL) {
+        guard let watch = makeFolderWatch() else { status = "资料库尚未打开，无法监听文件夹"; return }
+        if watch.start(folder: url) { status = "正在监听文件夹：" + url.lastPathComponent }
+        else { status = "无法监听文件夹：" + url.lastPathComponent }
+    }
+    private func resumeFolderWatch() {
+        makeFolderWatch()?.resume()
+    }
+    private func makeFolderWatch() -> FolderWatch? {
+        if let existing = folderWatch { return existing }
+        guard store != nil, let root = libraryRoot else { return nil }
+        let watch = FolderWatch(root: root)
+        watch.onFiles = { [weak self] urls in
+            guard let self else { return }
+            self.acceptDroppedFiles(urls)
+        }
+        folderWatch = watch
+        return watch
+    }
     func acceptDroppedFiles(_ urls: [URL]) {
         Task {
-            var media: [URL] = [], textFiles: [URL] = [], images: [URL] = [], unsupported: [String] = []
+            var media: [URL] = [], textFiles: [URL] = [], images: [URL] = [], pdfs: [URL] = [], unsupported: [String] = []
             for url in urls {
                 let ext = url.pathExtension.lowercased()
                 if ext == "txt" || ext == "md" { textFiles.append(url) }
+                else if ext == "pdf" { pdfs.append(url) }
                 else if SourceAttachment.mime(forFileExtension: ext) != nil { images.append(url) }
                 else if let type = UTType(filenameExtension: ext), type.conforms(to: .audio) || type.conforms(to: .movie) { media.append(url) }
                 else { unsupported.append(url.lastPathComponent) }
             }
             if !media.isEmpty { await importFiles(media) }
             for url in textFiles { await importCapturedTextFile(url) }
+            for url in pdfs { await acceptPDFCapture(url) }
             for url in images { await acceptImageCapture(url) }
             if !unsupported.isEmpty { status = "暂不支持这些文件类型：" + unsupported.joined(separator: "、") }
         }
@@ -1975,6 +2022,28 @@ final class ControlCenter: ObservableObject {
                 _ = try await store.attachSourceFile(sourceID: id, fileURL: url)
                 status = "已识别图片文字，仅本机保存"
             } catch { status = "已识别图片文字，原图保存失败：" + error.localizedDescription }
+        } catch {
+            status = error.localizedDescription
+            await refresh()
+        }
+    }
+    private func acceptPDFCapture(_ url: URL) async {
+        guard let store else { status = "资料库尚未打开，未保存"; return }
+        let access = url.startAccessingSecurityScopedResource()
+        defer { if access { url.stopAccessingSecurityScopedResource() } }
+        let text: String
+        do { text = try await Task.detached(priority: .userInitiated) { try PDFText.extract(fileURL: url).text }.value }
+        catch { status = "PDF 读取失败：" + error.localizedDescription; return }
+        do {
+            let title = String(url.deletingPathExtension().lastPathComponent.prefix(100))
+            let id = try await store.recordCapturedText(text, title: title, ownership: .external, commandID: UUID().uuidString)
+            let policy = try await store.sourcePolicy(sourceID: id)
+            if !policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: true) }
+            await refresh()
+            do {
+                _ = try await store.attachSourceFile(sourceID: id, fileURL: url)
+                status = "已读取 PDF「\(url.lastPathComponent)」的文字，仅本机保存"
+            } catch { status = "已读取 PDF 文字，原件保存失败：" + error.localizedDescription }
         } catch {
             status = error.localizedDescription
             await refresh()
@@ -2774,9 +2843,14 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     private var dictationKeyMonitor: Any?
     private var appIconObservation: NSKeyValueObservation?
     private var statusItem: NSStatusItem?
+    private var dictationMenuItem: NSMenuItem?
+    private var clipboardMenuItem: NSMenuItem?
+    private var watchMenuItem: NSMenuItem?
+    private var stopWatchMenuItem: NSMenuItem?
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppBrand.applyApplicationIcon()
+        installGlobalHotKeys()
         appIconObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
             DispatchQueue.main.async { AppBrand.applyApplicationIcon() }
         }
@@ -2814,8 +2888,19 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         let menu = NSMenu()
         menu.autoenablesItems = false
         menu.delegate = self
-        let dictation = menu.addItem(withTitle: "开始口述并自动整理", action: #selector(toggleDictation), keyEquivalent: "")
+        let dictation = menu.addItem(withTitle: "开始口述并自动整理（⌥⌘D）", action: #selector(toggleDictation), keyEquivalent: "")
         dictation.target = self
+        dictationMenuItem = dictation
+        let clipboard = menu.addItem(withTitle: "捕获剪贴板文字（⌥⌘V）", action: #selector(captureClipboard), keyEquivalent: "")
+        clipboard.target = self
+        clipboardMenuItem = clipboard
+        menu.addItem(.separator())
+        let watch = menu.addItem(withTitle: "监听文件夹…", action: #selector(chooseWatchFolder), keyEquivalent: "")
+        watch.target = self
+        watchMenuItem = watch
+        let stopWatch = menu.addItem(withTitle: "停止监听", action: #selector(stopWatchingFolder), keyEquivalent: "")
+        stopWatch.target = self
+        stopWatchMenuItem = stopWatch
         menu.addItem(.separator())
         let open = menu.addItem(withTitle: "打开 VoiceOS", action: #selector(openMainWindow), keyEquivalent: "")
         open.target = self
@@ -2826,14 +2911,19 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        guard let dictation = menu.items.first else { return }
         guard let model = ControlCenter.primary else {
-            dictation.title = "控制中心尚未准备好"
-            dictation.isEnabled = false
+            dictationMenuItem?.title = "控制中心尚未准备好"
+            dictationMenuItem?.isEnabled = false
+            clipboardMenuItem?.isEnabled = false
+            watchMenuItem?.isEnabled = false
+            stopWatchMenuItem?.isEnabled = false
             return
         }
-        dictation.title = model.dictationActive ? "停止口述并整理" : "开始口述并自动整理"
-        dictation.isEnabled = model.canToggleCaptureDictation
+        dictationMenuItem?.title = (model.dictationActive ? "停止口述并整理" : "开始口述并自动整理") + "（⌥⌘D）"
+        dictationMenuItem?.isEnabled = model.canToggleCaptureDictation
+        clipboardMenuItem?.isEnabled = true
+        watchMenuItem?.isEnabled = true
+        stopWatchMenuItem?.isEnabled = model.folderWatchActive
     }
 
     private func acceptDroppedFiles(_ urls: [URL]) {
@@ -2867,6 +2957,33 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
 
     @objc private func toggleDictation() {
         ControlCenter.primary?.toggleCaptureDictation()
+    }
+
+    @objc private func captureClipboard() {
+        ControlCenter.primary?.captureClipboardText()
+    }
+
+    @objc private func chooseWatchFolder() {
+        ControlCenter.primary?.chooseWatchFolder()
+    }
+
+    @objc private func stopWatchingFolder() {
+        ControlCenter.primary?.stopWatchingFolder()
+    }
+
+    private func installGlobalHotKeys() {
+        let center = GlobalHotKeyCenter.shared
+        center.register(.toggleDictation) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.toggleDictation()
+            }
+        }
+        center.register(.captureClipboard) {
+            MainActor.assumeIsolated {
+                if let model = ControlCenter.primary { model.captureClipboardText() }
+            }
+        }
     }
 
     @objc private func openMainWindow() {

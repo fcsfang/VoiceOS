@@ -67,6 +67,7 @@ struct WorkspaceSourceView: View {
     @State private var claimNotes:[String:ClaimNote]=[:]
     @State private var captureInfo:CaptureMetadata?
     @State private var attachmentURL:URL?
+    @State private var attachmentMime:String?
     @State private var playbackMS:Int?
     @State private var selectedText=""
     @State private var selectedRange=NSRange(location:0,length:0)
@@ -206,7 +207,7 @@ struct WorkspaceSourceView: View {
                 HStack(spacing:12) {
                     Label(sourceStatus,systemImage:sourceStatusIcon).vosFont(13).foregroundStyle(.secondary)
                     if let attachmentURL {
-                        Button("查看原图",systemImage:"photo") { if !NSWorkspace.shared.open(attachmentURL) { error="无法打开原图" } }
+                        Button(attachmentMime == "application/pdf" ? "查看原件" : "查看原图",systemImage:attachmentMime == "application/pdf" ? "doc.richtext" : "photo") { if !NSWorkspace.shared.open(attachmentURL) { error="无法打开原件" } }
                     }
                     Spacer()
                     Button("从这里启动",systemImage:"arrow.up.forward") { openInitiation(source.id) }
@@ -472,10 +473,13 @@ struct WorkspaceSourceView: View {
             } catch is CancellationError {} catch { contextIssue=error.localizedDescription }
         }
         .task(id: source.id) {
-            attachmentURL=nil
+            attachmentURL=nil;attachmentMime=nil
             captureInfo=try? await model.sourceCaptureMetadata(sourceID:source.id)
-            do { attachmentURL=try await model.sourceAttachmentURL(sourceID:source.id) }
-            catch { self.error="原图读取失败：" + error.localizedDescription }
+            do {
+                let attachment=try await model.sourceAttachmentURL(sourceID:source.id)
+                attachmentURL=attachment?.url;attachmentMime=attachment?.mime
+            }
+            catch { self.error="原件读取失败：" + error.localizedDescription }
         }
         .task(id: source.id + thoughts.map(\.id).joined()) {
             guard model.store != nil else { return }
@@ -612,10 +616,10 @@ struct ClaimCorrectionView:View {
 }
 
 extension ControlCenter {
-    func sourceAttachmentURL(sourceID:String) async throws -> URL? {
+    func sourceAttachmentURL(sourceID:String) async throws -> (url:URL,mime:String)? {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
         guard let attachment=try await store.sourceAttachment(sourceID:sourceID) else { return nil }
         let root=await store.root
-        return root.appendingPathComponent(attachment.relativePath)
+        return (root.appendingPathComponent(attachment.relativePath),attachment.mime)
     }
 }
