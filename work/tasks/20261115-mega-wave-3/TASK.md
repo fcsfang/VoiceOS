@@ -1,5 +1,5 @@
 ---
-status: draft
+status: in_progress
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-3
@@ -12,7 +12,7 @@ owner: coordinator
 
 五条互不重叠的线：本地重复任务、任务页重复与地点回读、实体索引、剪贴板历史、费曼式复述文字首版。同时收口第二批审查发现的缺陷。写入代理只写不编译，集成后单次编译与测试。
 
-基线为第二批合并后的 `main`，schema 59，测试数在第二批合并后填入。
+基线 `main` 为 `38472b3`，schema 59，224 项测试。
 
 ## 数据形状（schema 60，F0 独占）
 
