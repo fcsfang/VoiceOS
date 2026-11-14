@@ -71,15 +71,17 @@ struct WorkspaceRow: View {
             HStack(alignment:.top,spacing:14) {
                 Image(systemName:icon).vosFont(16).foregroundStyle(palette.accent)
                     .frame(width:34,height:34).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                    .accessibilityHidden(true)
                 VStack(alignment:.leading,spacing:8) {
                     Text(title).vosFont(16, weight: .semibold).lineSpacing(3).lineLimit(3).fixedSize(horizontal:false,vertical:true).help(title)
                     if !subtitle.isEmpty { Text(subtitle).vosFont(13).foregroundStyle(.secondary).lineSpacing(3).lineLimit(2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
                 }
                 Spacer(minLength:8)
                 if !trailing.isEmpty { Text(trailing).vosFont(12, weight: .medium).foregroundStyle(.secondary).padding(.top,3) }
-                Image(systemName:"chevron.right").font(.caption).foregroundStyle(.tertiary).padding(.top,3)
+                Image(systemName:"chevron.right").font(.caption).foregroundStyle(.tertiary).padding(.top,3).accessibilityHidden(true)
             }.padding(.vertical,18).padding(.horizontal,10).contentShape(RoundedRectangle(cornerRadius:9))
                 .background(hovered ? palette.selection.opacity(0.5) : .clear,in:RoundedRectangle(cornerRadius:9))
+                .accessibilityElement(children:.combine)
         }.buttonStyle(.plain).onHover { hovered=$0 }
     }
 }
@@ -405,7 +407,7 @@ struct WorkspaceView: View {
             }
             if !savedViews.isEmpty {
                 VStack(alignment:.leading,spacing:8) {
-                    Text("视图").vosFont(12, weight:.medium).foregroundStyle(.secondary).padding(.horizontal,9)
+                    Text("视图").vosFont(12, weight:.medium).foregroundStyle(.secondary).padding(.horizontal,9).accessibilityAddTraits(.isHeader)
                     VStack(spacing:2) {
                         ForEach(savedViews) { view in
                             Button { openSavedView(view) } label: {
@@ -417,6 +419,7 @@ struct WorkspaceView: View {
                             }.buttonStyle(.plain)
                                 .help(view.page == .materials ? "材料：" + view.filter : "行动：" + view.filter)
                                 .contextMenu { Button("删除视图",role:.destructive) { pendingDeleteView = view } }
+                                .accessibilityLabel("打开视图：" + view.name)
                                 .accessibilityIdentifier("workspace.savedView." + view.name)
                         }
                     }
@@ -458,7 +461,7 @@ struct WorkspaceView: View {
             Text(breadcrumb).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
             Button { if page == .search { searchFocused = true } else { go(.search) } } label: { Image(systemName:"magnifyingglass") }
-                .buttonStyle(.plain).help("搜索全部内容（⌘F）").keyboardShortcut("f",modifiers:.command)
+                .buttonStyle(.plain).accessibilityLabel("搜索").help("搜索全部内容（⌘F）").keyboardShortcut("f",modifiers:.command)
             Button { Task { await toggleDiscussion() } } label: { Label("讨论",systemImage:"sidebar.right") }
                 .buttonStyle(.borderless).disabled(model.discussionSaving || model.discussionSending)
                 .accessibilityIdentifier("workspace.discussion")
@@ -974,10 +977,10 @@ struct WorkspaceView: View {
     @ViewBuilder private var processingIssues: some View {
         let catalog=recordCatalog
         ForEach(model.assistantAssessmentIssues) { issue in
-            VStack(alignment:.leading,spacing:8) { Text(issue.title);Text(issue.error).font(.caption).foregroundStyle(.secondary);Button("重新识别 AI 委托") { Task { await model.retryAssistantAssessment(issue) } } }
+            VStack(alignment:.leading,spacing:8) { Text(issue.title);Text(issue.error).font(.caption).foregroundStyle(.secondary);Button("重新识别 AI 委托") { Task { await model.retryAssistantAssessment(issue) } }.accessibilityLabel("重新识别 AI 委托：" + issue.title) }
         }
         ForEach(model.recordingFollowups.filter { $0.state == "failed" }) { receipt in
-            VStack(alignment:.leading,spacing:8) { Text(model.records.first { $0.id == receipt.sourceID }?.displayTitle ?? "资料跟进");Button("重试思想与下一步") { model.refreshFollowup(receipt.sourceID) } }
+            VStack(alignment:.leading,spacing:8) { Text(model.records.first { $0.id == receipt.sourceID }?.displayTitle ?? "资料跟进");Button("重试思想与下一步") { model.refreshFollowup(receipt.sourceID) }.accessibilityLabel("重试思想与下一步：" + (model.records.first { $0.id == receipt.sourceID }?.displayTitle ?? "资料跟进")) }
         }
         ForEach(activeMaterials.filter { ["failed","blocked"].contains($0.jobState ?? "") }) { source in sourceRow(source,catalog:catalog) }
         ForEach(model.processingIntents.filter { [.blocked,.unknown].contains($0.state) }) { intent in
@@ -1111,11 +1114,14 @@ struct WorkspaceView: View {
                 Button("改天") { openReminderSettings(entry.action) }
                     .disabled(!hasLinkedReminder(entry.action) || model.savingAction || model.remindersBusy)
                     .help("改天用提醒事项的日期设置；没有提醒链接时不可用")
+                    .accessibilityLabel("改天：" + entry.action.title)
                 Button("移到随时") { toggleFocus(entry.action.id) }
                     .disabled(!focused || model.savingAction)
                     .help(focused ? "只移出专注，不改提醒日期" : "这条行动不在专注中")
+                    .accessibilityLabel("移到随时：" + entry.action.title)
                 Button("不再跟进") { dismissAction(entry.action) }
                     .disabled(model.savingAction)
+                    .accessibilityLabel("不再跟进：" + entry.action.title)
             }.controlSize(.small).padding(.top,16)
         }
     }
@@ -1186,7 +1192,7 @@ struct WorkspaceView: View {
                 Button("取消") { showingPlanToday=false }
             }
             if !focusedActions.isEmpty {
-                Text("已在专注").vosFont(13, weight:.medium).foregroundStyle(.secondary)
+                Text("已在专注").vosFont(13, weight:.medium).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
                 ForEach(focusedActions) { action in
                     HStack(spacing:10) {
                         Image(systemName:"pin").foregroundStyle(palette.accent).frame(width:22,alignment:.leading)
@@ -1196,7 +1202,7 @@ struct WorkspaceView: View {
                     }.padding(.vertical,5)
                 }
             }
-            Text("即将与随时").vosFont(13, weight:.medium).foregroundStyle(.secondary)
+            Text("即将与随时").vosFont(13, weight:.medium).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
             if candidates.isEmpty {
                 Text("没有可安排的任务。").font(.callout).foregroundStyle(.secondary)
             } else {
@@ -1225,14 +1231,15 @@ struct WorkspaceView: View {
         return Button { togglePlanSelection(entry.action.id) } label: {
             HStack(alignment:.top,spacing:12) {
                 Image(systemName:selected ? "checkmark.circle.fill" : "circle")
-                    .vosFont(16).foregroundStyle(selected ? palette.accent : Color.secondary).padding(.top,2)
+                    .vosFont(16).foregroundStyle(selected ? palette.accent : Color.secondary).padding(.top,2).accessibilityHidden(true)
                 VStack(alignment:.leading,spacing:4) {
                     Text(entry.action.title).vosFont(15, weight:.medium).lineLimit(2).multilineTextAlignment(.leading)
                     if let due=entry.due { Text(due.summary).vosFont(12).foregroundStyle(.secondary) }
                 }
                 Spacer(minLength:8)
             }.padding(.vertical,9).contentShape(Rectangle())
-        }.buttonStyle(.plain)
+                .accessibilityElement(children:.combine)
+        }.buttonStyle(.plain).accessibilityValue(selected ? "已选" : "未选")
     }
     private var actionKeyboardOrder: [ActionRecord] {
         var rows:[ActionRecord]=[]

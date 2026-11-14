@@ -124,8 +124,10 @@ private struct ActionOriginalQuotes: View {
                     }
                     HStack(spacing: 14) {
                         Button("打开材料") { openSource(source.id) }
+                            .accessibilityLabel("打开材料：" + source.displayTitle)
                         if let start = span.startMS, let end = span.endMS {
                             Button("回听这段原话", systemImage: "play.circle") { Task { _ = await model.playSpan(source, milliseconds: start, endMilliseconds: end) } }
+                                .accessibilityLabel("回听这段原话：" + source.displayTitle)
                         }
                     }.font(.caption)
                 }
@@ -136,6 +138,7 @@ private struct ActionOriginalQuotes: View {
                     }
                     Text("原话版本已变化，打开材料查看当前原文。").font(.caption).foregroundStyle(.secondary)
                     Button("打开材料") { openSource(source.id) }.font(.caption)
+                        .accessibilityLabel("打开材料：" + source.displayTitle)
                 }
             } else {
                 Text("来源已不可用。").font(.caption).foregroundStyle(.secondary)
@@ -282,7 +285,7 @@ struct WorkspaceTaskView: View {
                         ForEach(pauseReasons,id:\.self) { Text($0).font(.callout).foregroundStyle(.secondary) }
                         ForEach(sources) { source in Button("打开材料：" + source.displayTitle) { openSource(source.id) } }
                         if model.workspaceTaskRequiresReview(action), let claim = correctedClaim {
-                            Text("你更正后的观点").font(.subheadline.bold())
+                            Text("你更正后的观点").font(.subheadline.bold()).accessibilityAddTraits(.isHeader)
                             Text(claim.statement).textSelection(.enabled)
                             Text("若仍需做这件事，在下方写下准确的待办并保存；之前的任务及完成记录会保留。").font(.callout).foregroundStyle(.secondary)
                             TextField("要做的事情",text:$replacementTitle)
@@ -394,7 +397,7 @@ struct WorkspaceTaskView: View {
                 }
                 if delegating {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("让 AI 推进这件事").font(.headline)
+                        Text("让 AI 推进这件事").font(.headline).accessibilityAddTraits(.isHeader)
                         TextEditor(text: $instruction).frame(minHeight: 130).workspaceEditorSurface()
                         Text("发送后使用完整任务原文执行调研、比较或起草，结果自动保存。").font(.caption).foregroundStyle(.secondary)
                         if !model.modelConfigured {
@@ -421,7 +424,7 @@ struct WorkspaceTaskView: View {
                 if let feedbackError {
                     HStack(spacing:10) {
                         WorkspaceNoticeText(message:feedbackError,severity:.danger)
-                        Button("重试") { Task { await loadFeedback() } }.font(.caption).buttonStyle(.borderless)
+                        Button("重试") { Task { await loadFeedback() } }.font(.caption).buttonStyle(.borderless).accessibilityLabel("重试读取反馈历史")
                     }
                 }
                 if !feedbackHistory.isEmpty {
