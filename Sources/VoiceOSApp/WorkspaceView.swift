@@ -117,6 +117,7 @@ struct WorkspaceView: View {
     @State private var reviewPeriod = ReflectionPeriod.week
     @State private var reviewAnchor = Date()
     @State private var error = ""
+    @State private var showingWeeklyReview = false
     @Environment(\.openWindow) private var openWindow
     private var discussionIsPresented: Bool {
         showingDiscussion && discussionDraftSessionID != nil && discussionDraftSessionID == model.discussionSession?.id
@@ -262,6 +263,9 @@ struct WorkspaceView: View {
                 onOpen:{ action in showingOutcome=false;go(.task(action.id)) },
                 onSkip:{ model.skipOutcome($0) },
                 onDone:{ showingOutcome=false })
+        }
+        .sheet(isPresented:$showingWeeklyReview) {
+            WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) })
         }
         .alert("无法导入录音或视频", isPresented: Binding(
             get: { model.fullRecordingImportIssue != nil },
@@ -599,7 +603,10 @@ struct WorkspaceView: View {
     }
     private var actions: some View {
         LazyVStack(alignment:.leading,spacing:24) {
-            WorkspaceHeading(eyebrow:"",title:"行动")
+            HStack(alignment:.top) {
+                WorkspaceHeading(eyebrow:"",title:"行动")
+                Button("每周回顾",systemImage:"calendar.badge.clock") { showingWeeklyReview=true }.buttonStyle(.bordered)
+            }
             WorkspaceTabs(selection:$actionFilter,titles:["全部","我的待办","AI 助理","已完成","问题与目标","待核对","历史记录"])
             if !model.visibleOutcomeFollowups.isEmpty {
                 WorkspaceSection(title:"完成后的结果",icon:"checkmark.seal",count:model.visibleOutcomeFollowups.count) {
