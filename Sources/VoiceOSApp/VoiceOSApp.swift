@@ -9,6 +9,10 @@ enum WorkspaceErrorRetry {
     case localSpeech, textModel, export(includeMedia: Bool)
 }
 
+enum WorkspaceRoute: Equatable {
+    case actions, search
+}
+
 @MainActor
 final class ControlCenter: ObservableObject {
     let panorama = PanoramaScreenModel()
@@ -126,6 +130,8 @@ final class ControlCenter: ObservableObject {
     /// for a source and the workspace consumes the request from its own state.
     @Published var pendingWorkspaceSourceID: String?
     func requestWorkspaceSource(_ id: String) { pendingWorkspaceSourceID = id }
+    @Published var pendingWorkspaceRoute: WorkspaceRoute?
+    @Published var pendingWorkspaceTaskID: String?
     @Published var retrievalResult: RetrievalResult?
     @Published var retrievalStatus = ""
     @Published var searchingHistory = false
@@ -2912,8 +2918,13 @@ final class ControlCenter: ObservableObject {
             _ = try await store.confirmExternalCompletion(actionID: candidate.actionID, expectedVersion: candidate.expectedVersion,
                                                           linkID: candidate.linkID, expectedObservationID: candidate.observationID,
                                                           commandID: candidate.commandID)
+            do {
+                _ = try await store.completeActionWithRecurrence(id: candidate.actionID)
+                status = "外部完成已登记 · 已进入结果队列"
+            } catch {
+                status = "外部完成已登记；下一次重复任务未生成：" + error.localizedDescription
+            }
             await refresh()
-            status = "外部完成已登记 · 已进入结果队列"
             return true
         } catch {
             status = error.localizedDescription
@@ -2944,6 +2955,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     private var clipboardMenuItem: NSMenuItem?
     private let clipboardMonitor = ClipboardMonitor()
     private var clipboardHistoryMenuItem: NSMenuItem?
+    private var todayOverviewMenuItems: [NSMenuItem] = []
     private var quickNoteMenuItem: NSMenuItem?
     private var watchMenuItem: NSMenuItem?
     private var stopWatchMenuItem: NSMenuItem?
@@ -3020,6 +3032,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         rebuildClipboardHistoryMenu()
+        rebuildTodayOverviewMenu(model: ControlCenter.primary)
         guard let model = ControlCenter.primary else {
             clipboardHistoryMenuItem?.isEnabled = false
             dictationMenuItem?.title = "控制中心尚未准备好"
@@ -3121,6 +3134,53 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         opener.arguments = ["-a", Bundle.main.bundleURL.path]
         try? opener.run()
+    }
+
+    private func rebuildTodayOverviewMenu(model: ControlCenter?) {
+        guard let menu = statusItem?.menu, let clipboard = clipboardMenuItem else { return }
+        for item in todayOverviewMenuItems { menu.removeItem(item) }
+        todayOverviewMenuItems = []
+        guard let model else { return }
+        let actions = model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" }
+        let surface = ActionTimeSurface.build(actions: actions, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
+        let overdue = Array(surface.today.filter { $0.isOverdue }.prefix(3))
+        let dueToday = Array(surface.today.filter { !$0.isOverdue }.prefix(3))
+        var items: [NSMenuItem] = []
+        let header = NSMenuItem(title: "今日一览", action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        items.append(header)
+        if overdue.isEmpty && dueToday.isEmpty {
+            let empty = NSMenuItem(title: "今天没有待办", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            items.append(empty)
+        } else {
+            appendTodayOverviewSection("逾期", entries: overdue, to: &items)
+            appendTodayOverviewSection("今天", entries: dueToday, to: &items)
+        }
+        items.append(.separator())
+        let index = menu.indexOfItem(clipboard) + 1
+        for (offset, item) in items.enumerated() { menu.insertItem(item, at: index + offset) }
+        todayOverviewMenuItems = items
+    }
+
+    private func appendTodayOverviewSection(_ label: String, entries: [ActionTimeEntry], to items: inout [NSMenuItem]) {
+        guard !entries.isEmpty else { return }
+        let title = NSMenuItem(title: label, action: nil, keyEquivalent: "")
+        title.isEnabled = false
+        items.append(title)
+        for entry in entries {
+            let text = entry.action.title
+            let row = NSMenuItem(title: text.count > 20 ? String(text.prefix(20)) + "…" : text, action: #selector(openTodayOverviewTask(_:)), keyEquivalent: "")
+            row.target = self
+            row.representedObject = entry.action.id
+            items.append(row)
+        }
+    }
+
+    @objc private func openTodayOverviewTask(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, let model = ControlCenter.primary else { return }
+        openMainWindow()
+        model.pendingWorkspaceTaskID = id
     }
 
     @objc private func quitApplication() { NSApp.terminate(nil) }
@@ -3981,5 +4041,17 @@ extension ApplicationDelegate: VoiceOSIntentEndpoint {
     @MainActor func captureVoiceOSIntent(text: String, title: String?) async -> Bool {
         guard let model = ControlCenter.primary else { return false }
         return await model.acceptCaptureRequest(text: text, title: title, url: nil, successURL: nil, context: "快捷指令")
+    }
+    @MainActor func openTodayActions() -> Bool {
+        guard let model = ControlCenter.primary else { return false }
+        openMainWindow()
+        model.pendingWorkspaceRoute = .actions
+        return true
+    }
+    @MainActor func openSearch() -> Bool {
+        guard let model = ControlCenter.primary else { return false }
+        openMainWindow()
+        model.pendingWorkspaceRoute = .search
+        return true
     }
 }
