@@ -1,19 +1,20 @@
 # 项目状态
 
-更新：2026-11-14T19:45+08
+更新：2026-11-14T21:30+08
 
 ## 当前基线
 
-- `main` 收在合并提交 `42b7f00`（PR #146 扩展候选库；其下依次 #145 候选清单、#144 审计收尾、#143 产品参照审计、#142 界面说明性文字清理），本地与远端一致。
-- `main` 的 SQLite schema 54，迁移包格式 48。分支 `work/quick-wins-1` 升到 schema 55。
-- `main` 基线：`swift build -j 2` 通过，`swift test -j 2` 125 项通过。分支 `work/quick-wins-1`：`swift build -j 2` 通过，`swift test -j 2` 152 项 0 失败。
+- `main` 收在合并提交 `cc24e9e`（PR #148 快速赢面第二批；其下 `2b67352` 是 PR #147 第一批），本地与远端一致。
+- `main` 的 SQLite schema 55，迁移包格式 48。分支 `work/quick-wins-3` 升到 schema 56。
+- `main` 基线：`swift build -j 2` 通过，`swift test -j 2` 162 项通过。分支 `work/quick-wins-3`：167 项 0 失败。
 - 仓库不使用自动 CI。日常迭代用 `swift build`，完整测试本地跑 `swift test`。
 - 本地与远端仍有历史 codex/work/worktree 分支未清理，正式分支只有 `main`。
 
 ## 分支在审
 
 - `work/quick-wins-1` 快速赢面第一批，PR #147 已合并为 `2b67352`。十项：macOS 服务、菜单栏拖放、网页选区、x-callback-url、隐私清单、稍后预设、撤销条、专注旗标、旁注、未链接引用。schema 55。
-- `work/quick-wins-2` 快速赢面第二批，任务卡 `work/tasks/20261114-quick-wins-wave-2/TASK.md`。阅读状态与过滤、行动批量选择、悬停预览、逐句高亮、讨论追问建议、侧栏保存视图。`swift build -j 2` 通过，`swift test -j 2` 162 项 0 失败。实机已核对材料过滤、保存视图与多选界面；浮条点击、悬停、高亮、追问没有取得实机证据。PR 待开，合并等用户确认。
+- `work/quick-wins-2` 快速赢面第二批，PR #148 已合并为 `cc24e9e`。阅读状态与过滤、行动批量选择、悬停预览、逐句高亮、讨论追问建议、侧栏保存视图。
+- `work/quick-wins-3` 快速赢面第三批，任务卡 `work/tasks/20261114-quick-wins-wave-3/TASK.md`。图片 OCR、原图入口、全文选读与选中三项动作。`swift build -j 2` 通过，`swift test -j 2` 167 项 0 失败。实机已核对全文选读与原图入口；拖放与鼠标拖选没有取得实机证据。PR 待开，合并等用户确认。
 
 ## 今日落地
 

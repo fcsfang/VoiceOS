@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...55).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...56).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1044,6 +1044,21 @@ final class Database {
                 )
                 """)
                 try execute("PRAGMA user_version=55")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "55" {
+            try transaction {
+                try execute("""
+                CREATE TABLE source_attachments (
+                  source_id TEXT PRIMARY KEY REFERENCES sources(id),
+                  relative_path TEXT NOT NULL,
+                  mime TEXT NOT NULL,
+                  bytes INTEGER NOT NULL,
+                  created_at TEXT NOT NULL
+                )
+                """)
+                try execute("PRAGMA user_version=56")
             }
         }
 

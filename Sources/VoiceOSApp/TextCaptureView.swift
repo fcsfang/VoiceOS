@@ -43,7 +43,7 @@ struct TextCaptureView: View {
                 if !model.textCaptureDraftIssue.isEmpty { WorkspaceNoticeText(message: model.textCaptureDraftIssue) }
                 Text("草稿自动保存在本机，切页或重开应用可继续；保存成功后清空。").font(.caption).foregroundStyle(.secondary)
                 if let validationIssue { Text(validationIssue).font(.caption).foregroundStyle(.secondary) }
-                if importing { ProgressView("正在读取完整文件…").controlSize(.small) }
+                if importing { ProgressView("正在读取文字或识别图片…").controlSize(.small) }
                 Text(saveExplanation).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("稍后继续", action: dismiss).disabled(draft.saving)
@@ -58,10 +58,10 @@ struct TextCaptureView: View {
             .dropDestination(for: URL.self) { urls, _ in
                 guard model.initialized, !draft.saving, !importing, !confirmingReplacement else { return false }
                 guard urls.count == 1, let url = urls.first else {
-                    draft.error = "请一次拖入一份 .txt 或 .md 文件；当前草稿已保留。"
+                    draft.error = "请一次拖入一份 .txt、.md 或图片文件；当前草稿已保留。"
                     return false
                 }
-                readFile(url)
+                readDroppedFile(url)
                 return true
             } isTargeted: { dropTargeted = $0 }
             .task {
@@ -106,7 +106,7 @@ struct TextCaptureView: View {
                         Text("外部资料").tag(TextCaptureOwnership.external)
                     }.pickerStyle(.segmented).disabled(draft.saving)
                     Toggle("允许云端理解全文", isOn: $draft.allowCloud).disabled(draft.saving)
-                    Text("手打默认我的表达；导入文件默认外部资料并仅本地。").font(.caption).foregroundStyle(.secondary)
+                    Text("手打默认我的表达；导入文字或图片默认外部资料并仅本地。").font(.caption).foregroundStyle(.secondary)
                 }.padding(.top, 8)
             } label: {
                 Text("保存选项 · \(draft.ownership == .personal ? "我的表达" : "外部资料") · \(draft.allowCloud ? "允许云端" : "仅本地")")
@@ -148,6 +148,32 @@ struct TextCaptureView: View {
                 if !draft.text.isEmpty || !draft.title.isEmpty { confirmingReplacement = true }
                 else { applyImport() }
             } catch is CancellationError {} catch { draft.error = error.localizedDescription }
+        }
+    }
+    private func readDroppedFile(_ url: URL) {
+        guard url.isFileURL else {
+            draft.error = "请拖入 .txt、.md 或图片文件；当前草稿已保留。"
+            return
+        }
+        let ext = url.pathExtension.lowercased()
+        if ext == "txt" || ext == "md" { readFile(url) }
+        else if SourceAttachment.mime(forFileExtension: ext) != nil { recognizeImage(url) }
+        else { draft.error = "请拖入 .txt、.md 或图片文件；当前草稿已保留。" }
+    }
+    private func recognizeImage(_ url: URL) {
+        importing = true
+        draft.error = ""
+        importWorker = Task {
+            defer { importing = false; importWorker = nil }
+            let result = await model.ocrImage(url)
+            guard !Task.isCancelled else { return }
+            guard let result else {
+                draft.error = model.status.isEmpty ? "图片里没有识别到文字" : model.status
+                return
+            }
+            pendingImport = (result.text, result.title, url.lastPathComponent)
+            if !draft.text.isEmpty || !draft.title.isEmpty { confirmingReplacement = true }
+            else { applyImport() }
         }
     }
     private func applyImport() {

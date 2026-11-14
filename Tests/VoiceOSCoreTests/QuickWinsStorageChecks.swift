@@ -46,7 +46,7 @@ final class QuickWinsStorageChecks: XCTestCase {
         let store = try await openStore()
         let db = await store.db
         let version = try db.query("PRAGMA user_version").first?["user_version"]
-        XCTAssertEqual(version, "55")
+        XCTAssertEqual(version, "56")
         let claimID = try insertClaim(db)
         let first = try insertAction(db, claimID: claimID)
         let second = try insertAction(db, claimID: claimID)
