@@ -68,6 +68,21 @@ final class SourceAttachmentChecks: XCTestCase {
         XCTAssertEqual(readBack?.createdAt, attachment.createdAt)
     }
 
+    func testAttachesPDFCopiesFileAndReadsBack() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let sourceID = try insertSource(db)
+        let data = Data("%PDF-1.4 fixture".utf8)
+        let pdf = try file("论文.pdf", data)
+        let attachment = try await store.attachSourceFile(sourceID: sourceID, fileURL: pdf)
+        XCTAssertEqual(attachment.mime, "application/pdf")
+        XCTAssertEqual(attachment.bytes, Int64(data.count))
+        XCTAssertTrue(attachment.relativePath.hasSuffix(".pdf"))
+        XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent(attachment.relativePath)), data)
+        let readBack = try await store.sourceAttachment(sourceID: sourceID)
+        XCTAssertEqual(readBack?.mime, "application/pdf")
+    }
+
     func testAttachOverwritesExistingAttachment() async throws {
         let store = try await openStore()
         let db = await store.db
@@ -87,10 +102,10 @@ final class SourceAttachmentChecks: XCTestCase {
         let store = try await openStore()
         let db = await store.db
         let sourceID = try insertSource(db)
-        for name in ["扫描.pdf", "笔记.txt"] {
+        for name in ["笔记.txt", "压缩.zip"] {
             do {
                 _ = try await store.attachSourceFile(sourceID: sourceID, fileURL: try file(name, Data("fixture".utf8)))
-                XCTFail("非图片文件必须被拒绝：\(name)")
+                XCTFail("不支持的文件必须被拒绝：\(name)")
             } catch {}
         }
         XCTAssertTrue(try db.query("SELECT * FROM source_attachments WHERE source_id=?", [sourceID]).isEmpty)

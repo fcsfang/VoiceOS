@@ -15,6 +15,7 @@ extension SourceAttachment {
         case "jpg", "jpeg": return "image/jpeg"
         case "heic": return "image/heic"
         case "tiff": return "image/tiff"
+        case "pdf": return "application/pdf"
         default: return nil
         }
     }
@@ -25,7 +26,7 @@ extension VoiceOSStore {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
         guard try db.query("SELECT id FROM sources WHERE id=?", [sourceID]).first != nil else { throw VoiceOSError("来源不存在") }
         let ext = fileURL.pathExtension.lowercased()
-        guard let mime = SourceAttachment.mime(forFileExtension: ext) else { throw VoiceOSError("仅支持 png、jpg、jpeg、heic、tiff 图片") }
+        guard let mime = SourceAttachment.mime(forFileExtension: ext) else { throw VoiceOSError("仅支持 png、jpg、jpeg、heic、tiff 图片与 pdf 文件") }
         let data = try Data(contentsOf: fileURL)
         let asset = UUID().uuidString, relative = "assets/\(asset).\(ext)"
         let staged = root.appendingPathComponent("staging/\(asset).part.\(ext)")
