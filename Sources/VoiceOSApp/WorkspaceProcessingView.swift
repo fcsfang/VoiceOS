@@ -124,6 +124,7 @@ struct WorkspaceProcessingView: View {
         ScrollView {
             LazyVStack(alignment:.leading,spacing:24) {
                 WorkspaceHeading(eyebrow:"后台处理",title:"进度与需要查看的事项",subtitle:"保持应用运行即可继续处理；可以先阅读其他内容。原文、处理结果与历史分别保留。")
+                ReverifyControls(model:model)
                 if !model.startupIssue.isEmpty {
                     WorkspaceSection(title:"资料库尚未打开",subtitle:"已有资料没有被重建或清空。处理原因后可以重新打开。",icon:"exclamationmark.triangle") {
                         reason(model.startupIssue).padding(.top,12)

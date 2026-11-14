@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: merge-ready
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-4
@@ -61,6 +61,14 @@ owner: coordinator
 - 重新核对成功只恢复原件状态与转写任务，已被冻结的认知不自动解冻。
 - 任务启动记录只做导出恢复，不做跨库合并。
 - 无障碍本批只覆盖捕获与复述主流程，其余页面留到下一批。
+
+## 结果
+
+2026-11-15 四条线与 App Intents 集成到 `work/mega-4`：I1 `41fa056`，I2 `4ed5c2f`，I3 `b331559`，I4 `1b24c0f`，App Intents `7535729`（合并 `a75926f`）。协调者把重新核对区块同时挂到行动页「待核对」与独立「处理情况」页。
+
+`swift build -j 2` 一次通过；`swift test -j 2` 263 项 0 失败（新增迁移包 v50 往返一项）。
+
+发行构建：`scripts/app/build.py` 的元数据步骤产出 `Contents/Resources/Metadata.appintents/extract.actionsdata`，`VoiceOSApp.CaptureTextIntent`、参数与 `openAppWhenRun` 齐备；隔离副本冒烟启动正常（schema 60、78 份材料）。锁屏环境下 Shortcuts 动作发现、Siri 调用与 VoiceOver 走查不可得。
 
 ## 链接
 

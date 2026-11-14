@@ -108,4 +108,4 @@
 
 - 并行大波第三批（PR #158，合并 `877a147`）。七条线：重复任务与实体索引（schema 60）、任务页重复与地点回读、材料页实体索引、费曼复述、导出包 v49、导入与启动校验可靠性、应用接线层（剪贴板历史、抓取去重、后台镜像与 Spotlight、备份状态）。验证：`swift build -j 2` 通过，`swift test -j 2` 262 项 0 失败；隔离副本 59→60 迁移、备份完整性与镜像核对；锁屏挡住窗口核对。
 
-- 第四批开工（`work/mega-4`）：处理情况页重新核对、任务页重新跟进、迁移包 v50（任务启动记录）、捕获主流程无障碍；App Intents 由协调者单独推进。
+- 并行大波第四批（`work/mega-4`，PR 待开）：处理情况页重新核对、任务页重新跟进、迁移包 v50（任务启动记录）、捕获主流程无障碍；App Intents 文字捕获接入 Shortcuts 与 Siri（元数据进 bundle）。验证：`swift build -j 2` 通过，`swift test -j 2` 263 项 0 失败；发行包 `extract.actionsdata` 含 `VoiceOSApp.CaptureTextIntent`；隔离副本冒烟启动正常；锁屏挡住 Shortcuts 与 VoiceOver 界面核对。
