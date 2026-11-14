@@ -6,6 +6,7 @@ enum WorkspaceMetrics {
     static let pageWidth: CGFloat = 860
     static let readerWidth: CGFloat = 720
     static let pagePadding: CGFloat = 30
+    static let controlPadding: CGFloat = 12
     static let sectionRadius: CGFloat = 14
     static let panelRadius: CGFloat = 12
     static let controlRadius: CGFloat = 8
@@ -58,7 +59,7 @@ struct WorkspaceSearchField: View {
                 }.buttonStyle(.plain).accessibilityLabel("清空搜索")
             }
         }
-        .padding(.horizontal, 12).frame(height: 36)
+        .padding(.horizontal, WorkspaceMetrics.controlPadding).frame(minHeight: 36)
         .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
         .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border, lineWidth: 1) }
     }
