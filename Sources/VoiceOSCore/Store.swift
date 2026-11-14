@@ -2,6 +2,7 @@ import Foundation
 
 public actor VoiceOSStore {
     public let root: URL
+    private static let verificationFailureMessage = "原件核对失败，可在处理情况页重试"
     private let lock: StoreLock
     let db: Database
     private let inspector: any MediaInspector
@@ -59,33 +60,41 @@ public actor VoiceOSStore {
             if row["input_fingerprint"] == "microphone-v1:"+id, row["expected_bytes"] == "0" {
                 try interruptDictation(sourceID:id); continue
             }
-            if ["interrupted", "quarantined", "reference_only", "trashed"].contains(row["state"]!) { continue }
+            let state = row["state"]!
+            if ["interrupted", "quarantined", "reference_only", "trashed"].contains(state) { continue }
             let final = try assetURL(relativePath: row["relative_path"]!)
+            if state == "saved" {
+                guard let attributes = try? FileManager.default.attributesOfItem(atPath: final.path),
+                      let size = attributes[.size] as? NSNumber else {
+                    try quarantine(id, "受管原件缺失"); continue
+                }
+                if size.int64Value != Int64(row["expected_bytes"]!) {
+                    try db.execute("UPDATE sources SET error=? WHERE id=?", [Self.verificationFailureMessage, id])
+                }
+                continue
+            }
             let staging = root.appendingPathComponent("staging/\(row["asset_id"]!).part.\(final.pathExtension)")
             let file = FileManager.default.fileExists(atPath: final.path) ? final : staging
             guard FileManager.default.fileExists(atPath: file.path) else {
-                if row["state"] == "receiving" { try interrupt(id, "保存被中断，尚无完整副本") }
+                if state == "receiving" { try interrupt(id, "保存被中断，尚无完整副本") }
                 else { try quarantine(id, "受管原件缺失") }
                 continue
             }
             do {
                 let (bytes, hash) = try verifiedHash(file)
                 guard String(bytes) == row["expected_bytes"], hash == row["expected_hash"] else {
-                    if row["state"] == "receiving" { try interrupt(id, "保存被中断，副本不完整") }
+                    if state == "receiving" { try interrupt(id, "保存被中断，副本不完整") }
                     else { try quarantine(id, "原件完整性核对失败") }
                     continue
                 }
-                let info: MediaInfo
-                if row["kind"] == "ai_text" { info = try Self.inspectAssistantText(file) }
-                else if row["kind"] == "user_text" { info = try Self.inspectUserText(file) }
-                else if row["kind"] == "external_text" { info = try Self.inspectExternalText(file) }
-                else { info = try await inspector.inspect(file) }
-                if row["state"] != "saved" {
-                    try db.execute("UPDATE sources SET state='sealed', duration=?, kind=? WHERE id=?", [String(info.duration), info.kind, id])
-                    if file != final { try place(staging, final) }
-                    try sealAndQueue(row, info: info)
-                }
-            } catch { try quarantine(id, "无法验证媒体原件，请保留副本并检查文件") }
+                let info = try await inspectSource(file, kind: row["kind"]!)
+                try db.execute("UPDATE sources SET state='sealed', duration=?, kind=? WHERE id=?", [String(info.duration), info.kind, id])
+                if file != final { try place(staging, final) }
+                try sealAndQueue(row, info: info)
+            } catch {
+                if state == "receiving" { try interrupt(id, "保存被中断，无法验证媒体原件") }
+                else { try quarantine(id, "无法验证媒体原件，请保留副本并检查文件") }
+            }
         }
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT a.id FROM model_attempts a JOIN contexts x ON x.id=a.context_id WHERE x.state='stale')")
         try Self.validateStoredRelevance(db)
@@ -137,7 +146,7 @@ public actor VoiceOSStore {
         try await importMedia(input, commandID: commandID, personalAudio: true)
     }
     public func importedSourceID(commandID: String) throws -> String? {
-        try db.query("SELECT id FROM sources WHERE command_id=?", [commandID]).first?["id"]
+        try db.query("SELECT id FROM sources WHERE command_id=? AND state IN ('saved','reference_only')", [commandID]).first?["id"]
     }
     public func personalAudioSourceID(sha256: String) throws -> String? {
         try db.query("SELECT id FROM sources WHERE expected_hash=? AND origin='user' AND speaker='user' AND state='saved' ORDER BY created_at LIMIT 1", [sha256]).first?["id"]
@@ -154,22 +163,29 @@ public actor VoiceOSStore {
         let (bytes, hash) = try DurableFiles.hash(input)
         guard bytes > 0 else { throw VoiceOSError("文件为空") }
         let fingerprint = (personalAudio ? "personal-audio-v1:" : "") + "\(hash):\(bytes):\(extensionName):\(input.lastPathComponent)"
+        let id: String; let asset: String; let relative: String
         if let old = try db.query("SELECT * FROM sources WHERE command_id=?", [commandID]).first {
             guard old["input_fingerprint"] == fingerprint else { throw VoiceOSError("同一导入命令不能更换文件内容") }
-            return old["id"]!
+            id = old["id"]!; asset = old["asset_id"]!; relative = old["relative_path"]!
+            if ["saved", "reference_only"].contains(old["state"] ?? "") { return id }
+            guard !activeImports.contains(id) else { throw VoiceOSError("同一导入命令正在执行") }
+            if old["state"] == "sealed" { return try await finishSealedImport(old) }
+            try db.execute("UPDATE sources SET state='receiving',error=NULL WHERE id=?", [id])
+        } else {
+            id = UUID().uuidString; asset = UUID().uuidString; let version = UUID().uuidString
+            relative = "assets/\(asset).\(extensionName)"
+            try db.execute("""
+            INSERT INTO sources(id,command_id,input_fingerprint,asset_id,version_id,name,kind,origin,speaker,state,created_at,timezone,expected_bytes,expected_hash,relative_path)
+            VALUES(?,?,?,?,?,?,?,?,?,'receiving',?,?,?,?,?)
+            """, [id,commandID,fingerprint,asset,version,input.lastPathComponent,"unknown",personalAudio ? "user" : "external",personalAudio ? "user" : "unknown",Self.now(),TimeZone.current.identifier,String(bytes),hash,relative])
         }
-        let id = UUID().uuidString; let asset = UUID().uuidString; let version = UUID().uuidString
-        let relative = "assets/\(asset).\(extensionName)"
         let staging = root.appendingPathComponent("staging/\(asset).part.\(extensionName)")
         let final = try assetURL(relativePath: relative)
-        try db.execute("""
-        INSERT INTO sources(id,command_id,input_fingerprint,asset_id,version_id,name,kind,origin,speaker,state,created_at,timezone,expected_bytes,expected_hash,relative_path)
-        VALUES(?,?,?,?,?,?,?,?,?,'receiving',?,?,?,?,?)
-        """, [id,commandID,fingerprint,asset,version,input.lastPathComponent,"unknown",personalAudio ? "user" : "external",personalAudio ? "user" : "unknown",Self.now(),TimeZone.current.identifier,String(bytes),hash,relative])
         activeImports.insert(id)
         defer { activeImports.remove(id) }
         do {
             try checkpoint(.intent)
+            try? FileManager.default.removeItem(at: staging)
             try DurableFiles.copy(input, to: staging, checkpoint: checkpoint)
             try checkpoint(.copyComplete)
             let actual = try DurableFiles.hash(staging)
@@ -207,17 +223,37 @@ public actor VoiceOSStore {
     public func playableURL(sourceID: String) throws -> URL {
         guard let row = try db.query("SELECT * FROM sources WHERE id=? AND state='saved'", [sourceID]).first else { throw VoiceOSError("此原件尚未可靠保存") }
         let url = try assetURL(relativePath: row["relative_path"]!)
-        let actual: (Int64, String)
-        do { actual = try verifiedHash(url) }
-        catch {
+        guard FileManager.default.fileExists(atPath: url.path) else {
             try quarantine(sourceID, "原件缺失或无法完整核对")
             throw VoiceOSError("原件缺失或无法完整核对，已暂停后续处理")
         }
+        let actual: (Int64, String)
+        do { actual = try verifiedHash(url) }
+        catch {
+            try db.execute("UPDATE sources SET error=? WHERE id=?", [Self.verificationFailureMessage, sourceID])
+            throw VoiceOSError(Self.verificationFailureMessage)
+        }
         guard actual.0 == Int64(row["expected_bytes"]!), actual.1 == row["expected_hash"]! else {
-            try quarantine(sourceID, "原件完整性核对失败")
-            throw VoiceOSError("原件完整性核对失败，已暂停后续处理")
+            try db.execute("UPDATE sources SET error=? WHERE id=?", [Self.verificationFailureMessage, sourceID])
+            throw VoiceOSError(Self.verificationFailureMessage)
         }
         return url
+    }
+    public func reverifySource(id: String) async throws -> Bool {
+        guard let row = try db.query("SELECT * FROM sources WHERE id=? AND state='saved'", [id]).first,
+              let expectedBytes = Int64(row["expected_bytes"]!) else { return false }
+        do {
+            let file = try assetURL(relativePath: row["relative_path"]!)
+            guard FileManager.default.fileExists(atPath: file.path) else { throw VoiceOSError("原件缺失") }
+            let actual = try DurableFiles.hash(file)
+            guard actual.0 == expectedBytes, actual.1 == row["expected_hash"] else { throw VoiceOSError("原件完整性核对失败") }
+            _ = try await inspectSource(file, kind: row["kind"]!)
+            try db.execute("UPDATE sources SET error=NULL WHERE id=?", [id])
+            return true
+        } catch {
+            try db.execute("UPDATE sources SET error=? WHERE id=?", [Self.verificationFailureMessage, id])
+            return false
+        }
     }
     private func verifiedHash(_ url: URL) throws -> (Int64, String) {
         // Session-only reuse. ctime also changes if equal-size contents are edited
@@ -294,6 +330,46 @@ public actor VoiceOSStore {
             }
             try checkpoint(.savedUncommitted)
         }
+    }
+    private func inspectSource(_ file: URL, kind: String) async throws -> MediaInfo {
+        if kind == "ai_text" { return try Self.inspectAssistantText(file) }
+        if kind == "user_text" { return try Self.inspectUserText(file) }
+        if kind == "external_text" { return try Self.inspectExternalText(file) }
+        return try await inspector.inspect(file)
+    }
+    private func finishSealedImport(_ row: [String: String]) async throws -> String {
+        let id = row["id"]!, asset = row["asset_id"]!
+        guard !activeImports.contains(id) else { throw VoiceOSError("同一导入命令正在执行") }
+        let final = try assetURL(relativePath: row["relative_path"]!)
+        let staging = root.appendingPathComponent("staging/\(asset).part.\(final.pathExtension)")
+        let file = FileManager.default.fileExists(atPath: final.path) ? final : staging
+        guard FileManager.default.fileExists(atPath: file.path) else {
+            try interrupt(id, "导入未完成，尚无完整副本")
+            throw VoiceOSError("导入未完成，尚无完整副本")
+        }
+        activeImports.insert(id); defer { activeImports.remove(id) }
+        let actual: (Int64, String)
+        do { actual = try DurableFiles.hash(file) }
+        catch {
+            try interrupt(id, "导入未完成，无法核对副本")
+            throw error
+        }
+        guard String(actual.0) == row["expected_bytes"], actual.1 == row["expected_hash"] else {
+            try interrupt(id, "导入未完成，副本不完整")
+            throw VoiceOSError("导入未完成，副本不完整")
+        }
+        let info: MediaInfo
+        if let duration = row["duration"].flatMap(Double.init), ["audio", "video"].contains(row["kind"] ?? "") {
+            info = MediaInfo(duration: duration, kind: row["kind"]!)
+        } else {
+            info = try await inspectSource(file, kind: row["kind"] ?? "unknown")
+        }
+        if file == staging { try place(staging, final) }
+        try checkpoint(.renamed)
+        let sealed = try db.query("SELECT * FROM sources WHERE id=?", [id]).first!
+        try sealAndQueue(sealed, info: info)
+        try checkpoint(.savedCommitted)
+        return id
     }
     private func interrupt(_ id: String, _ reason: String) throws { try db.execute("UPDATE sources SET state='interrupted',error=? WHERE id=?", [reason,id]) }
     private func quarantine(_ id: String, _ reason: String) throws {
