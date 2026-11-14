@@ -624,7 +624,24 @@ struct WorkspaceView: View {
             let visible = visibleActions
             let executions = model.assistantExecutions.filter { $0.state != "cancelled" }
             let paused = model.workspacePausedTasks
-            if actionFilter != "AI 助理",!visible.isEmpty {
+            if actionFilter == "我的待办", !visible.isEmpty {
+                let surface = ActionTimeSurface.build(actions: visible, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
+                if !surface.today.isEmpty {
+                    WorkspaceSection(title:"今天",subtitle:"逾期与今天到期",icon:"sun.max",count:surface.today.count) {
+                        ForEach(surface.today) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != surface.today.last?.id { Divider() } }
+                    }
+                }
+                if !surface.soon.isEmpty {
+                    WorkspaceSection(title:"即将",subtitle:"7 天内",icon:"calendar",count:surface.soon.count) {
+                        ForEach(surface.soon) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != surface.soon.last?.id { Divider() } }
+                    }
+                }
+                if !surface.anytime.isEmpty {
+                    WorkspaceSection(title:"随时",subtitle:"没有日期或更远",icon:"tray",count:surface.anytime.count) {
+                        ForEach(surface.anytime) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != surface.anytime.last?.id { Divider() } }
+                    }
+                }
+            } else if actionFilter != "AI 助理",!visible.isEmpty {
                 WorkspaceSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,icon:"checkmark.circle",count:visible.count) {
                     ForEach(visible) { action in actionRow(action);if action.id != visible.last?.id { Divider() } }
                 }
@@ -792,9 +809,12 @@ struct WorkspaceView: View {
         let origin=source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料"
         return WorkspaceRow(title:combined ? expression!.title : source.displayTitle,subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : ""),icon:source.kind.contains("text") ? "doc.text" : "waveform") { go(.source(source.id)) }
     }
-    private func actionRowSubtitle(_ action:ActionRecord) -> String {
+    private func actionRowSubtitle(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> String {
         let detail:String
-        if let note=model.workspaceExternalCompletionNote(action),!note.isEmpty { detail=note }
+        if let entry=timeEntry,entry.source == .localSchedule {
+            if let due=entry.due { detail=(entry.isOverdue ? "已逾期 " : "到期 ") + due.summary } else { detail="" }
+            if entry.needsLocalSyncLabel { detail=detail.isEmpty ? "本地未同步" : detail + " · 本地未同步" }
+        } else if let note=model.workspaceExternalCompletionNote(action),!note.isEmpty { detail=note }
         else if action.state == "dismissed" { detail="已放下" }
         else if action.intent?.followupState == "withdrawn" || action.validity != "current" || model.workspaceTaskRequiresReview(action) { detail=model.workspaceActionStatus(action) }
         else if action.state == "completed" { detail="已登记完成" }
@@ -835,7 +855,7 @@ struct WorkspaceView: View {
             return date < Date()
         }
     }
-    private func actionRow(_ action:ActionRecord) -> some View { WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action),icon:action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : "circle") { go(.task(action.id)) } }
+    private func actionRow(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> some View { WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action,timeEntry:timeEntry),icon:action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : "circle") { go(.task(action.id)) } }
     private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
     private var navigationEntry: WorkspaceNavigationEntry { .init(page:page,topicID:topicID,topicTab:topicTab,topicReadingMode:topicReadingMode) }
