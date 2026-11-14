@@ -107,6 +107,13 @@ struct WorkspaceView: View {
     @State private var showingOutcome = false
     @State private var materialFilter = "日常材料"
     @State private var actionFilter = "全部"
+    @State private var savedViews: [SavedWorkspaceView] = []
+    @State private var showingSaveView = false
+    @State private var savingView = false
+    @State private var newViewName = ""
+    @State private var saveViewPage: SavedViewPage = .materials
+    @State private var saveViewFilter = ""
+    @State private var pendingDeleteView: SavedWorkspaceView?
     @State private var focusedActionIDs: Set<String> = []
     @State private var readingStates: [String: SourceReadingState] = [:]
     @State private var selectingActions = false
@@ -216,6 +223,7 @@ struct WorkspaceView: View {
         .focusedSceneValue(\.voiceOSController,model)
         .task { await model.start() }
         .task(id:model.initialized) { if model.initialized { readingStates = await model.readingStates() } }
+        .task(id:model.initialized) { if model.initialized { savedViews = await model.savedWorkspaceViews() } }
         .task { await model.setPanoramaVisible(page == .home && homeShowsPanorama) }
         .task(id:topicLoadKey) {
             guard page == .themes, let id=topicID else { topicFocus=nil; return }
@@ -276,6 +284,24 @@ struct WorkspaceView: View {
         .sheet(isPresented:$showingWeeklyReview) {
             WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) })
         }
+        .sheet(isPresented:$showingSaveView) {
+            VStack(alignment:.leading,spacing:16) {
+                Text("保存当前视图").font(.title2)
+                Text(saveViewPage == .materials ? "材料 · " + saveViewFilter : "行动 · " + saveViewFilter).font(.caption).foregroundStyle(.secondary)
+                TextField("视图名称",text:$newViewName).textFieldStyle(.roundedBorder)
+                    .onChange(of:newViewName) { _, value in if value.count > ControlCenter.savedViewNameLimit { newViewName = String(value.prefix(ControlCenter.savedViewNameLimit)) } }
+                if savedViews.count >= ControlCenter.savedViewsLimit {
+                    Text("最多保存 \(ControlCenter.savedViewsLimit) 个视图，可先删除一个。").font(.caption).foregroundStyle(palette.danger)
+                } else if savedViews.contains(where: { $0.name == trimmedNewViewName }) {
+                    Text("已有同名视图，请换一个名称。").font(.caption).foregroundStyle(palette.danger)
+                }
+                HStack {
+                    Spacer()
+                    Button("取消") { showingSaveView=false }
+                    Button("保存") { Task { await saveView() } }.buttonStyle(.borderedProminent).disabled(!canSaveView || savingView)
+                }
+            }.padding(24).frame(width:400)
+        }
         .alert("无法导入录音或视频", isPresented: Binding(
             get: { model.fullRecordingImportIssue != nil },
             set: { if !$0 { model.fullRecordingImportIssue = nil } }
@@ -296,6 +322,19 @@ struct WorkspaceView: View {
             }
         } message: {
             Text(batchConfirmMessage)
+        }
+        .alert("删除视图？", isPresented: Binding(
+            get: { pendingDeleteView != nil },
+            set: { if !$0 { pendingDeleteView = nil } }
+        )) {
+            Button("取消", role: .cancel) { pendingDeleteView = nil }
+            Button("删除", role: .destructive) {
+                guard let view = pendingDeleteView else { return }
+                pendingDeleteView = nil
+                deleteSavedView(view)
+            }
+        } message: {
+            Text(pendingDeleteView.map { "会从侧栏移除「\($0.name)」，材料与行动不受影响。" } ?? "")
         }
     }
     private var topicLoadKey: String {
@@ -319,6 +358,25 @@ struct WorkspaceView: View {
                 nav("材料",icon:"books.vertical",target:.materials).keyboardShortcut("3",modifiers:.command)
                 nav("行动",icon:"checkmark.circle",target:.actions).keyboardShortcut("4",modifiers:.command)
                 nav("启动",icon:"arrow.up.forward",target:.initiate).keyboardShortcut("5",modifiers:.command)
+            }
+            if !savedViews.isEmpty {
+                VStack(alignment:.leading,spacing:8) {
+                    Text("视图").vosFont(12, weight:.medium).foregroundStyle(.secondary).padding(.horizontal,9)
+                    VStack(spacing:2) {
+                        ForEach(savedViews) { view in
+                            Button { openSavedView(view) } label: {
+                                Label(view.name,systemImage:view.page == .materials ? "books.vertical" : "checkmark.circle")
+                                    .vosFont(14).lineLimit(1)
+                                    .frame(maxWidth:.infinity,alignment:.leading)
+                                    .padding(.horizontal,9).padding(.vertical,7)
+                                    .contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                                .help(view.page == .materials ? "材料：" + view.filter : "行动：" + view.filter)
+                                .contextMenu { Button("删除视图",role:.destructive) { pendingDeleteView = view } }
+                                .accessibilityIdentifier("workspace.savedView." + view.name)
+                        }
+                    }
+                }
             }
             Spacer()
             Button { go(.capture) } label: { Label("记录想法",systemImage:"mic").frame(maxWidth:.infinity).padding(.vertical,7) }
@@ -517,8 +575,11 @@ struct WorkspaceView: View {
         let rows = readingMaterials
         let catalog = recordCatalog
         return LazyVStack(alignment:.leading,spacing:24) {
-            WorkspaceHeading(eyebrow:"",title:"材料",subtitle:"\(rows.count) 份")
-            WorkspaceTabs(selection:$materialFilter,titles:["日常材料","未读","在读","已归档","回收站"])
+            HStack(alignment:.top) {
+                WorkspaceHeading(eyebrow:"",title:"材料",subtitle:"\(rows.count) 份")
+                Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.materials,filter:materialFilter) }.buttonStyle(.bordered)
+            }
+            WorkspaceTabs(selection:$materialFilter,titles:SavedViewPage.materials.filters)
             if ["已归档","回收站"].contains(materialFilter) {
                 Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留，不用于当前理解；恢复后仅本机保存。Apple 提醒事项未被删除或取消。").font(.callout).foregroundStyle(.secondary)
             }
@@ -646,9 +707,10 @@ struct WorkspaceView: View {
                 if ["全部","我的待办"].contains(actionFilter) {
                     Button(selectingActions ? "取消选择" : "选择") { if selectingActions { exitActionSelection() } else { selectingActions=true } }.buttonStyle(.bordered).disabled(batchRunning)
                 }
+                Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.actions,filter:actionFilter) }.buttonStyle(.bordered)
                 Button("每周回顾",systemImage:"calendar.badge.clock") { showingWeeklyReview=true }.buttonStyle(.bordered)
             }
-            WorkspaceTabs(selection:$actionFilter,titles:["全部","我的待办","AI 助理","已完成","问题与目标","待核对","历史记录"])
+            WorkspaceTabs(selection:$actionFilter,titles:SavedViewPage.actions.filters)
             if !model.visibleOutcomeFollowups.isEmpty {
                 WorkspaceSection(title:"完成后的结果",icon:"checkmark.seal",count:model.visibleOutcomeFollowups.count) {
                     HStack(spacing:12) {
@@ -1030,6 +1092,38 @@ struct WorkspaceView: View {
             else { let created=try await model.createReflectionQuestion(newTopicTitle,allowCloud:true);topicID=created.id }
             creatingTopic=false;newTopicTitle="";model.queueTopicOrganization()
         } catch { self.error=error.localizedDescription }
+    }
+    private var trimmedNewViewName: String { newViewName.trimmingCharacters(in:.whitespacesAndNewlines) }
+    private var canSaveView: Bool {
+        !trimmedNewViewName.isEmpty && trimmedNewViewName.count <= ControlCenter.savedViewNameLimit
+            && savedViews.count < ControlCenter.savedViewsLimit
+            && !savedViews.contains { $0.name == trimmedNewViewName }
+    }
+    private func beginSavingView(_ page:SavedViewPage,filter:String) {
+        saveViewPage=page;saveViewFilter=filter;newViewName="";showingSaveView=true
+    }
+    private func saveView() async {
+        guard canSaveView, !savingView else { return }
+        savingView=true
+        defer { savingView=false }
+        if let views=await model.saveWorkspaceView(name:trimmedNewViewName,page:saveViewPage,filter:saveViewFilter) {
+            savedViews=views;showingSaveView=false;error=""
+        } else { error="视图未能保存，请稍后重试。" }
+    }
+    private func deleteSavedView(_ view:SavedWorkspaceView) {
+        Task {
+            if let views=await model.deleteWorkspaceView(id:view.id) { savedViews=views;error="" }
+            else { error="视图未能删除，请稍后重试。" }
+        }
+    }
+    private func openSavedView(_ view:SavedWorkspaceView) {
+        path=[]
+        scrollPositions.removeAll()
+        switch view.page {
+        case .materials: materialFilter=view.filter;page = .materials
+        case .actions: actionFilter=view.filter;page = .actions
+        }
+        error=""
     }
     private func routeExternalURL(_ url:URL) {
         if CaptureLink.isCapture(url) { Task { await model.acceptCaptureURL(url) } }
