@@ -46,4 +46,16 @@ final class ActionUndoStackChecks: XCTestCase {
         XCTAssertEqual(popped.from, LocalActionState.completed)
         XCTAssertEqual(popped.to, LocalActionState.open)
     }
+
+    func testEntrySuccessorDefaultsToNil() {
+        let value = ActionUndoEntry(actionID: "action-1", title: "行动 1", from: .completed, to: .open)
+        XCTAssertNil(value.successorID)
+    }
+
+    func testEntryKeepsSuccessorID() throws {
+        var stack = ActionUndoStack()
+        stack.record(ActionUndoEntry(actionID: "action-1", title: "行动 1", from: .completed, to: .open, successorID: "action-2"))
+        let popped = try XCTUnwrap(stack.popLast())
+        XCTAssertEqual(popped.successorID, "action-2")
+    }
 }

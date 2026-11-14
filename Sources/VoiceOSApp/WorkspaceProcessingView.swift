@@ -155,11 +155,16 @@ struct WorkspaceProcessingView: View {
                         }
                     }
                 }
-                let failedSources=model.records.filter { ["failed","blocked"].contains($0.jobState ?? "") || ["interrupted","quarantined"].contains($0.state) }
+                let quarantinedSources=model.records.filter { $0.state == "quarantined" }
+                let quarantinedIDs=Set(quarantinedSources.map(\.id))
+                if !quarantinedSources.isEmpty {
+                    Text("需要核对的原件见上方『需要重新核对的原件』").font(.caption).foregroundStyle(.secondary)
+                }
+                let failedSources=model.records.filter { !quarantinedIDs.contains($0.id) && (["failed","blocked"].contains($0.jobState ?? "") || $0.state == "interrupted") }
                 if !failedSources.isEmpty {
                     WorkspaceSection(title:"录音与转写需要查看",icon:"waveform",count:failedSources.count) {
                         ForEach(failedSources) { source in
-                            WorkspaceRow(title:source.displayTitle,subtitle:source.state == "interrupted" ? "录音被中断，已保存的片段仍保留" : source.state == "quarantined" ? "原件完整性待核对，已暂停后续处理" : "本地转写未完成，原件仍保留",trailing:"查看材料") { openSource(source.id) }
+                            WorkspaceRow(title:source.displayTitle,subtitle:source.state == "interrupted" ? "录音被中断，已保存的片段仍保留" : "本地转写未完成，原件仍保留",trailing:"查看材料") { openSource(source.id) }
                             if let error=source.error { reason(error) }
                             if source.state == "saved" { Button("重试本地转写") { Task { await model.retry(source) } }.disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil) }
                         }

@@ -860,6 +860,9 @@ struct WorkspaceView: View {
                 }
             }
             if actionFilter == "待核对" { processingIssues }
+            if ["全部","我的待办"].contains(actionFilter), !visible.isEmpty {
+                Text("↑↓ 选择 · ↵ 打开 · x 完成 · z 不再跟进 · ⌥⌘Z 撤销上一次变更").font(.caption).foregroundStyle(.secondary)
+            }
             HStack { Button("同步提醒事项") { Task { await model.refreshTaskReminders() } }.disabled(model.reminderAccess?.enabled != true || model.remindersBusy);Spacer();Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
         }.task(id: focusRefreshKey) { focusedActionIDs = await model.focusedActionIDs() }
     }
@@ -915,6 +918,25 @@ struct WorkspaceView: View {
                 ForEach(AppTextSize.allCases) { option in Text(option.label).tag(option) }
             }.pickerStyle(.segmented).frame(maxWidth:360)
             Text("配色即时生效，并在下次打开时沿用。").font(.caption).foregroundStyle(.secondary)
+            Divider()
+            sectionTitle("键盘快捷键")
+            HStack(alignment:.top,spacing:40) {
+                VStack(alignment:.leading,spacing:6) {
+                    Text("⌥⌘D 口述")
+                    Text("⌥⌘V 保存剪贴板")
+                    Text("⌥⌘N 速记")
+                    Text("⌘⇧R 口述")
+                    Text("⌘F 搜索")
+                    Text("⌘1 到 ⌘5 切换页面")
+                }
+                VStack(alignment:.leading,spacing:6) {
+                    Text("↑↓ 选择")
+                    Text("↵ 打开")
+                    Text("x 完成")
+                    Text("z 不再跟进")
+                    Text("⌥⌘Z 撤销")
+                }
+            }.font(.caption).foregroundStyle(.secondary)
             Divider()
             sectionTitle("模型与服务")
             WorkspaceRow(title:"语音转文字",subtitle:model.speechSummary,icon:"waveform") { model.chooseLocalSpeech() }

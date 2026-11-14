@@ -221,6 +221,7 @@ extension VoiceOSStore {
             try checkpoint(.reminderFeedbackUncommitted)
         }
         try checkpoint(.reminderFeedbackCommitted)
+        if feedbackID != nil { _ = try completeActionWithRecurrence(id: link["action_id"]!) }
         for _ in confirmedScheduleOperations { try checkpoint(.scheduleOperationCommitted) }
         for _ in confirmedCompensations { try checkpoint(.compensationOperationCommitted) }
     }
