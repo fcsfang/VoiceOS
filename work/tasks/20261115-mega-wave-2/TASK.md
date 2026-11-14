@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-2
@@ -79,5 +79,6 @@ CREATE TABLE search_index_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 ## 链接
 
+- 2026-11-15 已合并为 `38472b3`（PR #156）。
 - `docs/product/reference-products.md` 第 9.3、9.4、9.5 节
 - 2026-11-15 第三批任务卡 `work/tasks/20261115-mega-wave-3/TASK.md`
