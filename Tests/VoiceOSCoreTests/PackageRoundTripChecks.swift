@@ -7,6 +7,7 @@ final class PackageRoundTripChecks: XCTestCase {
     private static let newTables = ["action_clarifications", "action_focus", "source_reading_states", "claim_notes", "topic_claim_confirmations", "source_capture_metadata", "source_attachments", "action_subtasks", "action_estimates", "source_chapters", "capture_templates"]
     private static let optionalTables = ["action_recurrence", "source_entities"]
     private static let addedIn50Tables = ["task_initiations"]
+    private static let addedIn51Tables = ["panorama_attempts", "panorama_steps", "panorama_theme_replies", "panorama_themes", "panorama_theme_batches", "panorama_theme_appearances"]
     private var base: URL!
     private var root: URL!
     private var input: URL!
@@ -85,6 +86,20 @@ final class PackageRoundTripChecks: XCTestCase {
         return id
     }
 
+    private func insertPanorama(_ store: VoiceOSStore) async throws -> (attemptID: String, themeID: String) {
+        let db = await store.db
+        let attemptID = UUID().uuidString, themeID = "theme-" + String(repeating: "b", count: 32), now = "2026-11-15T00:00:00Z", digest = String(repeating: "a", count: 64)
+        try db.execute("INSERT INTO panorama_attempts(id,digest,state,input_json,created_at) VALUES(?,?,'completed','{}',?)", [attemptID, digest, now])
+        try db.execute("INSERT INTO panorama_themes(id,title,created_at,last_seen_at) VALUES(?,'主题甲',?,?)", [themeID, now, now])
+        try db.execute("INSERT INTO panorama_theme_batches(attempt_id,phase,theme_count,created_at) VALUES(?,'completed',1,?)", [attemptID, now])
+        try db.execute("""
+        INSERT INTO panorama_theme_appearances(attempt_id,phase,theme_id,raw_region_id,region_title,question_titles_json,claim_ids_json,source_ids_json,quote_keys_json,match_kind,match_score,created_at)
+        VALUES(?,'completed',?,'region-1','主题甲','[]','[]','[]','[]','new',0.5,?)
+        """, [attemptID, themeID, now])
+        try db.execute("INSERT INTO panorama_theme_replies(region_id,digest,reply,model,prompt_version,state,created_at) VALUES('region-1',?,'回收主题','fixture','v1','completed',?)", [digest, now])
+        return (attemptID, themeID)
+    }
+
     func testPackageVersion49RoundTripPreservesNewTablesAndAttachments() async throws {
         let store = try await openStore()
         let fixture = try await makeFixture(store)
@@ -140,18 +155,21 @@ final class PackageRoundTripChecks: XCTestCase {
         XCTAssertEqual(copied, original)
     }
 
-    func testPackageVersion50RoundTripPreservesTaskInitiations() async throws {
+    func testPackageVersion51RoundTripPreservesTaskInitiationsAndPanorama() async throws {
         let store = try await openStore()
         let fixture = try await makeFixture(store)
         let initiationID = try await insertTaskInitiation(store, sourceID: fixture.sourceID)
-        let package = base.appendingPathComponent("package50")
+        let panorama = try await insertPanorama(store)
+        let package = base.appendingPathComponent("package51")
         try await store.exportPackage(to: package, includeMedia: true)
         let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: package.appendingPathComponent("manifest.json"))) as? [String: Any]
-        XCTAssertEqual(manifest?["version"] as? Int, 50)
-        XCTAssertEqual(manifest?["databaseSchema"] as? Int, 50)
-        XCTAssertEqual((manifest?["counts"] as? [String: Any])?["task_initiations"] as? Int, 1)
+        XCTAssertEqual(manifest?["version"] as? Int, 51)
+        XCTAssertEqual(manifest?["databaseSchema"] as? Int, 51)
+        let counts = try XCTUnwrap(manifest?["counts"] as? [String: Any])
+        XCTAssertEqual(counts["task_initiations"] as? Int, 1)
+        for table in Self.addedIn51Tables { XCTAssertEqual(counts[table] as? Int, table == "panorama_steps" ? 0 : 1, table) }
 
-        let restoredRoot = base.appendingPathComponent("restored50")
+        let restoredRoot = base.appendingPathComponent("restored51")
         try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
         let restored = try await openStore(restoredRoot)
         let records = try await restored.taskInitiations()
@@ -161,15 +179,35 @@ final class PackageRoundTripChecks: XCTestCase {
         XCTAssertEqual(records.first?.sourceID, fixture.sourceID)
         XCTAssertEqual(records.first?.proposal.title, "迁移往返启动包")
         XCTAssertEqual(records.first?.basisChanged, false)
+        let restoredDB = await restored.db
+        XCTAssertEqual(try restoredDB.query("SELECT state FROM panorama_attempts WHERE id=?", [panorama.attemptID]).first?["state"], "completed")
+        XCTAssertEqual(try restoredDB.query("SELECT title FROM panorama_themes WHERE id=?", [panorama.themeID]).first?["title"], "主题甲")
+        XCTAssertEqual(try restoredDB.query("SELECT theme_count FROM panorama_theme_batches").first?["theme_count"], "1")
+        XCTAssertEqual(try restoredDB.query("SELECT match_kind,match_score FROM panorama_theme_appearances").first?["match_kind"], "new")
+        XCTAssertEqual(try restoredDB.query("SELECT match_kind,match_score FROM panorama_theme_appearances").first?["match_score"], "0.5")
+        XCTAssertEqual(try restoredDB.query("SELECT reply FROM panorama_theme_replies").first?["reply"], "回收主题")
+        let themeMap = try await restored.latestPanoramaThemeMap()
+        XCTAssertEqual(themeMap?.references.map(\.id), [panorama.themeID])
+        let history = try await restored.panoramaThemeHistory()
+        XCTAssertEqual(history[panorama.themeID]?.appearanceCount, 1)
 
-        try rewriteAsVersion49(package)
-        let olderRoot = base.appendingPathComponent("restored49")
+        try rewriteAsVersion50(package)
+        let olderRoot = base.appendingPathComponent("restored50")
         try await VoiceOSStore.restorePackage(from: package, to: olderRoot, inspector: NativeMediaInspector())
         let older = try await openStore(olderRoot)
-        let olderRecords = try await older.taskInitiations()
-        XCTAssertTrue(olderRecords.isEmpty)
         let olderDB = await older.db
-        XCTAssertEqual(try olderDB.query("SELECT count(*) AS n FROM task_initiations").first?["n"], "0")
+        for table in Self.addedIn51Tables { XCTAssertEqual(try olderDB.query("SELECT count(*) AS n FROM \(table)").first?["n"], "0", table) }
+        let olderRecords = try await older.taskInitiations()
+        XCTAssertEqual(olderRecords.map(\.id), [initiationID])
+
+        try rewriteAsVersion49(package)
+        let oldestRoot = base.appendingPathComponent("restored49")
+        try await VoiceOSStore.restorePackage(from: package, to: oldestRoot, inspector: NativeMediaInspector())
+        let oldest = try await openStore(oldestRoot)
+        let oldestRecords = try await oldest.taskInitiations()
+        XCTAssertTrue(oldestRecords.isEmpty)
+        let oldestDB = await oldest.db
+        XCTAssertEqual(try oldestDB.query("SELECT count(*) AS n FROM task_initiations").first?["n"], "0")
     }
 
     func testVersion48PackageStillRestoresAndLeavesNewTablesEmpty() async throws {
@@ -229,11 +267,15 @@ final class PackageRoundTripChecks: XCTestCase {
     }
 
     private func rewriteAsVersion48(_ package: URL, attachment: SourceAttachment) throws {
-        try rewriteManifest(package, version: 48, dropping: Self.newTables + Self.optionalTables + Self.addedIn50Tables, removing: [attachment.relativePath])
+        try rewriteManifest(package, version: 48, dropping: Self.newTables + Self.optionalTables + Self.addedIn50Tables + Self.addedIn51Tables, removing: [attachment.relativePath])
     }
 
     private func rewriteAsVersion49(_ package: URL) throws {
-        try rewriteManifest(package, version: 49, dropping: Self.addedIn50Tables, removing: [])
+        try rewriteManifest(package, version: 49, dropping: Self.addedIn50Tables + Self.addedIn51Tables, removing: [])
+    }
+
+    private func rewriteAsVersion50(_ package: URL) throws {
+        try rewriteManifest(package, version: 50, dropping: Self.addedIn51Tables, removing: [])
     }
 
     private func rewriteManifest(_ package: URL, version: Int, dropping tables: [String], removing paths: [String]) throws {
