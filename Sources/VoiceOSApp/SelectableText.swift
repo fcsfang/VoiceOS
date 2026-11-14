@@ -29,9 +29,9 @@ struct SelectableText: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.minSize = NSSize(width: 0, height: scrollView.contentSize.height)
-        textView.maxSize = NSSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: .greatestFiniteMagnitude)
+        textView.textContainer?.containerSize = NSSize(width: scrollView.contentSize.width, height: CGFloat.greatestFiniteMagnitude)
         textView.string = text
         textView.delegate = context.coordinator
 

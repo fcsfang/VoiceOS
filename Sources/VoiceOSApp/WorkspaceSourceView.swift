@@ -614,7 +614,8 @@ struct ClaimCorrectionView:View {
 extension ControlCenter {
     func sourceAttachmentURL(sourceID:String) async throws -> URL? {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
-        guard let attachment=try store.sourceAttachment(sourceID:sourceID) else { return nil }
-        return store.root.appendingPathComponent(attachment.relativePath)
+        guard let attachment=try await store.sourceAttachment(sourceID:sourceID) else { return nil }
+        let root=await store.root
+        return root.appendingPathComponent(attachment.relativePath)
     }
 }
