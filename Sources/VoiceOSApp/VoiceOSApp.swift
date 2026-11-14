@@ -30,7 +30,7 @@ final class ControlCenter: ObservableObject {
                 try FileManager.default.copyItem(at: file, to: backup)
                 textCaptureDraftIssue = "旧草稿读取失败，原文件已另存保留；可以继续记录。"
             } catch {
-                textCaptureDraftIssue = "旧草稿无法读取或另存，暂未覆盖；这次请使用仅本地保存。"
+                textCaptureDraftIssue = "旧草稿无法读取或另存，暂未覆盖；可以继续记录。"
                 return
             }
         }
@@ -50,7 +50,7 @@ final class ControlCenter: ObservableObject {
         draftSaveWorker?.cancel(); draftSaveWorker = nil
         guard draftNeedsSave, let file = textCaptureDraftFile else { return }
         do { try textCaptureDraft.save(to: file); draftNeedsSave = false; textCaptureDraftIssue = "" }
-        catch { textCaptureDraftIssue = "草稿暂未自动保存：" + error.localizedDescription + "；请先使用仅本地保存。" }
+        catch { textCaptureDraftIssue = "草稿暂未自动保存：" + error.localizedDescription + "；请先保存当前草稿。" }
     }
     @Published var records: [SourceRecord] = []
     @Published var recordingTitleStatus = ""
@@ -1885,19 +1885,20 @@ final class ControlCenter: ObservableObject {
     var canUnderstandCapturedText: Bool { modelConfigured && understandingWorker == nil && !discussionExtracting }
     func saveCapturedText(_ text: String, title: String, ownership: TextCaptureOwnership, allowCloud: Bool, commandID: String) async -> String? {
         guard let store else { return nil }
-        guard !allowCloud || canUnderstandCapturedText else {
-            status = "其他内容正在整理或模型尚未就绪，草稿已保留；可先仅本地保存。"; return nil
-        }
+        let process = allowCloud && canUnderstandCapturedText
         do {
             let id = try await store.recordCapturedText(text, title: title, ownership: ownership, commandID: commandID)
             let policy = try await store.sourcePolicy(sourceID: id)
-            if policy.localOnly != !allowCloud {
-                _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: !allowCloud)
+            if policy.localOnly != !process {
+                _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: !process)
             }
             await refresh()
-            guard allowCloud else { status = "完整原文已保存 · 仅本机"; return id }
+            guard process else {
+                status = allowCloud ? "完整原文已保存 · 仅本机；模型暂不可用" : "完整原文已保存 · 仅本机"
+                return id
+            }
             guard canUnderstandCapturedText, let record = records.first(where: { $0.id == id }) else {
-                status = "完整原文已保存；其他内容正在整理，草稿保留，可稍后重试理解。"; return nil
+                status = "完整原文已保存；模型暂不可用，可稍后从资料页整理。"; return id
             }
             if ownership == .personal, text.unicodeScalars.count > 4000 { understandSegmented(record) }
             else { understand(record) }
