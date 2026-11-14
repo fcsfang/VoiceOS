@@ -56,7 +56,7 @@ final class CrossCuttingChecks: XCTestCase {
         XCTAssertTrue(actionText.contains("# 整理 摘录"))
     }
 
-    func testMarkdownMirrorThrottlesAndPrunes() throws {
+    func testMarkdownMirrorThrottlesAndKeepsHistory() throws {
         let mirrorDirectory = root.appendingPathComponent("Mirror", isDirectory: true)
         var mirror = MarkdownMirror(directory: mirrorDirectory, minimumInterval: 60)
         let start = Date(timeIntervalSince1970: 1_800_000_000)
@@ -74,7 +74,7 @@ final class CrossCuttingChecks: XCTestCase {
         XCTAssertTrue(try mirror.write(sources: changed, claims: [], actions: [], now: start.addingTimeInterval(61)))
         let rewritten = try String(contentsOf: mirrorDirectory.appendingPathComponent("materials").appendingPathComponent("s1.md"), encoding: .utf8)
         XCTAssertTrue(rewritten.contains("改写"))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: secondFile.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondFile.path))
     }
 
     func testDatabaseBackupCreatesVerifiedCopiesAndKeepsSeven() async throws {
