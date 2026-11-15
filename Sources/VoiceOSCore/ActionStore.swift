@@ -31,6 +31,7 @@ public struct ActionRecord: Identifiable, Sendable {
     public let intent: ActionIntentMetadata?
     public let commandID: String
     public let createdAt: String
+    public let parentID: String?
     public var isExtracted: Bool { commandID.hasPrefix("extracted:") }
 }
 public struct ActionRevision: Identifiable, Codable, Sendable {
@@ -67,7 +68,17 @@ extension VoiceOSStore {
         return try db.query("SELECT * FROM actions \(clause) ORDER BY created_at,id").map(Self.actionRecord)
     }
     private static func actionRecord(_ row: [String: String]) throws -> ActionRecord {
-        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1", intent: try row["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self, from: Data($0.utf8)) }, commandID: row["command_id"]!, createdAt: row["created_at"]!)
+        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1", intent: try row["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self, from: Data($0.utf8)) }, commandID: row["command_id"]!, createdAt: row["created_at"]!, parentID: row["parent_id"])
+    }
+    /// Active outcomes with no open next action; a saveable "stalled" view.
+    public func stalledOutcomes() throws -> [ActionRecord] {
+        _ = try candidateClaims(includeFrozen: true)
+        return try db.query("""
+            SELECT * FROM actions a
+            WHERE a.kind='opportunity' AND a.state='open' AND a.validity='current'
+              AND NOT EXISTS (SELECT 1 FROM actions c WHERE c.parent_id=a.id AND c.state='open')
+            ORDER BY a.created_at,a.id
+            """).map(Self.actionRecord)
     }
     @discardableResult
     public func confirmOpportunityAsTask(actionID: String, expectedVersion: Int, title: String, commandID: String = UUID().uuidString) throws -> String {
@@ -105,7 +116,8 @@ extension VoiceOSStore {
         }
         guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }), current.validity == "current",
               current.version == expectedVersion else { throw VoiceOSError("行动版本或依据已变化，请重新核对") }
-        guard state.rawValue != current.state, state != .completed || current.kind == "task", note.unicodeScalars.count <= 2000 else { throw VoiceOSError("探索意图与 AI 建议不能标成任务完成，或状态没有变化") }
+        guard state.rawValue != current.state, note.unicodeScalars.count <= 2000 else { throw VoiceOSError("行动状态没有变化或备注过长") }
+        guard state != .completed || current.kind == "task" else { throw VoiceOSError("探索意图与 AI 建议不能标成任务完成；问题与目标的完成请使用 completeOutcome") }
         let next = expectedVersion + 1
         try db.transaction {
             try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),state.rawValue,note,commandID,hash,ISO8601DateFormatter().string(from: Date())])
@@ -114,6 +126,88 @@ extension VoiceOSStore {
         }
         try checkpoint(.actionStateCommitted)
         return next
+    }
+    /// Completing an outcome is separate from completing a task. A task keeps
+    /// using `setActionState`; only an opportunity goal takes this path.
+    @discardableResult
+    public func completeOutcome(actionID: String, expectedVersion: Int, commandID: String = UUID().uuidString) throws -> Int {
+        let note = "目标达成"
+        let hash = try Self.actionHash([actionID,String(expectedVersion),LocalActionState.completed.rawValue,note])
+        if let receipt = try db.query("SELECT version,input_fingerprint FROM action_revisions WHERE command_id=?", [commandID]).first {
+            guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一完成目标命令不能更换内容") }
+            return Int(receipt["version"]!)!
+        }
+        guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard current.kind == "opportunity" else { throw VoiceOSError("只有问题与目标可以达成") }
+        guard current.state == "open" else { throw VoiceOSError("只有未完成的问题与目标可以达成") }
+        guard current.validity == "current" else { throw VoiceOSError("已失效的问题与目标不能达成") }
+        guard current.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
+        let next = expectedVersion + 1
+        try db.transaction {
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'completed',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),note,commandID,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("UPDATE actions SET state='completed',version=? WHERE id=?", [String(next),actionID])
+            try checkpoint(.actionStateUncommitted)
+        }
+        try checkpoint(.actionStateCommitted)
+        return next
+    }
+    /// Hangs a task under an outcome. The child starts unattached, so the same
+    /// command cannot silently re-target an already attached task.
+    @discardableResult
+    public func attachNextAction(outcomeID: String, actionID: String, commandID: String = UUID().uuidString) throws -> Int {
+        let note = "添加下一步"
+        let revisionCommand = "attach:" + commandID
+        let hash = try Self.actionHash([outcomeID,actionID,note])
+        if let receipt = try db.query("SELECT action_id,version,input_fingerprint FROM action_revisions WHERE command_id=?", [revisionCommand]).first {
+            guard receipt["action_id"] == actionID, receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一添加下一步命令不能更换目标或行动") }
+            return Int(receipt["version"]!)!
+        }
+        guard let outcome = try actions(includeHistory: true).first(where: { $0.id == outcomeID }) else { throw VoiceOSError("目标不存在") }
+        guard outcome.kind == "opportunity" else { throw VoiceOSError("下一步只能挂在问题与目标下") }
+        guard outcome.state == "open", outcome.validity == "current" else { throw VoiceOSError("只有未完成且有效的问题与目标可以添加下一步") }
+        guard let child = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard child.kind == "task" else { throw VoiceOSError("只有待办可以作为下一步") }
+        guard child.state == "open", child.validity == "current" else { throw VoiceOSError("只有未完成且有效的待办可以作为下一步") }
+        guard child.parentID == nil else { throw VoiceOSError("这条待办已经挂在目标下") }
+        try Self.rejectNextActionCycle(db, outcomeID: outcomeID, actionID: actionID)
+        let next = child.version + 1
+        try db.transaction {
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'open',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(child.version),note,revisionCommand,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("UPDATE actions SET parent_id=?,version=? WHERE id=?", [outcomeID,String(next),actionID])
+            try checkpoint(.actionStateUncommitted)
+        }
+        try checkpoint(.actionStateCommitted)
+        return next
+    }
+    @discardableResult
+    public func detachNextAction(actionID: String, expectedVersion: Int, commandID: String = UUID().uuidString) throws -> Int {
+        let note = "摘除下一步"
+        let revisionCommand = "detach:" + commandID
+        let hash = try Self.actionHash([actionID,String(expectedVersion),note])
+        if let receipt = try db.query("SELECT version,input_fingerprint FROM action_revisions WHERE command_id=?", [revisionCommand]).first {
+            guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一摘除下一步命令不能更换行动") }
+            return Int(receipt["version"]!)!
+        }
+        guard let child = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard child.kind == "task" else { throw VoiceOSError("只有待办可以作为目标下一步") }
+        guard child.parentID != nil else { throw VoiceOSError("这条待办没有挂在目标下") }
+        guard child.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
+        let next = expectedVersion + 1
+        try db.transaction {
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),child.state,note,revisionCommand,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("UPDATE actions SET parent_id=NULL,version=? WHERE id=?", [String(next),actionID])
+            try checkpoint(.actionStateUncommitted)
+        }
+        try checkpoint(.actionStateCommitted)
+        return next
+    }
+    private static func rejectNextActionCycle(_ db: Database, outcomeID: String, actionID: String) throws {
+        var seen: Set<String> = []
+        var cursor: String? = outcomeID
+        while let current = cursor {
+            guard seen.insert(current).inserted, current != actionID else { throw VoiceOSError("下一步归属不能成环") }
+            cursor = try db.query("SELECT parent_id FROM actions WHERE id=?", [current]).first?["parent_id"]
+        }
     }
     /// Receipts are authoritative; the revision marker also keeps restored
     /// packages valid, because the older package format omits the receipt table.
@@ -219,17 +313,43 @@ extension VoiceOSStore {
             for (index, revision) in revisions.enumerated() {
                 let kindClarification = revision["state"] == state && revision["command_id"]?.hasPrefix("clarify:") == true
                 let kindPromotion = revision["state"] == state && revision["command_id"]?.hasPrefix("promote:") == true
-                guard revision["version"] == String(index+2), revision["from_version"] == String(index+1), let next = revision["state"], next != state || kindClarification || kindPromotion,
-                      next != "completed" || action["kind"] == "task", (revision["note"]?.unicodeScalars.count ?? 2001) <= 2000 else { throw VoiceOSError("迁移行动状态链不一致") }
+                let attachLink = revision["command_id"]?.hasPrefix("attach:") == true
+                let detachLink = revision["command_id"]?.hasPrefix("detach:") == true
+                let nextActionLink = revision["state"] == state && (attachLink || detachLink)
+                guard revision["version"] == String(index+2), revision["from_version"] == String(index+1), let next = revision["state"], next != state || kindClarification || kindPromotion || nextActionLink,
+                      next != "completed" || action["kind"] == "task" || action["kind"] == "opportunity", (revision["note"]?.unicodeScalars.count ?? 2001) <= 2000 else { throw VoiceOSError("迁移行动状态链不一致") }
                 if kindClarification, revision["note"] != "澄清为问题与目标" {
                     throw VoiceOSError("行动版本升级缺少澄清依据")
                 }
                 if kindPromotion, revision["note"] != "转为待办" {
                     throw VoiceOSError("行动版本升级缺少提升依据")
                 }
+                if attachLink, revision["note"] != "添加下一步" {
+                    throw VoiceOSError("行动版本升级缺少添加下一步依据")
+                }
+                if detachLink, revision["note"] != "摘除下一步" {
+                    throw VoiceOSError("行动版本升级缺少摘除下一步依据")
+                }
                 state = next
             }
             guard state == action["state"] else { throw VoiceOSError("迁移行动当前状态与历史不一致") }
+        }
+        let links = try db.query("SELECT id,kind,parent_id FROM actions")
+        var parentByID: [String: String] = [:]
+        var kindByID: [String: String] = [:]
+        for row in links {
+            kindByID[row["id"]!] = row["kind"]
+            if let parent = row["parent_id"] { parentByID[row["id"]!] = parent }
+        }
+        for (id, parent) in parentByID {
+            guard kindByID[parent] == "opportunity" else { throw VoiceOSError("迁移行动的下一步必须指向存在的问题与目标") }
+            var seen: Set<String> = [id]
+            var cursor = parent
+            while true {
+                guard seen.insert(cursor).inserted else { throw VoiceOSError("迁移行动的下一步归属成环") }
+                guard let next = parentByID[cursor] else { break }
+                cursor = next
+            }
         }
         try validateStoredActionSchedules(db)
         try validateReminderScheduleBases(db)
