@@ -23,7 +23,7 @@ struct SelectableText: NSViewRepresentable {
         textView.isRichText = false
         textView.drawsBackground = false
         textView.textColor = .labelColor
-        textView.font = .systemFont(ofSize: 16 * textScale)
+        textView.font = .systemFont(ofSize: WorkspaceText.body.size * textScale)
         textView.textContainerInset = NSSize(width: 0, height: 8)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -48,7 +48,7 @@ struct SelectableText: NSViewRepresentable {
             textView.setSelectedRange(NSRange(location: 0, length: 0))
             context.coordinator.ignoresSelectionChange = false
         }
-        let font = NSFont.systemFont(ofSize: 16 * textScale)
+        let font = NSFont.systemFont(ofSize: WorkspaceText.body.size * textScale)
         if textView.font?.pointSize != font.pointSize { textView.font = font }
         if textView.textColor?.isEqual(NSColor.labelColor) != true { textView.textColor = .labelColor }
     }

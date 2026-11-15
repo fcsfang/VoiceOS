@@ -102,16 +102,16 @@ struct PausedActionBatchControl: View {
                 DisclosureGroup("查看本次明细") {
                     ForEach(summary.updated, id: \.sourceID) { row in
                         Text(row.reused ? "沿用已有理解 · \(title(row.sourceID))" : "已更新 · \(title(row.sourceID))")
-                            .font(.callout)
+                            .vosFont(WorkspaceText.body)
                     }
                     ForEach(summary.skipped, id: \.sourceID) { row in
                         Text("跳过 · \(title(row.sourceID)) · \(skipLabel(row.reason))")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                     }
                     ForEach(summary.failed, id: \.sourceID) { row in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("失败 · \(title(row.sourceID))").font(.callout)
-                            Text(row.message).font(.caption).foregroundStyle(.secondary)
+                            Text("失败 · \(title(row.sourceID))").vosFont(WorkspaceText.body)
+                            Text(row.message).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -122,13 +122,13 @@ struct PausedActionBatchControl: View {
                     Button("重新识别全部暂停的待办…") { Task { await model.preparePausedActionBatch() } }
                         .disabled(model.pausedActionBatchUnavailableReason != nil)
                     Text("涉及 \(preview.affectedMaterialCount) 份材料、\(preview.targetActionCount) 条暂停待办。每份材料重新识别一次，会调用已配置的文本模型；长文字或完整录音沿用该材料的现有分段流程，部分材料会先校正完整转写，可能因此多一次模型调用。相同依据会复用，不会重复发送。")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                     if let reason = model.pausedActionBatchUnavailableReason {
-                        Text(reason).font(.caption).foregroundStyle(.secondary)
+                        Text(reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     }
                 } else {
                     Text("当前没有可批量重新识别的暂停待办；上面的事项需要逐条打开核对。")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
             }
         }

@@ -18,7 +18,7 @@ struct SelectionActions: View {
             Button("复制", systemImage: "doc.on.doc", action: onCopy).accessibilityLabel("复制选中文字")
             Button("回听选中段", systemImage: "play.circle", action: onPlay).disabled(!canPlay)
         }
-        .vosFont(13, weight: .medium)
+        .vosFont(WorkspaceText.meta)
         .buttonStyle(.borderless)
         .padding(.horizontal, 12)
         .padding(.vertical, 9)

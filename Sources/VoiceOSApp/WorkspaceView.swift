@@ -92,7 +92,7 @@ struct WorkspaceRow: View {
     var body: some View {
         Button(action:open) {
             HStack(alignment:.top,spacing:14) {
-                Image(systemName:icon).vosFont(16).foregroundStyle(palette.accent)
+                Image(systemName:icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
                     .frame(width:30,height:30).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                     .accessibilityHidden(true)
                 VStack(alignment:.leading,spacing:3) {
@@ -116,7 +116,7 @@ struct WorkspaceRow: View {
         case .link:
             HStack(spacing:3) {
                 Text(trailing).vosFont(WorkspaceText.meta)
-                Image(systemName:"chevron.right").vosFont(9, weight:.semibold)
+                Image(systemName:"chevron.right").vosFont(WorkspaceText.caption.size, weight: .semibold)
             }.foregroundStyle(palette.accent)
         }
     }
@@ -248,7 +248,7 @@ struct WorkspaceView: View {
     }
     private var styledContent: some View {
         chrome
-            .vosFont(15).foregroundStyle(palette.text).background(palette.canvas).tint(palette.accent)
+            .vosFont(WorkspaceText.body).foregroundStyle(palette.text).background(palette.canvas).tint(palette.accent)
             .environment(\.workspacePalette, palette)
             .environment(\.vosTextScale, model.textSize.scale)
             .dynamicTypeSize(model.textSize.dynamicType)
@@ -312,9 +312,9 @@ struct WorkspaceView: View {
         lifecycleContent
             .sheet(isPresented:$model.choosingReminderCalendar) {
                 VStack(alignment:.leading,spacing:16) {
-                    Text("选择提醒事项清单").font(.title2)
+                    Text("选择提醒事项清单").vosFont(WorkspaceText.sectionTitle)
                     ForEach(model.reminderCalendars) { calendar in Button(calendar.title) { Task { model.proposedReminderCalendarID=calendar.id; await model.saveReminderConnection() } }.disabled(model.remindersBusy) }
-                    if !model.status.isEmpty { Text(model.status).font(.caption).foregroundStyle(.secondary) }
+                    if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                     Button("取消") { model.choosingReminderCalendar=false }
                 }.padding(24)
                     .frame(minWidth:440,idealWidth:440,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
@@ -373,14 +373,14 @@ struct WorkspaceView: View {
     }
     private var saveViewSheet: some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("保存当前视图").font(.title2)
-            Text(saveViewPage == .materials ? "材料 · " + saveViewFilter : "行动 · " + saveViewFilter).font(.caption).foregroundStyle(.secondary)
+            Text("保存当前视图").vosFont(WorkspaceText.sectionTitle)
+            Text(saveViewPage == .materials ? "材料 · " + saveViewFilter : "行动 · " + saveViewFilter).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             TextField("视图名称",text:$newViewName).textFieldStyle(.roundedBorder)
                 .onChange(of:newViewName) { _, value in if value.count > ControlCenter.savedViewNameLimit { newViewName = String(value.prefix(ControlCenter.savedViewNameLimit)) } }
             if savedViews.count >= ControlCenter.savedViewsLimit {
-                Text("最多保存 \(ControlCenter.savedViewsLimit) 个视图，可先删除一个。").font(.caption).foregroundStyle(palette.danger)
+                Text("最多保存 \(ControlCenter.savedViewsLimit) 个视图，可先删除一个。").vosFont(WorkspaceText.meta).foregroundStyle(palette.danger)
             } else if savedViews.contains(where: { $0.name == trimmedNewViewName }) {
-                Text("已有同名视图，请换一个名称。").font(.caption).foregroundStyle(palette.danger)
+                Text("已有同名视图，请换一个名称。").vosFont(WorkspaceText.meta).foregroundStyle(palette.danger)
             }
             HStack {
                 Spacer()
@@ -417,17 +417,17 @@ struct WorkspaceView: View {
                     ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
                 } else { pageContent }
             }.frame(maxWidth:.infinity,maxHeight:.infinity)
-            if !error.isEmpty { Text(error).font(.callout).foregroundStyle(palette.danger).textSelection(.enabled).padding(12) }
+            if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled).padding(12) }
             WorkspaceProcessingBar(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
         }.frame(minWidth:440)
     }
     @ViewBuilder private var workspaceErrorBanner: some View {
         if let message = model.workspaceLastError {
             HStack(alignment:.firstTextBaseline,spacing:12) {
-                Label(message,systemImage:"exclamationmark.triangle.fill").font(.callout).foregroundStyle(palette.danger).textSelection(.enabled)
+                Label(message,systemImage:"exclamationmark.triangle.fill").vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled)
                 Spacer(minLength:8)
                 if model.workspaceLastErrorRetry != nil { Button("重试") { model.retryWorkspaceError() } }
-                Button { model.clearWorkspaceError() } label: { Image(systemName:"xmark").font(.caption) }
+                Button { model.clearWorkspaceError() } label: { Image(systemName:"xmark").vosFont(WorkspaceText.caption) }
                     .buttonStyle(.plain).accessibilityLabel("关闭错误提示")
             }.padding(.horizontal,20).padding(.vertical,10).background(palette.surface)
         }
@@ -456,12 +456,12 @@ struct WorkspaceView: View {
             }
             if !savedViews.isEmpty {
                 VStack(alignment:.leading,spacing:8) {
-                    Text("视图").vosFont(12, weight:.medium).foregroundStyle(.secondary).padding(.horizontal,9).accessibilityAddTraits(.isHeader)
+                    Text("视图").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.horizontal,9).accessibilityAddTraits(.isHeader)
                     VStack(spacing:2) {
                         ForEach(savedViews) { view in
                             Button { openSavedView(view) } label: {
                                 Label(view.name,systemImage:view.page == .materials ? "books.vertical" : "checkmark.circle")
-                                    .vosFont(14).lineLimit(1)
+                                    .vosFont(WorkspaceText.body).lineLimit(1)
                                     .frame(maxWidth:.infinity,alignment:.leading)
                                     .padding(.horizontal,9).padding(.vertical,7)
                                     .contentShape(Rectangle())
@@ -478,7 +478,7 @@ struct WorkspaceView: View {
             VStack(alignment:.leading,spacing:12) {
                 HStack(spacing:7) {
                     if model.organizingTopics || model.assistantBusy || model.followupBusy { ProgressView().controlSize(.mini) }
-                    if model.organizingTopics { Text("AI 正在连接主题").font(.caption).foregroundStyle(.secondary) }
+                    if model.organizingTopics { Text("AI 正在连接主题").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                 }
                 Button { go(.settings);showingDiscussion=false } label: { Label("设置",systemImage:"slider.horizontal.3").foregroundStyle(.secondary) }.buttonStyle(.plain)
             }.padding(.horizontal,8)
@@ -488,7 +488,7 @@ struct WorkspaceView: View {
     }
     private func nav(_ title:String,icon:String,target:WorkspacePage) -> some View {
         Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
-            Label(title,systemImage:icon).vosFont(15, weight: section == title ? .semibold : .regular)
+            Label(title,systemImage:icon).vosFont(WorkspaceText.body.size, weight: section == title ? .semibold : .regular)
                 .frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,12).padding(.vertical,11)
                 .background(section == title ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 // Plain buttons otherwise only hit-test the icon and text, leaving the padded row inert.
@@ -499,18 +499,18 @@ struct WorkspaceView: View {
         HStack(spacing:12) {
             if !path.isEmpty {
                 Button(action:back) {
-                    Image(systemName:"chevron.left").vosFont(15, weight: .medium)
+                    Image(systemName:"chevron.left").vosFont(WorkspaceText.body.size, weight: .medium)
                         .frame(width:44,height:44)
                         .background(palette.selection.opacity(0.5),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("返回").help("返回上一页").keyboardShortcut("[",modifiers:.command)
-                if showsBreadcrumb { Text(breadcrumb).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                if showsBreadcrumb { Text(breadcrumb).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(1) }
             }
             Spacer()
             Button { if page == .search { searchFocused = true } else { go(.search) } } label: {
                 HStack(spacing:6) {
-                    Image(systemName:"magnifyingglass").vosFont(12, weight:.medium)
-                    Text("搜索").vosFont(13)
+                    Image(systemName:"magnifyingglass").vosFont(WorkspaceText.meta.size, weight: .medium)
+                    Text("搜索").vosFont(WorkspaceText.meta)
                 }.foregroundStyle(.secondary).padding(.horizontal,10).frame(height: WorkspaceMetrics.fieldHeight)
                     .background(searchHovered ? palette.hover : palette.surface,in:Capsule())
                     .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
@@ -522,8 +522,8 @@ struct WorkspaceView: View {
                 .accessibilityIdentifier("workspace.discussion")
             Button { go(.capture) } label: {
                 HStack(spacing:6) {
-                    Image(systemName:"mic").vosFont(12, weight:.medium)
-                    Text("记录想法").vosFont(13, weight:.medium)
+                    Image(systemName:"mic").vosFont(WorkspaceText.meta.size, weight: .medium)
+                    Text("记录想法").vosFont(WorkspaceText.meta.size, weight: .medium)
                 }.foregroundStyle(palette.canvas).padding(.horizontal,12).frame(height:30)
                     .background(palette.accent,in:Capsule())
                     .contentShape(Capsule())
@@ -643,7 +643,7 @@ struct WorkspaceView: View {
                     }
                     if let issue = model.recordingModelIssue {
                         HStack(spacing:10) {
-                            Text(issue).font(.caption).foregroundStyle(palette.warning)
+                            Text(issue).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                             if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.controlSize(.small) }
                             if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.controlSize(.small) }
                         }
@@ -883,7 +883,7 @@ struct WorkspaceView: View {
                 Picker("回顾周期",selection:$reviewPeriod) { ForEach(ReflectionPeriod.allCases,id:\.self) { Text($0.label).tag($0) } }.pickerStyle(.segmented).frame(maxWidth:210)
                 DatePicker("日期",selection:$reviewAnchor,displayedComponents:.date).labelsHidden()
             }
-            Text("放在完整主题的脉络里，看这段时间的变化。").font(.callout).foregroundStyle(.secondary)
+            Text("放在完整主题的脉络里，看这段时间的变化。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             let interval=reviewPeriod.interval(containing:reviewAnchor)
             let sources=topicSources.filter { interval.contains($0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt) ?? .distantPast) }
             let catalog=recordCatalog
@@ -902,8 +902,8 @@ struct WorkspaceView: View {
                 if actionFilter == "我的待办" {
                     Button { beginPlanningToday() } label: {
                         HStack(spacing:6) {
-                            Image(systemName:"sun.max").vosFont(12, weight:.medium)
-                            Text("安排今天").vosFont(13, weight:.medium)
+                            Image(systemName:"sun.max").vosFont(WorkspaceText.meta.size, weight: .medium)
+                            Text("安排今天").vosFont(WorkspaceText.meta.size, weight: .medium)
                         }.foregroundStyle(palette.canvas).padding(.horizontal,12).frame(height:30)
                             .background(palette.accent,in:Capsule()).contentShape(Capsule())
                     }.buttonStyle(.plain)
@@ -1131,7 +1131,7 @@ struct WorkspaceView: View {
             Picker("文字大小",selection:Binding(get:{ model.textSize },set:{ model.setTextSize($0) })) {
                 ForEach(AppTextSize.allCases) { option in Text(option.label).tag(option) }
             }.pickerStyle(.segmented).frame(maxWidth:360)
-            Text("配色即时生效，并在下次打开时沿用。").font(.caption).foregroundStyle(.secondary)
+            Text("配色即时生效，并在下次打开时沿用。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Divider()
             sectionTitle("键盘快捷键")
             HStack(alignment:.top,spacing:40) {
@@ -1153,7 +1153,7 @@ struct WorkspaceView: View {
                     Text("⌥⌘Z 撤销 · 仅本次运行")
                     Text("撤销只对当前会话有效")
                 }
-            }.font(.caption).foregroundStyle(.secondary)
+            }.vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Button("再看一次引导") { model.onboardingRequested = true }
             Divider()
             sectionTitle("模型与服务")
@@ -1170,8 +1170,8 @@ struct WorkspaceView: View {
                 if model.exporting { ProgressView().controlSize(.small) }
             }.disabled(model.exporting)
             HStack(spacing:12) {
-                Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText).font(.caption).foregroundStyle(.secondary)
-                Button("重试备份") { model.retryBackup() }.font(.caption)
+                Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Button("重试备份") { model.retryBackup() }.vosFont(WorkspaceText.meta)
             }
             HStack { Button("打开已有资料库") { chooseLibrary() };Button("从迁移包恢复") { go(.tool("恢复资料")) } }
             sectionTitle("回顾与查找")
@@ -1184,7 +1184,7 @@ struct WorkspaceView: View {
                     Button("纠错后的行动影响") { go(.tool("纠错影响")) }
                     Button("表达处理与重试") { go(.tool("处理情况")) }
                     Button("重新整理主题与简报") { model.queueTopicOrganization(retry:true) }
-                    Text(model.status).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                 }.padding(.top,15)
             }
         }
@@ -1192,7 +1192,7 @@ struct WorkspaceView: View {
     @ViewBuilder private var processingIssues: some View {
         let catalog=recordCatalog
         ForEach(model.assistantAssessmentIssues) { issue in
-            VStack(alignment:.leading,spacing:8) { Text(issue.title);Text(issue.error).font(.caption).foregroundStyle(.secondary);Button("重新识别 AI 委托") { Task { await model.retryAssistantAssessment(issue) } }.accessibilityLabel("重新识别 AI 委托：" + issue.title) }
+            VStack(alignment:.leading,spacing:8) { Text(issue.title);Text(issue.error).vosFont(WorkspaceText.meta).foregroundStyle(.secondary);Button("重新识别 AI 委托") { Task { await model.retryAssistantAssessment(issue) } }.accessibilityLabel("重新识别 AI 委托：" + issue.title) }
         }
         ForEach(model.recordingFollowups.filter { $0.state == "failed" }) { receipt in
             let title=displayTitle(model.records.first { $0.id == receipt.sourceID }?.displayTitle ?? "资料跟进")
@@ -1200,7 +1200,7 @@ struct WorkspaceView: View {
         }
         ForEach(activeMaterials.filter { ["failed","blocked"].contains($0.jobState ?? "") }) { source in sourceRow(source,catalog:catalog) }
         ForEach(model.processingIntents.filter { [.blocked,.unknown].contains($0.state) }) { intent in
-            Text("表达处理：" + workspaceStateLabel(intent.state.rawValue)).font(.caption).foregroundStyle(.secondary)
+            Text("表达处理：" + workspaceStateLabel(intent.state.rawValue)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
         }
         ReverifyControls(model:model)
     }
@@ -1451,26 +1451,26 @@ struct WorkspaceView: View {
         return VStack(alignment:.leading,spacing:16) {
             HStack(alignment:.top,spacing:12) {
                 VStack(alignment:.leading,spacing:6) {
-                    Text("安排今天").font(.title2)
-                    Text("从即将与随时里挑选，最多 3 条进入专注。").font(.caption).foregroundStyle(.secondary)
+                    Text("安排今天").vosFont(WorkspaceText.sectionTitle)
+                    Text("从即将与随时里挑选，最多 3 条进入专注。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
                 Spacer(minLength:8)
                 Button("取消") { showingPlanToday=false }
             }
             if !focusedActions.isEmpty {
-                Text("已在专注").vosFont(13, weight:.medium).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
+                Text("已在专注").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
                 ForEach(focusedActions) { action in
                     HStack(spacing:10) {
                         Image(systemName:"pin").foregroundStyle(palette.accent).frame(width:22,alignment:.leading)
-                        Text(action.title).vosFont(15, weight:.medium).lineLimit(2)
+                        Text(action.title).vosFont(WorkspaceText.rowTitle).lineLimit(2)
                         Spacer(minLength:8)
-                        Text("已专注").vosFont(12).foregroundStyle(.secondary)
+                        Text("已专注").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     }.padding(.vertical,5)
                 }
             }
-            Text("即将与随时").vosFont(13, weight:.medium).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
+            Text("即将与随时").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
             if candidates.isEmpty {
-                Text("没有可安排的任务。").font(.callout).foregroundStyle(.secondary)
+                Text("没有可安排的任务。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             } else {
                 ScrollView {
                     VStack(spacing:0) {
@@ -1484,7 +1484,7 @@ struct WorkspaceView: View {
             if planRemainingSlots == 0 { WorkspaceNoticeText(message:"专注已有 3 条，先移出一条再安排。",severity:.warning) }
             else if !planLimitHint.isEmpty { WorkspaceNoticeText(message:planLimitHint,severity:.warning) }
             HStack {
-                Text("已选 \(planSelection.count) 条").font(.caption).foregroundStyle(.secondary)
+                Text("已选 \(planSelection.count) 条").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button(planningToday ? "正在安排…" : "加入专注") { Task { await confirmPlanToday() } }
                     .buttonStyle(.borderedProminent)
@@ -1497,10 +1497,10 @@ struct WorkspaceView: View {
         return Button { togglePlanSelection(entry.action.id) } label: {
             HStack(alignment:.top,spacing:12) {
                 Image(systemName:selected ? "checkmark.circle.fill" : "circle")
-                    .vosFont(16).foregroundStyle(selected ? palette.accent : Color.secondary).padding(.top,2).accessibilityHidden(true)
+                    .vosFont(WorkspaceText.rowTitle.size).foregroundStyle(selected ? palette.accent : Color.secondary).padding(.top,2).accessibilityHidden(true)
                 VStack(alignment:.leading,spacing:4) {
-                    Text(entry.action.title).vosFont(15, weight:.medium).lineLimit(2).multilineTextAlignment(.leading)
-                    if let due=entry.due { Text(due.summary).vosFont(12).foregroundStyle(.secondary) }
+                    Text(entry.action.title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
+                    if let due=entry.due { Text(due.summary).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                 }
                 Spacer(minLength:8)
             }.padding(.vertical,9).contentShape(Rectangle())
@@ -1641,7 +1641,7 @@ struct WorkspaceView: View {
     }
     private var actionSelectionBar: some View {
         HStack(spacing:12) {
-            Text(batchRunning ? "正在更新…" : "已选 \(selectedActionIDs.count) 条").vosFont(13, weight: .medium)
+            Text(batchRunning ? "正在更新…" : "已选 \(selectedActionIDs.count) 条").vosFont(WorkspaceText.meta.size, weight: .medium)
             Button("标为完成") { pendingBatchState = .completed }.buttonStyle(.borderedProminent).disabled(batchRunning || batchActions(for: .completed).isEmpty)
             Button("不再跟进") { pendingBatchState = .dismissed }.buttonStyle(.bordered).disabled(batchRunning || batchActions(for: .dismissed).isEmpty)
             Button("取消") { exitActionSelection() }.buttonStyle(.borderless).disabled(batchRunning)
@@ -1653,7 +1653,7 @@ struct WorkspaceView: View {
     }
     private var actionUndoBar: some View {
         HStack(spacing:12) {
-            Text(actionUndo?.message ?? "").vosFont(13, weight:.medium)
+            Text(actionUndo?.message ?? "").vosFont(WorkspaceText.meta.size, weight: .medium)
             Button("撤销") { undoActionChange() }
         }.padding(.horizontal,16).padding(.vertical,10)
             .background(palette.surface,in:Capsule())
@@ -1842,7 +1842,7 @@ private struct WorkspaceTopicEntry: View {
                 Picker("记录类型",selection:$kind) { ForEach(ReflectionQuestionEntryKind.allCases,id:\.self) { Text($0.label).tag($0) } }.pickerStyle(.menu)
                 TextEditor(text:$text).frame(minHeight:100).padding(8).background(palette.surface,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 Button("保存并接回主题") { saving=true;Task { do { try await model.saveReflectionQuestionEntry(questionID:topic.id,kind:kind,text:text,sourceIDs:sourceIDs,allowCloud:true);text="";error="" } catch { self.error=error.localizedDescription };saving=false } }.disabled(saving || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
-                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger) }
+                if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             }.padding(.top,12)
         }
     }
@@ -1893,7 +1893,7 @@ private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
             .overlay(alignment:.trailing) {
                 if hovered {
                     menu()
-                        .font(.caption)
+                        .vosFont(WorkspaceText.meta)
                         .padding(.horizontal,8).padding(.vertical,4)
                         .background(palette.surface,in:Capsule())
                         .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
@@ -1923,7 +1923,7 @@ private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
                     HStack(spacing: 2) {
                     if canComplete {
                         Button(action: onComplete) {
-                            Image(systemName:"checkmark.circle").vosFont(15, weight:.semibold)
+                            Image(systemName:"checkmark.circle").vosFont(WorkspaceText.rowTitle.size, weight: .semibold)
                                 .foregroundStyle(palette.secondaryText)
                                 .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
                                 .contentShape(Rectangle())
@@ -1934,7 +1934,7 @@ private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
                     Menu {
                         menuItems()
                     } label: {
-                        Image(systemName:"ellipsis").vosFont(13, weight:.semibold)
+                        Image(systemName:"ellipsis").vosFont(WorkspaceText.meta.size, weight: .semibold)
                             .foregroundStyle(palette.secondaryText)
                             .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
                             .contentShape(Rectangle())

@@ -22,16 +22,16 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("欢迎使用 VoiceOS").font(.title2)
+            Text("欢迎使用 VoiceOS").vosFont(WorkspaceText.sectionTitle)
             HStack(spacing: 14) {
                 Image(systemName: current.symbol)
                     .font(.system(size: 28))
                     .foregroundStyle(.secondary)
                     .frame(width: 40)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(current.title).font(.headline)
+                    Text(current.title).vosFont(WorkspaceText.rowTitle)
                     Text(current.detail)
-                        .font(.callout)
+                        .vosFont(WorkspaceText.body)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -67,8 +67,8 @@ struct OnboardingView: View {
                 Text("⌥⌘N 速记")
                 Text("⌘F 搜索")
                 Text("更多快捷键见「设置 › 键盘快捷键」。")
-                    .font(.caption).foregroundStyle(.secondary).padding(.top, 3)
-            }.font(.callout)
+                    .vosFont(WorkspaceText.caption).foregroundStyle(.secondary).padding(.top, 3)
+            }.vosFont(WorkspaceText.body)
         }
     }
 

@@ -34,7 +34,7 @@ private struct SourceFold<Content: View>: View {
                         }
                     }
                     Spacer(minLength:0)
-                    Image(systemName:isExpanded ? "chevron.up" : "chevron.down").font(.caption).foregroundStyle(.secondary).padding(.top,6)
+                    Image(systemName:isExpanded ? "chevron.up" : "chevron.down").vosFont(WorkspaceText.caption).foregroundStyle(.secondary).padding(.top,6)
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityValue(isExpanded ? "已展开" : "已收起")
             if isExpanded {
@@ -302,14 +302,14 @@ struct WorkspaceSourceView: View {
                             let active=spanIsPlaying(span)
                             Button { Task { _=await model.playSpan(source,milliseconds:span.startMS!,endMilliseconds:span.endMS!) } } label: {
                                 Text(time(span.startMS!) + "—" + time(span.endMS!) + " · 回听")
-                                    .vosFont(13, weight:active ? .semibold : .regular)
+                                    .vosFont(WorkspaceText.meta.size, weight: active ? .semibold : .regular)
                                     .padding(.horizontal,8).padding(.vertical,3)
                                     .background(active ? palette.selection : .clear, in: RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
                                     .contentShape(Rectangle())
                             }.buttonStyle(.plain).id("source-span-"+span.id)
                         }
                         if let player=model.player { NativePlayerView(player:player).frame(height:source.kind == "video" ? 240 : 70) }
-                        Text("原文件：" + source.name).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text("原文件：" + source.name).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                         if source.transcript != nil {
                             Divider()
                             DisclosureGroup("全文选读",isExpanded:$fullTextExpanded) {
@@ -326,12 +326,12 @@ struct WorkspaceSourceView: View {
                 }
                 if let expression,expression.sourceIDs.count > 1 {
                     SourceFold(title:"整体理解",icon:"waveform.path",count:expression.sourceIDs.count,isExpanded:$overallExpanded) {
-                        WorkspaceExpandableText(text:expression.summary,label:"整体摘要",size:16)
+                        WorkspaceExpandableText(text:expression.summary,label:"整体摘要",size:WorkspaceText.body.size)
                         if let ledger = model.actionReviewLedgers[expression.id], ledger.canAcknowledge {
                             ActionReviewAcknowledgementControl(model:model,expressionID:expression.id)
                         }
                         DisclosureGroup("本次表达的录音与合并依据") {
-                            Text(expression.reason).font(.callout).foregroundStyle(.secondary).padding(.vertical,10)
+                            Text(expression.reason).vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical,10)
                             ForEach(Array(expression.sourceIDs.enumerated()),id:\.element) { index,id in
                                 if let member=model.records.first(where: { $0.id == id }) {
                                     Button("第 \(index+1) 段 · "+member.name+(id == source.id ? "（当前原文）" : "")) { openSource(id) }.padding(.vertical,5).disabled(id == source.id)
@@ -351,22 +351,22 @@ struct WorkspaceSourceView: View {
                             DisclosureGroup("节目原话与我的回应（\(contextLinks.count)）") {
                                 ForEach(Array(contextLinks.enumerated()),id:\.offset) { _,link in
                                     VStack(alignment:.leading,spacing:12) {
-                                        Text(contextRelation(link.relation)).font(.headline)
-                                        Text("节目原话").font(.caption).foregroundStyle(.secondary)
+                                        Text(contextRelation(link.relation)).vosFont(WorkspaceText.rowTitle)
+                                        Text("节目原话").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                         Text(link.externalQuote).textSelection(.enabled)
                                         Button(contextPlaybackLabel(link.externalClaimID,role:"节目")) { Task { await playContextClaim(link.externalClaimID) } }
-                                        Text("我的表达").font(.caption).foregroundStyle(.secondary)
+                                        Text("我的表达").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                         Text(link.personalQuote).textSelection(.enabled)
                                         Button(contextPlaybackLabel(link.personalClaimID,role:"我的")) { Task { await playContextClaim(link.personalClaimID) } }
-                                        Text("AI 关联："+link.explanation).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                                        Text("AI 关联："+link.explanation).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
                                     }.padding(.vertical,16)
                                     Divider()
                                 }
                             }.padding(.top,12)
                         } else {
-                            Text(automaticallyUpdating ? "正在重新核对节目与我的表达。" : programPairs.allSatisfy(pairingIsCurrent) ? "已保留节目背景；还没有已核对的回应关系。" : "已保存的双方原文仍可回看。").font(.callout).foregroundStyle(.secondary).padding(.top,10)
+                            Text(automaticallyUpdating ? "正在重新核对节目与我的表达。" : programPairs.allSatisfy(pairingIsCurrent) ? "已保留节目背景；还没有已核对的回应关系。" : "已保存的双方原文仍可回看。").vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.top,10)
                         }
-                        if !contextIssue.isEmpty { Text(contextIssue).font(.caption).foregroundStyle(.secondary) }
+                        if !contextIssue.isEmpty { Text(contextIssue).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                     }
                 }
                 if source.transcript == nil {
@@ -377,39 +377,39 @@ struct WorkspaceSourceView: View {
                 }
                 VStack(alignment:.leading,spacing:10) {
                     MaterialManagementControls(model:model,source:source)
-                    Text(source.isArchived ? "已归档：从日常材料列表收起，仍可作为历史依据使用。" : "归档只收起材料；移入回收站会暂停相关理解，原件和历史仍可恢复。").font(.caption).foregroundStyle(.secondary)
+                    Text(source.isArchived ? "已归档：从日常材料列表收起，仍可作为历史依据使用。" : "归档只收起材料；移入回收站会暂停相关理解，原件和历史仍可恢复。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 }
                 if !pausedThoughts.isEmpty {
                     VStack(alignment:.leading,spacing:12) {
-                        Label(automaticallyUpdating ? "正在自动更新理解" : pendingUnderstanding ? "理解尚未更新完成" : "AI 提取需要重新识别",systemImage:automaticallyUpdating ? "arrow.trianglehead.2.clockwise" : "pause.circle").font(.headline)
-                        Text(automaticallyUpdating ? "原文已保存，AI 正在结合完整表达与节目背景更新观点、任务和关联。完成后这里会自动更新，无需再次操作。" : pauseExplanation).font(.callout).foregroundStyle(.secondary)
+                        Label(automaticallyUpdating ? "正在自动更新理解" : pendingUnderstanding ? "理解尚未更新完成" : "AI 提取需要重新识别",systemImage:automaticallyUpdating ? "arrow.trianglehead.2.clockwise" : "pause.circle").vosFont(WorkspaceText.meta.size, weight: .semibold)
+                        Text(automaticallyUpdating ? "原文已保存，AI 正在结合完整表达与节目背景更新观点、任务和关联。完成后这里会自动更新，无需再次操作。" : pauseExplanation).vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                         if !pausedActions.isEmpty {
-                            Text("受影响的任务与问题").font(.subheadline.bold())
+                            Text("受影响的任务与问题").vosFont(WorkspaceText.rowTitle)
                             ForEach(pausedActions) { action in
                                 WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看任务") { openTask(action.id) }
                                 WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
                             }
                         }
                         if !automaticallyUpdating {
-                            Text(pendingUnderstanding ? "自动更新尚未完成。可查看处理进度或错误，并点击下方按钮重试；已保存的原文和任务完成记录会保留。" : "点击下方按钮，AI 会读取完整文字和转写核对记录，重新提取观点和任务。只有发现文字没记对时，才需要更正转写。").font(.callout).foregroundStyle(.secondary)
+                            Text(pendingUnderstanding ? "自动更新尚未完成。可查看处理进度或错误，并点击下方按钮重试；已保存的原文和任务完成记录会保留。" : "点击下方按钮，AI 会读取完整文字和转写核对记录，重新提取观点和任务。只有发现文字没记对时，才需要更正转写。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                         }
                         if source.localOnly {
-                            Text("当前仅本机保存。允许后会将这份完整文字发送给已配置的模型。").font(.callout).foregroundStyle(.secondary)
+                            Text("当前仅本机保存。允许后会将这份完整文字发送给已配置的模型。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                             Button("允许这份文字用于云端并重新识别") { Task { await model.changeTextPolicy(source);organize() } }.disabled(!model.modelConfigured || model.fullRecordingBusy || model.understandingSource != nil)
                         } else { Button(automaticallyUpdating ? "正在自动更新…" : processing ? "正在重新识别…" : pendingUnderstanding ? "重试更新理解" : "重新识别观点和任务",action:organize).buttonStyle(.borderedProminent).disabled(processing || model.fullRecordingBusy || model.understandingSource != nil || !model.modelConfigured || source.state == "quarantined") }
                         if !model.modelConfigured {
                             HStack(spacing:8) {
-                                Text("重新识别需要先配置文本模型。").font(.caption).foregroundStyle(palette.warning)
-                                Button("配置文本模型…") { model.chooseTextModel() }.font(.caption)
+                                Text("重新识别需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                                Button("配置文本模型…") { model.chooseTextModel() }.vosFont(WorkspaceText.meta)
                             }
                         }
-                        Text("之前的提取与完成记录会保留为历史。已连接的 Apple 提醒事项可能仍会通知，重新识别不等于已撤销系统提醒。").font(.caption).foregroundStyle(.secondary)
+                        Text("之前的提取与完成记录会保留为历史。已连接的 Apple 提醒事项可能仍会通知，重新识别不等于已撤销系统提醒。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                     }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
                 }
                 if processing {
                     HStack(alignment:.top,spacing:10) {
                         ProgressView().controlSize(.small)
-                        Text(organizationStatusText).font(.callout).textSelection(.enabled)
+                        Text(organizationStatusText).vosFont(WorkspaceText.meta).textSelection(.enabled)
                     }
                 }
                 if let followup = model.recordingFollowups.last(where: { expressionIDs.contains($0.sourceID) }) {
@@ -425,7 +425,7 @@ struct WorkspaceSourceView: View {
                 }
                 if (expression?.sourceIDs.count ?? 0) <= 1,let summary=source.contentSummary,!summary.isEmpty {
                     SourceFold(title:"内容摘要",icon:"text.alignleft",isExpanded:$digestExpanded) {
-                        WorkspaceExpandableText(text:summary,label:"完整摘要").padding(.top,10)
+                        WorkspaceExpandableText(text:summary,label:"完整摘要",size:WorkspaceText.body.size).padding(.top,10)
                     }
                 }
                 if !thoughts.isEmpty {
@@ -437,11 +437,11 @@ struct WorkspaceSourceView: View {
                                     if let excerpt=digest.excerpt { readingLayerRow("原文摘录",excerpt) }
                                     if !digest.points.isEmpty {
                                         VStack(alignment:.leading,spacing:8) {
-                                            Text("要点").vosFont(13, weight: .semibold).foregroundStyle(.secondary)
+                                            Text("要点").vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
                                             ForEach(Array(digest.points.enumerated()),id:\.offset) { _,point in
                                                 HStack(alignment:.top,spacing:8) {
                                                     Text("·").foregroundStyle(.secondary)
-                                                    Text(point).vosFont(15).lineSpacing(4).fixedSize(horizontal:false,vertical:true).textSelection(.enabled)
+                                                    Text(point).vosFont(WorkspaceText.body).lineSpacing(4).fixedSize(horizontal:false,vertical:true).textSelection(.enabled)
                                                 }
                                             }
                                         }
@@ -453,15 +453,15 @@ struct WorkspaceSourceView: View {
                         }
                         ForEach(Array((showAllThoughts ? thoughts : Array(thoughts.prefix(3))).enumerated()),id:\.element.id) { index,thought in
                             HStack(alignment:.top,spacing:14) {
-                                Text(String(format:"%02d",index+1)).vosFont(14, weight: .semibold, design: .monospaced).foregroundStyle(.secondary).padding(.top,3)
+                                Text(String(format:"%02d",index+1)).vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced).foregroundStyle(.secondary).padding(.top,3)
                                 VStack(alignment:.leading,spacing:12) {
-                                    WorkspaceExpandableText(text:thought.statement,label:"完整要点",lines:4,size:16)
-                                    Text(thought.ownership == "ai_candidate" ? "AI 分析与建议" : thought.ownership == "external" ? "外部观点" : "从我的表达中提取").vosFont(13).foregroundStyle(.secondary)
+                                    WorkspaceExpandableText(text:thought.statement,label:"完整要点",lines:4,size:WorkspaceText.body.size)
+                                    Text(thought.ownership == "ai_candidate" ? "AI 分析与建议" : thought.ownership == "external" ? "外部观点" : "从我的表达中提取").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                     HStack {
                                         Button("更正理解或归属",systemImage:"pencil") { claimEditor=thought }
                                         Button("停止使用") { pendingRejection=thought;confirmingRejection=true }
                                         Button("记录行动意图") { actionClaim=thought }.disabled(thought.validity == "frozen" || thought.reviewState == "rejected")
-                                    }.font(.caption).disabled(model.reviewingClaim)
+                                    }.vosFont(WorkspaceText.meta).disabled(model.reviewingClaim)
                                     ClaimNoteRow(model:model,claimID:thought.id,notes:$claimNotes)
                                     DisclosureGroup("原话依据与调整") {
                                         VStack(alignment:.leading,spacing:10) {
@@ -470,7 +470,7 @@ struct WorkspaceSourceView: View {
                                                    let span=member.spans.first(where: { $0.id == ref.spanID }),let text=member.transcript {
                                                     if expressionIDs.count > 1 {
                                                         QuoteHoverPreview(sourceTitle:member.displayTitle,snippet:quote(span,text:text),open:{ openSource(member.id) }) {
-                                                            Text(member.name).font(.caption).foregroundStyle(.secondary)
+                                                            Text(member.name).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                                         }
                                                     }
                                                     if let start=span.startMS,let end=span.endMS {
@@ -487,20 +487,20 @@ struct WorkspaceSourceView: View {
                                                 Button("审阅历史") { Task { await model.reviewHistory(thought); historyClaimID=thought.id; loadedClaimHistory=model.claimHistory } }
                                             }
                                             if historyClaimID == thought.id {
-                                                ForEach(loadedClaimHistory) { revision in Text("第 \(revision.version) 版 · " + revision.statement).font(.caption).textSelection(.enabled) }
+                                                ForEach(loadedClaimHistory) { revision in Text("第 \(revision.version) 版 · " + revision.statement).vosFont(WorkspaceText.meta).textSelection(.enabled) }
                                             }
                                             if let origin=model.claimOrigins.first(where: { $0.claimID == thought.id }) {
                                                 Button("查看原讨论") { openDiscussion(origin.conversationID) }
                                             }
                                         }.padding(.top,9)
-                                    }.vosFont(13)
+                                    }.vosFont(WorkspaceText.meta)
                                 }
                             }.padding(.vertical,20)
                             if thought.id != (showAllThoughts ? thoughts.last?.id : thoughts.prefix(3).last?.id) { Divider() }
                         }
                         if thoughts.count > 3 {
                             Divider()
-                            Button(showAllThoughts ? "收起要点" : "展开全部 \(thoughts.count) 条要点",systemImage:showAllThoughts ? "chevron.up" : "chevron.down") { showAllThoughts.toggle() }.vosFont(14, weight: .medium).buttonStyle(.borderless).padding(.top,18)
+                            Button(showAllThoughts ? "收起要点" : "展开全部 \(thoughts.count) 条要点",systemImage:showAllThoughts ? "chevron.up" : "chevron.down") { showAllThoughts.toggle() }.vosFont(WorkspaceText.meta).buttonStyle(.borderless).padding(.top,18)
                         }
                     }
                 } else if source.transcript != nil {
@@ -513,8 +513,8 @@ struct WorkspaceSourceView: View {
                                 let active=outlineSectionIsPlaying(section)
                                 Button { playOutlineSection(section) } label: {
                                     HStack(alignment:.top,spacing:10) {
-                                        Text(time(section.startMS)).vosFont(12, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
-                                        Text(section.title).vosFont(14, weight:active ? .semibold : .regular).multilineTextAlignment(.leading)
+                                        Text(time(section.startMS)).vosFont(WorkspaceText.meta.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
+                                        Text(section.title).vosFont(WorkspaceText.rowTitle.size, weight: active ? .semibold : .regular).multilineTextAlignment(.leading)
                                         Spacer(minLength:0)
                                     }.padding(.horizontal,8).padding(.vertical,6)
                                         .background(active ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
@@ -530,8 +530,8 @@ struct WorkspaceSourceView: View {
                             let active=chapterIsPlaying(chapter)
                             Button { playChapter(chapter) } label: {
                                 HStack(alignment:.top,spacing:10) {
-                                    Text(time(chapter.startMS)).vosFont(12, weight:.medium, design:.monospaced).foregroundStyle(.secondary)
-                                    Text(chapter.title).vosFont(14, weight:active ? .semibold : .regular).multilineTextAlignment(.leading)
+                                    Text(time(chapter.startMS)).vosFont(WorkspaceText.meta.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
+                                    Text(chapter.title).vosFont(WorkspaceText.rowTitle.size, weight: active ? .semibold : .regular).multilineTextAlignment(.leading)
                                     Spacer(minLength:0)
                                 }.padding(.horizontal,8).padding(.vertical,6)
                                     .background(active ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
@@ -543,11 +543,11 @@ struct WorkspaceSourceView: View {
                 if !entities.isEmpty {
                     SourceFold(title:"人名与术语",icon:"person.2",count:entities.count,isExpanded:$entitiesExpanded) {
                         ForEach(entityGroups) { group in
-                            Text(group.title).vosFont(13, weight: .semibold).foregroundStyle(.secondary).padding(.top,12)
+                            Text(group.title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary).padding(.top,12)
                             ForEach(group.entities,id:\.name) { entity in
                                 Button { openEntity(entity) } label: {
                                     HStack(spacing:8) {
-                                        Text(entity.name + " · " + String(entity.mentionCount) + " 次").vosFont(15).multilineTextAlignment(.leading)
+                                        Text(entity.name + " · " + String(entity.mentionCount) + " 次").vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
                                         Spacer(minLength:0)
                                     }.padding(.horizontal,8).padding(.vertical,6).contentShape(Rectangle())
                                 }.buttonStyle(.plain)
@@ -557,7 +557,7 @@ struct WorkspaceSourceView: View {
                 }
                 if let review,!review.issues.isEmpty {
                     WorkspaceSection(title:"理解有需要补充的地方",icon:"lightbulb",count:review.issues.count) {
-                        ForEach(review.issues) { issue in WorkspaceExpandableText(text:issue.betterUnderstanding,label:"完整建议",size:16).padding(.vertical,14) }
+                        ForEach(review.issues) { issue in WorkspaceExpandableText(text:issue.betterUnderstanding,label:"完整建议",size:WorkspaceText.body.size).padding(.vertical,14) }
                     }
                 }
                 let currentActions = actions.filter { $0.validity == "current" }
@@ -585,14 +585,14 @@ struct WorkspaceSourceView: View {
                     DisclosureGroup("文字校正、理解与修订历史") {
                         VStack(alignment:.leading,spacing:13) {
                             if let review=source.transcriptionReview {
-                                Text("转写校正已保存，原始版本可追溯。").font(.callout)
-                                ForEach(Array((review.unresolved_issues ?? []).enumerated()),id:\.offset) { _,issue in Text(issue.reason).font(.caption).foregroundStyle(palette.warning) }
+                                Text("转写校正已保存，原始版本可追溯。").vosFont(WorkspaceText.meta)
+                                ForEach(Array((review.unresolved_issues ?? []).enumerated()),id:\.offset) { _,issue in Text(issue.reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
                             }
                             Button("查看全部原文版本", action:loadHistory)
                             historyVersions
                             if source.transcript != nil { Button("查看原话分段") { Task { showingSegmentation = await model.previewSegmentation(source) } } }
                             ForEach(model.attempts[source.id] ?? []) { attempt in
-                                Text((attempt.state == "completed" ? "理解已完成" : "理解：" + workspaceStateLabel(attempt.state)) + (attempt.contextState == "stale" ? " · 历史依据已变化" : "")).font(.caption).foregroundStyle(.secondary)
+                                Text((attempt.state == "completed" ? "理解已完成" : "理解：" + workspaceStateLabel(attempt.state)) + (attempt.contextState == "stale" ? " · 历史依据已变化" : "")).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             }
                             ForEach(Array(loadedDiscussions.enumerated()),id:\.element.id) { index,session in Button("打开讨论 \(index+1)") { openDiscussion(session.id) } }
                         }.padding(.top,12)
@@ -606,12 +606,12 @@ struct WorkspaceSourceView: View {
                             }
                             if !source.localOnly { Button("重新整理当前内容",action:organize).disabled(source.transcript == nil || model.fullRecordingBusy || model.understandingSource != nil) }
                             ForEach(model.segmentedBatches.filter { $0.scope.plan.source.sourceID == source.id }) { batch in
-                                HStack { Text(workspaceStateLabel(batch.state.rawValue)).font(.caption);if batch.state == .queued { Button("停止后续处理") { model.cancelSegmented(batch.id) } } }
-                                if let error=batch.error { Text(error).font(.caption).foregroundStyle(.secondary) }
+                                HStack { Text(workspaceStateLabel(batch.state.rawValue)).vosFont(WorkspaceText.meta);if batch.state == .queued { Button("停止后续处理") { model.cancelSegmented(batch.id) } } }
+                                if let error=batch.error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                             }
-                            Text(model.fullRecordingStatus).font(.caption).foregroundStyle(.secondary)
-                            Text(model.transcriptReviewStatus).font(.caption).foregroundStyle(.secondary)
-                            if let error=source.error { Text(error).font(.caption).foregroundStyle(palette.danger) }
+                            Text(model.fullRecordingStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(model.transcriptReviewStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            if let error=source.error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
                         }.padding(.top,12)
                     }.padding(.vertical,16)
                 }
@@ -891,8 +891,8 @@ struct WorkspaceSourceView: View {
     }
     private func readingLayerRow(_ title:String,_ text:String) -> some View {
         VStack(alignment:.leading,spacing:7) {
-            Text(title).vosFont(13, weight: .semibold).foregroundStyle(.secondary)
-            Text(text).vosFont(15).lineSpacing(4).textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
+            Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
+            Text(text).vosFont(WorkspaceText.body).lineSpacing(4).textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
         }
     }
     private func refreshPlaybackPosition() {
@@ -915,10 +915,10 @@ struct WorkspaceTranscriptEditor:View {
     @State private var saving=false
     var body:some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("更正原文").font(.title2)
-            Text(source.localOnly ? "这份材料仅本机保存。更正后保留原话历史，旧理解暂停使用；允许云端处理后可重新整理。" : "保存后自动更新完整理解；原话历史、真实完成与结果保留。不能确定的关联会单独说明。").font(.callout).foregroundStyle(.secondary)
+            Text("更正原文").vosFont(WorkspaceText.sectionTitle)
+            Text(source.localOnly ? "这份材料仅本机保存。更正后保留原话历史，旧理解暂停使用；允许云端处理后可重新整理。" : "保存后自动更新完整理解；原话历史、真实完成与结果保留。不能确定的关联会单独说明。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             TextEditor(text:$text).frame(minHeight:300).workspaceEditorSurface()
-            if !failure.isEmpty { Text(failure).font(.caption).foregroundStyle(palette.danger) }
+            if !failure.isEmpty { Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             HStack {
                 Button("取消",action:close)
                 Spacer()
@@ -955,14 +955,14 @@ struct ClaimCorrectionView:View {
     }
     var body:some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("更正当前理解").font(.title2)
-            Text("更正不会改写原话，历史与相关行动依据会分别保留。").font(.callout).foregroundStyle(.secondary)
+            Text("更正当前理解").vosFont(WorkspaceText.sectionTitle)
+            Text("更正不会改写原话，历史与相关行动依据会分别保留。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             TextEditor(text:$text).frame(minHeight:180).workspaceEditorSurface()
             Picker("内容归属",selection:$ownership) {
                 Text("我的暂定表达").tag("user_tentative");Text("外部观点").tag("external");Text("AI 建议").tag("ai_candidate");Text("归属待核对").tag("unresolved")
             }
             TextField("更正原因",text:$note)
-            if !failure.isEmpty { Text(failure).font(.caption).foregroundStyle(palette.danger) }
+            if !failure.isEmpty { Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             HStack {
                 Button("取消",action:dismiss)
                 Spacer()

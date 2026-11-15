@@ -48,7 +48,7 @@ struct ReflectionChangeView: View {
                 ContentUnavailableView("这个周期还没有可对照的关联", systemImage: "rectangle.split.2x1", description: Text("后续表达与已有观点形成有依据的关联时，会在这里展示前后原话。也可以先从地图发起一次回顾。"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let error { Text(error).font(.callout).foregroundStyle(palette.danger).padding(16) }
+            if let error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).padding(16) }
         }.foregroundStyle(palette.text).background(palette.canvas)
             .frame(width: embedded ? nil : 960, height: embedded ? nil : 680)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -56,12 +56,12 @@ struct ReflectionChangeView: View {
     private var connectionList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                Text("\(focus.connections.count) 条关联候选").font(.caption).foregroundStyle(.secondary).padding(.bottom, 6)
+                Text("\(focus.connections.count) 条关联候选").vosFont(WorkspaceText.caption).foregroundStyle(.secondary).padding(.bottom, 6)
                 ForEach(focus.connections) { connection in
                     Button { selectedID = connection.id } label: {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(relation(connection.update.relation)).font(.caption).foregroundStyle(palette.accent)
-                            Text(connection.update.understanding).font(.callout).lineLimit(4).multilineTextAlignment(.leading)
+                            Text(relation(connection.update.relation)).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                            Text(connection.update.understanding).vosFont(WorkspaceText.body).lineLimit(4).multilineTextAlignment(.leading)
                         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
                             .background(palette.accent.opacity(selected?.id == connection.id ? 0.10 : 0), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                     }.buttonStyle(.plain)
@@ -75,51 +75,51 @@ struct ReflectionChangeView: View {
         let historicalSources = Array(Set(thought?.evidence.filter { $0.quote.contains(update.historicalQuote) }.map { $0.reference.sourceID } ?? [])).sorted()
         return VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text(relation(update.relation)).font(.headline).foregroundStyle(palette.accent)
+                Text(relation(update.relation)).vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.accent)
                 Spacer()
-                Text("AI 关系候选 · 待你核对").font(.caption).foregroundStyle(.secondary)
+                Text("AI 关系候选 · 待你核对").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             }
-            Text(update.understanding).vosFont(19, weight: .medium, design: .serif).textSelection(.enabled)
+            Text(update.understanding).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
             HStack(alignment: .top, spacing: 14) {
                 evidenceCard("此前原话", quote: update.historicalQuote, sourceIDs: historicalSources)
                 evidenceCard("这次原话", quote: update.currentQuote, sourceIDs: [connection.sourceID])
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text("为什么提出这条关联").font(.subheadline.bold())
-                Text(update.reason).font(.callout).textSelection(.enabled)
+                Text("为什么提出这条关联").vosFont(WorkspaceText.rowTitle)
+                Text(update.reason).vosFont(WorkspaceText.body).textSelection(.enabled)
             }
             Text("原话中的条件、犹豫与归属都属于依据。转写纠错不代表观点改变；支持或延续也不代表已经验证。这里不会自动确认你的认识发生了变化。")
-                .font(.caption).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Divider()
             VStack(alignment: .leading, spacing: 10) {
-                Text("接着问清楚").vosFont(20, weight: .medium, design: .serif)
+                Text("接着问清楚").vosFont(WorkspaceText.sectionTitle)
                 Text("这个联系成立的条件是什么？有没有相反经历？哪些变化是我明确表达的，哪些只是 AI 的解释？")
-                    .font(.callout)
+                    .vosFont(WorkspaceText.body)
                 Button {
                     Task { if await reflect(focus, prompt(connection)) { closeView() } else { error = model.status } }
                 } label: { Label("带着原话继续讨论", systemImage: "bubble.left.and.bubble.right") }
                     .buttonStyle(.borderedProminent).tint(palette.accent)
                     .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
-                Text("先打开可编辑的问题，确认发送后再交给 AI。关联仍作为候选保留。").font(.caption).foregroundStyle(.secondary)
+                Text("先打开可编辑的问题，确认发送后再交给 AI。关联仍作为候选保留。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private func evidenceCard(_ title: String, quote: String, sourceIDs: [String]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(palette.accent)
-            Text(quote).font(.callout).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.accent)
+            Text(quote).vosFont(WorkspaceText.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
             Divider()
-            if sourceIDs.isEmpty { Text("请返回地图核对观点来源").font(.caption).foregroundStyle(.secondary) }
+            if sourceIDs.isEmpty { Text("请返回地图核对观点来源").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             ForEach(sourceIDs, id: \.self) { id in
                 if let source = model.records.first(where: { $0.id == id }) {
-                    Text(source.displayTitle).font(.caption.weight(.medium)).textSelection(.enabled)
-                    Text(source.origin == "user" ? "个人表达" : source.origin == "ai" ? "AI 材料" : "外部资料 · 不代表我的观点").font(.caption).foregroundStyle(.secondary)
-                    if let date = source.expressedDate { Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                    Text(source.displayTitle).vosFont(WorkspaceText.meta.size, weight: .medium).textSelection(.enabled)
+                    Text(source.origin == "user" ? "个人表达" : source.origin == "ai" ? "AI 材料" : "外部资料 · 不代表我的观点").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    if let date = source.expressedDate { Text(date.formatted(date: .abbreviated, time: .shortened)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                 }
                 Button("查看来源全文") {
                     if let openSource { openSource(id) }
                     else { model.requestWorkspaceSource(id); dismiss(); dismissAtlas() }
-                }.font(.caption)
+                }.vosFont(WorkspaceText.meta)
             }
         }.padding(16).frame(maxWidth: .infinity, alignment: .topLeading)
             .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))

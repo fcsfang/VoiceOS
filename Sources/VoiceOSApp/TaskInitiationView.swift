@@ -66,11 +66,11 @@ struct TaskInitiationView: View {
         WorkspaceSection(title: "先说清楚要开始什么", icon: "text.cursor") {
             VStack(alignment: .leading, spacing: 14) {
                 ZStack(alignment: .topLeading) {
-                    TextEditor(text: $model.initiationText).font(.body).scrollContentBackground(.hidden).frame(minHeight: 120)
+                    TextEditor(text: $model.initiationText).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 120)
                         .workspaceEditorSurface().accessibilityLabel("要启动的原话")
                         .accessibilityIdentifier("initiation.input")
                     if model.initiationText.isEmpty {
-                        Text("例如：老师让我做一份 PPT，我不会，也不知道怎么开始。").font(.body)
+                        Text("例如：老师让我做一份 PPT，我不会，也不知道怎么开始。").vosFont(WorkspaceText.body)
                             .foregroundStyle(.tertiary).padding(.horizontal, 15).padding(.vertical, 16).allowsHitTesting(false)
                     }
                 }
@@ -85,7 +85,7 @@ struct TaskInitiationView: View {
                         }
                     }.fixedSize()
                     Spacer()
-                    Text("\(model.initiationText.unicodeScalars.count) / 4000 字").font(.caption.monospacedDigit())
+                    Text("\(model.initiationText.unicodeScalars.count) / 4000 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true)
                         .foregroundStyle(overLimit ? palette.danger : .secondary)
                 }
                 Picker("生成方式", selection: $mode) {
@@ -94,9 +94,9 @@ struct TaskInitiationView: View {
                 }.pickerStyle(.segmented)
                 Toggle("允许发送给云端模型", isOn: $allowCloud)
                 Text("生成时会先把这段原话保存为你的材料，只把这段文字发送给模型；不会读取仓库、文件或其他材料，也不会创建任务或提醒。")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 if !model.modelConfigured {
-                    Text("尚未配置文本模型；请先在设置中连接模型。").font(.caption).foregroundStyle(palette.warning)
+                    Text("尚未配置文本模型；请先在设置中连接模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                 }
                 HStack(spacing: 12) {
                     Button(model.initiationBusy ? "正在生成…" : "生成启动材料") {
@@ -109,7 +109,7 @@ struct TaskInitiationView: View {
                     Spacer()
                 }
                 if !model.initiationStatus.isEmpty {
-                    Text(model.initiationStatus).font(.callout).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(model.initiationStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                 }
             }
         }
@@ -121,9 +121,9 @@ struct TaskInitiationView: View {
                 sourceLine(record)
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(taskInitiationRouteLabel(record.route)).font(.caption).foregroundStyle(palette.accent)
+                        Text(taskInitiationRouteLabel(record.route)).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                         Text(record.proposal.title.isEmpty ? "尚未命名这次启动" : record.proposal.title)
-                            .vosFont(21, weight: .semibold).textSelection(.enabled)
+                            .vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
                     }
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 6) {
@@ -144,7 +144,7 @@ struct TaskInitiationView: View {
 
     private func sourceLine(_ record: TaskInitiationRecord) -> some View {
         let title = model.records.first(where: { $0.id == record.sourceID })?.displayTitle ?? "原话材料"
-        return Button("依据：" + title) { openSource(record.sourceID) }.buttonStyle(.borderless).vosFont(13)
+        return Button("依据：" + title) { openSource(record.sourceID) }.buttonStyle(.borderless).vosFont(WorkspaceText.meta)
             .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
     }
 
@@ -161,9 +161,9 @@ struct TaskInitiationView: View {
 
     private func clarify(_ record: TaskInitiationRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(record.proposal.clarifyQuestion).vosFont(18, weight: .semibold).textSelection(.enabled)
-            Text("先回答这一个问题会更准确；也可以跳过，按显式假设给出草稿。").font(.callout).foregroundStyle(.secondary)
-            TextEditor(text: $answer).font(.body).scrollContentBackground(.hidden).frame(minHeight: 100)
+            Text(record.proposal.clarifyQuestion).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
+            Text("先回答这一个问题会更准确；也可以跳过，按显式假设给出草稿。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            TextEditor(text: $answer).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 100)
                 .workspaceEditorSurface().accessibilityLabel("澄清回答")
             HStack(spacing: 12) {
                 Button(model.initiationBusy ? "正在整理…" : "按这个回答生成") {
@@ -181,7 +181,7 @@ struct TaskInitiationView: View {
 
     private func captureOnly(_ record: TaskInitiationRecord) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("已按你的意思仅记录，没有生成提示词、教程或任务。").font(.callout).textSelection(.enabled)
+            Text("已按你的意思仅记录，没有生成提示词、教程或任务。").vosFont(WorkspaceText.body).textSelection(.enabled)
             HStack {
                 discardButton(record)
                 Spacer()
@@ -200,9 +200,9 @@ struct TaskInitiationView: View {
             }.pickerStyle(.segmented).frame(maxWidth: 300)
                 .disabled(model.initiationBusy || record.editedArtifact != nil || record.isConfirmed)
             if record.editedArtifact != nil {
-                Text("材料已手动编辑，偏好不再自动调整。").font(.caption).foregroundStyle(.secondary)
+                Text("材料已手动编辑，偏好不再自动调整。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             }
-            TextEditor(text: $artifactDraft).vosFont(14).frame(minHeight: 360)
+            TextEditor(text: $artifactDraft).vosFont(WorkspaceText.body).frame(minHeight: 360)
                 .workspaceEditorSurface().accessibilityLabel("启动材料")
             if let warning = TaskInitiationComposer.secretWarning(in: artifactDraft) {
                 WorkspaceNoticeText(message: warning, severity: .warning)
@@ -217,7 +217,7 @@ struct TaskInitiationView: View {
                 .disabled(model.initiationBusy || record.isConfirmed || artifactDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("initiation.confirm")
                 if record.isConfirmed {
-                    Text("已确认 · 尚未执行").font(.caption).foregroundStyle(.secondary)
+                    Text("已确认 · 尚未执行").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 } else {
                     discardButton(record)
                 }
@@ -234,14 +234,14 @@ struct TaskInitiationView: View {
     }
 
     private func statusChip(_ text: String) -> some View {
-        Text(text).vosFont(12, weight: .medium).foregroundStyle(.secondary)
+        Text(text).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
             .padding(.horizontal, 9).padding(.vertical, 4)
             .background(palette.selection, in: Capsule())
     }
 
     @ViewBuilder private var statusText: some View {
         if !model.initiationStatus.isEmpty {
-            Text(model.initiationStatus).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            Text(model.initiationStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
         }
     }
 
@@ -249,16 +249,16 @@ struct TaskInitiationView: View {
         WorkspaceSection(title: "启动记录", subtitle: "生成过的材料都在这里；复制只代表已带走，不代表已经执行。", icon: "clock", count: records.count) {
             if records.isEmpty {
                 Text("还没有启动记录。生成过的交接提示词、教程或澄清问题会出现在这里。")
-                    .font(.callout).foregroundStyle(.secondary).padding(.vertical, 14)
+                    .vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 14)
             } else {
                 ForEach(records) { record in
                     Button { selectedID = record.id } label: {
                         HStack(alignment: .top, spacing: 14) {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(record.proposal.title.isEmpty ? "未命名启动" : record.proposal.title)
-                                    .vosFont(16, weight: .semibold).lineLimit(2)
+                                    .vosFont(WorkspaceText.rowTitle).lineLimit(2)
                                 Text(historySubtitle(record))
-                                    .vosFont(13).foregroundStyle(.secondary)
+                                    .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 8)
                             if record.id == selected?.id {

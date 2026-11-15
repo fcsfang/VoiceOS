@@ -23,16 +23,16 @@ struct IncrementalReadingView: View {
     }
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
-            Text("按天读").font(.title2)
+            Text("按天读").vosFont(WorkspaceText.sectionTitle)
             if !loaded {
                 ProgressView("正在读取阅读进度…")
             } else if let plan {
-                Text("第 \(index + 1)/\(chunks.count) 块 · 每块约 \(plan.chunkSize) 字").font(.headline)
+                Text("第 \(index + 1)/\(chunks.count) 块 · 每块约 \(plan.chunkSize) 字").vosFont(WorkspaceText.meta)
                 if chunks.isEmpty {
                     Text(source.transcript == nil ? "转写尚未完成，完成后可以开始按天读。" : "当前转写没有可读文字。").foregroundStyle(.secondary)
                 } else {
                     ScrollView {
-                        Text(text).vosFont(16).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading)
+                        Text(text).vosFont(WorkspaceText.body).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading)
                     }
                     HStack(spacing:10) {
                         Button("上一块") { move(to:index - 1) }.disabled(busy || index <= 0)
@@ -43,11 +43,11 @@ struct IncrementalReadingView: View {
                     }
                 }
             } else {
-                Text(source.transcript == nil ? "转写尚未完成，完成后可以开始按天读。" : "把这份材料切成小块，每天读一块。进度只记当前位置，原文变化后按最新转写重算。").font(.callout).foregroundStyle(.secondary)
+                Text(source.transcript == nil ? "转写尚未完成，完成后可以开始按天读。" : "把这份材料切成小块，每天读一块。进度只记当前位置，原文变化后按最新转写重算。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                 Picker("每块字数", selection:$chunkSize) { ForEach(sizes,id:\.self) { Text(String($0)).tag($0) } }.pickerStyle(.segmented)
                 Button("开始按天读") { start() }.buttonStyle(.borderedProminent).disabled(busy || source.transcript == nil)
             }
-            if !notice.isEmpty { Text(notice).font(.callout).foregroundStyle(.secondary) }
+            if !notice.isEmpty { Text(notice).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
             HStack { Spacer(); Button("关闭",action:dismiss).keyboardShortcut(.defaultAction) }
         }.padding(24).frame(width:680,height:560)
