@@ -177,6 +177,10 @@ struct WorkspaceTaskView: View {
     @State private var scheduleAction: ActionRecord?
     @State private var replacementTitle = ""
     @State private var pauseReasons: [String] = []
+    @State private var showingNextActionForm = false
+    @State private var nextActionTitle = ""
+    @State private var nextActionNotice = ""
+    @State private var confirmingCompleteOutcome = false
     @State private var undoMessage: String?
     @State private var undoToken = UUID()
     @State private var subtasks: [ActionSubtask] = []
@@ -205,12 +209,15 @@ struct WorkspaceTaskView: View {
     }
     private var showsClarification: Bool {
         guard action.isExtracted, action.kind == "task", action.state == "open", action.validity == "current",
+              action.parentID == nil,
               model.actionClarifications[action.id] == nil,
               let created = ConversationReflectionFocus.date(action.createdAt),
               created >= Date().addingTimeInterval(-14 * 24 * 60 * 60) else { return false }
         return true
     }
     private var reviewPairs: [ActionReviewPair] { model.actionReviewPairs(for: action) }
+    private var nextActions: [ActionRecord] { model.actionRecords.filter { $0.parentID == action.id } }
+    private var openNextActions: [ActionRecord] { nextActions.filter { $0.state == "open" } }
     private var subtaskSummary: String {
         guard !subtasks.isEmpty else { return "把任务拆成可勾选的小步。" }
         return "已完成 " + String(subtasks.filter(\.done).count) + "/" + String(subtasks.count)
@@ -340,10 +347,21 @@ struct WorkspaceTaskView: View {
                             Button("不再跟进", role: .destructive) { confirmingDismiss = true }.disabled(model.savingAction)
                         }
                     } else if action.canPromoteToTask {
-                        Button("转为待办") { promote() }
+                        Button("添加下一步") { nextActionTitle = ""; showingNextActionForm = true }
                             .buttonStyle(.borderedProminent)
                             .disabled(model.savingAction)
-                            .accessibilityLabel("转为待办：" + action.title)
+                            .accessibilityLabel("添加下一步：" + action.title)
+                        Button("标记达成") { confirmingCompleteOutcome = true }
+                            .disabled(model.savingAction)
+                            .accessibilityLabel("标记达成：" + action.title)
+                        if openNextActions.isEmpty {
+                            Button("转为待办") { promote() }
+                                .disabled(model.savingAction)
+                                .accessibilityLabel("转为待办：" + action.title)
+                        }
+                        Button("不再跟进", role: .destructive) { confirmingDismiss = true }
+                            .disabled(model.savingAction)
+                            .accessibilityLabel("不再跟进：" + action.title)
                     } else if action.validity == "current", action.state == "dismissed" {
                         Button("重新跟进") { confirmingReopen = true }.buttonStyle(.borderedProminent).disabled(model.savingAction)
                             .alert("重新跟进这条行动？", isPresented: $confirmingReopen) {
@@ -364,12 +382,13 @@ struct WorkspaceTaskView: View {
                             }
                         }
                     }
-                }.alert("不再跟进这项任务？", isPresented: $confirmingDismiss) {
+                }.alert(action.kind == "task" ? "不再跟进这项任务？" : "不再跟进这个目标？", isPresented: $confirmingDismiss) {
                     Button("不再跟进", role: .destructive) { stopFollowing() }
                     Button("取消", role: .cancel) {}
                 } message: {
-                    Text("会移入历史记录，之后仍可找回。Apple 提醒事项中的提醒需单独处理。")
+                    Text(action.kind == "task" ? "会移入历史记录，之后仍可找回。Apple 提醒事项中的提醒需单独处理。" : "会移到历史记录，之后仍可找回；已经添加的下一步仍会保留。")
                 }
+                if action.kind != "task" { nextActionSection }
                 if action.kind == "task" || recurrence != nil {
                     WorkspaceSection(title:"重复",subtitle:recurrence.map { "完成后按「" + $0.display + "」生成下一次行动。" } ?? "这次完成后不再生成新的行动。",icon:"repeat") {
                         HStack(spacing: 14) {
@@ -523,6 +542,13 @@ struct WorkspaceTaskView: View {
         .sheet(isPresented: $showingSettings) { if let settings { ReminderSettingsView(action: action, snapshot: settings, model: model) { showingSettings = false } } }
         .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
         .sheet(isPresented: $showingFeedback, onDismiss: { Task { await loadFeedback() } }) { ActionFeedbackView(action: action, model: model) { showingFeedback = false } }
+        .sheet(isPresented: $showingNextActionForm) { nextActionForm }
+        .alert("标记这个目标已达成？", isPresented: $confirmingCompleteOutcome) {
+            Button("标记达成") { completeOutcome() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("目标会移到已完成，已经添加的下一步不受影响。")
+        }
         .alert("已完成。要记一句结果吗？", isPresented: $askingForResult) {
             Button("记录结果") { showingFeedback = true }
             Button("完成", role: .cancel) {}
@@ -593,6 +619,85 @@ struct WorkspaceTaskView: View {
                     Text("记录于：" + schedule.anchorSummary).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
             }
+        }
+    }
+    @ViewBuilder private var nextActionSection: some View {
+        WorkspaceSection(title: "下一步",
+                         subtitle: openNextActions.isEmpty ? "这个目标还没有下一步。" : "还有 \(openNextActions.count) 个下一步未完成。",
+                         icon: "arrow.turn.down.right", count: nextActions.isEmpty ? nil : nextActions.count) {
+            ForEach(nextActions) { child in
+                HStack(spacing: 12) {
+                    Button { toggleNextAction(child) } label: {
+                        Image(systemName: child.state == "completed" ? "checkmark.circle.fill" : "circle")
+                            .vosFont(WorkspaceText.sectionTitle.size)
+                            .foregroundStyle(child.state == "completed" ? palette.accent : palette.secondaryText)
+                            .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(model.savingAction || child.state == "dismissed")
+                        .accessibilityLabel(child.state == "completed" ? "重新打开下一步：" + child.title : "完成下一步：" + child.title)
+                    Text(child.title).vosFont(WorkspaceText.body).lineSpacing(3).textSelection(.enabled)
+                        .strikethrough(child.state == "completed").foregroundStyle(child.state == "completed" ? palette.secondaryText : palette.text)
+                    Spacer(minLength: 8)
+                    Button("摘除") { detachNextAction(child) }
+                        .buttonStyle(.borderless).vosFont(WorkspaceText.meta)
+                        .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
+                        .disabled(model.savingAction)
+                        .accessibilityLabel("摘除下一步：" + child.title)
+                }.padding(.vertical, 10).padding(.horizontal, 4)
+                if child.id != nextActions.last?.id { Divider() }
+            }
+            if !nextActionNotice.isEmpty {
+                Label(nextActionNotice, systemImage: "checkmark.circle").vosFont(WorkspaceText.meta)
+                    .foregroundStyle(palette.success).padding(.top, 8)
+            }
+        }
+    }
+    @ViewBuilder private var nextActionForm: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("添加下一步").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
+            Text("下一步会挂在这个目标下，目标本身保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            TextField("下一步要做的事", text: $nextActionTitle)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { addNextAction() }
+                .accessibilityLabel("下一步标题")
+            HStack {
+                Button("取消") { showingNextActionForm = false }
+                Spacer()
+                Button("添加") { addNextAction() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.savingAction || nextActionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("确认添加下一步")
+            }
+        }.padding(24).frame(width: 400)
+    }
+    private func addNextAction() {
+        let title = nextActionTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        Task {
+            if await model.addNextAction(outcome: action, title: title) != nil {
+                showingNextActionForm = false
+                nextActionTitle = ""
+                nextActionNotice = "已添加下一步"
+                error = ""
+            } else { error = model.status }
+        }
+    }
+    private func completeOutcome() {
+        Task {
+            if await model.completeOutcome(action) { error = ""; nextActionNotice = "" }
+            else { error = model.status }
+        }
+    }
+    private func toggleNextAction(_ child: ActionRecord) {
+        let target: LocalActionState = child.state == "completed" ? .open : .completed
+        Task {
+            await model.changeAction(child, state: target)
+            if model.actionRecords.first(where: { $0.id == child.id })?.state != target.rawValue { error = model.status }
+        }
+    }
+    private func detachNextAction(_ child: ActionRecord) {
+        Task {
+            if await model.detachNextAction(child) { error = "" } else { error = model.status }
         }
     }
     private func clarify(_ decision: ActionClarificationDecision) {
