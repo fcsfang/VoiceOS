@@ -1258,6 +1258,8 @@ struct WorkspaceView: View {
         let canComplete=actionable && action.kind == "task"
         return WorkspaceActionRowChrome(action:action,
             canTransition:actionable,
+            canComplete:canComplete,
+            onComplete:{ if !model.savingAction { applyActionState(action,to:.completed) } },
             menuItems:{
                 if canComplete { Button("标为完成") { if !model.savingAction { applyActionState(action,to:.completed) } } }
                 actionMenuItems(action,focused:focused,canChangeDay:canChangeDay,canTransition:actionable)
@@ -1816,6 +1818,8 @@ private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
     @Environment(\.workspacePalette) private var palette
     let action: ActionRecord
     let canTransition: Bool
+    let canComplete: Bool
+    let onComplete: () -> Void
     @ViewBuilder let menuItems: () -> MenuItems
     @ViewBuilder let row: () -> Row
     @State private var hovered = false
@@ -1824,6 +1828,17 @@ private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
         row()
             .overlay(alignment:.trailing) {
                 if hovered && canTransition {
+                    HStack(spacing: 2) {
+                    if canComplete {
+                        Button(action: onComplete) {
+                            Image(systemName:"checkmark.circle").vosFont(15, weight:.semibold)
+                                .foregroundStyle(palette.secondaryText)
+                                .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                                .contentShape(Rectangle())
+                        }.buttonStyle(.plain)
+                            .help("标为完成")
+                            .accessibilityLabel("标为完成：" + action.title)
+                    }
                     Menu {
                         menuItems()
                     } label: {
@@ -1834,11 +1849,12 @@ private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
                     }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
                         .help("更多操作")
                         .accessibilityLabel("更多操作：" + action.title)
-                        .padding(.horizontal,6).padding(.vertical,3)
-                        .background(palette.surface,in:Capsule())
-                        .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
-                        .padding(.trailing,12)
-                        .transition(.opacity)
+                    }
+                    .padding(.horizontal,6).padding(.vertical,3)
+                    .background(palette.surface,in:Capsule())
+                    .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
+                    .padding(.trailing,12)
+                    .transition(.opacity)
                 }
             }
             .onHover { hovered=$0 }
