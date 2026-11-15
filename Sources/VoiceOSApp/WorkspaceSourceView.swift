@@ -28,11 +28,9 @@ private struct SourceFold<Content: View>: View {
                         Image(systemName:icon).vosFont(19, weight:.medium).foregroundStyle(palette.accent).frame(width:26,height:28).accessibilityHidden(true)
                     }
                     HStack(spacing:9) {
-                        Text(title).vosFont(21, weight:.semibold).accessibilityAddTraits(.isHeader)
+                        Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
                         if let count {
-                            Text(String(count)).vosFont(13, weight:.semibold, monospacedDigit:true)
-                                .padding(.horizontal,8).padding(.vertical,3)
-                                .background(palette.selection,in:Capsule()).foregroundStyle(.secondary)
+                            Text(String(count)).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
                         }
                     }
                     Spacer(minLength:0)
@@ -232,7 +230,10 @@ struct WorkspaceSourceView: View {
     @ViewBuilder private var readingContent:some View {
         if let scroll { readingScrollView.scrollPosition(scroll) } else { readingScrollView }
     }
-    private var sourceToolbar: some View {
+    private var readingTitle: String {
+        MarkdownDocument.plainTitle((expression?.sourceIDs.count ?? 0) > 1 ? expression!.title : source.displayTitle)
+    }
+    private var sourceActions: some View {
         HStack(spacing:10) {
             if ["audio","video"].contains(source.kind) {
                 Button("回听片段",systemImage:"play.circle") { Task { await model.play(source) } }
@@ -243,7 +244,6 @@ struct WorkspaceSourceView: View {
                     .disabled(source.transcript == nil)
                     .help(source.transcript == nil ? "转写完成后才能按天读" : "按天分段阅读这份文字")
             }
-            Spacer(minLength:0)
             Menu {
                 Button("修改标题") { naming=source }
                 Button("更正文字") { editing=source }.disabled(source.transcript == nil)
@@ -266,34 +266,36 @@ struct WorkspaceSourceView: View {
                 Label("更多",systemImage:"ellipsis.circle")
             }
         }
-        .padding(.horizontal,WorkspaceMetrics.pagePadding)
-        .padding(.vertical,8)
-        .frame(maxWidth:.infinity)
-        .background(palette.canvas)
-        .overlay(alignment:.bottom) { Rectangle().fill(palette.border).frame(height:1) }
+        .controlSize(.small)
+        .fixedSize()
     }
     private var readingScrollView: some View {
         ScrollView {
             LazyVStack(alignment:.leading,spacing:WorkspaceMetrics.sectionGap) {
-                WorkspaceHeading(eyebrow:(source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + " · " + source.recordingSubtitle,title:(expression?.sourceIDs.count ?? 0) > 1 ? expression!.title : source.displayTitle)
-                if let captureInfo {
-                    HStack(spacing:14) {
-                        if let context=captureInfo.context,!context.isEmpty { Text("来自 " + context) }
-                        if let link=captureLink(captureInfo.url) { Link(link.host ?? "来源链接", destination: link) }
-                        if let date=ConversationReflectionFocus.date(captureInfo.capturedAt) { Text("抓取于 " + date.formatted(date:.abbreviated,time:.shortened)) }
-                        else { Text("抓取于 " + captureInfo.capturedAt) }
-                    }.font(.caption).foregroundStyle(.secondary)
-                }
-                HStack(spacing:12) {
-                    Label(sourceStatus,systemImage:sourceStatusIcon).vosFont(13).foregroundStyle(.secondary)
-                    if let attachmentURL {
-                        Button(attachmentMime == "application/pdf" ? "查看原件" : "查看原图",systemImage:attachmentMime == "application/pdf" ? "doc.richtext" : "photo") { if !NSWorkspace.shared.open(attachmentURL) { error="无法打开原件" } }
+                VStack(alignment:.leading,spacing:10) {
+                    HStack(alignment:.top,spacing:16) {
+                        WorkspaceHeading(eyebrow:(source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + " · " + source.recordingSubtitle,title:readingTitle)
+                        sourceActions
                     }
-                    Spacer(minLength:0)
+                    if let captureInfo {
+                        HStack(spacing:14) {
+                            if let context=captureInfo.context,!context.isEmpty { Text("来自 " + context) }
+                            if let link=captureLink(captureInfo.url) { Link(link.host ?? "来源链接", destination: link) }
+                            if let date=ConversationReflectionFocus.date(captureInfo.capturedAt) { Text("抓取于 " + date.formatted(date:.abbreviated,time:.shortened)) }
+                            else { Text("抓取于 " + captureInfo.capturedAt) }
+                        }.font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack(spacing:12) {
+                        Label(sourceStatus,systemImage:sourceStatusIcon).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        if let attachmentURL {
+                            Button(attachmentMime == "application/pdf" ? "查看原件" : "查看原图",systemImage:attachmentMime == "application/pdf" ? "doc.richtext" : "photo") { if !NSWorkspace.shared.open(attachmentURL) { error="无法打开原件" } }
+                        }
+                        Spacer(minLength:0)
+                    }
                 }
                 SourceFold(title:"原文与回听",icon:"waveform",isExpanded:$originalExpanded) {
                     VStack(alignment:.leading,spacing:16) {
-                        if let transcript=source.transcript { Text(transcript).vosFont(16).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
+                        if let transcript=source.transcript { MarkdownText(transcript) }
                         else { Text("尚无可用转写 · " + (source.error ?? workspaceStateLabel(source.jobState ?? source.state))).foregroundStyle(.secondary) }
                         if source.state == "saved" { Button("打开保存的原件",systemImage:"play.circle") { Task { await model.play(source) } } }
                         ForEach(source.spans.filter { $0.startMS != nil && $0.endMS != nil }) { span in
@@ -614,9 +616,12 @@ struct WorkspaceSourceView: View {
                     }.padding(.vertical,16)
                 }
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
-            }.frame(maxWidth:WorkspaceMetrics.pageWidth,alignment:.leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth:.infinity,alignment:.top)
+            }.frame(maxWidth:WorkspaceMetrics.pageWidth,alignment:.leading)
+                .padding(.horizontal,WorkspaceMetrics.pagePadding)
+                .padding(.top,16)
+                .padding(.bottom,WorkspaceMetrics.pagePadding)
+                .frame(maxWidth:.infinity,alignment:.top)
         }
-        .safeAreaInset(edge:.top,spacing:0) { sourceToolbar }
         .onDisappear { historyTask?.cancel();bilingualTask?.cancel() }
     }
     var body:some View {
