@@ -10,7 +10,8 @@ private struct OnboardingStep: Identifiable, Sendable {
 private let onboardingSteps: [OnboardingStep] = [
     OnboardingStep(id: 0, title: "记录想法", detail: "按 ⌥⌘D 开始口述，或从菜单栏打开速记（⌥⌘N）。想法先留在本机，再慢慢整理。", symbol: "mic"),
     OnboardingStep(id: 1, title: "资料与行动", detail: "导入录音或文字后，VoiceOS 在本机整理成资料、理解与行动。完成的行动可以回来记录结果。", symbol: "books.vertical"),
-    OnboardingStep(id: 2, title: "快捷键", detail: "⌥⌘D 口述（全局） · ⌥⌘V 保存剪贴板 · ⌥⌘N 速记 · ⌘I 导入录音（全局） · ⌘F 搜索 · ⌘1 到 ⌘5 切换页面 · ⌘[ 返回（主窗口） · ⌘⇧R 口述（主窗口） · x 完成、z 不再跟进（列表聚焦时） · ⌥⌘Z 撤销（仅本次运行，撤销只对当前会话有效）", symbol: "keyboard")
+    OnboardingStep(id: 2, title: "快捷键", detail: "常用三条，随时可用。", symbol: "keyboard"),
+    OnboardingStep(id: 3, title: "完成", detail: "菜单栏图标常驻，随时速记；每周结束到行动页打开每周回顾。", symbol: "checkmark.circle")
 ]
 
 struct OnboardingView: View {
@@ -36,9 +37,8 @@ struct OnboardingView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Text("第 \(step + 1) 步，共 \(onboardingSteps.count) 步")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            stepExtra
+            stepDots
             HStack {
                 Button("跳过", action: finish)
                 Spacer()
@@ -53,6 +53,41 @@ struct OnboardingView: View {
         .padding(28)
         .frame(width: WorkspaceMetrics.modalSmall)
         .interactiveDismissDisabled()
+    }
+
+    @ViewBuilder private var stepExtra: some View {
+        if current.id == 0 {
+            Button("立即试一次") {
+                QuickNoteController.shared.show()
+                finish()
+            }.buttonStyle(.bordered)
+        } else if current.id == 2 {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("⌥⌘D 口述")
+                Text("⌥⌘N 速记")
+                Text("⌘F 搜索")
+                Text("更多快捷键见「设置 › 键盘快捷键」。")
+                    .font(.caption).foregroundStyle(.secondary).padding(.top, 3)
+            }.font(.callout)
+        }
+    }
+
+    private var stepDots: some View {
+        HStack(spacing: 8) {
+            ForEach(onboardingSteps) { item in
+                Button { step = item.id } label: {
+                    Circle()
+                        .fill(item.id == step ? Color.accentColor : Color.secondary.opacity(0.28))
+                        .frame(width: 8, height: 8)
+                        .frame(width: 18, height: 18)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("第 \(item.id + 1) 步")
+                .accessibilityLabel("第 \(item.id + 1) 步")
+                .accessibilityAddTraits(item.id == step ? [.isSelected] : [])
+            }
+        }
     }
 }
 

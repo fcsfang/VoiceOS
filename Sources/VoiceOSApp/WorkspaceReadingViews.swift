@@ -23,13 +23,13 @@ struct WorkspaceTabs: View {
 
     private func tab(_ title: String, fill: Bool = false) -> some View {
         Button { selection = title } label: {
-            Text(title).vosFont(17, weight: .semibold).lineLimit(1)
+            Text(title).vosFont(15, weight: .semibold).lineLimit(1)
                 .foregroundStyle(selection == title ? palette.canvas : palette.text)
                 .frame(maxWidth: fill ? .infinity : nil)
-                .padding(.horizontal, 20).padding(.vertical, 13)
-                .background(selection == title ? palette.accent : palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.tabRadius))
-                .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.tabRadius).strokeBorder(selection == title ? .clear : palette.border, lineWidth: 1) }
-                .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.tabRadius))
+                .padding(.horizontal, 14).padding(.vertical, 7)
+                .background(selection == title ? palette.accent : palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(selection == title ? .clear : palette.border, lineWidth: 1) }
+                .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
         }.buttonStyle(.plain)
             .accessibilityAddTraits(selection == title ? [.isSelected] : [])
             .accessibilityIdentifier("workspace.tab." + title)

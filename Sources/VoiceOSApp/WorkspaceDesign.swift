@@ -5,14 +5,18 @@ import SwiftUI
 enum WorkspaceMetrics {
     static let pageWidth: CGFloat = 860
     static let readerWidth: CGFloat = 720
-    static let pagePadding: CGFloat = 30
+    static let pagePadding: CGFloat = 32
+    static let sectionGap: CGFloat = 24
     static let controlPadding: CGFloat = 12
     static let toolbarPadding: CGFloat = 16
-    static let sectionRadius: CGFloat = 14
+    static let sectionRadius: CGFloat = 16
     static let panelRadius: CGFloat = 12
+    static let chipRadius: CGFloat = 6
     static let controlRadius: CGFloat = 8
     static let tabRadius: CGFloat = 10
-    static let iconButtonSize: CGFloat = 32
+    static let iconButtonSize: CGFloat = 28
+    static let rowActionMinHeight: CGFloat = 24
+    static let fieldHeight: CGFloat = 28
     static let modalSmall: CGFloat = 620
     static let modalMedium: CGFloat = 720
     static let modalLarge: CGFloat = 1020
@@ -110,7 +114,7 @@ struct WorkspaceIconButton: View {
         Button(action: action) {
             Image(systemName: systemImage).vosFont(14, weight: .medium)
                 .frame(width: WorkspaceMetrics.iconButtonSize, height: WorkspaceMetrics.iconButtonSize)
-                .background(hovered ? palette.selection.opacity(0.6) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                .background(hovered ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).onHover { hovered = $0 }
             .help(label).accessibilityLabel(label)
@@ -118,15 +122,164 @@ struct WorkspaceIconButton: View {
 }
 
 struct WorkspaceNoticeText: View {
-    enum Severity { case danger, warning }
+    enum Severity { case danger, warning, info, success }
     @Environment(\.workspacePalette) private var palette
     let message: String
     var severity: Severity = .warning
 
     var body: some View {
-        Text(message).font(.callout)
-            .foregroundStyle(severity == .danger ? palette.danger : palette.warning)
-            .textSelection(.enabled)
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
+            Image(systemName: icon).vosFont(12, weight: .semibold).foregroundStyle(tint)
+            Text(message).vosFont(WorkspaceText.meta.size).foregroundStyle(palette.text)
+                .lineSpacing(2).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+        .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(tint.opacity(0.3), lineWidth: 1) }
+    }
+
+    private var tint: Color {
+        switch severity {
+        case .danger: palette.danger
+        case .warning: palette.warning
+        case .info: palette.accent
+        case .success: palette.success
+        }
+    }
+
+    private var icon: String {
+        switch severity {
+        case .danger: "exclamationmark.triangle"
+        case .warning: "exclamationmark.circle"
+        case .info: "info.circle"
+        case .success: "checkmark.circle"
+        }
+    }
+}
+
+struct WorkspaceToast: View {
+    @Environment(\.workspacePalette) private var palette
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill").vosFont(13, weight: .semibold)
+                .foregroundStyle(palette.success)
+            Text(message).vosFont(WorkspaceText.meta.size).foregroundStyle(palette.text).lineLimit(2)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 9)
+        .background(palette.surface, in: Capsule())
+        .overlay { Capsule().strokeBorder(palette.border, lineWidth: 1) }
+        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct WorkspaceToastModifier: ViewModifier {
+    @Binding var message: String?
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .bottom) {
+                if let text = message {
+                    WorkspaceToast(message: text)
+                        .padding(.bottom, 18)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .task(id: text) {
+                            try? await Task.sleep(for: .seconds(2.5))
+                            guard !Task.isCancelled else { return }
+                            withAnimation(.easeOut(duration: 0.2)) { message = nil }
+                        }
+                }
+            }
+            .animation(.spring(duration: 0.26), value: message)
+    }
+}
+
+struct WorkspaceRowChevron: View {
+    @Environment(\.workspacePalette) private var palette
+
+    var body: some View {
+        Image(systemName: "chevron.right").vosFont(11, weight: .semibold)
+            .foregroundStyle(palette.disabledText).accessibilityHidden(true)
+    }
+}
+
+struct WorkspaceListRow<Trailing: View>: View {
+    enum Density { case comfortable, compact }
+    @Environment(\.workspacePalette) private var palette
+    var density: Density = .comfortable
+    let title: String
+    var subtitle: String = ""
+    var icon: String? = nil
+    @ViewBuilder var trailing: () -> Trailing
+    var highlighted: Bool = false
+    var action: (() -> Void)? = nil
+    @State private var hovered = false
+
+    var body: some View {
+        Group {
+            if let action {
+                Button(action: action) { row }
+            } else {
+                row
+            }
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 && action != nil }
+        .accessibilityAddTraits(highlighted ? .isSelected : [])
+    }
+
+    private var row: some View {
+        HStack(spacing: density == .comfortable ? 11 : 9) {
+            if let icon {
+                Image(systemName: icon).vosFont(15, weight: .medium)
+                    .foregroundStyle(action == nil ? palette.disabledText : palette.accent)
+                    .frame(width: 34, height: 34)
+                    .background(iconBackground, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).vosFont(titleSize, weight: .semibold)
+                    .foregroundStyle(action == nil ? palette.disabledText : palette.text)
+                    .lineLimit(1)
+                if !subtitle.isEmpty {
+                    Text(subtitle).vosFont(WorkspaceText.meta.size)
+                        .foregroundStyle(action == nil ? palette.disabledText : palette.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 8)
+            trailing()
+        }
+        .padding(.horizontal, density == .comfortable ? 12 : 10)
+        .padding(.vertical, density == .comfortable ? 9 : 6)
+        .frame(minHeight: density == .comfortable ? 52 : 44, alignment: .leading)
+        .background(rowBackground, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+        .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+        .animation(.easeOut(duration: 0.12), value: hovered)
+    }
+
+    private var titleSize: CGFloat { density == .comfortable ? WorkspaceText.rowTitle.size : 15 }
+
+    private var iconBackground: Color {
+        if action == nil { return palette.selection.opacity(0.35) }
+        return highlighted ? palette.surface : palette.selection.opacity(0.6)
+    }
+
+    private var rowBackground: Color {
+        if highlighted { return palette.selection }
+        if hovered && action != nil { return palette.hover }
+        return .clear
+    }
+}
+
+extension WorkspaceListRow where Trailing == WorkspaceRowChevron {
+    init(density: Density = .comfortable, title: String, subtitle: String = "", icon: String? = nil,
+         highlighted: Bool = false, action: (() -> Void)? = nil) {
+        self.init(density: density, title: title, subtitle: subtitle, icon: icon,
+                  trailing: { WorkspaceRowChevron() }, highlighted: highlighted, action: action)
     }
 }
 
@@ -136,7 +289,7 @@ private struct WorkspaceHoverHighlight: ViewModifier {
     @State private var hovered = false
 
     func body(content: Content) -> some View {
-        content.background(hovered ? palette.selection.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: cornerRadius))
+        content.background(hovered ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: cornerRadius))
             .onHover { hovered = $0 }
     }
 }
@@ -147,6 +300,7 @@ private struct WorkspaceEditorSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         content.padding(10)
+            .scrollContentBackground(.hidden)
             .background(palette.surface, in: RoundedRectangle(cornerRadius: radius))
             .overlay { RoundedRectangle(cornerRadius: radius).strokeBorder(palette.border, lineWidth: 1) }
     }
@@ -159,5 +313,9 @@ extension View {
 
     func workspaceEditorSurface(radius: CGFloat = WorkspaceMetrics.controlRadius) -> some View {
         modifier(WorkspaceEditorSurface(radius: radius))
+    }
+
+    func workspaceToast(_ message: Binding<String?>) -> some View {
+        modifier(WorkspaceToastModifier(message: message))
     }
 }

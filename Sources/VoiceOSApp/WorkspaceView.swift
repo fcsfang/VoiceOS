@@ -85,8 +85,8 @@ struct WorkspaceRow: View {
                 Spacer(minLength:8)
                 if !trailing.isEmpty { Text(trailing).vosFont(12, weight: .medium).foregroundStyle(.secondary).padding(.top,3) }
                 Image(systemName:"chevron.right").font(.caption).foregroundStyle(.tertiary).padding(.top,3).accessibilityHidden(true)
-            }.padding(.vertical,18).padding(.horizontal,10).contentShape(RoundedRectangle(cornerRadius:9))
-                .background(hovered ? palette.selection.opacity(0.5) : .clear,in:RoundedRectangle(cornerRadius:9))
+            }.padding(.vertical,18).padding(.horizontal,10).contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                .background(hovered ? palette.selection.opacity(0.5) : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 .accessibilityElement(children:.combine)
         }.buttonStyle(.plain).onHover { hovered=$0 }
     }
@@ -135,6 +135,8 @@ struct WorkspaceView: View {
     @State private var reminderSettingsTarget: WorkspaceReminderSettingsTarget?
     @State private var actionKeyboardHighlightID: String?
     @FocusState private var actionListFocused: Bool
+    @State private var materialKeyboardFocus = WorkspaceKeySelection()
+    @FocusState private var materialListFocused: Bool
     @State private var readingStates: [String: SourceReadingState] = [:]
     @State private var readingPlans: [IncrementalPlan] = []
     @State private var selectingActions = false
@@ -143,6 +145,11 @@ struct WorkspaceView: View {
     @State private var batchRunning = false
     @State private var query = ""
     @FocusState private var searchFocused: Bool
+    @State private var searchKeyboardFocus = WorkspaceKeySelection()
+    @FocusState private var searchListFocused: Bool
+    @State private var searchHits: [SearchHit] = []
+    @State private var searchFailed = false
+    @State private var searchBusy = false
     @State private var taskFeedbackDrafts: [String: TaskFeedbackDraft] = [:]
     @State private var creatingTopic = false
     @State private var savingTopic = false
@@ -152,6 +159,8 @@ struct WorkspaceView: View {
     @State private var reviewPeriod = ReflectionPeriod.week
     @State private var reviewAnchor = Date()
     @State private var error = ""
+    @State private var actionUndo: ActionUndoState?
+    @State private var toastMessage: String?
     @State private var showingWeeklyReview = false
     @Environment(\.openWindow) private var openWindow
     private var discussionIsPresented: Bool {
@@ -218,7 +227,12 @@ struct WorkspaceView: View {
             .dynamicTypeSize(model.textSize.dynamicType)
             .preferredColorScheme(appearance.colorScheme)
             .frame(minWidth:980,minHeight:700)
-            .onExitCommand { if !path.isEmpty { back() } }
+            .onExitCommand {
+                if selectingActions { exitActionSelection() }
+                else if page == .search, !query.isEmpty { query="";searchFocused=true;searchKeyboardFocus.id=nil }
+                else if !path.isEmpty { back() }
+            }
+            .workspaceToast($toastMessage)
             .navigationTitle(model.libraryTitle)
             .focusedSceneValue(\.voiceOSController,model)
     }
@@ -262,6 +276,7 @@ struct WorkspaceView: View {
             }
             .onChange(of:page) { _, next in if next != .actions { exitActionSelection() } }
             .onChange(of:actionFilter) { _, filter in actionKeyboardHighlightID=nil;if !["全部","我的待办"].contains(filter) { exitActionSelection() } }
+            .onChange(of:materialFilter) { _, _ in materialKeyboardFocus.id=nil }
             .onOpenURL { url in if model.initialized { routeExternalURL(url) } else { pendingURL=url } }
             .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;routeExternalURL(url) } }
             .onAppear { consumePendingNavigation() }
@@ -292,7 +307,7 @@ struct WorkspaceView: View {
                     onDone:{ showingOutcome=false })
             }
             .sheet(isPresented:$showingWeeklyReview) {
-                WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) },openActions:{ showingWeeklyReview=false;go(.actions) })
+                WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) },openActions:{ showingWeeklyReview=false;go(.actions) },openFilter:{ filter in actionFilter=filter; showingWeeklyReview=false; go(.actions) })
             }
             .onChange(of:showingWeeklyReview) { _, shown in if !shown { Task { focusedActionIDs = await model.focusedActionIDs() } } }
             .sheet(isPresented:$showingSaveView) { saveViewSheet }
@@ -510,7 +525,16 @@ struct WorkspaceView: View {
                 }
             }
         case .themes: scrolled { themes }.id(navigationEntry)
-        case .materials: scrolled { materials }
+        case .materials:
+            ScrollViewReader { proxy in
+                scrolled { materials }
+                    .focusable()
+                    .focused($materialListFocused)
+                    .focusEffectDisabled()
+                    .onKeyPress { handleMaterialListKey($0) }
+                    .onChange(of:materialKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
+                    .onAppear { requestMaterialListFocus() }
+            }
         case .actions:
             ScrollViewReader { proxy in
                 scrolled { actions }
@@ -521,7 +545,17 @@ struct WorkspaceView: View {
                     .onChange(of:actionKeyboardHighlightID) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
                     .onChange(of:showingPlanToday) { _, shown in if !shown { requestActionListFocus() } }
                     .onAppear { requestActionListFocus() }
-                    .overlay(alignment:.bottom) { if selectingActions { actionSelectionBar } }
+                    .task(id:actionUndo?.token) {
+                        guard actionUndo != nil else { return }
+                        do { try await Task.sleep(for:.seconds(8)) } catch { return }
+                        actionUndo=nil
+                    }
+                    .overlay(alignment:.bottom) {
+                        VStack(spacing:8) {
+                            if actionUndo != nil { actionUndoBar }
+                            if selectingActions { actionSelectionBar }
+                        }
+                    }
             }
         case .initiate: TaskInitiationView(model:model,openSource:{ go(.source($0)) })
         case .source(let id):
@@ -567,13 +601,21 @@ struct WorkspaceView: View {
                     }
                 }.padding(24)
                 TextCaptureView(model:model,draft:$model.textCaptureDraft,onSaved:{ if page == .capture { go(.source($0)) } },dismiss:back)
-            }.frame(maxWidth:860).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.top)
-        case .search: scrolled { search }
+            }.frame(maxWidth: WorkspaceMetrics.pageWidth).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.top)
+        case .search:
+            ScrollViewReader { proxy in
+                scrolled { search }
+                    .focusable()
+                    .focused($searchListFocused)
+                    .focusEffectDisabled()
+                    .onKeyPress { handleSearchListKey($0) }
+                    .onChange(of:searchKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
+            }
         case .tool(let name): tool(name)
         }
     }
     private func scrolled<Content:View>(@ViewBuilder content: () -> Content) -> some View {
-        ScrollView { content().frame(maxWidth:860,alignment:.leading).padding(30).frame(maxWidth:.infinity,alignment:.top) }
+        ScrollView { content().frame(maxWidth: WorkspaceMetrics.pageWidth,alignment:.leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth:.infinity,alignment:.top) }
             .scrollPosition(scrollBinding(for: scrollKey))
     }
     private func scrollBinding(for key: WorkspaceNavigationEntry) -> Binding<ScrollPosition> {
@@ -637,7 +679,7 @@ struct WorkspaceView: View {
     private var materials: some View {
         let rows = readingMaterials
         let catalog = recordCatalog
-        return LazyVStack(alignment:.leading,spacing:24) {
+        return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             HStack(alignment:.top) {
                 WorkspaceHeading(eyebrow:"",title:"材料",subtitle:"\(rows.count) 份")
                 Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.materials,filter:materialFilter) }.buttonStyle(.bordered)
@@ -674,10 +716,10 @@ struct WorkspaceView: View {
             } else {
                 ForEach(rows) { source in
                     HStack(alignment:.top,spacing:4) {
-                        sourceRow(source,catalog:catalog).frame(maxWidth:.infinity,alignment:.leading)
+                        sourceRow(source,catalog:catalog,highlighted:materialKeyboardFocus.id == source.id).frame(maxWidth:.infinity,alignment:.leading)
                         MaterialManagementControls(model:model,source:source,style:.compact)
                             .font(.caption).padding(.top,21)
-                    }
+                    }.id(source.id)
                     if source.id != rows.last?.id { Divider() }
                 }
             }
@@ -685,7 +727,7 @@ struct WorkspaceView: View {
     }
     private var themes: some View {
         let catalog = recordCatalog
-        return LazyVStack(alignment:.leading,spacing:24) {
+        return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             if let topic {
                 HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil };creatingTopic=false;newTopicTitle="";editingTopicID=nil };Spacer(); Menu("调整主题") { Button("修改主题名称") { newTopicTitle=topic.title;editingTopicID=topic.id;creatingTopic=true };Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) } } }
                 WorkspaceHeading(eyebrow:"",title:topic.title,subtitle:"\(topicSources.count) 份材料")
@@ -716,7 +758,7 @@ struct WorkspaceView: View {
                         Button("取消") { creatingTopic=false;editingTopicID=nil }
                         Button("保存主题") { Task { await saveTopic() } }.buttonStyle(.borderedProminent).disabled(newTopicTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || savingTopic)
                     }
-                }.padding(18).background(palette.selection,in:RoundedRectangle(cornerRadius:9))
+                }.padding(18).background(palette.selection,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             }
         }
     }
@@ -771,7 +813,7 @@ struct WorkspaceView: View {
         }
     }
     private var actions: some View {
-        LazyVStack(alignment:.leading,spacing:24) {
+        LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             HStack(alignment:.top) {
                 WorkspaceHeading(eyebrow:"",title:"行动")
                 if ["全部","我的待办"].contains(actionFilter) {
@@ -902,9 +944,9 @@ struct WorkspaceView: View {
     }
     private var search: some View {
         let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
-        return LazyVStack(alignment:.leading,spacing:24) {
+        return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspaceHeading(eyebrow:"",title:"搜索")
-            WorkspaceSearchField(text:$query,placeholder:"搜索标题、原话、理解或行动",focus:$searchFocused)
+            WorkspaceSearchField(text:$query,placeholder:"搜索标题、原话、理解或行动",focus:$searchFocused,submit:{ if !searchSections.isEmpty { searchListFocused=true } })
                 .task {
                     // Wait until the lazy field is attached to its native window.
                     do { try await Task.sleep(for:.milliseconds(100)); searchFocused = true } catch {}
@@ -915,12 +957,78 @@ struct WorkspaceView: View {
                 let catalog=recordCatalog
                 ForEach(sources) { sourceRow($0,catalog:catalog);Divider() }
             } else {
-                SearchResultsView(model:model,query:term,openMaterial:{ go(.source($0)) },openTask:{ go(.task($0)) },clearQuery:{ query="";searchFocused=true })
+                searchResults
+            }
+        }
+        .task(id: term) { await loadSearchHits(term) }
+        .onChange(of:term) { _, _ in searchKeyboardFocus.id=nil }
+    }
+    @ViewBuilder private var searchResults: some View {
+        if searchBusy && searchHits.isEmpty { ProgressView("正在检索…").controlSize(.small) }
+        if searchFailed { WorkspaceNoticeText(message:model.status,severity:.danger) }
+        let sections = searchSections
+        if !sections.isEmpty {
+            VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
+                ForEach(sections) { section in
+                    WorkspaceSection(title:section.title,icon:section.icon,count:section.rows.count) {
+                        ForEach(section.rows) { row in
+                            WorkspaceRow(title:row.title,subtitle:row.subtitle,icon:row.icon) { row.open() }
+                                .background(searchKeyboardFocus.id == row.id ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                                .overlay { if searchKeyboardFocus.id == row.id { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+                                .id(row.id)
+                            if row.id != section.rows.last?.id { Divider() }
+                        }
+                    }
+                }
+            }
+        }
+        if !searchBusy && !searchFailed && sections.isEmpty {
+            WorkspaceEmptyState(title:"没有找到相关内容",systemImage:"magnifyingglass",description:"换个关键词，或清空搜索查看全部材料。") {
+                Button("清空搜索") { query="";searchFocused=true }
             }
         }
     }
+    private var searchSections: [WorkspaceSearchSection] {
+        let catalog = recordCatalog
+        let materials = searchHits.filter { hit in
+            guard hit.kind == .material, let source = catalog[hit.refID] else { return false }
+            return !source.isTrashed
+        }.map { hit in
+            WorkspaceSearchRow(id:"material:" + hit.refID,title:hit.title,subtitle:hit.snippet,icon:"doc.text") { go(.source(hit.refID)) }
+        }
+        let claims = searchHits.filter { hit in
+            hit.kind == .claim && model.claims.contains { $0.id == hit.refID && $0.validity == "current" && $0.reviewState != "rejected" }
+        }.map { hit in
+            WorkspaceSearchRow(id:"claim:" + hit.refID,title:hit.title,subtitle:hit.snippet,icon:"lightbulb") {
+                if let sourceID=model.claims.first(where: { $0.id == hit.refID })?.references.first?.sourceID { go(.source(sourceID)) }
+            }
+        }
+        let actions = searchHits.filter { $0.kind == .action }.map { hit in
+            WorkspaceSearchRow(id:"action:" + hit.refID,title:hit.title,subtitle:hit.snippet,icon:"checkmark.circle") { go(.task(hit.refID)) }
+        }
+        var sections:[WorkspaceSearchSection]=[]
+        if !materials.isEmpty { sections.append(WorkspaceSearchSection(id:"materials",title:"材料",icon:"books.vertical",rows:materials)) }
+        if !claims.isEmpty { sections.append(WorkspaceSearchSection(id:"claims",title:"观点",icon:"lightbulb",rows:claims)) }
+        if !actions.isEmpty { sections.append(WorkspaceSearchSection(id:"actions",title:"行动",icon:"checkmark.circle",rows:actions)) }
+        return sections
+    }
+    private func loadSearchHits(_ term:String) async {
+        guard !term.isEmpty else {
+            searchHits=[];searchFailed=false;searchBusy=false;searchKeyboardFocus.id=nil
+            return
+        }
+        searchBusy=true
+        defer { searchBusy=false }
+        do { try await Task.sleep(for:.milliseconds(180)) } catch { return }
+        guard !Task.isCancelled else { return }
+        if let results=await model.searchAll(term) {
+            searchHits=results;searchFailed=false
+        } else {
+            searchHits=[];searchFailed=true
+        }
+    }
     private var settings: some View {
-        VStack(alignment:.leading,spacing:26) {
+        VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspaceHeading(eyebrow:"",title:"设置")
             sectionTitle("外观")
             HStack(spacing:12) {
@@ -1043,12 +1151,14 @@ struct WorkspaceView: View {
         readingPlans=(try? await store.incrementalPlans()) ?? []
     }
     private var recordCatalog: [String:SourceRecord] { Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) }) }
-    private func sourceRow(_ source:SourceRecord,catalog:[String:SourceRecord]) -> some View {
+    private func sourceRow(_ source:SourceRecord,catalog:[String:SourceRecord],highlighted:Bool = false) -> some View {
         let expression=source.recordingExpression(in:catalog)
         let combined=(expression?.sourceIDs.count ?? 0) > 1
         let first=combined ? expression!.sourceIDs.first.flatMap { catalog[$0] } ?? source : source
         let origin=source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料"
         return WorkspaceRow(title:combined ? expression!.title : source.displayTitle,subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:materialReadingLabel(source.id)) { go(.source(source.id)) }
+            .background(highlighted ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+            .overlay { if highlighted { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
                 Button("标为在读") { setMaterialReading(source.id,.reading) }
@@ -1114,24 +1224,37 @@ struct WorkspaceView: View {
             return date < Date()
         }
     }
+    @ViewBuilder private func actionMenuItems(_ action:ActionRecord,focused:Bool,canChangeDay:Bool,canTransition:Bool) -> some View {
+        Button("改天") { openReminderSettings(action) }.disabled(!canChangeDay)
+        Button("不再跟进") { dismissAction(action) }.disabled(!canTransition)
+        Button(focused ? "移出专注" : "加入专注") { toggleFocus(action.id) }.disabled(!canTransition)
+    }
     private func actionRow(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> some View {
         let selectable=action.state == "open" && action.validity == "current"
+        let actionable=selectable && !selectingActions
         let selected=selectedActionIDs.contains(action.id)
         let keyboardHighlighted=page == .actions && !selectingActions && actionKeyboardHighlightID == action.id
         let icon=selectingActions && selectable ? (selected ? "checkmark.circle.fill" : "circle") : action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : "circle"
-        return WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action,timeEntry:timeEntry),icon:icon,trailing:selectingActions && selected ? "已选" : "") {
-            if selectingActions {
-                guard selectable else { return }
-                if selected { selectedActionIDs.remove(action.id) } else { selectedActionIDs.insert(action.id) }
-            } else { go(.task(action.id)) }
-        }
-        .background(keyboardHighlighted ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:9))
-        .overlay { if keyboardHighlighted { RoundedRectangle(cornerRadius:9).strokeBorder(palette.accent.opacity(0.5),lineWidth:1) } }
-        .contextMenu {
-            if page == .actions, action.state == "open", action.validity == "current" {
-                Button(focusedActionIDs.contains(action.id) ? "移出专注" : "加入专注") { toggleFocus(action.id) }
+        let focused=focusedActionIDs.contains(action.id)
+        let canChangeDay=actionable && hasLinkedReminder(action) && !model.savingAction && !model.remindersBusy
+        return WorkspaceActionRowChrome(action:action,
+            canComplete:actionable && action.kind == "task",
+            canTransition:actionable,
+            complete:{ if !model.savingAction { applyActionState(action,to:.completed) } },
+            menuItems:{ actionMenuItems(action,focused:focused,canChangeDay:canChangeDay,canTransition:actionable) },
+            row:{
+                WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action,timeEntry:timeEntry),icon:icon,trailing:selectingActions && selected ? "已选" : "") {
+                    if selectingActions {
+                        guard selectable else { return }
+                        if selected { selectedActionIDs.remove(action.id) } else { selectedActionIDs.insert(action.id) }
+                    } else { go(.task(action.id)) }
+                }
+            })
+            .background(keyboardHighlighted ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+            .overlay { if keyboardHighlighted { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+            .contextMenu {
+                actionMenuItems(action,focused:focused,canChangeDay:canChangeDay,canTransition:actionable)
             }
-        }
     }
     private func toggleFocus(_ id:String) {
         Task {
@@ -1180,7 +1303,22 @@ struct WorkspaceView: View {
                 return
             }
             error=""
+            switch state {
+            case .completed: showActionUndo(action.id,message:"已完成")
+            case .dismissed: showActionUndo(action.id,message:"已放下")
+            case .open: actionUndo=nil
+            }
             if let nextHighlight { actionKeyboardHighlightID=nextHighlight }
+        }
+    }
+    private func showActionUndo(_ id:String,message:String) {
+        actionUndo=ActionUndoState(actionID:id,message:message,token:UUID())
+    }
+    private func undoActionChange() {
+        guard let target=actionUndo?.actionID else { return }
+        Task {
+            if await model.undoActionState(actionID:target) { actionUndo=nil;error="" }
+            else { error=model.status.isEmpty ? "未能撤销，请稍后重试。" : model.status }
         }
     }
     private var planRemainingSlots: Int { max(0,3 - focusedActions.count) }
@@ -1340,6 +1478,47 @@ struct WorkspaceView: View {
             actionListFocused=true
         }
     }
+    private func requestMaterialListFocus() {
+        Task {
+            try? await Task.sleep(for:.milliseconds(100))
+            guard page == .materials else { return }
+            materialListFocused=true
+        }
+    }
+    private func handleMaterialListKey(_ press:KeyPress) -> KeyPress.Result {
+        guard page == .materials, materialListFocused,
+              press.modifiers.isDisjoint(with: [.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let ids=readingMaterials.map(\.id)
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard materialKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
+            return .handled
+        case .return:
+            guard let id=materialKeyboardFocus.id, ids.contains(id) else { return .ignored }
+            go(.source(id))
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+    private func handleSearchListKey(_ press:KeyPress) -> KeyPress.Result {
+        guard page == .search, searchListFocused,
+              press.modifiers.isDisjoint(with: [.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let rows=searchSections.flatMap(\.rows)
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard searchKeyboardFocus.step(up: press.key == .upArrow, over: rows.map(\.id)) else { return .ignored }
+            return .handled
+        case .return:
+            guard let id=searchKeyboardFocus.id, let row=rows.first(where: { $0.id == id }) else { return .ignored }
+            row.open()
+            return .handled
+        default:
+            return .ignored
+        }
+    }
     private func batchActions(for state:LocalActionState) -> [ActionRecord] {
         let ids=selectedActionIDs
         return model.actionRecords.filter { ids.contains($0.id) && $0.state == "open" && $0.validity == "current" && (state != .completed || $0.kind == "task") }
@@ -1375,6 +1554,16 @@ struct WorkspaceView: View {
         }.padding(.horizontal,18).padding(.vertical,11)
             .background(palette.surface,in:Capsule())
             .overlay(Capsule().strokeBorder(palette.selection,lineWidth:1))
+            .shadow(color:.black.opacity(0.18),radius:14,y:6)
+            .padding(.bottom,16)
+    }
+    private var actionUndoBar: some View {
+        HStack(spacing:12) {
+            Text(actionUndo?.message ?? "").vosFont(13, weight:.medium)
+            Button("撤销") { undoActionChange() }
+        }.padding(.horizontal,16).padding(.vertical,10)
+            .background(palette.surface,in:Capsule())
+            .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
             .shadow(color:.black.opacity(0.18),radius:14,y:6)
             .padding(.bottom,16)
     }
@@ -1430,12 +1619,12 @@ struct WorkspaceView: View {
         savingView=true
         defer { savingView=false }
         if let views=await model.saveWorkspaceView(name:trimmedNewViewName,page:saveViewPage,filter:saveViewFilter) {
-            savedViews=views;showingSaveView=false;error=""
+            savedViews=views;showingSaveView=false;error="";toastMessage="已保存视图「\(trimmedNewViewName)」"
         } else { error="视图未能保存，请稍后重试。" }
     }
     private func deleteSavedView(_ view:SavedWorkspaceView) {
         Task {
-            if let views=await model.deleteWorkspaceView(id:view.id) { savedViews=views;error="" }
+            if let views=await model.deleteWorkspaceView(id:view.id) { savedViews=views;error="";toastMessage="已删除视图「\(view.name)」" }
             else { error="视图未能删除，请稍后重试。" }
         }
     }
@@ -1560,5 +1749,89 @@ private struct WorkspaceTopicEntry: View {
                 if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger) }
             }.padding(.top,12)
         }
+    }
+}
+
+private struct WorkspaceKeySelection {
+    var id: String?
+    mutating func step(up: Bool, over ids: [String]) -> Bool {
+        guard !ids.isEmpty else { return false }
+        let current = id.flatMap { ids.firstIndex(of: $0) }
+        let next: Int
+        if up { next = current.map { max(0,$0 - 1) } ?? ids.count - 1 }
+        else { next = current.map { min(ids.count - 1,$0 + 1) } ?? 0 }
+        id = ids[next]
+        return true
+    }
+}
+
+private struct ActionUndoState: Equatable {
+    let actionID: String
+    let message: String
+    let token: UUID
+}
+
+private struct WorkspaceSearchRow: Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let icon: String
+    let open: () -> Void
+}
+
+private struct WorkspaceSearchSection: Identifiable {
+    let id: String
+    let title: String
+    let icon: String
+    let rows: [WorkspaceSearchRow]
+}
+
+private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
+    @Environment(\.workspacePalette) private var palette
+    let action: ActionRecord
+    let canComplete: Bool
+    let canTransition: Bool
+    let complete: () -> Void
+    @ViewBuilder let menuItems: () -> MenuItems
+    @ViewBuilder let row: () -> Row
+    @State private var hovered = false
+
+    var body: some View {
+        row()
+            .overlay(alignment:.trailing) {
+                if hovered && canTransition {
+                    HStack(spacing:2) {
+                        if canComplete {
+                            Button(action:complete) {
+                                Image(systemName:"checkmark.circle").vosFont(14, weight:.medium)
+                                    .foregroundStyle(palette.accent)
+                                    .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                                    .background(palette.surface,in:Circle())
+                                    .overlay { Circle().strokeBorder(palette.border,lineWidth:1) }
+                                    .contentShape(Circle())
+                            }.buttonStyle(.plain)
+                                .help("标为完成")
+                                .accessibilityLabel("标为完成：" + action.title)
+                        }
+                        Menu {
+                            menuItems()
+                        } label: {
+                            Image(systemName:"ellipsis").vosFont(13, weight:.semibold)
+                                .foregroundStyle(palette.secondaryText)
+                                .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                                .contentShape(Rectangle())
+                        }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                            .help("更多操作")
+                            .accessibilityLabel("更多操作：" + action.title)
+                    }
+                    .padding(.horizontal,6).padding(.vertical,3)
+                    .background(palette.surface,in:Capsule())
+                    .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
+                    .padding(.trailing,12)
+                    .transition(.opacity)
+                }
+            }
+            .onHover { hovered=$0 }
+            .animation(.easeOut(duration:0.12),value:hovered)
     }
 }

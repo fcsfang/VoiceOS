@@ -32,24 +32,28 @@ enum WorkspaceAppearance: String, CaseIterable, Identifiable {
 struct WorkspacePalette {
     let theme: WorkspaceTheme
 
-    var canvas: Color { theme == .graphite ? adaptive(0xFFFFFF, 0x202020) : adaptive(0xFAFAF7, 0x1D211F) }
-    var surface: Color { theme == .graphite ? adaptive(0xF7F7F8, 0x292929) : adaptive(0xFFFFFF, 0x242925) }
-    var sidebar: Color { theme == .graphite ? adaptive(0xF3F3F3, 0x181818) : adaptive(0xF0F2ED, 0x181D19) }
+    var canvas: Color { theme == .graphite ? adaptive(0xF2F2F3, 0x1E1E1E) : adaptive(0xF1F3EE, 0x1B1F1D) }
+    var surface: Color { theme == .graphite ? adaptive(0xFCFCFD, 0x272727) : adaptive(0xFFFFFF, 0x242925) }
+    var sidebar: Color { theme == .graphite ? adaptive(0xECECEE, 0x161616) : adaptive(0xE9EDE6, 0x171C18) }
     var text: Color { theme == .graphite ? adaptive(0x202020, 0xECECEC) : adaptive(0x26352D, 0xE5EBE4) }
     /// Secondary toolbar and metadata copy; one step quieter than `text`.
-    var secondaryText: Color { text.opacity(0.62) }
-    var accent: Color { theme == .graphite ? adaptive(0x282828, 0xE5E5E5) : adaptive(0x315F49, 0xB8D9BF) }
+    var secondaryText: Color { text.opacity(0.72) }
+    var accent: Color { theme == .graphite ? adaptive(0x3A4A5C, 0xAEC3D6) : adaptive(0x315F49, 0xB8D9BF) }
     var selection: Color { theme == .graphite ? adaptive(0xE7E7E7, 0x333333) : adaptive(0xE6EEE5, 0x303F33) }
-    var border: Color { theme == .graphite ? adaptive(0xDEDEDE, 0x424242) : adaptive(0xD8E1D7, 0x405044) }
+    var border: Color { theme == .graphite ? adaptive(0xD5D5D8, 0x4A4A4A) : adaptive(0xCCD6CA, 0x4A5A4E) }
+    var hover: Color { selection.opacity(0.55) }
+    var pressed: Color { selection.opacity(0.9) }
+    var disabledText: Color { text.opacity(0.35) }
+    var focusRing: Color { accent.opacity(0.5) }
     // Graph colors distinguish kinds of evidence without tinting the workspace.
     var action: Color { adaptive(0x526B82, 0xA9BED1) }
     var outcome: Color { adaptive(0x826B52, 0xCDB99E) }
     // Status roles. Warnings are recoverable; danger marks failed writes or
-    // destructive results. Success follows the theme accent so completion never
-    // introduces an off-hue green.
+    // destructive results. Success is a fixed green so completion reads the same
+    // in either theme.
     var warning: Color { adaptive(0x9A5B13, 0xE8B15D) }
     var danger: Color { adaptive(0xB42318, 0xF97066) }
-    var success: Color { accent }
+    var success: Color { adaptive(0x2E7D52, 0x6FC08A) }
 
     func graphColor(_ lane: Int) -> Color { [text, accent, action, outcome][lane] }
 

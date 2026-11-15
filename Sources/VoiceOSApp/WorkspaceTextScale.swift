@@ -59,3 +59,17 @@ extension View {
         modifier(VOSFontModifier(size: size, weight: weight, design: design, digits: monospacedDigit))
     }
 }
+
+struct WorkspaceTextStyle {
+    let size: CGFloat
+    let weight: Font.Weight
+}
+
+enum WorkspaceText {
+    static let pageTitle = WorkspaceTextStyle(size: 28, weight: .semibold)
+    static let sectionTitle = WorkspaceTextStyle(size: 20, weight: .semibold)
+    static let rowTitle = WorkspaceTextStyle(size: 16, weight: .semibold)
+    static let body = WorkspaceTextStyle(size: 16, weight: .regular)
+    static let meta = WorkspaceTextStyle(size: 13, weight: .regular)
+    static let caption = WorkspaceTextStyle(size: 11, weight: .regular)
+}
