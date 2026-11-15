@@ -52,6 +52,7 @@ public struct ReminderFields: Codable, Sendable, Equatable {
     }
     public func validate() throws {
         try due.validate()
+        if case .none = due, !alerts.isEmpty { throw VoiceOSError("通知需要安排日期") }
         if let location {
             let name = location.title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { throw VoiceOSError("请填写地点名称") }
