@@ -10,7 +10,7 @@ enum WorkspaceErrorRetry {
 }
 
 enum WorkspaceRoute: Equatable {
-    case actions, search
+    case actions, search, settings
 }
 
 @MainActor
@@ -3165,6 +3165,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         try? opener.run()
     }
 
+    func openSettings() {
+        openMainWindow()
+        ControlCenter.primary?.pendingWorkspaceRoute = .settings
+    }
+
     private func rebuildTodayOverviewMenu(model: ControlCenter?) {
         guard let menu = statusItem?.menu, let clipboard = clipboardMenuItem else { return }
         for item in todayOverviewMenuItems { menu.removeItem(item) }
@@ -3246,6 +3251,9 @@ struct VoiceOSApp: App {
     @FocusedValue(\.voiceOSController) private var focusedModel
     var body: some Scene {
         Window("VoiceOS", id: "control-center") { WorkspaceView(model: model).onboarding(model: model) }
+            .commands {
+                CommandGroup(replacing: .appSettings) { Button("设置…") { delegate.openSettings() }.keyboardShortcut(",") }
+            }
         WindowGroup("独立资料库", id: "restored-library", for: String.self) { path in
             if let path = path.wrappedValue { RestoredLibraryView(path: path) }
         }
