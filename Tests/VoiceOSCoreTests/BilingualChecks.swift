@@ -60,6 +60,36 @@ final class BilingualChecks: XCTestCase {
         XCTAssertEqual(Bilingual.combine("", paragraphCount: 0), [])
     }
 
+    func testNextBatchContinuesPastParagraphCap() {
+        let text = (1...50).map { "第\($0)段" }.joined(separator: "\n")
+        let first = Bilingual.paragraphs(from: text, spans: [])
+        XCTAssertEqual(first.paragraphs.count, 40)
+        let consumed = first.paragraphs.reduce(0) { $0 + $1.text.unicodeScalars.count }
+        let next = Bilingual.nextBatch(from: text, spans: [], consumed: consumed)
+        XCTAssertEqual(next.paragraphs.map(\.text), (41...50).map { "第\($0)段" })
+        XCTAssertFalse(next.truncated)
+    }
+
+    func testNextBatchContinuesAfterCharacterCap() {
+        let line = String(repeating: "字", count: 800)
+        let text = Array(repeating: line, count: 10).joined(separator: "\n")
+        let first = Bilingual.paragraphs(from: text, spans: [])
+        let consumed = first.paragraphs.reduce(0) { $0 + $1.text.unicodeScalars.count }
+        XCTAssertEqual(consumed, 6000)
+        let next = Bilingual.nextBatch(from: text, spans: [], consumed: consumed)
+        XCTAssertEqual(next.paragraphs.map(\.text.count), [400, 800, 800])
+        XCTAssertFalse(next.truncated)
+    }
+
+    func testNextBatchPastEndIsEmpty() {
+        let text = "第一段\n\n第二段"
+        let first = Bilingual.paragraphs(from: text, spans: [])
+        let consumed = first.paragraphs.reduce(0) { $0 + $1.text.unicodeScalars.count }
+        let next = Bilingual.nextBatch(from: text, spans: [], consumed: consumed)
+        XCTAssertTrue(next.isEmpty)
+        XCTAssertFalse(next.truncated)
+    }
+
     func testPromptCarriesTargetAndNumberedParagraphs() {
         let prompt = Bilingual.requestPrompt(paragraphs: [BilingualParagraph(id: 0, text: "Hello"), BilingualParagraph(id: 1, text: "World")])
         XCTAssertTrue(prompt.contains("中文"))

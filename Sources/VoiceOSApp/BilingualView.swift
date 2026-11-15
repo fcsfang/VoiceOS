@@ -14,12 +14,19 @@ struct BilingualView: View {
     let translations: [String?]
     let phase: BilingualPhase
     let generate: () -> Void
+    let continueBatch: () -> Void
+    let retryParagraph: (BilingualParagraph) async -> Bool
+    let allowCloud: () -> Void
+    let correctTranscript: () -> Void
     let dismiss: () -> Void
+    @State private var retrying: Set<Int> = []
+    @State private var retryFailures: [Int: String] = [:]
 
-    private var blockedMessage: String? {
-        if source.localOnly { return "这份材料仅本机保存；允许云端处理后才能生成译文。" }
-        if source.needsTranscriptionReview { return "请先完成全文转写校正，再生成译文。" }
-        return nil
+    private var currentSource: SourceRecord { model.records.first { $0.id == source.id } ?? source }
+    private func sendPreview(_ plan: BilingualExcerpt) -> String {
+        let characters = plan.paragraphs.reduce(0) { $0 + $1.text.count }
+        let target = BilingualClient.configuredModelName.map { "已配置模型（" + $0 + "）" } ?? "已配置模型"
+        return "将发送前 \(plan.paragraphs.count) 段、约 \(characters) 字到" + target + "，可能产生费用。"
     }
 
     var body: some View {
@@ -37,6 +44,7 @@ struct BilingualView: View {
             Divider()
             content
         }.padding(24).frame(width: WorkspaceMetrics.modalMedium, height: 720)
+            .onChange(of: excerpt.paragraphs) { _, _ in retrying = []; retryFailures = [:] }
     }
 
     @ViewBuilder private var content: some View {
@@ -45,15 +53,25 @@ struct BilingualView: View {
                 Text("先在设置中选择文本模型").foregroundStyle(.secondary)
                 Button("配置文本模型…") { model.chooseTextModel() }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        } else if let blockedMessage {
-            Text(blockedMessage).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else if currentSource.localOnly {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("这份材料仅本机保存；允许云端处理后才能生成译文。").foregroundStyle(.secondary)
+                Button("允许云端处理", action: allowCloud).buttonStyle(.borderedProminent).disabled(model.changingPolicy)
+                Text("只改变这份文字的处理许可，原始录音仍仅本机。").font(.caption).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else if currentSource.needsTranscriptionReview {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("请先完成全文转写校正，再生成译文。").foregroundStyle(.secondary)
+                Button("去更正转写", action: correctTranscript)
+            }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
+            let plan = excerpt.isEmpty ? Bilingual.paragraphs(from: currentSource.transcript ?? "", spans: currentSource.spans) : excerpt
             switch phase {
             case .idle:
                 VStack(alignment: .leading, spacing: 12) {
                     Text("按需把原文分段翻译成中文；原文、资料库与其他内容不会改变。")
                         .foregroundStyle(.secondary)
+                    Text(sendPreview(plan)).font(.caption).foregroundStyle(.secondary)
                     Button("生成译文", action: generate).buttonStyle(.borderedProminent)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             case .loading:
@@ -67,21 +85,48 @@ struct BilingualView: View {
                     Button("重试", action: generate)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             case .ready:
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 22) {
-                        ForEach(excerpt.paragraphs) { paragraph in
-                            let translated = translations.indices.contains(paragraph.id) ? translations[paragraph.id] : nil
-                            VStack(alignment: .leading, spacing: 8) {
-                                Text(paragraph.text).vosFont(14).foregroundStyle(.secondary).textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Text(translated ?? "这段没有返回译文。").vosFont(16).lineSpacing(5).textSelection(.enabled)
-                                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 12) {
+                    if excerpt.truncated {
+                        Text(sendPreview(excerpt)).font(.caption).foregroundStyle(.secondary)
+                        Button("继续下一批", action: continueBatch).buttonStyle(.borderedProminent)
+                    }
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 22) {
+                            ForEach(excerpt.paragraphs) { paragraph in
+                                let translated = translations.indices.contains(paragraph.id) ? translations[paragraph.id] : nil
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(paragraph.text).vosFont(14).foregroundStyle(.secondary).textSelection(.enabled)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    if let translated {
+                                        Text(translated).vosFont(16).lineSpacing(5).textSelection(.enabled)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    } else {
+                                        Text("这段没有返回译文。").vosFont(16).foregroundStyle(.secondary)
+                                        HStack(spacing: 10) {
+                                            Button(retrying.contains(paragraph.id) ? "正在重试…" : "重试这一段") { retry(paragraph) }
+                                                .disabled(retrying.contains(paragraph.id))
+                                            if let failure = retryFailures[paragraph.id] {
+                                                Text(failure).font(.caption).foregroundStyle(palette.warning)
+                                            }
+                                        }
+                                    }
+                                }
+                                if paragraph.id != excerpt.paragraphs.last?.id { Divider() }
                             }
-                            if paragraph.id != excerpt.paragraphs.last?.id { Divider() }
-                        }
-                    }.padding(.vertical, 4)
+                        }.padding(.vertical, 4)
+                    }
                 }
             }
+        }
+    }
+    private func retry(_ paragraph: BilingualParagraph) {
+        guard !retrying.contains(paragraph.id) else { return }
+        retrying.insert(paragraph.id)
+        retryFailures[paragraph.id] = nil
+        Task {
+            let succeeded = await retryParagraph(paragraph)
+            retrying.remove(paragraph.id)
+            if !succeeded { retryFailures[paragraph.id] = "这一段仍没有拿到译文，可稍后再试。" }
         }
     }
 }
@@ -101,6 +146,12 @@ struct BilingualClient {
         apiKey = settings.1
         model = settings.2 ?? "gpt-6.1-sol"
         self.transport = transport
+    }
+
+    static var configuredModelName: String? {
+        guard let path = UserDefaults.standard.string(forKey: "voiceos.textModelConfigPath.v1"),
+              let loaded = try? settings(from: URL(fileURLWithPath: path)) else { return nil }
+        return loaded.2 ?? "gpt-6.1-sol"
     }
 
     func translate(_ paragraphs: [BilingualParagraph]) async throws -> [String?] {
