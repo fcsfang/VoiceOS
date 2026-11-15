@@ -64,7 +64,7 @@ final class RecurrenceChecks: XCTestCase {
     func testMigrationAddsRecurrenceAndEntityTables() async throws {
         let store = try await openStore()
         let db = await store.db
-        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], "60")
+        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], "61")
         for table in ["action_recurrence", "source_entities"] {
             XCTAssertEqual(try db.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [table]).count, 1)
         }
