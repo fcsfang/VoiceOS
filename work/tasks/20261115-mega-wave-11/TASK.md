@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-11
@@ -62,5 +62,7 @@ CREATE TABLE incremental_reading (
 实机：锁屏不可得；按天读入口、今日队列与块翻页由存储测试与代码审查覆盖。
 
 ## 链接
+
+- 2026-11-15 已合并为 `6f588a5`（PR #175）。
 
 - `docs/product/reference-products.md` 第 9.3 节
