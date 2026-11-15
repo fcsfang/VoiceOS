@@ -75,6 +75,7 @@ struct WorkspaceSourceView: View {
     @State private var loadedDiscussions: [ConversationRecord] = []
     @State private var pauseExplanation = "正在读取具体原因…"
     @State private var showingOriginal = false
+    @State private var showingIncrementalReading = false
     @State private var pendingRejection: CandidateClaim?
     @State private var confirmingRejection = false
     @State private var error=""
@@ -254,6 +255,8 @@ struct WorkspaceSourceView: View {
                         Button(attachmentMime == "application/pdf" ? "查看原件" : "查看原图",systemImage:attachmentMime == "application/pdf" ? "doc.richtext" : "photo") { if !NSWorkspace.shared.open(attachmentURL) { error="无法打开原件" } }
                     }
                     Spacer()
+                    Button("按天读",systemImage:"book") { showingIncrementalReading=true }
+                        .disabled(source.transcript == nil)
                     Button("译文对照",systemImage:"character.bubble") { showingBilingual=true }
                         .disabled(source.transcript == nil)
                     Button("从这里启动",systemImage:"arrow.up.forward") { openInitiation(source.id) }
@@ -568,6 +571,9 @@ struct WorkspaceSourceView: View {
                 ScrollView { Text(source.transcript ?? "暂无文字").textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
                 HStack { Spacer();Button("关闭") { showingOriginal=false } }
             }.padding(24).frame(width:650,height:520)
+        }
+        .sheet(isPresented:$showingIncrementalReading) {
+            IncrementalReadingView(model:model,source:source) { showingIncrementalReading=false }
         }
         .alert("停止使用这条理解？", isPresented:$confirmingRejection, presenting:pendingRejection) { claim in
             Button("停止使用", role:.destructive) { Task { _=await model.review(claim, action:.reject) } }

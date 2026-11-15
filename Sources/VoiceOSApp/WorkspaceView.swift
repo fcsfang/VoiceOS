@@ -26,6 +26,12 @@ private struct WorkspaceReminderSettingsTarget: Identifiable {
     let snapshot: ReminderSnapshot
     var id: String { action.id }
 }
+private struct TodayReadingItem: Identifiable {
+    let plan: IncrementalPlan
+    let source: SourceRecord
+    let chunks: Int
+    var id: String { plan.sourceID }
+}
 struct WorkspaceHeading: View {
     let eyebrow: String
     let title: String
@@ -130,6 +136,7 @@ struct WorkspaceView: View {
     @State private var actionKeyboardHighlightID: String?
     @FocusState private var actionListFocused: Bool
     @State private var readingStates: [String: SourceReadingState] = [:]
+    @State private var readingPlans: [IncrementalPlan] = []
     @State private var selectingActions = false
     @State private var selectedActionIDs: Set<String> = []
     @State private var pendingBatchState: LocalActionState?
@@ -635,6 +642,13 @@ struct WorkspaceView: View {
                 WorkspaceHeading(eyebrow:"",title:"材料",subtitle:"\(rows.count) 份")
                 Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.materials,filter:materialFilter) }.buttonStyle(.bordered)
             }
+            if materialFilter == "日常材料", !todayReading.isEmpty {
+                WorkspaceSection(title:"今日阅读",subtitle:"上次停下的地方，接着读。",icon:"book",count:todayReading.count) {
+                    ForEach(todayReading) { item in
+                        WorkspaceRow(title:item.source.displayTitle,subtitle:chunkLabel(item),icon:"book") { go(.source(item.id)) }
+                    }
+                }
+            }
             WorkspaceTabs(selection:$materialFilter,titles:SavedViewPage.materials.filters)
             if ["已归档","回收站"].contains(materialFilter) {
                 Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留，不用于当前理解；恢复后仅本机保存。Apple 提醒事项未被删除或取消。").font(.callout).foregroundStyle(.secondary)
@@ -667,7 +681,7 @@ struct WorkspaceView: View {
                     if source.id != rows.last?.id { Divider() }
                 }
             }
-        }
+        }.task { await loadReadingPlans() }
     }
     private var themes: some View {
         let catalog = recordCatalog
@@ -1010,6 +1024,23 @@ struct WorkspaceView: View {
         if let expression=source.recordingExpression(in:Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })),expression.sourceIDs.count > 1,
            let index=expression.sourceIDs.firstIndex(of:id) { return expression.title+" / 第 \(index+1) 段原文" }
         return source.displayTitle
+    }
+    private var todayReading: [TodayReadingItem] {
+        let catalog=recordCatalog
+        let items=readingPlans.compactMap { plan -> TodayReadingItem? in
+            guard let source=catalog[plan.sourceID],!source.isArchived,!source.isTrashed else { return nil }
+            if let updated=ConversationReflectionFocus.date(plan.updatedAt),Calendar.current.isDateInToday(updated) { return nil }
+            return TodayReadingItem(plan:plan,source:source,chunks:ReadingChunks.split(text:source.transcript ?? "",spans:source.spans,targetSize:plan.chunkSize).count)
+        }
+        return Array(items.sorted { (ConversationReflectionFocus.date($0.plan.updatedAt) ?? .distantPast) > (ConversationReflectionFocus.date($1.plan.updatedAt) ?? .distantPast) }.prefix(3))
+    }
+    private func chunkLabel(_ item:TodayReadingItem) -> String {
+        guard item.chunks > 0 else { return "第 \(item.plan.currentChunk + 1) 块" }
+        return "第 \(min(item.plan.currentChunk + 1, item.chunks))/\(item.chunks) 块"
+    }
+    private func loadReadingPlans() async {
+        guard let store=model.store else { return }
+        readingPlans=(try? await store.incrementalPlans()) ?? []
     }
     private var recordCatalog: [String:SourceRecord] { Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) }) }
     private func sourceRow(_ source:SourceRecord,catalog:[String:SourceRecord]) -> some View {
