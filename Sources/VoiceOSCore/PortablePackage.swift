@@ -533,8 +533,8 @@ extension VoiceOSStore {
             let appearances = try db.query("SELECT * FROM panorama_theme_appearances WHERE attempt_id=? AND phase=?", [attempt, phase])
             guard appearances.count == count else { throw VoiceOSError("全景主题计数与出现记录不一致") }
             for row in appearances {
-                guard let themeID = row["theme_id"], !themeID.isEmpty, themeID.utf8.count <= 64,
-                      themeID.unicodeScalars.allSatisfy({ (48...57).contains($0.value) || (65...90).contains($0.value) || (97...122).contains($0.value) || $0.value == 45 }) else {
+                guard let themeID = row["theme_id"], !themeID.isEmpty, themeID.utf8.count <= 128,
+                      themeID.unicodeScalars.allSatisfy({ !CharacterSet.whitespacesAndNewlines.contains($0) && !CharacterSet.controlCharacters.contains($0) }) else {
                     throw VoiceOSError("全景主题身份格式错误")
                 }
                 guard let claimIDsJSON = row["claim_ids_json"], let sourceIDsJSON = row["source_ids_json"], let questionTitlesJSON = row["question_titles_json"],
