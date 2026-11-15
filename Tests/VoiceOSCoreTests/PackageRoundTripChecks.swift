@@ -210,6 +210,69 @@ final class PackageRoundTripChecks: XCTestCase {
         XCTAssertEqual(try oldestDB.query("SELECT count(*) AS n FROM task_initiations").first?["n"], "0")
     }
 
+    func testRestoreRejectsCorruptPanoramaLedgerJSONAndCleansUp() async throws {
+        let store = try await openStore()
+        _ = try await makeFixture(store)
+        _ = try await insertPanorama(store)
+        let db = await store.db
+        try db.execute("UPDATE panorama_theme_appearances SET claim_ids_json='[broken'")
+        let package = base.appendingPathComponent("package-bad-json")
+        try await store.exportPackage(to: package, includeMedia: true)
+        let restoredRoot = base.appendingPathComponent("restored-bad-json")
+        do {
+            try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
+            XCTFail("全景账本 JSON 损坏时必须拒绝恢复")
+        } catch {
+            XCTAssertEqual((error as? VoiceOSError)?.message, "全景主题记录 JSON 无效")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: restoredRoot.path))
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: base.path).filter { $0.hasPrefix(".voiceos-restore-") }
+        XCTAssertTrue(leftovers.isEmpty)
+    }
+
+    func testRestoreTrimsDanglingPanoramaReferences() async throws {
+        let store = try await openStore()
+        let fixture = try await makeFixture(store)
+        let panorama = try await insertPanorama(store)
+        let db = await store.db
+        try db.execute("UPDATE panorama_theme_appearances SET claim_ids_json=?,source_ids_json=?",
+                       ["[\"\(fixture.claimID)\",\"\(UUID().uuidString)\"]", "[\"\(fixture.sourceID)\",\"\(UUID().uuidString)\"]"])
+        let package = base.appendingPathComponent("package-dangling")
+        try await store.exportPackage(to: package, includeMedia: true)
+        let restoredRoot = base.appendingPathComponent("restored-dangling")
+        try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
+        let restored = try await openStore(restoredRoot)
+        let restoredDB = await restored.db
+        let row = try XCTUnwrap(restoredDB.query("SELECT claim_ids_json,source_ids_json,question_titles_json FROM panorama_theme_appearances").first)
+        let claimsJSON = try XCTUnwrap(row["claim_ids_json"]), sourcesJSON = try XCTUnwrap(row["source_ids_json"]), titlesJSON = try XCTUnwrap(row["question_titles_json"])
+        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(claimsJSON.utf8)), [fixture.claimID])
+        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(sourcesJSON.utf8)), [fixture.sourceID])
+        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(titlesJSON.utf8)), [])
+        let themeMap = try await restored.latestPanoramaThemeMap()
+        XCTAssertEqual(themeMap?.references.first?.claimIDs, Set([fixture.claimID]))
+        XCTAssertEqual(themeMap?.references.first?.sourceIDs, Set([fixture.sourceID]))
+        let history = try await restored.panoramaThemeHistory()
+        XCTAssertEqual(history[panorama.themeID]?.appearanceCount, 1)
+    }
+
+    func testRestoreRejectsPanoramaThemeCountMismatch() async throws {
+        let store = try await openStore()
+        _ = try await makeFixture(store)
+        _ = try await insertPanorama(store)
+        let db = await store.db
+        try db.execute("UPDATE panorama_theme_batches SET theme_count=2")
+        let package = base.appendingPathComponent("package-count")
+        try await store.exportPackage(to: package, includeMedia: true)
+        let restoredRoot = base.appendingPathComponent("restored-count")
+        do {
+            try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
+            XCTFail("主题计数与出现记录不一致时必须拒绝恢复")
+        } catch {
+            XCTAssertEqual((error as? VoiceOSError)?.message, "全景主题计数与出现记录不一致")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: restoredRoot.path))
+    }
+
     func testVersion48PackageStillRestoresAndLeavesNewTablesEmpty() async throws {
         let store = try await openStore()
         let fixture = try await makeFixture(store)
