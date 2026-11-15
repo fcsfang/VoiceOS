@@ -21,6 +21,16 @@ public actor VoiceOSStore {
     var activeReminderLinks: Set<String> = []
     var activeEnglishAttempts: Set<String> = []
     var activePanoramaDigests: Set<String> = []
+    var contextValidationSuspended = false
+    var frozenContextCount = 0
+    func withoutContextValidation<T>(_ body: () throws -> T) rethrows -> T {
+        guard !contextValidationSuspended else { return try body() }
+        contextValidationSuspended = true
+        defer { contextValidationSuspended = false }
+        return try body()
+    }
+    var panoramaRetryDelay: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    public func setPanoramaRetryDelay(_ delay: @escaping @Sendable (Duration) async throws -> Void) { panoramaRetryDelay = delay }
     var assistantExecutionActive = false
     var assistantDiscoveryActive = false
     var activeAssistantRequests: [String: @Sendable () -> Void] = [:]
@@ -39,6 +49,7 @@ public actor VoiceOSStore {
     }
     public func recover() async throws {
         guard !ready, activeImports.isEmpty else { return }
+        StartupTrace.mark("recover.start")
         try db.execute("UPDATE reminder_links SET state='unknown' WHERE state='reserved'")
         try db.execute("UPDATE reminder_schedule_operations SET state='blocked',reason='写前进程退出；未派发，不自动继续' WHERE state='reserved'")
         try db.execute("UPDATE reminder_compensation_operations SET state='blocked',reason='补偿写前进程退出，未派发且不自动续写' WHERE state='reserved'")
@@ -51,28 +62,33 @@ public actor VoiceOSStore {
         try db.execute("UPDATE expression_association_attempts SET state='unknown',error='进程退出前关联结果未登记；不自动重发' WHERE state='reserved'")
         try db.execute("UPDATE assistant_executions SET state='failed',error='执行因应用退出中断，可手动重试' WHERE state='running'")
         try db.execute("UPDATE assistant_assessments SET state='failed',error='评估因应用退出中断' WHERE state='running'")
+        try StartupTrace.measure("recover.flags") {
         try db.execute("UPDATE panorama_steps SET state='unknown',error='进程退出前步骤结果未登记，不自动重发' WHERE state='running'")
         try db.execute("UPDATE panorama_attempts SET state='unknown',error='进程退出前结果未登记，不自动重发' WHERE state='running'")
-        try recoverRecordingFollowups()
-        try recoverKnowledgeReviews()
-        for row in try db.query("SELECT * FROM sources ORDER BY created_at") {
-            let id = row["id"]!
-            if row["input_fingerprint"] == "microphone-v1:"+id, row["expected_bytes"] == "0" {
+        }
+        try StartupTrace.measure("recover.knowledgeReviews") { try recoverKnowledgeReviews() }
+        let sourcesToken = StartupTrace.begin("recover.sources")
+        // Saved sources need metadata only. Selecting * here read every
+        // follow-up archive, which reaches tens of megabytes on a large library.
+        for slim in try db.query("SELECT id,input_fingerprint,expected_bytes,state,relative_path FROM sources ORDER BY created_at") {
+            let id = slim["id"]!
+            if slim["input_fingerprint"] == "microphone-v1:"+id, slim["expected_bytes"] == "0" {
                 try interruptDictation(sourceID:id); continue
             }
-            let state = row["state"]!
+            let state = slim["state"]!
             if ["interrupted", "quarantined", "reference_only", "trashed"].contains(state) { continue }
-            let final = try assetURL(relativePath: row["relative_path"]!)
+            let final = try assetURL(relativePath: slim["relative_path"]!)
             if state == "saved" {
                 guard let attributes = try? FileManager.default.attributesOfItem(atPath: final.path),
                       let size = attributes[.size] as? NSNumber else {
                     try quarantine(id, "受管原件缺失"); continue
                 }
-                if size.int64Value != Int64(row["expected_bytes"]!) {
+                if size.int64Value != Int64(slim["expected_bytes"]!) {
                     try db.execute("UPDATE sources SET error=? WHERE id=?", [Self.verificationFailureMessage, id])
                 }
                 continue
             }
+            guard let row = try db.query("SELECT * FROM sources WHERE id=?", [id]).first else { continue }
             let staging = root.appendingPathComponent("staging/\(row["asset_id"]!).part.\(final.pathExtension)")
             let file = FileManager.default.fileExists(atPath: final.path) ? final : staging
             guard FileManager.default.fileExists(atPath: file.path) else {
@@ -96,6 +112,8 @@ public actor VoiceOSStore {
                 else { try quarantine(id, "无法验证媒体原件，请保留副本并检查文件") }
             }
         }
+        StartupTrace.end(sourcesToken)
+        try StartupTrace.measure("recover.validators") {
         try db.execute("UPDATE claims SET validity='frozen' WHERE attempt_id IN (SELECT a.id FROM model_attempts a JOIN contexts x ON x.id=a.context_id WHERE x.state='stale')")
         try Self.validateStoredRelevance(db)
         try Self.validateStoredCognitiveFeedback(db)
@@ -132,8 +150,10 @@ public actor VoiceOSStore {
         try Self.validateReminderScheduleGrants(db)
         try Self.validateReminderScheduleOperations(db)
         try Self.validateReminderCompensations(db)
+        }
         ready = true
-        try backfillPanoramaThemeLedger()
+        try StartupTrace.measure("recover.backfillPanorama") { try backfillPanoramaThemeLedger() }
+        StartupTrace.mark("recover.end")
     }
     @discardableResult
     public func importFile(_ input: URL, commandID: String = UUID().uuidString) async throws -> String {

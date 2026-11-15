@@ -22,13 +22,13 @@ struct RecentContentHome: View {
 
     var body: some View {
         if items.isEmpty {
-            empty
+            empty.onAppear { StartupTrace.mark("home.appear.empty") }
         } else {
             HStack(spacing: 0) {
                 timeline.frame(width: 264)
                 Rectangle().fill(palette.border).frame(width: 1)
                 reader
-            }
+            }.onAppear { StartupTrace.mark("home.appear items=\(items.count)") }
         }
     }
 
