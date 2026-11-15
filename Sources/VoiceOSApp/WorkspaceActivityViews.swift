@@ -195,8 +195,16 @@ struct WorkspaceTaskView: View {
     }
     private var executions: [AssistantExecutionRecord] { model.assistantExecutions.filter { $0.actionID == action.id } }
     private var current: Bool { action.validity == "current" && action.state != "dismissed" }
+    private var eyebrow: String {
+        if current {
+            if action.state == "completed" { return "行动 · 已完成" }
+            return action.kind == "task" ? "行动 · 待跟进" : "问题与目标"
+        }
+        if action.kind != "task", action.validity == "current" { return "问题与目标 · 已放下" }
+        return model.workspaceActionStatus(action)
+    }
     private var showsClarification: Bool {
-        guard action.isExtracted, action.state == "open", action.validity == "current",
+        guard action.isExtracted, action.kind == "task", action.state == "open", action.validity == "current",
               model.actionClarifications[action.id] == nil,
               let created = ConversationReflectionFocus.date(action.createdAt),
               created >= Date().addingTimeInterval(-14 * 24 * 60 * 60) else { return false }
@@ -238,7 +246,7 @@ struct WorkspaceTaskView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
-                WorkspaceHeading(eyebrow: current ? (action.state == "completed" ? "行动 · 已完成" : action.kind == "task" ? "行动 · 待跟进" : "问题与目标") : model.workspaceActionStatus(action), title: action.title)
+                WorkspaceHeading(eyebrow: eyebrow, title: action.title)
                 if let recurrence {
                     HStack(spacing: 12) {
                         Label("重复 · " + recurrence.display, systemImage: "repeat").vosFont(WorkspaceText.meta)
@@ -331,6 +339,11 @@ struct WorkspaceTaskView: View {
                             Button("改天") { openReminderSettings() }.disabled(model.savingAction || model.remindersBusy)
                             Button("不再跟进", role: .destructive) { confirmingDismiss = true }.disabled(model.savingAction)
                         }
+                    } else if action.canPromoteToTask {
+                        Button("转为待办") { promote() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(model.savingAction)
+                            .accessibilityLabel("转为待办：" + action.title)
                     } else if action.validity == "current", action.state == "dismissed" {
                         Button("重新跟进") { confirmingReopen = true }.buttonStyle(.borderedProminent).disabled(model.savingAction)
                             .alert("重新跟进这条行动？", isPresented: $confirmingReopen) {
@@ -584,6 +597,9 @@ struct WorkspaceTaskView: View {
     }
     private func clarify(_ decision: ActionClarificationDecision) {
         Task { if await model.clarifyAction(action, decision: decision) { error = "" } else { error = model.status } }
+    }
+    private func promote() {
+        Task { if await model.promoteAction(action) { error = "" } else { error = model.status.isEmpty ? "未能转为待办，请稍后重试。" : model.status } }
     }
     private func saveReplacement(_ claim: CandidateClaim) {
         guard let store=model.store else { return }

@@ -364,6 +364,7 @@ extension VoiceOSStore {
         try validateStoredUserExpressions(db)
         try validateStoredActionFeedback(db)
         let clarifiedOpportunities = try Self.clarifiedOpportunityActionIDs(db)
+        let promotedActions = try Self.promotedActionIDs(db)
         for claim in try db.query("SELECT * FROM claims WHERE action_json IS NOT NULL") {
             let proposal = try JSONDecoder().decode(ExtractedAction.self, from: Data(claim["action_json"]!.utf8))
             let command = "extracted:" + claim["attempt_id"]! + ":" + claim["ordinal"]!
@@ -372,7 +373,8 @@ extension VoiceOSStore {
             let history=try validatedExpressionHistory(db,action:action)
             let origin=history.first
             let clarified = clarifiedOpportunities.contains(action["id"]!)
-            let effectiveKind = clarified ? proposal.kind.rawValue : action["kind"]
+            let kindOverride = clarified || promotedActions.contains(action["id"]!)
+            let effectiveKind = kindOverride ? proposal.kind.rawValue : action["kind"]
             let effectiveActor = clarified ? (proposal.kind == .aiSuggestion ? "ai" : "user") : action["intent_actor"]
             guard (origin?.fromClaimID ?? action["claim_id"]) == claim["id"],
                   (origin?.fromTitle ?? action["title"]) == proposal.title,(origin?.fromKind ?? effectiveKind) == proposal.kind.rawValue,

@@ -122,6 +122,10 @@ extension VoiceOSStore {
         ids.formUnion(try db.query("SELECT action_id FROM action_revisions WHERE command_id LIKE 'clarify:%' AND note='澄清为问题与目标'").compactMap { $0["action_id"] })
         return ids
     }
+    /// Kind overrides the user made in place; the claim keeps its extracted kind.
+    static func promotedActionIDs(_ db: Database) throws -> Set<String> {
+        Set(try db.query("SELECT action_id FROM action_revisions WHERE command_id LIKE 'promote:%' AND note='转为待办'").compactMap { $0["action_id"] })
+    }
     /// One additive clarification per extracted action. The receipt is the
     /// idempotency boundary; opportunity and not also append a revision so the
     /// action version chain stays complete.
@@ -160,6 +164,31 @@ extension VoiceOSStore {
         let bumped = decision == .not || (decision == .opportunity && action.kind != "opportunity")
         return bumped ? expectedVersion + 1 : expectedVersion
     }
+    /// One-way user promotion. The revision is the receipt, so a repeat with the
+    /// same command returns the same version without writing again.
+    @discardableResult
+    public func promoteAction(actionID: String, expectedVersion: Int, commandID: String = UUID().uuidString) throws -> Int {
+        let note = "转为待办"
+        let revisionCommand = "promote:" + commandID
+        let hash = try Self.actionHash([actionID,String(expectedVersion),note])
+        if let receipt = try db.query("SELECT version,input_fingerprint FROM action_revisions WHERE command_id=?", [revisionCommand]).first {
+            guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一提升命令不能更换行动或内容") }
+            return Int(receipt["version"]!)!
+        }
+        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard action.kind == "opportunity" else { throw VoiceOSError("只有问题与目标可以转为待办") }
+        guard action.state == "open" else { throw VoiceOSError("只有未完成的问题与目标可以转为待办") }
+        guard action.validity == "current" else { throw VoiceOSError("已失效的问题与目标不能转为待办") }
+        guard action.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
+        let next = expectedVersion + 1
+        try db.transaction {
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'open',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),note,revisionCommand,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("UPDATE actions SET kind='task',intent_actor='user',version=? WHERE id=?", [String(next),actionID])
+            try checkpoint(.actionStateUncommitted)
+        }
+        try checkpoint(.actionStateCommitted)
+        return next
+    }
     public func actionClarifications() throws -> [String: String] {
         Dictionary(uniqueKeysWithValues: try db.query("SELECT action_id,decision FROM action_clarifications").map { ($0["action_id"]!, $0["decision"]!) })
     }
@@ -189,10 +218,14 @@ extension VoiceOSStore {
             var state = "open"
             for (index, revision) in revisions.enumerated() {
                 let kindClarification = revision["state"] == state && revision["command_id"]?.hasPrefix("clarify:") == true
-                guard revision["version"] == String(index+2), revision["from_version"] == String(index+1), let next = revision["state"], next != state || kindClarification,
+                let kindPromotion = revision["state"] == state && revision["command_id"]?.hasPrefix("promote:") == true
+                guard revision["version"] == String(index+2), revision["from_version"] == String(index+1), let next = revision["state"], next != state || kindClarification || kindPromotion,
                       next != "completed" || action["kind"] == "task", (revision["note"]?.unicodeScalars.count ?? 2001) <= 2000 else { throw VoiceOSError("迁移行动状态链不一致") }
                 if kindClarification, revision["note"] != "澄清为问题与目标" {
                     throw VoiceOSError("行动版本升级缺少澄清依据")
+                }
+                if kindPromotion, revision["note"] != "转为待办" {
+                    throw VoiceOSError("行动版本升级缺少提升依据")
                 }
                 state = next
             }

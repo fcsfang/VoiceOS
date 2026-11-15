@@ -2885,6 +2885,18 @@ final class ControlCenter: ObservableObject {
         await refresh(); await queueActionFollowups([action.id])
         return receipt
     }
+    func promoteAction(_ action: ActionRecord) async -> Bool {
+        guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            _ = try await store.promoteAction(actionID: action.id, expectedVersion: action.version,
+                                              commandID: "workspace-promote:" + action.id + ":" + String(action.version))
+            await refresh()
+            guard actionRecords.first(where: { $0.id == action.id })?.kind == "task" else { throw VoiceOSError("转为待办未能保存，请重试") }
+            status = "已转为待办"
+            return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
+    }
     func clarifyAction(_ action: ActionRecord, decision: ActionClarificationDecision) async -> Bool {
         guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
         savingAction = true; defer { savingAction = false }
