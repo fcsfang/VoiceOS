@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: main
@@ -31,7 +31,9 @@ Obsidian、Roam、Zettelkasten 与 SiYuan（用户在用）。开放问题作为
 
 ## 结果
 
-（待填）
+三份报告完成：A1（GTD、OmniFocus、Things，官方商店与 OmniFocus 手册原文）、A2（Todoist、Linear、Notion、Apple Reminders 官方文档）、A3（Obsidian、Logseq、Zettelkasten、SiYuan、Matuschak 问题队列）。综合结论写入 `docs/product/action-model-research.md`：结果承载动作、结果可完成、停滞可查询、将来也许独立、澄清放状态、问题不建对象。决定采用 `parent_id` 承载目标与下一步，存量 197 条机会由用户分批澄清，不自动迁移。
+
+取不到的：GTD 主站 403（用官方商店与伙伴页替代）、Roam 官方文档客户端渲染不可达、Todoist 旧帮助 URL 改版。
 
 ## 链接
 
