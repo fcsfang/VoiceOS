@@ -32,6 +32,16 @@ private struct TodayReadingItem: Identifiable {
     let chunks: Int
     var id: String { plan.sourceID }
 }
+private struct MaterialDayGroup: Identifiable {
+    let id: Date
+    let label: String
+    let sources: [SourceRecord]
+}
+private struct ActionRowDetail {
+    var meta = ""
+    var status = ""
+    var statusColor: Color?
+}
 struct WorkspaceHeading: View {
     let eyebrow: String
     let title: String
@@ -73,12 +83,18 @@ fileprivate func displayTitle(_ raw:String) -> String {
     return text
 }
 struct WorkspaceRow: View {
+    enum TrailingStyle {
+        case secondary
+        case status(Color)
+        case link
+    }
     @Environment(\.workspacePalette) private var palette
     @State private var hovered = false
     let title: String
     let subtitle: String
     var icon: String = "doc.text"
     var trailing: String = ""
+    var trailingStyle: TrailingStyle = .secondary
     let open: () -> Void
     var body: some View {
         Button(action:open) {
@@ -91,12 +107,25 @@ struct WorkspaceRow: View {
                     if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3).lineLimit(2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
                 }
                 Spacer(minLength:8)
-                if !trailing.isEmpty { Text(trailing).vosFont(12, weight: .medium).foregroundStyle(.secondary).padding(.top,3) }
+                if !trailing.isEmpty { trailingLabel.padding(.top,3) }
             }.padding(.vertical,10).padding(.horizontal,10).contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 .background(hovered ? palette.selection.opacity(0.5) : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 .accessibilityElement(children:.combine)
         }.buttonStyle(.plain).onHover { hovered=$0 }
             .accessibilityLabel(subtitle.isEmpty ? title : title + " · " + subtitle)
+    }
+    @ViewBuilder private var trailingLabel: some View {
+        switch trailingStyle {
+        case .secondary:
+            Text(trailing).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+        case .status(let color):
+            Text(trailing).vosFont(WorkspaceText.meta).foregroundStyle(color)
+        case .link:
+            HStack(spacing:3) {
+                Text(trailing).vosFont(WorkspaceText.meta)
+                Image(systemName:"chevron.right").vosFont(9, weight:.semibold)
+            }.foregroundStyle(palette.accent)
+        }
     }
 }
 struct WorkspaceView: View {
@@ -695,6 +724,26 @@ struct WorkspaceView: View {
         }
         return entries.sorted { $0.1 > $1.1 }.map(\.0)
     }
+    private func materialDayGroups(_ sources: [SourceRecord]) -> [MaterialDayGroup] {
+        let calendar = Calendar.current
+        var order: [Date] = []
+        var buckets: [Date: [SourceRecord]] = [:]
+        for source in sources {
+            let day = calendar.startOfDay(for: source.createdAt)
+            if buckets[day] == nil { order.append(day) }
+            buckets[day, default: []].append(source)
+        }
+        return order.map { MaterialDayGroup(id: $0, label: materialDayLabel($0), sources: buckets[$0] ?? []) }
+    }
+    private func materialDayLabel(_ date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "今天" }
+        if calendar.isDateInYesterday(date) { return "昨天" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = calendar.isDate(date, equalTo: Date(), toGranularity: .year) ? "M月d日" : "yyyy年M月d日"
+        return formatter.string(from: date)
+    }
     private func contextSourceID(_ source:SourceRecord,catalog:[String:SourceRecord]) -> String? {
         guard let pair=source.presentation?.recordingContext,pair.personalSourceID == source.id,
               let external=catalog[pair.externalSourceID],!source.localOnly,!external.localOnly,
@@ -707,20 +756,27 @@ struct WorkspaceView: View {
         let rows = readingMaterials
         let catalog = recordCatalog
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
-            HStack(alignment:.top) {
-                WorkspaceHeading(eyebrow:"",title:"材料",subtitle:"\(rows.count) 份")
-                Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.materials,filter:materialFilter) }.buttonStyle(.bordered)
+            HStack(alignment:.top,spacing:12) {
+                WorkspaceHeading(eyebrow:"",title:"材料")
+                Text("\(rows.count) 份").vosFont(WorkspaceText.caption.size, monospacedDigit: true)
+                    .foregroundStyle(palette.tertiaryText)
+                    .padding(.top,10)
+                    .accessibilityLabel("\(rows.count) 份材料")
+                WorkspaceHeaderMenu {
+                    Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.materials,filter:materialFilter) }
+                }
             }
             if materialFilter == "日常材料", !todayReading.isEmpty {
-                WorkspaceSection(title:"今日阅读",subtitle:"上次停下的地方，接着读。",icon:"book",count:todayReading.count) {
+                WorkspaceListSection(title:"今日阅读",subtitle:"上次停下的地方，接着读。",count:todayReading.count) {
                     ForEach(todayReading) { item in
                         WorkspaceRow(title:displayTitle(item.source.displayTitle),subtitle:chunkLabel(item),icon:"book") { go(.source(item.id)) }
+                        if item.id != todayReading.last?.id { WorkspaceListDivider() }
                     }
                 }
             }
-            WorkspaceTabs(selection:$materialFilter,titles:SavedViewPage.materials.filters)
+            WorkspaceTabs(selection:$materialFilter,titles:SavedViewPage.materials.filters,style:.filters)
             if ["已归档","回收站"].contains(materialFilter) {
-                Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留，不用于当前理解；恢复后仅本机保存。Apple 提醒事项未被删除或取消。").font(.callout).foregroundStyle(.secondary)
+                Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留，不用于当前理解；恢复后仅本机保存。Apple 提醒事项未被删除或取消。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             if rows.isEmpty {
                 if materialFilter == "日常材料" {
@@ -741,13 +797,20 @@ struct WorkspaceView: View {
                     }
                 }
             } else {
-                ForEach(rows) { source in
-                    MaterialMenuRow {
-                        MaterialManagementControls(model:model,source:source,style:.compact)
-                    } row: {
-                        sourceRow(source,catalog:catalog,highlighted:materialKeyboardFocus.id == source.id).frame(maxWidth:.infinity,alignment:.leading)
-                    }.id(source.id)
-                    if source.id != rows.last?.id { Divider() }
+                LazyVStack(alignment:.leading,spacing:16) {
+                    ForEach(materialDayGroups(rows)) { group in
+                        VStack(alignment:.leading,spacing:0) {
+                            WorkspaceListGroupHeader(title:group.label)
+                            ForEach(group.sources) { source in
+                                MaterialMenuRow {
+                                    MaterialManagementControls(model:model,source:source,style:.compact)
+                                } row: {
+                                    sourceRow(source,catalog:catalog,highlighted:materialKeyboardFocus.id == source.id).frame(maxWidth:.infinity,alignment:.leading)
+                                }.id(source.id)
+                                if source.id != group.sources.last?.id { WorkspaceListDivider() }
+                            }
+                        }
+                    }
                 }
             }
         }.task { await loadReadingPlans() }
@@ -841,44 +904,33 @@ struct WorkspaceView: View {
     }
     private var actions: some View {
         LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
-            HStack(alignment:.top) {
+            HStack(alignment:.top,spacing:12) {
                 WorkspaceHeading(eyebrow:"",title:"行动")
-                if ["全部","我的待办"].contains(actionFilter) {
-                    Button(selectingActions ? "取消选择" : "选择") { if selectingActions { exitActionSelection() } else { selectingActions=true } }.buttonStyle(.bordered).disabled(batchRunning)
-                }
                 if actionFilter == "我的待办" {
-                    Button("安排今天",systemImage:"sun.max") { beginPlanningToday() }.buttonStyle(.bordered)
+                    Button { beginPlanningToday() } label: {
+                        HStack(spacing:6) {
+                            Image(systemName:"sun.max").vosFont(12, weight:.medium)
+                            Text("安排今天").vosFont(13, weight:.medium)
+                        }.foregroundStyle(palette.canvas).padding(.horizontal,12).frame(height:30)
+                            .background(palette.accent,in:Capsule()).contentShape(Capsule())
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel("安排今天").help("从即将与随时里挑最多 3 条加入专注")
                 }
-                Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.actions,filter:actionFilter) }.buttonStyle(.bordered)
-                Button("每周回顾",systemImage:"calendar.badge.clock") { showingWeeklyReview=true }.buttonStyle(.bordered)
-            }
-            WorkspaceTabs(selection:$actionFilter,titles:SavedViewPage.actions.filters)
-            if !model.visibleOutcomeFollowups.isEmpty {
-                WorkspaceSection(title:"完成后的结果",icon:"checkmark.seal",count:model.visibleOutcomeFollowups.count) {
-                    HStack(spacing:12) {
-                        Button("记录结果…") { showingOutcome=true }.buttonStyle(.borderedProminent)
-                        Button("显示已跳过") { model.showSkippedOutcomes() }
-                        Spacer(minLength:0)
-                    }.padding(.vertical,8)
-                }
-            }
-            if ["全部","AI 助理"].contains(actionFilter) {
-                let executions=model.assistantExecutions.filter { $0.state != "cancelled" }
-                if !executions.isEmpty {
-                    WorkspaceSection(title:"AI 助理的工作",icon:"sparkles",count:executions.count) {
-                        ForEach(executions) { execution in
-                            WorkspaceRow(title:execution.title,subtitle:assistantExecutionLabel(execution),icon:execution.state == "completed" ? "doc.text" : "sparkles",trailing:execution.state == "completed" ? "阅读结果" : "查看进度") { go(.delivery(execution.id)) }
-                            if execution.id != executions.last?.id { Divider() }
-                        }
+                WorkspaceHeaderMenu {
+                    if ["全部","我的待办"].contains(actionFilter) {
+                        Button(selectingActions ? "取消选择" : "选择") { if selectingActions { exitActionSelection() } else { selectingActions=true } }.disabled(batchRunning)
                     }
+                    Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.actions,filter:actionFilter) }
+                    Button("每周回顾",systemImage:"calendar.badge.clock") { showingWeeklyReview=true }
                 }
             }
+            WorkspaceTabs(selection:$actionFilter,titles:SavedViewPage.actions.filters,style:.filters)
             let visible = visibleActions
             let executions = model.assistantExecutions.filter { $0.state != "cancelled" }
             let paused = model.workspacePausedTasks
             if ["全部","我的待办"].contains(actionFilter), !focusedActions.isEmpty {
-                WorkspaceSection(title:"专注",icon:"pin",count:focusedActions.count) {
-                    ForEach(focusedActions) { action in actionRow(action);if action.id != focusedActions.last?.id { Divider() } }
+                WorkspaceListSection(title:"专注",count:focusedActions.count) {
+                    ForEach(focusedActions) { action in actionRow(action);if action.id != focusedActions.last?.id { WorkspaceListDivider() } }
                 }
             }
             if actionFilter == "我的待办", !visible.isEmpty {
@@ -886,33 +938,37 @@ struct WorkspaceView: View {
                 let overdue = surface.today.filter(\.isOverdue)
                 let dueToday = surface.today.filter { !$0.isOverdue }
                 if !overdue.isEmpty {
-                    WorkspaceSection(title:"逾期",subtitle:"已过期限。改天需要提醒事项链接。",icon:"exclamationmark.circle",count:overdue.count) {
-                        ForEach(overdue) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != overdue.last?.id { Divider() } }
+                    WorkspaceListSection(title:"逾期",subtitle:"已过期限。改天需要提醒事项链接。",count:overdue.count) {
+                        ForEach(overdue) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != overdue.last?.id { WorkspaceListDivider() } }
                     }
                 }
                 if !dueToday.isEmpty {
-                    WorkspaceSection(title:"今天",subtitle:"今天到期",icon:"sun.max",count:dueToday.count) {
-                        ForEach(dueToday) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != dueToday.last?.id { Divider() } }
+                    WorkspaceListSection(title:"今天",subtitle:"今天到期",count:dueToday.count) {
+                        ForEach(dueToday) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != dueToday.last?.id { WorkspaceListDivider() } }
                     }
                 }
                 if !surface.soon.isEmpty {
-                    WorkspaceSection(title:"即将",subtitle:"7 天内",icon:"calendar",count:surface.soon.count) {
-                        ForEach(surface.soon) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != surface.soon.last?.id { Divider() } }
+                    WorkspaceListSection(title:"即将",subtitle:"7 天内",count:surface.soon.count) {
+                        ForEach(surface.soon) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != surface.soon.last?.id { WorkspaceListDivider() } }
                     }
                 }
                 if !surface.anytime.isEmpty {
-                    WorkspaceSection(title:"随时",subtitle:"没有日期或更远",icon:"tray",count:surface.anytime.count) {
-                        ForEach(surface.anytime) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != surface.anytime.last?.id { Divider() } }
+                    WorkspaceListSection(title:"随时",subtitle:"没有日期或更远",count:surface.anytime.count) {
+                        ForEach(surface.anytime) { entry in actionRow(entry.action,timeEntry:entry);if entry.id != surface.anytime.last?.id { WorkspaceListDivider() } }
                     }
                 }
-            } else if actionFilter != "AI 助理",!visible.isEmpty {
-                WorkspaceSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,icon:"checkmark.circle",count:visible.count) {
-                    ForEach(visible) { action in actionRow(action);if action.id != visible.last?.id { Divider() } }
+            } else if actionFilter == "AI 助理" {
+                if !executions.isEmpty {
+                    WorkspaceListSection(title:"AI 助理的工作",count:executions.count) { executionRows(executions) }
+                }
+            } else if !visible.isEmpty {
+                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,count:visible.count) {
+                    ForEach(visible) { action in actionRow(action);if action.id != visible.last?.id { WorkspaceListDivider() } }
                 }
             }
             if actionFilter == "全部", !paused.isEmpty {
-                WorkspaceSection(title:"需要核对的待办",subtitle:"打开任务查看原因。",icon:"pause.circle",count:paused.count) {
-                    ForEach(paused) { action in actionRow(action);if action.id != paused.last?.id { Divider() } }
+                WorkspaceListSection(title:"需要核对的待办",subtitle:"打开任务查看原因。",count:paused.count) {
+                    ForEach(paused) { action in actionRow(action);if action.id != paused.last?.id { WorkspaceListDivider() } }
                     if model.pausedActionBatch == nil { PausedActionBatchControl(model:model) }
                 }
             }
@@ -920,21 +976,31 @@ struct WorkspaceView: View {
                 ? model.actionRecords.filter { $0.kind != "task" && $0.state != "dismissed" && $0.validity == "current" }
                 : []
             if !overviewGoals.isEmpty {
-                WorkspaceSection(title:"问题与目标",subtitle:"不计为已承诺待办。",icon:"lightbulb",count:overviewGoals.count) {
+                WorkspaceListSection(title:"问题与目标",subtitle:"不计为已承诺待办。",count:overviewGoals.count) {
                     ForEach(overviewGoals.prefix(3)) { action in
                         actionRow(action)
-                        if action.id != overviewGoals.prefix(3).last?.id { Divider() }
+                        if action.id != overviewGoals.prefix(3).last?.id { WorkspaceListDivider() }
                     }
                     if overviewGoals.count > 3 {
                         Button("查看全部 \(overviewGoals.count)") { actionFilter = "问题与目标" }
-                            .buttonStyle(.plain).vosFont(12.5).foregroundStyle(palette.accent).padding(.top,10)
+                            .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent).padding(.vertical,10)
                     }
                 }
             }
-            if model.pausedActionBatch != nil {
-                WorkspaceSection(title:"批量重新识别",icon:"arrow.triangle.2.circlepath") {
-                    PausedActionBatchControl(model:model)
+            if !model.visibleOutcomeFollowups.isEmpty {
+                WorkspaceListSection(title:"完成后的结果",count:model.visibleOutcomeFollowups.count,collapsible:true) {
+                    HStack(spacing:12) {
+                        Button("记录结果…") { showingOutcome=true }.buttonStyle(.bordered)
+                        Button("显示已跳过") { model.showSkippedOutcomes() }
+                        Spacer(minLength:0)
+                    }.padding(.vertical,10)
                 }
+            }
+            if actionFilter == "全部", !executions.isEmpty {
+                WorkspaceListSection(title:"AI 助理的工作",count:executions.count,collapsible:true) { executionRows(executions) }
+            }
+            if model.pausedActionBatch != nil {
+                WorkspaceListSection(title:"批量重新识别") { PausedActionBatchControl(model:model) }
             }
             if visible.isEmpty && (actionFilter == "AI 助理" || actionFilter == "全部" ? executions.isEmpty : true) && !(actionFilter == "全部" && (!paused.isEmpty || !overviewGoals.isEmpty)) {
                 WorkspaceEmptyState(
@@ -947,10 +1013,16 @@ struct WorkspaceView: View {
             }
             if actionFilter == "待核对" { processingIssues }
             if ["全部","我的待办"].contains(actionFilter), !visible.isEmpty {
-                Text("↑↓ 选择 · ↵ 打开 · x 完成 · z 不再跟进 · ⌥⌘Z 撤销上一次变更").font(.caption).foregroundStyle(.secondary)
+                Text("↑↓ 选择 · ↵ 打开 · x 完成 · z 不再跟进 · ⌥⌘Z 撤销上一次变更").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             }
-            HStack { Button("同步提醒事项") { Task { await model.refreshTaskReminders() } }.disabled(model.reminderAccess?.enabled != true || model.remindersBusy);Spacer();Text(model.reminderSyncStatus).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+            HStack { Button("同步提醒事项") { Task { await model.refreshTaskReminders() } }.disabled(model.reminderAccess?.enabled != true || model.remindersBusy);Spacer();Text(model.reminderSyncStatus).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).lineLimit(2) }
         }.task(id: focusRefreshKey) { focusedActionIDs = await model.focusedActionIDs() }
+    }
+    @ViewBuilder private func executionRows(_ executions: [AssistantExecutionRecord]) -> some View {
+        ForEach(executions) { execution in
+            WorkspaceRow(title:execution.title,subtitle:assistantExecutionLabel(execution),icon:execution.state == "completed" ? "doc.text" : "sparkles",trailing:execution.state == "completed" ? "阅读结果" : "查看进度",trailingStyle:.link) { go(.delivery(execution.id)) }
+            if execution.id != executions.last?.id { WorkspaceListDivider() }
+        }
     }
     private var focusedActions: [ActionRecord] {
         Array(model.actionRecords.filter { focusedActionIDs.contains($0.id) && $0.state == "open" && $0.validity == "current" }.prefix(3))
@@ -1182,7 +1254,8 @@ struct WorkspaceView: View {
         let combined=(expression?.sourceIDs.count ?? 0) > 1
         let first=combined ? expression!.sourceIDs.first.flatMap { catalog[$0] } ?? source : source
         let origin=source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料"
-        return WorkspaceRow(title:displayTitle(combined ? expression!.title : source.displayTitle),subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:materialReadingLabel(source.id)) { go(.source(source.id)) }
+        let reading=materialReadingStatus(source.id)
+        return WorkspaceRow(title:displayTitle(combined ? expression!.title : source.displayTitle),subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:reading?.text ?? "",trailingStyle:reading.map { WorkspaceRow.TrailingStyle.status($0.color) } ?? .secondary) { go(.source(source.id)) }
             .background(highlighted ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             .overlay { if highlighted { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
             .contextMenu {
@@ -1191,11 +1264,11 @@ struct WorkspaceView: View {
                 Button("标为已读") { setMaterialReading(source.id,.read) }
             }
     }
-    private func materialReadingLabel(_ id:String) -> String {
+    private func materialReadingStatus(_ id:String) -> (text:String,color:Color)? {
         switch readingStates[id] ?? .unread {
-        case .unread: return ""
-        case .reading: return "在读"
-        case .read: return "已读"
+        case .unread: return nil
+        case .reading: return ("在读",palette.accent)
+        case .read: return ("已读",palette.tertiaryText)
         }
     }
     private func setMaterialReading(_ id:String,_ state:SourceReadingState) {
@@ -1204,22 +1277,36 @@ struct WorkspaceView: View {
             else { error=model.status }
         }
     }
-    private func actionRowSubtitle(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> String {
-        var detail:String
+    private func actionRowDetail(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil) -> ActionRowDetail {
+        var detail=ActionRowDetail()
+        var due=""
         if let entry=timeEntry,entry.source == .localSchedule {
-            if let due=entry.due { detail=(entry.isOverdue ? "已逾期 " : "到期 ") + due.summary } else { detail="" }
-            if entry.needsLocalSyncLabel { detail=detail.isEmpty ? "本地未同步" : detail + " · 本地未同步" }
-        } else if let note=model.workspaceExternalCompletionNote(action),!note.isEmpty { detail=note }
-        else if action.state == "dismissed" { detail="已放下" }
-        else if action.intent?.followupState == "withdrawn" || action.validity != "current" || model.workspaceTaskRequiresReview(action) { detail=model.workspaceActionStatus(action) }
-        else if action.state == "completed" { detail="已登记完成" }
-        else if let due=model.reminderLinks.first(where: { link in
+            if let date=entry.due { due=(entry.isOverdue ? "已逾期 " : "到期 ") + date.summary }
+            if entry.needsLocalSyncLabel { detail.status="本地未同步";detail.statusColor=palette.warning }
+        } else if action.state == "open", action.validity == "current", let date=model.reminderLinks.first(where: { link in
             link.actionID == action.id && link.state == "linked" && link.remoteDueDate.map({ $0 != .none }) == true
-        })?.remoteDueDate { detail=(reminderDueIsPast(due) ? "已逾期 " : "到期 ") + due.summary }
-        else { detail="" }
-        guard let title=actionSourceTitle(action) else { return detail }
-        let shortened=title.count > 12 ? String(title.prefix(12)) + "…" : title
-        return detail.isEmpty ? "来自『\(shortened)』" : "来自『\(shortened)』 · " + detail
+        })?.remoteDueDate {
+            due=(reminderDueIsPast(date) ? "已逾期 " : "到期 ") + date.summary
+        }
+        if let title=actionSourceTitle(action) {
+            detail.meta=due.isEmpty ? "来自『\(title)』" : due + " · 来自『\(title)』"
+        } else { detail.meta=due }
+        if detail.status.isEmpty {
+            if model.workspaceExternalCompletionNote(action) != nil {
+                detail.status="提醒事项已完成";detail.statusColor=palette.success
+            } else if action.state == "dismissed" {
+                detail.status="已放下";detail.statusColor=palette.tertiaryText
+            } else if action.intent?.followupState == "withdrawn" {
+                detail.status="已撤回";detail.statusColor=palette.tertiaryText
+            } else if model.workspaceTaskRequiresReview(action) {
+                detail.status="待核对";detail.statusColor=palette.warning
+            } else if action.state == "completed" {
+                detail.status="已登记完成";detail.statusColor=palette.secondaryText
+            } else if action.validity != "current" {
+                detail.status="历史记录";detail.statusColor=palette.tertiaryText
+            }
+        }
+        return detail
     }
     private func actionSourceTitle(_ action:ActionRecord) -> String? {
         guard let claim=model.claims.first(where: { $0.id == action.claimID }) else { return nil }
@@ -1264,6 +1351,9 @@ struct WorkspaceView: View {
         let focused=focusedActionIDs.contains(action.id)
         let canChangeDay=actionable && hasLinkedReminder(action) && !model.savingAction && !model.remindersBusy
         let canComplete=actionable && action.kind == "task"
+        let detail=actionRowDetail(action,timeEntry:timeEntry)
+        let marksSelected=selectingActions && selected
+        let trailingStyle:WorkspaceRow.TrailingStyle=marksSelected ? .status(palette.accent) : (detail.status.isEmpty ? .secondary : .status(detail.statusColor ?? palette.secondaryText))
         return WorkspaceActionRowChrome(action:action,
             canTransition:actionable,
             canComplete:canComplete,
@@ -1273,7 +1363,7 @@ struct WorkspaceView: View {
                 actionMenuItems(action,focused:focused,canChangeDay:canChangeDay,canTransition:actionable)
             },
             row:{
-                WorkspaceRow(title:action.title,subtitle:actionRowSubtitle(action,timeEntry:timeEntry),icon:icon,trailing:selectingActions && selected ? "已选" : "") {
+                WorkspaceRow(title:action.title,subtitle:detail.meta,icon:icon,trailing:marksSelected ? "已选" : detail.status,trailingStyle:trailingStyle) {
                     if selectingActions {
                         guard selectable else { return }
                         if selected { selectedActionIDs.remove(action.id) } else { selectedActionIDs.insert(action.id) }
