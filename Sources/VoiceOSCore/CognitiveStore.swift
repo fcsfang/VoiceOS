@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-public struct ClaimReference: Codable, Sendable {
+public struct ClaimReference: Codable, Sendable, Equatable {
     public let sourceID: String
     public let transcriptVersionID: String
     public let spanID: String

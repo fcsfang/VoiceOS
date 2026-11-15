@@ -63,7 +63,9 @@ extension VoiceOSStore {
         try saveExpressionPresentation(presentation,sourceID:personalSourceID)
     }
     public func recordingContext(sourceID: String) throws -> RecordingContext? {
-        let catalog=Dictionary(uniqueKeysWithValues:try sources().map { ($0.id,$0) })
+        try recordingContext(sourceID: sourceID, catalog: Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) }))
+    }
+    public func recordingContext(sourceID: String, catalog:[String:SourceRecord]) throws -> RecordingContext? {
         guard let personal=catalog[sourceID],let pairing=personal.presentation?.recordingContext else { return nil }
         guard pairing.personalSourceID == sourceID,let external=catalog[pairing.externalSourceID],
               personal.origin == "user",personal.speaker == "user",external.origin == "external",external.speaker != "user",
@@ -73,9 +75,12 @@ extension VoiceOSStore {
         return pairing
     }
     public func recordingContextSourceIDs(sourceIDs: [String]) throws -> [String] {
+        try recordingContextSourceIDs(sourceIDs: sourceIDs, catalog: Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) }))
+    }
+    public func recordingContextSourceIDs(sourceIDs: [String], catalog:[String:SourceRecord]) throws -> [String] {
         var result=sourceIDs,seen=Set(sourceIDs)
         for id in sourceIDs {
-            if let pair=try recordingContext(sourceID:id),seen.insert(pair.externalSourceID).inserted { result.append(pair.externalSourceID) }
+            if let pair=try recordingContext(sourceID:id,catalog:catalog),seen.insert(pair.externalSourceID).inserted { result.append(pair.externalSourceID) }
         }
         return result
     }
