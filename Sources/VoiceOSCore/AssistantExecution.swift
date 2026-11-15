@@ -263,9 +263,13 @@ extension VoiceOSStore {
     }
     public func assistantAssessmentIssues() throws -> [AssistantAssessmentIssue] {
         let current = Dictionary(uniqueKeysWithValues: try actions().map { ($0.id,$0) })
+        // An action with any execution row already has a verdict, frozen or not.
+        // Asking assistantExecutions(actionID:) per failed assessment revalidated
+        // every current execution once per row; one existence query is equivalent.
+        let executed = Set(try db.query("SELECT DISTINCT action_id FROM assistant_executions").compactMap { $0["action_id"] })
         return try db.query("SELECT * FROM assistant_assessments WHERE state='failed' ORDER BY created_at,id").compactMap { row in
             guard let action = current[row["action_id"]!],action.version == row["action_version"].flatMap(Int.init),
-                  try assistantExecutions(actionID: action.id).isEmpty else { return nil }
+                  !executed.contains(action.id) else { return nil }
             return .init(id:row["id"]!,actionID:action.id,actionVersion:action.version,title:action.title,error:row["error"] ?? "委托识别未完成",createdAt:row["created_at"]!)
         }
     }

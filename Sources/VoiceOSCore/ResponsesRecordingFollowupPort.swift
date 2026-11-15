@@ -5,9 +5,14 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
     private let apiKey: String
     private let model: String
     private let transport: any ModelHTTPTransport
+    private let retryDelay: @Sendable (Duration) async throws -> Void
     public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectStreamingModelHTTPTransport()) throws {
+        try self.init(baseURL: baseURL, apiKey: apiKey, model: model, transport: transport, retryDelay: { try await Task.sleep(for: $0) })
+    }
+    init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, retryDelay: @escaping @Sendable (Duration) async throws -> Void) throws {
         _ = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model)
         endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.model = model; self.transport = transport
+        self.retryDelay = retryDelay
     }
     public func generate(_ input: RecordingFollowupInput) async throws -> RecordingFollowupGeneration {
         var evidence = RunEvidence()
@@ -129,7 +134,7 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
                 try Task.checkCancellation()
                 if attempt < 3, [429, 502, 503, 504].contains(response.status) {
                     try Task.checkCancellation()
-                    try await Task.sleep(for: .seconds(attempt == 1 ? 5 : 15))
+                    try await retryDelay(.seconds(attempt == 1 ? 5 : 15))
                     continue
                 }
                 if response.status == 429 || (500...599).contains(response.status) { throw RecordingFollowupTransientError(status: response.status) }

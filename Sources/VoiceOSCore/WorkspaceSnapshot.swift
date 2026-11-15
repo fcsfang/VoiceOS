@@ -41,68 +41,92 @@ public struct WorkspaceSnapshot: Sendable {
     public var segmentedCognitiveCounts: [String: Int] = [:]
     public var segmentedAssociationStates: [String: String] = [:]
     public var actionReviewLedgers: [String: ActionReviewLedger] = [:]
+    /// Secondary reads can freeze stale contexts; the caller should re-read core.
+    public var contextValidityChanged = false
+}
+
+/// Startup reads the core snapshot first so the library list can paint, then the
+/// secondary snapshot. The full scope keeps the original single-read contract.
+public enum WorkspaceSnapshotScope: Sendable {
+    case full, core, secondary
 }
 
 extension VoiceOSStore {
-    public func workspaceSnapshot() throws -> WorkspaceSnapshot {
+    public func workspaceSnapshot(_ scope: WorkspaceSnapshotScope = .full) throws -> WorkspaceSnapshot {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
+        let wantsCore = scope != .secondary
+        let wantsSecondary = scope != .core
         var result = WorkspaceSnapshot()
-        result.questions = try questions()
-        result.questionHistories = try questionHistories()
-        result.claimOrigins = try discussionClaimOrigins()
-        result.outcomeOrigins = try conversationOutcomeOrigins()
-        result.assistantExecutions = try assistantExecutions()
-        result.assistantAssessmentIssues = try assistantAssessmentIssues()
-        result.taskInitiations = try taskInitiations()
-        result.knowledgeReviews = try knowledgeReviews()
-        result.recentOutcomes = try recentActionOutcomes()
-        result.correctionImpacts = try correctionActionImpacts()
-        result.compensationPlans = try reminderCompensationPlans()
-        result.compensationGrants = try reminderCompensationGrants()
-        result.compensationOperations = try reminderCompensationOperations()
-        result.scheduleIntents = try actionScheduleIntents()
-        result.scheduleOperations = try reminderScheduleOperations()
-        result.scheduleGrants = try reminderScheduleGrants()
-        result.reminderLinks = try reminderLinks()
-        result.reminderAccess = try reminderAccess()
-        if let access = result.reminderAccess, access.enabled {
-            for intent in result.scheduleIntents {
-                result.schedulePreviews[intent.id] = try? previewReminderSchedule(intentID: intent.id, expectedAccessVersion: access.version)
+        func readCore() throws {
+            result.questions = try questions()
+            result.questionHistories = try questionHistories()
+            result.claimOrigins = try discussionClaimOrigins()
+            result.outcomeOrigins = try conversationOutcomeOrigins()
+            result.taskInitiations = try taskInitiations()
+            result.recentOutcomes = try recentActionOutcomes()
+            result.compensationPlans = try reminderCompensationPlans()
+            result.compensationGrants = try reminderCompensationGrants()
+            result.compensationOperations = try reminderCompensationOperations()
+            result.reminderLinks = try reminderLinks()
+            result.reminderAccess = try reminderAccess()
+            result.topics = try reflectionQuestions()
+            result.topicSources = try reflectionQuestionSources()
+            result.processingIntents = try processingIntents()
+            result.recordingRequests = try recordingProcessingRequests()
+            result.segmentedBatches = try segmentedProcessingBatches()
+            for batch in result.segmentedBatches {
+                if let ids = try segmentedCognitiveClaimIDs(batchID: batch.id) { result.segmentedCognitiveCounts[batch.id] = ids.count }
+                if let attempt = try committedSegmentedAssociationAttempt(batchID: batch.id) {
+                    result.segmentedAssociationStates[batch.id] = attempt.validity == "current" ? attempt.state : "frozen"
+                }
+            }
+            for request in result.recordingRequests {
+                if let id = request.segmentedBatchID, let state = request.segmentedAssociationState, result.segmentedAssociationStates[id] == nil {
+                    result.segmentedAssociationStates[id] = state
+                }
+            }
+            result.actions = try actions(includeHistory: true)
+            result.actionClarifications = try actionClarifications()
+            result.claims = try candidateClaims(includeFrozen: true)
+            result.currentClaimsBySource = try latestCandidateClaimsBySource(includeFrozen: true)
+            result.attempts = try modelAttemptsBySource()
+            result.sources = try sources()
+            result.actionReviewLedgers = ActionReviewLedger.buildMap(
+                expressions: try recordingExpressions(), actions: result.actions,
+                resolutions: try actionReviewResolutions(),
+                acknowledgements: try actionReviewAcknowledgements(),
+                linkedActionIDs: Set(result.reminderLinks.map(\.actionID)))
+        }
+        if wantsCore {
+            if scope == .core {
+                // The first paint lists what is stored. Context revalidation freezes
+                // stale rows and can hash media; the secondary read does that work.
+                try withoutContextValidation { try readCore() }
+            } else {
+                try readCore()
             }
         }
-        result.topics = try reflectionQuestions()
-        result.topicSources = try reflectionQuestionSources()
-        result.briefing = try workspaceBriefing()
-        result.recordingFollowups = try recordingFollowups()
-        result.followupValidity = try recordingFollowupValidities(result.recordingFollowups)
-        result.processingIntents = try processingIntents()
-        result.recordingRequests = try recordingProcessingRequests()
-        result.segmentedBatches = try segmentedProcessingBatches()
-        for batch in result.segmentedBatches {
-            if let ids = try segmentedCognitiveClaimIDs(batchID: batch.id) { result.segmentedCognitiveCounts[batch.id] = ids.count }
-            if let attempt = try committedSegmentedAssociationAttempt(batchID: batch.id) {
-                result.segmentedAssociationStates[batch.id] = attempt.validity == "current" ? attempt.state : "frozen"
-            }
-        }
-        for request in result.recordingRequests {
-            if let id = request.segmentedBatchID, let state = request.segmentedAssociationState, result.segmentedAssociationStates[id] == nil {
-                result.segmentedAssociationStates[id] = state
-            }
-        }
-        result.actions = try actions(includeHistory: true)
-        result.actionClarifications = try actionClarifications()
-        if result.actions.contains(where: { $0.kind == "task" && $0.state == "completed" }) {
+        if wantsSecondary {
+            let freezesBefore = frozenContextCount
+            result.assistantExecutions = try assistantExecutions()
+            result.assistantAssessmentIssues = try assistantAssessmentIssues()
+            result.knowledgeReviews = try knowledgeReviews()
+            result.correctionImpacts = try correctionActionImpacts()
             result.outcomeFollowups = try pendingOutcomeFollowups()
+            result.scheduleIntents = try actionScheduleIntents()
+            result.scheduleOperations = try reminderScheduleOperations()
+            result.scheduleGrants = try reminderScheduleGrants()
+            result.reminderAccess = try reminderAccess()
+            if let access = result.reminderAccess, access.enabled {
+                for intent in result.scheduleIntents {
+                    result.schedulePreviews[intent.id] = try? previewReminderSchedule(intentID: intent.id, expectedAccessVersion: access.version)
+                }
+            }
+            result.briefing = try workspaceBriefing()
+            result.recordingFollowups = try recordingFollowups()
+            result.followupValidity = try recordingFollowupValidities(result.recordingFollowups)
+            result.contextValidityChanged = frozenContextCount != freezesBefore
         }
-        result.claims = try candidateClaims(includeFrozen: true)
-        result.currentClaimsBySource = try latestCandidateClaimsBySource(includeFrozen: true)
-        result.attempts = try modelAttemptsBySource()
-        result.sources = try sources()
-        result.actionReviewLedgers = ActionReviewLedger.buildMap(
-            expressions: try recordingExpressions(), actions: result.actions,
-            resolutions: try actionReviewResolutions(),
-            acknowledgements: try actionReviewAcknowledgements(),
-            linkedActionIDs: Set(result.reminderLinks.map(\.actionID)))
         return result
     }
 }

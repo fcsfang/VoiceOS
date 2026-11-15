@@ -341,7 +341,7 @@ extension VoiceOSStore {
                 let limit = (error is PanoramaQuoteLocationFailure || error is PanoramaFocusViolation || error is PanoramaSynthesisReferenceFailure) ? 1 : 2
                 guard retries < limit, retryable, elapsed < 590 else { throw error }
                 retries += 1
-                try await Task.sleep(for: .seconds(retries))
+                try await panoramaRetryDelay(.seconds(retries))
             }
         }
     }
@@ -572,7 +572,7 @@ extension VoiceOSStore {
             } catch {
                 guard Self.panoramaUpstreamRejection(error), retries < 2 else { throw error }
                 retries += 1
-                try await Task.sleep(for: .seconds(5))
+                try await panoramaRetryDelay(.seconds(5))
             }
         }
         let rewritten=try PanoramaThemeIdentity.rewrite(generated.0, attemptID: snapshot.id, current: nil, prior: themePrior)
