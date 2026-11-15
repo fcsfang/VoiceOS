@@ -16,14 +16,8 @@ enum AppBrand {
         image(dark: appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua)
     }
 
-    static func applyApplicationIcon(preferred: WorkspaceAppearance = .system) {
-        let appearance: NSAppearance?
-        switch preferred {
-        case .system: appearance = NSApp?.effectiveAppearance
-        case .light: appearance = NSAppearance(named: .aqua)
-        case .dark: appearance = NSAppearance(named: .darkAqua)
-        }
-        guard let appearance, let image = image(for: appearance) else { return }
+    static func applyApplicationIcon() {
+        guard let appearance = NSApp?.effectiveAppearance, let image = image(for: appearance) else { return }
         NSApplication.shared.applicationIconImage = dockTile(image)
     }
 

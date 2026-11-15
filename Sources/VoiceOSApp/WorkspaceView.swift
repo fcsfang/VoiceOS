@@ -102,13 +102,9 @@ struct WorkspaceRow: View {
 struct WorkspaceView: View {
     @ObservedObject var model: ControlCenter
     @AppStorage("voiceos.workspaceTheme") private var theme = WorkspaceTheme.graphite
-    @AppStorage("voiceos.workspaceAppearance") private var appearance = WorkspaceAppearance.system
     @Environment(\.colorScheme) private var colorScheme
     private var palette: WorkspacePalette { WorkspacePalette(theme: theme) }
-    private var brandImage: NSImage? {
-        if let forced = appearance.colorScheme { return AppBrand.image(for: forced) }
-        return AppBrand.image(for: colorScheme)
-    }
+    private var brandImage: NSImage? { AppBrand.image(for: colorScheme) }
     @State private var page: WorkspacePage = .home
     @State private var homeShowsPanorama = false
     @State private var path: [WorkspaceNavigationEntry] = []
@@ -234,7 +230,6 @@ struct WorkspaceView: View {
             .environment(\.workspacePalette, palette)
             .environment(\.vosTextScale, model.textSize.scale)
             .dynamicTypeSize(model.textSize.dynamicType)
-            .preferredColorScheme(appearance.colorScheme)
             .frame(minWidth:980,minHeight:700)
             .onExitCommand {
                 if selectingActions { exitActionSelection() }
@@ -466,8 +461,8 @@ struct WorkspaceView: View {
                 Button { go(.settings);showingDiscussion=false } label: { Label("设置",systemImage:"slider.horizontal.3").foregroundStyle(.secondary) }.buttonStyle(.plain)
             }.padding(.horizontal,8)
         }.padding(.horizontal,13).padding(.vertical,28).frame(width:172).background(palette.sidebar)
-            .onAppear { AppBrand.applyApplicationIcon(preferred: appearance) }
-            .onChange(of: appearance) { _, next in AppBrand.applyApplicationIcon(preferred: next) }
+            .onAppear { AppBrand.applyApplicationIcon() }
+            .onChange(of: colorScheme) { _, _ in AppBrand.applyApplicationIcon() }
     }
     private func nav(_ title:String,icon:String,target:WorkspacePage) -> some View {
         Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
