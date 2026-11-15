@@ -42,6 +42,10 @@ private struct ActionRowDetail {
     var status = ""
     var statusColor: Color?
 }
+// Mirrors the guard in ActionStore.promoteAction so the row menu and detail page share one rule.
+extension ActionRecord {
+    var canPromoteToTask: Bool { kind == "opportunity" && state == "open" && validity == "current" }
+}
 struct WorkspaceHeading: View {
     let eyebrow: String
     let title: String
@@ -955,7 +959,7 @@ struct WorkspaceView: View {
                     WorkspaceListSection(title:"AI 助理的工作",count:executions.count) { executionRows(executions) }
                 }
             } else if !visible.isEmpty {
-                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,count:visible.count) {
+                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "问题与目标" ? "要达到的结果、要弄清的未知；转成待办后可提醒。" : "",count:visible.count) {
                     ForEach(visible) { action in actionRow(action);if action.id != visible.last?.id { WorkspaceListDivider() } }
                 }
             }
@@ -969,7 +973,7 @@ struct WorkspaceView: View {
                 ? model.actionRecords.filter { $0.kind != "task" && $0.state != "dismissed" && $0.validity == "current" }
                 : []
             if !overviewGoals.isEmpty {
-                WorkspaceListSection(title:"问题与目标",subtitle:"不计为已承诺待办。",count:overviewGoals.count) {
+                WorkspaceListSection(title:"问题与目标",subtitle:"要达到的结果、要弄清的未知；转成待办后可提醒。",count:overviewGoals.count) {
                     ForEach(overviewGoals.prefix(3)) { action in
                         actionRow(action)
                         if action.id != overviewGoals.prefix(3).last?.id { WorkspaceListDivider() }
@@ -999,7 +1003,7 @@ struct WorkspaceView: View {
                 WorkspaceEmptyState(
                     title: actionFilter == "历史记录" ? "还没有历史任务记录" : actionFilter == "已完成" ? "还没有已完成的事项" : actionFilter == "AI 助理" ? "还没有 AI 代办" : actionFilter == "待核对" ? "没有待核对的行动" : actionFilter == "问题与目标" ? "还没有问题与目标" : "目前没有可执行的待办",
                     systemImage:"checkmark.circle",
-                    description: actionFilter == "AI 助理" ? "在一项待办中选择“交给 AI”，编辑要求后开始执行。" : actionFilter == "待核对" ? "下方处理问题里的事项仍需要查看。" : "已暂停的历史、问题与目标分别保留，可通过上方分类查看。"
+                    description: actionFilter == "AI 助理" ? "在一项待办中选择“交给 AI”，编辑要求后开始执行。" : actionFilter == "待核对" ? "下方处理问题里的事项仍需要查看。" : actionFilter == "问题与目标" ? "这里是你要达到的结果和要弄清的未知；转成待办后可提醒。" : "已暂停的历史、问题与目标分别保留，可通过上方分类查看。"
                 ) {
                     HStack { Button("记录想法") { go(.capture) };if actionFilter != "问题与目标" { Button("查看问题与目标") { actionFilter="问题与目标" } } }
                 }
@@ -1331,6 +1335,10 @@ struct WorkspaceView: View {
         }
     }
     @ViewBuilder private func actionMenuItems(_ action:ActionRecord,focused:Bool,canChangeDay:Bool,canTransition:Bool) -> some View {
+        if action.canPromoteToTask {
+            Button("转为待办") { promoteAction(action) }
+                .accessibilityLabel("转为待办：" + action.title)
+        }
         Button("改天") { openReminderSettings(action) }.disabled(!canChangeDay)
         Button("不再跟进") { dismissAction(action) }.disabled(!canTransition)
         Button(focused ? "移出专注" : "加入专注") { toggleFocus(action.id) }.disabled(!canTransition)
@@ -1388,6 +1396,12 @@ struct WorkspaceView: View {
     }
     private func dismissAction(_ action:ActionRecord) {
         applyActionState(action,to:.dismissed)
+    }
+    private func promoteAction(_ action:ActionRecord) {
+        Task {
+            if await model.promoteAction(action) { error="" }
+            else { error=model.status.isEmpty ? "未能转为待办，请稍后重试。" : model.status }
+        }
     }
     private func applyActionState(_ action:ActionRecord,to state:LocalActionState,nextHighlight:String? = nil) {
         Task {
