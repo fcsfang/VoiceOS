@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-14
@@ -47,6 +47,16 @@ owner: coordinator
 - 提高对比度按启动时读取，系统设置运行中切换需重启生效。
 - 差距 11 保留自定义焦点环，理由与 HIG 允许的例外一致（列表键盘光标需要自定义高亮）。
 - 外观仅跟随系统，用户偏好固定明暗需等真实反馈再议。
+
+## 结果
+
+2026-11-15 四条线集成到 `work/mega-14`：U1 `6ab5fd0`，U2 `fb92823`，U3 `4d2a41b`，U4 `66b1c0f`；协调者补 `20c42aa` 清理 `WorkspaceAppearance` 残留（`AppBrand.applyApplicationIcon()` 改跟随系统外观）。
+
+U4 的初版只换 min/ideal 尺寸，实机验证不通过：sheet 窗口 `AXSize` 不可设（err=-25200），拖拽边缘与角落均无尺寸变化，SwiftUI `.sheet` 在 macOS 上不响应拉伸。按 HIG「支持调整大小」补 `workspaceResizableSheet()`（sheet 窗口补 `.resizable` 掩码 + 最小尺寸），`5dad876`。复测 `AXSize` 可设，重设到 1200×723 布局正常。参考文档差距 10 已记录做法与 400 宽表单保持固定尺寸的取舍。
+
+`swift build -j 2` 通过；`swift test -j 2` 321 项 0 失败。
+
+实机（`dist/VoiceOS.app`，独立启动）：设置页外观只有石墨/鼠尾草两张主题卡、无显示模式三选一；「再看一次引导」可重新打开引导；页头为强调胶囊「记录想法」，侧栏底部只剩设置；材料详情页显示「材料 / 标题」面包屑、设置与列表页不显示；View 菜单首项为「讨论」；交付结果 sheet 78 项，重设尺寸后列表与页脚布局正常；提示条「已保存视图」6 秒后仍在、✕ 可关闭。测试用的视图已删除。
 
 ## 链接
 
