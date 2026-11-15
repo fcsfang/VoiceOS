@@ -170,7 +170,7 @@ struct RecentContentHome: View {
         return VStack(alignment: .leading, spacing: 0) {
             Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 18)
             HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text(thread.title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.text)
+                Text(thread.title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText)
                 Spacer(minLength: 8)
             }
             if !notes.isEmpty {

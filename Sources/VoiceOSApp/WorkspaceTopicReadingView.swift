@@ -393,7 +393,7 @@ struct WorkspaceTopicTile: View {
                 HStack(spacing:15) {
                     Label("\(sourceCount) 份材料",systemImage:"doc.text")
                     if let count=topic.organization?.sections?.count { Label("\(count) 个小主题",systemImage:"square.grid.2x2") }
-                }.vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                }.vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
             }.padding(22).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
                 .background(hovered ? palette.selection.opacity(0.6) : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
                 .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
