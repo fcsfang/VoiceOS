@@ -385,15 +385,15 @@ struct WorkspaceTopicTile: View {
                     Spacer()
                     Image(systemName:"arrow.up.right").font(.caption).foregroundStyle(.secondary)
                 }
-                Text(topic.title).vosFont(20, weight: .semibold).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                if let summary=topic.organization?.summary {
-                    Text(summary).vosFont(14).lineSpacing(4).foregroundStyle(.secondary).multilineTextAlignment(.leading).lineLimit(3)
-                }
+                Text(topic.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
+                Text(topic.organization?.summary ?? "").vosFont(WorkspaceText.body).lineSpacing(4)
+                    .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
+                    .lineLimit(2, reservesSpace: true)
                 Spacer(minLength:0)
                 HStack(spacing:15) {
                     Label("\(sourceCount) 份材料",systemImage:"doc.text")
                     if let count=topic.organization?.sections?.count { Label("\(count) 个小主题",systemImage:"square.grid.2x2") }
-                }.vosFont(11, weight: .medium).foregroundStyle(.secondary)
+                }.vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
             }.padding(22).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
                 .background(hovered ? palette.selection.opacity(0.6) : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
                 .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }

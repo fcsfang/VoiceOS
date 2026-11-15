@@ -93,12 +93,12 @@ struct WorkspaceThemeOption: View {
                 }.frame(height: 72).clipShape(RoundedRectangle(cornerRadius: 5))
                     .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(preview.border, lineWidth: 1) }
                 HStack {
-                    Text(theme.title).font(.callout.weight(.medium))
-                    if theme == .graphite { Text("默认").font(.caption).foregroundStyle(.secondary) }
+                    Text(theme.title).vosFont(WorkspaceText.rowTitle)
+                    if theme == .graphite { Text("默认").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText) }
                     Spacer()
                     if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.accent) }
                 }
-                Text(theme.subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(theme.subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.canvas, in: RoundedRectangle(cornerRadius: 9))
                 .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(selected ? palette.accent : palette.border, lineWidth: selected ? 1.5 : 1) }
