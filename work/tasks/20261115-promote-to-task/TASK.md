@@ -24,6 +24,7 @@ owner: coordinator
 文件：`Sources/VoiceOSApp/WorkspaceView.swift`（问题与目标区段）、`Sources/VoiceOSApp/WorkspaceActivityViews.swift`（详情页）、`Sources/VoiceOSApp/VoiceOSApp.swift`（ControlCenter API）。
 - ControlCenter 增加 `promoteAction` 包装（成功后刷新并返回 Bool）。
 - 问题与目标行加「转为待办」操作；详情页对 opportunity 显示「转为待办」按钮；成功后提示「已转为待办」。
+- 文案：问题与目标区块副标题与详情页 eyebrow 去掉「不计为已承诺待办」这类系统语，改为「要达到的结果、要弄清的未知；转成待办后可提醒」。
 - 不改其他筛选与交互。
 
 ## 验证
