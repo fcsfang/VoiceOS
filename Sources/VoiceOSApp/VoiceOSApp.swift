@@ -724,8 +724,12 @@ final class ControlCenter: ObservableObject {
     private var dictationFullOrganization = false
     private let dictation = NativeDictation()
     private var dictationObservers: [NSObjectProtocol] = []
+    var dictationBusyReason: String? {
+        if dictationBusy || fullRecordingBusy || importing || worker != nil || understandingWorker != nil { return "请等待当前录音或文字处理结束" }
+        return nil
+    }
     func startDictation(processAfterTranscription: Bool = false) async {
-        guard let store, !dictationBusy, !dictationActive, !fullRecordingBusy, !importing, worker == nil, understandingWorker == nil else { status = "请等待当前录音或文字处理结束"; return }
+        guard let store, dictationBusyReason == nil, !dictationActive else { status = "请等待当前录音或文字处理结束"; return }
         if processAfterTranscription, let issue = recordingModelIssue {
             status = issue + "无法录制并完整整理"
             return
@@ -4087,16 +4091,22 @@ extension ApplicationDelegate: VoiceOSIntentEndpoint {
         model.pendingWorkspaceRoute = .search
         return true
     }
-    @MainActor func toggleDictation() async -> Bool? {
-        guard let model = await readyControlCenter(), model.canToggleCaptureDictation else { return nil }
-        let wasActive = model.dictationActive
-        model.toggleCaptureDictation()
-        if wasActive { return false }
-        let deadline = Date().addingTimeInterval(8)
-        while Date() < deadline {
-            if model.dictationActive { return true }
-            try? await Task.sleep(for: .milliseconds(100))
+    @MainActor func toggleDictation() async -> DictationOutcome {
+        guard let model = ControlCenter.primary, model.initialized else { return .notReady }
+        if model.dictationActive {
+            model.stopDictation()
+            return .stopped
         }
-        return nil
+        if let reason = model.dictationBusyReason { return .failed(reason) }
+        if let issue = model.recordingModelIssue { return .failed(issue + "无法录制并完整整理") }
+        let previousStatus = model.status
+        model.toggleCaptureDictation()
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            if model.dictationActive { return .started }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        if model.dictationActive { return .started }
+        return .failed(model.status == previousStatus ? "口述没有开始，请检查麦克风权限" : model.status)
     }
 }
