@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-18
@@ -44,7 +44,11 @@ owner: coordinator
 
 ## 结果
 
-（待填）
+2026-11-16 T1 完成（`f2df305`）：巨型测试拆成 6 个全景场景加想法流程，35.80 秒降到 13.56 秒；删除 2 个有「同一行为已由 X 覆盖」证据的重复测试；9 个文件的 10 处 schema 版本断言收敛到 `TestSchema.currentVersion`。356 项 0 失败，全量 54.03 秒。
+
+20 秒目标未达成，原因已定位并转交启动性能波：全量里约 32 秒是产品代码的固定重试 sleep（`ThoughtPanoramaStore.swift:344` 的 1/2 秒退避、`ResponsesRecordingFollowupPort.swift:132` 的 5 秒 429 退避，另有 3 处同类）。仓库已有可注入 retryDelay 的写法，S1 负责加 seam 后测试传零延迟。
+
+剩余非 sleep 大项：reopen 3.69 秒（41 轮对话，推断 `conversation(id:)` 全量重校验是平方级）、全景扫描 2.19 秒。
 
 ## 链接
 
