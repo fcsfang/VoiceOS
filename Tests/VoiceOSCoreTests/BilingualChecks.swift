@@ -101,8 +101,16 @@ final class BilingualChecks: XCTestCase {
         XCTAssertEqual(Bilingual.combine("[1] 译文一\n[2] 译文二", paragraphCount: 2), ["译文一", "译文二"])
     }
 
-    func testCombineKeepsMissingParagraphsNil() {
-        XCTAssertEqual(Bilingual.combine("[1] 一\n[3] 三", paragraphCount: 3), ["一", nil, "三"])
+    func testCombineRejectsGappedNumbering() {
+        XCTAssertEqual(Bilingual.combine("[1] 一\n[3] 三", paragraphCount: 3), [nil, nil, nil])
+    }
+
+    func testCombineRejectsZeroBasedNumbering() {
+        XCTAssertEqual(Bilingual.combine("[0] 零\n[1] 一", paragraphCount: 2), [nil, nil])
+    }
+
+    func testCombineRejectsMixedNumberedAndPlainLines() {
+        XCTAssertEqual(Bilingual.combine("[1] 一\n没有编号的续行", paragraphCount: 2), [nil, nil])
     }
 
     func testCombinePlainLinesOnlyWhenCountMatches() {
