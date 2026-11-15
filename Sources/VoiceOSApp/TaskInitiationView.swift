@@ -37,7 +37,7 @@ struct TaskInitiationView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                WorkspaceHero(eyebrow: "", title: "启动")
+                WorkspaceHeading(eyebrow: "", title: "启动")
                 composer
                 if let record = selected { package(record) }
                 history
@@ -144,7 +144,8 @@ struct TaskInitiationView: View {
 
     private func sourceLine(_ record: TaskInitiationRecord) -> some View {
         let title = model.records.first(where: { $0.id == record.sourceID })?.displayTitle ?? "原话材料"
-        return Button("依据：" + title) { openSource(record.sourceID) }.buttonStyle(.borderless).font(.caption)
+        return Button("依据：" + title) { openSource(record.sourceID) }.buttonStyle(.borderless).vosFont(13)
+            .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
     }
 
     private func routePicker(_ record: TaskInitiationRecord) -> some View {
@@ -255,23 +256,23 @@ struct TaskInitiationView: View {
                         HStack(alignment: .top, spacing: 14) {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text(record.proposal.title.isEmpty ? "未命名启动" : record.proposal.title)
-                                    .vosFont(15, weight: .semibold).lineLimit(2)
+                                    .vosFont(16, weight: .semibold).lineLimit(2)
                                 Text(historySubtitle(record))
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .vosFont(13).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 8)
                             if record.id == selected?.id {
                                 Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.accent).accessibilityHidden(true)
                             }
                         }
-                        .padding(.vertical, 12).padding(.horizontal, 10)
+                        .padding(.vertical, 18).padding(.horizontal, 10)
                         .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         .accessibilityElement(children: .combine)
                     }
                     .buttonStyle(.plain)
                     .accessibilityValue(record.id == selected?.id ? "当前选中" : "未选中")
                     .accessibilityIdentifier("initiation.history.item")
-                    .workspaceHoverHighlight()
+                    .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
                     if record.id != records.last?.id { Divider() }
                 }
             }

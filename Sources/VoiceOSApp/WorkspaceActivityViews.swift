@@ -251,10 +251,12 @@ struct WorkspaceTaskView: View {
                         ForEach([15, 30, 60], id: \.self) { minutes in
                             Button { setEstimate(minutes) } label: {
                                 Label(String(minutes) + " 分钟", systemImage: actionEstimate == minutes ? "checkmark.circle.fill" : "circle").font(.callout)
+                                    .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
                             }.buttonStyle(.borderless).disabled(!current || planBusy)
                         }
                         if actionEstimate != nil {
-                            Button("清除") { clearEstimate() }.buttonStyle(.borderless).font(.callout).disabled(!current || planBusy)
+                            Button("清除") { clearEstimate() }.buttonStyle(.borderless).font(.callout)
+                                .frame(minHeight: WorkspaceMetrics.rowActionMinHeight).disabled(!current || planBusy)
                         }
                     }
                 }
@@ -302,6 +304,8 @@ struct WorkspaceTaskView: View {
                 if let locationLabel { Label("地点提醒 · " + locationLabel, systemImage: "mappin.and.ellipse").font(.callout).foregroundStyle(.secondary) }
                 if current, action.kind == "task" {
                     VStack(alignment:.leading,spacing:8) {
+                        Button("日期与提醒", systemImage: "calendar") { openReminderSettings() }
+                            .disabled(model.savingAction || model.remindersBusy)
                         if let link=model.reminderLinks.first(where: { $0.actionID == action.id }) {
                             Label(link.state == "linked" ? "已同步提醒事项并回读" : "提醒同步需要核对，保留原有尝试",systemImage:link.state == "linked" ? "checkmark.circle" : "exclamationmark.circle").font(.callout)
                         } else {
@@ -317,6 +321,12 @@ struct WorkspaceTaskView: View {
                     if current, action.kind == "task" {
                         Button(action.state == "completed" ? "重新跟进" : "标记已完成") { changeState() }
                             .buttonStyle(.borderedProminent).disabled(model.savingAction || model.remindersBusy)
+                        if model.remindersBusy {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("正在同步提醒事项，稍后可操作").vosFont(13).foregroundStyle(palette.disabledText)
+                            }.accessibilityElement(children: .combine)
+                        }
                         if action.state == "open" {
                             Button("改天") { openReminderSettings() }.disabled(model.savingAction || model.remindersBusy)
                             Button("不再跟进", role: .destructive) { confirmingDismiss = true }.disabled(model.savingAction)
@@ -367,13 +377,19 @@ struct WorkspaceTaskView: View {
                                 Button { toggleSubtask(subtask) } label: {
                                     Image(systemName: subtask.done ? "checkmark.circle.fill" : "circle")
                                         .vosFont(17).foregroundStyle(subtask.done ? palette.accent : palette.secondaryText)
+                                        .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                                        .contentShape(Rectangle())
                                 }.buttonStyle(.plain).disabled(!current || planBusy)
                                     .accessibilityLabel(subtask.done ? "标为未完成" : "标为已完成")
                                 Text(subtask.title).font(.callout).lineSpacing(3).textSelection(.enabled)
                                     .strikethrough(subtask.done).foregroundStyle(subtask.done ? palette.secondaryText : palette.text)
                                 Spacer(minLength: 8)
                                 if current {
-                                    Button { deleteSubtask(subtask) } label: { Image(systemName:"trash").vosFont(13) }
+                                    Button { deleteSubtask(subtask) } label: {
+                                        Image(systemName:"trash").vosFont(13)
+                                            .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                                            .contentShape(Rectangle())
+                                    }
                                         .buttonStyle(.borderless).foregroundStyle(palette.secondaryText)
                                         .accessibilityLabel("删除子任务").disabled(planBusy)
                                 }
@@ -411,7 +427,7 @@ struct WorkspaceTaskView: View {
                             Spacer()
                             Button("开始代办") { delegate() }.buttonStyle(.borderedProminent).disabled(saving || !model.modelConfigured || instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
-                    }.padding(18).background(palette.selection, in: RoundedRectangle(cornerRadius: 10))
+                    }.padding(18).background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 }
                 if !executions.isEmpty {
                     WorkspaceSection(title:"AI 的工作与交付",icon:"sparkles",count:executions.count) {
@@ -462,13 +478,15 @@ struct WorkspaceTaskView: View {
                             if current {
                                 Button("回听任务原话") { Task { _ = await model.playActionOriginal(action) } }
                                 if let player = model.player { NativePlayerView(player: player).frame(height: 65) }
-                                if action.kind == "task", action.state == "open" {
-                                    Button("日期、提醒与优先级") { openReminderSettings() }.disabled(model.remindersBusy)
-                                }
                             }
-                            scheduleSection
                         }.padding(.top, 10)
                     }.padding(.vertical,16)
+                    if action.kind == "task" {
+                        Divider()
+                        DisclosureGroup("处理记录与高级") {
+                            VStack(alignment: .leading, spacing: 14) { scheduleSection }.padding(.top, 10)
+                        }.padding(.vertical,16)
+                    }
                 }
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
@@ -519,47 +537,47 @@ struct WorkspaceTaskView: View {
     @State private var showingFeedback = false
     @ViewBuilder private var scheduleSection: some View {
         if action.kind == "task" {
-            Button("设置本地期限选择") { scheduleAction = action }
+            Button("改到某天") { scheduleAction = action }
                 .disabled(model.savingAction || model.remindersBusy || action.validity != "current" || action.state != "open")
             if let schedule = model.scheduleIntents.first(where: { $0.actionID == action.id }) {
-                Text((schedule.authority == .userCommitment ? "用户明确期限：" : "AI 弹性安排：") + schedule.due.summary).font(.caption)
-                Text(schedule.baseOperationID != nil ? "外部期限基线：已应答并回读的 AI 弹性安排" : (schedule.baseAuthority == .externalManual ? "外部期限基线：人工或未确认归属，改动需具体确认" : (schedule.baseAuthority == .userCommitment ? "外部期限基线：明确承诺" : "外部期限基线：初始无期限或尚未绑定"))).font(.caption).foregroundStyle(.secondary)
+                Text((schedule.authority == .userCommitment ? "你确认的日期：" : "AI 建议的日期：") + schedule.due.summary).font(.caption)
+                Text(schedule.baseOperationID != nil ? "同步基准：上次写入后已回读" : (schedule.baseAuthority == .externalManual ? "同步基准：手动修改或来源不明，改动前会再次确认" : (schedule.baseAuthority == .userCommitment ? "同步基准：已确认的承诺日期" : "同步基准：还没有写入提醒事项"))).font(.caption).foregroundStyle(.secondary)
                 if let operation = model.scheduleOperations.first(where: { $0.intentID == schedule.id }) {
-                    Text("排期操作：" + operation.state.summary).font(.caption)
+                    Text("上次改期：" + operation.state.summary).font(.caption)
                     Text(operation.reason).font(.caption).foregroundStyle(.secondary)
                     if operation.validity == "frozen" {
-                        Text("迁移历史已冻结，不恢复外部操作。").font(.caption).foregroundStyle(.secondary)
+                        Text("历史记录已冻结，不再写入。").font(.caption).foregroundStyle(.secondary)
                     } else if operation.attempted, operation.state == .unknown || operation.state == .conflict {
-                        Button("只读核对改期结果") { Task { await model.reconcileSchedule(operation) } }
+                        Button("只读核对") { Task { await model.reconcileSchedule(operation) } }
                             .disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
                     }
                 } else {
-                    Text(schedule.eligibleForPlanning ? "本地排期意图，尚未执行外部改期。" : "排期保留为历史，当前暂停执行。").font(.caption).foregroundStyle(.secondary)
+                    Text(schedule.eligibleForPlanning ? "本地已选日期，还没有写入提醒事项。" : "已暂停写入，记录保留。").font(.caption).foregroundStyle(.secondary)
                     if let preview = model.schedulePreviews[schedule.id] {
-                        Text("基于上次回读：" + preview.reason).font(.caption).foregroundStyle(.secondary)
+                        Text("上次核对：" + preview.reason).font(.caption).foregroundStyle(.secondary)
                     }
                     if model.schedulePreviews[schedule.id]?.disposition == .writeFlexible,
                        let target = model.reminderLinks.first(where: { $0.actionID == action.id }), target.state == "linked" {
-                        Button("执行普通弹性安排") { Task { await model.executeSchedule(schedule, link: target) } }
+                        Button("写入 Apple 提醒事项") { Task { await model.executeSchedule(schedule, link: target) } }
                             .disabled(model.remindersBusy || model.reminderAccess?.enabled != true || model.reminderCalendarID != target.calendarID)
                     }
                 }
                 if let grant = model.scheduleGrants.first(where: { $0.intentID == schedule.id }) {
-                    Text(grant.revoked ? "本次改期确认已撤回" : (grant.validity == "frozen" ? "迁移确认仅作历史保留" : "已确认本次具体改期")).font(.caption).foregroundStyle(.secondary)
+                    Text(grant.revoked ? "本次改期确认已撤回" : (grant.validity == "frozen" ? "这次确认仅作历史保留" : "已确认这次改期")).font(.caption).foregroundStyle(.secondary)
                     if grant.eligibleForExecution, let target = model.reminderLinks.first(where: { $0.actionID == action.id }) {
-                        Button("执行已确认改期") { Task { await model.executeSchedule(schedule, link: target, grantID: grant.id) } }.disabled(model.remindersBusy)
+                        Button("按确认的日期写入") { Task { await model.executeSchedule(schedule, link: target, grantID: grant.id) } }.disabled(model.remindersBusy)
                     }
                     if !grant.revoked, grant.validity == "current" {
-                        Button("撤回本次改期确认") { Task { await model.revokeScheduleGrant(grant) } }
+                        Button("撤回这次改期确认") { Task { await model.revokeScheduleGrant(grant) } }
                     }
                 } else if model.schedulePreviews[schedule.id]?.disposition == .requiresConfirmation,
                           let target = model.reminderLinks.first(where: { $0.actionID == action.id }),
                           !model.scheduleOperations.contains(where: { $0.intentID == schedule.id }) {
-                    Button("查看具体改期并确认") { Task { await model.prepareScheduleEffect(schedule, link: target) } }.disabled(model.remindersBusy)
+                    Button("核对这次改期并确认") { Task { await model.prepareScheduleEffect(schedule, link: target) } }.disabled(model.remindersBusy)
                 }
-                DisclosureGroup("排期依据") {
+                DisclosureGroup("原话里的日期") {
                     Text(schedule.rawExpression).font(.caption)
-                    Text("表达时刻：" + schedule.anchorSummary).font(.caption).foregroundStyle(.secondary)
+                    Text("记录于：" + schedule.anchorSummary).font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
