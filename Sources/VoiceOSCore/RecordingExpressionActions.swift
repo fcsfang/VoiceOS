@@ -160,6 +160,7 @@ extension VoiceOSStore {
     static func validatedExpressionHistory(_ database:Database,action:[String:String]) throws -> [ExpressionActionAdoption] {
         guard let raw=action["intent_json"],let history=try JSONDecoder().decode(ActionIntentMetadata.self,from:Data(raw.utf8)).expressionHistory,!history.isEmpty else { return [] }
         let clarified = try Self.clarifiedOpportunityActionIDs(database).contains(action["id"] ?? "")
+        let promoted = try Self.promotedActionIDs(database).contains(action["id"] ?? "")
         var prior:String?,seen=Set<String>()
         for (index,step) in history.enumerated() {
             guard prior == nil || prior == step.fromClaimID,seen.insert(step.fromClaimID).inserted,
@@ -185,7 +186,7 @@ extension VoiceOSStore {
         guard let last=history.last,action["claim_id"] == last.toClaimID,
               let json=try database.query("SELECT action_json FROM claims WHERE id=?",[last.toClaimID]).first?["action_json"] else { throw VoiceOSError("连续表达任务的当前依据缺失") }
         let current=try JSONDecoder().decode(ExtractedAction.self,from:Data(json.utf8))
-        guard action["title"] == current.title,action["note"] == current.quote,clarified || action["kind"] == current.kind.rawValue else { throw VoiceOSError("连续表达任务与最新理解不一致") }
+        guard action["title"] == current.title,action["note"] == current.quote,clarified || promoted || action["kind"] == current.kind.rawValue else { throw VoiceOSError("连续表达任务与最新理解不一致") }
         return history
     }
     func dismissExpressionAction(_ action:RecordingExpressionActionItem,note:String) throws {
