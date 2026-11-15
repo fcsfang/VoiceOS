@@ -50,9 +50,9 @@ public struct ReminderFields: Codable, Sendable, Equatable {
             ($0.0, formatter.string(from: calendar.date(byAdding: .day, value: $0.1, to: anchor)!))
         })
     }
-    public func validate() throws {
+    public func validate(allowingAlertsWithoutDue: Bool = false) throws {
         try due.validate()
-        if case .none = due, !alerts.isEmpty { throw VoiceOSError("通知需要安排日期") }
+        if case .none = due, !alerts.isEmpty, !allowingAlertsWithoutDue { throw VoiceOSError("通知需要安排日期") }
         if let location {
             let name = location.title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { throw VoiceOSError("请填写地点名称") }

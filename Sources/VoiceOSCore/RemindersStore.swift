@@ -185,7 +185,7 @@ extension VoiceOSStore {
         }
         guard !remote.id.isEmpty, remote.id.utf8.count <= 4096, remote.title.unicodeScalars.count <= 10000, remote.marker.utf8.count <= 4096 else { throw VoiceOSError("提醒事项字段无效或过长") }
         try remote.dueDate?.validate()
-        try remote.fields?.validate()
+        try remote.fields?.validate(allowingAlertsWithoutDue: true)
         let action = try actions(includeHistory: true).first { $0.id == link["action_id"] }
         let validMarker = remote.marker == link["marker"]
         // Once identified, a copied marker on a replacement is a conflict,
