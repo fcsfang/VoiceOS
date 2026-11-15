@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: merge-ready
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-11
@@ -52,6 +52,14 @@ CREATE TABLE incremental_reading (
 - 只存游标不存切块缓存，转写变化后块边界可能变化，游标夹取。
 - 今日队列按 updated_at 日期判定，不做每日配额合计。
 - 不做按天提醒通知。
+
+## 结果
+
+2026-11-15 两条线集成到 `work/mega-11`：P1 `805c29f`，P2 `48a7147`；协调者修正切块夹具字数。
+
+`swift build -j 2` 一次通过；`swift test -j 2` 321 项 0 失败（新增切块与游标 9 项）。
+
+实机：锁屏不可得；按天读入口、今日队列与块翻页由存储测试与代码审查覆盖。
 
 ## 链接
 
