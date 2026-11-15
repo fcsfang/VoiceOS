@@ -29,7 +29,8 @@ public actor VoiceOSStore {
         defer { contextValidationSuspended = false }
         return try body()
     }
-    var panoramaRetryDelay: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    nonisolated(unsafe) static var defaultPanoramaRetryDelay: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    var panoramaRetryDelay: @Sendable (Duration) async throws -> Void = VoiceOSStore.defaultPanoramaRetryDelay
     public func setPanoramaRetryDelay(_ delay: @escaping @Sendable (Duration) async throws -> Void) { panoramaRetryDelay = delay }
     var assistantExecutionActive = false
     var assistantDiscoveryActive = false

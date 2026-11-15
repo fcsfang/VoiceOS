@@ -528,7 +528,10 @@ private extension VoiceOSStore {
 
 final class CoreFlowTests: XCTestCase {
     var root: URL!
-    override func setUpWithError() throws { root = FileManager.default.temporaryDirectory.appendingPathComponent("voiceos-flow-" + UUID().uuidString) }
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("voiceos-flow-" + UUID().uuidString)
+        VoiceOSStore.defaultPanoramaRetryDelay = { _ in }
+    }
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: root) }
     private func openStore() async throws -> VoiceOSStore {
         let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
@@ -1876,7 +1879,7 @@ final class CoreFlowTests: XCTestCase {
         let assistantActions = try await store.actions()
         let delegatedAction = try XCTUnwrap(assistantActions.first { $0.title.contains("请帮我调研") })
         let transport = FlowAssistantTransport()
-        let assistant = try ResponsesAssistantPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: transport)
+        let assistant = try ResponsesAssistantPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: transport, retryDelay: { _ in })
         let firstDiscovery = try await store.discoverAutomaticAssistantExecutions(using: assistant)
         XCTAssertTrue(firstDiscovery)
         let discovered = try await store.assistantExecutions()
@@ -2057,7 +2060,7 @@ final class CoreFlowTests: XCTestCase {
         let knowledgeText = "私人代号只留在原文。" + String(repeating: "这段是个人背景，不作为公开检索词。", count: 100) + "SQLite quick_check 会完整检查所有索引与表记录的一致性。SQLite integrity_check 不能证明业务逻辑没有错误。这个术语的转写还没听准。我喜欢简洁界面；作者说数据库足够可靠，但我未表态。"
         let knowledgeSource = try await expression(recovered, text: knowledgeText, model: FlowModel())
         let knowledgeTransport = FlowKnowledgeTransport(expectedText: knowledgeText)
-        let knowledgePort = try ResponsesKnowledgeReviewPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: knowledgeTransport)
+        let knowledgePort = try ResponsesKnowledgeReviewPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: knowledgeTransport, retryDelay: { _ in })
         let failedKnowledge = try await recovered.processKnowledgeReview(sourceID: knowledgeSource, using: knowledgePort)
         XCTAssertEqual(failedKnowledge.state, "failed")
         XCTAssertEqual(failedKnowledge.issues.map(\.id), ["incorrect"])
@@ -2556,7 +2559,7 @@ final class CoreFlowTests: XCTestCase {
                 "output": [["type": "message", "role": "assistant", "status": "completed", "content": [["type": "output_text", "text": text]]]]], options: [.sortedKeys]))
         }
         func nativePort(_ transport: FlowFollowupTransport) throws -> ResponsesRecordingFollowupPort {
-            try ResponsesRecordingFollowupPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture-model", transport: transport)
+            try ResponsesRecordingFollowupPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture-model", transport: transport, retryDelay: { _ in })
         }
         let selection: [String: Any] = ["thoughtIDs": nativeInput.thoughts.map(\.id), "goalIDs": nativeInput.goals.map(\.id),
             "taskIDs": nativeInput.tasks.map(\.id), "practiceSourceIDs": nativeInput.practices.map(\.sourceID)]
