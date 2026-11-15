@@ -66,25 +66,33 @@ public struct ContinuousRecordingContext: Codable, Sendable {
 
 extension VoiceOSStore {
     func continuousRecordingContext(sourceID:String) throws -> ContinuousRecordingContext? {
-        let catalog=try sources()
-        guard let source=catalog.first(where: { $0.id == sourceID }) else { return nil }
-        let expression=try recordingExpressions().first(where: { $0.sourceIDs.contains(sourceID) })
+        try continuousRecordingContext(sourceID: sourceID, catalog: try sources(), expressions: try recordingExpressions())
+    }
+    /// Preloaded catalog and expressions keep per-receipt validation off the
+    /// full-library read path.
+    func continuousRecordingContext(sourceID:String, catalog:[SourceRecord], expressions:[RecordingExpression]) throws -> ContinuousRecordingContext? {
+        let byID = Dictionary(uniqueKeysWithValues: catalog.map { ($0.id, $0) })
+        guard let source = byID[sourceID] else { return nil }
+        let expression=expressions.first(where: { $0.sourceIDs.contains(sourceID) })
         if let expression,expression.state != "completed" { throw VoiceOSError("连续表达仍在整体理解，后续跟进稍后继续") }
         let members=expression?.sourceIDs ?? [sourceID]
-        let expanded=try recordingContextSourceIDs(sourceIDs:members)
+        let expanded=try recordingContextSourceIDs(sourceIDs:members,catalog:byID)
         guard members.count > 1 || expanded.count > members.count else { return nil }
         let selected=Set(expanded)
-        let context=try prepareLocalTranscriptContext(sourceIDs:expanded,scalarBudget:max(1,catalog.filter { selected.contains($0.id) }.reduce(0) { $0 + ($1.transcript?.unicodeScalars.count ?? 0) }))
-        let policies=Dictionary(uniqueKeysWithValues:catalog.filter { selected.contains($0.id) }.map { ($0.id,$0.policyVersion) })
+        let context=try prepareLocalTranscriptContext(sourceIDs:expanded,scalarBudget:max(1,expanded.compactMap { byID[$0] }.reduce(0) { $0 + ($1.transcript?.unicodeScalars.count ?? 0) }))
+        let policies=Dictionary(uniqueKeysWithValues:expanded.compactMap { byID[$0] }.map { ($0.id,$0.policyVersion) })
         return .init(expressionID:expression?.id ?? source.presentation?.recordingContext?.sessionID ?? sourceID,digest:context.contentDigest,context:context,policies:policies)
     }
 
     func validateContinuousRecordingContext(_ input:ContinuousRecordingContext?,sourceID:String) throws {
+        try validateContinuousRecordingContext(input, sourceID: sourceID, catalog: try sources(), expressions: try recordingExpressions())
+    }
+    func validateContinuousRecordingContext(_ input:ContinuousRecordingContext?,sourceID:String,catalog:[SourceRecord],expressions:[RecordingExpression]) throws {
         guard let input else {
-            if try continuousRecordingContext(sourceID:sourceID) != nil { throw VoiceOSError("单段跟进的依据已扩展为连续表达，需要结合全部分段") }
+            if try continuousRecordingContext(sourceID:sourceID,catalog:catalog,expressions:expressions) != nil { throw VoiceOSError("单段跟进的依据已扩展为连续表达，需要结合全部分段") }
             return
         }
-        guard let current=try continuousRecordingContext(sourceID:sourceID),try Self.relevanceJSON(current) == Self.relevanceJSON(input) else { throw VoiceOSError("连续表达的分段、原话或授权已变化") }
+        guard let current=try continuousRecordingContext(sourceID:sourceID,catalog:catalog,expressions:expressions),try Self.relevanceJSON(current) == Self.relevanceJSON(input) else { throw VoiceOSError("连续表达的分段、原话或授权已变化") }
         try validateLocalTranscriptContext(input.context)
     }
     public func registerAutomaticRecording(sourceID:String,inbox:String,recordedAt:String?,discoveredAt:String? = nil) throws {

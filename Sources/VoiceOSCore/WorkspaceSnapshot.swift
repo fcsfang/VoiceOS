@@ -46,34 +46,36 @@ public struct WorkspaceSnapshot: Sendable {
 }
 
 /// Startup reads the core snapshot first so the library list can paint, then the
-/// secondary snapshot. The full scope keeps the original single-read contract.
+/// secondary pieces. The full scope keeps the original single-read contract.
 public enum WorkspaceSnapshotScope: Sendable {
-    case full, core, secondary
+    case full, core, secondary, assistant, knowledge
 }
 
 extension VoiceOSStore {
     public func workspaceSnapshot(_ scope: WorkspaceSnapshotScope = .full) throws -> WorkspaceSnapshot {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
-        let wantsCore = scope != .secondary
-        let wantsSecondary = scope != .core
+        let wantsCore = scope == .full || scope == .core
+        let wantsSecondary = scope == .full || scope == .secondary
+        let wantsAssistant = scope == .full || scope == .assistant
+        let wantsKnowledge = scope == .full || scope == .knowledge
         var result = WorkspaceSnapshot()
         func readCore() throws {
-            result.questions = try questions()
-            result.questionHistories = try questionHistories()
-            result.claimOrigins = try discussionClaimOrigins()
-            result.outcomeOrigins = try conversationOutcomeOrigins()
-            result.taskInitiations = try taskInitiations()
-            result.recentOutcomes = try recentActionOutcomes()
-            result.compensationPlans = try reminderCompensationPlans()
-            result.compensationGrants = try reminderCompensationGrants()
-            result.compensationOperations = try reminderCompensationOperations()
-            result.reminderLinks = try reminderLinks()
-            result.reminderAccess = try reminderAccess()
-            result.topics = try reflectionQuestions()
-            result.topicSources = try reflectionQuestionSources()
-            result.processingIntents = try processingIntents()
-            result.recordingRequests = try recordingProcessingRequests()
-            result.segmentedBatches = try segmentedProcessingBatches()
+            result.questions = try StartupTrace.measure("snapshot.questions") { try questions() }
+            result.questionHistories = try StartupTrace.measure("snapshot.questionHistories") { try questionHistories() }
+            result.claimOrigins = try StartupTrace.measure("snapshot.claimOrigins") { try discussionClaimOrigins() }
+            result.outcomeOrigins = try StartupTrace.measure("snapshot.outcomeOrigins") { try conversationOutcomeOrigins() }
+            result.taskInitiations = try StartupTrace.measure("snapshot.taskInitiations") { try taskInitiations() }
+            result.recentOutcomes = try StartupTrace.measure("snapshot.recentOutcomes") { try recentActionOutcomes() }
+            result.compensationPlans = try StartupTrace.measure("snapshot.compensationPlans") { try reminderCompensationPlans() }
+            result.compensationGrants = try StartupTrace.measure("snapshot.compensationGrants") { try reminderCompensationGrants() }
+            result.compensationOperations = try StartupTrace.measure("snapshot.compensationOperations") { try reminderCompensationOperations() }
+            result.reminderLinks = try StartupTrace.measure("snapshot.reminderLinks") { try reminderLinks() }
+            result.reminderAccess = try StartupTrace.measure("snapshot.reminderAccess") { try reminderAccess() }
+            result.topics = try StartupTrace.measure("snapshot.topics") { try reflectionQuestions() }
+            result.topicSources = try StartupTrace.measure("snapshot.topicSources") { try reflectionQuestionSources() }
+            result.processingIntents = try StartupTrace.measure("snapshot.processingIntents") { try processingIntents() }
+            result.recordingRequests = try StartupTrace.measure("snapshot.recordingRequests") { try recordingProcessingRequests() }
+            result.segmentedBatches = try StartupTrace.measure("snapshot.segmentedBatches") { try segmentedProcessingBatches() }
             for batch in result.segmentedBatches {
                 if let ids = try segmentedCognitiveClaimIDs(batchID: batch.id) { result.segmentedCognitiveCounts[batch.id] = ids.count }
                 if let attempt = try committedSegmentedAssociationAttempt(batchID: batch.id) {
@@ -85,17 +87,19 @@ extension VoiceOSStore {
                     result.segmentedAssociationStates[id] = state
                 }
             }
-            result.actions = try actions(includeHistory: true)
-            result.actionClarifications = try actionClarifications()
-            result.claims = try candidateClaims(includeFrozen: true)
-            result.currentClaimsBySource = try latestCandidateClaimsBySource(includeFrozen: true)
-            result.attempts = try modelAttemptsBySource()
-            result.sources = try sources()
-            result.actionReviewLedgers = ActionReviewLedger.buildMap(
-                expressions: try recordingExpressions(), actions: result.actions,
-                resolutions: try actionReviewResolutions(),
-                acknowledgements: try actionReviewAcknowledgements(),
-                linkedActionIDs: Set(result.reminderLinks.map(\.actionID)))
+            result.actions = try StartupTrace.measure("snapshot.actions") { try actions(includeHistory: true) }
+            result.actionClarifications = try StartupTrace.measure("snapshot.actionClarifications") { try actionClarifications() }
+            result.claims = try StartupTrace.measure("snapshot.claims") { try candidateClaims(includeFrozen: true) }
+            result.currentClaimsBySource = try StartupTrace.measure("snapshot.currentClaimsBySource") { try latestCandidateClaimsBySource(includeFrozen: true) }
+            result.attempts = try StartupTrace.measure("snapshot.attempts") { try modelAttemptsBySource() }
+            result.sources = try StartupTrace.measure("snapshot.sources") { try sources() }
+            result.actionReviewLedgers = try StartupTrace.measure("snapshot.actionReviewLedgers") {
+                ActionReviewLedger.buildMap(
+                    expressions: try recordingExpressions(), actions: result.actions,
+                    resolutions: try actionReviewResolutions(),
+                    acknowledgements: try actionReviewAcknowledgements(),
+                    linkedActionIDs: Set(result.reminderLinks.map(\.actionID)))
+            }
         }
         if wantsCore {
             if scope == .core {
@@ -106,26 +110,42 @@ extension VoiceOSStore {
                 try readCore()
             }
         }
-        if wantsSecondary {
+        func readSecondary() throws {
             let freezesBefore = frozenContextCount
-            result.assistantExecutions = try assistantExecutions()
-            result.assistantAssessmentIssues = try assistantAssessmentIssues()
-            result.knowledgeReviews = try knowledgeReviews()
-            result.correctionImpacts = try correctionActionImpacts()
-            result.outcomeFollowups = try pendingOutcomeFollowups()
-            result.scheduleIntents = try actionScheduleIntents()
-            result.scheduleOperations = try reminderScheduleOperations()
-            result.scheduleGrants = try reminderScheduleGrants()
+            result.correctionImpacts = try StartupTrace.measure("snapshot.correctionImpacts") { try correctionActionImpacts() }
+            result.outcomeFollowups = try StartupTrace.measure("snapshot.outcomeFollowups") { try pendingOutcomeFollowups() }
+            result.scheduleIntents = try StartupTrace.measure("snapshot.scheduleIntents") { try actionScheduleIntents() }
+            result.scheduleOperations = try StartupTrace.measure("snapshot.scheduleOperations") { try reminderScheduleOperations() }
+            result.scheduleGrants = try StartupTrace.measure("snapshot.scheduleGrants") { try reminderScheduleGrants() }
             result.reminderAccess = try reminderAccess()
             if let access = result.reminderAccess, access.enabled {
                 for intent in result.scheduleIntents {
                     result.schedulePreviews[intent.id] = try? previewReminderSchedule(intentID: intent.id, expectedAccessVersion: access.version)
                 }
             }
-            result.briefing = try workspaceBriefing()
-            result.recordingFollowups = try recordingFollowups()
-            result.followupValidity = try recordingFollowupValidities(result.recordingFollowups)
+            result.briefing = try StartupTrace.measure("snapshot.briefing") { try workspaceBriefing() }
+            result.recordingFollowups = try StartupTrace.measure("snapshot.recordingFollowups") { try recordingFollowups() }
             result.contextValidityChanged = frozenContextCount != freezesBefore
+        }
+        if wantsSecondary {
+            if scope == .secondary {
+                try withoutContextValidation { try readSecondary() }
+            } else {
+                try readSecondary()
+            }
+        }
+        if wantsAssistant {
+            let freezesBefore = frozenContextCount
+            result.assistantExecutions = try StartupTrace.measure("snapshot.assistantExecutions") { try assistantExecutions() }
+            result.assistantAssessmentIssues = try StartupTrace.measure("snapshot.assistantAssessmentIssues") { try assistantAssessmentIssues() }
+            result.contextValidityChanged = result.contextValidityChanged || frozenContextCount != freezesBefore
+        }
+        if wantsKnowledge {
+            result.knowledgeReviews = try StartupTrace.measure("snapshot.knowledgeReviews") { try knowledgeReviews() }
+        }
+        if scope == .full {
+            // Validity follows assistant validation, which may freeze contexts.
+            result.followupValidity = try StartupTrace.measure("snapshot.followupValidity") { try recordingFollowupValidities(result.recordingFollowups) }
         }
         return result
     }

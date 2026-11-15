@@ -829,9 +829,9 @@ final class ControlCenter: ObservableObject {
             StartupTrace.mark("start.initialized")
             restoreSpeechSelection()
             if let path = ProcessInfo.processInfo.environment["VOICEOS_MODEL_CONFIG_FILE"] {
-                configureTextModel(URL(fileURLWithPath: path))
+                configureTextModel(URL(fileURLWithPath: path), resume: false)
             } else if let path = UserDefaults.standard.string(forKey: "voiceos.textModelConfigPath.v1") ?? Bundle.main.object(forInfoDictionaryKey: "VoiceOSModelConfigurationPath") as? String {
-                configureTextModel(URL(fileURLWithPath: path))
+                configureTextModel(URL(fileURLWithPath: path), resume: false)
             }
             await refresh()
             StartupTrace.mark("start.refreshDone")
@@ -859,6 +859,7 @@ final class ControlCenter: ObservableObject {
             resumeRecordingFollowups()
             resumeFolderWatch()
             queueRecordingTitles()
+            if modelConfigured { resumeKnowledgeReviews() }
             StartupTrace.mark("start.end")
                 recordingInbox.start(canProcess: { [weak self] in
                     guard let self else { return false }
@@ -989,9 +990,6 @@ final class ControlCenter: ObservableObject {
         StartupTrace.mark("core.records=\(records.count) claims=\(claims.count) actions=\(actionRecords.count)")
     }
     private func applySecondarySnapshot(_ snapshot: WorkspaceSnapshot) {
-        assistantExecutions = snapshot.assistantExecutions
-        assistantAssessmentIssues = snapshot.assistantAssessmentIssues
-        knowledgeReviews = snapshot.knowledgeReviews
         outcomeFollowups = snapshot.outcomeFollowups
         correctionImpacts = snapshot.correctionImpacts
         scheduleIntents = snapshot.scheduleIntents
@@ -1000,19 +998,23 @@ final class ControlCenter: ObservableObject {
         schedulePreviews = snapshot.schedulePreviews
         workspaceBriefing = snapshot.briefing
         recordingFollowups = snapshot.recordingFollowups
-        followupValidity = snapshot.followupValidity
-        StartupTrace.mark("secondary.followups=\(recordingFollowups.count) validity=\(followupValidity.count) assistant=\(assistantExecutions.count)")
+        StartupTrace.mark("secondary.followups=\(recordingFollowups.count)")
+    }
+    private func applyAssistantSnapshot(_ snapshot: WorkspaceSnapshot) {
+        assistantExecutions = snapshot.assistantExecutions
+        assistantAssessmentIssues = snapshot.assistantAssessmentIssues
+        StartupTrace.mark("secondary.assistant=\(assistantExecutions.count) issues=\(assistantAssessmentIssues.count)")
     }
     private func reloadWorkspace() async {
         guard let store else { return }
         StartupTrace.mark("reload.begin")
         await panoramaChanged()
         StartupTrace.mark("reload.panoramaChecked")
+        var contextsFroze = false
         do {
             let snapshot = try await StartupTrace.measureAsync("reload.workspaceSnapshot") { try await store.workspaceSnapshot(.core) }
             // Publish the core lists together, without awaits between related data sets.
             applyCoreSnapshot(snapshot)
-            englishAttempts = try await StartupTrace.measureAsync("reload.englishAttempts") { try await store.englishFeedbackAttempts() }
             StartupTrace.mark("reload.published")
             if let plan = segmentationPlan, !records.contains(where: { $0.id == plan.source.sourceID && $0.transcriptVersionID == plan.source.transcriptVersionID && $0.policyVersion == plan.policyVersion && ["saved","reference_only"].contains($0.state) }) {
                 segmentationPlan = nil; segmentationStatus = "原话或授权已变化，请重新查看分段"
@@ -1026,19 +1028,34 @@ final class ControlCenter: ObservableObject {
                     }
                 }
             }
-            await StartupTrace.measureAsync("reload.relevanceValidate") { await relevance.validate(store:store) }
-            await StartupTrace.measureAsync("reload.quietFeedback") { await refreshQuietFeedback() }
-            await StartupTrace.measureAsync("reload.sourceDiscussions") { await refreshSourceDiscussions() }
         }
         catch { status = error.localizedDescription }
         workspaceLoaded = true
         StartupTrace.mark("reload.firstScreen")
+        // Give the first frame room before background reads and model work.
+        try? await Task.sleep(for: .milliseconds(200))
         do {
-            let secondary = try await StartupTrace.measureAsync("reload.secondarySnapshot") { try await store.workspaceSnapshot(.secondary) }
-            applySecondarySnapshot(secondary)
-            stalledOutcomes = try await StartupTrace.measureAsync("reload.stalledOutcomes") { (try? await store.stalledOutcomes()) ?? [] }
+            let light = try await StartupTrace.measureAsync("reload.secondarySnapshot") { try await store.workspaceSnapshot(.secondary) }
+            applySecondarySnapshot(light)
+            contextsFroze = light.contextValidityChanged
             StartupTrace.mark("reload.secondaryPublished")
-            if secondary.contextValidityChanged {
+            try? await Task.yield()
+            let assistant = try await StartupTrace.measureAsync("reload.assistantSnapshot") { try await store.workspaceSnapshot(.assistant) }
+            applyAssistantSnapshot(assistant)
+            contextsFroze = contextsFroze || assistant.contextValidityChanged
+            StartupTrace.mark("reload.assistantPublished")
+            try? await Task.yield()
+            followupValidity = try await StartupTrace.measureAsync("reload.followupValidity") { try await store.recordingFollowupValidities(recordingFollowups) }
+            StartupTrace.mark("reload.validityPublished")
+            let knowledge = try await StartupTrace.measureAsync("reload.knowledgeSnapshot") { try await store.workspaceSnapshot(.knowledge) }
+            knowledgeReviews = knowledge.knowledgeReviews
+            StartupTrace.mark("reload.knowledgePublished")
+            stalledOutcomes = try await StartupTrace.measureAsync("reload.stalledOutcomes") { (try? await store.stalledOutcomes()) ?? [] }
+            englishAttempts = try await StartupTrace.measureAsync("reload.englishAttempts") { try await store.englishFeedbackAttempts() }
+            await StartupTrace.measureAsync("reload.relevanceValidate") { await relevance.validate(store:store) }
+            await StartupTrace.measureAsync("reload.quietFeedback") { await refreshQuietFeedback() }
+            await StartupTrace.measureAsync("reload.sourceDiscussions") { await refreshSourceDiscussions() }
+            if contextsFroze {
                 applyCoreSnapshot(try await store.workspaceSnapshot(.core))
                 StartupTrace.mark("reload.coreRepublished")
             }
@@ -1069,7 +1086,7 @@ final class ControlCenter: ObservableObject {
             if response == .OK, let url = panel.url { self.configureTextModel(url) }
         }
     }
-    private func configureTextModel(_ file: URL) {
+    private func configureTextModel(_ file: URL, resume: Bool = true) {
         do {
             // Long segmented cognition uses the explicitly validated SSE
             // transport and 600-second window. Its versioned identity prevents
@@ -1096,13 +1113,17 @@ final class ControlCenter: ObservableObject {
             // A queued intent may have been restored before the user selected a
             // configuration. Wake the durable worker exactly once after the
             // new model identity is installed; scheduleProcessing() itself
-            // remains the single-owner gate for concurrent work.
-            scheduleProcessing()
-            queueRecordingTitles()
-            resumeRecordingFollowups()
-            resumeAssistantExecutions()
-            resumeKnowledgeReviews()
-            queueTopicOrganization()
+            // remains the single-owner gate for concurrent work. Startup defers
+            // this to after the first screen so model work cannot hold the store
+            // actor while the library is opening.
+            if resume {
+                scheduleProcessing()
+                queueRecordingTitles()
+                resumeRecordingFollowups()
+                resumeAssistantExecutions()
+                resumeKnowledgeReviews()
+                queueTopicOrganization()
+            }
         } catch {
             status = error.localizedDescription
             reportWorkspaceError(error.localizedDescription,retry:.textModel)
