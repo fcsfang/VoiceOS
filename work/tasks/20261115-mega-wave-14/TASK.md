@@ -60,4 +60,6 @@ U4 的初版只换 min/ideal 尺寸，实机验证不通过：sheet 窗口 `AXSi
 
 ## 链接
 
+- 2026-11-15 已合并为 `b13c37f`（PR #182）。
+
 - `docs/product/interface-reference.md` 第 4、5 节
