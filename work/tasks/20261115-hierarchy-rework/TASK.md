@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-15
@@ -48,7 +48,15 @@ owner: coordinator
 
 ## 结果
 
-（待填）
+2026-11-15 四个单元集成到 `work/mega-15`：W1 `11dcc8f`，W2 `2d0d5a6`，W3 `a4083db`，W4 `da5ec1f`；协调者补齐 `a4bae42`（线程头与主题页脚按规范统一）、`MarkdownDocument.plainTitle` 单一来源、设置页区块头降级。
+
+集成期修掉两处缺陷：W2 的材料分组把 `SourceRecord.createdAt` 当 `Date` 用，改走 `ConversationReflectionFocus.date`；设置页区块头在两个单元交接处漏改，补成 `sectionTitle` 加次级灰。
+
+`swift build -j 2` 通过；`swift test -j 2` 333 项 0 失败（新增 12 项 Markdown 切块）。
+
+实机（`dist/VoiceOS.app` 独立启动）六页截图：首页时间线统一标题在上、右栏无衬线；行动页页标题唯一顶点、筛选为文字标签、待办为唯一主区块、结果与 AI 工作折叠；材料页日期组头、右对齐计数、行尾状态强调色、1px 行线；阅读页标题去井号、工具行并入标题行、正文起点在窗口头下 16 点；主题卡等高；设置页只有「设置」一个黑字顶点。
+
+遗留：其余工具页（文本捕获、助理、反思、全景等）仍有散写字号，`rg` 去重 20 个值，超过规范验收的 8 个，下一波 W5 全量迁移。
 
 ## 链接
 
