@@ -12,10 +12,14 @@ protocol VoiceOSIntentEndpoint {
 
 enum VoiceOSIntentError: Error, CustomLocalizedStringResourceConvertible {
     case notReady
+    case libraryOpening
+    case dictationNotReady
     case failed
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .notReady: return "VoiceOS 尚未就绪，请先打开应用一次"
+        case .libraryOpening: return "资料库正在打开，请稍后再试"
+        case .dictationNotReady: return "当前不能开始口述，请检查麦克风与资料库状态"
         case .failed: return "未能存入 VoiceOS，请重试"
         }
     }
@@ -36,21 +40,21 @@ struct CaptureTextIntent: AppIntent {
     }
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let endpoint = await MainActor.run { NSApp.delegate as? VoiceOSIntentEndpoint }
-        guard let endpoint else { throw VoiceOSIntentError.notReady }
+        guard let endpoint else { throw VoiceOSIntentError.libraryOpening }
         guard await endpoint.captureVoiceOSIntent(text: text, title: title) else { throw VoiceOSIntentError.failed }
         return .result(dialog: "已存入 VoiceOS")
     }
 }
 
 struct OpenTodayActionsIntent: AppIntent {
-    static let title: LocalizedStringResource = "打开今天的行动"
-    static let description: IntentDescription = IntentDescription("在 VoiceOS 打开今天与逾期的行动列表。")
+    static let title: LocalizedStringResource = "打开行动列表"
+    static let description: IntentDescription = IntentDescription("在 VoiceOS 打开行动列表，包含今天与逾期的任务。")
     static let openAppWhenRun: Bool = true
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let endpoint = await MainActor.run { NSApp.delegate as? VoiceOSIntentEndpoint }
         guard let endpoint else { throw VoiceOSIntentError.notReady }
         guard await endpoint.openTodayActions() else { throw VoiceOSIntentError.notReady }
-        return .result(dialog: "已打开今天的行动")
+        return .result(dialog: "已打开行动列表")
     }
 }
 
@@ -72,8 +76,8 @@ struct ToggleDictationIntent: AppIntent {
     static let openAppWhenRun: Bool = true
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let endpoint = await MainActor.run { NSApp.delegate as? VoiceOSIntentEndpoint }
-        guard let endpoint else { throw VoiceOSIntentError.notReady }
-        guard let started = await endpoint.toggleDictation() else { throw VoiceOSIntentError.notReady }
+        guard let endpoint else { throw VoiceOSIntentError.dictationNotReady }
+        guard let started = await endpoint.toggleDictation() else { throw VoiceOSIntentError.dictationNotReady }
         return .result(dialog: started ? "口述已开始" : "口述已停止")
     }
 }
