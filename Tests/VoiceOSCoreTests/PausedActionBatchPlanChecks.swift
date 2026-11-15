@@ -28,7 +28,7 @@ final class PausedActionBatchPlanChecks: XCTestCase {
                      kind: "task", intentActor: "user", note: "", state: state, validity: validity,
                      version: 1, autoSend: true,
                      intent: ActionIntentMetadata(intentType: "task", followupState: followupState, uncertain: false),
-                     commandID: "test:" + id, createdAt: "2026-01-01T00:00:00Z")
+                     commandID: "test:" + id, createdAt: "2026-01-01T00:00:00Z", parentID: nil)
     }
 
     private func expressionPresentation(actionID: String) -> RecordingPresentation {

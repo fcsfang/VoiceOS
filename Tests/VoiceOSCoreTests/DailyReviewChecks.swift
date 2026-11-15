@@ -15,7 +15,7 @@ final class DailyReviewChecks: XCTestCase {
         ActionRecord(id: id, claimID: "claim-" + id, claimReviewVersion: 1, title: "任务 " + id,
                      kind: kind, intentActor: "user", note: "", state: state, validity: validity,
                      version: 1, autoSend: true, intent: nil, commandID: "test:" + id,
-                     createdAt: "2026-11-01T00:00:00Z")
+                     createdAt: "2026-11-01T00:00:00Z", parentID: nil)
     }
 
     private func schedule(_ actionID: String, _ due: ReminderDueDate) -> ActionScheduleIntent {

@@ -922,6 +922,7 @@ struct WorkspaceView: View {
                 }
             }
             WorkspaceTabs(selection:$actionFilter,titles:SavedViewPage.actions.filters,style:.filters)
+            if actionFilter == "问题与目标", !model.stalledOutcomes.isEmpty { stalledBanner }
             let visible = visibleActions
             let executions = model.assistantExecutions.filter { $0.state != "cancelled" }
             let paused = model.workspacePausedTasks
@@ -1288,6 +1289,11 @@ struct WorkspaceView: View {
         if let title=actionSourceTitle(action) {
             detail.meta=due.isEmpty ? "来自『\(title)』" : due + " · 来自『\(title)』"
         } else { detail.meta=due }
+        if action.kind != "task", action.state == "open", action.validity == "current" {
+            let nextCount=model.actionRecords.filter { $0.parentID == action.id && $0.state == "open" }.count
+            let nextLabel=nextCount == 0 ? "还没有下一步" : "\(nextCount) 个下一步"
+            detail.meta=detail.meta.isEmpty ? nextLabel : detail.meta + " · " + nextLabel
+        }
         if detail.status.isEmpty {
             if model.workspaceExternalCompletionNote(action) != nil {
                 detail.status="提醒事项已完成";detail.statusColor=palette.success
@@ -1334,8 +1340,23 @@ struct WorkspaceView: View {
             return date < Date()
         }
     }
+    private var stalledBanner: some View {
+        let goals = model.stalledOutcomes
+        return HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "exclamationmark.circle").foregroundStyle(palette.warning).accessibilityHidden(true)
+            Text("\(goals.count) 个目标还没有下一步").vosFont(WorkspaceText.body)
+            Spacer(minLength: 0)
+            if let first = goals.first {
+                Button("打开第一条") { go(.task(first.id)) }
+                    .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                    .accessibilityLabel("打开第一个没有下一步的目标：" + first.title)
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(palette.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+    }
     @ViewBuilder private func actionMenuItems(_ action:ActionRecord,focused:Bool,canChangeDay:Bool,canTransition:Bool) -> some View {
-        if action.canPromoteToTask {
+        if action.canPromoteToTask, model.openNextActions(of: action.id).isEmpty {
             Button("转为待办") { promoteAction(action) }
                 .accessibilityLabel("转为待办：" + action.title)
         }

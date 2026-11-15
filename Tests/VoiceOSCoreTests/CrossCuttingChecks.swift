@@ -27,7 +27,7 @@ final class CrossCuttingChecks: XCTestCase {
     private func action(id: String, claimID: String, title: String, state: String = "open", validity: String = "current", note: String = "") -> ActionRecord {
         ActionRecord(id: id, claimID: claimID, claimReviewVersion: 1, title: title, kind: "task",
                      intentActor: "user", note: note, state: state, validity: validity, version: 1, autoSend: false,
-                     intent: nil, commandID: "test:" + id, createdAt: "2026-11-14T00:00:00Z")
+                     intent: nil, commandID: "test:" + id, createdAt: "2026-11-14T00:00:00Z", parentID: nil)
     }
 
     func testMarkdownMirrorWritesFrontMatterAndEscapes() throws {
