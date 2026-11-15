@@ -201,6 +201,16 @@ extension VoiceOSStore {
         try checkpoint(.actionStateCommitted)
         return next
     }
+    /// Kind changes would strand children: a goal owning open next actions must
+    /// stay an opportunity, and a task under a goal must not become one. The
+    /// export validator rejects either shape on restore.
+    private static func rejectNextActionKindChange(_ db: Database, action: ActionRecord) throws {
+        guard action.parentID == nil else { throw VoiceOSError("这条行动属于某个目标") }
+        if action.kind == "opportunity" {
+            let openChildren = try db.query("SELECT id FROM actions WHERE parent_id=? AND state='open' LIMIT 1", [action.id])
+            guard openChildren.isEmpty else { throw VoiceOSError("目标已有下一步，请先摘除") }
+        }
+    }
     private static func rejectNextActionCycle(_ db: Database, outcomeID: String, actionID: String) throws {
         var seen: Set<String> = []
         var cursor: String? = outcomeID
@@ -229,8 +239,9 @@ extension VoiceOSStore {
             guard receipt["action_id"] == actionID, receipt["decision"] == decision.rawValue else { throw VoiceOSError("同一澄清命令不能更换行动或判断") }
             return try db.query("SELECT version FROM actions WHERE id=?", [actionID]).first?["version"].flatMap(Int.init) ?? expectedVersion
         }
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
-              action.isExtracted, action.state == "open", action.validity == "current", action.version == expectedVersion else {
+        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        try Self.rejectNextActionKindChange(db, action: action)
+        guard action.isExtracted, action.state == "open", action.validity == "current", action.version == expectedVersion else {
             throw VoiceOSError("只有抽取得到且仍有效的未完成行动可以澄清")
         }
         guard try db.query("SELECT action_id FROM action_clarifications WHERE action_id=?", [actionID]).isEmpty else {
@@ -270,6 +281,7 @@ extension VoiceOSStore {
             return Int(receipt["version"]!)!
         }
         guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        try Self.rejectNextActionKindChange(db, action: action)
         guard action.kind == "opportunity" else { throw VoiceOSError("只有问题与目标可以转为待办") }
         guard action.state == "open" else { throw VoiceOSError("只有未完成的问题与目标可以转为待办") }
         guard action.validity == "current" else { throw VoiceOSError("已失效的问题与目标不能转为待办") }

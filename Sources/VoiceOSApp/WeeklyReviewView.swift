@@ -70,9 +70,11 @@ struct WeeklyReviewView: View {
         return (model.workspacePausedTasks + model.actionRecords.filter { $0.validity != "current" })
             .filter { seen.insert($0.id).inserted }
     }
+    private var stalledGoals: [ActionRecord] { model.stalledOutcomes }
     private var isEmpty: Bool {
         dailyReview.today.isEmpty && dailyReview.overdue.isEmpty && dailyReview.remaining.isEmpty &&
             staleTasks.isEmpty && unclarifiedTasks.isEmpty && weekProgress.isEmpty && pausedTasks.isEmpty &&
+            stalledGoals.isEmpty &&
             nextWeekEntries.isEmpty
     }
     private var undoHint: some View {
@@ -93,6 +95,7 @@ struct WeeklyReviewView: View {
                 if !nextWeekEntries.isEmpty { nextWeekSection }
                 if !staleTasks.isEmpty { staleSection }
                 if !unclarifiedTasks.isEmpty { unclarifiedSection }
+                if !stalledGoals.isEmpty { stalledGoalsSection }
                 if !weekProgress.isEmpty { progressSection }
                 if !pausedTasks.isEmpty { pausedSection }
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding)
@@ -401,8 +404,21 @@ struct WeeklyReviewView: View {
         }
     }
 
+    private var stalledGoalsSection: some View {
+        let rows = Array(stalledGoals.prefix(5))
+        return WorkspaceSection(title: "没有下一步的目标", subtitle: "目标还没有可以推进的下一步。", icon: "exclamationmark.circle", count: stalledGoals.count) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
+                if index > 0 { Divider() }
+                reviewRow(title: goal.title, subtitle: "还没有下一步", trailing: "停滞", icon: "exclamationmark.circle",
+                          accessibilityLabel: "目标：" + goal.title + "，还没有下一步") { openTask(goal.id) }
+            }
+            if stalledGoals.count > rows.count {
+                Text("还有 \(stalledGoals.count - rows.count) 个目标，到问题与目标页查看。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
+            }
+        }
+    }
     private func reviewRow(title: String, subtitle: String, detail: String = "", trailing: String = "",
-                           icon: String = "circle", enabled: Bool = true,
+                           icon: String = "circle", enabled: Bool = true, accessibilityLabel: String? = nil,
                            open: @escaping () -> Void) -> some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 14) {
@@ -429,6 +445,7 @@ struct WeeklyReviewView: View {
             .contentShape(Rectangle())
             .accessibilityElement(children: .combine)
         }.buttonStyle(.plain).disabled(!enabled)
+            .accessibilityLabelIfPresent(accessibilityLabel)
             .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
     }
     private func dueLabel(_ entry: ActionTimeEntry) -> String {
@@ -449,5 +466,10 @@ struct WeeklyReviewView: View {
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日"
         return formatter.string(from: date)
+    }
+}
+private extension View {
+    @ViewBuilder func accessibilityLabelIfPresent(_ label: String?) -> some View {
+        if let label { self.accessibilityLabel(label) } else { self }
     }
 }

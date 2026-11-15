@@ -619,6 +619,7 @@ final class ControlCenter: ObservableObject {
     @Published var reviewingClaim = false
     @Published var actionRecords: [ActionRecord] = []
     @Published var actionClarifications: [String: String] = [:]
+    @Published var stalledOutcomes: [ActionRecord] = []
     @Published var homeSnapshot = RecentContentHomeSnapshot(days: [], digests: [:])
     @Published var actionReviewLedgers: [String: ActionReviewLedger] = [:]
     @Published var focusedTaskID: String?
@@ -951,6 +952,7 @@ final class ControlCenter: ObservableObject {
         await panoramaChanged()
         do {
             let snapshot = try await store.workspaceSnapshot()
+            let stalled = (try? await store.stalledOutcomes()) ?? []
             // Publish together, without awaits between related data sets.
             records = snapshot.sources
             claims = snapshot.claims
@@ -961,6 +963,7 @@ final class ControlCenter: ObservableObject {
             outcomeOrigins = snapshot.outcomeOrigins
             actionRecords = snapshot.actions
             actionClarifications = snapshot.actionClarifications
+            stalledOutcomes = stalled
             publishHomeSnapshot()
             actionReviewLedgers = snapshot.actionReviewLedgers
             assistantExecutions = snapshot.assistantExecutions
@@ -2894,6 +2897,55 @@ final class ControlCenter: ObservableObject {
             await refresh()
             guard actionRecords.first(where: { $0.id == action.id })?.kind == "task" else { throw VoiceOSError("转为待办未能保存，请重试") }
             status = "已转为待办"
+            return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
+    }
+    func openNextActions(of outcomeID: String) -> [ActionRecord] {
+        actionRecords.filter { $0.parentID == outcomeID && $0.state == "open" }
+    }
+    func addNextAction(outcome: ActionRecord, title: String) async -> String? {
+        guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return nil }
+        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { status = "下一步不能为空"; return nil }
+        savingAction = true; defer { savingAction = false }
+        let commandID = "workspace-next-action:" + UUID().uuidString
+        do {
+            let id = try await store.createAction(claimID: outcome.claimID, expectedClaimReviewVersion: outcome.claimReviewVersion,
+                                                  title: clean, kind: .task, commandID: commandID)
+            do {
+                _ = try await store.attachNextAction(outcomeID: outcome.id, actionID: id, commandID: commandID)
+            } catch {
+                await refresh()
+                status = "下一步已创建，但未能挂到目标：" + error.localizedDescription
+                return nil
+            }
+            await refresh()
+            guard actionRecords.first(where: { $0.id == id })?.parentID == outcome.id else { throw VoiceOSError("添加下一步未能保存，请重试") }
+            status = "已添加下一步"
+            return id
+        } catch { status = error.localizedDescription; await refresh(); return nil }
+    }
+    func completeOutcome(_ action: ActionRecord) async -> Bool {
+        guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            _ = try await store.completeOutcome(actionID: action.id, expectedVersion: action.version,
+                                                commandID: "workspace-complete-outcome:" + action.id + ":" + String(action.version))
+            await refresh()
+            guard actionRecords.first(where: { $0.id == action.id })?.state == "completed" else { throw VoiceOSError("目标达成未能保存，请重试") }
+            status = "已标记达成"
+            return true
+        } catch { status = error.localizedDescription; await refresh(); return false }
+    }
+    func detachNextAction(_ action: ActionRecord) async -> Bool {
+        guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            _ = try await store.detachNextAction(actionID: action.id, expectedVersion: action.version,
+                                                 commandID: "workspace-detach-next:" + action.id + ":" + String(action.version))
+            await refresh()
+            guard actionRecords.first(where: { $0.id == action.id })?.parentID == nil else { throw VoiceOSError("摘除下一步未能保存，请重试") }
+            status = "已摘除下一步"
             return true
         } catch { status = error.localizedDescription; await refresh(); return false }
     }
