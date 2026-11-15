@@ -2,24 +2,31 @@ import AppIntents
 import AppKit
 import Foundation
 
+enum DictationOutcome: Sendable {
+    case started
+    case stopped
+    case failed(String)
+    case notReady
+}
+
 @MainActor
 protocol VoiceOSIntentEndpoint {
     func captureVoiceOSIntent(text: String, title: String?) async -> Bool
     func openTodayActions() -> Bool
     func openSearch() -> Bool
-    func toggleDictation() async -> Bool?
+    func toggleDictation() async -> DictationOutcome
 }
 
 enum VoiceOSIntentError: Error, CustomLocalizedStringResourceConvertible {
     case notReady
     case libraryOpening
-    case dictationNotReady
+    case dictationFailed(String)
     case failed
     var localizedStringResource: LocalizedStringResource {
         switch self {
         case .notReady: return "VoiceOS 尚未就绪，请先打开应用一次"
         case .libraryOpening: return "资料库正在打开，请稍后再试"
-        case .dictationNotReady: return "当前不能开始口述，请检查麦克风与资料库状态"
+        case .dictationFailed(let reason): return "\(reason)"
         case .failed: return "未能存入 VoiceOS，请重试"
         }
     }
@@ -76,8 +83,12 @@ struct ToggleDictationIntent: AppIntent {
     static let openAppWhenRun: Bool = true
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let endpoint = await MainActor.run { NSApp.delegate as? VoiceOSIntentEndpoint }
-        guard let endpoint else { throw VoiceOSIntentError.dictationNotReady }
-        guard let started = await endpoint.toggleDictation() else { throw VoiceOSIntentError.dictationNotReady }
-        return .result(dialog: started ? "口述已开始" : "口述已停止")
+        guard let endpoint else { throw VoiceOSIntentError.notReady }
+        switch await endpoint.toggleDictation() {
+        case .started: return .result(dialog: "口述已开始")
+        case .stopped: return .result(dialog: "口述正在停止，随后核对原件")
+        case .failed(let reason): throw VoiceOSIntentError.dictationFailed(reason)
+        case .notReady: throw VoiceOSIntentError.notReady
+        }
     }
 }

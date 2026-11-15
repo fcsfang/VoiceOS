@@ -65,26 +65,29 @@ public enum Bilingual {
         guard paragraphCount > 0 else { return [] }
         var marked: [Int: String] = [:]
         var plain: [String] = []
+        var sawMarker = false
+        var numberingInvalid = false
         for raw in translated.components(separatedBy: .newlines) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             guard !line.isEmpty else { continue }
-            if let parsed = marker(line), parsed.index >= 1, parsed.index <= paragraphCount {
-                marked[parsed.index] = parsed.text
-            } else {
+            guard let parsed = marker(line) else {
                 plain.append(line)
+                continue
+            }
+            sawMarker = true
+            if parsed.index < 1 || parsed.index > paragraphCount || marked[parsed.index] != nil {
+                numberingInvalid = true
+            } else {
+                marked[parsed.index] = parsed.text
             }
         }
-        var result = [String?](repeating: nil, count: paragraphCount)
-        if !marked.isEmpty {
-            for index in 1...paragraphCount {
-                result[index - 1] = marked[index]
-            }
-        } else if plain.count == paragraphCount {
-            for (index, line) in plain.enumerated() {
-                result[index] = line
-            }
+        let missing = [String?](repeating: nil, count: paragraphCount)
+        if sawMarker {
+            guard !numberingInvalid, plain.isEmpty, marked.count == paragraphCount else { return missing }
+            return (1...paragraphCount).map { marked[$0] }
         }
-        return result
+        guard plain.count == paragraphCount else { return missing }
+        return plain
     }
 
     public static func translationText(from data: Data) throws -> String {

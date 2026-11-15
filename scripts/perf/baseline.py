@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Measure a VoiceOS library copy with fixed local regression thresholds; writes only inside the copy."""
+"""Measure a VoiceOS library with fixed local regression thresholds; search rebuild defaults to a temporary copy."""
 from pathlib import Path
-import argparse, json, subprocess, sys, time
+import argparse, json, shutil, subprocess, sys, tempfile, time
 from datetime import datetime, timezone
 
 SQLITE = '/usr/bin/sqlite3'
 KEYS = ('open', 'snapshot', 'search', 'mirror')
 MAIN_TABLES = ('sources', 'claims', 'actions', 'transcripts', 'transcript_versions', 'assets', 'questions')
 FIXED_QUERY = 'VoiceOS'
+DEFAULT_LIBRARY = (Path.home() / 'Library' / 'Application Support' / 'VoiceOS').resolve()
 UNAVAILABLE = {
     'snapshot': 'unavailable: workspaceSnapshot 需要 VoiceOSStore 运行时；voiceos-check 没有该测量入口',
     'mirror': 'unavailable: MarkdownMirror 写入需要 Swift 运行时',
@@ -18,11 +19,14 @@ parser = argparse.ArgumentParser(
                 'search=重建 FTS 索引并检索固定词 ' + FIXED_QUERY + '（检索上限 50）。'
                 'snapshot 与 mirror 需要 Swift 运行时，报告为 unavailable。'
                 '每个耗时是一次 /usr/bin/sqlite3 进程的墙钟，包含进程启动与首次打开开销。'
-                'voiceos-check 只有 read 入口且需要构建，本脚本只测数据库层，不改仓库内文件。',
+                'voiceos-check 只有 read 入口且需要构建，本脚本只测数据库层，不改仓库内文件。'
+                'search 默认在临时副本上重建，--allow-write 才写 --library 原库。',
     epilog='示例：scripts/perf/baseline.py --library /tmp/voiceos-copy --max-ms open=200 --max-ms search=500 --output text')
-parser.add_argument('--library', type=Path, required=True, help='语音库副本目录，须含 voiceos.sqlite；脚本会重建副本内的 search_index')
+parser.add_argument('--library', type=Path, required=True, help='语音库目录，须含 voiceos.sqlite；默认复制到临时目录重建 search_index，原库不写入')
 parser.add_argument('--max-ms', action='append', default=[], metavar='KEY=MS', help='耗时上限，可多次；key 取 open|snapshot|search|mirror')
 parser.add_argument('--output', choices=['json', 'text'], default='json', help='json 输出完整结果；text 输出逐行摘要')
+parser.add_argument('--allow-write', action='store_true', help='直接在 --library 原库重建 search_index；默认只在临时副本上重建')
+parser.add_argument('--force', action='store_true', help='仅与 --allow-write 一起使用，才允许写默认资料库')
 args = parser.parse_args()
 
 thresholds = {}
@@ -37,15 +41,20 @@ for item in args.max_ms:
     if thresholds[key] < 0:
         parser.error(f'--max-ms 的 MS 不能为负：{item}')
 
+if args.force and not args.allow_write:
+    parser.error('--force 只与 --allow-write 一起使用')
 library = args.library.resolve()
+if args.allow_write and not args.force and library == DEFAULT_LIBRARY:
+    parser.error(f'拒绝原地写入默认资料库 {library}；确需写入请同时给 --allow-write 与 --force')
 database = library / 'voiceos.sqlite'
 if not database.is_file():
     print(f'缺少 {database}', file=sys.stderr)
     sys.exit(2)
 
-def sqlite_input(sql):
+def sqlite_input(sql, target, readonly=False):
+    command = [SQLITE, '-batch', '-bail'] + (['-readonly'] if readonly else []) + [str(target)]
     started = time.perf_counter()
-    completed = subprocess.run([SQLITE, '-batch', '-bail', str(database)], input=sql, text=True, capture_output=True)
+    completed = subprocess.run(command, input=sql, text=True, capture_output=True)
     return (time.perf_counter() - started) * 1000, completed
 
 def rows_of(output):
@@ -61,7 +70,7 @@ evidence = {}
 def record(key, milliseconds, status):
     measurements[key] = {'ms': None if milliseconds is None else round(milliseconds, 1), 'status': status}
 
-_, probe = sqlite_input("SELECT name FROM sqlite_master WHERE type='table';")
+_, probe = sqlite_input("SELECT name FROM sqlite_master WHERE type='table';", database, readonly=True)
 if probe.returncode != 0:
     record('open', None, 'error: ' + failure_text(probe))
     record('search', None, 'error: ' + failure_text(probe))
@@ -69,7 +78,7 @@ else:
     tables = {line for line in probe.stdout.splitlines() if line}
     counted = [table for table in MAIN_TABLES if table in tables]
     open_sql = 'PRAGMA integrity_check;\n' + ''.join(f"SELECT '{table}', count(*) FROM {table};\n" for table in counted)
-    open_ms, opened = sqlite_input(open_sql)
+    open_ms, opened = sqlite_input(open_sql, database, readonly=True)
     if opened.returncode != 0:
         record('open', None, 'error: ' + failure_text(opened))
     else:
@@ -82,7 +91,7 @@ else:
         else:
             record('open', None, f'error: integrity_check 返回 {integrity}')
     if 'search_index' not in tables:
-        record('search', None, 'unavailable: 副本没有 search_index 表')
+        record('search', None, 'unavailable: 库没有 search_index 表')
     else:
         search_sql = f"""DELETE FROM search_index;
 INSERT INTO search_index(kind, ref_id, title, body)
@@ -95,7 +104,20 @@ INSERT INTO search_index(kind, ref_id, title, body) SELECT 'action', id, title, 
 SELECT 'indexed', count(*) FROM search_index;
 SELECT 'matches', count(*) FROM (SELECT snippet(search_index, 3, '', '', '…', 24) FROM search_index WHERE search_index MATCH '"{FIXED_QUERY}"' ORDER BY rank LIMIT 50);
 """
-        search_ms, searched = sqlite_input(search_sql)
+        if args.allow_write:
+            evidence['search_rebuild'] = 'in-place'
+            search_ms, searched = sqlite_input(search_sql, database)
+        else:
+            evidence['search_rebuild'] = 'copy'
+            with tempfile.TemporaryDirectory() as scratch:
+                copy = Path(scratch) / database.name
+                shutil.copy2(database, copy)
+                # Copy WAL sidecars so rows not yet checkpointed are measured too.
+                for suffix in ('-wal', '-shm'):
+                    sidecar = database.with_name(database.name + suffix)
+                    if sidecar.is_file():
+                        shutil.copy2(sidecar, copy.with_name(copy.name + suffix))
+                search_ms, searched = sqlite_input(search_sql, copy)
         if searched.returncode != 0:
             record('search', None, 'error: ' + failure_text(searched))
         else:
@@ -149,6 +171,8 @@ else:
         pieces.append(f"indexed={evidence['search_indexed']}")
     if 'search_matches' in evidence:
         pieces.append(f"matches={evidence['search_matches']}")
+    if 'search_rebuild' in evidence:
+        pieces.append(f"rebuild={evidence['search_rebuild']}")
     if pieces:
         print('evidence: ' + ' '.join(pieces))
     for _, message in failures:
