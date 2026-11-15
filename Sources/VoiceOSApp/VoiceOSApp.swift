@@ -807,6 +807,7 @@ final class ControlCenter: ObservableObject {
     private var resumedSavedRecordingExpressions = false
     func start() async {
         guard store == nil else { return }
+        StartupTrace.mark("start.begin")
         startupIssue = ""
         do {
             let root: URL
@@ -818,18 +819,24 @@ final class ControlCenter: ObservableObject {
             skippedOutcomeKeys = Set(UserDefaults.standard.stringArray(forKey: outcomePreferenceKey) ?? [])
             let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
             self.store = store
+            StartupTrace.mark("start.storeInit")
             try await store.recover()
+            StartupTrace.mark("start.recoverDone")
             markdownMirror = MarkdownMirror(directory: root.appendingPathComponent("Mirror", isDirectory: true))
             backupLibrary(at: root)
             restoreTextCaptureDraft(at: root)
             initialized = true; status = "准备就绪 · 媒体只在本机处理"
+            StartupTrace.mark("start.initialized")
             restoreSpeechSelection()
             if let path = ProcessInfo.processInfo.environment["VOICEOS_MODEL_CONFIG_FILE"] {
-                configureTextModel(URL(fileURLWithPath: path))
+                configureTextModel(URL(fileURLWithPath: path), resume: false)
             } else if let path = UserDefaults.standard.string(forKey: "voiceos.textModelConfigPath.v1") ?? Bundle.main.object(forInfoDictionaryKey: "VoiceOSModelConfigurationPath") as? String {
-                configureTextModel(URL(fileURLWithPath: path))
+                configureTextModel(URL(fileURLWithPath: path), resume: false)
             }
             await refresh()
+            StartupTrace.mark("start.refreshDone")
+            do { if try await store.recoverRecordingFollowups() { await refresh() } }
+            catch { status = error.localizedDescription }
             // Long panorama runs must be resumable without a visible window.
             // Only the explicit launch variable retries; a failed state alone
             // never auto-spends on its own.
@@ -852,6 +859,8 @@ final class ControlCenter: ObservableObject {
             resumeRecordingFollowups()
             resumeFolderWatch()
             queueRecordingTitles()
+            if modelConfigured { resumeKnowledgeReviews() }
+            StartupTrace.mark("start.end")
                 recordingInbox.start(canProcess: { [weak self] in
                     guard let self else { return false }
                     return self.initialized && self.modelConfigured && self.speechPort is LocalQwenSpeechPort && !self.fullRecordingBusy && self.worker == nil && self.understandingWorker == nil && !self.dictationActive && !self.dictationBusy && !self.importing && self.pausedActionBatch?.isRunning != true
@@ -883,8 +892,10 @@ final class ControlCenter: ObservableObject {
         }
         refreshWorker = work
         await work.value
+        StartupTrace.mark("refresh.reloaded")
         writeMarkdownMirror()
         updateSpotlightIndex()
+        StartupTrace.mark("refresh.backgroundQueued")
     }
     func retryBackup() {
         guard let root = libraryRoot else { return }
@@ -947,55 +958,64 @@ final class ControlCenter: ObservableObject {
     private func publishHomeSnapshot() {
         homeSnapshot = RecentContentHomeSnapshot.build(sources: records, claims: claims, actions: actionRecords)
     }
+    private func applyCoreSnapshot(_ snapshot: WorkspaceSnapshot) {
+        records = snapshot.sources
+        claims = snapshot.claims
+        currentClaimsBySource = snapshot.currentClaimsBySource
+        questionRecords = snapshot.questions
+        questionRevisions = snapshot.questionHistories
+        claimOrigins = snapshot.claimOrigins
+        outcomeOrigins = snapshot.outcomeOrigins
+        actionRecords = snapshot.actions
+        actionClarifications = snapshot.actionClarifications
+        publishHomeSnapshot()
+        actionReviewLedgers = snapshot.actionReviewLedgers
+        taskInitiations = snapshot.taskInitiations
+        recentOutcomes = snapshot.recentOutcomes
+        compensationPlans = snapshot.compensationPlans
+        compensationGrants = snapshot.compensationGrants
+        compensationOperations = snapshot.compensationOperations
+        reminderLinks = snapshot.reminderLinks
+        reminderAccess = snapshot.reminderAccess
+        reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
+        if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
+        workspaceTopics = snapshot.topics
+        workspaceTopicSources = snapshot.topicSources
+        attempts = snapshot.attempts
+        processingIntents = snapshot.processingIntents
+        recordingRequests = snapshot.recordingRequests
+        segmentedBatches = snapshot.segmentedBatches
+        segmentedCognitiveCounts = snapshot.segmentedCognitiveCounts
+        segmentedAssociationStates = snapshot.segmentedAssociationStates
+        StartupTrace.mark("core.records=\(records.count) claims=\(claims.count) actions=\(actionRecords.count)")
+    }
+    private func applySecondarySnapshot(_ snapshot: WorkspaceSnapshot) {
+        outcomeFollowups = snapshot.outcomeFollowups
+        correctionImpacts = snapshot.correctionImpacts
+        scheduleIntents = snapshot.scheduleIntents
+        scheduleOperations = snapshot.scheduleOperations
+        scheduleGrants = snapshot.scheduleGrants
+        schedulePreviews = snapshot.schedulePreviews
+        workspaceBriefing = snapshot.briefing
+        recordingFollowups = snapshot.recordingFollowups
+        StartupTrace.mark("secondary.followups=\(recordingFollowups.count)")
+    }
+    private func applyAssistantSnapshot(_ snapshot: WorkspaceSnapshot) {
+        assistantExecutions = snapshot.assistantExecutions
+        assistantAssessmentIssues = snapshot.assistantAssessmentIssues
+        StartupTrace.mark("secondary.assistant=\(assistantExecutions.count) issues=\(assistantAssessmentIssues.count)")
+    }
     private func reloadWorkspace() async {
         guard let store else { return }
+        StartupTrace.mark("reload.begin")
         await panoramaChanged()
+        StartupTrace.mark("reload.panoramaChecked")
+        var contextsFroze = false
         do {
-            let snapshot = try await store.workspaceSnapshot()
-            let stalled = (try? await store.stalledOutcomes()) ?? []
-            // Publish together, without awaits between related data sets.
-            records = snapshot.sources
-            claims = snapshot.claims
-            currentClaimsBySource = snapshot.currentClaimsBySource
-            questionRecords = snapshot.questions
-            questionRevisions = snapshot.questionHistories
-            claimOrigins = snapshot.claimOrigins
-            outcomeOrigins = snapshot.outcomeOrigins
-            actionRecords = snapshot.actions
-            actionClarifications = snapshot.actionClarifications
-            stalledOutcomes = stalled
-            publishHomeSnapshot()
-            actionReviewLedgers = snapshot.actionReviewLedgers
-            assistantExecutions = snapshot.assistantExecutions
-            assistantAssessmentIssues = snapshot.assistantAssessmentIssues
-            taskInitiations = snapshot.taskInitiations
-            knowledgeReviews = snapshot.knowledgeReviews
-            recentOutcomes = snapshot.recentOutcomes
-            outcomeFollowups = snapshot.outcomeFollowups
-            correctionImpacts = snapshot.correctionImpacts
-            compensationPlans = snapshot.compensationPlans
-            compensationGrants = snapshot.compensationGrants
-            compensationOperations = snapshot.compensationOperations
-            scheduleIntents = snapshot.scheduleIntents
-            scheduleOperations = snapshot.scheduleOperations
-            scheduleGrants = snapshot.scheduleGrants
-            schedulePreviews = snapshot.schedulePreviews
-            reminderLinks = snapshot.reminderLinks
-            reminderAccess = snapshot.reminderAccess
-            reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
-            if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
-            workspaceTopics = snapshot.topics
-            workspaceTopicSources = snapshot.topicSources
-            workspaceBriefing = snapshot.briefing
-            recordingFollowups = snapshot.recordingFollowups
-            followupValidity = snapshot.followupValidity
-            englishAttempts = try await store.englishFeedbackAttempts()
-            attempts = snapshot.attempts
-            processingIntents = snapshot.processingIntents
-            recordingRequests = snapshot.recordingRequests
-            segmentedBatches = snapshot.segmentedBatches
-            segmentedCognitiveCounts = snapshot.segmentedCognitiveCounts
-            segmentedAssociationStates = snapshot.segmentedAssociationStates
+            let snapshot = try await StartupTrace.measureAsync("reload.workspaceSnapshot") { try await store.workspaceSnapshot(.core) }
+            // Publish the core lists together, without awaits between related data sets.
+            applyCoreSnapshot(snapshot)
+            StartupTrace.mark("reload.published")
             if let plan = segmentationPlan, !records.contains(where: { $0.id == plan.source.sourceID && $0.transcriptVersionID == plan.source.transcriptVersionID && $0.policyVersion == plan.policyVersion && ["saved","reference_only"].contains($0.state) }) {
                 segmentationPlan = nil; segmentationStatus = "原话或授权已变化，请重新查看分段"
             }
@@ -1008,16 +1028,42 @@ final class ControlCenter: ObservableObject {
                     }
                 }
             }
-
-            await relevance.validate(store:store)
-            await refreshQuietFeedback()
-            await refreshDiscussion()
-            await refreshSourceDiscussions()
         }
         catch { status = error.localizedDescription }
+        workspaceLoaded = true
+        StartupTrace.mark("reload.firstScreen")
+        // Give the first frame room before background reads and model work.
+        try? await Task.sleep(for: .milliseconds(200))
+        do {
+            let light = try await StartupTrace.measureAsync("reload.secondarySnapshot") { try await store.workspaceSnapshot(.secondary) }
+            applySecondarySnapshot(light)
+            contextsFroze = light.contextValidityChanged
+            StartupTrace.mark("reload.secondaryPublished")
+            try? await Task.yield()
+            let assistant = try await StartupTrace.measureAsync("reload.assistantSnapshot") { try await store.workspaceSnapshot(.assistant) }
+            applyAssistantSnapshot(assistant)
+            contextsFroze = contextsFroze || assistant.contextValidityChanged
+            StartupTrace.mark("reload.assistantPublished")
+            try? await Task.yield()
+            followupValidity = try await StartupTrace.measureAsync("reload.followupValidity") { try await store.recordingFollowupValidities(recordingFollowups) }
+            StartupTrace.mark("reload.validityPublished")
+            let knowledge = try await StartupTrace.measureAsync("reload.knowledgeSnapshot") { try await store.workspaceSnapshot(.knowledge) }
+            knowledgeReviews = knowledge.knowledgeReviews
+            StartupTrace.mark("reload.knowledgePublished")
+            stalledOutcomes = try await StartupTrace.measureAsync("reload.stalledOutcomes") { (try? await store.stalledOutcomes()) ?? [] }
+            englishAttempts = try await StartupTrace.measureAsync("reload.englishAttempts") { try await store.englishFeedbackAttempts() }
+            await StartupTrace.measureAsync("reload.relevanceValidate") { await relevance.validate(store:store) }
+            await StartupTrace.measureAsync("reload.quietFeedback") { await refreshQuietFeedback() }
+            await StartupTrace.measureAsync("reload.sourceDiscussions") { await refreshSourceDiscussions() }
+            if contextsFroze {
+                applyCoreSnapshot(try await store.workspaceSnapshot(.core))
+                StartupTrace.mark("reload.coreRepublished")
+            }
+        }
+        catch { status = error.localizedDescription }
+        await StartupTrace.measureAsync("reload.discussion") { await refreshDiscussion() }
         resumeAssistantExecutions()
         queueTopicOrganization()
-        workspaceLoaded = true
     }
     func setPanoramaVisible(_ visible: Bool) async {
         guard panoramaPolicy.setVisible(visible) else { return }
@@ -1040,7 +1086,7 @@ final class ControlCenter: ObservableObject {
             if response == .OK, let url = panel.url { self.configureTextModel(url) }
         }
     }
-    private func configureTextModel(_ file: URL) {
+    private func configureTextModel(_ file: URL, resume: Bool = true) {
         do {
             // Long segmented cognition uses the explicitly validated SSE
             // transport and 600-second window. Its versioned identity prevents
@@ -1067,13 +1113,17 @@ final class ControlCenter: ObservableObject {
             // A queued intent may have been restored before the user selected a
             // configuration. Wake the durable worker exactly once after the
             // new model identity is installed; scheduleProcessing() itself
-            // remains the single-owner gate for concurrent work.
-            scheduleProcessing()
-            queueRecordingTitles()
-            resumeRecordingFollowups()
-            resumeAssistantExecutions()
-            resumeKnowledgeReviews()
-            queueTopicOrganization()
+            // remains the single-owner gate for concurrent work. Startup defers
+            // this to after the first screen so model work cannot hold the store
+            // actor while the library is opening.
+            if resume {
+                scheduleProcessing()
+                queueRecordingTitles()
+                resumeRecordingFollowups()
+                resumeAssistantExecutions()
+                resumeKnowledgeReviews()
+                queueTopicOrganization()
+            }
         } catch {
             status = error.localizedDescription
             reportWorkspaceError(error.localizedDescription,retry:.textModel)
@@ -3319,6 +3369,7 @@ struct VoiceOSApp: App {
     @NSApplicationDelegateAdaptor(ApplicationDelegate.self) var delegate
     @StateObject private var model = ControlCenter()
     @FocusedValue(\.voiceOSController) private var focusedModel
+    init() { StartupTrace.mark("app.init") }
     var body: some Scene {
         Window("VoiceOS", id: "control-center") { WorkspaceView(model: model).onboarding(model: model) }
             .commands {

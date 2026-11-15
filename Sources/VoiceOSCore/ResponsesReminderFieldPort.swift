@@ -5,9 +5,14 @@ public struct ResponsesReminderFieldPort: ReminderFieldModelPort {
     private let apiKey: String
     private let model: String
     private let transport: any ModelHTTPTransport
+    private let retryDelay: @Sendable (Duration) async throws -> Void
     public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectStreamingModelHTTPTransport()) throws {
+        try self.init(baseURL: baseURL, apiKey: apiKey, model: model, transport: transport, retryDelay: { try await Task.sleep(for: $0) })
+    }
+    init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport, retryDelay: @escaping @Sendable (Duration) async throws -> Void) throws {
         _ = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model)
         endpoint = baseURL.appendingPathComponent("responses"); self.apiKey = apiKey; self.model = model; self.transport = transport
+        self.retryDelay = retryDelay
     }
     public func extract(_ input: ReminderFieldInput) async throws -> ([ReminderFieldProposal], [String]) {
         let (fields, responseID) = try await call(input)
@@ -29,7 +34,7 @@ public struct ResponsesReminderFieldPort: ReminderFieldModelPort {
         request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization"); request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         var response = try await transport.send(request)
         for delay in [5, 15] where [429, 502, 503, 504].contains(response.status) {
-            try await Task.sleep(for: .seconds(delay)); response = try await transport.send(request)
+            try await retryDelay(.seconds(delay)); response = try await transport.send(request)
         }
         guard response.status == 200 else { throw VoiceOSError("提醒字段模型 HTTP \(response.status)；任务已保存，稍后重试") }
         let envelope = try ResponsesEnvelope.parse(response.body)

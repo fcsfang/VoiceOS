@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: done
 started: 2026-11-16
 updated: 2026-11-16
 branch: work/mega-19
@@ -39,7 +39,11 @@ owner: coordinator
 
 ## 结果
 
-（待填）
+2026-11-16 两轮修复（提交 `689cd8e`、`187bf80`）。第二轮定位到真根因：启动时模型队列在第一次刷新前唤醒，占住 store actor，首屏读取排在 46 条排队任务后。端口构造与队列唤醒拆开、首屏只读 core、secondary 拆四段。
+
+协调者三次冷启动独立验证（`home.appear` 1061/1112/1133 毫秒，修复前 24.8/24.5/24.6 秒）。合并过程出过一次差错：性能提交被 cherry-pick 在本地 main 后随 reset 丢失，PR #190 实际是空合并；已从当前 main 重新挑拣（含 T1 的 356 项测试）并重开 PR。
+
+`swift build -j 2` 通过；`swift test -j 2` 356 项 0 失败。
 
 ## 链接
 

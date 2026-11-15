@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-public struct ClaimReference: Codable, Sendable {
+public struct ClaimReference: Codable, Sendable, Equatable {
     public let sourceID: String
     public let transcriptVersionID: String
     public let spanID: String
@@ -122,12 +122,14 @@ extension VoiceOSStore {
     public func localContext(id: String) throws -> LocalTranscriptContext {
         guard let row = try db.query("SELECT * FROM contexts WHERE id=? AND state='current'", [id]).first else { throw VoiceOSError("上下文已失效或不存在") }
         let context = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(row["snapshot_json"]!.utf8))
-        do {
-            try validateLocalTranscriptContext(context)
-            if let focus = context.reflectionFocus { try validateReflectionBasis(focus) }
-            guard try db.query("SELECT i.id FROM context_inputs i JOIN sources s ON s.id=i.source_id WHERE i.context_id=? AND i.policy_version!=s.policy_version", [id]).isEmpty else { throw VoiceOSError("来源授权版本已变化") }
+        if !contextValidationSuspended {
+            do {
+                try validateLocalTranscriptContext(context)
+                if let focus = context.reflectionFocus { try validateReflectionBasis(focus) }
+                guard try db.query("SELECT i.id FROM context_inputs i JOIN sources s ON s.id=i.source_id WHERE i.context_id=? AND i.policy_version!=s.policy_version", [id]).isEmpty else { throw VoiceOSError("来源授权版本已变化") }
+            }
+            catch { try db.transaction { try freezeContext(id) }; throw error }
         }
-        catch { try db.transaction { try freezeContext(id) }; throw error }
         return context
     }
     /// This slice only supports local fixtures. A reservation is durable before work;
@@ -220,8 +222,10 @@ extension VoiceOSStore {
         // Dynamic read checks are a second barrier in addition to atomic invalidation.
         // A detail read checks its own producers; it must not decode and validate
         // the whole library for each claim or recording.
+        if !contextValidationSuspended {
         for row in try db.query("SELECT DISTINCT x.id FROM contexts x JOIN model_attempts a ON a.context_id=x.id JOIN claims c ON c.attempt_id=a.id WHERE x.state='current'\(selection)", arguments) {
             do { _ = try localContext(id: row["id"]!) } catch { try db.transaction { try freezeContext(row["id"]!) } }
+        }
         }
         let whereClause = includeFrozen ? "WHERE 1=1" : "WHERE c.validity='current' AND x.state='current' AND COALESCE(r.decision,'pending')!='rejected'"
         return try db.query("SELECT c.*,r.statement AS reviewed_statement,r.ownership AS reviewed_ownership,r.decision AS review_state FROM claims c JOIN model_attempts a ON a.id=c.attempt_id JOIN contexts x ON x.id=a.context_id LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version \(whereClause)\(selection) ORDER BY c.created_at,c.id", arguments)
@@ -403,6 +407,7 @@ extension VoiceOSStore {
         for row in try db.query("SELECT context_id FROM context_inputs WHERE source_id=?", [sourceID]) { try freezeContext(row["context_id"]!) }
     }
     func freezeContext(_ id: String) throws {
+        frozenContextCount += 1
         try db.execute("UPDATE contexts SET state='stale' WHERE id=?", [id])
         try db.execute("UPDATE conversations SET validity='frozen' WHERE entry_context_id=? OR id IN (SELECT conversation_id FROM conversation_user_turns WHERE context_id=?)",[id,id])
         try db.execute("UPDATE discussion_attempts SET validity='frozen' WHERE context_id=? OR conversation_id IN (SELECT id FROM conversations WHERE validity='frozen')",[id])
