@@ -54,14 +54,14 @@ struct WorkspaceSection<Content: View>: View {
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 9) {
-                        Text(title).vosFont(21, weight: .semibold).accessibilityAddTraits(.isHeader)
+                        Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
                         if let count {
                             Text(String(count)).vosFont(13, weight: .semibold, monospacedDigit: true)
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .background(palette.selection, in: Capsule()).foregroundStyle(.secondary)
                         }
                     }
-                    if !subtitle.isEmpty { Text(subtitle).vosFont(13).foregroundStyle(.secondary).lineSpacing(3) }
+                    if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3) }
                 }
                 Spacer(minLength: 0)
                 if let action { Button(actionTitle, action: action).vosFont(13, weight: .medium).buttonStyle(.borderless).padding(.top, 4) }

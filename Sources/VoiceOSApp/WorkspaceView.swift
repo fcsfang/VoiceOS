@@ -38,9 +38,9 @@ struct WorkspaceHeading: View {
     var subtitle: String = ""
     var body: some View {
         VStack(alignment:.leading,spacing:11) {
-            if !eyebrow.isEmpty { Text(eyebrow).vosFont(13, weight: .medium).foregroundStyle(.secondary) }
-            Text(title).vosFont(30, weight: .semibold).textSelection(.enabled).accessibilityAddTraits(.isHeader)
-            if !subtitle.isEmpty { Text(subtitle).vosFont(14).foregroundStyle(.secondary).lineSpacing(4) }
+            if !eyebrow.isEmpty { Text(eyebrow).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            Text(title).vosFont(WorkspaceText.pageTitle).textSelection(.enabled).accessibilityAddTraits(.isHeader)
+            if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.body).foregroundStyle(.secondary).lineSpacing(4) }
         }.frame(maxWidth:.infinity,alignment:.leading)
     }
 }
@@ -86,9 +86,9 @@ struct WorkspaceRow: View {
                 Image(systemName:icon).vosFont(16).foregroundStyle(palette.accent)
                     .frame(width:30,height:30).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                     .accessibilityHidden(true)
-                VStack(alignment:.leading,spacing:8) {
-                    Text(title).vosFont(16, weight: .semibold).lineSpacing(3).lineLimit(3).fixedSize(horizontal:false,vertical:true).help(title)
-                    if !subtitle.isEmpty { Text(subtitle).vosFont(13).foregroundStyle(.secondary).lineSpacing(3).lineLimit(2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
+                VStack(alignment:.leading,spacing:3) {
+                    Text(title).vosFont(WorkspaceText.rowTitle).lineSpacing(3).lineLimit(3).fixedSize(horizontal:false,vertical:true).help(title)
+                    if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3).lineLimit(2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
                 }
                 Spacer(minLength:8)
                 if !trailing.isEmpty { Text(trailing).vosFont(12, weight: .medium).foregroundStyle(.secondary).padding(.top,3) }

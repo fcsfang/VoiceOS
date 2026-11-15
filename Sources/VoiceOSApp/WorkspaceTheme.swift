@@ -24,6 +24,8 @@ struct WorkspacePalette {
     var text: Color { theme == .graphite ? adaptive(0x202020, 0xECECEC) : adaptive(0x26352D, 0xE5EBE4) }
     /// Secondary toolbar and metadata copy; one step quieter than `text`.
     var secondaryText: Color { text.opacity(increasesContrast ? 0.85 : 0.72) }
+    /// Counts, footers and third-level facts. One step quieter than `secondaryText`.
+    var tertiaryText: Color { text.opacity(increasesContrast ? 0.66 : 0.53) }
     var accent: Color { theme == .graphite ? adaptive(0x3A4A5C, 0xAEC3D6) : adaptive(0x315F49, 0xB8D9BF) }
     var selection: Color { theme == .graphite ? adaptive(0xE7E7E7, 0x333333) : adaptive(0xE6EEE5, 0x303F33) }
     var border: Color {
