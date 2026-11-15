@@ -49,6 +49,6 @@ struct OutcomeFollowupView: View {
                 Spacer()
                 Button("完成", action: onDone).keyboardShortcut(.cancelAction)
             }
-        }.padding(24).frame(width: 820, height: 540)
+        }.padding(24).frame(minWidth: 680, idealWidth: 820, minHeight: 540, maxHeight: .infinity)
     }
 }
