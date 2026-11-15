@@ -9,41 +9,31 @@ enum WorkspaceTheme: String, CaseIterable, Identifiable {
     var subtitle: String { self == .graphite ? "中性灰阶，专注内容" : "柔和绿调，轻盈自然" }
 }
 
-enum WorkspaceAppearance: String, CaseIterable, Identifiable {
-    case system, light, dark
-
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .system: "跟随系统"
-        case .light: "浅色"
-        case .dark: "深色"
-        }
-    }
-    var colorScheme: ColorScheme? {
-        switch self {
-        case .system: nil
-        case .light: .light
-        case .dark: .dark
-        }
-    }
-}
-
 struct WorkspacePalette {
     let theme: WorkspaceTheme
+    private let increasesContrast: Bool
+
+    init(theme: WorkspaceTheme) {
+        self.theme = theme
+        increasesContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+    }
 
     var canvas: Color { theme == .graphite ? adaptive(0xF2F2F3, 0x1E1E1E) : adaptive(0xF1F3EE, 0x1B1F1D) }
     var surface: Color { theme == .graphite ? adaptive(0xFCFCFD, 0x272727) : adaptive(0xFFFFFF, 0x242925) }
     var sidebar: Color { theme == .graphite ? adaptive(0xECECEE, 0x161616) : adaptive(0xE9EDE6, 0x171C18) }
     var text: Color { theme == .graphite ? adaptive(0x202020, 0xECECEC) : adaptive(0x26352D, 0xE5EBE4) }
     /// Secondary toolbar and metadata copy; one step quieter than `text`.
-    var secondaryText: Color { text.opacity(0.72) }
+    var secondaryText: Color { text.opacity(increasesContrast ? 0.85 : 0.72) }
     var accent: Color { theme == .graphite ? adaptive(0x3A4A5C, 0xAEC3D6) : adaptive(0x315F49, 0xB8D9BF) }
     var selection: Color { theme == .graphite ? adaptive(0xE7E7E7, 0x333333) : adaptive(0xE6EEE5, 0x303F33) }
-    var border: Color { theme == .graphite ? adaptive(0xD5D5D8, 0x4A4A4A) : adaptive(0xCCD6CA, 0x4A5A4E) }
+    var border: Color {
+        theme == .graphite
+            ? (increasesContrast ? adaptive(0xB0B0B6, 0x6C6C6C) : adaptive(0xD5D5D8, 0x4A4A4A))
+            : (increasesContrast ? adaptive(0xA7B5A5, 0x6C7F72) : adaptive(0xCCD6CA, 0x4A5A4E))
+    }
     var hover: Color { selection.opacity(0.55) }
     var pressed: Color { selection.opacity(0.9) }
-    var disabledText: Color { text.opacity(0.35) }
+    var disabledText: Color { text.opacity(increasesContrast ? 0.6 : 0.35) }
     var focusRing: Color { accent.opacity(0.5) }
     // Graph colors distinguish kinds of evidence without tinting the workspace.
     var action: Color { adaptive(0x526B82, 0xA9BED1) }

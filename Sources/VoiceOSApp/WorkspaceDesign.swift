@@ -162,18 +162,24 @@ struct WorkspaceNoticeText: View {
 struct WorkspaceToast: View {
     @Environment(\.workspacePalette) private var palette
     let message: String
+    let close: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill").vosFont(13, weight: .semibold)
                 .foregroundStyle(palette.success)
             Text(message).vosFont(WorkspaceText.meta.size).foregroundStyle(palette.text).lineLimit(2)
+            Button(action: close) {
+                Image(systemName: "xmark").vosFont(10, weight: .semibold)
+                    .foregroundStyle(palette.secondaryText)
+                    .frame(width: 18, height: 18)
+                    .contentShape(Rectangle())
+            }.buttonStyle(.plain).help("关闭提示").accessibilityLabel("关闭提示")
         }
         .padding(.horizontal, 14).padding(.vertical, 9)
         .background(palette.surface, in: Capsule())
         .overlay { Capsule().strokeBorder(palette.border, lineWidth: 1) }
         .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -184,14 +190,11 @@ private struct WorkspaceToastModifier: ViewModifier {
         content
             .overlay(alignment: .bottom) {
                 if let text = message {
-                    WorkspaceToast(message: text)
-                        .padding(.bottom, 18)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .task(id: text) {
-                            try? await Task.sleep(for: .seconds(2.5))
-                            guard !Task.isCancelled else { return }
-                            withAnimation(.easeOut(duration: 0.2)) { message = nil }
-                        }
+                    WorkspaceToast(message: text) {
+                        withAnimation(.easeOut(duration: 0.2)) { message = nil }
+                    }
+                    .padding(.bottom, 18)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
             .animation(.spring(duration: 0.26), value: message)
