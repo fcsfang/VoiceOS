@@ -55,7 +55,7 @@ extension ControlCenter {
             guard change.skipReason(current: Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0.disposition) })) == nil else { return .skipped }
             do { try await store.setMaterialDisposition(sourceIDs: change.sourceIDs, disposition: change.from) } catch { return .failed(error.localizedDescription) }
             await refresh()
-            return .applied("已撤销「\(change.title)」的处置")
+            return .applied("已撤销处置；理解与暂停不会回滚")
         case .materialTitle(let change):
             let sources: [SourceRecord]
             do { sources = try await store.sources() } catch { return .failed(error.localizedDescription) }
