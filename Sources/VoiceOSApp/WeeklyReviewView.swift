@@ -76,7 +76,7 @@ struct WeeklyReviewView: View {
             nextWeekEntries.isEmpty
     }
     private var undoHint: some View {
-        Text("完成或不再跟进后可立即撤销，任务页也保留撤销。").vosFont(12).foregroundStyle(.secondary)
+        Text("完成或不再跟进后可立即撤销，任务页也保留撤销。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
     }
     var body: some View {
         ScrollView {
@@ -88,7 +88,7 @@ struct WeeklyReviewView: View {
                 undoHint
                 dailyCloseSection
                 if isEmpty {
-                    Text("这一周没有需要回顾的行动。").font(.callout).foregroundStyle(.secondary)
+                    Text("这一周没有需要回顾的行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                 }
                 if !nextWeekEntries.isEmpty { nextWeekSection }
                 if !staleTasks.isEmpty { staleSection }
@@ -117,7 +117,7 @@ struct WeeklyReviewView: View {
         let overdueRows = Array(review.overdue.prefix(5))
         return WorkspaceSection(title: "今天收尾", subtitle: "逐条完成或不再跟进；改天仍到任务页处理。", icon: "checkmark.circle", count: review.remainingCount) {
             if review.isClear {
-                Text("今天没有未收尾的行动").font(.callout).foregroundStyle(.secondary).padding(.vertical, 10)
+                Text("今天没有未收尾的行动").vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 10)
             }
             if !todayRows.isEmpty {
                 ForEach(Array(todayRows.enumerated()), id: \.element.id) { index, entry in
@@ -128,7 +128,7 @@ struct WeeklyReviewView: View {
             if review.today.count > todayRows.count { allButton(review.today.count, .todo) }
             if !overdueRows.isEmpty {
                 if !todayRows.isEmpty { Divider() }
-                Text("逾期").vosFont(13, weight: .semibold).foregroundStyle(palette.warning).accessibilityAddTraits(.isHeader)
+                Text("逾期").vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.warning).accessibilityAddTraits(.isHeader)
                     .padding(.top, 12).padding(.bottom, 2)
                 ForEach(Array(overdueRows.enumerated()), id: \.element.id) { index, entry in
                     if index > 0 { Divider() }
@@ -138,18 +138,18 @@ struct WeeklyReviewView: View {
             if review.overdue.count > overdueRows.count { allButton(review.overdue.count, .todo) }
             if review.completedCount + review.dismissedCount > 0 {
                 Text("已完成 \(review.completedCount) 条，已放下 \(review.dismissedCount) 条。")
-                    .vosFont(12).foregroundStyle(.secondary).padding(.top, 10)
+                    .vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
             }
             if review.remainingCount > 0 {
                 HStack(spacing: 8) {
-                    Text("今天与逾期共 \(review.remainingCount) 条").vosFont(12).foregroundStyle(.secondary)
+                    Text("今天与逾期共 \(review.remainingCount) 条").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     Button("到行动页查看 →") { jump(.todo) }
-                        .buttonStyle(.plain).vosFont(12.5).foregroundStyle(palette.accent)
+                        .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                 }.padding(.top, 10)
             }
             if !actionError.isEmpty {
-                Text(actionError).vosFont(12).foregroundStyle(palette.warning).padding(.top, 10)
+                Text(actionError).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning).padding(.top, 10)
             }
         }
     }
@@ -159,15 +159,15 @@ struct WeeklyReviewView: View {
         return HStack(alignment: .top, spacing: 12) {
             Button { openTask(entry.action.id) } label: {
                 HStack(alignment: .top, spacing: 14) {
-                    Image(systemName: overdue ? "exclamationmark.circle" : "circle").vosFont(16)
+                    Image(systemName: overdue ? "exclamationmark.circle" : "circle").vosFont(WorkspaceText.rowTitle.size)
                         .foregroundStyle(overdue ? palette.warning : palette.accent)
                         .frame(width: 34, height: 34)
                         .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(entry.action.title).vosFont(16, weight: .semibold).lineLimit(2).multilineTextAlignment(.leading)
+                        Text(entry.action.title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
                         if !subtitle.isEmpty {
-                            Text(subtitle).vosFont(13).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                            Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
                         }
                     }
                     Spacer(minLength: 8)
@@ -177,7 +177,7 @@ struct WeeklyReviewView: View {
                 .accessibilityElement(children: .combine)
             }.buttonStyle(.plain)
             if overdue {
-                Text("逾期").vosFont(12, weight: .medium).foregroundStyle(palette.warning).padding(.top, 5)
+                Text("逾期").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.warning).padding(.top, 5)
             }
             Button("完成") { apply(entry, .completed) }
                 .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
@@ -224,7 +224,7 @@ struct WeeklyReviewView: View {
 
     private func allButton(_ count: Int, _ filter: ReviewFilter) -> some View {
         Button("查看全部 \(count) 条 →") { jump(filter) }
-            .buttonStyle(.plain).vosFont(12.5).foregroundStyle(palette.accent)
+            .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
             .padding(.top, 10)
             .accessibilityLabel("查看全部 \(count) 条")
     }
@@ -235,7 +235,7 @@ struct WeeklyReviewView: View {
                 Button(action: undoLastChange) {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.accent)
-                        Text("\(undoEntry.label) · 撤销").vosFont(13, weight: .medium)
+                        Text("\(undoEntry.label) · 撤销").vosFont(WorkspaceText.meta.size, weight: .medium)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 14).padding(.vertical, 10)
@@ -275,7 +275,7 @@ struct WeeklyReviewView: View {
         let rows = Array(candidates.prefix(5))
         return WorkspaceSection(title: "下周先做", subtitle: "从即将与随时里挑最多 3 条，确认后加入专注。", icon: "calendar.badge.plus", count: nextWeekEntries.count) {
             if focusSlots == 0 {
-                Text("已有 3 条专注，先到行动页移出。").vosFont(12).foregroundStyle(palette.warning).padding(.top, 8)
+                Text("已有 3 条专注，先到行动页移出。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning).padding(.top, 8)
             }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, entry in
                 if index > 0 { Divider() }
@@ -284,14 +284,14 @@ struct WeeklyReviewView: View {
             if candidates.count > rows.count { allButton(candidates.count, .todo) }
             HStack(spacing: 10) {
                 Text(selectedFocusIDs.isEmpty ? "最多还能加入 \(focusSlots) 条" : "已选 \(selectedFocusIDs.count) 条")
-                    .vosFont(12).foregroundStyle(.secondary)
+                    .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("加入专注") { applyNextWeekFocus() }
                     .buttonStyle(.borderedProminent).controlSize(.small)
                     .disabled(selectedFocusIDs.isEmpty || focusSaving)
             }.padding(.top, 10)
             if !focusError.isEmpty {
-                Text(focusError).vosFont(12).foregroundStyle(palette.warning).padding(.top, 10)
+                Text(focusError).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning).padding(.top, 10)
             }
         }
     }
@@ -315,18 +315,18 @@ struct WeeklyReviewView: View {
             }
         } label: {
             HStack(alignment: .top, spacing: 14) {
-                Image(systemName: focused ? "pin.fill" : selected ? "checkmark.circle.fill" : "circle").vosFont(16)
+                Image(systemName: focused ? "pin.fill" : selected ? "checkmark.circle.fill" : "circle").vosFont(WorkspaceText.rowTitle.size)
                     .foregroundStyle(focused || selected ? palette.accent : Color.secondary)
                     .frame(width: 34, height: 34)
                     .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(entry.action.title).vosFont(16, weight: .semibold).lineLimit(2).multilineTextAlignment(.leading)
-                    Text(subtitle.isEmpty ? "随时" : subtitle).vosFont(13).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                    Text(entry.action.title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
+                    Text(subtitle.isEmpty ? "随时" : subtitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 8)
                 if focused {
-                    Text("已专注").vosFont(12, weight: .medium).foregroundStyle(palette.accent).padding(.top, 5)
+                    Text("已专注").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.accent).padding(.top, 5)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -406,24 +406,24 @@ struct WeeklyReviewView: View {
                            open: @escaping () -> Void) -> some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 14) {
-                Image(systemName: icon).vosFont(16).foregroundStyle(palette.accent)
+                Image(systemName: icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
                     .frame(width: 34, height: 34)
                     .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(title).vosFont(16, weight: .semibold).lineLimit(2).multilineTextAlignment(.leading)
+                    Text(title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
                     if !subtitle.isEmpty {
-                        Text(subtitle).vosFont(13).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                        Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
                     }
                     if !detail.isEmpty {
-                        Text(detail).vosFont(13).lineSpacing(3).lineLimit(3).multilineTextAlignment(.leading)
+                        Text(detail).vosFont(WorkspaceText.body).lineSpacing(3).lineLimit(3).multilineTextAlignment(.leading)
                     }
                 }
                 Spacer(minLength: 8)
                 if !trailing.isEmpty {
-                    Text(trailing).vosFont(12, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
+                    Text(trailing).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
                 }
-                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
+                Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
             }
             .padding(.vertical, 14).padding(.horizontal, 10)
             .contentShape(Rectangle())

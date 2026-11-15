@@ -40,7 +40,7 @@ struct WorkspaceTabs: View {
 
     private func chip(_ title: String, fill: Bool = false) -> some View {
         Button { selection = title } label: {
-            Text(title).vosFont(15, weight: .semibold).lineLimit(1)
+            Text(title).vosFont(WorkspaceText.rowTitle).lineLimit(1)
                 .foregroundStyle(selection == title ? palette.canvas : palette.text)
                 .frame(maxWidth: fill ? .infinity : nil)
                 .padding(.horizontal, 14).padding(.vertical, 7)
@@ -76,7 +76,7 @@ struct WorkspaceHeaderMenu<Content: View>: View {
 
     var body: some View {
         Menu { content() } label: {
-            Image(systemName: "ellipsis").vosFont(13, weight: .semibold)
+            Image(systemName: "ellipsis").vosFont(WorkspaceText.meta.size, weight: .semibold)
                 .foregroundStyle(palette.secondaryText)
                 .frame(width: 30, height: 30)
                 .contentShape(Rectangle())
@@ -139,7 +139,7 @@ struct WorkspaceListSection<Content: View>: View {
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
             if collapsible {
-                Image(systemName: "chevron.right").vosFont(10, weight: .semibold)
+                Image(systemName: "chevron.right").vosFont(WorkspaceText.caption.size, weight: .semibold)
                     .foregroundStyle(palette.tertiaryText)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
                     .accessibilityHidden(true)
@@ -181,7 +181,7 @@ struct WorkspaceSection<Content: View>: View {
                     HStack(spacing: 9) {
                         Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
                         if let count {
-                            Text(String(count)).vosFont(13, weight: .semibold, monospacedDigit: true)
+                            Text(String(count)).vosFont(WorkspaceText.caption.size, monospacedDigit: true)
                                 .padding(.horizontal, 8).padding(.vertical, 3)
                                 .background(palette.selection, in: Capsule()).foregroundStyle(.secondary)
                         }
@@ -189,7 +189,7 @@ struct WorkspaceSection<Content: View>: View {
                     if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3) }
                 }
                 Spacer(minLength: 0)
-                if let action { Button(actionTitle, action: action).vosFont(13, weight: .medium).buttonStyle(.borderless).padding(.top, 4) }
+                if let action { Button(actionTitle, action: action).vosFont(WorkspaceText.meta.size, weight: .medium).buttonStyle(.borderless).padding(.top, 4) }
             }.padding(.bottom, 18)
             Rectangle().fill(palette.border).frame(height: 1)
             LazyVStack(alignment: .leading, spacing: 0, content: content).padding(.top, 8)
@@ -203,7 +203,7 @@ struct WorkspaceExpandableText: View {
     let text: String
     var label = "完整内容"
     var lines = 4
-    var size: CGFloat = 17
+    var size: CGFloat = WorkspaceText.body.size
     @State private var expanded = false
     private var canCollapse: Bool { text.count > 160 || text.components(separatedBy: .newlines).count > lines }
 
@@ -213,7 +213,7 @@ struct WorkspaceExpandableText: View {
                 .lineLimit(canCollapse && !expanded ? lines : nil).fixedSize(horizontal: false, vertical: true)
             if canCollapse {
                 Button(expanded ? "收起" + label : "展开" + label, systemImage: expanded ? "chevron.up" : "chevron.down") { expanded.toggle() }
-                    .vosFont(13, weight: .medium).buttonStyle(.borderless)
+                    .vosFont(WorkspaceText.meta.size, weight: .medium).buttonStyle(.borderless)
                     .accessibilityValue(expanded ? "已展开" : "已收起")
             }
         }.frame(maxWidth: .infinity, alignment: .leading)

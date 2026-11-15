@@ -58,6 +58,14 @@ owner: coordinator
 
 遗留：其余工具页（文本捕获、助理、反思、全景等）仍有散写字号，`rg` 去重 20 个值，超过规范验收的 8 个，下一波 W5 全量迁移。
 
+### W5 工具页字号全量迁移
+
+文件：`Sources/VoiceOSApp` 下除六个已迁移页面外的全部视图。
+
+- 49 个文件、821 个调用点全部迁到六档令牌；字号去重 19 降到 3（18、19、62），三个都是装饰图标字形。
+- `.title2` 弹窗标题统一 `sectionTitle`，`pageTitle` 只留给每页唯一顶点。
+- 提交 `1f90360`；`swift build -j 2` 通过，`swift test -j 2` 333 项 0 失败。
+
 ## 链接
 
 - `docs/product/hierarchy-spec.md`

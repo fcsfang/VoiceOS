@@ -1075,14 +1075,14 @@ private struct RegionCard: View {
         Button(action: onOpen) {
             VStack(alignment: .leading, spacing: compact ? 0 : 4) {
                 Text(region.title)
-                    .vosFont(compact ? 14 : 12.5, weight: .semibold)
+                    .vosFont(compact ? WorkspaceText.rowTitle.size : WorkspaceText.meta.size, weight: .semibold)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if !compact {
                     HStack(spacing: 4) {
                         Text("\(region.questionIDs.count) 个问题 · \(region.evidenceCount) 处原话")
-                            .vosFont(10.5)
+                            .vosFont(WorkspaceText.caption.size)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         Spacer(minLength: 0)
@@ -1143,7 +1143,7 @@ private struct ZoomCluster: View {
             Divider().frame(height: 14)
 
             Button(action: onFit) {
-                Text("适配").vosFont(11).padding(.horizontal, 4).frame(height: 24)
+                Text("适配").vosFont(WorkspaceText.caption).padding(.horizontal, 4).frame(height: 24)
             }
             .keyboardShortcut("0", modifiers: .command)
             .help("适配全部区域")
@@ -1164,7 +1164,7 @@ private struct ConstellationLegend: View {
 
     var body: some View {
         Text(copy)
-            .font(.caption)
+            .vosFont(WorkspaceText.caption)
             .foregroundStyle(.secondary)
             .lineLimit(2)
             .padding(.horizontal, 10)
@@ -1216,7 +1216,7 @@ private struct AreaHullLayer: View {
                 context.fill(path, with: .color(color.opacity(colorScheme == .dark ? 0.14 : 0.09)))
                 context.stroke(path, with: .color(color.opacity(0.24)), lineWidth: 1)
                 if let anchor = hull.min(by: { $0.y < $1.y }), let left = hull.map(\.x).min() {
-                    let resolved = context.resolve(Text(area.title).font(.system(size: 12 * textScale, weight: .semibold)).foregroundColor(color))
+                    let resolved = context.resolve(Text(area.title).font(.system(size: WorkspaceText.meta.size * textScale, weight: .semibold)).foregroundColor(color))
                     let measured = resolved.measure(in: CGSize(width: 320, height: 40))
                     // Plain colored name at the hull's top-left, like the mockup,
                     // clamped so it never runs off the canvas.

@@ -47,9 +47,9 @@ struct ReminderSettingsView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("日期、提醒与优先级").font(.title2)
-            Text(action.title).font(.headline)
-            Text("读取的是 Apple 提醒事项当前设置。保存时会再次核对，其他设备刚改过的内容不会被旧设置覆盖。").font(.caption).foregroundStyle(.secondary)
+            Text("日期、提醒与优先级").vosFont(WorkspaceText.sectionTitle)
+            Text(action.title).vosFont(WorkspaceText.rowTitle)
+            Text("读取的是 Apple 提醒事项当前设置。保存时会再次核对，其他设备刚改过的内容不会被旧设置覆盖。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             HStack(spacing: 8) {
                 ForEach(SnoozePreset.allCases, id: \.self) { preset in
                     Button(preset.title) { apply(preset) }
@@ -63,15 +63,15 @@ struct ReminderSettingsView: View {
             if hasDate {
                 if hasTime { DatePicker("时刻", selection: $due, displayedComponents: [.hourAndMinute]) }
                 if !hasTime {
-                    Text("仅日期任务固定 09:00 提醒（当前不可关闭）").font(.caption).foregroundStyle(.secondary)
-                    if let text = defaultAlertText { Text("实际通知时间 " + text).font(.caption).foregroundStyle(.secondary) }
+                    Text("仅日期任务固定 09:00 提醒（当前不可关闭）").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    if let text = defaultAlertText { Text("实际通知时间 " + text).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                 }
             }
             if hasTime {
                 Toggle("发送通知", isOn: alertToggle).disabled(!hasDate)
                 if hasDate, hasAlert {
                     DatePicker("提醒我", selection: $alert, displayedComponents: [.date, .hourAndMinute])
-                    Text("通知时间独立于安排日期。其他已有通知会保留。").font(.caption).foregroundStyle(.secondary)
+                    Text("通知时间独立于安排日期。其他已有通知会保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
             }
             Picker("优先级", selection: $priority) {
@@ -84,7 +84,7 @@ struct ReminderSettingsView: View {
                 Picker("提醒方式", selection: $locationProximity) {
                     Text("到达").tag(ReminderLocation.Proximity.enter); Text("离开").tag(ReminderLocation.Proximity.leave)
                 }.pickerStyle(.segmented)
-                Text("地点由系统按名称解析；只写名称，不联网搜索，也不写入坐标。").font(.caption).foregroundStyle(.secondary)
+                Text("地点由系统按名称解析；只写名称，不联网搜索，也不写入坐标。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {

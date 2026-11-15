@@ -346,15 +346,15 @@ struct RecordingInboxView: View {
                              subtitle: "将自己的录音放入收件箱，或连接已同步到 Mac 的语音备忘录。")
             Text("VoiceOS 打开且 Mac 唤醒时，自动完成 Qwen 全长转写，由 AI 识别连续表达并合并理解，再整理观点、任务和提醒事项。")
             Text("只接收连接后新增或更新的素材；原文件保留。每 10 秒检查，文件连续两次检查不变后自动处理。同批录音先转写再判断分组；稍后到达的补录自动接续。音频在本机处理，文字使用已配置文本模型。")
-                .font(.callout).foregroundStyle(.secondary)
-            Text(RecordingMediaInfo.personalRecordingLayout).font(.callout).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text(RecordingMediaInfo.personalRecordingLayout).vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             HStack {
                 Button("启用 VoiceOS收件箱") { inbox.addDefaultInbox() }.buttonStyle(.borderedProminent)
                 Button("其他文件夹…") { inbox.chooseFolder(voiceMemos: false) }
                 Button("连接语音备忘录…") { inbox.chooseFolder(voiceMemos: true) }
             }
             if !inbox.folders.isEmpty && (!model.speechConfigured || !model.textModelConfigured) {
-                Text("已连接；配置模型后开始处理新录音").font(.callout).foregroundStyle(.secondary)
+                Text("已连接；配置模型后开始处理新录音").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 HStack {
                     if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() } }
                     if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
@@ -369,7 +369,7 @@ struct RecordingInboxView: View {
                         Button("打开文件夹") { inbox.open(folder) }
                         Button("移除入口", role: .destructive) { folderPendingRemoval = folder }
                     }
-                    Text(folder.path).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(folder.path).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                     if let error = inbox.folderErrors[folder.id] { WorkspaceNoticeText(message: error) }
                 }
             }
@@ -379,13 +379,13 @@ struct RecordingInboxView: View {
             } message: { _ in
                 Text("移除入口不会删除原文件，只是不再自动接收这个文件夹的新录音。")
             }
-            Text(inbox.status).font(.callout).textSelection(.enabled)
+            Text(inbox.status).vosFont(WorkspaceText.meta).textSelection(.enabled)
             if !inbox.pendingItems.isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(inbox.pendingItems) { item in
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(URL(fileURLWithPath: item.path).lastPathComponent).font(.callout).lineLimit(1)
+                                Text(URL(fileURLWithPath: item.path).lastPathComponent).vosFont(WorkspaceText.rowTitle).lineLimit(1)
                                 if item.state == .processing {
                                     Text("正在整理 · 第 \(item.attempts) 次尝试").foregroundStyle(.secondary)
                                 } else if let next = item.nextAttempt {
@@ -403,7 +403,7 @@ struct RecordingInboxView: View {
                                 if inbox.folders.first(where: { $0.id == item.folderID })?.enabled == false {
                                     Text("入口已暂停，恢复前不会自动重试").foregroundStyle(.secondary)
                                 }
-                            }.font(.caption)
+                            }.vosFont(WorkspaceText.meta)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -415,7 +415,7 @@ struct RecordingInboxView: View {
                 }
                 .frame(maxHeight: 150)
             }
-            if model.fullRecordingBusy { ProgressView(model.fullRecordingStatus).font(.caption) }
+            if model.fullRecordingBusy { ProgressView(model.fullRecordingStatus).vosFont(WorkspaceText.meta) }
             HStack {
                 Button("检查新素材") { Task { await inbox.scan() } }
                 Button("重试未完成素材") { inbox.retryFailures() }

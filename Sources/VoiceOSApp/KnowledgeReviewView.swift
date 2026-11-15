@@ -15,16 +15,16 @@ struct KnowledgeReviewSection: View {
         if !sources.isEmpty {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Label("知识理解核查", systemImage: "text.magnifyingglass").font(.headline)
+                Label("知识理解核查", systemImage: "text.magnifyingglass").vosFont(WorkspaceText.rowTitle)
                 Spacer()
                 if model.knowledgeReviewBusy { ProgressView().controlSize(.small) }
             }
-            Text("对照原话检查事实、推断与适用条件。以下是有依据的 AI 核查建议，是否采纳由你决定。").font(.caption).foregroundStyle(.secondary)
+            Text("对照原话检查事实、推断与适用条件。以下是有依据的 AI 核查建议，是否采纳由你决定。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             ForEach(sources) { source in
                 sourceReview(source)
             }
             if !model.knowledgeReviewStatus.isEmpty {
-                Text(model.knowledgeReviewStatus).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(model.knowledgeReviewStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
             }
         }.padding(14)
             .background(palette.accent.opacity(0.045), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius))
@@ -44,22 +44,22 @@ struct KnowledgeReviewSection: View {
     }
     @ViewBuilder private func sourceReview(_ source: SourceRecord) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if sources.count > 1 { Text(source.displayTitle).font(.callout.bold()).textSelection(.enabled) }
+            if sources.count > 1 { Text(source.displayTitle).vosFont(WorkspaceText.rowTitle).textSelection(.enabled) }
             if let record = review(source.id) {
                 switch record.state {
                 case "queued", "running":
                     HStack {
                         ProgressView().controlSize(.small)
-                        Text(record.state == "queued" ? "知识核查已排队" : "正在查证原话中的知识判断…").font(.callout)
+                        Text(record.state == "queued" ? "知识核查已排队" : "正在查证原话中的知识判断…").vosFont(WorkspaceText.meta)
                     }
                 case "failed":
-                    Label("本次核查未完成", systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(palette.warning)
-                    if let error = record.error { Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+                    Label("本次核查未完成", systemImage: "exclamationmark.circle").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                    if let error = record.error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled) }
                     Button("重试知识核查") { Task { await model.reviewKnowledge(sourceID: source.id, retry: true) } }
                         .disabled(!canReview(source))
                 case "frozen":
-                    Label("历史核查 · 原话或授权已变化", systemImage: "pause.circle").font(.callout).foregroundStyle(palette.warning)
-                    Text("这份核查保留供追溯，当前不能据此判断这条认识。可以针对现有原文重新核查。").font(.caption).foregroundStyle(.secondary)
+                    Label("历史核查 · 原话或授权已变化", systemImage: "pause.circle").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                    Text("这份核查保留供追溯，当前不能据此判断这条认识。可以针对现有原文重新核查。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     let issues = record.issues.filter { matches($0, source: source) }
                     if !issues.isEmpty {
                         DisclosureGroup("查看历史核查建议") {
@@ -70,27 +70,27 @@ struct KnowledgeReviewSection: View {
                 case "completed":
                     let issues = record.issues.filter { matches($0, source: source) }
                     if record.issues.isEmpty {
-                        Text("本次未提出需要纠偏的知识判断。").font(.callout)
-                        Text("这不代表全文全部正确；当前核查可能仍有遗漏。").font(.caption).foregroundStyle(.secondary)
+                        Text("本次未提出需要纠偏的知识判断。").vosFont(WorkspaceText.body)
+                        Text("这不代表全文全部正确；当前核查可能仍有遗漏。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     } else if issues.isEmpty {
-                        Text("本条思考暂无可按连续原话定位的核查建议。").font(.callout).foregroundStyle(.secondary)
-                        Text("来源中其他判断的核查可在资料详情查看，未关联到这里。").font(.caption).foregroundStyle(.secondary)
+                        Text("本条思考暂无可按连续原话定位的核查建议。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                        Text("来源中其他判断的核查可在资料详情查看，未关联到这里。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     } else {
                         ForEach(issues) { issue in issueCard(issue) }
                     }
                 default:
-                    Text("核查状态：" + record.state).font(.caption).foregroundStyle(.secondary)
+                    Text("核查状态：" + record.state).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
             } else {
-                Text("检查这份资料中可能的事实错误、缺失条件或推断跳跃，并保留查证来源。").font(.callout).foregroundStyle(.secondary)
+                Text("检查这份资料中可能的事实错误、缺失条件或推断跳跃，并保留查证来源。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                 Button("核查知识理解") { Task { await model.reviewKnowledge(sourceID: source.id) } }.disabled(!canReview(source))
             }
             if source.localOnly {
-                Text("这份原文仅本地。先在资料详情允许云端处理，再发起核查。").font(.caption).foregroundStyle(.secondary)
+                Text("这份原文仅本地。先在资料详情允许云端处理，再发起核查。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             } else if !model.modelConfigured {
-                Text("配置模型连接后可发起核查。").font(.caption).foregroundStyle(.secondary)
+                Text("配置模型连接后可发起核查。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             } else if (model.currentClaimsBySource[source.id] ?? []).isEmpty {
-                Text("先完成这份原话的理解，再核查其中的知识判断。").font(.caption).foregroundStyle(.secondary)
+                Text("先完成这份原话的理解，再核查其中的知识判断。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             }
         }
     }
@@ -101,10 +101,10 @@ struct KnowledgeReviewSection: View {
     }
     private func issueCard(_ issue: KnowledgeReviewIssue) -> some View {
         VStack(alignment: .leading, spacing: 11) {
-            Text(kindLabel(issue.kind.rawValue)).font(.caption.bold()).foregroundStyle(palette.accent)
+            Text(kindLabel(issue.kind.rawValue)).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.accent)
             VStack(alignment: .leading, spacing: 5) {
-                Text("原话").font(.caption).foregroundStyle(.secondary)
-                Text(issue.quote).font(.callout).textSelection(.enabled)
+                Text("原话").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text(issue.quote).vosFont(WorkspaceText.body).textSelection(.enabled)
             }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
             field("为什么值得核对", issue.explanation)
@@ -113,11 +113,11 @@ struct KnowledgeReviewSection: View {
             field("反例", issue.counterexample)
             if !issue.references.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("核查来源").font(.caption.bold()).foregroundStyle(.secondary)
+                    Text("核查来源").vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
                     ForEach(Array(issue.references.enumerated()), id: \.offset) { _, reference in
                         if let url = URL(string: reference.url), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil {
-                            Link(reference.title.isEmpty ? reference.url : reference.title, destination: url).font(.callout).tint(palette.accent)
-                            Text(reference.url).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                            Link(reference.title.isEmpty ? reference.url : reference.title, destination: url).vosFont(WorkspaceText.body).tint(palette.accent)
+                            Text(reference.url).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                         }
                     }
                 }
@@ -128,8 +128,8 @@ struct KnowledgeReviewSection: View {
     @ViewBuilder private func field(_ title: String, _ text: String) -> some View {
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(.caption.bold()).foregroundStyle(.secondary)
-                Text(text).font(.callout).textSelection(.enabled)
+                Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
+                Text(text).vosFont(WorkspaceText.body).textSelection(.enabled)
             }
         }
     }

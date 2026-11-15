@@ -32,13 +32,13 @@ struct WorkspaceHero: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             if !eyebrow.isEmpty {
-                Text(eyebrow).vosFont(10, weight: .semibold, design: .monospaced).tracking(2)
+                Text(eyebrow).vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced).tracking(2)
                     .textCase(.uppercase).foregroundStyle(palette.accent)
             }
-            Text(title).vosFont(27, weight: .medium, design: .serif).textSelection(.enabled)
+            Text(title).vosFont(WorkspaceText.pageTitle).textSelection(.enabled)
                 .accessibilityAddTraits(.isHeader)
             if !subtitle.isEmpty {
-                Text(subtitle).vosFont(14).foregroundStyle(.secondary).lineSpacing(4)
+                Text(subtitle).vosFont(WorkspaceText.body).foregroundStyle(.secondary).lineSpacing(4)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -53,14 +53,14 @@ struct WorkspaceSearchField: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Image(systemName: "magnifyingglass").vosFont(13, weight: .medium).foregroundStyle(.secondary)
+            Image(systemName: "magnifyingglass").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
             field
             if !text.isEmpty {
                 Button {
                     text = ""
                     focus?.wrappedValue = true
                 } label: {
-                    Image(systemName: "xmark.circle.fill").vosFont(13).foregroundStyle(.tertiary)
+                    Image(systemName: "xmark.circle.fill").vosFont(WorkspaceText.meta.size).foregroundStyle(.tertiary)
                 }.buttonStyle(.plain).accessibilityLabel("清空搜索")
             }
         }
@@ -71,10 +71,10 @@ struct WorkspaceSearchField: View {
 
     @ViewBuilder private var field: some View {
         if let focus {
-            TextField(placeholder, text: $text).textFieldStyle(.plain).vosFont(15).focused(focus)
+            TextField(placeholder, text: $text).textFieldStyle(.plain).vosFont(WorkspaceText.body).focused(focus)
                 .onSubmit { submit?() }
         } else {
-            TextField(placeholder, text: $text).textFieldStyle(.plain).vosFont(15)
+            TextField(placeholder, text: $text).textFieldStyle(.plain).vosFont(WorkspaceText.body)
                 .onSubmit { submit?() }
         }
     }
@@ -112,7 +112,7 @@ struct WorkspaceIconButton: View {
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemImage).vosFont(14, weight: .medium)
+            Image(systemName: systemImage).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
                 .frame(width: WorkspaceMetrics.iconButtonSize, height: WorkspaceMetrics.iconButtonSize)
                 .background(hovered ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
                 .contentShape(Rectangle())
@@ -129,7 +129,7 @@ struct WorkspaceNoticeText: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 9) {
-            Image(systemName: icon).vosFont(12, weight: .semibold).foregroundStyle(tint)
+            Image(systemName: icon).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(tint)
             Text(message).vosFont(WorkspaceText.meta).foregroundStyle(palette.text)
                 .lineSpacing(2).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             Spacer(minLength: 0)
@@ -166,11 +166,11 @@ struct WorkspaceToast: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "checkmark.circle.fill").vosFont(13, weight: .semibold)
+            Image(systemName: "checkmark.circle.fill").vosFont(WorkspaceText.meta.size, weight: .semibold)
                 .foregroundStyle(palette.success)
             Text(message).vosFont(WorkspaceText.meta).foregroundStyle(palette.text).lineLimit(2)
             Button(action: close) {
-                Image(systemName: "xmark").vosFont(10, weight: .semibold)
+                Image(systemName: "xmark").vosFont(WorkspaceText.caption.size, weight: .semibold)
                     .foregroundStyle(palette.secondaryText)
                     .frame(width: 18, height: 18)
                     .contentShape(Rectangle())
@@ -205,7 +205,7 @@ struct WorkspaceRowChevron: View {
     @Environment(\.workspacePalette) private var palette
 
     var body: some View {
-        Image(systemName: "chevron.right").vosFont(11, weight: .semibold)
+        Image(systemName: "chevron.right").vosFont(WorkspaceText.caption.size, weight: .semibold)
             .foregroundStyle(palette.disabledText).accessibilityHidden(true)
     }
 }
@@ -238,7 +238,7 @@ struct WorkspaceListRow<Trailing: View>: View {
     private var row: some View {
         HStack(spacing: density == .comfortable ? 11 : 9) {
             if let icon {
-                Image(systemName: icon).vosFont(15, weight: .medium)
+                Image(systemName: icon).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
                     .foregroundStyle(action == nil ? palette.disabledText : palette.accent)
                     .frame(width: 34, height: 34)
                     .background(iconBackground, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))

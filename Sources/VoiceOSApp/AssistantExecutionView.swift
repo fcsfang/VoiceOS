@@ -39,12 +39,12 @@ struct AssistantDelegationView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("交给 AI 助理", systemImage: "sparkles").font(.title2)
-            Text(action.title).font(.headline).textSelection(.enabled)
-            Text("编辑你希望得到的结果。应用会执行调研、比较或起草；你可以关闭窗口，稍后回来查看。").font(.callout).foregroundStyle(.secondary)
+            Label("交给 AI 助理", systemImage: "sparkles").vosFont(WorkspaceText.sectionTitle)
+            Text(action.title).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
+            Text("编辑你希望得到的结果。应用会执行调研、比较或起草；你可以关闭窗口，稍后回来查看。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 7) {
-                Text("交付要求").font(.headline)
-                TextEditor(text: $instruction).font(.body).frame(height: 190)
+                Text("交付要求").vosFont(WorkspaceText.rowTitle)
+                TextEditor(text: $instruction).vosFont(WorkspaceText.body).frame(height: 190)
                     .padding(8).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                     .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(palette.accent.opacity(0.2)) }
             }
@@ -52,19 +52,19 @@ struct AssistantDelegationView: View {
                 Text("暂不关联").tag("")
                 ForEach(questions) { Text($0.title).tag($0.id) }
             }
-            Text("本次使用完整任务原文与交付要求。关联主题用于保存成果；AI 产出、实际任务完成情况和你的认识分别保留。").font(.caption).foregroundStyle(.secondary)
+            Text("本次使用完整任务原文与交付要求。关联主题用于保存成果；AI 产出、实际任务完成情况和你的认识分别保留。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             DisclosureGroup("本次使用的任务原文 · \(taskSources.count) 份") {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         ForEach(taskSources) { source in
-                            Text(source.displayTitle).font(.headline)
+                            Text(source.displayTitle).vosFont(WorkspaceText.rowTitle)
                             Text(source.transcript ?? "尚无可用文字").textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                 }.frame(maxHeight: 150)
             }
-            Toggle("允许交付要求与以上完整任务原文用于云端代办", isOn: $allowCloud).font(.callout)
-            if !error.isEmpty { Text(error).font(.callout).foregroundStyle(palette.danger).textSelection(.enabled) }
+            Toggle("允许交付要求与以上完整任务原文用于云端代办", isOn: $allowCloud).vosFont(WorkspaceText.body)
+            if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled) }
             HStack {
                 Button("取消", action: dismiss).disabled(saving)
                 Spacer()
@@ -79,7 +79,7 @@ struct AssistantDelegationView: View {
                 }.buttonStyle(.borderedProminent).tint(palette.accent)
                     .disabled(saving || !allowCloud || !model.modelConfigured || instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            if !model.modelConfigured { Text("先配置模型连接，才能开始代办。").font(.caption).foregroundStyle(.secondary) }
+            if !model.modelConfigured { Text("先配置模型连接，才能开始代办。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
         }.padding(24).frame(width: 680)
             .background(palette.canvas)
             .interactiveDismissDisabled(saving)
@@ -122,8 +122,8 @@ struct AssistantExecutionView: View {
             Divider()
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("代办与成果").font(.headline)
-                    Toggle("显示已取消", isOn: $includeCancelled).font(.caption)
+                    Text("代办与成果").vosFont(WorkspaceText.rowTitle)
+                    Toggle("显示已取消", isOn: $includeCancelled).vosFont(WorkspaceText.meta)
                     ScrollView {
                         LazyVStack(spacing: 8) {
                             ForEach(visible) { execution in
@@ -131,8 +131,8 @@ struct AssistantExecutionView: View {
                                     selectedID = execution.id; questionID = execution.questionID ?? ""; error = ""
                                 } label: {
                                     VStack(alignment: .leading, spacing: 7) {
-                                        Text(.init(execution.title)).vosFont(14, weight: .medium).lineLimit(3)
-                                        Text(assistantExecutionLabel(execution)).font(.caption).foregroundStyle(execution.state == "failed" ? palette.warning : .secondary)
+                                        Text(.init(execution.title)).vosFont(WorkspaceText.rowTitle).lineLimit(3)
+                                        Text(assistantExecutionLabel(execution)).vosFont(WorkspaceText.meta).foregroundStyle(execution.state == "failed" ? palette.warning : .secondary)
                                     }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
                                         .background(selected?.id == execution.id ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                                         .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(selected?.id == execution.id ? palette.accent.opacity(0.5) : .clear) }
@@ -151,7 +151,7 @@ struct AssistantExecutionView: View {
             Divider()
             HStack {
                 if model.assistantBusy { ProgressView().controlSize(.small) }
-                Text(model.assistantStatus).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                Text(model.assistantStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
             }.padding(.horizontal, 24).padding(.vertical, 10)
         }.foregroundStyle(palette.text).background(palette.canvas).frame(width: 1030, height: 730)
@@ -166,10 +166,10 @@ struct AssistantExecutionView: View {
     }
     private func detail(_ execution: AssistantExecutionRecord) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(.init(execution.title)).vosFont(22, weight: .medium, design: .serif).textSelection(.enabled)
+            Text(.init(execution.title)).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
             HStack {
                 Label(assistantExecutionLabel(execution), systemImage: execution.state == "completed" ? "doc.text" : execution.state == "failed" ? "exclamationmark.circle" : "hourglass")
-                    .font(.callout).foregroundStyle(palette.accent)
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                 Spacer()
                 if ["queued", "running"].contains(execution.state) {
                     Button("取消代办") { confirmingCommand = .cancel }.disabled(saving)
@@ -182,29 +182,29 @@ struct AssistantExecutionView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     DisclosureGroup("本次交付要求") { Text(execution.instruction).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6) }
                     if execution.validity != "current" {
-                        Label("原始任务或资料已有变化。保留这份历史成果，接续使用前请核对当前依据。", systemImage: "pause.circle").font(.callout).foregroundStyle(palette.warning)
+                        Label("原始任务或资料已有变化。保留这份历史成果，接续使用前请核对当前依据。", systemImage: "pause.circle").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                     }
                     if let report = execution.report, !report.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack {
-                                Text("AI 交付物").font(.headline).foregroundStyle(palette.accent)
+                                Text("AI 交付物").vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.accent)
                                 Spacer()
                                 Button("保存完整报告…") { exportReport(execution) }
                             }
                             AssistantReportView(report: report)
                             DisclosureGroup("查看完整报告原文") {
-                                Text(verbatim: report).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                                Text(verbatim: report).vosFont(WorkspaceText.body.size, design: .monospaced).textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-                            }.font(.caption).foregroundStyle(.secondary)
+                            }.vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         }
                         if !execution.references.isEmpty {
                             Divider()
-                            Text("可核查的来源").font(.headline)
+                            Text("可核查的来源").vosFont(WorkspaceText.rowTitle)
                             ForEach(Array(execution.references.enumerated()), id: \.offset) { _, reference in
                                 if let url = URL(string: reference.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Link(reference.title.isEmpty ? reference.url : reference.title, destination: url).tint(palette.accent)
-                                        Text(reference.url).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                                        Text(reference.url).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                                     }
                                 }
                             }
@@ -213,13 +213,13 @@ struct AssistantExecutionView: View {
                         VStack(alignment: .leading, spacing: 9) {
                             ProgressView().controlSize(.small)
                             Text(execution.state == "queued" ? "委托已保存，等待应用执行。" : "正在完成交付要求，成果准备好后会保存在这里。")
-                            Text("可以关闭窗口继续使用 VoiceOS；应用需要保持运行。").font(.caption).foregroundStyle(.secondary)
+                            Text("可以关闭窗口继续使用 VoiceOS；应用需要保持运行。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         }.padding(.vertical, 20)
                     }
                     if let message = execution.error, !message.isEmpty {
                         Text(message).foregroundStyle(palette.danger).textSelection(.enabled)
                     }
-                    Text("这是 AI 产出。它不会自动成为你的观点，也不会把原任务标为完成；采纳与实际结果可以在后续记录。").font(.caption).foregroundStyle(.secondary)
+                    Text("这是 AI 产出。它不会自动成为你的观点，也不会把原任务标为完成；采纳与实际结果可以在后续记录。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             if execution.state == "completed", execution.validity == "current" {
@@ -245,9 +245,9 @@ struct AssistantExecutionView: View {
                     }.buttonStyle(.borderedProminent).tint(palette.accent)
                         .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive || saving)
                 }
-                if execution.questionID != nil { Text("成果已关联主题。").font(.caption).foregroundStyle(.secondary) }
+                if execution.questionID != nil { Text("成果已关联主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             }
-            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger).textSelection(.enabled) }
+            if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled) }
         }.padding(22).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .alert(confirmingCommand == .cancel ? "取消这次代办？" : "重新执行这次代办？",
                    isPresented: Binding(get: { confirmingCommand != nil }, set: { if !$0 { confirmingCommand = nil } })) {
@@ -323,13 +323,13 @@ struct AssistantReportView: View {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 if block.literal {
                     ScrollView(.horizontal) {
-                        Text(verbatim: block.text).vosFont(14, design: .monospaced).lineSpacing(5).textSelection(.enabled)
+                        Text(verbatim: block.text).vosFont(WorkspaceText.body.size, design: .monospaced).lineSpacing(5).textSelection(.enabled)
                             .padding(16)
                     }.background(palette.canvas, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border,lineWidth:1) }
                 } else {
                     Text(inline(block.text))
-                        .vosFont(block.heading == 1 ? 25 : block.heading == 2 ? 21 : block.heading == 3 ? 18 : 16, weight: block.heading > 0 ? .semibold : .regular)
+                        .vosFont(block.heading == 1 ? WorkspaceText.pageTitle : block.heading > 0 ? WorkspaceText.sectionTitle : WorkspaceText.body)
                         .lineSpacing(block.heading > 0 ? 3 : 6)
                         .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, block.heading > 0 ? 18 : 0)

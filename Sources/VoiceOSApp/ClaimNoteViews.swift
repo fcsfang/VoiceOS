@@ -44,24 +44,24 @@ struct ClaimNoteRow:View {
             if editing {
                 TextEditor(text:$draft).frame(minHeight:64).workspaceEditorSurface()
                 HStack {
-                    Text("\(trimmed.count) / 1000").font(.caption).foregroundStyle(tooLong ? palette.warning : Color.secondary)
+                    Text("\(trimmed.count) / 1000").vosFont(WorkspaceText.caption).foregroundStyle(tooLong ? palette.warning : Color.secondary)
                     Spacer()
                     if note != nil { Button("删除旁注", role:.destructive) { Task { await remove() } }.disabled(saving) }
                     Button("取消") { editing=false;errorText="" }.disabled(saving)
                     Button("保存") { Task { await save() } }.disabled(saving || trimmed.isEmpty || tooLong)
-                }.font(.caption)
-                if !errorText.isEmpty { Text(errorText).font(.caption).foregroundStyle(palette.danger) }
+                }.vosFont(WorkspaceText.meta)
+                if !errorText.isEmpty { Text(errorText).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             } else {
                 HStack(spacing:12) {
-                    Button("复述一遍",systemImage:"text.bubble") { practicing=true }.font(.caption)
-                    if note == nil { Button("添加旁注",systemImage:"square.and.pencil") { draft="";editing=true;errorText="" }.font(.caption) }
+                    Button("复述一遍",systemImage:"text.bubble") { practicing=true }.vosFont(WorkspaceText.meta)
+                    if note == nil { Button("添加旁注",systemImage:"square.and.pencil") { draft="";editing=true;errorText="" }.vosFont(WorkspaceText.meta) }
                 }
                 if let note {
                     HStack(alignment:.top,spacing:10) {
-                        Text("旁注").vosFont(12, weight:.medium).foregroundStyle(.secondary)
-                        Text(note.body).vosFont(13).foregroundStyle(.secondary).lineSpacing(3).textSelection(.enabled)
+                        Text("旁注").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
+                        Text(note.body).vosFont(WorkspaceText.body).foregroundStyle(.secondary).lineSpacing(3).textSelection(.enabled)
                         Spacer(minLength:8)
-                        Button("编辑",systemImage:"pencil") { draft=note.body;editing=true;errorText="" }.font(.caption)
+                        Button("编辑",systemImage:"pencil") { draft=note.body;editing=true;errorText="" }.vosFont(WorkspaceText.meta)
                     }
                     .padding(10)
                     .frame(maxWidth:.infinity,alignment:.leading)

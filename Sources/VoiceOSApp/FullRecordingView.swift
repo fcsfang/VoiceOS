@@ -24,18 +24,18 @@ struct FullRecordingView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("完整整理我的录音").font(.title2)
-            Text(input.url.lastPathComponent).font(.headline).textSelection(.enabled)
+            Text("完整整理我的录音").vosFont(WorkspaceText.sectionTitle)
+            Text(input.url.lastPathComponent).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
             Text("完整时长 \(duration) · \(input.media.tracks.count) 条音轨").foregroundStyle(.secondary)
             Picker("本人音轨", selection: $track) {
                 ForEach(input.media.tracks) { audio in Text(audio.title).tag(audio.id) }
             }.disabled(model.fullRecordingBusy || model.fullRecordingCount != nil)
             Text(RecordingMediaInfo.personalRecordingLayout)
-                .font(.callout).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             Toggle("所选音轨是我的声音", isOn: $ownVoice)
                 .disabled(model.fullRecordingBusy || model.fullRecordingCount != nil || !trackDecision.allowsOwnVoice)
             Text(input.media.contextTrack != nil && track == input.media.personalTrack ? "Qwen 在本机分别完整转写你的声音和节目声音，AI 校正后结合双轨全文理解，保留双方原话与时间。节目观点、你的复述与看法分开，只有你明确要做的事进入待办。双轨文字使用已配置模型，原始音视频留在本机。" : "Qwen 在本机完整转写本人音轨，AI 依据全文校正识别错误，保留原意与修订历史。随后整理观点与明确待办；原始音视频保留在本机。")
-                .font(.callout)
+                .vosFont(WorkspaceText.body)
             if let issue = model.recordingModelIssue {
                 WorkspaceNoticeText(message: issue)
                 HStack {
@@ -44,12 +44,12 @@ struct FullRecordingView: View {
                 }
             }
             if model.fullRecordingBusy { ProgressView().controlSize(.small) }
-            Text(model.fullRecordingStatus).font(.callout).textSelection(.enabled).frame(minHeight: 48, alignment: .topLeading)
+            Text(model.fullRecordingStatus).vosFont(WorkspaceText.meta).textSelection(.enabled).frame(minHeight: 48, alignment: .topLeading)
             if !trackDecision.importsAsPersonal && !model.fullRecordingBusy {
                 Text(input.media.usesPersonalRecordingLayout
                      ? "所选音轨不是本人音轨，或尚未勾选“所选音轨是我的声音”；确认后才能完整整理。"
                      : "勾选“所选音轨是我的声音”后才能完整整理。")
-                    .font(.caption).foregroundStyle(palette.warning)
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
             }
             HStack {
                 if model.fullRecordingBusy { Button("停止处理") { model.cancelFullRecording() } }
