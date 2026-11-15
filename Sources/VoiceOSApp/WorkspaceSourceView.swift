@@ -127,7 +127,7 @@ struct WorkspaceSourceView: View {
     @State private var outlineExpanded=false
     @State private var chaptersExpanded=false
     @State private var entitiesExpanded=false
-    @State private var toast=""
+    @State private var toast: String? = nil
     @State private var entities:[SourceEntity]=[]
     @State private var chapters:[SourceChapter]=[]
     private var sourceStatus: String {

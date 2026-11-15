@@ -307,7 +307,7 @@ struct WorkspaceView: View {
                     onDone:{ showingOutcome=false })
             }
             .sheet(isPresented:$showingWeeklyReview) {
-                WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) },openActions:{ showingWeeklyReview=false;go(.actions) })
+                WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) },openActions:{ showingWeeklyReview=false;go(.actions) },openFilter:{ filter in actionFilter=filter; showingWeeklyReview=false; go(.actions) })
             }
             .onChange(of:showingWeeklyReview) { _, shown in if !shown { Task { focusedActionIDs = await model.focusedActionIDs() } } }
             .sheet(isPresented:$showingSaveView) { saveViewSheet }
