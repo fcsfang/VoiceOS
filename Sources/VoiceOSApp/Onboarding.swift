@@ -106,6 +106,11 @@ private struct OnboardingPresenter: ViewModifier {
                 }
                 showing = true
             }
+            .onChange(of: model.onboardingRequested) { _, requested in
+                guard requested else { return }
+                model.onboardingRequested = false
+                showing = true
+            }
             .sheet(isPresented: $showing) {
                 OnboardingView {
                     completed = true
