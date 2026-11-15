@@ -74,14 +74,7 @@ func workspaceStateLabel(_ value:String) -> String {
     default: return "状态待确认"
     }
 }
-fileprivate func displayTitle(_ raw:String) -> String {
-    var text=raw
-    while text.hasPrefix("#") {
-        text.removeFirst()
-        if text.hasPrefix(" ") { text.removeFirst() }
-    }
-    return text
-}
+fileprivate func displayTitle(_ raw:String) -> String { MarkdownDocument.plainTitle(raw) }
 struct WorkspaceRow: View {
     enum TrailingStyle {
         case secondary
@@ -729,7 +722,7 @@ struct WorkspaceView: View {
         var order: [Date] = []
         var buckets: [Date: [SourceRecord]] = [:]
         for source in sources {
-            let day = calendar.startOfDay(for: source.createdAt)
+            let day = calendar.startOfDay(for: ConversationReflectionFocus.date(source.createdAt) ?? .distantPast)
             if buckets[day] == nil { order.append(day) }
             buckets[day, default: []].append(source)
         }
@@ -1224,7 +1217,7 @@ struct WorkspaceView: View {
         default: WorkspaceProcessingView(model:model,inbox:model.recordingInbox,openSource:{ go(.source($0)) },openSettings:{ go(.settings) },openInbox:{ go(.tool("自动入口")) })
         }
     }
-    private func sectionTitle(_ title:String) -> some View { Text(title).vosFont(21, weight: .semibold).accessibilityAddTraits(.isHeader) }
+    private func sectionTitle(_ title:String) -> some View { Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader) }
     private func sourceNavigationTitle(_ id:String) -> String {
         guard let source=model.records.first(where: { $0.id == id }) else { return "材料" }
         if let expression=source.recordingExpression(in:Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })),expression.sourceIDs.count > 1,
