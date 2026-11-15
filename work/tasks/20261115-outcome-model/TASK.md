@@ -25,8 +25,8 @@ owner: coordinator
 - 包往返：parent_id 随 actions 列导出导入；`validateStoredActions` 校验父子（父存在且 kind 为 opportunity、无环）。
 - 测试：完成目标、放弃目标、挂下一步与摘除、停滞查询、成环拒绝、包往返、撤销不受影响。
 
-### M2 界面（后续）
-目标页与详情页的「添加下一步」、停滞提示、每周回顾区块。本波不做。
+### M2 界面
+目标页与详情页的「添加下一步」、停滞提示、每周回顾区块、两处不变量守卫（有子项的目标不能提升、挂在目标下的行动不能澄清为机会）。
 
 ## 验证
 
@@ -40,7 +40,11 @@ owner: coordinator
 
 ## 结果
 
-（待填）
+2026-11-15 两单元集成到 `work/mega-17`：M1 `05e8203`（迁移 62、`parent_id`、`completeOutcome`、`attachNextAction`、`detachNextAction`、`stalledOutcomes`、10 项测试），M2 `41d31ba`（ControlCenter 包装、详情页添加下一步与标记达成、问题与目标页停滞提示、每周回顾区块、两处守卫）。
+
+M1 在隔离副本上做真实迁移时抓到两个编译期看不见的错误：重建表自引用写成中间表名导致 `no such table`；`ON DELETE SET NULL` 触发搜索脏标记时 `INSERT OR REPLACE` 撞唯一约束，改为 upsert。迁移后 197 条当前机会原样保留，行数、distinct id、command_id、version 和、claim 数与源库一致，外键检查为空。
+
+`swift build -j 2` 通过；`swift test -j 2` 352 项 0 失败。
 
 ## 链接
 
