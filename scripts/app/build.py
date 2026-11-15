@@ -97,6 +97,9 @@ with (app / 'Contents' / 'Info.plist').open('wb') as f: plistlib.dump(info, f)
 # SwiftPM has no step for it, so replicate the compiler const-values pass and the processor.
 # A metadata failure must not block signing or replace the previous good app with an unsigned one.
 try:
+    # Remove stale metadata first so a failed pass cannot pair old metadata with the new binary.
+    target = bundle_resources / 'Metadata.appintents'
+    if target.exists(): shutil.rmtree(target)
     sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
     toolchain = subprocess.check_output(['xcode-select', '-p'], text=True).strip() + '/Toolchains/XcodeDefault.xctoolchain'
     xcode_version = subprocess.check_output(['xcodebuild', '-version'], text=True).split()[1]
@@ -127,10 +130,8 @@ try:
                         '--target-triple', target_triple,
                         '--source-file-list', str(sources_list),
                         '--swift-const-vals-list', str(values_list)], check=True)
-        target = bundle_resources / 'Metadata.appintents'
-        if target.exists(): shutil.rmtree(target)
         shutil.copytree(output / 'Metadata.appintents', target)
-except subprocess.CalledProcessError as error:
+except Exception as error:
     print(f'warning: App Intents metadata skipped: {error}')
 subprocess.run(['codesign', '--force', '--sign', signing_identity, str(app)], check=True)
 subprocess.run(['codesign', '--verify', '--strict', str(app)], check=True)
