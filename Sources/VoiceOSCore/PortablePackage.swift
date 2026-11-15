@@ -512,6 +512,7 @@ extension VoiceOSStore {
             try VoiceOSStore.validateStoredSegmentExtraction(database)
             try VoiceOSStore.validateStoredSegmentAggregation(database)
             try VoiceOSStore.validateStoredSegmentCognitiveCommits(database)
+            if tables.contains("panorama_theme_appearances") { try VoiceOSStore.validateStoredPanoramaThemes(database) }
             guard try database.query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("恢复记录存在悬空引用") }
             guard try database.query("""
             SELECT j.id FROM jobs j JOIN sources s ON s.id=j.source_id WHERE j.input_version_id!=s.version_id
@@ -522,6 +523,38 @@ extension VoiceOSStore {
         }
         guard try database.query("PRAGMA integrity_check").first?["integrity_check"] == "ok" else { throw VoiceOSError("恢复数据库校验失败") }
         try database.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    }
+    static func validateStoredPanoramaThemes(_ db: Database) throws {
+        let sourceIDs = Set(try db.query("SELECT id FROM sources").compactMap { $0["id"] })
+        let claimIDs = Set(try db.query("SELECT id FROM claims").compactMap { $0["id"] })
+        for batch in try db.query("SELECT attempt_id,phase,theme_count FROM panorama_theme_batches") {
+            guard let attempt = batch["attempt_id"], let phase = batch["phase"],
+                  let count = batch["theme_count"].flatMap(Int.init) else { throw VoiceOSError("全景主题批次记录损坏") }
+            let appearances = try db.query("SELECT * FROM panorama_theme_appearances WHERE attempt_id=? AND phase=?", [attempt, phase])
+            guard appearances.count == count else { throw VoiceOSError("全景主题计数与出现记录不一致") }
+            for row in appearances {
+                guard let themeID = row["theme_id"], !themeID.isEmpty, themeID.utf8.count <= 64,
+                      themeID.unicodeScalars.allSatisfy({ (48...57).contains($0.value) || (65...90).contains($0.value) || (97...122).contains($0.value) || $0.value == 45 }) else {
+                    throw VoiceOSError("全景主题身份格式错误")
+                }
+                guard let claimIDsJSON = row["claim_ids_json"], let sourceIDsJSON = row["source_ids_json"], let questionTitlesJSON = row["question_titles_json"],
+                      let storedClaims = try? JSONDecoder().decode([String].self, from: Data(claimIDsJSON.utf8)),
+                      let storedSources = try? JSONDecoder().decode([String].self, from: Data(sourceIDsJSON.utf8)),
+                      (try? JSONDecoder().decode([String].self, from: Data(questionTitlesJSON.utf8))) != nil else {
+                    throw VoiceOSError("全景主题记录 JSON 无效")
+                }
+                let keptClaims = storedClaims.filter { claimIDs.contains($0) }
+                let keptSources = storedSources.filter { sourceIDs.contains($0) }
+                if keptClaims.count != storedClaims.count {
+                    try db.execute("UPDATE panorama_theme_appearances SET claim_ids_json=? WHERE attempt_id=? AND phase=? AND theme_id=?",
+                                   [try Self.relevanceJSON(keptClaims), attempt, phase, themeID])
+                }
+                if keptSources.count != storedSources.count {
+                    try db.execute("UPDATE panorama_theme_appearances SET source_ids_json=? WHERE attempt_id=? AND phase=? AND theme_id=?",
+                                   [try Self.relevanceJSON(keptSources), attempt, phase, themeID])
+                }
+            }
+        }
     }
     private func syncFile(_ file: URL) throws {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
