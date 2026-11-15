@@ -24,6 +24,8 @@ struct WorkspacePalette {
     var text: Color { theme == .graphite ? adaptive(0x202020, 0xECECEC) : adaptive(0x26352D, 0xE5EBE4) }
     /// Secondary toolbar and metadata copy; one step quieter than `text`.
     var secondaryText: Color { text.opacity(increasesContrast ? 0.85 : 0.72) }
+    /// Counts, footers and third-level facts. One step quieter than `secondaryText`.
+    var tertiaryText: Color { text.opacity(increasesContrast ? 0.66 : 0.53) }
     var accent: Color { theme == .graphite ? adaptive(0x3A4A5C, 0xAEC3D6) : adaptive(0x315F49, 0xB8D9BF) }
     var selection: Color { theme == .graphite ? adaptive(0xE7E7E7, 0x333333) : adaptive(0xE6EEE5, 0x303F33) }
     var border: Color {
@@ -91,12 +93,12 @@ struct WorkspaceThemeOption: View {
                 }.frame(height: 72).clipShape(RoundedRectangle(cornerRadius: 5))
                     .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(preview.border, lineWidth: 1) }
                 HStack {
-                    Text(theme.title).font(.callout.weight(.medium))
-                    if theme == .graphite { Text("默认").font(.caption).foregroundStyle(.secondary) }
+                    Text(theme.title).vosFont(WorkspaceText.rowTitle)
+                    if theme == .graphite { Text("默认").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText) }
                     Spacer()
                     if selected { Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.accent) }
                 }
-                Text(theme.subtitle).font(.caption).foregroundStyle(.secondary)
+                Text(theme.subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.canvas, in: RoundedRectangle(cornerRadius: 9))
                 .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(selected ? palette.accent : palette.border, lineWidth: selected ? 1.5 : 1) }

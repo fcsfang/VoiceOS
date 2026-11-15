@@ -34,8 +34,8 @@ struct RecentContentHome: View {
 
     private var empty: some View {
         VStack(spacing: 14) {
-            Text("还没有可以回看的内容").font(.title3.weight(.medium))
-            Text("录一段，或写几句。").font(.callout).foregroundStyle(.secondary)
+            Text("还没有可以回看的内容").vosFont(WorkspaceText.sectionTitle)
+            Text("录一段，或写几句。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             Button("记录想法") { capture() }.buttonStyle(.borderedProminent)
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -45,7 +45,7 @@ struct RecentContentHome: View {
             LazyVStack(alignment: .leading, spacing: 18) {
                 ForEach(days) { day in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(dayLabel(day.date)).vosFont(12, weight: .medium).foregroundStyle(.secondary).padding(.horizontal, 10)
+                        Text(dayLabel(day.date)).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.secondaryText).padding(.horizontal, 10)
                         ForEach(day.items) { item in
                             Button { selectedID = item.id } label: { row(item) }
                                 .buttonStyle(.plain)
@@ -60,15 +60,9 @@ struct RecentContentHome: View {
     private func row(_ item: RecentContentItem) -> some View {
         let isSelected = selected?.id == item.id
         return VStack(alignment: .leading, spacing: 3) {
-            if item.kind == .feedback {
-                Text(timeLabel(item.date)).vosFont(11).foregroundStyle(.secondary)
-                Text(item.title).vosFont(13.5, weight: isSelected ? .semibold : .regular)
-                    .foregroundStyle(palette.text).lineLimit(2).multilineTextAlignment(.leading)
-            } else {
-                Text(item.title).vosFont(13.5, weight: isSelected ? .semibold : .regular)
-                    .foregroundStyle(palette.text).lineLimit(2).multilineTextAlignment(.leading)
-                Text(rowMeta(item)).vosFont(11).foregroundStyle(.secondary)
-            }
+            Text(item.title).vosFont(WorkspaceText.rowTitle)
+                .foregroundStyle(palette.text).lineLimit(2).multilineTextAlignment(.leading)
+            Text(rowMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10).padding(.vertical, 8)
@@ -101,13 +95,13 @@ struct RecentContentHome: View {
             let rows = model.homeSnapshot.progressRows[item.id] ?? []
             VStack(alignment: .leading, spacing: 18) {
                 Text([dateLabel(item.date), "任务进展"].joined(separator: " · "))
-                    .vosFont(12).foregroundStyle(.secondary)
-                Text(item.title).vosFont(27, weight: .semibold, design: .serif).lineSpacing(4).textSelection(.enabled)
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Text(item.title).vosFont(WorkspaceText.pageTitle).lineSpacing(4).textSelection(.enabled)
                 if rows.isEmpty {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(Array(item.excerpts.enumerated()), id: \.offset) { index, excerpt in
                             if index > 0 { Divider() }
-                            Text(excerpt).vosFont(14.5).lineSpacing(4).textSelection(.enabled)
+                            Text(excerpt).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
                         }
                     }
                 } else {
@@ -128,10 +122,10 @@ struct RecentContentHome: View {
         Button { openTask(row.actionID) } label: {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(row.taskTitle).vosFont(14.5, weight: .semibold)
-                    Text(row.relationLabel).vosFont(12).foregroundStyle(.secondary)
+                    Text(row.taskTitle).vosFont(WorkspaceText.rowTitle)
+                    Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
-                Text(row.text).vosFont(14.5).lineSpacing(4).textSelection(.enabled)
+                Text(row.text).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -143,11 +137,11 @@ struct RecentContentHome: View {
     private func materialReader(_ item: RecentContentItem) -> some View {
         let digest = model.homeSnapshot.digests[item.id] ?? RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration)
         return VStack(alignment: .leading, spacing: 0) {
-            Text(readerMeta(item)).vosFont(12).foregroundStyle(.secondary)
-            Text(item.title).vosFont(27, weight: .semibold, design: .serif).lineSpacing(4)
+            Text(readerMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            Text(item.title).vosFont(WorkspaceText.pageTitle).lineSpacing(4)
                 .padding(.top, 16).textSelection(.enabled)
             if !item.summary.isEmpty {
-                Text(item.summary).vosFont(16, design: .serif).lineSpacing(6)
+                Text(item.summary).vosFont(WorkspaceText.body).lineSpacing(5)
                     .textSelection(.enabled)
                     .padding(.top, 24)
             }
@@ -159,7 +153,7 @@ struct RecentContentHome: View {
             tasksSummary(digest.tasks)
             if let first = item.sourceIDs.first {
                 Button("打开材料") { openSource(first) }.buttonStyle(.plain)
-                    .vosFont(13).foregroundStyle(palette.accent).padding(.top, 40)
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.accent).padding(.top, 40)
             }
         }
     }
@@ -176,26 +170,26 @@ struct RecentContentHome: View {
         return VStack(alignment: .leading, spacing: 0) {
             Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 18)
             HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text(thread.title).vosFont(15.5, weight: .semibold)
+                Text(thread.title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText)
                 Spacer(minLength: 8)
             }
             if !notes.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(notes.enumerated()), id: \.element.id) { index, thought in
                         HStack(alignment: .top, spacing: 10) {
-                            Text("\(index + 1)").vosFont(10.5, monospacedDigit: true)
-                                .foregroundStyle(.tertiary).frame(width: 18, alignment: .trailing)
+                            Text("\(index + 1)").vosFont(WorkspaceText.caption.size, weight: WorkspaceText.caption.weight, monospacedDigit: true)
+                                .foregroundStyle(palette.tertiaryText).frame(width: 18, alignment: .trailing)
                                 .padding(.top, 3)
-                            Text(thought.statement).vosFont(14.5).lineSpacing(5).textSelection(.enabled)
+                            Text(thought.statement).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
                         }
                     }
                 }.padding(.top, 18).padding(.leading, 42)
             }
             if !thread.goals.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
-                    Text("想慢慢做到").vosFont(10).tracking(1.4).foregroundStyle(palette.accent)
+                    Text("想慢慢做到").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                     ForEach(thread.goals) { thought in
-                        Text(thought.statement).vosFont(14).lineSpacing(4).textSelection(.enabled)
+                        Text(thought.statement).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
                     }
                 }
                 .padding(.vertical, 13).padding(.horizontal, 17)
@@ -211,11 +205,11 @@ struct RecentContentHome: View {
             VStack(alignment: .leading, spacing: 0) {
                 Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 20)
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("这条材料带出了 \(tasks.count) 条待办").vosFont(13.5).foregroundStyle(.secondary)
+                    Text("这条材料带出了 \(tasks.count) 条待办").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     Spacer(minLength: 0)
                     Button("查看") { openTask(first.id) }
                         .buttonStyle(.plain)
-                        .vosFont(13, weight: .medium)
+                        .vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.accent)
                         .accessibilityIdentifier("home.tasks.view")
                 }

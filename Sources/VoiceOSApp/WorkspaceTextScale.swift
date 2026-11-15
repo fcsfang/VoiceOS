@@ -58,6 +58,10 @@ extension View {
     func vosFont(_ size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default, monospacedDigit: Bool = false) -> some View {
         modifier(VOSFontModifier(size: size, weight: weight, design: design, digits: monospacedDigit))
     }
+
+    func vosFont(_ style: WorkspaceTextStyle) -> some View {
+        vosFont(style.size, weight: style.weight)
+    }
 }
 
 struct WorkspaceTextStyle {
@@ -66,10 +70,10 @@ struct WorkspaceTextStyle {
 }
 
 enum WorkspaceText {
-    static let pageTitle = WorkspaceTextStyle(size: 28, weight: .semibold)
-    static let sectionTitle = WorkspaceTextStyle(size: 20, weight: .semibold)
-    static let rowTitle = WorkspaceTextStyle(size: 16, weight: .semibold)
-    static let body = WorkspaceTextStyle(size: 16, weight: .regular)
-    static let meta = WorkspaceTextStyle(size: 13, weight: .regular)
+    static let pageTitle = WorkspaceTextStyle(size: 26, weight: .semibold)
+    static let sectionTitle = WorkspaceTextStyle(size: 17, weight: .semibold)
+    static let rowTitle = WorkspaceTextStyle(size: 15, weight: .semibold)
+    static let body = WorkspaceTextStyle(size: 15, weight: .regular)
+    static let meta = WorkspaceTextStyle(size: 12, weight: .regular)
     static let caption = WorkspaceTextStyle(size: 11, weight: .regular)
 }

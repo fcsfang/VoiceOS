@@ -130,7 +130,7 @@ struct WorkspaceNoticeText: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 9) {
             Image(systemName: icon).vosFont(12, weight: .semibold).foregroundStyle(tint)
-            Text(message).vosFont(WorkspaceText.meta.size).foregroundStyle(palette.text)
+            Text(message).vosFont(WorkspaceText.meta).foregroundStyle(palette.text)
                 .lineSpacing(2).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             Spacer(minLength: 0)
         }
@@ -168,7 +168,7 @@ struct WorkspaceToast: View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill").vosFont(13, weight: .semibold)
                 .foregroundStyle(palette.success)
-            Text(message).vosFont(WorkspaceText.meta.size).foregroundStyle(palette.text).lineLimit(2)
+            Text(message).vosFont(WorkspaceText.meta).foregroundStyle(palette.text).lineLimit(2)
             Button(action: close) {
                 Image(systemName: "xmark").vosFont(10, weight: .semibold)
                     .foregroundStyle(palette.secondaryText)
@@ -243,12 +243,12 @@ struct WorkspaceListRow<Trailing: View>: View {
                     .frame(width: 34, height: 34)
                     .background(iconBackground, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).vosFont(titleSize, weight: .semibold)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).vosFont(WorkspaceText.rowTitle)
                     .foregroundStyle(action == nil ? palette.disabledText : palette.text)
                     .lineLimit(1)
                 if !subtitle.isEmpty {
-                    Text(subtitle).vosFont(WorkspaceText.meta.size)
+                    Text(subtitle).vosFont(WorkspaceText.meta)
                         .foregroundStyle(action == nil ? palette.disabledText : palette.secondaryText)
                         .lineLimit(1)
                 }
@@ -257,14 +257,12 @@ struct WorkspaceListRow<Trailing: View>: View {
             trailing()
         }
         .padding(.horizontal, density == .comfortable ? 12 : 10)
-        .padding(.vertical, density == .comfortable ? 9 : 6)
+        .padding(.vertical, density == .comfortable ? 9 : 8)
         .frame(minHeight: density == .comfortable ? 52 : 44, alignment: .leading)
         .background(rowBackground, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
         .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
         .animation(.easeOut(duration: 0.12), value: hovered)
     }
-
-    private var titleSize: CGFloat { density == .comfortable ? WorkspaceText.rowTitle.size : 15 }
 
     private var iconBackground: Color {
         if action == nil { return palette.selection.opacity(0.35) }
