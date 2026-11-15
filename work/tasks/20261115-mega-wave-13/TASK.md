@@ -1,5 +1,5 @@
 ---
-status: merge-ready
+status: done
 started: 2026-11-15
 updated: 2026-11-15
 branch: work/mega-13
@@ -44,5 +44,7 @@ owner: coordinator
 实机截图核对：材料页页名重复消失、搜索为胶囊、标题井号清洗生效、行尾常驻图标消失且密度接近参照；⌘, 打开设置页（含主题卡片与快捷键小节）；阅读页原文主体与任务交付页排版正常。悬停完成圆钮的静态截图未卡到时机，行为由编译与代码路径覆盖。
 
 ## 链接
+
+- 2026-11-15 已合并为 `0648d35`（PR #180）。
 
 - `docs/product/interface-reference.md`
