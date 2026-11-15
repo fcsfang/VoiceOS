@@ -73,8 +73,8 @@ final class IncrementalReadingChecks: XCTestCase {
         let text = "abcdef\nghi"
         let spans = [TranscriptSpan(textStart: 0, textEnd: 4), TranscriptSpan(textStart: 4, textEnd: 7), TranscriptSpan(textStart: 7, textEnd: 11)]
         let chunks = ReadingChunks.split(text: text, spans: spans, targetSize: 5)
-        XCTAssertEqual(chunks.map { [$0.start, $0.end] }, [[0, 4], [4, 7], [7, 11]])
-        assertCovers(chunks, scalars: 11, targetSize: 5)
+        XCTAssertEqual(chunks.map { [$0.start, $0.end] }, [[0, 4], [4, 7], [7, 10]])
+        assertCovers(chunks, scalars: 10, targetSize: 5)
     }
 
     func testSplitEmptyTextHasNoChunks() {
