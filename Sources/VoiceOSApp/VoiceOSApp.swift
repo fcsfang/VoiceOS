@@ -10,7 +10,7 @@ enum WorkspaceErrorRetry {
 }
 
 enum WorkspaceRoute: Equatable {
-    case actions, search, settings
+    case actions, search, settings, discussion
 }
 
 @MainActor
@@ -137,6 +137,7 @@ final class ControlCenter: ObservableObject {
     func requestWorkspaceSource(_ id: String) { pendingWorkspaceSourceID = id }
     @Published var pendingWorkspaceRoute: WorkspaceRoute?
     @Published var pendingWorkspaceTaskID: String?
+    @Published var onboardingRequested = false
     @Published var retrievalResult: RetrievalResult?
     @Published var retrievalStatus = ""
     @Published var searchingHistory = false
@@ -3170,6 +3171,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         ControlCenter.primary?.pendingWorkspaceRoute = .settings
     }
 
+    func openDiscussion() {
+        openMainWindow()
+        ControlCenter.primary?.pendingWorkspaceRoute = .discussion
+    }
+
     private func rebuildTodayOverviewMenu(model: ControlCenter?) {
         guard let menu = statusItem?.menu, let clipboard = clipboardMenuItem else { return }
         for item in todayOverviewMenuItems { menu.removeItem(item) }
@@ -3253,6 +3259,7 @@ struct VoiceOSApp: App {
         Window("VoiceOS", id: "control-center") { WorkspaceView(model: model).onboarding(model: model) }
             .commands {
                 CommandGroup(replacing: .appSettings) { Button("设置…") { delegate.openSettings() }.keyboardShortcut(",") }
+                CommandGroup(after: .sidebar) { Button("讨论") { delegate.openDiscussion() } }
             }
         WindowGroup("独立资料库", id: "restored-library", for: String.self) { path in
             if let path = path.wrappedValue { RestoredLibraryView(path: path) }
