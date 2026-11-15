@@ -110,7 +110,7 @@ struct WorkspaceProcessingBar: View {
             else if model.pausedActionBatch?.isRunning == true { Button("停止后续处理") { model.stopPausedActionBatch() } }
             else if model.fullRecordingBusy { Button("停止后续处理") { model.cancelFullRecording() } }
             Button("查看处理",action:open).accessibilityIdentifier("workspace.processing")
-        }.font(.caption).padding(.horizontal,20).padding(.vertical,12).background(palette.surface)
+        }.vosFont(WorkspaceText.meta).padding(.horizontal,20).padding(.vertical,12).background(palette.surface)
     }
 }
 
@@ -136,9 +136,9 @@ struct WorkspaceProcessingView: View {
                         if let id=model.workspaceProcessingSourceID,let source=model.records.first(where: { $0.id == id }) {
                             WorkspaceRow(title:source.displayTitle,subtitle:"当前正在处理这份完整材料",trailing:"查看原文") { openSource(id) }
                         }
-                        Text(model.transcriptReviewSourceID != nil ? model.transcriptReviewStatus : model.status).font(.callout).foregroundStyle(.secondary).textSelection(.enabled).padding(.top,12)
+                        Text(model.transcriptReviewSourceID != nil ? model.transcriptReviewStatus : model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled).padding(.top,12)
                         if !model.fullRecordingDetail.isEmpty,model.fullRecordingDetail != model.fullRecordingStatus {
-                            DisclosureGroup("查看处理详情") { Text(model.fullRecordingDetail).font(.caption).foregroundStyle(.secondary).textSelection(.enabled).padding(.top,8) }
+                            DisclosureGroup("查看处理详情") { Text(model.fullRecordingDetail).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled).padding(.top,8) }
                         }
                     }
                 } else {
@@ -158,7 +158,7 @@ struct WorkspaceProcessingView: View {
                 let quarantinedSources=model.records.filter { $0.state == "quarantined" }
                 let quarantinedIDs=Set(quarantinedSources.map(\.id))
                 if !quarantinedSources.isEmpty {
-                    Text("需要核对的原件见上方『需要重新核对的原件』").font(.caption).foregroundStyle(.secondary)
+                    Text("需要核对的原件见上方『需要重新核对的原件』").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
                 let failedSources=model.records.filter { !quarantinedIDs.contains($0.id) && (["failed","blocked"].contains($0.jobState ?? "") || $0.state == "interrupted") }
                 if !failedSources.isEmpty {
@@ -187,7 +187,7 @@ struct WorkspaceProcessingView: View {
                             ForEach(model.workspacePausedTasks.filter { task in model.claims.first(where: { $0.id == task.claimID })?.references.contains { $0.sourceID == source.id } == true }) { task in
                                 VStack(alignment:.leading,spacing:5) {
                                     Text(task.title)
-                                    Text(model.workspaceExternalCompletionNote(task) ?? model.workspaceActionStatus(task)).font(.caption).foregroundStyle(.secondary)
+                                    Text(model.workspaceExternalCompletionNote(task) ?? model.workspaceActionStatus(task)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                     WorkspaceExternalCompletionButton(model:model,action:task)
                                     ForEach(model.actionReviewPairs(for:task)) { pair in
                                         ActionReviewResolutionControl(model:model,pair:pair)
@@ -234,7 +234,7 @@ struct WorkspaceProcessingView: View {
                 }
                 ForEach(model.assistantExecutions.filter { $0.validity == "current" && $0.state == "failed" }) { execution in
                     WorkspaceSection(title:"AI 代办未完成",icon:"sparkles") {
-                        Text(execution.title).font(.headline).padding(.vertical,12)
+                        Text(execution.title).vosFont(WorkspaceText.rowTitle).padding(.vertical,12)
                         if let error=execution.error { reason(error) }
                         Button("查看委托与重试") { model.showTask(execution.actionID) }.accessibilityLabel("查看委托与重试：" + execution.title)
                     }
@@ -247,13 +247,13 @@ struct WorkspaceProcessingView: View {
                 }
                 if !inbox.folders.isEmpty || !inbox.pendingItems.isEmpty || !inbox.folderErrors.isEmpty {
                     WorkspaceSection(title:"录音自动入口",icon:"tray.and.arrow.down") {
-                        Text(inbox.status).font(.callout).padding(.vertical,12)
+                        Text(inbox.status).vosFont(WorkspaceText.meta).padding(.vertical,12)
                         Button("查看接收、重试与权限状态",action:openInbox)
                     }
                 }
                 if model.initialized { WorkspaceSection(title:"模型与提醒事项",icon:"checklist") {
-                    Text(model.modelConfigured ? model.modelSummary : "尚未配置模型；完整原文仍可先在本机保存。").font(.callout).padding(.vertical,12)
-                    Text(model.reminderAccess?.enabled == true ? model.reminderSyncStatus : "尚未连接提醒事项；任务可以先在 VoiceOS 内保存。").font(.callout)
+                    Text(model.modelConfigured ? model.modelSummary : "尚未配置模型；完整原文仍可先在本机保存。").vosFont(WorkspaceText.meta).padding(.vertical,12)
+                    Text(model.reminderAccess?.enabled == true ? model.reminderSyncStatus : "尚未连接提醒事项；任务可以先在 VoiceOS 内保存。").vosFont(WorkspaceText.meta)
                     if let error=model.reminderFieldIssue {
                         reason(error)
                         Button("重试提醒同步") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderFieldsPending)
@@ -264,7 +264,7 @@ struct WorkspaceProcessingView: View {
         }
     }
     private func name(_ id:String) -> String { model.records.first(where: { $0.id == id })?.displayTitle ?? "已保存的材料" }
-    private func reason(_ text:String) -> some View { DisclosureGroup("查看原因") { Text(text).font(.callout).textSelection(.enabled) }.accessibilityHint(text).padding(.bottom,12) }
+    private func reason(_ text:String) -> some View { DisclosureGroup("查看原因") { Text(text).vosFont(WorkspaceText.body).textSelection(.enabled) }.accessibilityHint(text).padding(.bottom,12) }
     private func intentLabel(_ intent:ExpressionProcessingIntentRecord) -> String {
         switch intent.state {
         case .queued: return model.modelConfigured ? "已保存，等待理解与关联" : "已保存，等待配置模型"
@@ -292,7 +292,7 @@ struct WorkspaceExternalCompletionButton: View {
                 if candidate != nil {
                     Button("确认外部已完成") { confirming = true }.disabled(model.savingAction)
                 }
-                if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger).textSelection(.enabled) }
+                if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled) }
             }
             .alert("把「\(action.title)」登记为已完成？", isPresented: $confirming) {
                 Button("确认外部已完成") { confirm() }

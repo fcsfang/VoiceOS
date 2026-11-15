@@ -35,17 +35,17 @@ struct ReverifyControls: View {
                         VStack(alignment:.leading,spacing:8) {
                             HStack(alignment:.firstTextBaseline,spacing:10) {
                                 VStack(alignment:.leading,spacing:5) {
-                                    Text(source.displayTitle).vosFont(15, weight:.medium).lineLimit(2)
-                                    Text(workspaceStateLabel(source.state)).font(.caption).foregroundStyle(.secondary)
+                                    Text(source.displayTitle).vosFont(WorkspaceText.rowTitle).lineLimit(2)
+                                    Text(workspaceStateLabel(source.state)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength:8)
                                 Button(runningID == source.id ? "正在核对…" : "重新核对") { reverify(source) }
                                     .disabled(runningID != nil)
                             }
                             if let failure = failures[source.id] {
-                                Text(failure).font(.caption).foregroundStyle(palette.danger).textSelection(.enabled)
+                                Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled)
                             } else if let error = source.error {
-                                Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                                Text(error).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                             }
                         }.padding(.vertical,10)
                         if source.id != pending.last?.id { Divider() }
@@ -58,8 +58,8 @@ struct ReverifyControls: View {
                         ForEach(restoredSources) { source in
                             HStack(alignment:.firstTextBaseline,spacing:10) {
                                 VStack(alignment:.leading,spacing:4) {
-                                    Text(source.displayTitle).vosFont(15, weight:.medium).lineLimit(2)
-                                    Text("原件已恢复；已有理解仍暂停，在材料页重新识别观点和任务后更新。").font(.caption).foregroundStyle(.secondary)
+                                    Text(source.displayTitle).vosFont(WorkspaceText.rowTitle).lineLimit(2)
+                                    Text("原件已恢复；已有理解仍暂停，在材料页重新识别观点和任务后更新。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                 }
                                 Spacer(minLength:8)
                                 Button("打开材料") { model.requestWorkspaceSource(source.id) }
@@ -67,7 +67,7 @@ struct ReverifyControls: View {
                             if source.id != restoredSources.last?.id { Divider() }
                         }
                     }.padding(.top,8)
-                }.font(.callout)
+                }.vosFont(WorkspaceText.body)
             }
         }
     }

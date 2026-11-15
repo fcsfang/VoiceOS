@@ -48,9 +48,9 @@ struct QuoteHoverPreview<Content: View>: View {
 
     private var panel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(sourceTitle).vosFont(12, weight: .semibold).lineLimit(2)
-            Text(snippet).vosFont(13).foregroundStyle(.secondary).lineLimit(6)
-            Button("打开材料") { revealed = false; open() }.font(.caption)
+            Text(sourceTitle).vosFont(WorkspaceText.meta.size, weight: .semibold).lineLimit(2)
+            Text(snippet).vosFont(WorkspaceText.body).foregroundStyle(.secondary).lineLimit(6)
+            Button("打开材料") { revealed = false; open() }.vosFont(WorkspaceText.meta)
         }
         .padding(12)
         .frame(width: 280, alignment: .leading)

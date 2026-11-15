@@ -77,21 +77,21 @@ struct ReflectionEventListView: View {
         VStack(alignment: .leading, spacing: 14) {
             WorkspaceSearchField(text: $query, placeholder: "查找录音、思考、任务或结果")
             Text("\(visible.filter { $0.source != nil }.count) 条表达 · \(visible.filter { $0.feedback != nil }.count) 条结果与反思 · \(visible.filter { $0.completion != nil }.count) 条完成登记")
-                .font(.caption).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     if visible.isEmpty {
                         ContentUnavailableView(query.isEmpty ? (focus.isTopicOverview ? "这个主题还没有关联记录" : "这段时间还没有记录") : "没有找到相关记录", systemImage: "clock", description: Text(focus.isTopicOverview ? "可以关联一份资料、留下认识，或换一个关键词。" : "可以扩大时间范围，或换一个关键词。"))
                     }
                     ForEach(days(visible)) { day in
-                        Text(day.date?.formatted(date: .complete, time: .omitted) ?? "时间待核对").font(.headline)
+                        Text(day.date?.formatted(date: .complete, time: .omitted) ?? "时间待核对").vosFont(WorkspaceText.meta.size, weight: .semibold)
                         ForEach(day.events) { event in
                             if let source = event.source { expressionCard(source) }
                             if let feedback = event.feedback { outcomeCard(feedback, date: event.date) }
                             if let completion = event.completion {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Label("完成登记 · " + (focus.tasks.first { $0.actionID == completion.actionID }?.title ?? "任务"), systemImage: "checkmark.circle")
-                                    Text("按实际状态记录时间排列；不代表已取得收获。").font(.caption).foregroundStyle(.secondary)
+                                    Text("按实际状态记录时间排列；不代表已取得收获。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                                     Button("任务与结果") { model.showTask(completion.actionID); dismiss() }
                                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                             }
@@ -105,40 +105,40 @@ struct ReflectionEventListView: View {
         let claims = knowledge(source), actions = tasks(source), connections = updates(source)
         return DisclosureGroup {
             VStack(alignment: .leading, spacing: 12) {
-                if let summary = source.contentSummary { Text(summary).font(.callout).textSelection(.enabled) }
+                if let summary = source.contentSummary { Text(summary).vosFont(WorkspaceText.body).textSelection(.enabled) }
                 Button(source.kind == "ai_text" ? "查看 AI 交付全文" : source.kind == "user_text" ? "查看表达全文" : "查看录音与全文") { showSource(source.id) }
-                if claims.isEmpty && actions.isEmpty { Text("尚无当前有效的整理内容；可以打开全文查看表达。").font(.callout).foregroundStyle(.secondary) }
+                if claims.isEmpty && actions.isEmpty { Text("尚无当前有效的整理内容；可以打开全文查看表达。").vosFont(WorkspaceText.body).foregroundStyle(.secondary) }
                 ForEach(claims) { claim in
                     VStack(alignment: .leading, spacing: 5) {
                         Text(claim.statement).textSelection(.enabled)
                         HStack {
-                            Text(owner(claim)).font(.caption).foregroundStyle(.secondary)
+                            Text(owner(claim)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             Button("讨论这条思考") { discuss(claim) }
                                 .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
                         }
                     }
                 }
                 if !connections.isEmpty {
-                    Text("这次表达接续了以前的思考").font(.subheadline.bold())
+                    Text("这次表达接续了以前的思考").vosFont(WorkspaceText.rowTitle)
                     ForEach(Array(connections.enumerated()), id: \.offset) { _, update in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(update.understanding).font(.callout).textSelection(.enabled)
+                            Text(update.understanding).vosFont(WorkspaceText.body).textSelection(.enabled)
                             DisclosureGroup("前后原话") {
                                 Text("此前：" + update.historicalQuote).textSelection(.enabled)
                                 Text("这次：" + update.currentQuote).textSelection(.enabled)
-                            }.font(.caption)
+                            }.vosFont(WorkspaceText.meta)
                         }
                     }
                 }
                 if !actions.isEmpty {
-                    Text("任务当前状态").font(.subheadline.bold())
-                    Text("这是现在的状态，不代表任务在这一天完成。").font(.caption).foregroundStyle(.secondary)
+                    Text("任务当前状态").vosFont(WorkspaceText.rowTitle)
+                    Text("这是现在的状态，不代表任务在这一天完成。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     ForEach(actions) { task in
                         HStack(alignment: .top) {
                             Image(systemName: task.state == "completed" ? "checkmark.circle" : task.state == "dismissed" ? "minus.circle" : "circle")
                             Text(task.title).textSelection(.enabled)
                             Spacer()
-                            Text(task.state == "completed" ? "已完成" : task.state == "dismissed" ? "已放下" : "待办").font(.caption).foregroundStyle(.secondary)
+                            Text(task.state == "completed" ? "已完成" : task.state == "dismissed" ? "已放下" : "待办").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             Button("任务与结果") { model.showTask(task.id); dismiss() }
                         }
                     }
@@ -146,10 +146,10 @@ struct ReflectionEventListView: View {
             }.padding(.top, 10)
         } label: {
             VStack(alignment: .leading, spacing: 5) {
-                Text(source.displayTitle).font(.headline).lineLimit(2)
-                Text(source.recordingSubtitle + " · \(claims.count) 条思考 · \(actions.count) 项任务").font(.caption).foregroundStyle(.secondary)
-                if source.origin == "ai" { Text("AI 交付物 · 不代表我的观点或实际验证").font(.caption).foregroundStyle(.secondary) }
-                else if source.expressedDate == nil { Text("录制时间未知，按导入时间排列").font(.caption).foregroundStyle(.secondary) }
+                Text(source.displayTitle).vosFont(WorkspaceText.rowTitle).lineLimit(2)
+                Text(source.recordingSubtitle + " · \(claims.count) 条思考 · \(actions.count) 项任务").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                if source.origin == "ai" { Text("AI 交付物 · 不代表我的观点或实际验证").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                else if source.expressedDate == nil { Text("录制时间未知，按导入时间排列").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             }
         }.padding(12).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }
@@ -159,7 +159,7 @@ struct ReflectionEventListView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(feedback.text).textSelection(.enabled)
                 if let task, task.version != feedback.actionVersion {
-                    Text("历史记录 · 第 \(feedback.actionVersion) 版任务的反馈；当前任务为第 \(task.version) 版。").font(.caption).foregroundStyle(.secondary)
+                    Text("历史记录 · 第 \(feedback.actionVersion) 版任务的反馈；当前任务为第 \(task.version) 版。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
                 HStack {
                     Button("任务与全部结果") { model.showTask(feedback.actionID); dismiss() }
@@ -170,9 +170,9 @@ struct ReflectionEventListView: View {
             }.padding(.top, 8)
         } label: {
             VStack(alignment: .leading, spacing: 5) {
-                Text(feedback.label + " · " + (task?.title ?? "历史任务")).font(.headline).lineLimit(2)
-                Text(feedback.text).font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                Text(date.map { "记录于 " + $0.formatted(date: .omitted, time: .shortened) } ?? "记录时间待核对").font(.caption).foregroundStyle(.secondary)
+                Text(feedback.label + " · " + (task?.title ?? "历史任务")).vosFont(WorkspaceText.rowTitle).lineLimit(2)
+                Text(feedback.text).vosFont(WorkspaceText.body).foregroundStyle(.secondary).lineLimit(2)
+                Text(date.map { "记录于 " + $0.formatted(date: .omitted, time: .shortened) } ?? "记录时间待核对").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             }
         }.padding(12).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }

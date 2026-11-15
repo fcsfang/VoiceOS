@@ -24,15 +24,15 @@ struct ClaimReviewHistoryView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("认知审阅历史").font(.title2)
+            Text("认知审阅历史").vosFont(WorkspaceText.sectionTitle)
             Text("认可不等于已验证；更正不代表真实观点变化。").foregroundStyle(.secondary)
             ScrollView {
                 ForEach(revisions) { revision in
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("第 \(revision.version) 版 · " + reason(revision.reason)).font(.headline)
+                        Text("第 \(revision.version) 版 · " + reason(revision.reason)).vosFont(WorkspaceText.rowTitle)
                         Text(revision.statement).textSelection(.enabled)
-                        Text(owner(revision.ownership) + " · " + (revision.decision == "endorsed" ? "已认可" : revision.decision == "rejected" ? "已停止使用" : "待核对")).font(.caption).foregroundStyle(.secondary)
-                        if !revision.note.isEmpty { Text("原因：" + revision.note).font(.callout) }
+                        Text(owner(revision.ownership) + " · " + (revision.decision == "endorsed" ? "已认可" : revision.decision == "rejected" ? "已停止使用" : "待核对")).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        if !revision.note.isEmpty { Text("原因：" + revision.note).vosFont(WorkspaceText.body) }
                         Divider()
                     }
                 }

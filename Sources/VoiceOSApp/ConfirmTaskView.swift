@@ -10,9 +10,9 @@ struct ConfirmTaskView: View {
     @State private var commandID = UUID().uuidString
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("核对为明确待办").font(.title2)
+            Text("核对为明确待办").vosFont(WorkspaceText.sectionTitle)
             Text("确认这是你仍需跟进的事情，并把标题改成实际要做的动作。保存后会同步到已连接的提醒事项清单。")
-                .font(.callout).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             TextField("需要跟进什么", text: $title).disabled(model.savingAction)
             ScrollView { Text(action.note).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 160)
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }

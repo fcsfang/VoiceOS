@@ -10,13 +10,13 @@ struct ActionReviewResolutionControl: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("行动关系待核对").font(.headline)
+            Text("行动关系待核对").vosFont(WorkspaceText.rowTitle)
             VStack(alignment: .leading, spacing: 3) {
-                Text("之前的记录：" + pair.oldTitle).font(.callout)
-                Text("这次识别：" + pair.newTitle).font(.callout)
+                Text("之前的记录：" + pair.oldTitle).vosFont(WorkspaceText.body)
+                Text("这次识别：" + pair.newTitle).vosFont(WorkspaceText.body)
             }
             if !pair.quote.isEmpty {
-                Text("依据原话：" + pair.quote).font(.caption).foregroundStyle(.secondary)
+                Text("依据原话：" + pair.quote).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     .lineLimit(3).textSelection(.enabled)
             }
             HStack(spacing: 10) {
@@ -24,9 +24,9 @@ struct ActionReviewResolutionControl: View {
                 Button("同一件事") { resolve(.same) }.disabled(saving || !pair.isMergeable)
             }
             if let reason = pair.mergeBlockedReason {
-                Text(reason).font(.caption).foregroundStyle(palette.warning)
+                Text(reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
             }
-            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger) }
+            if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
         }
     }
 
@@ -49,7 +49,7 @@ struct ActionReviewAcknowledgementControl: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button("已核对当前理解") { confirming = true }.disabled(model.savingAction)
-            if !error.isEmpty { Text(error).font(.caption).foregroundStyle(palette.danger) }
+            if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
         }
         .alert("已核对当前理解？", isPresented: $confirming) {
             Button("已核对当前理解") { acknowledge() }

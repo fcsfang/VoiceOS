@@ -96,7 +96,7 @@ struct ReflectionTimelineView: View {
             if embeddedTopicID == nil { header }
             else {
                 HStack {
-                    Text("主题里的材料、认识、行动与结果").font(.caption).foregroundStyle(.secondary)
+                    Text("主题里的材料、认识、行动与结果").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     Spacer()
                     Picker("查看方式",selection:$timeline) { Text("图谱").tag(false);Text("时间线").tag(true) }.labelsHidden().pickerStyle(.segmented).frame(width:140)
                 }.padding(14)
@@ -134,12 +134,12 @@ struct ReflectionTimelineView: View {
                 ContentUnavailableView("暂时无法打开回顾", systemImage: "arrow.triangle.branch", description: Text(error ?? "请刷新资料"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let error { Text(error).font(.callout).foregroundStyle(palette.danger).padding(10) }
+            if let error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).padding(10) }
             HStack {
                 Label("实线：来源与行动关系", systemImage: "line.diagonal")
                 Text("┄ AI 思想关联 · 可查看前后原话")
                 if embeddedTopicID == nil { Spacer();Text("点击节点与关系查看依据") }
-            }.font(.caption).foregroundStyle(palette.text.opacity(0.65)).padding(.horizontal, 24).padding(.vertical, 12)
+            }.vosFont(WorkspaceText.caption).foregroundStyle(palette.text.opacity(0.65)).padding(.horizontal, 24).padding(.vertical, 12)
         }
         .foregroundStyle(palette.text).background(palette.canvas)
         .frame(width: embeddedTopicID == nil ? 1100 : nil, height: embeddedTopicID == nil ? 760 : 720)
@@ -165,7 +165,7 @@ struct ReflectionTimelineView: View {
                     }.labelsHidden().pickerStyle(.segmented).frame(width: 130)
                     HStack(spacing: 8) {
                         Button { shift(-1) } label: { Image(systemName: "chevron.left") }.help("上一个周期").accessibilityLabel("上一个周期")
-                        Text(dateLabel).vosFont(13, weight: .semibold).lineLimit(1)
+                        Text(dateLabel).vosFont(WorkspaceText.meta.size, weight: .semibold).lineLimit(1)
                         Button { shift(1) } label: { Image(systemName: "chevron.right") }.help("下一个周期").accessibilityLabel("下一个周期")
                     }.buttonStyle(.plain)
                     DatePicker("选择日期", selection: $anchor, displayedComponents: .date).labelsHidden().frame(width: 100)
@@ -173,7 +173,7 @@ struct ReflectionTimelineView: View {
                     Picker("探索主题", selection: Binding(get: { selectedTopic?.id ?? "" }, set: { selectedTopicID = $0 })) {
                         ForEach(topics) { topic in Text(topic.title).tag(topic.id) }
                     }.labelsHidden().frame(maxWidth: 340)
-                    Text("全部历史").font(.caption).foregroundStyle(palette.accent)
+                    Text("全部历史").vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                 }
                 Spacer()
                 Picker("回顾方式", selection: $timeline) { Text("图谱").tag(false); Text("时间线").tag(true) }
@@ -187,7 +187,7 @@ struct ReflectionTimelineView: View {
             }
             if focus?.sourceIDs.isEmpty == true {
                 Text(periodic ? "当前周期没有可探索的材料" : "当前主题没有可探索的材料")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             }
         }.padding(.horizontal, 26).padding(.top, 24).padding(.bottom, 20)
     }
@@ -319,13 +319,13 @@ struct ReflectionTimelineView: View {
                 WorkspaceSearchField(text: $query, placeholder: "在图谱中定位内容…") {
                     if let node = matches.first { locate(node.id, layout: layout, contentSize: CGSize(width: width * scale + 36, height: height * scale + 36)) }
                 }
-                Text("\(items.count) 个节点 · \(links.count) 条关系").font(.caption).foregroundStyle(.secondary)
+                Text("\(items.count) 个节点 · \(links.count) 条关系").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 Slider(value: $scale, in: 0.55...1.2).frame(width: 75).accessibilityLabel("图谱缩放")
             }.padding(.horizontal, 22).padding(.vertical, 14)
             if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
-                        if matches.isEmpty { Text("没有找到相符的内容").font(.caption).foregroundStyle(.secondary) }
+                        if matches.isEmpty { Text("没有找到相符的内容").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                         ForEach(matches) { node in
                             Button { locate(node.id, layout: layout, contentSize: CGSize(width: width * scale + 36, height: height * scale + 36)) } label: {
                                 HStack(alignment: .top, spacing: 8) {
@@ -333,7 +333,7 @@ struct ReflectionTimelineView: View {
                                     Text(node.title).lineLimit(2).multilineTextAlignment(.leading)
                                     Spacer(minLength: 0)
                                     Image(systemName: "arrow.down.right")
-                                }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+                                }.vosFont(WorkspaceText.meta).frame(maxWidth: .infinity, alignment: .leading)
                             }.buttonStyle(.plain).help("在地图中定位并查看依据")
                         }
                     }.padding(.horizontal, 22).padding(.vertical, 10)
@@ -345,7 +345,7 @@ struct ReflectionTimelineView: View {
                 Spacer()
                 Button("回到全部") { relatedOnly = false; selection = nil; query = "" }
                     .buttonStyle(.plain).foregroundStyle(palette.accent)
-            }.font(.caption).padding(.horizontal, 22).padding(.bottom, 12)
+            }.vosFont(WorkspaceText.meta).padding(.horizontal, 22).padding(.bottom, 12)
             Divider()
             if items.isEmpty {
                 ContentUnavailableView("这一页，等待新的连接", systemImage: "point.3.connected.trianglepath.dotted", description: Text(focus.isTopicOverview ? "为这个主题关联资料，或留下现在的认识与实践结果。" : "换一个日、周或月，找回已经留下的表达与成果。"))
@@ -372,14 +372,14 @@ struct ReflectionTimelineView: View {
                         ForEach(Array(["表达与材料", "认知与问题", "行动与目标", "结果与反思"].enumerated()), id: \.offset) { lane, title in
                             HStack(spacing: 7) {
                                 Circle().fill(palette.graphColor(lane)).frame(width: 5, height: 5)
-                                Text(title).vosFont(12, weight: .semibold)
+                                Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold)
                             }.position(x: CGFloat(112 + lane * 246), y: 30)
                         }
                         ForEach(visibleLinks) { edge in
                             if let from = items.first(where: { $0.id == edge.from }), let to = items.first(where: { $0.id == edge.to }) {
                                 let a = layout[from.id] ?? .zero, b = layout[to.id] ?? .zero
                                 Button { selection = edge.id } label: {
-                                    Text(edge.label).vosFont(9, weight: .medium).padding(4)
+                                    Text(edge.label).vosFont(WorkspaceText.caption.size, weight: .medium).padding(4)
                                         .background(palette.canvas, in: Capsule())
                                 }.buttonStyle(.plain).help("查看关系与原话依据")
                                     .position(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
@@ -434,11 +434,11 @@ struct ReflectionTimelineView: View {
         Button { selection = node.id } label: {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 4) {
-                    Text(node.label).vosFont(10, weight: .semibold).lineLimit(1)
+                    Text(node.label).vosFont(WorkspaceText.caption.size, weight: .semibold).lineLimit(1)
                     Spacer(minLength: 0)
-                    if node.context { Text("此前").vosFont(9).padding(.horizontal, 4).background(palette.canvas, in: Capsule()) }
+                    if node.context { Text("此前").vosFont(WorkspaceText.caption).padding(.horizontal, 4).background(palette.canvas, in: Capsule()) }
                 }.foregroundStyle(palette.graphColor(node.lane))
-                Text(node.title).vosFont(13, weight: .medium).lineLimit(3).multilineTextAlignment(.leading)
+                Text(node.title).vosFont(WorkspaceText.rowTitle).lineLimit(3).multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }.padding(13).frame(width: 196, height: 104, alignment: .topLeading)
                 .background(palette.surface.opacity(node.context ? 0.5 : 1), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
@@ -451,23 +451,23 @@ struct ReflectionTimelineView: View {
         let items = nodes(focus), links = edges(focus, nodes: items)
         return ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text(selection == nil ? (focus.isTopicOverview ? "这个主题的脉络" : "这个周期的线索") : "关系与依据").vosFont(20, weight: .medium, design: .serif)
+                Text(selection == nil ? (focus.isTopicOverview ? "这个主题的脉络" : "这个周期的线索") : "关系与依据").vosFont(WorkspaceText.sectionTitle)
                 if let node = items.first(where: { $0.id == selection }) {
                     nodeDetails(node, focus: focus)
                     let connected = links.filter { $0.from == node.id || $0.to == node.id }
                     if !connected.isEmpty {
                         Divider()
-                        Text("连接").font(.headline)
+                        Text("连接").vosFont(WorkspaceText.rowTitle)
                         ForEach(connected) { edge in
-                            Button { selection = edge.id } label: { Label(edge.label + " · 查看依据", systemImage: "arrow.triangle.branch") }.buttonStyle(.plain).font(.callout)
+                            Button { selection = edge.id } label: { Label(edge.label + " · 查看依据", systemImage: "arrow.triangle.branch") }.buttonStyle(.plain).vosFont(WorkspaceText.body)
                         }
                     }
                 } else if let edge = links.first(where: { $0.id == selection }) {
-                    Text(edge.label).font(.headline).foregroundStyle(palette.accent)
+                    Text(edge.label).vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.accent)
                     if let connection = edge.connection {
-                        Text("AI 关系判断 · 待核对").font(.caption).foregroundStyle(.secondary)
+                        Text("AI 关系判断 · 待核对").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         Text(connection.update.understanding).textSelection(.enabled)
-                        Text(connection.update.reason).font(.callout).textSelection(.enabled)
+                        Text(connection.update.reason).vosFont(WorkspaceText.body).textSelection(.enabled)
                         quote("此前原话", connection.update.historicalQuote)
                         quote("本次原话", connection.update.currentQuote)
                         Button("并排对照与追问") { changeID = connection.id; showsChanges = true }
@@ -482,45 +482,45 @@ struct ReflectionTimelineView: View {
                     metric(focus.isTopicOverview ? "完成登记" : "周期内完成登记", focus.completions.count, color: palette.action)
                     metric("结果与反思", focus.isTopicOverview ? focus.outcomes.count : focus.outcomes.filter { focus.contains(timestamp: $0.createdAt) }.count, color: palette.outcome)
                     Divider()
-                    Text(focus.isTopicOverview ? "关联资料跨时间完整展示。先后日期帮助理解判断如何形成，主题不会因换周而中断。任务状态与实际结果分别保留。" : "旧资料作为背景接入，以「此前」标记。任务卡片显示当前状态，完成登记按实际记录时间归入周期。").font(.callout).foregroundStyle(.secondary)
-                    Text("你带来经历与判断，VoiceOS 帮你找回联系、提出问题。一起回顾后，可以继续讨论并保留有价值的认识。").font(.callout)
-                    Text("AI 使用完整相关原文；先查看并编辑讨论草稿，再确认发送。").font(.caption).foregroundStyle(.secondary)
+                    Text(focus.isTopicOverview ? "关联资料跨时间完整展示。先后日期帮助理解判断如何形成，主题不会因换周而中断。任务状态与实际结果分别保留。" : "旧资料作为背景接入，以「此前」标记。任务卡片显示当前状态，完成登记按实际记录时间归入周期。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                    Text("你带来经历与判断，VoiceOS 帮你找回联系、提出问题。一起回顾后，可以继续讨论并保留有价值的认识。").vosFont(WorkspaceText.body)
+                    Text("AI 使用完整相关原文；先查看并编辑讨论草稿，再确认发送。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(22)
         }.background(palette.surface)
     }
     private func nodeDetails(_ node: AtlasNode, focus: ConversationReflectionFocus) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(node.label + (node.context ? " · 此前背景" : "")).font(.caption).foregroundStyle(palette.graphColor(node.lane))
-            Text(node.title).font(.headline).textSelection(.enabled)
+            Text(node.label + (node.context ? " · 此前背景" : "")).vosFont(WorkspaceText.meta).foregroundStyle(palette.graphColor(node.lane))
+            Text(node.title).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
             if let claimID = node.claimID, let thought = focus.thoughts.first(where: { $0.claimID == claimID }) {
-                Text("当前整理 · 不等于事实已验证").font(.caption).foregroundStyle(.secondary)
+                Text("当前整理 · 不等于事实已验证").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 ForEach(Array(thought.evidence.enumerated()), id: \.offset) { _, evidence in
                     quote("来源原话", evidence.quote)
                     Button("查看表达全文") { showSource(evidence.reference.sourceID) }
                 }
                 if let claim = model.claims.first(where: { $0.id == claimID }) { Button("继续讨论这条思考") { discuss(claim) } }
             } else if let feedback = node.feedback {
-                Text("记录时间：" + (ConversationReflectionFocus.date(feedback.createdAt)?.formatted(date: .abbreviated, time: .shortened) ?? feedback.createdAt)).font(.caption)
+                Text("记录时间：" + (ConversationReflectionFocus.date(feedback.createdAt)?.formatted(date: .abbreviated, time: .shortened) ?? feedback.createdAt)).vosFont(WorkspaceText.meta)
                 if let task = focus.tasks.first(where: { $0.actionID == feedback.actionID }) {
-                    Text("反馈属于第 \(feedback.actionVersion) 版任务；当前第 \(task.version) 版。").font(.caption).foregroundStyle(.secondary)
+                    Text("反馈属于第 \(feedback.actionVersion) 版任务；当前第 \(task.version) 版。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
                 Button("查看结果原文") { showSource(feedback.sourceID) }
                 Button("任务与全部结果") { model.showTask(feedback.actionID); dismiss() }
             } else if let completion = node.completion {
-                Text("登记于 " + (ConversationReflectionFocus.date(completion.revision.createdAt)?.formatted(date: .abbreviated, time: .shortened) ?? completion.revision.createdAt)).font(.caption)
-                Text("任务第 \(completion.revision.version) 版 · " + (completion.revision.actor == "user" ? "用户记录" : "提醒状态同步")).font(.caption)
-                Text("完成状态独立保存；是否取得收获，要看实际结果。").font(.callout).foregroundStyle(.secondary)
-                if !completion.revision.note.isEmpty { Text(completion.revision.note).font(.callout).textSelection(.enabled) }
+                Text("登记于 " + (ConversationReflectionFocus.date(completion.revision.createdAt)?.formatted(date: .abbreviated, time: .shortened) ?? completion.revision.createdAt)).vosFont(WorkspaceText.meta)
+                Text("任务第 \(completion.revision.version) 版 · " + (completion.revision.actor == "user" ? "用户记录" : "提醒状态同步")).vosFont(WorkspaceText.meta)
+                Text("完成状态独立保存；是否取得收获，要看实际结果。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                if !completion.revision.note.isEmpty { Text(completion.revision.note).vosFont(WorkspaceText.body).textSelection(.enabled) }
                 Button("任务与结果") { model.showTask(completion.actionID); dismiss() }
             } else if let actionID = node.actionID {
-                Text("当前状态，不能用来推断何时完成或学会。").font(.caption).foregroundStyle(.secondary)
+                Text("当前状态，不能用来推断何时完成或学会。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 Button("打开任务或目标") { model.showTask(actionID); dismiss() }
             } else if let sourceID = node.sourceID {
                 if let source = model.records.first(where: { $0.id == sourceID }) {
-                    Text(source.origin == "ai" ? "AI 交付物 · 不代表我的观点或实际验证" : source.origin == "user" ? "个人表达" : "外部资料 · 不代表我的观点").font(.caption)
-                    if let summary = source.contentSummary { Text(summary).font(.callout).textSelection(.enabled) }
-                    if let text = source.transcript { DisclosureGroup("完整原文") { Text(text).font(.callout).textSelection(.enabled) } }
+                    Text(source.origin == "ai" ? "AI 交付物 · 不代表我的观点或实际验证" : source.origin == "user" ? "个人表达" : "外部资料 · 不代表我的观点").vosFont(WorkspaceText.meta)
+                    if let summary = source.contentSummary { Text(summary).vosFont(WorkspaceText.body).textSelection(.enabled) }
+                    if let text = source.transcript { DisclosureGroup("完整原文") { Text(text).vosFont(WorkspaceText.body).textSelection(.enabled) } }
                 }
                 Button("查看资料全文") { showSource(sourceID) }
             }
@@ -532,15 +532,15 @@ struct ReflectionTimelineView: View {
     }
     private func quote(_ title: String, _ text: String) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(text).font(.callout).textSelection(.enabled)
+            Text(title).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text(text).vosFont(WorkspaceText.body).textSelection(.enabled)
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
     }
     private func metric(_ title: String, _ count: Int, color: Color) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(title).font(.callout)
+            Text(title).vosFont(WorkspaceText.meta)
             Spacer()
-            Text(String(count)).vosFont(28, weight: .medium, design: .serif).foregroundStyle(color)
+            Text(String(count)).vosFont(WorkspaceText.sectionTitle).foregroundStyle(color)
         }
     }
     private func owner(_ value: String) -> String {

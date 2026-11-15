@@ -13,10 +13,10 @@ struct OutcomeFollowupView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("完成后的结果与收获").font(.title2)
+                    Text("完成后的结果与收获").vosFont(WorkspaceText.sectionTitle)
                 }
                 Spacer()
-                Text("\(actions.count) 项").font(.callout).foregroundStyle(.secondary)
+                Text("\(actions.count) 项").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
@@ -37,7 +37,7 @@ struct OutcomeFollowupView: View {
                                     if !action.note.isEmpty { Text(action.note).textSelection(.enabled) }
                                     Button("查看待办与原话") { onOpen(action) }.buttonStyle(.link)
                                 }.padding(.top, 6)
-                            }.font(.caption).foregroundStyle(.secondary)
+                            }.vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         }
                         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
                         .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
@@ -45,7 +45,7 @@ struct OutcomeFollowupView: View {
                 }.padding(.vertical, 4)
             }
             HStack {
-                Text("完成状态会保留；这里不会替你生成结果。").font(.caption).foregroundStyle(.secondary)
+                Text("完成状态会保留；这里不会替你生成结果。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("完成", action: onDone).keyboardShortcut(.cancelAction)
             }

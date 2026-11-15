@@ -12,10 +12,10 @@ struct TopicResurfacingCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("可以再看一眼", systemImage: "leaf").font(.caption).foregroundStyle(palette.accent)
-            Text(item.title).vosFont(15, weight: .medium, design: .serif).lineLimit(3)
-            Text(item.quote).font(.callout).lineLimit(4).textSelection(.enabled)
-            Text(item.reason).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Label("可以再看一眼", systemImage: "leaf").vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+            Text(item.title).vosFont(WorkspaceText.rowTitle).lineLimit(3)
+            Text(item.quote).vosFont(WorkspaceText.body).lineLimit(4).textSelection(.enabled)
+            Text(item.reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("接着探索", action: open).buttonStyle(.borderedProminent).tint(palette.accent)
                 Spacer(minLength: 0)
@@ -24,7 +24,7 @@ struct TopicResurfacingCard: View {
                     Button("减少此主题提示") { feedback(.reduced, false) }
                     Button("暂停此主题提示") { feedback(.paused, false) }
                 }
-            }.font(.caption)
+            }.vosFont(WorkspaceText.meta)
         }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.accent.opacity(0.07), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             .disabled(busy)
