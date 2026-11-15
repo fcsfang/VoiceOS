@@ -299,7 +299,8 @@ struct WorkspaceView: View {
                     ForEach(model.reminderCalendars) { calendar in Button(calendar.title) { Task { model.proposedReminderCalendarID=calendar.id; await model.saveReminderConnection() } }.disabled(model.remindersBusy) }
                     if !model.status.isEmpty { Text(model.status).font(.caption).foregroundStyle(.secondary) }
                     Button("取消") { model.choosingReminderCalendar=false }
-                }.padding(24).frame(width:440)
+                }.padding(24)
+                    .frame(minWidth:440,idealWidth:440,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
             }
             .sheet(item: $panoramaSourceEditor) { source in
                 WorkspaceTranscriptEditor(model: model, source: source) { panoramaSourceEditor = nil }
@@ -457,8 +458,6 @@ struct WorkspaceView: View {
                 }
             }
             Spacer()
-            Button { go(.capture) } label: { Label("记录想法",systemImage:"mic").frame(maxWidth:.infinity).padding(.vertical,7) }
-                .buttonStyle(.borderedProminent).controlSize(.large)
             VStack(alignment:.leading,spacing:12) {
                 HStack(spacing:7) {
                     if model.organizingTopics || model.assistantBusy || model.followupBusy { ProgressView().controlSize(.mini) }
@@ -488,7 +487,7 @@ struct WorkspaceView: View {
                         .background(palette.selection.opacity(0.5),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("返回").help("返回上一页").keyboardShortcut("[",modifiers:.command)
-                Text(breadcrumb).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if showsBreadcrumb { Text(breadcrumb).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             }
             Spacer()
             Button { if page == .search { searchFocused = true } else { go(.search) } } label: {
@@ -504,7 +503,23 @@ struct WorkspaceView: View {
             WorkspaceIconButton(systemImage:"sidebar.right",label:"讨论") { Task { await toggleDiscussion() } }
                 .disabled(model.discussionSaving || model.discussionSending)
                 .accessibilityIdentifier("workspace.discussion")
+            Button { go(.capture) } label: {
+                HStack(spacing:6) {
+                    Image(systemName:"mic").vosFont(12, weight:.medium)
+                    Text("记录想法").vosFont(13, weight:.medium)
+                }.foregroundStyle(palette.canvas).padding(.horizontal,12).frame(height:30)
+                    .background(palette.accent,in:Capsule())
+                    .contentShape(Capsule())
+            }.buttonStyle(.plain)
+                .accessibilityLabel("记录想法").help("记录想法")
         }.padding(.horizontal,26).frame(minHeight:58).background(palette.canvas)
+    }
+    private var showsBreadcrumb: Bool {
+        guard !path.isEmpty else { return false }
+        switch page {
+        case .source, .task, .delivery: return true
+        default: return false
+        }
     }
     private var breadcrumb: String {
         switch page {
@@ -1053,9 +1068,6 @@ struct WorkspaceView: View {
                     WorkspaceThemeOption(theme:option,selected:theme == option) { theme=option }
                 }
             }.frame(maxWidth:560)
-            Picker("显示模式",selection:$appearance) {
-                ForEach(WorkspaceAppearance.allCases) { option in Text(option.title).tag(option) }
-            }.pickerStyle(.segmented).frame(maxWidth:360)
             Picker("文字大小",selection:Binding(get:{ model.textSize },set:{ model.setTextSize($0) })) {
                 ForEach(AppTextSize.allCases) { option in Text(option.label).tag(option) }
             }.pickerStyle(.segmented).frame(maxWidth:360)
@@ -1082,6 +1094,7 @@ struct WorkspaceView: View {
                     Text("撤销只对当前会话有效")
                 }
             }.font(.caption).foregroundStyle(.secondary)
+            Button("再看一次引导") { model.onboardingRequested = true }
             Divider()
             sectionTitle("模型与服务")
             WorkspaceRow(title:"语音转文字",subtitle:model.speechSummary,icon:"waveform") { model.chooseLocalSpeech() }
@@ -1388,7 +1401,7 @@ struct WorkspaceView: View {
                             if entry.id != candidates.last?.id { Divider() }
                         }
                     }
-                }.frame(maxHeight:320)
+                }.frame(minHeight:160,maxHeight:.infinity)
             }
             if planRemainingSlots == 0 { WorkspaceNoticeText(message:"专注已有 3 条，先移出一条再安排。",severity:.warning) }
             else if !planLimitHint.isEmpty { WorkspaceNoticeText(message:planLimitHint,severity:.warning) }
@@ -1399,7 +1412,7 @@ struct WorkspaceView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(planSelection.isEmpty || planningToday)
             }
-        }.padding(24).frame(width:560)
+        }.padding(24).frame(minWidth:560,idealWidth:560,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
     }
     private func planCandidateRow(_ entry:ActionTimeEntry) -> some View {
         let selected=planSelection.contains(entry.action.id)
@@ -1647,6 +1660,7 @@ struct WorkspaceView: View {
             case .actions: go(.actions)
             case .search: if page == .search { searchFocused = true } else { go(.search) }
             case .settings: go(.settings)
+            case .discussion: Task { await toggleDiscussion() }
             }
         }
         if let id = model.pendingWorkspaceTaskID {
