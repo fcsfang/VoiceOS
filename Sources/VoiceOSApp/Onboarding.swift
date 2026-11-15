@@ -10,7 +10,7 @@ private struct OnboardingStep: Identifiable, Sendable {
 private let onboardingSteps: [OnboardingStep] = [
     OnboardingStep(id: 0, title: "记录想法", detail: "按 ⌥⌘D 开始口述，或从菜单栏打开速记（⌥⌘N）。想法先留在本机，再慢慢整理。", symbol: "mic"),
     OnboardingStep(id: 1, title: "资料与行动", detail: "导入录音或文字后，VoiceOS 在本机整理成资料、理解与行动。完成的行动可以回来记录结果。", symbol: "books.vertical"),
-    OnboardingStep(id: 2, title: "快捷键", detail: "⌥⌘D 口述 · ⌥⌘V 保存剪贴板 · ⌥⌘N 速记 · ⌘F 搜索 · ⌘1 到 ⌘5 切换页面 · x 完成 · z 不再跟进 · ⌥⌘Z 撤销 · ⌘⇧R 口述", symbol: "keyboard")
+    OnboardingStep(id: 2, title: "快捷键", detail: "⌥⌘D 口述（全局） · ⌥⌘V 保存剪贴板 · ⌥⌘N 速记 · ⌘I 导入录音（全局） · ⌘F 搜索 · ⌘1 到 ⌘5 切换页面 · ⌘[ 返回（主窗口） · ⌘⇧R 口述（主窗口） · x 完成、z 不再跟进（列表聚焦时） · ⌥⌘Z 撤销（仅本次运行，撤销只对当前会话有效）", symbol: "keyboard")
 ]
 
 struct OnboardingView: View {

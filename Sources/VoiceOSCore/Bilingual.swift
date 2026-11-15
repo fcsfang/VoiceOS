@@ -27,18 +27,27 @@ public enum Bilingual {
     public static let truncationNotice = "已截断，分批查看"
 
     public static func paragraphs(from text: String, spans: [TranscriptSpan]) -> BilingualExcerpt {
-        let pieces = spanPieces(from: text, spans: spans)
-        let paragraphs: [String]
-        if pieces.isEmpty {
-            paragraphs = text.components(separatedBy: .newlines).flatMap { line -> [String] in
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                guard !trimmed.isEmpty else { return [] }
-                return pack(sentences(in: trimmed))
+        nextBatch(from: text, spans: spans, consumed: 0)
+    }
+
+    public static func nextBatch(from text: String, spans: [TranscriptSpan], consumed: Int) -> BilingualExcerpt {
+        var skip = max(0, consumed)
+        var remaining: [String] = []
+        for unit in units(from: text, spans: spans) {
+            if skip > 0 {
+                let scalars = Array(unit.unicodeScalars)
+                if scalars.count <= skip {
+                    skip -= scalars.count
+                    continue
+                }
+                let tail = String(String.UnicodeScalarView(scalars[skip...])).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !tail.isEmpty { remaining.append(tail) }
+                skip = 0
+            } else {
+                remaining.append(unit)
             }
-        } else {
-            paragraphs = pack(pieces)
         }
-        return cap(paragraphs)
+        return cap(remaining)
     }
 
     public static func requestPrompt(paragraphs: [BilingualParagraph], target: String = Bilingual.target) -> String {
@@ -91,6 +100,18 @@ public enum Bilingual {
             throw VoiceOSError("模型没有返回完整译文")
         }
         return text
+    }
+
+    private static func units(from text: String, spans: [TranscriptSpan]) -> [String] {
+        let pieces = spanPieces(from: text, spans: spans)
+        if pieces.isEmpty {
+            return text.components(separatedBy: .newlines).flatMap { line -> [String] in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else { return [] }
+                return pack(sentences(in: trimmed))
+            }
+        }
+        return pack(pieces)
     }
 
     private static func spanPieces(from text: String, spans: [TranscriptSpan]) -> [String] {
