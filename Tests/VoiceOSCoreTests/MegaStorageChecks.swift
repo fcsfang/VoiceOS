@@ -45,7 +45,7 @@ final class MegaStorageChecks: XCTestCase {
     func testMigrationAddsMegaTables() async throws {
         let store = try await openStore()
         let db = await store.db
-        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], "60")
+        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], "61")
         for table in ["action_subtasks", "action_estimates", "source_chapters", "capture_templates"] {
             XCTAssertEqual(try db.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [table]).count, 1)
         }
