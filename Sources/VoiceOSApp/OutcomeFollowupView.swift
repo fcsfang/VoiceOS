@@ -50,5 +50,6 @@ struct OutcomeFollowupView: View {
                 Button("完成", action: onDone).keyboardShortcut(.cancelAction)
             }
         }.padding(24).frame(minWidth: 680, idealWidth: 820, minHeight: 540, maxHeight: .infinity)
+            .workspaceResizableSheet()
     }
 }

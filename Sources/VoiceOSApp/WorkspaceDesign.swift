@@ -322,3 +322,33 @@ extension View {
         modifier(WorkspaceToastModifier(message: message))
     }
 }
+
+/// SwiftUI presents `.sheet` as a fixed-size window on macOS. The HIG asks
+/// sheets with long content to support resizing, which only a resizable
+/// NSWindow offers, so the sheet's hosting window flips its style mask once
+/// it is on screen.
+private struct WorkspaceResizableSheet: NSViewRepresentable {
+    let minimumSize: CGSize
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { apply(to: view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { apply(to: nsView.window) }
+    }
+
+    private func apply(to window: NSWindow?) {
+        guard let window, !window.styleMask.contains(.resizable) else { return }
+        window.styleMask.insert(.resizable)
+        window.contentMinSize = minimumSize
+    }
+}
+
+extension View {
+    func workspaceResizableSheet(minimumSize: CGSize = CGSize(width: 680, height: 540)) -> some View {
+        background(WorkspaceResizableSheet(minimumSize: minimumSize))
+    }
+}
