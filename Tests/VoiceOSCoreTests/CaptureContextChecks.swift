@@ -45,14 +45,8 @@ final class CaptureContextChecks: XCTestCase {
         let metadata = try await store.captureMetadata()
         XCTAssertEqual(metadata[sourceID]?.url, "https://example.com/note")
         XCTAssertEqual(metadata[sourceID]?.context, "Safari · 某页面")
-    }
-
-    func testCaptureMetadataRejectsMissingSource() async throws {
-        let store = try await openStore()
-        do {
-            try await store.attachCaptureMetadata(sourceID: UUID().uuidString, url: nil, context: "Safari · 某页面")
-            XCTFail("来源不存在时不能写入抓取元数据")
-        } catch {}
+        XCTAssertFalse(metadata[sourceID]?.capturedAt.isEmpty ?? true)
+        XCTAssertNotNil(ISO8601DateFormatter().date(from: metadata[sourceID]?.capturedAt ?? ""))
     }
 
     func testFrontContextDisplayJoinsAndTruncates() {

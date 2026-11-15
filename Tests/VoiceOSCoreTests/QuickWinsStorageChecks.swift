@@ -46,7 +46,7 @@ final class QuickWinsStorageChecks: XCTestCase {
         let store = try await openStore()
         let db = await store.db
         let version = try db.query("PRAGMA user_version").first?["user_version"]
-        XCTAssertEqual(version, "62")
+        XCTAssertEqual(version, TestSchema.currentVersion)
         let claimID = try insertClaim(db)
         let first = try insertAction(db, claimID: claimID)
         let second = try insertAction(db, claimID: claimID)
@@ -202,13 +202,5 @@ final class QuickWinsStorageChecks: XCTestCase {
             try await store.attachCaptureMetadata(sourceID: UUID().uuidString, url: nil)
             XCTFail("来源不存在时不能写入抓取元数据")
         } catch {}
-    }
-
-    func testCapturedTextWritesSourceURLMetadata() async throws {
-        let store = try await openStore()
-        let sourceID = try await store.recordCapturedText("网页选区正文", title: "选区标题", ownership: .external, sourceURL: "https://example.com/selection")
-        let metadata = try await store.captureMetadata()
-        XCTAssertEqual(metadata[sourceID]?.url, "https://example.com/selection")
-        XCTAssertFalse(metadata[sourceID]?.capturedAt.isEmpty ?? true)
     }
 }

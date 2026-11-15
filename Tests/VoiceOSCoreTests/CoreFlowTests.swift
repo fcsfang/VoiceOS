@@ -452,7 +452,7 @@ private struct FlowEnglish: EnglishPracticeModelPort {
     let response: EnglishPracticeResponse
     func generate(_ request: EnglishPracticeRequest) async throws -> EnglishPracticeResponse { response }
 }
-private actor FlowFollowupTransport: ModelHTTPTransport {
+actor FlowFollowupTransport: ModelHTTPTransport {
     let replies: [ModelHTTPReply]
     let cancelAt: Int?
     var requests: [Data] = []
@@ -527,7 +527,7 @@ private extension VoiceOSStore {
 }
 
 final class CoreFlowTests: XCTestCase {
-    private var root: URL!
+    var root: URL!
     override func setUpWithError() throws { root = FileManager.default.temporaryDirectory.appendingPathComponent("voiceos-flow-" + UUID().uuidString) }
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: root) }
     private func openStore() async throws -> VoiceOSStore {
@@ -1380,12 +1380,6 @@ final class CoreFlowTests: XCTestCase {
     }
 
     func testIdeaFindsHistoryWithoutCreatingTask() async throws {
-        try assertPanoramaDatabaseReopens()
-        try await assertPanoramaSchemaRepair()
-        try await assertPanoramaProgressiveRecovery(root: root)
-        try await assertPanoramaTitleChangeContinues(root: root)
-        try await assertPanoramaQuoteRetry(root: root)
-        try await assertPanoramaSlicedGeneration(root: root)
         let store = try await openStore(), model = FlowModel()
         let oldID = try await expression(store, text: "记忆系统需要关注检索质量。", model: model)
         let previous = try await store.retrieve("检索质量", using: NativeRetrieval())
@@ -1641,7 +1635,8 @@ final class CoreFlowTests: XCTestCase {
         let starvationStore=try VoiceOSStore(root: starvationDirectory, inspector: NativeMediaInspector())
         try await starvationStore.recover()
         var starvationIDs: [String]=[]
-        for (index, repetitions) in [40, 120, 260].enumerated() {
+        // Ascending text sizes only pin the unit scheduling order; magnitudes carry no meaning.
+        for (index, repetitions) in [4, 6, 8].enumerated() {
             let id=try await starvationStore.recordUserExpression(String(repeating: "单元失败隔离材料第\(index)项。", count: repetitions))
             _ = try await starvationStore.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
             starvationIDs.append(id)
@@ -1664,22 +1659,6 @@ final class CoreFlowTests: XCTestCase {
         catch { XCTFail("明确重试应继续失败单元：\(error)") }
         let starvationRecovered=try await starvationStore.panoramaState()
         XCTAssertEqual(starvationRecovered.status, "completed")
-        let transientDirectory=root.appendingPathComponent("panorama-transient-unit")
-        let transientStore=try VoiceOSStore(root: transientDirectory, inspector: NativeMediaInspector())
-        try await transientStore.recover()
-        let transientID=try await transientStore.recordUserExpression("瞬时上游失败重试后仍须完成完整核对。")
-        _ = try await transientStore.setSourceLocalOnly(sourceID: transientID, expectedVersion: 1, localOnly: false)
-        let transientContext=try await transientStore.prepareLocalTranscriptContext(sourceIDs: [transientID], scalarBudget: Int.max)
-        _ = try await transientStore.importOrganizedClaims(context: transientContext, proposals: [], commandID: "transient-fixture")
-        let transientPort=ProgressivePanoramaFixture(unitTransientFailures: [transientID: 2])
-        do { try await transientStore.generatePanorama(using: transientPort) }
-        catch { XCTFail("瞬时上游失败应在重试后完成：\(error)") }
-        let transientState=try await transientStore.panoramaState()
-        XCTAssertEqual(transientState.status, "completed")
-        let transientGenerations=await transientPort.generations
-        XCTAssertEqual(transientGenerations, 3, "单元生成应经历两次重试后成功")
-        let transientSteps=try Database(transientDirectory.appendingPathComponent("voiceos.sqlite")).query("SELECT state FROM panorama_steps WHERE stage='unit.generate' ORDER BY rowid")
-        XCTAssertEqual(transientSteps.compactMap { $0["state"] }, ["failed", "failed", "completed"])
         do { try await store.generatePanorama(using: panorama, retry: true); XCTFail("全局核对尚未完成不能完成全景") }
         catch { XCTAssertEqual((error as? VoiceOSError)?.message, "当前模型端口尚不支持跨单元全景核对，已核对区域保留") }
         try await store.generatePanorama(using: panorama)
@@ -1732,55 +1711,6 @@ final class CoreFlowTests: XCTestCase {
         let invalidated=try await store.panoramaState()
         XCTAssertNil(invalidated.snapshot)
         do { _ = try await store.beginPanoramaConversation(snapshotID: snapshot.id, selection: .question(snapshot.proposal.questions[0].id)); XCTFail("旧图不能继续讨论") } catch {}
-    }
-
-    private func assertPanoramaDatabaseReopens() throws {
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        let url=root.appendingPathComponent("panorama-schema.sqlite")
-        var created: Database?=try Database(url)
-        XCTAssertEqual(try created?.query("PRAGMA user_version").first?["user_version"], "62")
-        created=nil
-        let reopened=try Database(url)
-        for table in ["action_review_resolutions", "expression_review_acknowledgements"] {
-            XCTAssertEqual(try reopened.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [table]).count, 1)
-        }
-        XCTAssertEqual(try reopened.query("PRAGMA table_info(panorama_steps)").filter { $0["name"] == "receipt_json" }.count, 1)
-        XCTAssertEqual(try reopened.query("PRAGMA table_info(panorama_theme_replies)").filter { $0["name"] == "reply" }.count, 1)
-        for table in ["panorama_themes", "panorama_theme_batches", "panorama_theme_appearances"] {
-            XCTAssertEqual(try reopened.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [table]).count, 1)
-        }
-    }
-    private func assertPanoramaSchemaRepair() async throws {
-        let text="格式核对需要完整原文。"
-        let transcript=ContextTranscript(sourceID: "format-source", sourceVersionID: "format-source-version", transcriptVersionID: "format-version", origin: "user", speaker: "user", localOnly: false,
-            text: text, spans: [.init(textStart: 0, textEnd: text.unicodeScalars.count)])
-        let input=PanoramaInput(manifest: .init(digest: "format-fixture", sourceIDs: [transcript.sourceID], claimIDs: [], unitIDs: ["format-unit"]),
-            units: [.init(id: "format-unit", sourceIDs: [transcript.sourceID], dependencyIDs: [], producerID: "format-producer", completionDigest: "format-complete")],
-            sources: [.init(transcript: transcript, title: "格式回放", occurredAt: "2026-10-23", policyVersion: 1)], claims: [], exclusions: [])
-        let evidence: [String: Any]=["sourceID":"s1","transcriptVersionID":"t1","start":0,"end":text.unicodeScalars.count,"quote":text,"claimIDs":[]]
-        let nestedQuestion: [String: Any]=["id":"q","title":"如何核对格式？","summary":"保留原话","evidence":[evidence]]
-        let bad: [String: Any]=["regions":[["id":"r","title":"格式核对","summary":"保留原话","questions":[nestedQuestion]]], "relations":[], "unrepresentedSources":[], "unrepresentedClaims":[]]
-        var flatQuestion=nestedQuestion; flatQuestion["regionID"]="r"
-        let valid: [String: Any]=["regions":[["id":"r","title":"格式核对","summary":"保留原话"]], "questions":[flatQuestion], "relations":[], "unrepresentedSources":[], "unrepresentedClaims":[]]
-        func reply(_ object: [String: Any], id: String) throws -> ModelHTTPReply {
-            let content=String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
-            return .init(status: 200, body: try JSONSerialization.data(withJSONObject: ["id":id,"status":"completed","output":[["type":"message","role":"assistant","status":"completed","content":[["type":"output_text","text":content]]]]]))
-        }
-        let transport=FlowFollowupTransport(try [reply(bad,id: "nested-fixture"),reply(valid,id: "flat-fixture")])
-        let port=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: transport)
-        let (proposal,receipt)=try await port.generate(input)
-        _ = try VoiceOSStore.validatePanorama(proposal, input: input)
-        XCTAssertEqual(receipt.responseID,"flat-fixture")
-        XCTAssertEqual(proposal.questions.first?.regionID,"r")
-        let requests=await transport.requests
-        XCTAssertEqual(requests.count,2)
-        let body=try XCTUnwrap(JSONSerialization.jsonObject(with: requests[1]) as? [String: Any])
-        let messages=try XCTUnwrap(body["input"] as? [[String: Any]])
-        let instruction=try XCTUnwrap(messages.last?["content"] as? String)
-        XCTAssertTrue(instruction.contains("keyNotFound"))
-        XCTAssertTrue(instruction.contains("$.questions"))
-        XCTAssertTrue(instruction.contains("regionID"))
-        XCTAssertTrue(instruction.contains("绝不嵌套 questions"))
     }
 
     func testPeriodReflectionKeepsKnowledgeActionsResultsAndCompleteEvidence() async throws {

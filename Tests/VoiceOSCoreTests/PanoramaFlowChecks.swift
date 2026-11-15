@@ -212,7 +212,7 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
 }
 
 extension CoreFlowTests {
-    func assertPanoramaProgressiveRecovery(root: URL) async throws {
+    func testPanoramaProgressiveRecovery() async throws {
         try await assertPanoramaRepairLoop(root: root.appendingPathComponent("repair-loop"))
         let store=try await panoramaFixtureStore(root.appendingPathComponent("progressive"), count: 3)
         let port=ProgressivePanoramaFixture(failGenerationAt: 2, failCoverage: true, failConsistency: true)
@@ -712,7 +712,7 @@ extension CoreFlowTests {
 
 
 extension CoreFlowTests {
-    func assertPanoramaTitleChangeContinues(root: URL) async throws {
+    func testPanoramaTitleChangeContinues() async throws {
         let store=try await panoramaFixtureStore(root.appendingPathComponent("title-change"), count: 2)
         let input=try await store.panoramaInput(), sourceID=try XCTUnwrap(input.sources.first?.id)
         let port=ProgressivePanoramaFixture(beforeGenerate: { _ in
@@ -731,7 +731,7 @@ extension CoreFlowTests {
 
 
 extension CoreFlowTests {
-    func assertPanoramaQuoteRetry(root: URL) async throws {
+    func testPanoramaQuoteRetry() async throws {
         let store=try await panoramaFixtureStore(root.appendingPathComponent("quote-retry"), count: 1)
         let port=ProgressivePanoramaFixture(invalidQuoteAttempts: 1)
         try await store.generatePanorama(using: port)
@@ -744,7 +744,7 @@ extension CoreFlowTests {
 }
 
 extension CoreFlowTests {
-    func assertPanoramaSlicedGeneration(root: URL) async throws {
+    func testPanoramaSlicedGeneration() async throws {
         try assertPanoramaSlicingPlanAndMerge()
         try await assertPanoramaFocusedGeneration(root: root.appendingPathComponent("focused-generation"))
         try await assertPanoramaFocusViolationRetry(root: root.appendingPathComponent("focused-violation"))
@@ -1195,5 +1195,56 @@ extension CoreFlowTests {
         let context=try await store.prepareLocalTranscriptContext(sourceIDs: ids,scalarBudget: Int.max)
         _ = try await store.importOrganizedClaims(context: context,proposals: [],commandID: "slices-fixture")
         return store
+    }
+}
+
+extension CoreFlowTests {
+    func testPanoramaDatabaseReopens() throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let url=root.appendingPathComponent("panorama-schema.sqlite")
+        var created: Database?=try Database(url)
+        XCTAssertEqual(try created?.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        created=nil
+        let reopened=try Database(url)
+        for table in ["action_review_resolutions", "expression_review_acknowledgements"] {
+            XCTAssertEqual(try reopened.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [table]).count, 1)
+        }
+        XCTAssertEqual(try reopened.query("PRAGMA table_info(panorama_steps)").filter { $0["name"] == "receipt_json" }.count, 1)
+        XCTAssertEqual(try reopened.query("PRAGMA table_info(panorama_theme_replies)").filter { $0["name"] == "reply" }.count, 1)
+        for table in ["panorama_themes", "panorama_theme_batches", "panorama_theme_appearances"] {
+            XCTAssertEqual(try reopened.query("SELECT name FROM sqlite_master WHERE type='table' AND name=?", [table]).count, 1)
+        }
+    }
+    func testPanoramaSchemaRepair() async throws {
+        let text="格式核对需要完整原文。"
+        let transcript=ContextTranscript(sourceID: "format-source", sourceVersionID: "format-source-version", transcriptVersionID: "format-version", origin: "user", speaker: "user", localOnly: false,
+            text: text, spans: [.init(textStart: 0, textEnd: text.unicodeScalars.count)])
+        let input=PanoramaInput(manifest: .init(digest: "format-fixture", sourceIDs: [transcript.sourceID], claimIDs: [], unitIDs: ["format-unit"]),
+            units: [.init(id: "format-unit", sourceIDs: [transcript.sourceID], dependencyIDs: [], producerID: "format-producer", completionDigest: "format-complete")],
+            sources: [.init(transcript: transcript, title: "格式回放", occurredAt: "2026-10-23", policyVersion: 1)], claims: [], exclusions: [])
+        let evidence: [String: Any]=["sourceID":"s1","transcriptVersionID":"t1","start":0,"end":text.unicodeScalars.count,"quote":text,"claimIDs":[]]
+        let nestedQuestion: [String: Any]=["id":"q","title":"如何核对格式？","summary":"保留原话","evidence":[evidence]]
+        let bad: [String: Any]=["regions":[["id":"r","title":"格式核对","summary":"保留原话","questions":[nestedQuestion]]], "relations":[], "unrepresentedSources":[], "unrepresentedClaims":[]]
+        var flatQuestion=nestedQuestion; flatQuestion["regionID"]="r"
+        let valid: [String: Any]=["regions":[["id":"r","title":"格式核对","summary":"保留原话"]], "questions":[flatQuestion], "relations":[], "unrepresentedSources":[], "unrepresentedClaims":[]]
+        func reply(_ object: [String: Any], id: String) throws -> ModelHTTPReply {
+            let content=String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+            return .init(status: 200, body: try JSONSerialization.data(withJSONObject: ["id":id,"status":"completed","output":[["type":"message","role":"assistant","status":"completed","content":[["type":"output_text","text":content]]]]]))
+        }
+        let transport=FlowFollowupTransport(try [reply(bad,id: "nested-fixture"),reply(valid,id: "flat-fixture")])
+        let port=try ResponsesPanoramaPort(baseURL: URL(string: "https://api.openai.com/v1")!, apiKey: "fixture", model: "fixture", transport: transport)
+        let (proposal,receipt)=try await port.generate(input)
+        _ = try VoiceOSStore.validatePanorama(proposal, input: input)
+        XCTAssertEqual(receipt.responseID,"flat-fixture")
+        XCTAssertEqual(proposal.questions.first?.regionID,"r")
+        let requests=await transport.requests
+        XCTAssertEqual(requests.count,2)
+        let body=try XCTUnwrap(JSONSerialization.jsonObject(with: requests[1]) as? [String: Any])
+        let messages=try XCTUnwrap(body["input"] as? [[String: Any]])
+        let instruction=try XCTUnwrap(messages.last?["content"] as? String)
+        XCTAssertTrue(instruction.contains("keyNotFound"))
+        XCTAssertTrue(instruction.contains("$.questions"))
+        XCTAssertTrue(instruction.contains("regionID"))
+        XCTAssertTrue(instruction.contains("绝不嵌套 questions"))
     }
 }
