@@ -234,7 +234,7 @@ final class ExternalCompletionChecks: XCTestCase {
         func action(state: String = "open", validity: String = "frozen", kind: String = "task") -> ActionRecord {
             ActionRecord(id: "action", claimID: "claim", claimReviewVersion: 1, title: "查阅相关论文", kind: kind,
                          intentActor: "user", note: "", state: state, validity: validity, version: 4, autoSend: false, intent: nil,
-                         commandID: "test:action", createdAt: "2026-01-01T00:00:00Z")
+                         commandID: "test:action", createdAt: "2026-01-01T00:00:00Z", parentID: nil)
         }
         func link(state: String = "linked", markerValid: Bool? = true, completed: Bool? = true,
                   observationID: String? = "observation") -> ReminderLink {
