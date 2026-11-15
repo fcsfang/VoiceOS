@@ -40,7 +40,7 @@ final class SourceAttachmentChecks: XCTestCase {
     func testMigrationAddsSourceAttachmentsTable() async throws {
         let store = try await openStore()
         let db = await store.db
-        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], "62")
+        XCTAssertEqual(try db.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
         XCTAssertNotNil(try db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='source_attachments'").first)
     }
 
