@@ -6,6 +6,7 @@ struct WeeklyReviewView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: ControlCenter
     let openTask: (String) -> Void
+    let openActions: () -> Void
     @State private var actionError = ""
     @State private var focusError = ""
     @State private var focusedIDs: Set<String> = []
@@ -74,6 +75,7 @@ struct WeeklyReviewView: View {
                     WorkspaceHeading(eyebrow: "行动 · 每周回顾", title: "这一周，行动走到了哪里", subtitle: "今天收尾可直接完成或不再跟进；点开任意一条查看任务、原话与结果。")
                     Button("关闭") { dismiss() }
                 }
+                undoHint
                 dailyCloseSection
                 if isEmpty {
                     Text("这一周没有需要回顾的行动。").font(.callout).foregroundStyle(.secondary)
@@ -96,7 +98,6 @@ struct WeeklyReviewView: View {
     private var dailyCloseSection: some View {
         let review = dailyReview
         return WorkspaceSection(title: "今天收尾", subtitle: "逐条完成或不再跟进；改天仍到任务页处理。", icon: "checkmark.circle", count: review.remainingCount) {
-            undoHint
             if review.isClear {
                 Text("今天没有未收尾的行动").font(.callout).foregroundStyle(.secondary).padding(.vertical, 10)
             }
@@ -191,7 +192,6 @@ struct WeeklyReviewView: View {
     private var nextWeekSection: some View {
         let rows = Array(nextWeekCandidates.prefix(5))
         return WorkspaceSection(title: "下周先做", subtitle: "从即将与随时里挑最多 3 条，确认后加入专注。", icon: "calendar.badge.plus", count: nextWeekEntries.count) {
-            undoHint
             if focusSlots == 0 {
                 Text("已有 3 条专注，先到行动页移出。").vosFont(12).foregroundStyle(palette.warning).padding(.top, 8)
             }
@@ -275,21 +275,13 @@ struct WeeklyReviewView: View {
     }
 
     private var todaySection: some View {
-        WorkspaceSection(title: "今天与逾期", subtitle: "按本地排期与提醒事项回读，今天到期和已经过去的期限。", icon: "sun.max", count: todayEntries.count) {
-            undoHint
-            ForEach(Array(todayEntries.enumerated()), id: \.element.id) { index, entry in
-                if index > 0 { Divider() }
-                reviewRow(title: entry.action.title, subtitle: dueLabel(entry),
-                          trailing: entry.isOverdue ? "已逾期" : "今天",
-                          trailingColor: entry.isOverdue ? palette.warning : nil,
-                          icon: entry.isOverdue ? "exclamationmark.circle" : "circle") { openTask(entry.action.id) }
-            }
+        WorkspaceSection(title: "今天与逾期", subtitle: "这些行动已在「今天收尾」逐条列出，这里只保留计数。", icon: "sun.max", count: todayEntries.count) {
+            Button("到行动页查看今天与逾期", action: openActions)
         }
     }
     private var staleSection: some View {
         let rows = Array(staleTasks.prefix(5))
         return WorkspaceSection(title: "长期未动", subtitle: "创建超过 14 天，仍是未完成状态。", icon: "hourglass", count: staleTasks.count) {
-            undoHint
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
                 reviewRow(title: action.title, subtitle: staleLabel(action), trailing: "搁置", icon: "hourglass") { openTask(action.id) }
@@ -299,7 +291,6 @@ struct WeeklyReviewView: View {
     private var unclarifiedSection: some View {
         let rows = Array(unclarifiedTasks.prefix(5))
         return WorkspaceSection(title: "待确认", subtitle: "最近 14 天从原话抽取，还没有确认是承诺、问题与目标，还是不是。", icon: "questionmark.circle", count: unclarifiedTasks.count) {
-            undoHint
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
                 reviewRow(title: action.title, subtitle: "打开任务页完成一次三选一澄清。", trailing: "待确认", icon: "questionmark.circle") { openTask(action.id) }
@@ -309,7 +300,6 @@ struct WeeklyReviewView: View {
     private var progressSection: some View {
         let rows = Array(weekProgress.prefix(5))
         return WorkspaceSection(title: "本周完成与结果", subtitle: "最近 7 天记录的完成、进展与结果。", icon: "checkmark.seal", count: weekProgress.count) {
-            undoHint
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 if index > 0 { Divider() }
                 reviewRow(title: row.taskTitle, subtitle: row.relationLabel, detail: row.text,
@@ -320,7 +310,6 @@ struct WeeklyReviewView: View {
     private var pausedSection: some View {
         let rows = Array(pausedTasks.prefix(5))
         return WorkspaceSection(title: "暂停与冻结", subtitle: "AI 提取暂停或不再随当前理解更新的行动，状态保留。", icon: "pause.circle", count: pausedTasks.count) {
-            undoHint
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
                 reviewRow(title: action.title, subtitle: model.workspaceActionStatus(action),
@@ -330,7 +319,7 @@ struct WeeklyReviewView: View {
     }
 
     private func reviewRow(title: String, subtitle: String, detail: String = "", trailing: String = "",
-                           trailingColor: Color? = nil, icon: String = "circle", enabled: Bool = true,
+                           icon: String = "circle", enabled: Bool = true,
                            open: @escaping () -> Void) -> some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 14) {
@@ -349,7 +338,7 @@ struct WeeklyReviewView: View {
                 }
                 Spacer(minLength: 8)
                 if !trailing.isEmpty {
-                    Text(trailing).vosFont(12, weight: .medium).foregroundStyle(trailingColor ?? Color.secondary).padding(.top, 3)
+                    Text(trailing).vosFont(12, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
                 }
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
             }

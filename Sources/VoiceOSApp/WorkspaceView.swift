@@ -285,7 +285,7 @@ struct WorkspaceView: View {
                     onDone:{ showingOutcome=false })
             }
             .sheet(isPresented:$showingWeeklyReview) {
-                WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) })
+                WeeklyReviewView(model:model,openTask:{ id in showingWeeklyReview=false;go(.task(id)) },openActions:{ showingWeeklyReview=false;go(.actions) })
             }
             .onChange(of:showingWeeklyReview) { _, shown in if !shown { Task { focusedActionIDs = await model.focusedActionIDs() } } }
             .sheet(isPresented:$showingSaveView) { saveViewSheet }
@@ -925,19 +925,22 @@ struct WorkspaceView: View {
             sectionTitle("键盘快捷键")
             HStack(alignment:.top,spacing:40) {
                 VStack(alignment:.leading,spacing:6) {
-                    Text("⌥⌘D 口述")
-                    Text("⌥⌘V 保存剪贴板")
-                    Text("⌥⌘N 速记")
-                    Text("⌘⇧R 口述")
-                    Text("⌘F 搜索")
-                    Text("⌘1 到 ⌘5 切换页面")
+                    Text("⌥⌘D 口述 · 全局")
+                    Text("⌥⌘V 保存剪贴板 · 全局")
+                    Text("⌥⌘N 速记 · 全局")
+                    Text("⌘I 导入音频或视频 · 全局")
+                    Text("⌘F 搜索 · 主窗口")
+                    Text("⌘1 到 ⌘5 切换页面 · 主窗口")
+                    Text("⌘[ 返回 · 主窗口")
                 }
                 VStack(alignment:.leading,spacing:6) {
-                    Text("↑↓ 选择")
-                    Text("↵ 打开")
-                    Text("x 完成")
-                    Text("z 不再跟进")
-                    Text("⌥⌘Z 撤销")
+                    Text("⌘⇧R 口述 · 仅主窗口")
+                    Text("↑↓ 选择 · 列表聚焦时")
+                    Text("↵ 打开 · 列表聚焦时")
+                    Text("x 完成 · 列表聚焦时")
+                    Text("z 不再跟进 · 列表聚焦时")
+                    Text("⌥⌘Z 撤销 · 仅本次运行")
+                    Text("撤销只对当前会话有效")
                 }
             }.font(.caption).foregroundStyle(.secondary)
             Divider()

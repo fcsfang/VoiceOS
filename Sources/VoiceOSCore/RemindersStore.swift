@@ -1,6 +1,10 @@
 import Foundation
 import CryptoKit
 
+private struct ReminderSuccessorPending: Error {
+    static let message = "外部完成已登记；下一次未生成，请重试"
+}
+
 public struct ReminderSnapshot: Sendable, Codable, Equatable {
     public let id: String
     public let title: String
@@ -122,6 +126,7 @@ extension VoiceOSStore {
             // send must also stop its follow-up reconciliation, even when a
             // connector returns normally after the task was cancelled.
             if error is CancellationError || Task.isCancelled { throw CancellationError() }
+            if error is ReminderSuccessorPending { throw VoiceOSError(ReminderSuccessorPending.message) }
             throw VoiceOSError("提醒事项结果尚未确认；尝试已保留，请回读，不会自动重建")
         }
     }
@@ -157,10 +162,16 @@ extension VoiceOSStore {
             try Task.checkCancellation()
             try applyReminder(matches, linkID: linkID)
         } catch {
-            try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=?", [linkID])
+            try preserveConfirmedReminderLink(linkID)
             if error is CancellationError || Task.isCancelled { throw CancellationError() }
+            if error is ReminderSuccessorPending { throw VoiceOSError(ReminderSuccessorPending.message) }
             throw VoiceOSError("提醒事项回读失败，结果未知；没有修改或重建外部任务")
         }
+    }
+    private func preserveConfirmedReminderLink(_ linkID: String) throws {
+        guard let row = try db.query("SELECT l.state,a.state AS action_state FROM reminder_links l JOIN actions a ON a.id=l.action_id WHERE l.id=?", [linkID]).first,
+              row["state"] != "linked", row["action_state"] != "completed" else { return }
+        try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=?", [linkID])
     }
     func applyReminder(_ matches: [ReminderSnapshot], linkID: String, includingScheduleOperation: String? = nil, includingCompensationOperation: String? = nil) throws {
         guard let link = try db.query("SELECT * FROM reminder_links WHERE id=?", [linkID]).first else { throw VoiceOSError("提醒事项关联缺失") }
@@ -174,7 +185,7 @@ extension VoiceOSStore {
         }
         guard !remote.id.isEmpty, remote.id.utf8.count <= 4096, remote.title.unicodeScalars.count <= 10000, remote.marker.utf8.count <= 4096 else { throw VoiceOSError("提醒事项字段无效或过长") }
         try remote.dueDate?.validate()
-        try remote.fields?.validate()
+        try remote.fields?.validate(allowingAlertsWithoutDue: true)
         let action = try actions(includeHistory: true).first { $0.id == link["action_id"] }
         let validMarker = remote.marker == link["marker"]
         // Once identified, a copied marker on a replacement is a conflict,
@@ -221,9 +232,15 @@ extension VoiceOSStore {
             try checkpoint(.reminderFeedbackUncommitted)
         }
         try checkpoint(.reminderFeedbackCommitted)
-        if feedbackID != nil { _ = try completeActionWithRecurrence(id: link["action_id"]!) }
+        let completed = (try db.query("SELECT state FROM actions WHERE id=?", [link["action_id"]!]).first?["state"]) == "completed"
+        var successorPending = false
+        if completed, try db.query("SELECT action_id FROM action_recurrence WHERE action_id=?", [link["action_id"]!]).first != nil {
+            do { _ = try completeActionWithRecurrence(id: link["action_id"]!) }
+            catch { successorPending = true }
+        }
         for _ in confirmedScheduleOperations { try checkpoint(.scheduleOperationCommitted) }
         for _ in confirmedCompensations { try checkpoint(.compensationOperationCommitted) }
+        if successorPending { throw ReminderSuccessorPending() }
     }
     static func validateStoredReminders(_ db: Database) throws {
         let clarifiedOpportunities = try clarifiedOpportunityActionIDs(db)

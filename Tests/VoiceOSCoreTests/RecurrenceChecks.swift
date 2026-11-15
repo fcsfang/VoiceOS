@@ -3,6 +3,15 @@ import Foundation
 @testable import VoiceOSCore
 import VoiceOSPlatform
 
+private actor RecurrenceReminders: RemindersPort {
+    let snapshot: ReminderSnapshot
+    init(_ snapshot: ReminderSnapshot) { self.snapshot = snapshot }
+    func find(calendarID: String, externalID: String?, marker: String) async throws -> [ReminderSnapshot] {
+        snapshot.marker == marker || snapshot.id == externalID ? [snapshot] : []
+    }
+    func create(calendarID: String, title: String, marker: String, context: String) async throws {}
+}
+
 final class RecurrenceChecks: XCTestCase {
     private var root: URL!
     override func setUpWithError() throws { root = FileManager.default.temporaryDirectory.appendingPathComponent("voiceos-recurrence-" + UUID().uuidString) }
@@ -40,14 +49,14 @@ final class RecurrenceChecks: XCTestCase {
         return (id, versionID, speech.spans[0].id)
     }
 
-    private func makeTask(_ store: VoiceOSStore, text: String = "我要每周复盘", due: ReminderDueDate, alerts: [String] = []) async throws -> String {
+    private func makeTask(_ store: VoiceOSStore, text: String = "我要每周复盘", due: ReminderDueDate, alerts: [String] = [], note: String = "") async throws -> String {
         let source = try await insertSource(store, text: text)
         let context = try await store.prepareLocalTranscriptContext(sourceIDs: [source.sourceID], scalarBudget: Int.max)
         let contextID = try await store.persistLocalContext(context, commandID: UUID().uuidString)
         let attemptID = try await store.reserveLocalModelAttempt(contextID: contextID, model: "fixture", promptVersion: "v1", schemaVersion: "v1")
         let proposal = ClaimProposal(statement: text, ownership: .external, references: [ClaimReference(sourceID: source.sourceID, transcriptVersionID: source.versionID, spanID: source.spanID)], contentKind: .statement)
         let claims = try await store.commitLocalClaims(attemptID: attemptID, proposals: [proposal])
-        let actionID = try await store.createAction(claimID: claims[0], expectedClaimReviewVersion: 0, title: "每周复盘", kind: .task)
+        let actionID = try await store.createAction(claimID: claims[0], expectedClaimReviewVersion: 0, title: "每周复盘", kind: .task, note: note)
         try await store.saveReminderFields(actionID: actionID, expectedVersion: 1, fields: ReminderFields(due: due, alerts: alerts))
         return actionID
     }
@@ -126,6 +135,7 @@ final class RecurrenceChecks: XCTestCase {
         XCTAssertEqual(row["intent_actor"], "user")
         XCTAssertEqual(row["state"], "open")
         XCTAssertEqual(row["validity"], "current")
+        XCTAssertEqual(row["auto_send"], "0")
         XCTAssertEqual(row["version"], "1")
         XCTAssertEqual(row["command_id"], "recurrence:" + action + ":2026-11-08")
         let intent = try JSONDecoder().decode(ActionIntentMetadata.self, from: Data(try XCTUnwrap(row["intent_json"]).utf8))
@@ -136,7 +146,7 @@ final class RecurrenceChecks: XCTestCase {
         let original = try await store.recurrence(actionID: action)
         XCTAssertNil(original)
         XCTAssertEqual(try db.query("SELECT series_id FROM action_recurrence WHERE action_id=?", [successorID]).first?["series_id"], seriesID)
-        XCTAssertFalse(try db.query("SELECT id FROM action_revisions WHERE action_id=? AND command_id=?", [action, "recurrence-complete:" + action]).isEmpty)
+        XCTAssertFalse(try db.query("SELECT id FROM action_revisions WHERE action_id=? AND command_id=?", [action, "recurrence-complete:" + action + ":1"]).isEmpty)
         let repeated = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 9, 8, 0))
         XCTAssertNil(repeated)
         XCTAssertEqual(try db.query("SELECT count(*) AS n FROM actions").first?["n"], "2")
@@ -191,7 +201,7 @@ final class RecurrenceChecks: XCTestCase {
         XCTAssertEqual(row["version"], "2")
         XCTAssertEqual(try db.query("SELECT count(*) AS n FROM actions").first?["n"], "1")
         XCTAssertEqual(try db.query("SELECT count(*) AS n FROM action_recurrence").first?["n"], "0")
-        XCTAssertFalse(try db.query("SELECT id FROM action_revisions WHERE action_id=? AND command_id=?", [action, "recurrence-complete:" + action]).isEmpty)
+        XCTAssertFalse(try db.query("SELECT id FROM action_revisions WHERE action_id=? AND command_id=?", [action, "recurrence-complete:" + action + ":1"]).isEmpty)
     }
 
     func testExternalCompletionEquivalentCreatesOneSuccessor() async throws {
@@ -273,6 +283,99 @@ final class RecurrenceChecks: XCTestCase {
         XCTAssertEqual(successorRecurrence, .weekly)
         XCTAssertNil(actionRecurrence)
         XCTAssertEqual(try db.query("SELECT state FROM actions WHERE id=?", [action]).first?["state"], "open")
+    }
+
+    func testCompleteReopenCompleteUsesVersionedCommandsAndOneSuccessor() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let zone = calendar("Asia/Shanghai")
+        let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"))
+        try await store.setRecurrence(actionID: action, period: .weekly)
+        let firstRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
+        let first = try XCTUnwrap(firstRaw)
+        let reopened = try await store.reopenActionWithRecurrence(id: action, successorID: first)
+        XCTAssertNil(reopened)
+        XCTAssertEqual(try db.query("SELECT version FROM actions WHERE id=?", [action]).first?["version"], "3")
+        let secondRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
+        let second = try XCTUnwrap(secondRaw)
+        XCTAssertNotEqual(first, second)
+        let commands = try db.query("SELECT command_id FROM action_revisions WHERE action_id=? AND command_id LIKE 'recurrence-complete:%' ORDER BY version", [action]).compactMap { $0["command_id"] }
+        XCTAssertEqual(commands, ["recurrence-complete:" + action + ":1", "recurrence-complete:" + action + ":3"])
+        XCTAssertEqual(try db.query("SELECT count(*) AS n FROM actions").first?["n"], "2")
+        XCTAssertEqual(try db.query("SELECT count(*) AS n FROM action_recurrence").first?["n"], "1")
+        let moved = try await store.recurrence(actionID: second)
+        XCTAssertEqual(moved, .weekly)
+        let row = try XCTUnwrap(try db.query("SELECT state,validity FROM actions WHERE id=?", [second]).first)
+        XCTAssertEqual(row["state"], "open")
+        XCTAssertEqual(row["validity"], "current")
+    }
+
+    func testReopenDeletesUntouchedSuccessorWithPredecessorNote() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let zone = calendar("Asia/Shanghai")
+        let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"), note: "原话：每周复盘")
+        try await store.setRecurrence(actionID: action, period: .weekly)
+        let successorRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
+        let successor = try XCTUnwrap(successorRaw)
+        XCTAssertEqual(try db.query("SELECT note FROM actions WHERE id=?", [successor]).first?["note"], "原话：每周复盘")
+        let kept = try await store.reopenActionWithRecurrence(id: action, successorID: successor)
+        XCTAssertNil(kept)
+        XCTAssertEqual(try db.query("SELECT id FROM actions WHERE id=?", [successor]).count, 0)
+        let moved = try await store.recurrence(actionID: action)
+        XCTAssertEqual(moved, .weekly)
+    }
+
+    func testFrozenSourceCreatesFrozenSuccessorWithoutAutoSend() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let zone = calendar("Asia/Shanghai")
+        let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"))
+        try await store.setRecurrence(actionID: action, period: .weekly)
+        try db.execute("UPDATE actions SET auto_send=1 WHERE id=?", [action])
+        _ = try await store.setActionState(actionID: action, expectedVersion: 1, state: .completed)
+        try db.execute("UPDATE actions SET validity='frozen' WHERE id=?", [action])
+        let successorRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
+        let successor = try XCTUnwrap(successorRaw)
+        let row = try XCTUnwrap(try db.query("SELECT * FROM actions WHERE id=?", [successor]).first)
+        XCTAssertEqual(row["state"], "open")
+        XCTAssertEqual(row["validity"], "frozen")
+        XCTAssertEqual(row["auto_send"], "0")
+        XCTAssertEqual(row["command_id"], "recurrence:" + action + ":2026-11-08")
+        let moved = try await store.recurrence(actionID: successor)
+        XCTAssertEqual(moved, .weekly)
+    }
+
+    func testReminderReadbackRetriesDeferredSuccessorAndKeepsLink() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"))
+        try await store.setRecurrence(actionID: action, period: .weekly)
+        _ = try await store.setActionState(actionID: action, expectedVersion: 1, state: .completed)
+        let linkID = UUID().uuidString
+        let marker = "voiceos-action:" + linkID
+        try db.execute("INSERT INTO reminder_links(id,action_id,action_version,calendar_id,marker,desired_title,state,created_at) VALUES(?,?,2,?,?,?,'linked',?)", [linkID, action, "recurrence-calendar", marker, "每周复盘", "2026-11-01T00:00:00Z"])
+        let snapshot = ReminderSnapshot(id: "remote-recurrence", title: "每周复盘", completed: true, marker: marker)
+        let reminders = RecurrenceReminders(snapshot)
+        try db.execute("CREATE TRIGGER block_recurrence_successor BEFORE INSERT ON actions WHEN NEW.command_id LIKE 'recurrence:%' BEGIN SELECT RAISE(ABORT,'blocked'); END")
+        do {
+            try await store.readReminder(linkID: linkID, calendarID: "recurrence-calendar", using: reminders)
+            XCTFail("后继生成失败时回读应提示重试")
+        } catch {
+            XCTAssertEqual((error as? VoiceOSError)?.message, "外部完成已登记；下一次未生成，请重试")
+        }
+        XCTAssertEqual(try db.query("SELECT state FROM reminder_links WHERE id=?", [linkID]).first?["state"], "linked")
+        XCTAssertEqual(try db.query("SELECT count(*) AS n FROM action_recurrence WHERE action_id=?", [action]).first?["n"], "1")
+        XCTAssertEqual(try db.query("SELECT count(*) AS n FROM actions").first?["n"], "1")
+        try db.execute("DROP TRIGGER block_recurrence_successor")
+        try await store.readReminder(linkID: linkID, calendarID: "recurrence-calendar", using: reminders)
+        let successor = try XCTUnwrap(try db.query("SELECT id FROM actions WHERE command_id LIKE ?", ["recurrence:" + action + ":%"]).first?["id"])
+        let moved = try await store.recurrence(actionID: successor)
+        XCTAssertEqual(moved, .weekly)
+        XCTAssertEqual(try db.query("SELECT count(*) AS n FROM actions").first?["n"], "2")
+        XCTAssertEqual(try db.query("SELECT count(*) AS n FROM action_recurrence").first?["n"], "1")
+        try await store.readReminder(linkID: linkID, calendarID: "recurrence-calendar", using: reminders)
+        XCTAssertEqual(try db.query("SELECT count(*) AS n FROM actions").first?["n"], "2")
     }
 
     func testRecurrenceSuccessorsBypassLinkedTitleBarrier() {

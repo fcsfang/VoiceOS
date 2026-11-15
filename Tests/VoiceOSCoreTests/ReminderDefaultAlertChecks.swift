@@ -67,4 +67,11 @@ final class ReminderDefaultAlertChecks: XCTestCase {
         XCTAssertNil(ReminderFields.nextDefaultAlert(due: .instant(utc: ReminderFields.timestamp(date(zone, 2026, 11, 15, 14, 0)), timeZone: "Asia/Shanghai"), now: now, calendar: zone))
         XCTAssertNil(ReminderFields.nextDefaultAlert(due: .none, now: now, calendar: zone))
     }
+
+    func testAlertsWithoutDueAreRejected() {
+        let fields = ReminderFields(alerts: ["2026-11-15T01:00:00.000Z"])
+        XCTAssertThrowsError(try fields.validate()) { error in
+            XCTAssertEqual(error.localizedDescription, "通知需要安排日期")
+        }
+    }
 }

@@ -11,6 +11,7 @@ struct ReminderSettingsView: View {
     @State private var due = Date()
     @State private var hasAlert = false
     @State private var alert = Date()
+    @State private var confirmingAlertRemoval = false
     @State private var priority = 0
     @State private var hasLocation = false
     @State private var locationName = ""
@@ -30,6 +31,19 @@ struct ReminderSettingsView: View {
         formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "MM-dd HH:mm"
         return formatter.string(from: defaultAlert)
     }
+    private var hasNonDefaultAlert: Bool {
+        guard let fields = snapshot.fields, !fields.alerts.isEmpty else { return false }
+        guard case let .dateOnly(localDate, _) = fields.due,
+              let defaultAlert = ReminderFields.nextDefaultAlert(due: .dateOnly(localDate: localDate, timeZone: nil), now: Date(), calendar: alertCalendar) else { return true }
+        return fields.alerts != [ReminderFields.timestamp(defaultAlert)]
+    }
+    private var alertToggle: Binding<Bool> {
+        Binding(get: { hasAlert }, set: { on in
+            if on { hasAlert = true }
+            else if hasNonDefaultAlert { confirmingAlertRemoval = true }
+            else { hasAlert = false; alert = Date().addingTimeInterval(3600) }
+        })
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("日期、提醒与优先级").font(.title2)
@@ -43,7 +57,9 @@ struct ReminderSettingsView: View {
             Toggle("安排日期", isOn: $hasDate)
             if hasDate {
                 DatePicker("日期", selection: $due, displayedComponents: [.date])
-                Toggle("具体时刻", isOn: $hasTime)
+            }
+            Toggle("具体时刻", isOn: $hasTime).disabled(!hasDate)
+            if hasDate {
                 if hasTime { DatePicker("时刻", selection: $due, displayedComponents: [.hourAndMinute]) }
                 if !hasTime {
                     Text("仅日期任务固定 09:00 提醒（当前不可关闭）").font(.caption).foregroundStyle(.secondary)
@@ -51,8 +67,8 @@ struct ReminderSettingsView: View {
                 }
             }
             if hasTime {
-                Toggle("发送通知", isOn: $hasAlert)
-                if hasAlert {
+                Toggle("发送通知", isOn: alertToggle).disabled(!hasDate)
+                if hasDate, hasAlert {
                     DatePicker("提醒我", selection: $alert, displayedComponents: [.date, .hourAndMinute])
                     Text("通知时间独立于安排日期。其他已有通知会保留。").font(.caption).foregroundStyle(.secondary)
                 }
@@ -72,16 +88,24 @@ struct ReminderSettingsView: View {
                 Spacer()
                 Button("保存到提醒事项") {
                     Task {
+                        error = ""
                         do {
                             let fields = try chosenFields()
                             if await model.saveReminderSettings(action, expected: snapshot, fields: fields) { dismiss() }
-                            else { error = model.status }
+                            else { error = model.status.isEmpty ? "提醒设置未保存" : model.status }
                         } catch { self.error = error.localizedDescription }
                     }
                 }.buttonStyle(.borderedProminent).disabled(model.remindersBusy || model.reminderFieldEditing)
             }
         }.padding(24).frame(width: 590).environment(\.timeZone, zone)
         .onAppear { load() }.interactiveDismissDisabled(model.reminderFieldEditing)
+        .onChange(of: hasTime) { _, on in
+            if !on { hasAlert = false; alert = Date().addingTimeInterval(3600) }
+        }
+        .alert("关闭发送通知？", isPresented: $confirmingAlertRemoval) {
+            Button("关闭并清空通知", role: .destructive) { hasAlert = false; alert = Date().addingTimeInterval(3600) }
+            Button("保留通知", role: .cancel) {}
+        } message: { Text("这会移除这条任务现有的非默认通知。") }
     }
     private func load() {
         guard let fields = snapshot.fields else { return }
@@ -96,7 +120,7 @@ struct ReminderSettingsView: View {
         case let .instant(utc, _):
             if let date = ReminderFields.date(utc) { due = date; hasDate = true; hasTime = true }
         }
-        if let first = fields.alerts.first.flatMap(ReminderFields.date) { alert = first; hasAlert = true }
+        if hasTime, let first = fields.alerts.first.flatMap(ReminderFields.date) { alert = first; hasAlert = true }
         if let location = fields.location { hasLocation = true; locationName = location.title }
     }
     private func chosenFields() throws -> ReminderFields {

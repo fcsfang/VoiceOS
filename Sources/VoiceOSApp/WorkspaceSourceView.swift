@@ -65,6 +65,7 @@ struct WorkspaceSourceView: View {
     @State private var bilingualTranslations:[String?]=[]
     @State private var bilingualPhase=BilingualPhase.idle
     @State private var bilingualTask: Task<Void, Never>?
+    @State private var bilingualConsumed=0
     @State private var showAllThoughts=false
     @State private var historyState = SourceHistoryState.idle
     @State private var historyTask: Task<Void, Never>?
@@ -559,7 +560,7 @@ struct WorkspaceSourceView: View {
         .sheet(item:$actionClaim) { claim in ActionCreationView(claim:claim,model:model) { actionClaim=nil } }
         .sheet(isPresented:$showingSegmentation) { TranscriptSegmentationView(model:model) { showingSegmentation=false } }
         .sheet(isPresented:$showingBilingual) {
-            BilingualView(model:model,source:source,excerpt:bilingualExcerpt,translations:bilingualTranslations,phase:bilingualPhase,generate:generateBilingual,dismiss:{ showingBilingual=false })
+            BilingualView(model:model,source:source,excerpt:bilingualExcerpt,translations:bilingualTranslations,phase:bilingualPhase,generate:generateBilingual,continueBatch:continueBilingual,retryParagraph:retryBilingualParagraph,allowCloud:allowBilingualCloud,correctTranscript:correctBilingualTranscript,dismiss:{ showingBilingual=false })
         }
         .sheet(isPresented:$showingOriginal) {
             VStack(alignment:.leading,spacing:16) {
@@ -684,7 +685,18 @@ struct WorkspaceSourceView: View {
         guard !source.localOnly,!source.needsTranscriptionReview else { return }
         let excerpt=Bilingual.paragraphs(from:transcript,spans:source.spans)
         guard !excerpt.isEmpty else { bilingualPhase = .failed("这份材料没有可对照的文字。");return }
+        bilingualConsumed=0
+        translateBilingual(excerpt)
+    }
+    private func continueBilingual() {
+        guard bilingualPhase == .ready,let transcript=source.transcript else { return }
+        let next=Bilingual.nextBatch(from:transcript,spans:source.spans,consumed:bilingualConsumed)
+        guard !next.isEmpty else { return }
+        translateBilingual(next)
+    }
+    private func translateBilingual(_ excerpt:BilingualExcerpt) {
         bilingualExcerpt=excerpt
+        bilingualConsumed+=excerpt.paragraphs.reduce(0) { $0+$1.text.unicodeScalars.count }
         bilingualTranslations=Array(repeating:nil,count:excerpt.paragraphs.count)
         bilingualPhase = .loading
         let paragraphs=excerpt.paragraphs
@@ -702,8 +714,29 @@ struct WorkspaceSourceView: View {
             }
         }
     }
+    private func retryBilingualParagraph(_ paragraph:BilingualParagraph) async -> Bool {
+        guard bilingualTranslations.indices.contains(paragraph.id) else { return false }
+        do {
+            let lines=try await BilingualClient().translate([paragraph])
+            guard let text=lines.first ?? nil else { return false }
+            bilingualTranslations[paragraph.id]=text
+            return true
+        } catch { return false }
+    }
+    private func allowBilingualCloud() {
+        guard let current=model.records.first(where: { $0.id == source.id }) else { return }
+        Task { await model.changeTextPolicy(current) }
+    }
+    private func correctBilingualTranscript() {
+        showingBilingual=false
+        Task {
+            try? await Task.sleep(for:.milliseconds(250))
+            editing=source
+        }
+    }
     private func resetBilingual() {
         bilingualTask?.cancel()
+        bilingualConsumed=0
         bilingualExcerpt=BilingualExcerpt(paragraphs:[],truncated:false)
         bilingualTranslations=[]
         bilingualPhase = .idle

@@ -2577,7 +2577,9 @@ final class ControlCenter: ObservableObject {
         } catch { status = error.localizedDescription; return nil }
     }
     func saveReminderSettings(_ action: ActionRecord, expected: ReminderSnapshot, fields: ReminderFields) async -> Bool {
-        guard let store, let access = reminderAccess, access.enabled, !remindersBusy else { return false }
+        guard let store else { status = "资料库尚未打开，无法保存提醒设置"; return false }
+        guard let access = reminderAccess, access.enabled else { status = "提醒事项连接已暂停，请先恢复连接"; return false }
+        guard !remindersBusy else { status = "正在处理其他提醒事项操作，请稍后再试"; return false }
         remindersBusy = true; reminderFieldEditing = true
         defer { remindersBusy = false; reminderFieldEditing = false; requestReminderRefresh() }
         do {

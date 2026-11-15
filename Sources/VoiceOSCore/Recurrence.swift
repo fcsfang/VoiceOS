@@ -60,7 +60,7 @@ extension VoiceOSStore {
     public func completeActionWithRecurrence(id: String, now: Date = Date()) throws -> String? {
         guard let row = try db.query("SELECT * FROM actions WHERE id=?", [id]).first else { throw VoiceOSError("行动不存在") }
         let version = Int(row["version"]!)!
-        let commandID = "recurrence-complete:" + id
+        let commandID = "recurrence-complete:" + id + ":" + String(version)
         guard let series = try db.query("SELECT * FROM action_recurrence WHERE action_id=?", [id]).first else {
             if row["state"] == "completed" { return nil }
             try setActionState(actionID: id, expectedVersion: version, state: .completed, commandID: commandID)
@@ -102,7 +102,7 @@ extension VoiceOSStore {
                 let claimID = row["claim_id"]!, reviewVersion = row["claim_review_version"]!, title = row["title"]!, kind = row["kind"]!, actor = row["intent_actor"]!, note = row["note"]!
                 let fingerprint = try Self.actionHash([claimID, reviewVersion, title, kind, actor, note])
                 let nextCommand = "recurrence:" + id + ":" + Self.recurrenceToken(newDue)
-                try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,intent_json,auto_send) VALUES(?,?,?,?,?,?,?,'open','current',?,?,?,?,?)", [newID, claimID, reviewVersion, title, kind, actor, note, nextCommand, fingerprint, stamp, String(decoding: try JSONEncoder().encode(intent), as: UTF8.self), row["auto_send"]!])
+                try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,intent_json,auto_send) VALUES(?,?,?,?,?,?,?,'open',?,?,?,?,?,0)", [newID, claimID, reviewVersion, title, kind, actor, note, row["validity"]!, nextCommand, fingerprint, stamp, String(decoding: try JSONEncoder().encode(intent), as: UTF8.self)])
                 try db.execute("INSERT INTO action_recurrence(action_id,series_id,period,created_at) VALUES(?,?,?,?)", [newID, seriesID, period.rawValue, stamp])
                 successorID = newID
             }
@@ -124,7 +124,7 @@ extension VoiceOSStore {
             if let resolved {
                 let command = try db.query("SELECT command_id FROM actions WHERE id=?", [resolved]).first?["command_id"]
                 if command?.hasPrefix("recurrence:" + id + ":") == true {
-                    if try successorIsUntouched(resolved), let recurrence = try db.query("SELECT * FROM action_recurrence WHERE action_id=?", [resolved]).first {
+                    if try successorIsUntouched(resolved, note: row["note"]!), let recurrence = try db.query("SELECT * FROM action_recurrence WHERE action_id=?", [resolved]).first {
                         try db.execute("DELETE FROM action_recurrence WHERE action_id=?", [resolved])
                         try db.execute("DELETE FROM actions WHERE id=?", [resolved])
                         try db.execute("INSERT OR REPLACE INTO action_recurrence(action_id,series_id,period,created_at) VALUES(?,?,?,?)", [id, recurrence["series_id"]!, recurrence["period"]!, recurrence["created_at"]!])
@@ -142,8 +142,8 @@ extension VoiceOSStore {
         try checkpoint(.actionStateCommitted)
         return keptSuccessorID
     }
-    private func successorIsUntouched(_ id: String) throws -> Bool {
-        guard let row = try db.query("SELECT * FROM actions WHERE id=?", [id]).first, row["state"] == "open", row["version"] == "1", row["note"] == "" else { return false }
+    private func successorIsUntouched(_ id: String, note: String) throws -> Bool {
+        guard let row = try db.query("SELECT * FROM actions WHERE id=?", [id]).first, row["state"] == "open", row["version"] == "1", row["note"] == note else { return false }
         for table in ["action_revisions","action_feedback","reminder_links","action_schedule_intents","reminder_compensation_plans","assistant_executions","assistant_assessments","action_clarifications","action_focus","action_subtasks","action_estimates"] {
             if !(try db.query("SELECT 1 AS present FROM \(table) WHERE action_id=? LIMIT 1", [id])).isEmpty { return false }
         }
