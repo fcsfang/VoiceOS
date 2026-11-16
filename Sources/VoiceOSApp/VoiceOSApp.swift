@@ -2962,43 +2962,6 @@ final class ControlCenter: ObservableObject {
     func openNextActions(of outcomeID: String) -> [ActionRecord] {
         actionRecords.filter { $0.parentID == outcomeID && $0.state == "open" }
     }
-    private struct NextActionAttempt {
-        let commandID: String
-        var createdActionID: String?
-    }
-    private var nextActionAttempts: [String: NextActionAttempt] = [:]
-    func addNextAction(outcome: ActionRecord, title: String) async -> String? {
-        guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return nil }
-        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { status = "下一步不能为空"; return nil }
-        savingAction = true; defer { savingAction = false }
-        let key = outcome.id + "\u{1}" + clean
-        var attempt = nextActionAttempts[key] ?? NextActionAttempt(commandID: "workspace-next-action:" + outcome.id + ":" + UUID().uuidString, createdActionID: nil)
-        nextActionAttempts[key] = attempt
-        do {
-            let id: String
-            if let created = attempt.createdActionID {
-                id = created
-            } else {
-                id = try await store.createAction(claimID: outcome.claimID, expectedClaimReviewVersion: outcome.claimReviewVersion,
-                                                  title: clean, kind: .task, commandID: attempt.commandID)
-                attempt.createdActionID = id
-                nextActionAttempts[key] = attempt
-            }
-            do {
-                _ = try await store.attachNextAction(outcomeID: outcome.id, actionID: id, commandID: attempt.commandID + ":attach")
-            } catch {
-                await refresh()
-                status = "下一步已创建，但未能挂到目标：" + error.localizedDescription + "。再次添加会重试挂接，不会重复创建。"
-                return nil
-            }
-            nextActionAttempts[key] = nil
-            await refresh()
-            guard actionRecords.first(where: { $0.id == id })?.parentID == outcome.id else { throw VoiceOSError("添加下一步未能保存，请重试") }
-            status = "已添加下一步"
-            return id
-        } catch { status = error.localizedDescription; await refresh(); return nil }
-    }
     func completeOutcome(_ action: ActionRecord) async -> Bool {
         guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
         savingAction = true; defer { savingAction = false }

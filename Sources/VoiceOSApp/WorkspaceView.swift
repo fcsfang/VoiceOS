@@ -605,7 +605,8 @@ struct WorkspaceView: View {
             }.buttonStyle(.plain).onHover { searchHovered=$0 }
                 .accessibilityLabel("搜索").help("搜索全部内容（⌘F）").keyboardShortcut("f",modifiers:.command)
             WorkspaceIconButton(systemImage:"sidebar.right",label:"讨论") { Task { await toggleDiscussion() } }
-                .disabled(model.discussionSaving || model.discussionSending)
+                .disabled(model.discussionSaving || model.discussionSending || !homeCanDiscuss)
+                .help(homeCanDiscuss ? "讨论" : "先选择一条材料或全景中的问题")
                 .accessibilityIdentifier("workspace.discussion")
             Button { go(.capture) } label: {
                 HStack(spacing:6) {
@@ -657,7 +658,10 @@ struct WorkspaceView: View {
                             try await model.themeReply(briefing)
                         })
                 } else {
-                    RecentContentHome(model: model, openSource: { go(.source($0)) }, openTask: { go(.task($0)) }, capture: { go(.capture) })
+                    RecentContentHome(model: model, openSource: { go(.source($0)) }, openSpan: { sourceID, spanID in
+                        sourceScrollPositions[sourceID] = ScrollPosition(id: "source-span-" + spanID)
+                        go(.source(sourceID))
+                    }, openTask: { go(.task($0)) }, capture: { go(.capture) })
                 }
             }
         case .themes: scrolled { themes }.id(navigationEntry)
@@ -1489,7 +1493,7 @@ struct WorkspaceView: View {
         let marksSelected=selectingActions && selected
         let trailingStyle:WorkspaceRow.TrailingStyle=marksSelected ? .status(palette.accent) : (layout.status.isEmpty ? .secondary : .status(actionRowToneColor(layout.tone)))
         let icon:String=selectingActions ? (selectable ? (selected ? "checkmark.circle.fill" : "circle") : "circle") : action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : typeIcon(tagged.tag)
-        let showsCompletion=!selectingActions && action.kind == "task" && action.state == "open" && action.validity == "current"
+        let showsCompletion = !selectingActions && action.kind == "task" && action.state == "open" && action.validity == "current"
         return WorkspaceActionRowChrome(action:action,
             canTransition:actionable,
             menuItems:{ actionMenuItems(action,focused:focused,canChangeDay:canChangeDay,canTransition:actionable) },
@@ -1933,6 +1937,13 @@ struct WorkspaceView: View {
         guard await model.beginReflectionDiscussion(focus) else { if key == discussionKey { error=model.status };return false }
         guard key == discussionKey else { return false }
         presentDiscussion(for:key,prompt:prompt);return true
+    }
+    private var homeCanDiscuss: Bool {
+        guard page == .home else { return true }
+        if homeShowsPanorama { return model.panorama.state?.snapshot != nil && model.panorama.selection != nil }
+        return model.homeSnapshot.days.contains { day in
+            day.items.contains { $0.kind == .material && !$0.sourceIDs.isEmpty }
+        }
     }
     private func toggleDiscussion(force:Bool=false,prompt:String="") async {
         let key = discussionKey

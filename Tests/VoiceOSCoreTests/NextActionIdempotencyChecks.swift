@@ -58,8 +58,8 @@ final class NextActionIdempotencyChecks: XCTestCase {
         let retry = try await store.attachNextAction(outcomeID: outcome.id, actionID: taskID, commandID: commandID + ":attach")
         XCTAssertEqual(retry, first)
         let database = await store.db
-        let revisions = try database.query("SELECT count(*) AS n FROM action_revisions WHERE command_id=?",
-                                           [commandID + ":attach"])
+        let revisions = try database.query("SELECT count(*) AS n FROM action_revisions WHERE action_id=? AND command_id LIKE 'attach:%'",
+                                           [taskID])
         XCTAssertEqual(revisions.first?["n"], "1")
         let attached = try await store.actions(includeHistory: true).first { $0.id == taskID }
         XCTAssertEqual(attached?.parentID, outcome.id)

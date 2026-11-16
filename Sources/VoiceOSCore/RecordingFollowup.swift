@@ -417,7 +417,7 @@ extension VoiceOSStore {
         else { claimRows = try StartupTrace.measure("validity.claims") { try candidateClaims() } }
         let actionRows: [ActionRecord]
         if let preloadedActions { actionRows = preloadedActions }
-        else { actionRows = try StartupTrace.measure("validity.actions") { try actions(includeHistory: true) } }
+        else { actionRows = try StartupTrace.measure("validity.actions") { try self.actions(includeHistory: true) } }
         let catalog: [String: SourceRecord] = Dictionary(uniqueKeysWithValues: catalogRows.map { ($0.id, $0) })
         let claims: [String: CandidateClaim] = Dictionary(uniqueKeysWithValues: claimRows.map { ($0.id, $0) })
         let latest: [String: Set<String>] = try StartupTrace.measure("validity.latest") { try latestCandidateClaimsBySource() }.mapValues { Set($0.map(\.id)) }
@@ -458,7 +458,7 @@ extension VoiceOSStore {
         }
         return result
     }
-    private func recordingFollowupValidity(_ receipt: RecordingFollowupReceipt, catalog: [String: SourceRecord], claims: [String: CandidateClaim], latest: [String: Set<String>], actions: [String: ActionRecord], policies: [String: Int], feedback: [String: [String]]?, remembered: (CandidateClaim) throws -> RememberedThought?, contextIsCurrent: (LocalTranscriptContext) -> Bool, continuousIsCurrent: (ContinuousRecordingContext?, String) -> Bool) throws -> RecordingFollowupValidity {
+    private func recordingFollowupValidity(_ receipt: RecordingFollowupReceipt, catalog: [String: SourceRecord], claims: [String: CandidateClaim], latest: [String: Set<String>], actions: [String: ActionRecord], policies: [String: Int], feedback: [String: [String]]?, remembered: @escaping (CandidateClaim) throws -> RememberedThought?, contextIsCurrent: (LocalTranscriptContext) -> Bool, continuousIsCurrent: (ContinuousRecordingContext?, String) -> Bool) throws -> RecordingFollowupValidity {
         guard receipt.state == "completed", receipt.result != nil,catalog[receipt.sourceID]?.needsTranscriptionReview != true,
               contextIsCurrent(receipt.input.current),
               continuousIsCurrent(receipt.input.continuousExpression, receipt.sourceID),
@@ -468,7 +468,7 @@ extension VoiceOSStore {
         // Rebuild the plan-derived links from the stored input so this comparison
         // uses the same convention that produced input.tasks.
         let tasks = try followupTasks(actions: Array(actions.values), claims: claims, catalog: catalog,
-                                      goalIDByTaskID: Self.goalIDByTaskID(receipt.input.goals), feedback: feedback, remembered: remembered)
+                                      goalIDByTaskID: Self.goalIDByTaskID(receipt.input.goals), feedback: feedback, remembered: { try remembered($0) })
         func thought(_ item: RememberedThought) throws {
             guard let claim = claims[item.id] else { throw VoiceOSError("历史观点或原话已变化") }
             let actual = try remembered(claim)

@@ -16,6 +16,7 @@ struct RecentContentHome: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let openSource: (String) -> Void
+    let openSpan: (String, String) -> Void
     let openTask: (String) -> Void
     let capture: () -> Void
     @State private var selectedID: String?
@@ -276,7 +277,7 @@ struct RecentContentHome: View {
     private func openOriginal(_ thought: RecentContentThought) {
         guard let claim = model.claims.first(where: { $0.id == thought.claimID }),
               let reference = claim.references.first else { return }
-        openSource(reference.sourceID)
+        openSpan(reference.sourceID, reference.spanID)
     }
 
     @ViewBuilder private func tasksSummary(_ tasks: [RecentContentTask]) -> some View {
