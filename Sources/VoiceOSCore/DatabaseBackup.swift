@@ -103,6 +103,140 @@ public enum DatabaseBackup {
         return integrityOK(handle)
     }
 
+    public struct SourceAssetScan: Sendable {
+        public let sourceCount: Int
+        public let missing: [String]
+        public init(sourceCount: Int, missing: [String]) {
+            self.sourceCount = sourceCount
+            self.missing = missing
+        }
+    }
+
+    public struct BackupVerification: Sendable {
+        public let file: URL?
+        public let date: Date?
+        public let count: Int
+        public let ok: Bool
+        public init(file: URL?, date: Date?, count: Int, ok: Bool) {
+            self.file = file
+            self.date = date
+            self.count = count
+            self.ok = ok
+        }
+    }
+
+    /// Walks the backup's b-tree pages without a full integrity pass. Used by
+    /// the library check so a 270 MB backup stays cheap to verify repeatedly.
+    public static func quickCheck(at url: URL) -> Bool {
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            sqlite3_close(handle)
+            return false
+        }
+        defer { sqlite3_close(handle) }
+        sqlite3_busy_timeout(handle, 5000)
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, "PRAGMA quick_check", -1, &statement, nil) == SQLITE_OK else { return false }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW, let value = sqlite3_column_text(statement, 0) else { return false }
+        return String(cString: value) == "ok"
+    }
+
+    public static func latestBackupFile(directory: URL) -> URL? {
+        backupFiles(directory: directory).max { lhs, rhs in
+            let left = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let right = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return left < right
+        }
+    }
+
+    public static func verifyLatestBackup(directory: URL) -> BackupVerification {
+        let count = backupCount(directory: directory)
+        guard let latest = latestBackupFile(directory: directory) else {
+            return BackupVerification(file: nil, date: nil, count: count, ok: false)
+        }
+        let date = try? latest.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        return BackupVerification(file: latest, date: date, count: count, ok: quickCheck(at: latest))
+    }
+
+    /// Read-only enumeration of the originals recorded in `assets`. Missing
+    /// files are returned as relative paths so the caller can name key items.
+    public static func scanSourceAssets(database: URL, root: URL) throws -> SourceAssetScan {
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(database.path, &handle, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
+            sqlite3_close(handle)
+            throw VoiceOSError("无法只读打开资料库：" + database.path)
+        }
+        defer { sqlite3_close(handle) }
+        sqlite3_busy_timeout(handle, 5000)
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, "SELECT relative_path FROM assets", -1, &statement, nil) == SQLITE_OK else {
+            throw VoiceOSError("无法读取原件清单：" + database.path)
+        }
+        defer { sqlite3_finalize(statement) }
+        var count = 0
+        var missing: [String] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            guard let raw = sqlite3_column_text(statement, 0) else { continue }
+            count += 1
+            let relative = String(cString: raw)
+            if !FileManager.default.fileExists(atPath: root.appendingPathComponent(relative).path) {
+                missing.append(relative)
+            }
+        }
+        return SourceAssetScan(sourceCount: count, missing: missing)
+    }
+
+    /// Builds a new library root from the newest backup database plus clones of
+    /// the current library's originals. The current library is only read.
+    public static func createLibraryFromLatestBackup(currentRoot: URL, destination: URL) throws -> URL {
+        let backupDirectory = currentRoot.appendingPathComponent("Backups", isDirectory: true)
+        guard let backup = latestBackupFile(directory: backupDirectory) else {
+            throw VoiceOSError("还没有可用于恢复的备份（\(backupDirectory.path)）")
+        }
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw VoiceOSError("新资料库位置已存在，请换一个名称（\(destination.path)）")
+        }
+        let currentPath = currentRoot.standardizedFileURL.path
+        let targetPath = destination.standardizedFileURL.path
+        guard targetPath != currentPath, !targetPath.hasPrefix(currentPath + "/") else {
+            throw VoiceOSError("新资料库不能放在当前资料库目录内（\(destination.path)）")
+        }
+        guard quickCheck(at: backup) else {
+            throw VoiceOSError("最近备份未通过完整性抽查，不能用来新建资料库（\(backup.path)）")
+        }
+        do {
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            let database = destination.appendingPathComponent("voiceos.sqlite")
+            guard cloneOrCopy(backup, to: database), quickCheck(at: database) else {
+                throw VoiceOSError("无法复制备份数据库")
+            }
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: database.path)
+            let assets = destination.appendingPathComponent("assets", isDirectory: true)
+            try FileManager.default.createDirectory(at: assets, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            let sourceAssets = currentRoot.appendingPathComponent("assets", isDirectory: true)
+            let files = try FileManager.default.contentsOfDirectory(at: sourceAssets, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
+            for file in files {
+                guard (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+                guard cloneOrCopy(file, to: assets.appendingPathComponent(file.lastPathComponent)) else {
+                    throw VoiceOSError("无法复制原件：" + file.lastPathComponent)
+                }
+            }
+            return destination
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw VoiceOSError("无法从最近备份建立新资料库：\(error.localizedDescription)（位置：\(destination.path)）")
+        }
+    }
+
+    private static func cloneOrCopy(_ source: URL, to destination: URL) -> Bool {
+        if clonefile(source.path, destination.path, 0) == 0 { return true }
+        do {
+            try FileManager.default.copyItem(at: source, to: destination)
+            return true
+        } catch { return false }
+    }
+
     /// APFS clone of the main database file. A WAL-mode database is consistent
     /// at its last checkpoint, so the clone is a point-in-time snapshot. The
     /// integrity check rejects a copy taken during a checkpoint; the caller
