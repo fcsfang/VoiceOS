@@ -1454,6 +1454,10 @@ struct WorkspaceView: View {
                 Text("撤销只对当前会话有效")
                 Text("口述、剪贴板、速记、导入与页面切换在菜单栏的「记录」与「显示」菜单。")
             }.vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            if model.dictationHotKeyConflict {
+                Text("快捷键 ⌥⌘D 被其它应用占用；口述仍可从菜单栏开始。请在系统设置 › 键盘 › 键盘快捷键中查看冲突，或退出占用它的应用后重启 VoiceOS。")
+                    .vosFont(WorkspaceText.caption).foregroundStyle(palette.warning)
+            }
             Button("再看一次引导") { model.onboardingRequested = true }
             Divider()
             sectionTitle("模型与服务")
