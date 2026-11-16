@@ -152,6 +152,8 @@ struct RecentContentHome: View {
         if source.localOnly { return ("仅本地", palette.secondaryText) }
         if ["queued", "running", "reserved"].contains(source.jobState ?? "") { return ("整理中", palette.accent) }
         if source.needsTranscriptionReview { return ("待核对", palette.warning) }
+        let issues = source.unresolvedTranscriptionIssueCount
+        if issues > 0 { return ("疑点 \(issues)", palette.warning) }
         if readingStates[source.id] == .reading { return ("在读", palette.accent) }
         return nil
     }
