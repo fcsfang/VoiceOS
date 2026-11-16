@@ -34,6 +34,9 @@ public struct ActionRowStatus: Equatable, Sendable {
 /// instead of a chain of conditionals per view.
 public struct ActionRowFacts: Sendable {
     public var isGoal = false
+    public var isQuestion = false
+    /// Latest analysis execution state for a question; empty when none exists.
+    public var answerState = ""
     public var group: ActionRowGroup = .active
     public var state = "open"
     public var validity = "current"
@@ -80,6 +83,13 @@ public enum ActionRowLayout {
         if facts.state == "dismissed" { return row("已放下", .tertiary) }
         if facts.state == "completed" && facts.group != .completed { return row("已登记完成", .secondary) }
         if facts.validity != "current" && facts.group != .history && facts.group != .needsReview { return row("历史记录", .tertiary) }
+        if facts.isQuestion {
+            switch facts.answerState {
+            case "completed": return row("已回答", .success)
+            case "queued", "running", "reserved", "blocked": return row("回答中", .secondary)
+            default: return row("未回答", .secondary)
+            }
+        }
         if facts.isGoal && facts.group == .active && facts.nextStepCount > 0 {
             return row("\(facts.nextStepCount) 个下一步", .secondary)
         }

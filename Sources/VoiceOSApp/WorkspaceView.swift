@@ -47,6 +47,16 @@ private enum WorkspaceRowChrome {
 extension ActionRecord {
     var canPromoteToTask: Bool { kind == "opportunity" && state == "open" && validity == "current" }
 }
+extension ControlCenter {
+    // Nature-scoped projections behind the 问题 and 目标 entrances. The
+    // coordinator may replace these with published arrays from the store.
+    var openQuestions: [ActionRecord] { openOutcomes(nature: .question) }
+    var openGoals: [ActionRecord] { openOutcomes(nature: .goal) }
+    var untriagedSuggestions: [ActionRecord] { openOutcomes(nature: .unknown) }
+    private func openOutcomes(nature: ActionNature) -> [ActionRecord] {
+        actionRecords.filter { $0.nature == nature.rawValue && $0.kind == "opportunity" && $0.state == "open" && $0.validity == "current" }
+    }
+}
 struct WorkspaceHeading: View {
     let eyebrow: String
     let title: String
@@ -990,6 +1000,7 @@ struct WorkspaceView: View {
         }
     }
     @State private var showingClarifyQueue = false
+    @State private var clarifyScope: ActionClarifyScope = .questions
     private var actions: some View {
         let nextStepCounts=ActionRowLayout.nextStepCounts(model.actionRecords)
         let listGroup:ActionRowGroup=actionFilter == "已完成" ? .completed : actionFilter == "历史记录" ? .history : actionFilter == "待核对" ? .needsReview : .active
@@ -1007,8 +1018,11 @@ struct WorkspaceView: View {
                         .accessibilityLabel("安排今天").help("从即将与随时里挑最多 3 条加入专注")
                 }
                 WorkspaceHeaderMenu {
-                    if actionFilter == "问题与目标" {
-                        Button("逐个澄清", systemImage:"checklist") { showingClarifyQueue=true }
+                    if ["问题","目标"].contains(actionFilter) {
+                        Button("逐个澄清", systemImage:"checklist") {
+                            clarifyScope = actionFilter == "目标" ? .goals : .questions
+                            showingClarifyQueue=true
+                        }
                     }
                     if ["全部","我的待办"].contains(actionFilter) {
                         Button(selectingActions ? "取消选择" : "选择") { if selectingActions { exitActionSelection() } else { selectingActions=true } }.disabled(batchRunning)
@@ -1016,9 +1030,9 @@ struct WorkspaceView: View {
                     Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.actions,filter:actionFilter) }
                     Button("每周回顾",systemImage:"calendar.badge.clock") { showingWeeklyReview=true }
                 }
-            }.sheet(isPresented:$showingClarifyQueue) { ActionClarifyQueueView(model:model) }
+            }.sheet(isPresented:$showingClarifyQueue) { ActionClarifyQueueView(model:model, scope:clarifyScope) }
             WorkspaceTabs(selection:$actionFilter,titles:SavedViewPage.actions.filters,style:.filters)
-            if ["问题与目标","全部"].contains(actionFilter), !model.stalledOutcomes.isEmpty { stalledBanner }
+            if ["目标","全部"].contains(actionFilter), !model.stalledOutcomes.isEmpty { stalledBanner }
             let visible = visibleActions
             let executions = model.assistantExecutions.filter { $0.state != "cancelled" }
             let paused = model.workspacePausedTasks
@@ -1056,8 +1070,8 @@ struct WorkspaceView: View {
                     WorkspaceListSection(title:"AI 助理的工作",count:executions.count) { executionRows(executions) }
                 }
             } else if !visible.isEmpty {
-                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "问题与目标" ? "要达到的结果、要弄清的未知；转成待办后可提醒。" : "",count:visible.count) {
-                    ForEach(visible) { action in actionRow(action,group:listGroup,nextStepCounts:nextStepCounts);if action.id != visible.last?.id { WorkspaceListDivider() } }
+                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "问题" ? "VoiceOS 先回答；想清楚了可以转成下一步。" : actionFilter == "目标" ? "你要长期达到的结果；转成待办后可提醒。" : "",count:visible.count) {
+                    ForEach(visible) { action in actionRow(action,group:listGroup,nature:listNature,nextStepCounts:nextStepCounts);if action.id != visible.last?.id { WorkspaceListDivider() } }
                 }
             }
             if actionFilter == "全部", !paused.isEmpty {
@@ -1066,18 +1080,40 @@ struct WorkspaceView: View {
                     if model.pausedActionBatch == nil { PausedActionBatchControl(model:model) }
                 }
             }
-            let overviewGoals = actionFilter == "全部"
-                ? model.actionRecords.filter { $0.kind != "task" && $0.state != "dismissed" && $0.validity == "current" }
-                : []
+            let overviewQuestions = actionFilter == "全部" ? model.openQuestions : []
+            if !overviewQuestions.isEmpty {
+                WorkspaceListSection(title:"问题",subtitle:"VoiceOS 先回答；想清楚了可以转成下一步。",count:overviewQuestions.count) {
+                    ForEach(overviewQuestions.prefix(3)) { action in
+                        actionRow(action,nature:.question,nextStepCounts:nextStepCounts)
+                        if action.id != overviewQuestions.prefix(3).last?.id { WorkspaceListDivider() }
+                    }
+                    if overviewQuestions.count > 3 {
+                        Button("查看全部 \(overviewQuestions.count)") { actionFilter = "问题" }
+                            .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent).padding(.vertical,10)
+                    }
+                }
+            }
+            let overviewGoals = actionFilter == "全部" ? model.openGoals : []
             if !overviewGoals.isEmpty {
-                WorkspaceListSection(title:"问题与目标",subtitle:"要达到的结果、要弄清的未知；转成待办后可提醒。",count:overviewGoals.count) {
+                WorkspaceListSection(title:"目标",subtitle:"你要长期达到的结果；转成待办后可提醒。",count:overviewGoals.count) {
                     ForEach(overviewGoals.prefix(3)) { action in
-                        actionRow(action,nextStepCounts:nextStepCounts)
+                        actionRow(action,nature:.goal,nextStepCounts:nextStepCounts)
                         if action.id != overviewGoals.prefix(3).last?.id { WorkspaceListDivider() }
                     }
                     if overviewGoals.count > 3 {
-                        Button("查看全部 \(overviewGoals.count)") { actionFilter = "问题与目标" }
+                        Button("查看全部 \(overviewGoals.count)") { actionFilter = "目标" }
                             .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent).padding(.vertical,10)
+                    }
+                }
+            }
+            if actionFilter == "目标" {
+                let suggestions = model.untriagedSuggestions
+                if !suggestions.isEmpty {
+                    WorkspaceListSection(title:"系统整理的建议",subtitle:"VoiceOS 还拿不准类别；可以逐条归类。",count:suggestions.count,collapsible:true) {
+                        ForEach(suggestions) { action in
+                            suggestionRow(action)
+                            if action.id != suggestions.last?.id { WorkspaceListDivider() }
+                        }
                     }
                 }
             }
@@ -1096,13 +1132,15 @@ struct WorkspaceView: View {
             if model.pausedActionBatch != nil {
                 WorkspaceListSection(title:"批量重新识别") { PausedActionBatchControl(model:model) }
             }
-            if visible.isEmpty && (actionFilter == "AI 助理" || actionFilter == "全部" ? executions.isEmpty : true) && !(actionFilter == "全部" && (!paused.isEmpty || !overviewGoals.isEmpty)) {
-                WorkspaceEmptyState(
-                    title: actionFilter == "历史记录" ? "还没有历史任务记录" : actionFilter == "已完成" ? "还没有已完成的事项" : actionFilter == "AI 助理" ? "还没有 AI 代办" : actionFilter == "待核对" ? "没有待核对的行动" : actionFilter == "问题与目标" ? "还没有问题与目标" : "目前没有可执行的待办",
-                    systemImage:"checkmark.circle",
-                    description: actionFilter == "AI 助理" ? "在一项待办中选择“交给 AI”，编辑要求后开始执行。" : actionFilter == "待核对" ? "下方处理问题里的事项仍需要查看。" : actionFilter == "问题与目标" ? "这里是你要达到的结果和要弄清的未知；转成待办后可提醒。" : "已暂停的历史、问题与目标分别保留，可通过上方分类查看。"
-                ) {
-                    HStack { Button("记录想法") { go(.capture) };if actionFilter != "问题与目标" { Button("查看问题与目标") { actionFilter="问题与目标" } } }
+            if visible.isEmpty && (actionFilter == "AI 助理" || actionFilter == "全部" ? executions.isEmpty : true)
+                && !(actionFilter == "全部" && (!paused.isEmpty || !overviewQuestions.isEmpty || !overviewGoals.isEmpty))
+                && !(actionFilter == "目标" && !model.untriagedSuggestions.isEmpty) {
+                WorkspaceEmptyState(title:actionEmptyTitle,systemImage:"checkmark.circle",description:actionEmptyDescription) {
+                    HStack {
+                        Button("记录想法") { go(.capture) }
+                        if actionFilter != "问题" { Button("查看问题") { actionFilter="问题" } }
+                        if actionFilter != "目标" { Button("查看目标") { actionFilter="目标" } }
+                    }
                 }
             }
             if actionFilter == "待核对" { processingIssues }
@@ -1128,6 +1166,70 @@ struct WorkspaceView: View {
                 Text("目标会移到已完成，已经添加的下一步不受影响。")
             }
     }
+    private var actionEmptyTitle: String {
+        switch actionFilter {
+        case "历史记录": "还没有历史任务记录"
+        case "已完成": "还没有已完成的事项"
+        case "AI 助理": "还没有 AI 代办"
+        case "待核对": "没有待核对的行动"
+        case "问题": "还没有问题"
+        case "目标": "还没有目标"
+        default: "目前没有可执行的待办"
+        }
+    }
+    private var actionEmptyDescription: String {
+        switch actionFilter {
+        case "AI 助理": "在一项待办中选择“交给 AI”，编辑要求后开始执行。"
+        case "待核对": "下方处理问题里的事项仍需要查看。"
+        case "问题": "记录一个问题，VoiceOS 会先试着回答；想清楚了可以加下一步。"
+        case "目标": "这里是你长期要达到的结果；转成待办后可提醒。"
+        default: "已暂停的历史、问题与目标分别保留，可通过上方分类查看。"
+        }
+    }
+    private var listNature: ActionNature? {
+        switch actionFilter {
+        case "问题": .question
+        case "目标": .goal
+        default: nil
+        }
+    }
+    private func suggestionRow(_ action:ActionRecord) -> some View {
+        let tagged=StatementTagParser.split(action.title)
+        return HStack(alignment:.center,spacing:8) {
+            WorkspaceRow(title:tagged.text,subtitle:"VoiceOS 还拿不准；可以归为问题、目标，或标记为旁白。",icon:"sparkles") { go(.task(action.id)) }
+            Menu {
+                Button("归为问题") { classifySuggestion(action,.question) }
+                Button("归为目标") { classifySuggestion(action,.goal) }
+                Button("是旁白") { classifySuggestion(action,.narration) }
+            } label: {
+                Image(systemName:"ellipsis.circle").vosFont(WorkspaceText.meta.size,weight:.semibold)
+                    .foregroundStyle(palette.secondaryText).frame(width:30,height:30).contentShape(Rectangle())
+            }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("归类这条建议").accessibilityLabel("归类：" + tagged.text)
+        }
+    }
+    private func classifySuggestion(_ action:ActionRecord,_ nature:ActionNature) {
+        Task {
+            guard let store=model.store, !model.savingAction else { error="正在保存其他更改，请稍后重试"; return }
+            model.savingAction=true
+            defer { model.savingAction=false }
+            do {
+                _ = try await store.setActionNature(id:action.id,expectedVersion:action.version,nature:nature,
+                                                    commandID:"workspace-nature:" + action.id + ":" + nature.rawValue + ":" + String(action.version))
+                await model.refresh()
+                guard model.actionRecords.first(where: { $0.id == action.id })?.nature == nature.rawValue else { throw VoiceOSError("归类未能保存，请重试") }
+                error=""
+                toastMessage=nature == .narration ? "已移出问题与目标" : nature == .question ? "已归为问题" : "已归为目标"
+            } catch {
+                error=error.localizedDescription
+                await model.refresh()
+            }
+        }
+    }
+    private func latestAnalysisState(_ action:ActionRecord) -> String {
+        model.assistantExecutions.filter { $0.actionID == action.id && $0.mode == .analysis && $0.validity == "current" && $0.state != "cancelled" }
+            .max { $0.updatedAt < $1.updatedAt }?.state ?? ""
+    }
     @ViewBuilder private func executionRows(_ executions: [AssistantExecutionRecord]) -> some View {
         ForEach(executions) { execution in
             WorkspaceRow(title:execution.title,subtitle:assistantExecutionLabel(execution),icon:execution.state == "completed" ? "doc.text" : "sparkles",trailing:execution.state == "completed" ? "阅读结果" : "查看进度",trailingStyle:.link) { go(.delivery(execution.id)) }
@@ -1146,7 +1248,8 @@ struct WorkspaceView: View {
             case "已完成": return action.state == "completed"
             case "历史记录": return action.state == "dismissed" || (action.validity != "current" && !model.workspaceTaskRequiresReview(action))
             case "待核对": return model.workspaceTaskRequiresReview(action) || action.validity == "current" && (action.intent?.uncertain == true || action.intent?.followupState == "needs_review")
-            case "问题与目标": return action.kind != "task" && action.state != "dismissed" && action.validity == "current"
+            case "问题": return action.kind == "opportunity" && action.nature == ActionNature.question.rawValue && action.state == "open" && action.validity == "current"
+            case "目标": return action.kind == "opportunity" && action.nature == ActionNature.goal.rawValue && action.state == "open" && action.validity == "current"
             default: return action.kind == "task" && action.state == "open" && action.validity == "current" && !model.workspaceTaskRequiresReview(action)
             }
         }
@@ -1382,7 +1485,7 @@ struct WorkspaceView: View {
             else { error=model.status }
         }
     }
-    private func actionRowStatus(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil,group:ActionRowGroup,nextStepCount:Int) -> ActionRowStatus {
+    private func actionRowStatus(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil,group:ActionRowGroup,nature:ActionNature? = nil,nextStepCount:Int) -> ActionRowStatus {
         var due=""
         var localUnsynced=false
         if let entry=timeEntry,entry.source == .localSchedule {
@@ -1394,7 +1497,9 @@ struct WorkspaceView: View {
             due=(reminderDueIsPast(date) ? "已逾期 " : "到期 ") + date.summary
         }
         var facts=ActionRowFacts()
-        facts.isGoal=action.kind != "task"
+        facts.isGoal=nature.map { $0 == .goal } ?? (action.kind != "task")
+        facts.isQuestion=nature == .question
+        facts.answerState=nature == .question ? latestAnalysisState(action) : ""
         facts.group=group
         facts.state=action.state
         facts.validity=action.validity
@@ -1480,7 +1585,7 @@ struct WorkspaceView: View {
         Button("不再跟进") { dismissAction(action) }.disabled(!canTransition)
         Button(focused ? "移出专注" : "加入专注") { toggleFocus(action.id) }.disabled(!canTransition)
     }
-    private func actionRow(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil,group:ActionRowGroup = .active,nextStepCounts:[String:Int]) -> some View {
+    private func actionRow(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil,group:ActionRowGroup = .active,nature:ActionNature? = nil,nextStepCounts:[String:Int]) -> some View {
         let selectable=action.state == "open" && action.validity == "current"
         let actionable=selectable && !selectingActions
         let selected=selectedActionIDs.contains(action.id)
@@ -1488,11 +1593,11 @@ struct WorkspaceView: View {
         let focused=focusedActionIDs.contains(action.id)
         let canChangeDay=actionable && hasLinkedReminder(action) && !model.savingAction && !model.remindersBusy
         let canComplete=actionable && action.kind == "task"
-        let layout=actionRowStatus(action,timeEntry:timeEntry,group:group,nextStepCount:nextStepCounts[action.id] ?? 0)
+        let layout=actionRowStatus(action,timeEntry:timeEntry,group:group,nature:nature,nextStepCount:nextStepCounts[action.id] ?? 0)
         let tagged=StatementTagParser.split(action.title)
         let marksSelected=selectingActions && selected
         let trailingStyle:WorkspaceRow.TrailingStyle=marksSelected ? .status(palette.accent) : (layout.status.isEmpty ? .secondary : .status(actionRowToneColor(layout.tone)))
-        let icon:String=selectingActions ? (selectable ? (selected ? "checkmark.circle.fill" : "circle") : "circle") : action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : typeIcon(tagged.tag)
+        let icon:String=selectingActions ? (selectable ? (selected ? "checkmark.circle.fill" : "circle") : "circle") : action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : nature == .question ? "questionmark.circle" : nature == .goal ? "target" : typeIcon(tagged.tag)
         let showsCompletion = !selectingActions && action.kind == "task" && action.state == "open" && action.validity == "current"
         return WorkspaceActionRowChrome(action:action,
             canTransition:actionable,
@@ -1673,7 +1778,8 @@ struct WorkspaceView: View {
         }
         if actionFilter == "全部" {
             add(model.workspacePausedTasks)
-            add(model.actionRecords.filter { $0.kind != "task" && $0.state != "dismissed" && $0.validity == "current" }.prefix(3))
+            add(model.openQuestions.prefix(3))
+            add(model.openGoals.prefix(3))
         }
         return rows
     }
