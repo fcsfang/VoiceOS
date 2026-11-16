@@ -24,8 +24,8 @@ struct TaskInitiationView: View {
 
     private var records: [TaskInitiationRecord] { model.taskInitiations }
     private var selected: TaskInitiationRecord? {
-        if let selectedID, let record = records.first(where: { $0.id == selectedID }) { return record }
-        return records.first
+        guard let selectedID else { return nil }
+        return records.first(where: { $0.id == selectedID })
     }
     private var syncKey: String { (selected?.id ?? "") + "/" + (selected?.updatedAt ?? "") }
     private var materialSources: [SourceRecord] {
@@ -39,8 +39,8 @@ struct TaskInitiationView: View {
             VStack(alignment: .leading, spacing: 24) {
                 WorkspaceHeading(eyebrow: "", title: "启动")
                 composer
-                if let record = selected { package(record) }
                 history
+                if let record = selected { package(record) }
             }
             .frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading)
             .padding(WorkspaceMetrics.pagePadding)
@@ -63,7 +63,7 @@ struct TaskInitiationView: View {
     }
 
     private var composer: some View {
-        WorkspaceSection(title: "先说清楚要开始什么", icon: "text.cursor") {
+        WorkspaceSection(title: "先说清楚要开始什么", icon: "square.and.pencil") {
             VStack(alignment: .leading, spacing: 14) {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $model.initiationText).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 120)

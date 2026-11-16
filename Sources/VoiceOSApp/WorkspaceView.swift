@@ -1115,7 +1115,7 @@ struct WorkspaceView: View {
         let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspaceHeading(eyebrow:"",title:"搜索")
-            WorkspaceSearchField(text:$query,placeholder:"搜索标题、原话、理解或行动",focus:$searchFocused,submit:{ if !searchSections.isEmpty { searchListFocused=true } })
+            WorkspaceSearchField(text:$query,placeholder:"搜索标题、原话、理解、主题或行动",focus:$searchFocused,submit:{ if !searchSections.isEmpty { searchListFocused=true } })
                 .task {
                     // Wait until the lazy field is attached to its native window.
                     do { try await Task.sleep(for:.milliseconds(100)); searchFocused = true } catch {}
@@ -1172,11 +1172,17 @@ struct WorkspaceView: View {
                 if let sourceID=model.claims.first(where: { $0.id == hit.refID })?.references.first?.sourceID { go(.source(sourceID)) }
             }
         }
+        let topics = searchHits.filter { hit in
+            hit.kind == .topic && model.workspaceTopics.contains { $0.id == hit.refID }
+        }.map { hit in
+            WorkspaceSearchRow(id:"topic:" + hit.refID,title:hit.title,subtitle:hit.snippet,icon:"circle.hexagongrid") { selectTopic(hit.refID) }
+        }
         let actions = searchHits.filter { $0.kind == .action }.map { hit in
             WorkspaceSearchRow(id:"action:" + hit.refID,title:hit.title,subtitle:hit.snippet,icon:"checkmark.circle") { go(.task(hit.refID)) }
         }
         var sections:[WorkspaceSearchSection]=[]
         if !materials.isEmpty { sections.append(WorkspaceSearchSection(id:"materials",title:"材料",icon:"books.vertical",rows:materials)) }
+        if !topics.isEmpty { sections.append(WorkspaceSearchSection(id:"topics",title:"主题",icon:"circle.hexagongrid",rows:topics)) }
         if !claims.isEmpty { sections.append(WorkspaceSearchSection(id:"claims",title:"观点",icon:"lightbulb",rows:claims)) }
         if !actions.isEmpty { sections.append(WorkspaceSearchSection(id:"actions",title:"行动",icon:"checkmark.circle",rows:actions)) }
         return sections
