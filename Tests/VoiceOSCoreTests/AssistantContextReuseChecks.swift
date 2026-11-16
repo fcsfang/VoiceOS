@@ -49,6 +49,25 @@ final class AssistantContextReuseChecks: XCTestCase {
         return (sourceID, try XCTUnwrap(actions.first { $0.title == title }))
     }
 
+    private func executionInputJSON(action: ActionRecord, references: [ClaimReference], dropReferences: Bool) throws -> String {
+        let input = AssistantTaskInput(actionID: action.id, actionVersion: action.version, claimID: action.claimID,
+                                       claimReviewVersion: action.claimReviewVersion, title: action.title, note: action.note,
+                                       instruction: "", context: LocalTranscriptContext(sources: [], scalarBudget: 4000, contentDigest: "fixture"),
+                                       policyVersions: [:], references: references)
+        let data = try JSONEncoder().encode(input)
+        guard dropReferences else { return String(decoding: data, as: UTF8.self) }
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "references")
+        return String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+    }
+
+    private func insertExecution(_ store: VoiceOSStore, action: ActionRecord, id: String, inputJSON: String) async throws {
+        let db = await store.db
+        let now = "2026-11-17T00:00:00Z"
+        try db.execute("INSERT INTO assistant_executions(id,action_id,action_version,input_json,sequence,state,validity,created_at,updated_at) VALUES(?,?,?,?,?,'completed','current',?,?)",
+                       [id, action.id, String(action.version), inputJSON, "1", now, now])
+    }
+
     func testDiscoverySharedContextQueuesSameAsPerItemEnqueue() async throws {
         let batch = try await openStore(named: "batch")
         let perItem = try await openStore(named: "single")
@@ -150,5 +169,26 @@ final class AssistantContextReuseChecks: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(after[revokedID]).sourceCurrent)
         XCTAssertTrue(try XCTUnwrap(after[currentID]).sourceCurrent)
         try await assertMatchesSingles(after)
+    }
+
+    func testAssistantExecutionRecordReadsLegacyInputWithoutReferences() async throws {
+        let store = try await openStore(named: "legacy-references")
+        let seeded = try await seedTask(store, text: "请帮我核对回答依据。", title: "核对回答依据")
+        let json = try executionInputJSON(action: seeded.action, references: [], dropReferences: true)
+        try await insertExecution(store, action: seeded.action, id: "legacy-execution", inputJSON: json)
+        let records = try await store.assistantExecutions()
+        let record = try XCTUnwrap(records.first { $0.id == "legacy-execution" })
+        XCTAssertTrue(record.inputReferences.isEmpty, "缺少 references 的旧输入应按空数组读取")
+    }
+
+    func testAssistantExecutionRecordKeepsInputReferenceOrder() async throws {
+        let store = try await openStore(named: "ordered-references")
+        let seeded = try await seedTask(store, text: "请帮我核对回答顺序。", title: "核对回答顺序")
+        let references = (1...3).map { ClaimReference(sourceID: "source-\($0)", transcriptVersionID: "version-\($0)", spanID: "span-\($0)") }
+        let json = try executionInputJSON(action: seeded.action, references: references, dropReferences: false)
+        try await insertExecution(store, action: seeded.action, id: "ordered-execution", inputJSON: json)
+        let records = try await store.assistantExecutions()
+        let record = try XCTUnwrap(records.first { $0.id == "ordered-execution" })
+        XCTAssertEqual(record.inputReferences, references, "应按 input_json 的原顺序解码")
     }
 }
