@@ -252,7 +252,7 @@ struct WorkspaceTaskView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
-                WorkspaceHeading(eyebrow: eyebrow, title: action.title)
+                WorkspaceHeading(eyebrow: eyebrow, title: StatementTagParser.split(action.title).text)
                 if let recurrence {
                     HStack(spacing: 12) {
                         Label("重复 · " + recurrence.display, systemImage: "repeat").vosFont(WorkspaceText.meta)

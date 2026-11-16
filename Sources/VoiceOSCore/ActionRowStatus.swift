@@ -79,7 +79,7 @@ public enum ActionRowLayout {
         if facts.requiresReview && facts.group != .needsReview { return row("待核对", .warning) }
         if facts.state == "dismissed" { return row("已放下", .tertiary) }
         if facts.state == "completed" && facts.group != .completed { return row("已登记完成", .secondary) }
-        if facts.validity != "current" && facts.group != .history { return row("历史记录", .tertiary) }
+        if facts.validity != "current" && facts.group != .history && facts.group != .needsReview { return row("历史记录", .tertiary) }
         if facts.isGoal && facts.group == .active && facts.nextStepCount > 0 {
             return row("\(facts.nextStepCount) 个下一步", .secondary)
         }

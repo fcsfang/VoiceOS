@@ -57,6 +57,11 @@ final class ActionRowStatusChecks: XCTestCase {
             facts.requiresReview = true
         }
         XCTAssertEqual(row.status, "")
+        let frozen = facts { facts in
+            facts.group = .needsReview
+            facts.validity = "frozen"
+        }
+        XCTAssertEqual(frozen.status, "")
     }
 
     func testNeedsReviewShowsAsWarningOutsideItsGroup() {

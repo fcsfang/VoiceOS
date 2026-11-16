@@ -31,7 +31,7 @@ struct ActionClarifyQueueView: View {
             }
             if let current {
                 Text("剩余 \(remaining.count) 条").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                Text(current.title).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
+                Text(StatementTagParser.split(current.title).text).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
                 HStack(spacing: 10) {
                     Button("达成") { apply(current, .complete) }.buttonStyle(.borderedProminent)
                     Button("放弃") { apply(current, .abandon) }
@@ -93,28 +93,21 @@ extension ControlCenter {
             switch exit {
             case .complete:
                 _ = try await store.completeOutcome(actionID: action.id, expectedVersion: action.version, commandID: command)
-                await refresh()
-                guard actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.completed.rawValue else { throw VoiceOSError("达成未能保存，请重试") }
                 status = "已标记达成"
             case .abandon:
                 _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: .dismissed, note: "逐个澄清：放弃", commandID: command)
-                await refresh()
-                guard actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.dismissed.rawValue else { throw VoiceOSError("放弃未能保存，请重试") }
                 status = "已放弃这条目标"
             case .someday:
                 _ = try await store.setActionState(actionID: action.id, expectedVersion: action.version, state: .someday, note: "逐个澄清：留到以后", commandID: command)
-                await refresh()
-                guard actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.someday.rawValue else { throw VoiceOSError("留到以后未能保存，请重试") }
                 status = "已留到以后"
             case .next:
                 let title = nextTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                 let id = try await store.createAction(claimID: action.claimID, expectedClaimReviewVersion: action.claimReviewVersion,
                                                       title: title, kind: .task, commandID: command)
                 _ = try await store.attachNextAction(outcomeID: action.id, actionID: id, commandID: command)
-                await refresh()
-                guard actionRecords.first(where: { $0.id == id })?.parentID == action.id else { throw VoiceOSError("添加下一步未能保存，请重试") }
                 status = "已添加下一步"
             }
+            Task { await refresh() }
             return true
         } catch {
             status = error.localizedDescription
