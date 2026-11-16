@@ -102,7 +102,7 @@ extension VoiceOSStore {
                 let claimID = row["claim_id"]!, reviewVersion = row["claim_review_version"]!, title = row["title"]!, kind = row["kind"]!, actor = row["intent_actor"]!, note = row["note"]!
                 let fingerprint = try Self.actionHash([claimID, reviewVersion, title, kind, actor, note])
                 let nextCommand = "recurrence:" + id + ":" + Self.recurrenceToken(newDue)
-                try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,intent_json,auto_send) VALUES(?,?,?,?,?,?,?,'open',?,?,?,?,?,0)", [newID, claimID, reviewVersion, title, kind, actor, note, row["validity"]!, nextCommand, fingerprint, stamp, String(decoding: try JSONEncoder().encode(intent), as: UTF8.self)])
+                try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,nature,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,intent_json,auto_send) VALUES(?,?,?,?,?,?,?,?,'open',?,?,?,?,?,0)", [newID, claimID, reviewVersion, title, kind, row["nature"]!, actor, note, row["validity"]!, nextCommand, fingerprint, stamp, String(decoding: try JSONEncoder().encode(intent), as: UTF8.self)])
                 try db.execute("INSERT INTO action_recurrence(action_id,series_id,period,created_at) VALUES(?,?,?,?)", [newID, seriesID, period.rawValue, stamp])
                 successorID = newID
             }

@@ -34,6 +34,10 @@ public struct ActionRecord: Identifiable, Sendable {
     public let commandID: String
     public let createdAt: String
     public let parentID: String?
+    public let nature: String
+    public init(id: String, claimID: String, claimReviewVersion: Int, title: String, kind: String, intentActor: String, note: String, state: String, validity: String, version: Int, autoSend: Bool, intent: ActionIntentMetadata?, commandID: String, createdAt: String, parentID: String?, nature: String = "unknown") {
+        self.id = id; self.claimID = claimID; self.claimReviewVersion = claimReviewVersion; self.title = title; self.kind = kind; self.intentActor = intentActor; self.note = note; self.state = state; self.validity = validity; self.version = version; self.autoSend = autoSend; self.intent = intent; self.commandID = commandID; self.createdAt = createdAt; self.parentID = parentID; self.nature = nature
+    }
     public var isExtracted: Bool { commandID.hasPrefix("extracted:") }
 }
 public struct ActionRevision: Identifiable, Codable, Sendable {
@@ -70,17 +74,24 @@ extension VoiceOSStore {
         return try db.query("SELECT * FROM actions \(clause) ORDER BY created_at,id").map(Self.actionRecord)
     }
     private static func actionRecord(_ row: [String: String]) throws -> ActionRecord {
-        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1", intent: try row["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self, from: Data($0.utf8)) }, commandID: row["command_id"]!, createdAt: row["created_at"]!, parentID: row["parent_id"])
+        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1", intent: try row["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self, from: Data($0.utf8)) }, commandID: row["command_id"]!, createdAt: row["created_at"]!, parentID: row["parent_id"], nature: row["nature"] ?? "unknown")
     }
     /// Active outcomes with no open next action; a saveable "stalled" view.
     public func stalledOutcomes() throws -> [ActionRecord] {
         _ = try candidateClaims(includeFrozen: true)
         return try db.query("""
             SELECT * FROM actions a
-            WHERE a.kind='opportunity' AND a.state='open' AND a.validity='current'
+            WHERE a.kind='opportunity' AND a.nature='goal' AND a.state='open' AND a.validity='current'
               AND NOT EXISTS (SELECT 1 FROM actions c WHERE c.parent_id=a.id AND c.state='open')
             ORDER BY a.created_at,a.id
             """).map(Self.actionRecord)
+    }
+    public func openQuestions() throws -> [ActionRecord] { try scopedOutcomes(nature: .question) }
+    public func openGoals() throws -> [ActionRecord] { try scopedOutcomes(nature: .goal) }
+    public func untriagedSuggestions() throws -> [ActionRecord] { try scopedOutcomes(nature: .unknown) }
+    private func scopedOutcomes(nature: ActionNature) throws -> [ActionRecord] {
+        _ = try candidateClaims(includeFrozen: true)
+        return try db.query("SELECT * FROM actions WHERE kind='opportunity' AND nature=? AND state='open' AND validity='current' ORDER BY created_at,id", [nature.rawValue]).map(Self.actionRecord)
     }
     @discardableResult
     public func confirmOpportunityAsTask(actionID: String, expectedVersion: Int, title: String, commandID: String = UUID().uuidString) throws -> String {
@@ -125,6 +136,30 @@ extension VoiceOSStore {
         try db.transaction {
             try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),state.rawValue,note,commandID,hash,ISO8601DateFormatter().string(from: Date())])
             try db.execute("UPDATE actions SET state=?,version=? WHERE id=?", [state.rawValue,String(next),actionID])
+            try checkpoint(.actionStateUncommitted)
+        }
+        try checkpoint(.actionStateCommitted)
+        return next
+    }
+    /// Reclassifies an action's pool membership. The revision ledger records the
+    /// same-state change so a replay stays idempotent.
+    @discardableResult
+    public func setActionNature(id: String, expectedVersion: Int, nature: ActionNature, commandID: String = UUID().uuidString) throws -> Int {
+        let revisionCommand = "nature:" + commandID
+        let note = "归类：" + nature.label
+        let hash = try Self.actionHash([id,String(expectedVersion),nature.rawValue])
+        if let receipt = try db.query("SELECT * FROM action_revisions WHERE command_id=?", [revisionCommand]).first {
+            guard receipt["input_fingerprint"] == hash, receipt["action_id"] == id, receipt["from_version"] == String(expectedVersion) else { throw VoiceOSError("同一次归类不能更换行动或归类") }
+            return Int(receipt["version"]!)!
+        }
+        guard let current = try actions(includeHistory: true).first(where: { $0.id == id }) else { throw VoiceOSError("行动不存在") }
+        guard current.validity == "current" else { throw VoiceOSError("已失效的行动不能归类") }
+        guard current.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
+        guard current.nature != nature.rawValue else { throw VoiceOSError("行动归类没有变化") }
+        let next = expectedVersion + 1
+        try db.transaction {
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,id,String(next),String(expectedVersion),current.state,note,revisionCommand,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("UPDATE actions SET nature=?,version=? WHERE id=?", [nature.rawValue,String(next),id])
             try checkpoint(.actionStateUncommitted)
         }
         try checkpoint(.actionStateCommitted)
@@ -358,6 +393,7 @@ extension VoiceOSStore {
             _ = try validatedExpressionHistory(db,action:action)
             guard let pinned = action["claim_review_version"].flatMap(Int.init), let latest = action["latest_review"].flatMap(Int.init), pinned >= 0, pinned <= latest,
                   let title = action["title"], !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, title.unicodeScalars.count <= 2000,
+                  ActionNature(rawValue: action["nature"] ?? "") != nil,
                   (action["note"]?.unicodeScalars.count ?? 2001) <= 2000 else { throw VoiceOSError("迁移行动内容或认知版本不完整") }
             let review = try db.query("SELECT * FROM claim_reviews WHERE claim_id=? AND version=?", [action["claim_id"],String(pinned)]).first
             guard pinned == 0 || review != nil, review?["decision"] != "rejected",
@@ -375,7 +411,8 @@ extension VoiceOSStore {
                 let detachLink = revision["command_id"]?.hasPrefix("detach:") == true
                 let nextActionLink = revision["state"] == state && (attachLink || detachLink)
                 let revisit = revision["state"] == state && revision["command_id"]?.hasPrefix("revisit:") == true
-                guard revision["version"] == String(index+2), revision["from_version"] == String(index+1), let next = revision["state"], next != state || kindClarification || kindPromotion || nextActionLink || revisit,
+                let natureChange = revision["state"] == state && revision["command_id"]?.hasPrefix("nature:") == true
+                guard revision["version"] == String(index+2), revision["from_version"] == String(index+1), let next = revision["state"], next != state || kindClarification || kindPromotion || nextActionLink || revisit || natureChange,
                       next != "completed" || action["kind"] == "task" || action["kind"] == "opportunity", (revision["note"]?.unicodeScalars.count ?? 2001) <= 2000 else { throw VoiceOSError("迁移行动状态链不一致") }
                 if kindClarification, revision["note"] != "澄清为问题与目标" {
                     throw VoiceOSError("行动版本升级缺少澄清依据")
@@ -391,6 +428,9 @@ extension VoiceOSStore {
                 }
                 if revisit, revision["note"] != "回看" {
                     throw VoiceOSError("行动版本升级缺少回看依据")
+                }
+                if natureChange, !(revision["note"]?.hasPrefix("归类：") == true && ActionNature(label: String((revision["note"] ?? "").dropFirst("归类：".count))) != nil) {
+                    throw VoiceOSError("行动版本升级缺少归类依据")
                 }
                 state = next
             }

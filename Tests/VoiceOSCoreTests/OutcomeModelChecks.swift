@@ -32,7 +32,11 @@ final class OutcomeModelChecks: XCTestCase {
         ], commandID: "outcome-claims-" + UUID().uuidString)
         let claimID = try XCTUnwrap(claimIDs.first)
         let actions = try await store.actions()
-        return try XCTUnwrap(actions.first { $0.claimID == claimID })
+        let record = try XCTUnwrap(actions.first { $0.claimID == claimID })
+        guard kind == .opportunity else { return record }
+        _ = try await store.setActionNature(id: record.id, expectedVersion: record.version, nature: .goal)
+        let refreshed = try await store.actions()
+        return try XCTUnwrap(refreshed.first { $0.id == record.id })
     }
 
     private func action(_ store: VoiceOSStore, _ id: String) async throws -> ActionRecord {
@@ -314,6 +318,7 @@ final class OutcomeModelChecks: XCTestCase {
         let task = try await addAction(store, title: "留在原地的待办", kind: .task)
         _ = try await store.attachNextAction(outcomeID: outcome.id, actionID: task.id)
         let database = await store.db
+        try database.execute("DELETE FROM action_revisions WHERE action_id=?", [outcome.id])
         try database.execute("DELETE FROM actions WHERE id=?", [outcome.id])
         let surviving = try await action(store, task.id)
         XCTAssertEqual(surviving.kind, "task")

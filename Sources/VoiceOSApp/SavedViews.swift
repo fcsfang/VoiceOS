@@ -7,7 +7,7 @@ enum SavedViewPage: String, Codable {
     var filters: [String] {
         switch self {
         case .materials: ["日常材料", "未读", "在读", "已归档", "回收站"]
-        case .actions: ["全部", "我的待办", "AI 助理", "已完成", "问题与目标", "待核对", "历史记录"]
+        case .actions: ["全部", "我的待办", "AI 助理", "已完成", "问题", "目标", "待核对", "历史记录"]
         }
     }
 }
@@ -51,10 +51,19 @@ extension ControlCenter {
         return "voiceos.savedViews.v1:" + (root?.standardizedFileURL.path ?? libraryTitle)
     }
 
+    /// Views saved before the split keep working; new saves only use the
+    /// current filter names.
+    private static let legacyActionFilterNames = ["问题与目标": "问题"]
+
     private func loadSavedViews(key: String) -> [SavedWorkspaceView] {
         guard let data = UserDefaults.standard.data(forKey: key),
               let decoded = try? JSONDecoder().decode([SavedWorkspaceView].self, from: data) else { return [] }
         return Array(decoded
+            .map { view in
+                var view = view
+                if view.page == .actions, let mapped = Self.legacyActionFilterNames[view.filter] { view.filter = mapped }
+                return view
+            }
             .filter { $0.page.filters.contains($0.filter) && (1...ControlCenter.savedViewNameLimit).contains($0.name.count) }
             .prefix(ControlCenter.savedViewsLimit))
     }

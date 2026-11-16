@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...63).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...64).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1243,6 +1243,22 @@ final class Database {
                 }
             } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
             try execute("PRAGMA foreign_keys=ON")
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "63" {
+            try transaction {
+                try execute("ALTER TABLE actions ADD COLUMN nature TEXT NOT NULL DEFAULT 'unknown' CHECK(nature IN ('question','goal','narration','unknown'))")
+                // Backfill follows the extraction precedence: narration first, then
+                // question (tag or question mark), then goal, else unknown.
+                try execute("""
+                UPDATE actions SET nature = CASE
+                  WHEN instr(title,'【录音中活动】')>0 THEN 'narration'
+                  WHEN instr(title,'【问题】')>0 OR instr(title,'?')>0 OR instr(title,'？')>0 THEN 'question'
+                  WHEN instr(title,'【长期目标】')>0 THEN 'goal'
+                  ELSE 'unknown' END
+                """)
+                try execute("PRAGMA user_version=64")
+            }
         }
 
     }
