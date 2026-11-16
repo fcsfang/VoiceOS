@@ -48,7 +48,7 @@ final class ActionRevisionHistoryChecks: XCTestCase {
         XCTAssertEqual(revisions.map(\.state), ["open", "open", "completed"])
         XCTAssertEqual(revisions.map(\.note), ["归类：目标", "重新打开继续推进", "目标达成"])
         XCTAssertEqual(revisions.map(\.actor), ["user", "user", "user"])
-        XCTAssertEqual(revisions.map(\.fromVersion), [reopened - 1, completed - 1, outcome.version])
+        XCTAssertEqual(revisions.map(\.fromVersion), [reopened, completed, outcome.version])
         XCTAssertEqual(revisions.map(\.commandID), ["nature:revision-nature", "revision-reopen", "revision-complete"])
         XCTAssertTrue(revisions.allSatisfy { !$0.id.isEmpty && !$0.createdAt.isEmpty })
 

@@ -86,6 +86,7 @@ actor ProgressivePanoramaFixture: PanoramaModelPort {
         focusCalls.append(focus)
         focusTargets.append(target)
         if let failFocusAt, focusCalls.count == failFocusAt { throw VoiceOSError("模拟聚焦分片暂停") }
+        try await beforeGenerate?(input)
         let regionID="r"
         let claimsByID=Dictionary(uniqueKeysWithValues: input.claims.map { ($0.id,$0) })
         let sourceByID=Dictionary(uniqueKeysWithValues: input.sources.map { ($0.id,$0) })
@@ -1297,14 +1298,12 @@ extension CoreFlowTests {
     private func panoramaFixtureStore(_ root: URL, texts: [String]) async throws -> VoiceOSStore {
         let store=try VoiceOSStore(root: root,inspector: NativeMediaInspector())
         try await store.recover()
-        var ids: [String]=[]
         for text in texts {
             let id=try await store.recordUserExpression(text)
             _ = try await store.setSourceLocalOnly(sourceID: id,expectedVersion: 1,localOnly: false)
-            ids.append(id)
+            let context=try await store.prepareLocalTranscriptContext(sourceIDs:[id],scalarBudget: Int.max)
+            _ = try await store.importOrganizedClaims(context: context,proposals: [],commandID: "slices-fixture-" + id)
         }
-        let context=try await store.prepareLocalTranscriptContext(sourceIDs: ids,scalarBudget: Int.max)
-        _ = try await store.importOrganizedClaims(context: context,proposals: [],commandID: "slices-fixture")
         return store
     }
 }

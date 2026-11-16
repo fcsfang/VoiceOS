@@ -752,7 +752,7 @@ struct WorkspaceTaskView: View {
     private func loadRevisions() async {
         guard let store = model.store else { revisions = []; return }
         do { revisions = try await store.actionRevisions(actionID: action.id) }
-        catch { revisions = []; error = "读取变更历史失败：" + error.localizedDescription }
+        catch { revisions = []; self.error = "读取变更历史失败：" + error.localizedDescription }
     }
     private func loadPlan() async {
         guard let store = model.store else { error = "资料库尚未打开，无法读取子任务"; return }
