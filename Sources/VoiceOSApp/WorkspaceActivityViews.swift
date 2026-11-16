@@ -168,6 +168,7 @@ struct WorkspaceTaskView: View {
     let discuss: () -> Void
     @State private var feedbackHistory: [ActionFeedbackRecord] = []
     @State private var feedbackError: String?
+    @State private var revisions: [ActionRevisionRecord] = []
     @State private var feedbackActionID = ""
     @State private var delegating = false
     @State private var instruction = ""
@@ -539,6 +540,7 @@ struct WorkspaceTaskView: View {
                             VStack(alignment: .leading, spacing: 14) { scheduleSection }.padding(.top, 10)
                         }.padding(.vertical,16)
                     }
+                    ActionRevisionHistoryView(revisions: revisions)
                 }
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
@@ -558,6 +560,7 @@ struct WorkspaceTaskView: View {
             recurrence = await model.actionRecurrence(action.id)
             locationLabel = await model.actionLocationLabel(action.id)
         }
+        .task(id: action.id + String(action.version)) { await loadRevisions() }
         .sheet(isPresented: $confirming) { ConfirmTaskView(action: action, model: model) { confirming = false } }
         .sheet(isPresented: $showingSettings) { if let settings { ReminderSettingsView(action: action, snapshot: settings, model: model) { showingSettings = false } } }
         .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
@@ -746,6 +749,11 @@ struct WorkspaceTaskView: View {
         do { feedbackHistory = try await store.actionFeedback(actionID: action.id); feedbackError = nil }
         catch { feedbackError = "读取反馈历史失败：" + error.localizedDescription }
     }
+    private func loadRevisions() async {
+        guard let store = model.store else { revisions = []; return }
+        do { revisions = try await store.actionRevisions(actionID: action.id) }
+        catch { revisions = []; error = "读取变更历史失败：" + error.localizedDescription }
+    }
     private func loadPlan() async {
         guard let store = model.store else { error = "资料库尚未打开，无法读取子任务"; return }
         do {
@@ -921,6 +929,48 @@ struct WorkspaceTaskView: View {
             formatter.dateFormat = "yyyy-MM-dd"
             return localDate < formatter.string(from: Date())
         }
+    }
+}
+
+struct ActionRevisionHistoryView: View {
+    let revisions: [ActionRevisionRecord]
+    var body: some View {
+        if !revisions.isEmpty {
+            Divider()
+            DisclosureGroup("变更历史（\(revisions.count)）") {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(revisions) { revision in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text(stateLabel(revision.state)).vosFont(WorkspaceText.meta.size, weight: .medium)
+                                .frame(minWidth: 64, alignment: .leading)
+                            VStack(alignment: .leading, spacing: 4) {
+                                if !revision.note.isEmpty {
+                                    Text(revision.note).vosFont(WorkspaceText.body).textSelection(.enabled)
+                                }
+                                Text("v\(revision.version) · " + actorLabel(revision.actor) + " · " + dateLabel(revision.createdAt))
+                                    .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        if revision.id != revisions.last?.id { Divider() }
+                    }
+                }.padding(.top, 10)
+            }.padding(.vertical, 16)
+        }
+    }
+    private func stateLabel(_ state: String) -> String {
+        switch state {
+        case "completed": return "已完成"
+        case "dismissed": return "不再跟进"
+        case "someday": return "留到以后"
+        default: return "待跟进"
+        }
+    }
+    private func actorLabel(_ actor: String) -> String {
+        actor == "user" ? "用户" : "系统"
+    }
+    private func dateLabel(_ value: String) -> String {
+        ConversationReflectionFocus.date(value)?.formatted(date: .abbreviated, time: .shortened) ?? value
     }
 }
 

@@ -50,6 +50,17 @@ public struct ActionRevision: Identifiable, Codable, Sendable {
     public let createdAt: String
     public let actor: String
 }
+/// One user-visible ledger row; the app never edits it, only reads it.
+public struct ActionRevisionRecord: Identifiable, Sendable {
+    public let id: String
+    public let version: Int
+    public let fromVersion: Int
+    public let state: String
+    public let note: String
+    public let actor: String
+    public let commandID: String
+    public let createdAt: String
+}
 extension VoiceOSStore {
     /// Explicit local intent; endorsement alone never creates a task or external reminder.
     @discardableResult
@@ -416,6 +427,13 @@ extension VoiceOSStore {
         guard let initial = try db.query("SELECT * FROM actions WHERE id=?", [actionID]).first else { throw VoiceOSError("行动不存在") }
         return [ActionRevision(id: actionID, version: 1, state: "open", note: initial["note"]!, createdAt: initial["created_at"]!, actor: initial["intent_actor"]!)] + (try db.query("SELECT * FROM action_revisions WHERE action_id=? ORDER BY version", [actionID])).map {
             ActionRevision(id: $0["id"]!, version: Int($0["version"]!)!, state: $0["state"]!, note: $0["note"]!, createdAt: $0["created_at"]!, actor: $0["actor"]!)
+        }
+    }
+    /// Read-only ledger for the detail views. Newest first; writes within the
+    /// same second fall back to version so the order stays stable.
+    public func actionRevisions(actionID: String) throws -> [ActionRevisionRecord] {
+        try db.query("SELECT id,version,from_version,state,note,actor,command_id,created_at FROM action_revisions WHERE action_id=? ORDER BY created_at DESC,version DESC", [actionID]).map {
+            ActionRevisionRecord(id: $0["id"]!, version: Int($0["version"]!)!, fromVersion: Int($0["from_version"]!)!, state: $0["state"]!, note: $0["note"]!, actor: $0["actor"]!, commandID: $0["command_id"]!, createdAt: $0["created_at"]!)
         }
     }
     static func actionHash(_ fields: [String]) throws -> String {
