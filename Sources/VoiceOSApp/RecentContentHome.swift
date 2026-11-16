@@ -19,14 +19,21 @@ struct RecentContentHome: View {
     let openSpan: (String, String) -> Void
     let openTask: (String) -> Void
     let capture: () -> Void
-    @State private var selectedID: String?
+    @State private var selectedID: String? = RecentContentHomeSelection.shared.itemID
+    @SceneStorage("recentHome.selectedItem") private var storedSelection = ""
+    @SceneStorage("recentHome.timelineAnchor") private var storedTimelineAnchor = ""
+    @State private var timelineRestored = false
     @State private var readingStates: [String: SourceReadingState] = [:]
     private let topAnchor = "home.top"
+    private let timelineSpace = "home.timeline"
 
     private var days: [RecentContentDay] { model.homeSnapshot.days }
     private var items: [RecentContentItem] { days.flatMap(\.items) }
     private var selected: RecentContentItem? {
-        items.first { $0.id == selectedID } ?? items.first { !$0.thoughts.isEmpty } ?? items.first
+        items.first { $0.id == selectedID }
+            ?? items.first { !storedSelection.isEmpty && $0.id == storedSelection }
+            ?? items.first { $0.id == RecentContentHomeSelection.shared.itemID }
+            ?? items.first { !$0.thoughts.isEmpty } ?? items.first
     }
 
     var body: some View {
@@ -46,7 +53,10 @@ struct RecentContentHome: View {
         .task(id: model.initialized) { if model.initialized { readingStates = await model.readingStates() } }
     }
 
-    private func syncSelection() { RecentContentHomeSelection.shared.itemID = selected?.id }
+    private func syncSelection() {
+        RecentContentHomeSelection.shared.itemID = selected?.id
+        if let id = selected?.id, id != storedSelection { storedSelection = id }
+    }
 
     private var empty: some View {
         VStack(spacing: 14) {
@@ -57,19 +67,48 @@ struct RecentContentHome: View {
     }
 
     private var timeline: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 18) {
-                ForEach(days) { day in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(dayLabel(day.date)).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.secondaryText).padding(.horizontal, 10)
-                        ForEach(day.items) { item in
-                            Button { selectedID = item.id } label: { row(item) }
-                                .buttonStyle(.plain)
-                                .accessibilityIdentifier("recent.item")
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18) {
+                    ForEach(days) { day in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(dayLabel(day.date)).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.secondaryText).padding(.horizontal, 10)
+                            ForEach(day.items) { item in
+                                Button { selectedID = item.id } label: { row(item) }
+                                    .buttonStyle(.plain)
+                                    .id(item.id)
+                                    .background {
+                                        GeometryReader { geometry in
+                                            Color.clear.preference(key: TimelineAnchorKey.self, value: [item.id: geometry.frame(in: .named(timelineSpace)).minY])
+                                        }
+                                    }
+                                    .accessibilityIdentifier("recent.item")
+                            }
                         }
                     }
-                }
-            }.padding(14)
+                }.padding(14)
+            }
+            .coordinateSpace(name: timelineSpace)
+            .onPreferenceChange(TimelineAnchorKey.self) { updateTimelineAnchor($0) }
+            .onAppear { restoreTimeline(proxy) }
+            .onChange(of: items.count) { _, _ in restoreTimeline(proxy) }
+        }
+    }
+
+    private func updateTimelineAnchor(_ positions: [String: CGFloat]) {
+        // Keep the saved anchor until the restore has run, so first layout cannot overwrite it with the top row.
+        guard timelineRestored || storedTimelineAnchor.isEmpty else { return }
+        guard let anchor = positions.min(by: { abs($0.value) < abs($1.value) })?.key else { return }
+        if anchor != storedTimelineAnchor { storedTimelineAnchor = anchor }
+    }
+
+    private func restoreTimeline(_ proxy: ScrollViewProxy) {
+        guard !timelineRestored else { return }
+        if storedTimelineAnchor.isEmpty || !items.isEmpty { timelineRestored = true }
+        guard !storedTimelineAnchor.isEmpty, items.contains(where: { $0.id == storedTimelineAnchor }) else { return }
+        Task { @MainActor in
+            await Task.yield()
+            proxy.scrollTo(storedTimelineAnchor, anchor: .top)
         }
     }
 
@@ -328,23 +367,32 @@ struct RecentContentHome: View {
     }
 }
 
+private struct TimelineAnchorKey: PreferenceKey {
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
 private struct ThoughtLine: View {
     @Environment(\.workspacePalette) private var palette
     let thought: RecentContentThought
     let openOriginal: () -> Void
-    @State private var hovered = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Text(thought.statement).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if hovered {
-                Button("看原话") { openOriginal() }
-                    .buttonStyle(.plain).vosFont(WorkspaceText.caption).foregroundStyle(palette.accent)
-                    .help("打开这条想法出自的材料")
+            Button { openOriginal() } label: {
+                Image(systemName: "text.quote")
+                    .vosFont(WorkspaceText.caption)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(palette.accent)
+            .help("打开这条想法出自的材料")
+            .accessibilityLabel("看原话")
         }
-        .contentShape(Rectangle())
-        .onHover { hovered = $0 }
     }
 }
