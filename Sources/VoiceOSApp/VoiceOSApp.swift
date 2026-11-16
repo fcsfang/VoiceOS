@@ -907,23 +907,30 @@ final class ControlCenter: ObservableObject {
         guard let root = libraryRoot else { return }
         backupLibrary(at: root)
     }
+    func revealBackups() {
+        guard let root = libraryRoot else { return }
+        let directory = root.appendingPathComponent("Backups", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        NSWorkspace.shared.activateFileViewerSelecting([directory])
+    }
     private func backupLibrary(at root: URL) {
         let database = root.appendingPathComponent("voiceos.sqlite")
         let directory = root.appendingPathComponent("Backups", isDirectory: true)
         Task.detached(priority: .utility) { [weak self] in
             do {
-                _ = try DatabaseBackup.create(database: database, directory: directory)
-                let at = Date()
-                await MainActor.run { self?.recordBackupSuccess(at: at) }
+                _ = try DatabaseBackup.createDailyIfNeeded(database: database, directory: directory)
+                let summary = DatabaseBackup.summary(directory: directory)
+                await MainActor.run { self?.recordBackupSummary(summary) }
             } catch {
                 NSLog("VoiceOS 数据库备份失败：\(error.localizedDescription)")
                 await MainActor.run { self?.backupStatusText = DatabaseBackup.failureText(error) }
             }
         }
     }
-    private func recordBackupSuccess(at date: Date) {
-        lastBackupAt = date
-        backupStatusText = DatabaseBackup.successText(at: date)
+    private func recordBackupSummary(_ summary: DatabaseBackup.Summary?) {
+        guard let summary else { lastBackupAt = nil; backupStatusText = ""; return }
+        lastBackupAt = summary.date
+        backupStatusText = DatabaseBackup.successText(at: summary.date, count: summary.count)
     }
     private func writeMarkdownMirror() {
         guard markdownMirror != nil else { return }
@@ -1017,10 +1024,12 @@ final class ControlCenter: ObservableObject {
         await panoramaChanged()
         StartupTrace.mark("reload.panoramaChecked")
         var contextsFroze = false
+        var coreSnapshotApplied = false
         do {
             let snapshot = try await StartupTrace.measureAsync("reload.workspaceSnapshot") { try await store.workspaceSnapshot(.core) }
             // Publish the core lists together, without awaits between related data sets.
             applyCoreSnapshot(snapshot)
+            coreSnapshotApplied = true
             StartupTrace.mark("reload.published")
             if let plan = segmentationPlan, !records.contains(where: { $0.id == plan.source.sourceID && $0.transcriptVersionID == plan.source.transcriptVersionID && $0.policyVersion == plan.policyVersion && ["saved","reference_only"].contains($0.state) }) {
                 segmentationPlan = nil; segmentationStatus = "原话或授权已变化，请重新查看分段"
@@ -1038,8 +1047,6 @@ final class ControlCenter: ObservableObject {
         catch { status = error.localizedDescription }
         workspaceLoaded = true
         StartupTrace.mark("reload.firstScreen")
-        // Give the first frame room before background reads and model work.
-        try? await Task.sleep(for: .milliseconds(200))
         do {
             let light = try await StartupTrace.measureAsync("reload.secondarySnapshot") { try await store.workspaceSnapshot(.secondary) }
             applySecondarySnapshot(light)
@@ -1051,7 +1058,12 @@ final class ControlCenter: ObservableObject {
             contextsFroze = contextsFroze || assistant.contextValidityChanged
             StartupTrace.mark("reload.assistantPublished")
             try? await Task.yield()
-            followupValidity = try await StartupTrace.measureAsync("reload.followupValidity") { try await store.recordingFollowupValidities(recordingFollowups) }
+            followupValidity = try await StartupTrace.measureAsync("reload.followupValidity") {
+                try await store.recordingFollowupValidities(recordingFollowups,
+                    catalogRows: coreSnapshotApplied ? records : nil,
+                    claimRows: coreSnapshotApplied ? claims : nil,
+                    actionRows: coreSnapshotApplied ? actionRecords : nil)
+            }
             StartupTrace.mark("reload.validityPublished")
             let knowledge = try await StartupTrace.measureAsync("reload.knowledgeSnapshot") { try await store.workspaceSnapshot(.knowledge) }
             knowledgeReviews = knowledge.knowledgeReviews

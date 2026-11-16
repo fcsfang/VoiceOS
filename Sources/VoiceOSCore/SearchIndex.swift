@@ -1,7 +1,7 @@
 import Foundation
 
 public struct SearchHit: Sendable {
-    public enum Kind: String, Sendable, Equatable {
+    public enum Kind: String, Sendable, Hashable, CaseIterable {
         case material
         case claim
         case action
@@ -13,81 +13,255 @@ public struct SearchHit: Sendable {
     public let snippet: String
 }
 
+public struct SearchKindResult: Sendable {
+    public let hits: [SearchHit]
+    public let total: Int
+    public init(hits: [SearchHit] = [], total: Int = 0) {
+        self.hits = hits
+        self.total = total
+    }
+    static let empty = SearchKindResult()
+}
+
+public struct SearchAllResult: Sendable {
+    public let sections: [SearchHit.Kind: SearchKindResult]
+    public init(sections: [SearchHit.Kind: SearchKindResult]) { self.sections = sections }
+    public subscript(kind: SearchHit.Kind) -> SearchKindResult { sections[kind] ?? .empty }
+    public func hits(for kind: SearchHit.Kind) -> [SearchHit] { self[kind].hits }
+    public func total(for kind: SearchHit.Kind) -> Int { self[kind].total }
+    static let empty = SearchAllResult(sections: Dictionary(uniqueKeysWithValues: SearchHit.Kind.allCases.map { ($0, .empty) }))
+}
+
+private struct RankedSearchRow {
+    let kind: SearchHit.Kind
+    let hit: SearchHit
+}
+
+/// A query split into tokens the trigram index can drive and tokens that can
+/// only filter its candidates. CJK text is indexed with a space between every
+/// pair of adjacent characters, so a two-character Chinese token becomes a
+/// three-character phrase and matches the trigram index instead of forcing a
+/// LIKE scan of every transcript.
+private struct SearchTokens {
+    let drivable: [String]
+    let filters: [String]
+    var isEmpty: Bool { drivable.isEmpty && filters.isEmpty }
+    var matchExpression: String {
+        drivable.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: " ")
+    }
+    var filterClause: String { filterClause(qualifyingWith: "") }
+    func filterClause(qualifyingWith qualifier: String) -> String {
+        filters.map { _ in "(instr(\(qualifier)title, ?) > 0 OR instr(\(qualifier)body, ?) > 0)" }.joined(separator: " AND ")
+    }
+    var filterBinds: [String] { filters.flatMap { [$0, $0] } }
+}
+
 extension VoiceOSStore {
     public func search(query: String, limit: Int = 50) throws -> [SearchHit] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, limit > 0 else { return [] }
-        try rebuildSearchIndexIfNeeded()
-        let tokens = trimmed.split(whereSeparator: \.isWhitespace).map(String.init)
+        try scheduleSearchIndexRebuildIfNeeded()
+        let tokens = searchTokens(from: trimmed)
+        return try rankedSearchRows(tokens).prefix(limit).map(\.hit)
+    }
+
+    public func searchAll(query: String, perKindLimit: Int) throws -> SearchAllResult {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, perKindLimit > 0 else { return .empty }
+        try scheduleSearchIndexRebuildIfNeeded()
+        let rows = try rankedSearchRows(searchTokens(from: trimmed))
+        var hits: [SearchHit.Kind: [SearchHit]] = [:]
+        var totals: [SearchHit.Kind: Int] = [:]
+        for row in rows {
+            totals[row.kind, default: 0] += 1
+            if hits[row.kind, default: []].count < perKindLimit { hits[row.kind, default: []].append(row.hit) }
+        }
+        return SearchAllResult(sections: Dictionary(uniqueKeysWithValues: SearchHit.Kind.allCases.map { kind in
+            (kind, SearchKindResult(hits: hits[kind] ?? [], total: totals[kind] ?? 0))
+        }))
+    }
+
+    private func rankedSearchRows(_ tokens: SearchTokens) throws -> [RankedSearchRow] {
         guard !tokens.isEmpty else { return [] }
-        if tokens.contains(where: { $0.count < 3 }) {
-            return try searchBySubstring(tokens: tokens, limit: limit)
-        }
-        let expression = tokens.map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"" }.joined(separator: " ")
+        if tokens.drivable.isEmpty { return try substringSearchRows(tokens) }
+        return try trigramSearchRows(tokens)
+    }
+
+    private func trigramSearchRows(_ tokens: SearchTokens) throws -> [RankedSearchRow] {
+        let filters = tokens.filterClause.isEmpty ? "" : " AND " + tokens.filterClause
+        // bm25 and snippet must stay in the CTE that uses MATCH. A recent edit
+        // takes a 5 percent better score, which is scale-invariant and small
+        // enough that relevance still leads; it only breaks near-ties.
         return try db.query("""
-        SELECT kind, ref_id, title, COALESCE(NULLIF(snippet(search_index, 3, '', '', '…', 24), ''), title) AS snippet
-        FROM search_index WHERE search_index MATCH ? ORDER BY rank LIMIT ?
-        """, [expression, String(limit)]).map(decodeHit)
+        WITH ranked AS (
+          SELECT kind, ref_id, title,
+                 COALESCE(NULLIF(snippet(search_index, 3, '', '', '…', 24), ''), title) AS snippet,
+                 bm25(search_index) AS score
+          FROM search_index
+          WHERE search_index MATCH ?\(filters)
+        )
+        SELECT ranked.kind, ranked.ref_id, ranked.title, ranked.snippet
+        FROM ranked
+        LEFT JOIN sources src ON ranked.kind='material' AND src.id=ranked.ref_id
+        LEFT JOIN claims cl ON ranked.kind='claim' AND cl.id=ranked.ref_id
+        LEFT JOIN actions ac ON ranked.kind='action' AND ac.id=ranked.ref_id
+        LEFT JOIN reflection_questions rq ON ranked.kind='topic' AND rq.id=ranked.ref_id
+        ORDER BY CASE WHEN julianday(COALESCE(src.created_at, cl.created_at, ac.created_at, rq.updated_at)) >= julianday('now', '-30 days') THEN ranked.score * 1.05 ELSE ranked.score END,
+                 ranked.ref_id
+        """, [tokens.matchExpression] + tokens.filterBinds).map(decodeSearchRow)
     }
 
-    private func searchBySubstring(tokens: [String], limit: Int) throws -> [SearchHit] {
-        let conditions = Array(repeating: "(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')", count: tokens.count).joined(separator: " AND ")
-        var binds: [String] = [tokens[0], tokens[0]]
-        for token in tokens {
-            let pattern = substringPattern(token)
-            binds.append(pattern); binds.append(pattern)
-        }
-        binds.append(substringPattern(tokens[0]))
-        binds.append(String(limit))
+    private func substringSearchRows(_ tokens: SearchTokens) throws -> [RankedSearchRow] {
+        guard let first = tokens.filters.first else { return [] }
+        var binds: [String] = [first, first]
+        binds.append(contentsOf: tokens.filterBinds)
+        binds.append(first)
         return try db.query("""
-        SELECT kind, ref_id, title,
-               CASE WHEN instr(body, ?) > 0 THEN substr(body, MAX(1, instr(body, ?) - 20), 60) ELSE title END AS snippet
-        FROM search_index WHERE \(conditions)
-        ORDER BY CASE WHEN title LIKE ? ESCAPE '\\' THEN 0 ELSE 1 END
-        LIMIT ?
-        """, binds).map(decodeHit)
+        SELECT s.kind, s.ref_id, s.title,
+               COALESCE(NULLIF(CASE WHEN instr(s.body, ?) > 0 THEN substr(s.body, MAX(1, instr(s.body, ?) - 20), 60) ELSE '' END, ''), s.title) AS snippet
+        FROM search_index s
+        LEFT JOIN sources src ON s.kind='material' AND src.id=s.ref_id
+        LEFT JOIN claims cl ON s.kind='claim' AND cl.id=s.ref_id
+        LEFT JOIN actions ac ON s.kind='action' AND ac.id=s.ref_id
+        LEFT JOIN reflection_questions rq ON s.kind='topic' AND rq.id=s.ref_id
+        WHERE \(tokens.filterClause(qualifyingWith: "s."))
+        ORDER BY CASE WHEN instr(s.title, ?) > 0 THEN 0 ELSE 1 END,
+                 julianday(COALESCE(src.created_at, cl.created_at, ac.created_at, rq.updated_at)) DESC,
+                 s.ref_id
+        """, binds).map(decodeSearchRow)
     }
 
-    private func substringPattern(_ token: String) -> String {
-        var escaped = token.replacingOccurrences(of: "\\", with: "\\\\")
-        escaped = escaped.replacingOccurrences(of: "%", with: "\\%")
-        escaped = escaped.replacingOccurrences(of: "_", with: "\\_")
-        return "%\(escaped)%"
+    private func searchTokens(from query: String) -> SearchTokens {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init).prefix(8)
+        var drivable: [String] = []
+        var filters: [String] = []
+        for word in words {
+            let spaced = searchSpaced(word)
+            if spaced.count >= 3 { drivable.append(spaced) } else { filters.append(spaced) }
+        }
+        return SearchTokens(drivable: drivable, filters: filters)
     }
 
-    private func decodeHit(_ row: [String: String]) throws -> SearchHit {
-        guard let kind = row["kind"].flatMap(SearchHit.Kind.init(rawValue:)), let refID = row["ref_id"], let title = row["title"] else {
+    private var searchIndexShape: String { "cjk-spaced-v1" }
+
+    private func searchSpaced(_ text: String) -> String {
+        var result = ""
+        var previous: Character?
+        for character in text {
+            if let previous, isCJK(previous), isCJK(character) { result.append(" ") }
+            result.append(character)
+            previous = character
+        }
+        return result
+    }
+
+    private func searchUnspaced(_ text: String) -> String {
+        let characters = Array(text)
+        guard characters.count > 2 else { return text }
+        var result = ""
+        result.reserveCapacity(characters.count)
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            if character == " ", index > 0, index + 1 < characters.count,
+               isCJK(characters[index - 1]), isCJK(characters[index + 1]) {
+                index += 1
+                continue
+            }
+            result.append(character)
+            index += 1
+        }
+        return result
+    }
+
+    private func isCJK(_ character: Character) -> Bool {
+        character.unicodeScalars.contains { scalar in
+            switch scalar.value {
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF, 0x20000...0x2FA1F: return true
+            default: return false
+            }
+        }
+    }
+
+    private func decodeSearchRow(_ row: [String: String]) throws -> RankedSearchRow {
+        guard let kind = row["kind"].flatMap(SearchHit.Kind.init(rawValue:)), let refID = row["ref_id"], let rawTitle = row["title"] else {
             throw VoiceOSError("检索结果损坏")
         }
-        return SearchHit(kind: kind, refID: refID, title: title, snippet: row["snippet"] ?? "")
+        let title = searchUnspaced(rawTitle)
+        let snippet = searchUnspaced(row["snippet"] ?? "")
+        return RankedSearchRow(kind: kind, hit: SearchHit(kind: kind, refID: refID, title: title, snippet: snippet.isEmpty ? title : snippet))
     }
 
     public func rebuildSearchIndexIfNeeded() throws {
-        let dirty = try db.query("SELECT value FROM search_index_meta WHERE key='dirty'").first?["value"]
-        if dirty != "1" {
-            let stored = try db.query("SELECT value FROM search_index_meta WHERE key='fingerprint'").first?["value"]
-            guard stored != (try searchFingerprint()) else { return }
-        }
+        guard try searchIndexNeedsRebuild() else { return }
         try rebuildSearchIndex()
+    }
+
+    private func searchIndexNeedsRebuild() throws -> Bool {
+        if try db.query("SELECT value FROM search_index_meta WHERE key='dirty'").first?["value"] == "1" { return true }
+        if try db.query("SELECT value FROM search_index_meta WHERE key='shape'").first?["value"] != searchIndexShape { return true }
+        let stored = try db.query("SELECT value FROM search_index_meta WHERE key='fingerprint'").first?["value"]
+        return stored != (try searchFingerprint())
+    }
+
+    private func scheduleSearchIndexRebuildIfNeeded() throws {
+        guard try searchIndexNeedsRebuild() else { return }
+        if try db.query("SELECT value FROM search_index_meta WHERE key='rebuild_pending'").first?["value"] == "1" { return }
+        try db.execute("INSERT OR REPLACE INTO search_index_meta(key, value) VALUES('rebuild_pending', '1')")
+        Task { [weak self] in await self?.rebuildSearchIndexAfterTyping() }
+    }
+
+    private func rebuildSearchIndexAfterTyping() async {
+        try? await Task.sleep(for: .milliseconds(200))
+        finishScheduledSearchRebuild()
+    }
+
+    private func finishScheduledSearchRebuild() {
+        defer { try? db.execute("DELETE FROM search_index_meta WHERE key='rebuild_pending'") }
+        try? rebuildSearchIndexIfNeeded()
+    }
+
+    func waitForPendingSearchRebuild(timeout: TimeInterval = 5) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while try db.query("SELECT value FROM search_index_meta WHERE key='rebuild_pending'").first?["value"] == "1" {
+            guard Date() < deadline else { throw VoiceOSError("搜索索引重建超时") }
+            try await Task.sleep(for: .milliseconds(20))
+        }
     }
 
     public func rebuildSearchIndex() throws {
         let fingerprint = try searchFingerprint()
+        let materials = try db.query("""
+        SELECT s.id AS id, s.name AS title, COALESCE(GROUP_CONCAT(v.text, ' '), '') AS body
+        FROM sources s
+        LEFT JOIN transcripts t ON t.source_id = s.id
+        LEFT JOIN transcript_versions v ON v.id = t.current_version_id
+        WHERE s.state != 'trashed'
+        GROUP BY s.id
+        """)
+        let claims = try db.query("SELECT id, statement AS title, statement AS body FROM claims")
+        let actions = try db.query("SELECT id, title, note AS body FROM actions")
+        let topics = try db.query("SELECT id, title, title AS body FROM reflection_questions")
         try db.transaction {
             try db.execute("DELETE FROM search_index")
-            try db.execute("""
-            INSERT INTO search_index(kind, ref_id, title, body)
-            SELECT 'material', s.id, s.name, COALESCE(GROUP_CONCAT(v.text, ' '), '')
-            FROM sources s
-            LEFT JOIN transcripts t ON t.source_id = s.id
-            LEFT JOIN transcript_versions v ON v.id = t.current_version_id
-            WHERE s.state != 'trashed'
-            GROUP BY s.id
-            """)
-            try db.execute("INSERT INTO search_index(kind, ref_id, title, body) SELECT 'claim', id, statement, statement FROM claims")
-            try db.execute("INSERT INTO search_index(kind, ref_id, title, body) SELECT 'action', id, title, note FROM actions")
-            try db.execute("INSERT INTO search_index(kind, ref_id, title, body) SELECT 'topic', id, title, title FROM reflection_questions")
+            for row in materials {
+                try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('material', ?, ?, ?)",
+                               [row["id"], searchSpaced(row["title"] ?? ""), searchSpaced(row["body"] ?? "")])
+            }
+            for row in claims {
+                try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('claim', ?, ?, ?)",
+                               [row["id"], searchSpaced(row["title"] ?? ""), searchSpaced(row["body"] ?? "")])
+            }
+            for row in actions {
+                try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('action', ?, ?, ?)",
+                               [row["id"], searchSpaced(row["title"] ?? ""), searchSpaced(row["body"] ?? "")])
+            }
+            for row in topics {
+                try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('topic', ?, ?, ?)",
+                               [row["id"], searchSpaced(row["title"] ?? ""), searchSpaced(row["body"] ?? "")])
+            }
             try db.execute("INSERT OR REPLACE INTO search_index_meta(key, value) VALUES('fingerprint', ?)", [fingerprint])
+            try db.execute("INSERT OR REPLACE INTO search_index_meta(key, value) VALUES('shape', ?)", [searchIndexShape])
             try db.execute("DELETE FROM search_index_meta WHERE key='dirty'")
         }
     }
