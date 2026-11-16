@@ -167,8 +167,9 @@ struct WorkspaceToast: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill").vosFont(WorkspaceText.meta.size, weight: .semibold)
-                .foregroundStyle(palette.success)
+                .foregroundStyle(palette.success).accessibilityHidden(true)
             Text(message).vosFont(WorkspaceText.meta).foregroundStyle(palette.text).lineLimit(2)
+                .accessibilityHidden(true)
             Button(action: close) {
                 Image(systemName: "xmark").vosFont(WorkspaceText.caption.size, weight: .semibold)
                     .foregroundStyle(palette.secondaryText)
@@ -184,7 +185,11 @@ struct WorkspaceToast: View {
 }
 
 private struct WorkspaceToastModifier: ViewModifier {
+    private static let visibleFor: TimeInterval = 3.5
     @Binding var message: String?
+    @State private var hovered = false
+    @State private var remaining = WorkspaceToastModifier.visibleFor
+    @State private var deadline: Date?
 
     func body(content: Content) -> some View {
         content
@@ -195,9 +200,46 @@ private struct WorkspaceToastModifier: ViewModifier {
                     }
                     .padding(.bottom, 18)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .onHover { setHovered($0) }
                 }
             }
             .animation(.spring(duration: 0.26), value: message)
+            .onChange(of: message) { _, text in
+                guard let text else { deadline = nil; return }
+                remaining = Self.visibleFor
+                deadline = hovered ? nil : Date().addingTimeInterval(remaining)
+                // The toast is transient, so VoiceOver hears it once instead of
+                // chasing an element that disappears.
+                AccessibilityNotification.Announcement(text).post()
+            }
+            .task(id: dismissKey) { await dismissWhenDue() }
+    }
+
+    private var dismissKey: String {
+        (message ?? "") + "|" + (deadline.map { String($0.timeIntervalSinceReferenceDate) } ?? "paused")
+    }
+
+    private func setHovered(_ value: Bool) {
+        guard value != hovered else { return }
+        if value, let deadline {
+            remaining = max(0, deadline.timeIntervalSinceNow)
+            self.deadline = nil
+            hovered = true
+        } else if !value, message != nil {
+            deadline = Date().addingTimeInterval(remaining)
+            hovered = false
+        } else {
+            hovered = value
+        }
+    }
+
+    private func dismissWhenDue() async {
+        guard message != nil, !hovered, let deadline else { return }
+        let wait = deadline.timeIntervalSinceNow
+        if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+        guard message != nil, !hovered, self.deadline == deadline else { return }
+        withAnimation(.easeOut(duration: 0.2)) { message = nil }
+        self.deadline = nil
     }
 }
 

@@ -1032,6 +1032,21 @@ struct WorkspaceView: View {
                 }
             }.sheet(isPresented:$showingClarifyQueue) { ActionClarifyQueueView(model:model, scope:clarifyScope) }
             WorkspaceTabs(selection:$actionFilter,titles:SavedViewPage.actions.filters,style:.filters)
+            if actionFilter == "全部" {
+                let surface = ActionTimeSurface.build(actions: myTodoActions, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
+                let overdue = surface.today.filter(\.isOverdue).count
+                Button { actionFilter = "我的待办" } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sun.max").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.accent)
+                        Text("今天 \(surface.today.count - overdue) · 逾期 \(overdue)").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        Image(systemName: "chevron.right").vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(palette.disabledText)
+                        Spacer(minLength: 0)
+                    }.contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .accessibilityLabel("今天 \(surface.today.count - overdue) 项，逾期 \(overdue) 项")
+                    .accessibilityHint("切到我的待办")
+                    .help("切到我的待办")
+            }
             if ["目标","全部"].contains(actionFilter), !model.stalledOutcomes.isEmpty { stalledBanner }
             let visible = visibleActions
             let executions = model.assistantExecutions.filter { $0.state != "cancelled" }
@@ -1226,8 +1241,9 @@ struct WorkspaceView: View {
             }
         }
     }
+    /// Raw state of the newest analysis run; the row layout decides how to read it.
     private func latestAnalysisState(_ action:ActionRecord) -> String {
-        model.assistantExecutions.filter { $0.actionID == action.id && $0.mode == .analysis && $0.validity == "current" && $0.state != "cancelled" }
+        model.assistantExecutions.filter { $0.actionID == action.id && $0.mode == .analysis && $0.validity == "current" }
             .max { $0.updatedAt < $1.updatedAt }?.state ?? ""
     }
     @ViewBuilder private func executionRows(_ executions: [AssistantExecutionRecord]) -> some View {
@@ -1242,16 +1258,26 @@ struct WorkspaceView: View {
     private var focusRefreshKey: String {
         model.actionRecords.map { $0.id + String($0.version) + $0.state + $0.validity }.joined(separator: "|")
     }
+    private var myTodoActions: [ActionRecord] {
+        model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" && !model.workspaceTaskRequiresReview($0) }
+    }
     private var visibleActions: [ActionRecord] {
-        model.actionRecords.filter { action in
-            switch actionFilter {
-            case "已完成": return action.state == "completed"
-            case "历史记录": return action.state == "dismissed" || (action.validity != "current" && !model.workspaceTaskRequiresReview(action))
-            case "待核对": return model.workspaceTaskRequiresReview(action) || action.validity == "current" && (action.intent?.uncertain == true || action.intent?.followupState == "needs_review")
-            case "问题": return action.kind == "opportunity" && action.nature == ActionNature.question.rawValue && action.state == "open" && action.validity == "current"
-            case "目标": return action.kind == "opportunity" && action.nature == ActionNature.goal.rawValue && action.state == "open" && action.validity == "current"
-            default: return action.kind == "task" && action.state == "open" && action.validity == "current" && !model.workspaceTaskRequiresReview(action)
+        switch actionFilter {
+        case "已完成":
+            return model.actionRecords.filter { $0.state == "completed" }.sorted { left, right in
+                let leftDate = left.completedAt ?? left.createdAt, rightDate = right.completedAt ?? right.createdAt
+                return leftDate == rightDate ? left.id > right.id : leftDate > rightDate
             }
+        case "历史记录":
+            return model.actionRecords.filter { $0.state == "dismissed" || ($0.validity != "current" && !model.workspaceTaskRequiresReview($0)) }
+        case "待核对":
+            return model.actionRecords.filter { model.workspaceTaskRequiresReview($0) || $0.validity == "current" && ($0.intent?.uncertain == true || $0.intent?.followupState == "needs_review") }
+        case "问题":
+            return model.actionRecords.filter { $0.kind == "opportunity" && $0.nature == ActionNature.question.rawValue && $0.state == "open" && $0.validity == "current" }
+        case "目标":
+            return model.actionRecords.filter { $0.kind == "opportunity" && $0.nature == ActionNature.goal.rawValue && $0.state == "open" && $0.validity == "current" }
+        default:
+            return myTodoActions
         }
     }
     private var search: some View {
@@ -1506,6 +1532,7 @@ struct WorkspaceView: View {
         facts.due=due
         facts.sourceTitle=actionSourceTitle(action)
         facts.nextStepCount=nextStepCount
+        facts.completedAt=group == .completed ? action.completedAt.map { "完成于 " + dateLabel($0) } ?? "" : ""
         facts.requiresReview=model.workspaceTaskRequiresReview(action)
         facts.externalCompletion=model.workspaceExternalCompletionNote(action) != nil
         facts.withdrawn=action.intent?.followupState == "withdrawn"
@@ -1575,6 +1602,10 @@ struct WorkspaceView: View {
         .background(palette.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }
     @ViewBuilder private func actionMenuItems(_ action:ActionRecord,focused:Bool,canChangeDay:Bool,canTransition:Bool) -> some View {
+        if model.workspaceExternalCompletion(action) != nil {
+            Button("确认外部已完成") { confirmExternalCompletionFromRow(action) }
+                .accessibilityLabel("确认外部已完成：" + action.title)
+        }
         if action.canPromoteToTask {
             Button("添加下一步") { nextActionOutcome=action }
                 .accessibilityLabel("添加下一步：" + action.title)
@@ -1593,6 +1624,7 @@ struct WorkspaceView: View {
         let focused=focusedActionIDs.contains(action.id)
         let canChangeDay=actionable && hasLinkedReminder(action) && !model.savingAction && !model.remindersBusy
         let canComplete=actionable && action.kind == "task"
+        let externalCompletion=model.workspaceExternalCompletion(action) != nil
         let layout=actionRowStatus(action,timeEntry:timeEntry,group:group,nature:nature,nextStepCount:nextStepCounts[action.id] ?? 0)
         let tagged=StatementTagParser.split(action.title)
         let marksSelected=selectingActions && selected
@@ -1600,7 +1632,7 @@ struct WorkspaceView: View {
         let icon:String=selectingActions ? (selectable ? (selected ? "checkmark.circle.fill" : "circle") : "circle") : action.state == "completed" ? "checkmark.circle" : action.state == "dismissed" ? "minus.circle" : nature == .question ? "questionmark.circle" : nature == .goal ? "target" : typeIcon(tagged.tag)
         let showsCompletion = !selectingActions && action.kind == "task" && action.state == "open" && action.validity == "current"
         return WorkspaceActionRowChrome(action:action,
-            canTransition:actionable,
+            canTransition:actionable || externalCompletion,
             menuItems:{ actionMenuItems(action,focused:focused,canChangeDay:canChangeDay,canTransition:actionable) },
             row:{
                 WorkspaceRow(title:tagged.text,subtitle:layout.meta,icon:icon,
@@ -1642,6 +1674,17 @@ struct WorkspaceView: View {
     private func dismissAction(_ action:ActionRecord) {
         applyActionState(action,to:.dismissed)
     }
+    private func confirmExternalCompletionFromRow(_ action:ActionRecord) {
+        guard let candidate=model.workspaceExternalCompletion(action) else {
+            error="提醒事项关联或最新回读已变化，请查看最新状态"; return
+        }
+        Task {
+            if await model.confirmExternalCompletion(candidate) {
+                error=""
+                actionUndo=ActionUndoState(actionID:action.id,message:"已确认外部完成",token:UUID(),kind:.externalCompletion(expectedVersion:candidate.expectedVersion + 1))
+            } else { error=model.status }
+        }
+    }
     private func applyActionState(_ action:ActionRecord,to state:LocalActionState,nextHighlight:String? = nil) {
         Task {
             await model.changeAction(action,state:state)
@@ -1663,10 +1706,24 @@ struct WorkspaceView: View {
         actionUndo=ActionUndoState(actionID:id,message:message,token:UUID())
     }
     private func undoActionChange() {
-        guard let target=actionUndo?.actionID else { return }
+        guard let undo=actionUndo else { return }
         Task {
-            if await model.undoActionState(actionID:target) { actionUndo=nil;error="" }
-            else { error=model.status.isEmpty ? "未能撤销，请稍后重试。" : model.status }
+            switch undo.kind {
+            case .stateChange:
+                if await model.undoActionState(actionID:undo.actionID) { actionUndo=nil;error="" }
+                else { error=model.status.isEmpty ? "未能撤销，请稍后重试。" : model.status }
+            case .externalCompletion(let expectedVersion):
+                guard let store=model.store else { error="资料库尚未打开"; return }
+                do {
+                    _ = try await store.revertExternalCompletion(actionID:undo.actionID,expectedVersion:expectedVersion,
+                                                                 commandID:"workspace-undo-external:" + undo.actionID + ":" + String(expectedVersion))
+                    await model.refresh()
+                    actionUndo=nil;error=""
+                } catch {
+                    error=error.localizedDescription
+                    await model.refresh()
+                }
+            }
         }
     }
     private var planRemainingSlots: Int { max(0,3 - focusedActions.count) }
@@ -2130,9 +2187,14 @@ private struct WorkspaceKeySelection {
 }
 
 private struct ActionUndoState: Equatable {
+    enum Kind: Equatable {
+        case stateChange
+        case externalCompletion(expectedVersion: Int)
+    }
     let actionID: String
     let message: String
     let token: UUID
+    var kind: Kind = .stateChange
 }
 
 private struct WorkspaceSearchRow: Identifiable {
