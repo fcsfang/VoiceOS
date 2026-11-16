@@ -120,19 +120,19 @@ extension VoiceOSStore {
             }
             var failures: [(unitID: String, reason: String)]=[]
             for (unit,scoped,_) in scheduled {
-                try requirePanoramaManifest(input)
+                try requirePanoramaManifest(input, scope: Set(scoped.manifest.sourceIDs))
                 let result: VerifiedPanoramaUnit
                 do {
                     result=try await verifyPanoramaUnit(unit.id, input: scoped, whole: input, attemptID: id, port: port)
                 } catch let error as CancellationError {
                     throw error
                 } catch {
-                    try requirePanoramaManifest(input)
+                    try requirePanoramaManifest(input, scope: Set(scoped.manifest.sourceIDs))
                     failures.append((unit.id, Self.panoramaFailure(error)))
                     continue
                 }
                 verified.append(result)
-                try requirePanoramaManifest(input)
+                try requirePanoramaManifest(input, scope: Set(scoped.manifest.sourceIDs))
                 let partial=try Self.partialPanorama(verified, input: input, id: id, phase: .units)
                 let saved=try db.query("SELECT snapshot_json FROM panorama_attempts WHERE id=?", [id]).first?["snapshot_json"]
                 let visible=try saved.map { try JSONDecoder().decode(PanoramaSnapshot.self, from: Data($0.utf8)) }
@@ -152,7 +152,7 @@ extension VoiceOSStore {
     }
     private func verifyPanoramaUnit(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, attemptID: String, port: any PanoramaModelPort) async throws -> VerifiedPanoramaUnit {
         try Task.checkCancellation()
-        try requirePanoramaManifest(whole)
+        try requirePanoramaManifest(whole, scope: Set(input.manifest.sourceIDs))
         let candidates=try db.query("SELECT attempt_id,input_json FROM panorama_steps WHERE stage='unit.generate' AND scope_id=? AND state='completed' ORDER BY rowid DESC", [unitID])
         for candidate in candidates {
             var reused: VerifiedPanoramaUnit?
@@ -167,7 +167,7 @@ extension VoiceOSStore {
             } catch is CancellationError { throw CancellationError() }
             catch {}
             try Task.checkCancellation()
-            try requirePanoramaManifest(whole)
+            try requirePanoramaManifest(whole, scope: Set(input.manifest.sourceIDs))
             if let reused {
                 return .init(unitID: unitID, input: input, proposal: reused.proposal, generation: reused.generation,
                     review: reused.review, verification: reused.verification, rejection: reused.rejection)
@@ -201,7 +201,8 @@ extension VoiceOSStore {
                 attemptID: attemptID, port: port, replayOnly: replayOnly)
         }
         let first: (PanoramaReview, PanoramaReceipt)=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.review", scopeID: unitID, replayOnly: replayOnly,
-            input: PanoramaProposalInput(input: input, proposal: generated.0), whole: whole, identity: port.configurationIdentity,
+            input: PanoramaProposalInput(input: input, proposal: generated.0), whole: whole, manifestScope: Set(input.manifest.sourceIDs),
+            identity: port.configurationIdentity,
             operation: { try await port.verify(generated.0, input: input, priorRejection: nil) }, validate: { _, _ in })
         var review=first
         var priorRejection: PanoramaRejection?
@@ -215,13 +216,15 @@ extension VoiceOSStore {
             } else {
                 let original=generated.0
                 generated=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.repair", scopeID: unitID, replayOnly: replayOnly,
-                    input: PanoramaRepairInput(input: input, rejection: rejection), whole: whole, identity: port.configurationIdentity,
+                    input: PanoramaRepairInput(input: input, rejection: rejection), whole: whole, manifestScope: Set(input.manifest.sourceIDs),
+                    identity: port.configurationIdentity,
                     operation: { try await port.repair(original, input: input, review: first.0) }, validate: { proposal, _ in
                         _ = try Self.validatePanorama(proposal, input: input)
                     }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
             }
             review=try await panoramaUnitStep(attemptID: attemptID, stage: "unit.review-repair", scopeID: unitID, replayOnly: replayOnly,
-                input: PanoramaRepairInput(input: input, rejection: .init(proposal: generated.0, review: first.0)), whole: whole, identity: port.configurationIdentity,
+                input: PanoramaRepairInput(input: input, rejection: .init(proposal: generated.0, review: first.0)), whole: whole,
+                manifestScope: Set(input.manifest.sourceIDs), identity: port.configurationIdentity,
                 operation: { try await port.verify(generated.0, input: input, priorRejection: rejection) }, validate: { value, receipt in
                     try Self.validatePanoramaReview(value, proposal: generated.0, generation: generated.1, verification: receipt)
                 })
@@ -232,19 +235,20 @@ extension VoiceOSStore {
     private func panoramaSingleGeneration(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, attemptID: String,
         port: any PanoramaModelPort, replayOnly: Bool) async throws -> (PanoramaProposal, PanoramaReceipt) {
         try await panoramaUnitStep(attemptID: attemptID, stage: "unit.generate", scopeID: unitID, replayOnly: replayOnly,
-            input: input, whole: whole, identity: port.configurationIdentity, operation: { try await port.generate(input) }, validate: { proposal, _ in
+            input: input, whole: whole, manifestScope: Set(input.manifest.sourceIDs), identity: port.configurationIdentity,
+            operation: { try await port.generate(input) }, validate: { proposal, _ in
                 _ = try Self.validatePanorama(proposal, input: input)
             }, normalize: { try Self.locatePanoramaQuotes($0, input: input) })
     }
     private func panoramaSlicedGeneration(_ unitID: String, input: PanoramaInput, whole: PanoramaInput, plan: PanoramaUnitSlicePlan,
         record: PanoramaSlicedGenerationRecord, attemptID: String, port: any PanoramaModelPort, replayOnly: Bool) async throws -> (PanoramaProposal, PanoramaReceipt) {
         try await panoramaUnitStep(attemptID: attemptID, stage: "unit.generate", scopeID: unitID, replayOnly: replayOnly,
-            input: record, whole: whole, identity: port.focusConfigurationIdentity, operation: {
+            input: record, whole: whole, manifestScope: Set(input.manifest.sourceIDs), identity: port.focusConfigurationIdentity, operation: {
                 var proposals: [PanoramaProposal]=[], receipts: [PanoramaReceipt]=[]
                 for slice in plan.slices {
                     let result: (PanoramaProposal, PanoramaReceipt)=try await panoramaUnitStep(
                         attemptID: attemptID, stage: "unit.focus.generate", scopeID: "\(unitID)#slice-\(slice.focus.ordinal)", replayOnly: false,
-                        input: slice.stepInput, whole: whole, identity: port.focusConfigurationIdentity,
+                        input: slice.stepInput, whole: whole, manifestScope: Set(input.manifest.sourceIDs), identity: port.focusConfigurationIdentity,
                         operation: { try await port.generate(input, focus: slice.focus, target: slice.target) },
                         validate: { proposal, _ in _ = try Self.validatePanoramaFocused(proposal, scope: slice.scope, focus: slice.focus) },
                         normalize: { try Self.locatePanoramaQuotes($0, input: input) })
@@ -258,7 +262,7 @@ extension VoiceOSStore {
         attemptID: String, port: any PanoramaModelPort, rejection: PanoramaRejection, replayOnly: Bool) async throws -> (PanoramaProposal, PanoramaReceipt) {
         let record=PanoramaSlicedRepairRecord(policy: plan.policy, planDigest: plan.digest, input: input, rejection: rejection)
         return try await panoramaUnitStep(attemptID: attemptID, stage: "unit.repair", scopeID: unitID, replayOnly: replayOnly,
-            input: record, whole: whole, identity: port.focusConfigurationIdentity, operation: {
+            input: record, whole: whole, manifestScope: Set(input.manifest.sourceIDs), identity: port.focusConfigurationIdentity, operation: {
                 let slices=plan.slices.map { slice in
                     let ids=plan.projectionIDs(rejection.proposal, ordinal: slice.focus.ordinal)
                     let projected=Self.panoramaProjection(rejection.proposal, input: slice.scope, questionIDs: ids.questionIDs, relationIDs: ids.relationIDs)
@@ -276,7 +280,7 @@ extension VoiceOSStore {
                     do {
                         let result: (PanoramaProposal, PanoramaReceipt)=try await panoramaUnitStep(
                             attemptID: attemptID, stage: "unit.focus.repair", scopeID: "\(unitID)#slice-\(slice.focus.ordinal)", replayOnly: false,
-                            input: step, whole: whole, identity: port.focusConfigurationIdentity,
+                            input: step, whole: whole, manifestScope: Set(input.manifest.sourceIDs), identity: port.focusConfigurationIdentity,
                             operation: { try await port.repair(projected, input: slice.scope, review: projectedReview) },
                             validate: { proposal, _ in _ = try Self.validatePanoramaFocused(proposal, scope: slice.scope, focus: slice.focus) },
                             normalize: { try Self.locatePanoramaQuotes($0, input: input) })
@@ -289,7 +293,8 @@ extension VoiceOSStore {
                         guard Self.panoramaUpstreamRejection(error) else { throw error }
                         let result: (PanoramaProposal, PanoramaReceipt)=try await panoramaUnitStep(
                             attemptID: attemptID, stage: "unit.focus.regenerate", scopeID: "\(unitID)#slice-\(slice.focus.ordinal)", replayOnly: false,
-                            input: slice.stepInput, whole: whole, identity: port.focusConfigurationIdentity + "|regenerate-after-repair-v1",
+                            input: slice.stepInput, whole: whole, manifestScope: Set(input.manifest.sourceIDs),
+                            identity: port.focusConfigurationIdentity + "|regenerate-after-repair-v1",
                             operation: { try await port.generate(input, focus: slice.focus, target: slice.target) },
                             validate: { proposal, _ in _ = try Self.validatePanoramaFocused(proposal, scope: slice.scope, focus: slice.focus) },
                             normalize: { try Self.locatePanoramaQuotes($0, input: input) })
@@ -301,11 +306,11 @@ extension VoiceOSStore {
             normalize: { try Self.locatePanoramaQuotes($0, input: input) })
     }
     private func panoramaUnitStep<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, replayOnly: Bool,
-        input: Input, whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
+        input: Input, whole: PanoramaInput, manifestScope: Set<String>? = nil, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
         validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }) async throws -> (Result, PanoramaReceipt) {
         guard replayOnly else {
-            return try await panoramaStep(attemptID: attemptID, stage: stage, scopeID: scopeID, input: input, whole: whole, identity: identity,
-                operation: operation, validate: validate, normalize: normalize)
+            return try await panoramaStep(attemptID: attemptID, stage: stage, scopeID: scopeID, input: input, whole: whole, manifestScope: manifestScope,
+                identity: identity, operation: operation, validate: validate, normalize: normalize)
         }
         let json=try Self.relevanceJSON(input)
         let digest=Self.panoramaStepDigest(json,identity: identity)
@@ -323,15 +328,15 @@ extension VoiceOSStore {
         relevanceHash(Data(("panorama-staged-v1|"+identity+"|"+json).utf8))
     }
     private func panoramaStep<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, input: Input,
-        whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
+        whole: PanoramaInput, manifestScope: Set<String>? = nil, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
         validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }, retainSemanticRejection: Bool = false,
         budget: PanoramaReviewBudget? = nil) async throws -> (Result, PanoramaReceipt) {
         var retries=0
         while true {
             let started=Date()
             do {
-                return try await panoramaStepAttempt(attemptID: attemptID,stage: stage,scopeID: scopeID,input: input,whole: whole,identity: identity,
-                    operation: operation,validate: validate,normalize: normalize,retainSemanticRejection: retainSemanticRejection,budget: budget)
+                return try await panoramaStepAttempt(attemptID: attemptID,stage: stage,scopeID: scopeID,input: input,whole: whole,manifestScope: manifestScope,
+                    identity: identity, operation: operation,validate: validate,normalize: normalize,retainSemanticRejection: retainSemanticRejection,budget: budget)
             } catch {
                 // A request that already spent the whole 600-second window must not be replayed three times.
                 let elapsed=Date().timeIntervalSince(started)
@@ -346,11 +351,11 @@ extension VoiceOSStore {
         }
     }
     private func panoramaStepAttempt<Input: Encodable, Result: Codable & Sendable>(attemptID: String, stage: String, scopeID: String, input: Input,
-        whole: PanoramaInput, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
+        whole: PanoramaInput, manifestScope: Set<String>? = nil, identity: String, operation: () async throws -> (Result, PanoramaReceipt),
         validate: (Result, PanoramaReceipt) throws -> Void, normalize: (Result) throws -> Result = { $0 }, retainSemanticRejection: Bool = false,
         budget: PanoramaReviewBudget? = nil) async throws -> (Result, PanoramaReceipt) {
         try Task.checkCancellation()
-        try requirePanoramaManifest(whole)
+        try requirePanoramaManifest(whole, scope: manifestScope)
         let json=try Self.relevanceJSON(input)
         // Global steps are keyed on evidence, not on the attempt row that paid
         // for them, so unchanged evidence replays across attempts as well.
@@ -377,7 +382,7 @@ extension VoiceOSStore {
         do {
             let (raw,receipt)=try await operation()
             try Task.checkCancellation()
-            try requirePanoramaManifest(whole)
+            try requirePanoramaManifest(whole, scope: manifestScope)
             guard !receipt.responseID.isEmpty, !receipt.model.isEmpty else { throw VoiceOSError("全景步骤缺少真实完成回执") }
             receivedResult=try Self.relevanceJSON(raw)
             receivedReceipt=try Self.relevanceJSON(receipt)
@@ -646,8 +651,22 @@ extension VoiceOSStore {
         }
         return nil
     }
-    private func requirePanoramaManifest(_ expected: PanoramaInput) throws {
-        guard try Self.panoramaEvidenceDigest(try panoramaInput()) == Self.panoramaEvidenceDigest(expected) else { throw VoiceOSError("全景依据、授权或完整整理状态已变化，旧结果未发布") }
+    /// Unit stages validate only the evidence inside the unit's scope. An
+    /// unrelated source or claim elsewhere in the library can change while a
+    /// large unit runs without invalidating work that never read it; global
+    /// stages keep whole-library validation.
+    private func requirePanoramaManifest(_ expected: PanoramaInput, scope: Set<String>? = nil) throws {
+        let live=try panoramaInput()
+        let expectedEvidence: PanoramaInput, currentEvidence: PanoramaInput
+        if let scope {
+            expectedEvidence=try Self.panoramaScope(expected, sourceIDs: scope)
+            currentEvidence=try Self.panoramaScope(live, sourceIDs: scope)
+        } else {
+            expectedEvidence=expected; currentEvidence=live
+        }
+        guard try Self.panoramaEvidenceDigest(currentEvidence) == Self.panoramaEvidenceDigest(expectedEvidence) else {
+            throw VoiceOSError("全景依据、授权或完整整理状态已变化，旧结果未发布")
+        }
     }
     // Titles and display dates can change while a run is in flight; only evidence fields invalidate it.
     static func panoramaEvidenceDigest(_ input: PanoramaInput) throws -> String {
