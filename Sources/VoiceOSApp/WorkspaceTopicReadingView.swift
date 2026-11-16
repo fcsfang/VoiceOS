@@ -80,10 +80,7 @@ struct WorkspaceTopicReadingView: View {
                             structure.padding(.top,14)
                         } label: { Label("内容结构 · \(sections.count) 个小主题",systemImage:"point.3.connected.trianglepath.dotted").vosFont(WorkspaceText.meta.size, weight: .medium) }
                     } else { structure }
-                    if mode == "概览" {
-                        Button("阅读认识、原话与完整脉络",systemImage:"text.book.closed") { showUnderstanding() }
-                            .buttonStyle(.bordered)
-                    } else { readingCards }
+                    if mode == "概览" { overviewReadingCards } else { readingCards }
                 }
                 connectionsSection
                 TopicUnlinkedReferencesSection(model:model,topic:topic)
@@ -186,6 +183,18 @@ struct WorkspaceTopicReadingView: View {
             LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing:16)],alignment:.leading,spacing:16) {
                 ForEach(displayedSections) { section in readingCard(section) }
             }
+        }
+    }
+
+    @ViewBuilder private var overviewReadingCards: some View {
+        if displayedSections.isEmpty && !filterTerm.isEmpty {
+            Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+        } else {
+            LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing:16)],alignment:.leading,spacing:16) {
+                ForEach(Array(displayedSections.prefix(3))) { section in readingCard(section) }
+            }
+            Button("查看全部 \(sections.count) 张卡片",systemImage:"text.book.closed") { showUnderstanding() }
+                .buttonStyle(.bordered)
         }
     }
 
