@@ -38,11 +38,6 @@ final class ClarifyNatureQueueChecks: XCTestCase {
         return try XCTUnwrap(actions.first { $0.claimID == claimID })
     }
 
-    private func classify(_ store: VoiceOSStore, _ action: ActionRecord, _ nature: ActionNature) async throws -> Int {
-        try await store.setActionNature(id: action.id, expectedVersion: action.version, nature: nature,
-                                        commandID: "clarify-nature-" + nature.rawValue + ":" + action.id)
-    }
-
     func testQueueScopesPartitionOpenOutcomesAndExcludeNarration() async throws {
         let store = try await openStore()
         let question = try await addAction(store, title: "【问题】为什么要把问题与目标分开？")
@@ -50,9 +45,8 @@ final class ClarifyNatureQueueChecks: XCTestCase {
         let untriaged = try await addAction(store, title: "【想法】随手记一条")
         let narration = try await addAction(store, title: "【录音中活动】正在接电话")
         let task = try await addAction(store, title: "【问题】已经变成待办", kind: .task)
-        _ = try await classify(store, question, .question)
-        _ = try await classify(store, goal, .goal)
-        _ = try await classify(store, narration, .narration)
+        // The extraction stores nature from the title tag, so these seeds
+        // already sit in their pools without a reclassification write.
 
         let questions = try await store.openQuestions().map(\.id)
         let goals = try await store.openGoals().map(\.id)
@@ -94,7 +88,6 @@ final class ClarifyNatureQueueChecks: XCTestCase {
     func testTrialAnswerEnqueueKeepsTheQuestionOpenAndDeduplicates() async throws {
         let store = try await openStore()
         let item = try await addAction(store, title: "【问题】先让 VoiceOS 试答的问题")
-        _ = try await classify(store, item, .question)
         let open = try await store.openQuestions()
         let question = try XCTUnwrap(open.first { $0.id == item.id })
 

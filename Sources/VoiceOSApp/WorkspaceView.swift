@@ -1000,7 +1000,7 @@ struct WorkspaceView: View {
         }
     }
     @State private var showingClarifyQueue = false
-    @State private var clarifyScope: ActionClarifyScope = .questions
+    @State private var clarifyScope: ClarifyQueueScope = .questions
     private var actions: some View {
         let nextStepCounts=ActionRowLayout.nextStepCounts(model.actionRecords)
         let listGroup:ActionRowGroup=actionFilter == "已完成" ? .completed : actionFilter == "历史记录" ? .history : actionFilter == "待核对" ? .needsReview : .active
@@ -1221,7 +1221,7 @@ struct WorkspaceView: View {
                 error=""
                 toastMessage=nature == .narration ? "已移出问题与目标" : nature == .question ? "已归为问题" : "已归为目标"
             } catch {
-                error=error.localizedDescription
+                self.error=error.localizedDescription
                 await model.refresh()
             }
         }
