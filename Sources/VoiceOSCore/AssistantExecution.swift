@@ -127,35 +127,80 @@ public struct AssistantExecutionRecord: Identifiable, Codable, Sendable {
     public let updatedAt: String
 }
 
+/// One coherent read shared by every assistant validation in a call. Validation
+/// freezes rows by writing, so a caller drops this after a freeze instead of
+/// trusting reads taken before it.
+struct AssistantValidationContext {
+    let actions: [String: ActionRecord]
+    let claims: [String: CandidateClaim]
+    let sources: [String: SourceRecord]
+    let policyVersions: [String: Int]
+    let ledgers = AssistantLedgerBox()
+}
+
+/// Review ledgers are needed only for continuous-expression inputs; build them
+/// on first use so the common single-expression path never pays for them.
+final class AssistantLedgerBox {
+    private var cached: [String: ActionReviewLedger]?
+    func value(_ build: () throws -> [String: ActionReviewLedger]) rethrows -> [String: ActionReviewLedger] {
+        if let cached { return cached }
+        let built = try build()
+        cached = built
+        return built
+    }
+}
+
 extension VoiceOSStore {
+    func assistantValidationContext() throws -> AssistantValidationContext {
+        let actionRows = try StartupTrace.measure("assistantContext.actions") { try actions(includeHistory: true) }
+        let claimRows = try StartupTrace.measure("assistantContext.claims") { try candidateClaims() }
+        let sourceRows = try StartupTrace.measure("assistantContext.sources") { try sources() }
+        return .init(actions: Dictionary(uniqueKeysWithValues: actionRows.map { ($0.id, $0) }),
+                     claims: Dictionary(uniqueKeysWithValues: claimRows.map { ($0.id, $0) }),
+                     sources: Dictionary(uniqueKeysWithValues: sourceRows.map { ($0.id, $0) }),
+                     policyVersions: Dictionary(uniqueKeysWithValues: sourceRows.map { ($0.id, $0.policyVersion) }))
+    }
     private func assistantInput(actionID: String, expectedVersion: Int, instruction: String, instructionSourceID: String? = nil, allowsCompleted: Bool = false, destination: ModelDestination = .local, mode: AssistantMode = .execution) throws -> AssistantTaskInput {
-        guard ready, let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+        var context = try assistantValidationContext()
+        return try assistantInput(actionID: actionID, expectedVersion: expectedVersion, instruction: instruction, instructionSourceID: instructionSourceID, allowsCompleted: allowsCompleted, destination: destination, mode: mode, context: &context)
+    }
+    private func assistantInput(actionID: String, expectedVersion: Int, instruction: String, instructionSourceID: String? = nil, allowsCompleted: Bool = false, destination: ModelDestination = .local, mode: AssistantMode = .execution, context: inout AssistantValidationContext) throws -> AssistantTaskInput {
+        guard ready, let action = context.actions[actionID],
               action.version == expectedVersion, action.validity == "current", (action.state == "open" || allowsCompleted && action.state == "completed"),
               action.kind == "task" && action.intentActor == "user" || mode == .analysis && action.kind == "opportunity" && action.intentActor == "user",
-              let claim = try candidateClaim(id: action.claimID), claim.reviewVersion == action.claimReviewVersion,
+              let claim = context.claims[action.claimID], claim.reviewVersion == action.claimReviewVersion,
               claim.ownership == "user_tentative", !claim.references.isEmpty else { throw VoiceOSError("仅当前有效的个人内容可由 AI 处理；请核对原话与归属") }
         var ids: [String] = []
         for ref in claim.references where !ids.contains(ref.sourceID) { ids.append(ref.sourceID) }
         if let instructionSourceID, !ids.contains(instructionSourceID) { ids.append(instructionSourceID) }
         try requireReviewedTranscriptions(sourceIDs:ids,destination:destination)
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
-        let ledgers = try actionReviewLedgers()
-        guard ids.allSatisfy({ id in
+        let catalog = context.sources
+        let ledgersBox = context.ledgers
+        guard try ids.allSatisfy({ id in
             guard let source = catalog[id] else { return false }
             guard source.presentation?.automaticInput != nil else { return true }
-            guard let expression = source.presentation?.expression, expression.state == "completed",
-                  let ledger = ledgers[expression.id], !ledger.requiresReview(actionID: actionID) else { return false }
+            guard let expression = source.presentation?.expression, expression.state == "completed" else { return false }
+            let ledgers = try ledgersBox.value { try actionReviewLedgers() }
+            guard let ledger = ledgers[expression.id], !ledger.requiresReview(actionID: actionID) else { return false }
             return true
         }) else { throw VoiceOSError("连续表达仍在整体核对，AI 待办将在完成后继续") }
         let budget = max(1, ids.reduce(0) { $0 + (catalog[$1]?.transcript?.unicodeScalars.count ?? 0) })
-        let context = try prepareLocalTranscriptContext(sourceIDs: ids, scalarBudget: budget)
-        guard claim.references.allSatisfy({ ref in context.sources.contains(where: { $0.sourceID == ref.sourceID && $0.transcriptVersionID == ref.transcriptVersionID && $0.origin == "user" && $0.speaker == "user" && $0.spans.contains(where: { $0.id == ref.spanID }) }) }),
-              instructionSourceID == nil || context.sources.first(where: { $0.sourceID == instructionSourceID })?.text == instruction else { throw VoiceOSError("委托原话版本或归属已变化") }
+        let transcriptContext = try prepareLocalTranscriptContext(sourceIDs: ids, scalarBudget: budget)
+        guard claim.references.allSatisfy({ ref in transcriptContext.sources.contains(where: { $0.sourceID == ref.sourceID && $0.transcriptVersionID == ref.transcriptVersionID && $0.origin == "user" && $0.speaker == "user" && $0.spans.contains(where: { $0.id == ref.spanID }) }) }),
+              instructionSourceID == nil || transcriptContext.sources.first(where: { $0.sourceID == instructionSourceID })?.text == instruction else { throw VoiceOSError("委托原话版本或归属已变化") }
         var policies: [String: Int] = [:]
-        for id in ids { policies[id] = try sourcePolicy(sourceID: id).version }
-        return .init(actionID: actionID, actionVersion: action.version, claimID: claim.id, claimReviewVersion: claim.reviewVersion, title: action.title, note: action.note, instruction: instruction, context: context, policyVersions: policies, references: claim.references, mode: mode)
+        for id in ids {
+            guard let version = context.policyVersions[id] else { throw VoiceOSError("来源不存在") }
+            guard version > 0 else { throw VoiceOSError("来源授权版本无效") }
+            policies[id] = version
+        }
+        return .init(actionID: actionID, actionVersion: action.version, claimID: claim.id, claimReviewVersion: claim.reviewVersion, title: action.title, note: action.note, instruction: instruction, context: transcriptContext, policyVersions: policies, references: claim.references, mode: mode)
     }
     private func validateAssistantInput(_ input: AssistantTaskInput, destination: ModelDestination, allowsCompletionHistory: Bool = false) throws {
+        var context = try assistantValidationContext()
+        try validateAssistantInput(input, destination: destination, allowsCompletionHistory: allowsCompletionHistory, context: &context)
+    }
+    private func validateAssistantInput(_ input: AssistantTaskInput, destination: ModelDestination, allowsCompletionHistory: Bool = false, context: inout AssistantValidationContext) throws {
         var version = input.actionVersion
         if allowsCompletionHistory, let action = try db.query("SELECT version FROM actions WHERE id=?", [input.actionID]).first,
            let latest = action["version"].flatMap(Int.init), latest > version {
@@ -164,20 +209,51 @@ extension VoiceOSStore {
             version = latest
         }
         let instructionID = input.context.sources.first(where: { !input.references.map(\.sourceID).contains($0.sourceID) })?.sourceID
-        let live = try assistantInput(actionID: input.actionID, expectedVersion: version, instruction: input.instruction, instructionSourceID: instructionID, allowsCompleted: allowsCompletionHistory,destination:destination,mode:input.mode)
-        let current = AssistantTaskInput(actionID: live.actionID,actionVersion: input.actionVersion,claimID: live.claimID,claimReviewVersion: live.claimReviewVersion,title: live.title,note: live.note,instruction: live.instruction,context: live.context,policyVersions: live.policyVersions,references: live.references,mode: input.mode)
-        guard try Self.relevanceJSON(current) == Self.relevanceJSON(input) else { throw VoiceOSError("委托、原话或授权已变化，请重新交给 AI") }
+        let live = try assistantInput(actionID: input.actionID, expectedVersion: version, instruction: input.instruction, instructionSourceID: instructionID, allowsCompleted: allowsCompletionHistory,destination:destination,mode:input.mode,context: &context)
+        guard try Self.assistantInputsMatch(live, input) else { throw VoiceOSError("委托、原话或授权已变化，请重新交给 AI") }
         if destination == .cloud, input.context.sources.contains(where: \.localOnly) { throw VoiceOSError("委托依据含仅本地资料，请先允许这些原话用于云端") }
     }
+    /// The stored snapshot is equal when every derived field matches. Transcript
+    /// sources are compared by their digest, which is the same identity the
+    /// context validator already relies on; that avoids two full JSON encodes.
+    private static func assistantInputsMatch(_ live: AssistantTaskInput, _ input: AssistantTaskInput) throws -> Bool {
+        guard live.actionID == input.actionID, live.claimID == input.claimID, live.claimReviewVersion == input.claimReviewVersion,
+              live.title == input.title, live.note == input.note, live.instruction == input.instruction,
+              live.policyVersions == input.policyVersions, live.references == input.references, live.mode == input.mode,
+              live.context.scalarBudget == input.context.scalarBudget, live.context.contentDigest == input.context.contentDigest,
+              try Self.relevanceJSON(live.context.recordingContexts) == Self.relevanceJSON(input.context.recordingContexts) else { return false }
+        if live.context.conversationFocus != nil || input.context.conversationFocus != nil {
+            guard try Self.relevanceJSON(live.context.conversationFocus) == Self.relevanceJSON(input.context.conversationFocus) else { return false }
+        }
+        if live.context.reflectionFocus != nil || input.context.reflectionFocus != nil {
+            guard try Self.relevanceJSON(live.context.reflectionFocus) == Self.relevanceJSON(input.context.reflectionFocus) else { return false }
+        }
+        return true
+    }
     public func assistantExecutions(actionID: String? = nil) throws -> [AssistantExecutionRecord] {
+        var context: AssistantValidationContext?
+        return try assistantExecutions(actionID: actionID, context: &context)
+    }
+    func assistantExecutions(actionID: String? = nil, context: inout AssistantValidationContext?) throws -> [AssistantExecutionRecord] {
         for row in try db.query("SELECT * FROM assistant_executions WHERE validity='current'") {
             let input = try JSONDecoder().decode(AssistantTaskInput.self, from: Data(row["input_json"]!.utf8))
-            if (try? validateAssistantInput(input, destination: .local, allowsCompletionHistory: row["state"] == "completed")) == nil {
+            var validation: AssistantValidationContext
+            if let shared = context { validation = shared }
+            else { validation = try StartupTrace.measure("assistantContext") { try assistantValidationContext() } }
+            let froze: Bool
+            do {
+                try validateAssistantInput(input, destination: .local, allowsCompletionHistory: row["state"] == "completed", context: &validation)
+                froze = false
+            } catch {
+                froze = true
                 activeAssistantRequests[row["id"]!]?()
                 try db.execute("UPDATE assistant_executions SET validity='frozen',state=CASE WHEN state IN ('queued','running') THEN 'cancelled' ELSE state END,error='委托或依据已变化；保留历史结果',updated_at=? WHERE id=?", [Self.now(),row["id"]])
                 if let sourceID = row["result_source_id"] { try db.execute("UPDATE sources SET state='quarantined',error='助理交付依据已变化，保留历史内容' WHERE id=?",[sourceID]); try invalidateCognition(sourceID: sourceID) }
             }
             if row["state"] == "completed", let sourceID = row["result_source_id"] { _ = try? validateAssistantResultBasis(sourceID: sourceID) }
+            // A freeze quarantines a source and invalidates cognition; later rows
+            // must not validate against reads taken before it.
+            context = froze ? nil : validation
         }
         let rows = try db.query("SELECT * FROM assistant_executions \(actionID == nil ? "" : "WHERE action_id=?") ORDER BY sequence DESC,id", actionID.map { [$0] } ?? [])
         return try rows.map { row in
@@ -262,7 +338,13 @@ extension VoiceOSStore {
         }
     }
     public func assistantAssessmentIssues() throws -> [AssistantAssessmentIssue] {
-        let current = Dictionary(uniqueKeysWithValues: try actions().map { ($0.id,$0) })
+        try assistantAssessmentIssues(context: nil)
+    }
+    func assistantAssessmentIssues(context: AssistantValidationContext?) throws -> [AssistantAssessmentIssue] {
+        let validation: AssistantValidationContext
+        if let context { validation = context }
+        else { validation = try StartupTrace.measure("assistantContext") { try assistantValidationContext() } }
+        let current = Dictionary(uniqueKeysWithValues: validation.actions.values.filter { $0.validity == "current" && $0.state == "open" }.map { ($0.id,$0) })
         // An action with any execution row already has a verdict, frozen or not.
         // Asking assistantExecutions(actionID:) per failed assessment revalidated
         // every current execution once per row; one existence query is equivalent.

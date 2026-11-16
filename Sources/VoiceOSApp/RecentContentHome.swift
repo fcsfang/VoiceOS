@@ -1,6 +1,13 @@
 import SwiftUI
 import VoiceOSCore
 
+/// The row the reader currently shows. The workspace header's discussion action
+/// lives outside this view and starts from the same material.
+final class RecentContentHomeSelection {
+    static let shared = RecentContentHomeSelection()
+    var itemID: String?
+}
+
 /// Content-first home: recordings on the left, the selected one read as
 /// threads of thought on the right. A thread is a pure grouping of the
 /// recording's insights, goals and notes, so the same recording always reads
@@ -9,9 +16,11 @@ struct RecentContentHome: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let openSource: (String) -> Void
+    let openSpan: (String, String) -> Void
     let openTask: (String) -> Void
     let capture: () -> Void
     @State private var selectedID: String?
+    @State private var readingStates: [String: SourceReadingState] = [:]
     private let topAnchor = "home.top"
 
     private var days: [RecentContentDay] { model.homeSnapshot.days }
@@ -21,16 +30,23 @@ struct RecentContentHome: View {
     }
 
     var body: some View {
-        if items.isEmpty {
-            empty.onAppear { StartupTrace.mark("home.appear.empty") }
-        } else {
-            HStack(spacing: 0) {
-                timeline.frame(width: 264)
-                Rectangle().fill(palette.border).frame(width: 1)
-                reader
-            }.onAppear { StartupTrace.mark("home.appear items=\(items.count)") }
+        Group {
+            if items.isEmpty {
+                empty.onAppear { StartupTrace.mark("home.appear.empty") }
+            } else {
+                HStack(spacing: 0) {
+                    timeline.frame(width: 264)
+                    Rectangle().fill(palette.border).frame(width: 1)
+                    reader
+                }.onAppear { StartupTrace.mark("home.appear items=\(items.count)") }
+            }
         }
+        .onAppear { syncSelection() }
+        .onChange(of: selected?.id) { _, _ in syncSelection() }
+        .task(id: model.initialized) { if model.initialized { readingStates = await model.readingStates() } }
     }
+
+    private func syncSelection() { RecentContentHomeSelection.shared.itemID = selected?.id }
 
     private var empty: some View {
         VStack(spacing: 14) {
@@ -59,14 +75,54 @@ struct RecentContentHome: View {
 
     private func row(_ item: RecentContentItem) -> some View {
         let isSelected = selected?.id == item.id
-        return VStack(alignment: .leading, spacing: 3) {
-            Text(item.title).vosFont(WorkspaceText.rowTitle)
-                .foregroundStyle(palette.text).lineLimit(2).multilineTextAlignment(.leading)
-            Text(rowMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: rowIcon(item)).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                .frame(width: 28, height: 28).background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(rowTitle(item)).vosFont(WorkspaceText.rowTitle)
+                    .foregroundStyle(palette.text).lineLimit(2).multilineTextAlignment(.leading)
+                Text(rowMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            }
+            Spacer(minLength: 6)
+            if let status = statusSlot(item) {
+                Text(status.text).vosFont(WorkspaceText.meta).foregroundStyle(status.color).padding(.top, 2)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 10).padding(.vertical, 8)
         .background(isSelected ? palette.selection : .clear, in: RoundedRectangle(cornerRadius: 9))
+        .overlay { if isSelected { RoundedRectangle(cornerRadius: 9).strokeBorder(palette.focusRing, lineWidth: 1) } }
+        .contentShape(RoundedRectangle(cornerRadius: 9))
+        .accessibilityAddTraits(isSelected ? .isSelected : AccessibilityTraits())
+    }
+
+    private func rowIcon(_ item: RecentContentItem) -> String {
+        if item.kind == .feedback { return "arrow.triangle.2.circlepath" }
+        return materialSource(item)?.kind.contains("text") == true ? "doc.text" : "waveform"
+    }
+
+    private func materialSource(_ item: RecentContentItem) -> SourceRecord? {
+        guard let id = item.sourceIDs.first else { return nil }
+        return model.records.first { $0.id == id }
+    }
+
+    /// Slot 3 holds only a non-default state, one at a time.
+    private func statusSlot(_ item: RecentContentItem) -> (text: String, color: Color)? {
+        guard item.kind == .material, let source = materialSource(item) else { return nil }
+        if source.localOnly { return ("仅本地", palette.secondaryText) }
+        if ["queued", "running", "reserved"].contains(source.jobState ?? "") { return ("整理中", palette.accent) }
+        if source.needsTranscriptionReview { return ("待核对", palette.warning) }
+        if readingStates[source.id] == .reading { return ("在读", palette.accent) }
+        return nil
+    }
+
+    private func rowTitle(_ item: RecentContentItem) -> String {
+        item.kind == .feedback ? item.title + " · \(progressCount(item)) 条" : item.title
+    }
+
+    private func progressCount(_ item: RecentContentItem) -> Int {
+        model.homeSnapshot.progressRows[item.id]?.count ?? item.excerpts.count
     }
 
     private func rowMeta(_ item: RecentContentItem) -> String {
@@ -92,40 +148,49 @@ struct RecentContentHome: View {
 
     @ViewBuilder private func readerContent(_ item: RecentContentItem) -> some View {
         if item.kind == .feedback {
-            let rows = model.homeSnapshot.progressRows[item.id] ?? []
-            VStack(alignment: .leading, spacing: 18) {
-                Text([dateLabel(item.date), "任务进展"].joined(separator: " · "))
-                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                Text(item.title).vosFont(WorkspaceText.pageTitle).lineSpacing(4).textSelection(.enabled)
-                if rows.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(item.excerpts.enumerated()), id: \.offset) { index, excerpt in
-                            if index > 0 { Divider() }
-                            Text(excerpt).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
-                        }
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 12) {
-                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                            if index > 0 { Divider() }
-                            progressRow(row)
-                        }
-                    }
-                }
-            }
+            feedbackReader(item)
         } else {
             materialReader(item)
         }
     }
 
-    private func progressRow(_ row: RecentContentProgressRow) -> some View {
+    private func feedbackReader(_ item: RecentContentItem) -> some View {
+        let rows = model.homeSnapshot.progressRows[item.id] ?? []
+        let count = rows.isEmpty ? item.excerpts.count : rows.count
+        return VStack(alignment: .leading, spacing: 16) {
+            Text([dateLabel(item.date), timeLabel(item.date)].joined(separator: " · "))
+                .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            Text("\(item.title) · \(count) 条")
+                .vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText)
+                .accessibilityAddTraits(.isHeader)
+            if rows.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(item.excerpts.enumerated()), id: \.offset) { index, excerpt in
+                        if index > 0 { Divider() }
+                        Text(excerpt)
+                            .vosFont(index == 0 ? WorkspaceText.pageTitle : WorkspaceText.body)
+                            .lineSpacing(index == 0 ? 4 : 5)
+                            .textSelection(.enabled)
+                    }
+                }
+            } else if let first = rows.first {
+                progressRow(first, style: WorkspaceText.pageTitle)
+                ForEach(rows.dropFirst()) { row in
+                    Divider().padding(.top, 4)
+                    progressRow(row, style: WorkspaceText.body)
+                }
+            }
+        }
+    }
+
+    private func progressRow(_ row: RecentContentProgressRow, style: WorkspaceTextStyle) -> some View {
         Button { openTask(row.actionID) } label: {
             VStack(alignment: .leading, spacing: 6) {
+                Text(row.text).vosFont(style).lineSpacing(style.size > 20 ? 4 : 5).textSelection(.enabled)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(row.taskTitle).vosFont(WorkspaceText.rowTitle)
-                    Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    Text(row.taskTitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
                 }
-                Text(row.text).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -137,7 +202,20 @@ struct RecentContentHome: View {
     private func materialReader(_ item: RecentContentItem) -> some View {
         let digest = model.homeSnapshot.digests[item.id] ?? RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration)
         return VStack(alignment: .leading, spacing: 0) {
-            Text(readerMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            HStack(alignment: .firstTextBaseline, spacing: 14) {
+                Text(readerMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Spacer(minLength: 8)
+                if let source = materialSource(item), ["audio", "video"].contains(source.kind) {
+                    Button("回听") { Task { await model.play(source) } }
+                        .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                        .disabled(source.state != "saved")
+                        .help(source.state == "saved" ? "播放这段录音" : "录音尚未就绪，暂时无法回听")
+                }
+                if let first = item.sourceIDs.first {
+                    Button("打开材料") { openSource(first) }
+                        .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                }
+            }
             Text(item.title).vosFont(WorkspaceText.pageTitle).lineSpacing(4)
                 .padding(.top, 16).textSelection(.enabled)
             if !item.summary.isEmpty {
@@ -151,10 +229,6 @@ struct RecentContentHome: View {
                     .id("home.thread.\(thread.id)")
             }
             tasksSummary(digest.tasks)
-            if let first = item.sourceIDs.first {
-                Button("打开材料") { openSource(first) }.buttonStyle(.plain)
-                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.accent).padding(.top, 40)
-            }
         }
     }
 
@@ -180,7 +254,7 @@ struct RecentContentHome: View {
                             Text("\(index + 1)").vosFont(WorkspaceText.caption.size, weight: WorkspaceText.caption.weight, monospacedDigit: true)
                                 .foregroundStyle(palette.tertiaryText).frame(width: 18, alignment: .trailing)
                                 .padding(.top, 3)
-                            Text(thought.statement).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
+                            ThoughtLine(thought: thought, openOriginal: { openOriginal(thought) })
                         }
                     }
                 }.padding(.top, 18).padding(.leading, 42)
@@ -198,6 +272,12 @@ struct RecentContentHome: View {
                 .padding(.top, 20).padding(.leading, 42)
             }
         }.accessibilityIdentifier("home.thread")
+    }
+
+    private func openOriginal(_ thought: RecentContentThought) {
+        guard let claim = model.claims.first(where: { $0.id == thought.claimID }),
+              let reference = claim.references.first else { return }
+        openSpan(reference.sourceID, reference.spanID)
     }
 
     @ViewBuilder private func tasksSummary(_ tasks: [RecentContentTask]) -> some View {
@@ -234,5 +314,26 @@ struct RecentContentHome: View {
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
+    }
+}
+
+private struct ThoughtLine: View {
+    @Environment(\.workspacePalette) private var palette
+    let thought: RecentContentThought
+    let openOriginal: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text(thought.statement).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if hovered {
+                Button("看原话") { openOriginal() }
+                    .buttonStyle(.plain).vosFont(WorkspaceText.caption).foregroundStyle(palette.accent)
+                    .help("打开这条想法出自的材料")
+            }
+        }
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
     }
 }

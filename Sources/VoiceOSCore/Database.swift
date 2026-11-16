@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...62).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...63).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1196,6 +1196,50 @@ final class Database {
                     // REPLACE fails when this trigger runs from an ON DELETE SET NULL action, so upsert.
                     try execute("CREATE TRIGGER search_dirty_actions AFTER UPDATE ON actions BEGIN INSERT INTO search_index_meta(key, value) VALUES('dirty', '1') ON CONFLICT(key) DO UPDATE SET value=excluded.value; END")
                     try execute("PRAGMA user_version=62")
+                }
+            } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
+            try execute("PRAGMA foreign_keys=ON")
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "62" {
+            // Adds `someday` to both the action and its revision ledger. Foreign
+            // keys stay off during the swap so child tables keep their references.
+            try execute("PRAGMA foreign_keys=OFF")
+            do {
+                try transaction {
+                    try execute("""
+                    CREATE TABLE actions_next (
+                      id TEXT PRIMARY KEY, claim_id TEXT NOT NULL REFERENCES claims(id), claim_review_version INTEGER NOT NULL CHECK(claim_review_version>=0),
+                      title TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('task','opportunity','ai_suggestion')),
+                      intent_actor TEXT NOT NULL CHECK(intent_actor IN ('user','ai')), note TEXT NOT NULL,
+                      state TEXT NOT NULL CHECK(state IN ('open','completed','dismissed','someday')), validity TEXT NOT NULL CHECK(validity IN ('current','frozen')),
+                      version INTEGER NOT NULL DEFAULT 1 CHECK(version>=1), command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL,
+                      auto_send INTEGER NOT NULL DEFAULT 0 CHECK(auto_send IN (0,1)), intent_json TEXT,
+                      parent_id TEXT REFERENCES actions(id) ON DELETE SET NULL DEFERRABLE INITIALLY DEFERRED,
+                      CHECK((kind='ai_suggestion' AND intent_actor='ai') OR (kind!='ai_suggestion' AND intent_actor='user')),
+                      CHECK(state!='completed' OR kind IN ('task','opportunity')),
+                      CHECK(state!='someday' OR kind!='task')
+                    )
+                    """)
+                    try execute("""
+                    INSERT INTO actions_next(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,version,command_id,input_fingerprint,created_at,auto_send,intent_json,parent_id)
+                    SELECT id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,version,command_id,input_fingerprint,created_at,auto_send,intent_json,parent_id FROM actions
+                    """)
+                    try execute("DROP TABLE actions")
+                    try execute("ALTER TABLE actions_next RENAME TO actions")
+                    try execute("""
+                    CREATE TABLE action_revisions_next (
+                      id TEXT PRIMARY KEY, action_id TEXT NOT NULL REFERENCES actions(id), version INTEGER NOT NULL CHECK(version>1), from_version INTEGER NOT NULL,
+                      state TEXT NOT NULL CHECK(state IN ('open','completed','dismissed','someday')), note TEXT NOT NULL, actor TEXT NOT NULL CHECK(actor IN ('user','external')),
+                      command_id TEXT NOT NULL UNIQUE, input_fingerprint TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(action_id,version)
+                    )
+                    """)
+                    try execute("INSERT INTO action_revisions_next(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) SELECT id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at FROM action_revisions")
+                    try execute("DROP TABLE action_revisions")
+                    try execute("ALTER TABLE action_revisions_next RENAME TO action_revisions")
+                    guard try query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("资料库升级引用校验失败") }
+                    try execute("CREATE TRIGGER search_dirty_actions AFTER UPDATE ON actions BEGIN INSERT INTO search_index_meta(key, value) VALUES('dirty', '1') ON CONFLICT(key) DO UPDATE SET value=excluded.value; END")
+                    try execute("PRAGMA user_version=63")
                 }
             } catch { try? execute("PRAGMA foreign_keys=ON"); throw error }
             try execute("PRAGMA foreign_keys=ON")

@@ -129,47 +129,111 @@ struct ThoughtPanoramaView: View {
         }
     }
 
+    // Three density tiers. ViewThatFits keeps the search field from clipping: below
+    // 1100pt the status sentence drops to an icon, and when the row still does not
+    // fit the time filter and tools fold into the trailing menu.
     private func constellationToolbar(width: CGFloat) -> some View {
-        let compact = width < 900
-        let minimal = width < 720
-        return HStack(spacing: minimal ? 6 : compact ? 8 : 12) {
-            Text("思考全景").vosFont(WorkspaceText.rowTitle).lineLimit(1)
-            if let snapshot = state?.snapshot, snapshot.isPartial {
-                partialChip(snapshot, short: compact)
+        ViewThatFits(in: .horizontal) {
+            if width >= 1100 {
+                toolbarRow(searchWidth: 220, showsStatusText: true, toolsInline: true)
             }
-            Picker("时间高亮", selection: $recent) {
-                Text("全部").tag(false)
-                Text("近期高亮").tag(true)
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.small)
-            .labelsHidden()
-            .frame(width: compact ? 130 : 150)
-            searchField(width: minimal ? 120 : compact ? 150 : 220)
-            searchMatchStatus(width: width)
-            if compact {
-                Image(systemName: "info.circle")
-                    .foregroundStyle(showsUnitFailure ? palette.warning : palette.secondaryText)
-                    .help(toolbarMessageHelp)
-                    .accessibilityLabel(toolbarMessage)
-                Spacer(minLength: 0)
-            } else {
-                Text(toolbarMessage)
-                    .vosFont(WorkspaceText.meta)
-                    .foregroundStyle(showsUnitFailure ? palette.warning : palette.secondaryText)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(toolbarMessageHelp)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            contextualControl(iconOnly: minimal)
-            outlineToolbarButton
-            coverageToolbarButton
-            materialsToolbarButton
+            toolbarRow(searchWidth: 150, showsStatusText: false, toolsInline: true)
+            toolbarRow(searchWidth: 140, showsStatusText: false, toolsInline: false)
         }
         .padding(.horizontal, WorkspaceMetrics.toolbarPadding)
         .frame(maxWidth: .infinity)
         .frame(minHeight: 52)
+    }
+
+    private func toolbarRow(searchWidth: CGFloat, showsStatusText: Bool, toolsInline: Bool) -> some View {
+        HStack(spacing: showsStatusText ? 12 : 8) {
+            Text("思考全景").vosFont(WorkspaceText.rowTitle).lineLimit(1)
+            if let snapshot = state?.snapshot, snapshot.isPartial {
+                partialChip(snapshot, short: !showsStatusText)
+            }
+            if toolsInline {
+                recentPicker.frame(width: showsStatusText ? 150 : 130)
+                searchField(width: searchWidth)
+                if showsStatusText {
+                    searchMatchSummaryWide
+                    Text(toolbarMessage)
+                        .vosFont(WorkspaceText.meta)
+                        .foregroundStyle(showsUnitFailure ? palette.warning : palette.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(toolbarMessageHelp)
+                        .frame(maxWidth: 320, alignment: .leading)
+                    Spacer(minLength: 0)
+                    contextualControl(iconOnly: false)
+                } else {
+                    searchMatchSummaryCompact
+                    Spacer(minLength: 0)
+                    statusIcon
+                    contextualControl(iconOnly: true)
+                }
+                outlineToolbarButton
+                coverageToolbarButton
+                materialsToolbarButton
+            } else {
+                searchField(width: searchWidth)
+                searchMatchNarrowStatus
+                Spacer(minLength: 0)
+                statusIcon
+                toolsMenu
+            }
+        }
+    }
+
+    private var recentPicker: some View {
+        Picker("时间高亮", selection: $recent) {
+            Text("全部").tag(false)
+            Text("近期高亮").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+        .labelsHidden()
+    }
+
+    private var statusIcon: some View {
+        Image(systemName: "info.circle")
+            .foregroundStyle(showsUnitFailure ? palette.warning : palette.secondaryText)
+            .help(toolbarMessageHelp)
+            .accessibilityLabel(toolbarMessage)
+    }
+
+    private var toolsMenu: some View {
+        Menu {
+            Picker("时间高亮", selection: $recent) {
+                Text("全部").tag(false)
+                Text("近期高亮").tag(true)
+            }
+            Divider()
+            contextualMenuItems
+            Divider()
+            Button { showOutline = true } label: { Label("问题与联系列表", systemImage: "list.bullet") }
+            Button { showCoverage = true } label: { Label("覆盖与未归入项", systemImage: "chart.pie") }
+            Button(action: openMaterials) { Label("打开材料", systemImage: "doc.on.doc") }
+        } label: {
+            Image(systemName: "ellipsis").frame(width: 22, height: 22)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("时间高亮、核对与工具")
+        .accessibilityLabel("更多工具")
+    }
+
+    @ViewBuilder
+    private var contextualMenuItems: some View {
+        if isGenerating {
+            Button("正在生成…") {}.disabled(true)
+        } else if !modelConfigured {
+            Button { chooseTextModel() } label: { Label("连接文本模型", systemImage: "link") }
+        } else if let state, ["failed", "unknown"].contains(state.status) {
+            let canDraft = state.snapshot?.isPartial == true && state.snapshot?.proposal.relations.isEmpty == true
+            if canDraft { Button { draft() } label: { Label("生成草稿", systemImage: "doc.badge.plus") } }
+            Button { retry() } label: { Label("继续核对", systemImage: "arrow.clockwise") }
+        }
     }
 
     // Core reports unit failures as "N 个完整单元未能核对" plus raw unit IDs.
@@ -239,24 +303,31 @@ struct ThoughtPanoramaView: View {
         return !snapshot.proposal.questions.isEmpty
     }
 
-    // The status shrinks with the toolbar so it never pushes the right-side
-    // controls out: full copy, then the count, then only the locate control.
-    // Below 520 the fixed items already fill the pane.
+    // Each density tier picks its own match summary; the narrowest keeps only the
+    // locate control so the search field always has room.
     @ViewBuilder
-    private func searchMatchStatus(width: CGFloat) -> some View {
+    private var searchMatchSummaryWide: some View {
         if hasQuery, hasPanoramaRegions {
-            if width >= 900 {
-                searchMatchText(searchMatchLabel)
-                if searchMatches.count > 0 { locateButton }
-            } else if width >= 620 {
-                searchMatchText(searchMatchCompactLabel)
-                if searchMatches.count > 0 { locateButton }
-            } else if width >= 520 {
-                if searchMatches.count > 0 {
-                    locateIconButton
-                } else {
-                    searchMatchText("无匹配")
-                }
+            searchMatchText(searchMatchLabel)
+            if searchMatches.count > 0 { locateButton }
+        }
+    }
+
+    @ViewBuilder
+    private var searchMatchSummaryCompact: some View {
+        if hasQuery, hasPanoramaRegions {
+            searchMatchText(searchMatchCompactLabel)
+            if searchMatches.count > 0 { locateButton }
+        }
+    }
+
+    @ViewBuilder
+    private var searchMatchNarrowStatus: some View {
+        if hasQuery, hasPanoramaRegions {
+            if searchMatches.count > 0 {
+                locateIconButton
+            } else {
+                searchMatchText("无匹配")
             }
         }
     }

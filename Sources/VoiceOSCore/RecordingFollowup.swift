@@ -158,18 +158,31 @@ public protocol RecordingFollowupPort: Sendable {
     func generate(_ input: RecordingFollowupInput) async throws -> RecordingFollowupGeneration
 }
 
+/// Per-source transcript scalars, so validating many receipts for the same
+/// recording does not re-split its text for every claim reference.
+private final class FollowupTranscriptScalars {
+    private var values: [String: [UnicodeScalar]] = [:]
+    func scalars(sourceID: String, transcriptVersionID: String, text: String) -> [UnicodeScalar] {
+        let key = sourceID + ":" + transcriptVersionID
+        if let cached = values[key] { return cached }
+        let computed = Array(text.unicodeScalars)
+        values[key] = computed
+        return computed
+    }
+}
+
 extension VoiceOSStore {
     private func followupJSON<T: Encodable>(_ value: T) throws -> String {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         return String(decoding: try encoder.encode(value), as: UTF8.self)
     }
-    private func rememberedThought(_ claim: CandidateClaim, catalog: [String: SourceRecord]) throws -> RememberedThought? {
+    private func rememberedThought(_ claim: CandidateClaim, catalog: [String: SourceRecord], scalarsCache: FollowupTranscriptScalars? = nil) throws -> RememberedThought? {
         guard claim.validity == "current", claim.ownership == "user_tentative", claim.reviewState != "rejected" else { return nil }
         var evidence: [FollowupEvidence] = []
         for ref in claim.references {
             guard let source = catalog[ref.sourceID], !source.localOnly,!source.needsTranscriptionReview, source.transcriptVersionID == ref.transcriptVersionID,
                   let span = source.spans.first(where: { $0.id == ref.spanID }), let text = source.transcript else { return nil }
-            let scalars = Array(text.unicodeScalars)
+            let scalars = scalarsCache?.scalars(sourceID: source.id, transcriptVersionID: ref.transcriptVersionID, text: text) ?? Array(text.unicodeScalars)
             evidence.append(.init(reference: ref, quote: String(String.UnicodeScalarView(scalars[span.textStart..<span.textEnd])), policyVersion: source.policyVersion))
         }
         guard !evidence.isEmpty else { return nil }
@@ -196,10 +209,10 @@ extension VoiceOSStore {
         return feedback
     }
 
-    private func followupTasks(actions: [ActionRecord], claims: [String: CandidateClaim], catalog: [String: SourceRecord], goalIDByTaskID: [String: String], feedback preloaded: [String: [String]]? = nil, remembered: ((CandidateClaim) throws -> RememberedThought?)? = nil) throws -> [FollowupTask] {
+    private func followupTasks(actions: [ActionRecord], claims: [String: CandidateClaim], catalog: [String: SourceRecord], goalIDByTaskID: [String: String], feedback preloaded: [String: [String]]? = nil, remembered: ((CandidateClaim) throws -> RememberedThought?)? = nil, scalarsCache: FollowupTranscriptScalars? = nil) throws -> [FollowupTask] {
         func thought(for claim: CandidateClaim) throws -> RememberedThought? {
             if let remembered { return try remembered(claim) }
-            return try rememberedThought(claim, catalog: catalog)
+            return try rememberedThought(claim, catalog: catalog, scalarsCache: scalarsCache)
         }
         let feedback = try preloaded ?? followupFeedback(actions: actions, claims: claims, catalog: catalog)
         return try actions.filter { $0.validity == "current" && $0.kind == "task" && $0.intentActor == "user" && $0.state != "dismissed" }.compactMap { action in
@@ -220,6 +233,7 @@ extension VoiceOSStore {
 
     public func prepareRecordingFollowup(sourceID: String) throws -> RecordingFollowupInput {
         let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let scalarsCache = FollowupTranscriptScalars()
         guard let source = catalog[sourceID], !source.localOnly, source.origin == "user", source.speaker == "user", let text = source.transcript else { throw VoiceOSError("请先完成本人原话并允许文本模型处理") }
         try requireReviewedTranscriptions(sourceIDs:[sourceID],destination:.cloud)
         let current = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: max(1, text.unicodeScalars.count))
@@ -231,15 +245,15 @@ extension VoiceOSStore {
         }
         let byID = Dictionary(uniqueKeysWithValues: claims.map { ($0.id, $0) })
         let taskClaims = Set(actions.filter { $0.kind == "task" }.map(\.claimID))
-        let historical = try claims.filter { currentThought($0) && !taskClaims.contains($0.id) && !$0.references.contains(where: { $0.sourceID == sourceID }) }.compactMap { try rememberedThought($0, catalog: catalog) }
+        let historical = try claims.filter { currentThought($0) && !taskClaims.contains($0.id) && !$0.references.contains(where: { $0.sourceID == sourceID }) }.compactMap { try rememberedThought($0, catalog: catalog, scalarsCache: scalarsCache) }
         var goals = try actions.filter { $0.validity == "current" && $0.state == "open" && $0.intent?.intentType == "goal" && $0.intent?.uncertain == false }.compactMap { action -> FollowupGoal? in
-            guard let claim = byID[action.claimID], currentThought(claim), claim.reviewVersion == action.claimReviewVersion, let thought = try rememberedThought(claim, catalog: catalog) else { return nil }
+            guard let claim = byID[action.claimID], currentThought(claim), claim.reviewVersion == action.claimReviewVersion, let thought = try rememberedThought(claim, catalog: catalog, scalarsCache: scalarsCache) else { return nil }
             return .init(id: action.id, version: action.version, thought: thought, title: action.title)
         }
         let priorFollowups = try recordingFollowups()
         // Plan lookup compares against tasks before the plan-derived goal links,
         // because those links are read back from the plans chosen in this loop.
-        let unlinkedTasks = try followupTasks(actions: actions, claims: byID, catalog: catalog, goalIDByTaskID: [:])
+        let unlinkedTasks = try followupTasks(actions: actions, claims: byID, catalog: catalog, goalIDByTaskID: [:], scalarsCache: scalarsCache)
         for index in goals.indices {
             goals[index].previousPlan = priorFollowups.reversed().first(where: { prior in
                 guard prior.state == "completed", let original = catalog[prior.sourceID], !original.localOnly,!original.needsTranscriptionReview,
@@ -250,7 +264,7 @@ extension VoiceOSStore {
                        prior.result?.goalPlans.contains(where: { $0.goalID == goals[index].id }) == true
             })?.result?.goalPlans.first(where: { $0.goalID == goals[index].id })
         }
-        let tasks = try followupTasks(actions: actions, claims: byID, catalog: catalog, goalIDByTaskID: Self.goalIDByTaskID(goals))
+        let tasks = try followupTasks(actions: actions, claims: byID, catalog: catalog, goalIDByTaskID: Self.goalIDByTaskID(goals), scalarsCache: scalarsCache)
         var practices: [PracticeHistory] = []
         for prior in priorFollowups.reversed() where prior.sourceID != sourceID && prior.state == "completed" && prior.result?.english.isPractice == true {
             guard !practices.contains(where: { $0.sourceID == prior.sourceID }), let old = catalog[prior.sourceID], !old.localOnly,
@@ -296,8 +310,30 @@ extension VoiceOSStore {
         return try sourceIDs.sorted().map { try enqueueRecordingFollowup(sourceID: $0) }
     }
 
+    /// Decoding every follow-up archive on each refresh dominated the secondary
+    /// read. Reuse a decoded history while its stored bytes are unchanged; the
+    /// bytes themselves are the identity, so a write cannot go unnoticed.
     public func recordingFollowups() throws -> [RecordingFollowupReceipt] {
-        try db.query("SELECT followup_json FROM sources WHERE followup_json IS NOT NULL ORDER BY created_at").flatMap { try decodeWithPath([RecordingFollowupReceipt].self, from: Data($0["followup_json"]!.utf8), label: "跟进回执") }.sorted { $0.createdAt < $1.createdAt }
+        let rows = try db.query("SELECT id,followup_json FROM sources WHERE followup_json IS NOT NULL ORDER BY created_at")
+        var decoded: [RecordingFollowupReceipt] = []
+        var cache = recordingFollowupDecodeCache
+        var reused = 0, parsed = 0
+        let token = StartupTrace.begin("followups.decode")
+        for row in rows {
+            guard let id = row["id"], let json = row["followup_json"] else { continue }
+            let digest = Self.relevanceHash(Data(json.utf8))
+            if let cached = cache[id], cached.digest == digest {
+                decoded.append(contentsOf: cached.receipts); reused += cached.receipts.count; continue
+            }
+            let receipts = try decodeWithPath([RecordingFollowupReceipt].self, from: Data(json.utf8), label: "跟进回执")
+            cache[id] = (digest, receipts)
+            decoded.append(contentsOf: receipts); parsed += receipts.count
+        }
+        StartupTrace.end(token)
+        let live = Set(rows.compactMap { $0["id"] })
+        recordingFollowupDecodeCache = cache.filter { live.contains($0.key) }
+        StartupTrace.mark("followups=\(decoded.count) reused=\(reused) parsed=\(parsed)")
+        return decoded.sorted { $0.createdAt < $1.createdAt }
     }
     /// Requeues interrupted receipts and compacts legacy histories. Runs after the
     /// first workspace paint so a large follow-up archive never delays opening.
@@ -365,48 +401,77 @@ extension VoiceOSStore {
         try recordingFollowupValidities([receipt])[receipt.id] ?? .init(sourceCurrent: false, thoughtClaimIDs: [], goalIDs: [], english: false)
     }
     public func recordingFollowupValidities(_ receipts: [RecordingFollowupReceipt]) throws -> [String: RecordingFollowupValidity] {
+        try recordingFollowupValidities(receipts, catalogRows: nil, claimRows: nil, actionRows: nil)
+    }
+    /// Snapshot callers pass arrays they already read. Within one call every
+    /// distinct source transcript and continuous-expression context is validated
+    /// once, instead of once per receipt.
+    func recordingFollowupValidities(_ receipts: [RecordingFollowupReceipt], catalogRows preloadedCatalog: [SourceRecord]? = nil, claimRows preloadedClaims: [CandidateClaim]? = nil, actionRows preloadedActions: [ActionRecord]? = nil) throws -> [String: RecordingFollowupValidity] {
         let completed = receipts.filter { $0.state == "completed" && $0.result != nil }
         guard !completed.isEmpty else { return [:] }
-        let catalogRows: [SourceRecord] = try sources()
-        let claimRows: [CandidateClaim] = try candidateClaims()
-        let actionRows: [ActionRecord] = try actions(includeHistory: true)
+        let catalogRows: [SourceRecord]
+        if let preloadedCatalog { catalogRows = preloadedCatalog; StartupTrace.mark("validity.reused") }
+        else { catalogRows = try StartupTrace.measure("validity.sources") { try sources() } }
+        let claimRows: [CandidateClaim]
+        if let preloadedClaims { claimRows = preloadedClaims }
+        else { claimRows = try StartupTrace.measure("validity.claims") { try candidateClaims() } }
+        let actionRows: [ActionRecord]
+        if let preloadedActions { actionRows = preloadedActions }
+        else { actionRows = try StartupTrace.measure("validity.actions") { try self.actions(includeHistory: true) } }
         let catalog: [String: SourceRecord] = Dictionary(uniqueKeysWithValues: catalogRows.map { ($0.id, $0) })
         let claims: [String: CandidateClaim] = Dictionary(uniqueKeysWithValues: claimRows.map { ($0.id, $0) })
-        let latestRows: [String: [CandidateClaim]] = try latestCandidateClaimsBySource()
-        let latest: [String: Set<String>] = latestRows.mapValues { Set($0.map(\.id)) }
+        let latest: [String: Set<String>] = try StartupTrace.measure("validity.latest") { try latestCandidateClaimsBySource() }.mapValues { Set($0.map(\.id)) }
         let actions: [String: ActionRecord] = Dictionary(uniqueKeysWithValues: actionRows.map { ($0.id, $0) })
-        let feedback = try followupFeedback(actions: actionRows, claims: claims, catalog: catalog)
-        let expressions = try recordingExpressions()
+        let policies = Dictionary(uniqueKeysWithValues: catalogRows.map { ($0.id, $0.policyVersion) })
+        let feedback = try StartupTrace.measure("validity.feedback") { try followupFeedback(actions: actionRows, claims: claims, catalog: catalog) }
+        let expressions = try StartupTrace.measure("validity.expressions") { try recordingExpressions() }
+        let scalarsCache = FollowupTranscriptScalars()
         var rememberedCache: [String: RememberedThought?] = [:]
         func remembered(_ claim: CandidateClaim) throws -> RememberedThought? {
             if let cached = rememberedCache[claim.id] { return cached }
-            let value = try rememberedThought(claim, catalog: catalog)
+            let value = try rememberedThought(claim, catalog: catalog, scalarsCache: scalarsCache)
             rememberedCache[claim.id] = value
             return value
         }
+        var contextValidity: [String: Bool] = [:]
+        func contextIsCurrent(_ context: LocalTranscriptContext) -> Bool {
+            let key = context.contentDigest + "|" + String(context.scalarBudget) + "|" + ((try? Self.relevanceJSON(context.recordingContexts)) ?? "")
+            if let cached = contextValidity[key] { return cached }
+            let current = (try? validateLocalTranscriptContext(context)) != nil
+            contextValidity[key] = current
+            return current
+        }
+        var continuousValidity: [String: Bool] = [:]
+        func continuousIsCurrent(_ input: ContinuousRecordingContext?, _ sourceID: String) -> Bool {
+            let key: String
+            if let input {
+                key = sourceID + "|" + input.expressionID + "|" + input.digest + "|" + ((try? Self.relevanceJSON(input.policies)) ?? "")
+            } else { key = sourceID + "|none" }
+            if let cached = continuousValidity[key] { return cached }
+            let current = (try? validateContinuousRecordingContext(input, sourceID: sourceID, catalog: catalogRows, expressions: expressions)) != nil
+            continuousValidity[key] = current
+            return current
+        }
         var result: [String: RecordingFollowupValidity] = [:]
         for receipt in completed {
-            result[receipt.id] = try recordingFollowupValidity(receipt, catalog: catalog, claims: claims, latest: latest, actions: actions, feedback: feedback, remembered: remembered, expressions: expressions)
+            result[receipt.id] = try recordingFollowupValidity(receipt, catalog: catalog, claims: claims, latest: latest, actions: actions, policies: policies, feedback: feedback, remembered: remembered, contextIsCurrent: contextIsCurrent, continuousIsCurrent: continuousIsCurrent)
         }
         return result
     }
-    private func recordingFollowupValidity(_ receipt: RecordingFollowupReceipt, catalog: [String: SourceRecord], claims: [String: CandidateClaim], latest: [String: Set<String>], actions: [String: ActionRecord], feedback: [String: [String]]? = nil, remembered: ((CandidateClaim) throws -> RememberedThought?)? = nil, expressions: [RecordingExpression]? = nil) throws -> RecordingFollowupValidity {
-        let expressions = try expressions ?? recordingExpressions()
+    private func recordingFollowupValidity(_ receipt: RecordingFollowupReceipt, catalog: [String: SourceRecord], claims: [String: CandidateClaim], latest: [String: Set<String>], actions: [String: ActionRecord], policies: [String: Int], feedback: [String: [String]]?, remembered: @escaping (CandidateClaim) throws -> RememberedThought?, contextIsCurrent: (LocalTranscriptContext) -> Bool, continuousIsCurrent: (ContinuousRecordingContext?, String) -> Bool) throws -> RecordingFollowupValidity {
         guard receipt.state == "completed", receipt.result != nil,catalog[receipt.sourceID]?.needsTranscriptionReview != true,
-              (try? validateLocalTranscriptContext(receipt.input.current)) != nil,
-              (try? validateContinuousRecordingContext(receipt.input.continuousExpression,sourceID:receipt.sourceID,catalog:Array(catalog.values),expressions:expressions)) != nil,
-              (try? sourcePolicy(sourceID: receipt.sourceID).version) == receipt.input.policyVersion else {
+              contextIsCurrent(receipt.input.current),
+              continuousIsCurrent(receipt.input.continuousExpression, receipt.sourceID),
+              policies[receipt.sourceID] == receipt.input.policyVersion else {
             return .init(sourceCurrent: false, thoughtClaimIDs: [], goalIDs: [], english: false)
         }
         // Rebuild the plan-derived links from the stored input so this comparison
         // uses the same convention that produced input.tasks.
         let tasks = try followupTasks(actions: Array(actions.values), claims: claims, catalog: catalog,
-                                      goalIDByTaskID: Self.goalIDByTaskID(receipt.input.goals), feedback: feedback, remembered: remembered)
+                                      goalIDByTaskID: Self.goalIDByTaskID(receipt.input.goals), feedback: feedback, remembered: { try remembered($0) })
         func thought(_ item: RememberedThought) throws {
             guard let claim = claims[item.id] else { throw VoiceOSError("历史观点或原话已变化") }
-            let actual: RememberedThought?
-            if let remembered { actual = try remembered(claim) }
-            else { actual = try rememberedThought(claim, catalog: catalog) }
+            let actual = try remembered(claim)
             guard let actual, actual == item else { throw VoiceOSError("历史观点或原话已变化") }
             if claim.reviewState != "endorsed" {
                 for id in Set(claim.references.map(\.sourceID)) {

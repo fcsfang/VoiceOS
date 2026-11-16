@@ -5,6 +5,7 @@ public struct SearchHit: Sendable {
         case material
         case claim
         case action
+        case topic
     }
     public let kind: Kind
     public let refID: String
@@ -85,6 +86,7 @@ extension VoiceOSStore {
             """)
             try db.execute("INSERT INTO search_index(kind, ref_id, title, body) SELECT 'claim', id, statement, statement FROM claims")
             try db.execute("INSERT INTO search_index(kind, ref_id, title, body) SELECT 'action', id, title, note FROM actions")
+            try db.execute("INSERT INTO search_index(kind, ref_id, title, body) SELECT 'topic', id, title, title FROM reflection_questions")
             try db.execute("INSERT OR REPLACE INTO search_index_meta(key, value) VALUES('fingerprint', ?)", [fingerprint])
             try db.execute("DELETE FROM search_index_meta WHERE key='dirty'")
         }
@@ -92,9 +94,16 @@ extension VoiceOSStore {
 
     private func searchFingerprint() throws -> String {
         var parts: [String] = []
-        for table in ["sources", "claims", "actions", "transcript_versions"] {
+        for table in ["sources", "claims", "actions", "transcript_versions", "reflection_questions"] {
             let row = try db.query("SELECT COUNT(*) AS count, COALESCE(MAX(created_at), '') AS latest FROM \(table)").first!
-            parts.append("\(row["count"]!):\(row["latest"]!)")
+            var part = "\(row["count"]!):\(row["latest"]!)"
+            // Topic renames update the row in place and no dirty trigger covers that
+            // table, so updated_at carries those changes into the fingerprint.
+            if table == "reflection_questions" {
+                let updated = try db.query("SELECT COALESCE(MAX(updated_at), '') AS latest FROM reflection_questions").first!["latest"]!
+                part += ":" + updated
+            }
+            parts.append(part)
         }
         return parts.joined(separator: "|")
     }

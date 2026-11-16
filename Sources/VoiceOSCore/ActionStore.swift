@@ -3,8 +3,10 @@ import CryptoKit
 
 public enum ActionKind: String, Codable, Sendable { case task, opportunity, aiSuggestion = "ai_suggestion" }
 public enum ActionIntentActor: String, Sendable { case user, ai }
-public enum LocalActionState: String, Sendable { case open, completed, dismissed }
+public enum LocalActionState: String, Sendable { case open, completed, dismissed, someday }
 public enum ActionClarificationDecision: String, Sendable { case commit, opportunity, not }
+/// The four exits of the one-at-a-time outcome queue.
+public enum ActionClarifyExit: String, Sendable { case complete, abandon, someday, next }
 public struct ActionIntentMetadata: Codable, Sendable {
     public let intentType: String
     public let followupState: String
@@ -118,6 +120,7 @@ extension VoiceOSStore {
               current.version == expectedVersion else { throw VoiceOSError("行动版本或依据已变化，请重新核对") }
         guard state.rawValue != current.state, note.unicodeScalars.count <= 2000 else { throw VoiceOSError("行动状态没有变化或备注过长") }
         guard state != .completed || current.kind == "task" else { throw VoiceOSError("探索意图与 AI 建议不能标成任务完成；问题与目标的完成请使用 completeOutcome") }
+        guard state != .someday || current.kind != "task" else { throw VoiceOSError("待办不能留到将来也许；请完成或不再跟进") }
         let next = expectedVersion + 1
         try db.transaction {
             try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),state.rawValue,note,commandID,hash,ISO8601DateFormatter().string(from: Date())])
@@ -295,6 +298,49 @@ extension VoiceOSStore {
         try checkpoint(.actionStateCommitted)
         return next
     }
+    /// The clarify queue's command identity. A retry with the same goal, exit,
+    /// and version resolves to the same receipt; anything else is a new command.
+    public static func clarifyCommandID(actionID: String, exit: ActionClarifyExit, version: Int) -> String {
+        "clarify:\(actionID):\(exit.rawValue):\(String(version))"
+    }
+    /// Keeps a someday goal in place and stamps the ledger so the review clock
+    /// restarts. Same-state revisions need the dedicated `revisit:` receipt.
+    @discardableResult
+    public func revisitSomeday(actionID: String, expectedVersion: Int, commandID: String = UUID().uuidString) throws -> Int {
+        let note = "回看"
+        let revisionCommand = "revisit:" + commandID
+        let hash = try Self.actionHash([actionID,String(expectedVersion),note])
+        if let receipt = try db.query("SELECT version,input_fingerprint FROM action_revisions WHERE command_id=?", [revisionCommand]).first {
+            guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一次回看命令不能更换行动") }
+            return Int(receipt["version"]!)!
+        }
+        guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { throw VoiceOSError("行动不存在") }
+        guard current.state == LocalActionState.someday.rawValue, current.validity == "current" else { throw VoiceOSError("只有留到以后的行动可以回看") }
+        guard current.version == expectedVersion else { throw VoiceOSError("行动版本已变化，请重新核对") }
+        let next = expectedVersion + 1
+        try db.transaction {
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,'someday',?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),note,revisionCommand,hash,ISO8601DateFormatter().string(from: Date())])
+            try db.execute("UPDATE actions SET version=? WHERE id=?", [String(next),actionID])
+            try checkpoint(.actionStateUncommitted)
+        }
+        try checkpoint(.actionStateCommitted)
+        return next
+    }
+    /// Someday goals not revisited within `unreviewedDays`. Falls back to when
+    /// the goal entered someday, then to its creation date.
+    public func somedayReviewCandidates(unreviewedDays: Int = 60, now: Date = Date()) throws -> [ActionRecord] {
+        _ = try candidateClaims(includeFrozen: true)
+        let cutoff = ISO8601DateFormatter().string(from: now.addingTimeInterval(-Double(unreviewedDays) * 86400))
+        return try db.query("""
+            SELECT a.* FROM actions a
+            WHERE a.state='someday' AND a.validity='current'
+              AND COALESCE(
+                (SELECT MAX(r.created_at) FROM action_revisions r WHERE r.action_id=a.id AND r.note LIKE '回看%'),
+                (SELECT MAX(r.created_at) FROM action_revisions r WHERE r.action_id=a.id AND r.state='someday'),
+                a.created_at) < ?
+            ORDER BY a.created_at,a.id
+            """, [cutoff]).map(Self.actionRecord)
+    }
     public func actionClarifications() throws -> [String: String] {
         Dictionary(uniqueKeysWithValues: try db.query("SELECT action_id,decision FROM action_clarifications").map { ($0["action_id"]!, $0["decision"]!) })
     }
@@ -328,7 +374,8 @@ extension VoiceOSStore {
                 let attachLink = revision["command_id"]?.hasPrefix("attach:") == true
                 let detachLink = revision["command_id"]?.hasPrefix("detach:") == true
                 let nextActionLink = revision["state"] == state && (attachLink || detachLink)
-                guard revision["version"] == String(index+2), revision["from_version"] == String(index+1), let next = revision["state"], next != state || kindClarification || kindPromotion || nextActionLink,
+                let revisit = revision["state"] == state && revision["command_id"]?.hasPrefix("revisit:") == true
+                guard revision["version"] == String(index+2), revision["from_version"] == String(index+1), let next = revision["state"], next != state || kindClarification || kindPromotion || nextActionLink || revisit,
                       next != "completed" || action["kind"] == "task" || action["kind"] == "opportunity", (revision["note"]?.unicodeScalars.count ?? 2001) <= 2000 else { throw VoiceOSError("迁移行动状态链不一致") }
                 if kindClarification, revision["note"] != "澄清为问题与目标" {
                     throw VoiceOSError("行动版本升级缺少澄清依据")
@@ -341,6 +388,9 @@ extension VoiceOSStore {
                 }
                 if detachLink, revision["note"] != "摘除下一步" {
                     throw VoiceOSError("行动版本升级缺少摘除下一步依据")
+                }
+                if revisit, revision["note"] != "回看" {
+                    throw VoiceOSError("行动版本升级缺少回看依据")
                 }
                 state = next
             }
