@@ -1912,12 +1912,18 @@ struct WorkspaceView: View {
         let opened:Bool
         switch page {
         case .home:
-            guard let snapshot = model.panorama.state?.snapshot, let selection = model.panorama.selection else {
-                error = "请先选择全景中的问题或联系，再沿线讨论。"
+            if homeShowsPanorama {
+                guard let snapshot = model.panorama.state?.snapshot, let selection = model.panorama.selection else { return }
+                await openPanoramaDiscussion(snapshotID: snapshot.id, selection: selection)
                 return
             }
-            await openPanoramaDiscussion(snapshotID: snapshot.id, selection: selection)
-            return
+            let items = model.homeSnapshot.days.flatMap(\.items)
+            let picked = RecentContentHomeSelection.shared.itemID.flatMap { id in items.first { $0.id == id } }
+                ?? items.first { !$0.thoughts.isEmpty } ?? items.first
+            guard let picked, picked.kind == .material,
+                  let sourceID = picked.sourceIDs.first,
+                  let record = model.records.first(where: { $0.id == sourceID }) else { return }
+            opened = await model.beginDiscussion(record)
         case .source(let id): opened = if let source=model.records.first(where: { $0.id == id }) { await model.beginDiscussion(source) } else { false }
         case .task(let id): opened = if let action=model.actionRecords.first(where: { $0.id == id }) { await model.beginActionDiscussion(action) } else { false }
         case .delivery(let id): opened = if let execution=model.assistantExecutions.first(where: { $0.id == id }) { await model.beginAssistantDiscussion(execution) } else { false }

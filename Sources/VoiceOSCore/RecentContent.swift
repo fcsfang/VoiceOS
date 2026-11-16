@@ -128,25 +128,33 @@ public struct RecentContentDay: Identifiable, Equatable, Sendable {
 public enum RecentContentIndex {
     public static func build(sources: [SourceRecord], claims: [CandidateClaim], calendar: Calendar = .current) -> [RecentContentDay] {
         let usable = sources.filter { ["saved", "reference_only"].contains($0.state) && $0.origin == "user" && $0.speaker == "user" }
+        let catalog = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let thoughtsBySource = claimsBySource(claims)
+        let materialIDs = Set(usable.filter { $0.feedbackKind == nil && !$0.name.hasPrefix("行动反馈") }.map(\.id))
+        let expressionsBySource = verifiedExpressions(usable, catalog: catalog, materialIDs: materialIDs)
         var materialItems: [RecentContentItem] = []
         var feedbackSources: [(SourceRecord, Date)] = []
+        var builtExpressionIDs: Set<String> = []
         for source in usable {
             let date = date(of: source)
             if source.feedbackKind != nil || source.name.hasPrefix("行动反馈") {
                 feedbackSources.append((source, date))
                 continue
             }
-            let thoughts = (thoughtsBySource[source.id] ?? []).compactMap { claim -> RecentContentThought? in
-                guard let parsed = parse(claim.statement) else { return nil }
-                return RecentContentThought(claimID: claim.id, statement: parsed.statement, kind: parsed.kind)
+            if let expression = expressionsBySource[source.id] {
+                guard builtExpressionIDs.insert(expression.id).inserted else { continue }
+                if let item = expressionItem(expression, catalog: catalog, thoughtsBySource: thoughtsBySource) {
+                    materialItems.append(item)
+                }
+                continue
             }
+            let parsed = thoughts(of: source, in: thoughtsBySource)
             let summary = source.contentSummary ?? ""
             let transcript = source.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !thoughts.isEmpty || !summary.isEmpty || !transcript.isEmpty else { continue }
+            guard !parsed.isEmpty || !summary.isEmpty || !transcript.isEmpty else { continue }
             materialItems.append(RecentContentItem(id: source.id, sourceIDs: [source.id], date: date,
                                                    title: source.displayTitle, summary: summary,
-                                                   thoughts: dedupe(thoughts), excerpts: [], kind: .material,
+                                                   thoughts: dedupe(parsed), excerpts: [], kind: .material,
                                                    duration: source.duration ?? 0))
         }
         let feedbackItems = feedbackGroups(feedbackSources, calendar: calendar)
@@ -172,22 +180,66 @@ public enum RecentContentIndex {
         return thoughts.filter { seen.insert($0.statement).inserted }
     }
 
+    private static func thoughts(of source: SourceRecord, in thoughtsBySource: [String: [CandidateClaim]]) -> [RecentContentThought] {
+        (thoughtsBySource[source.id] ?? []).compactMap { claim -> RecentContentThought? in
+            guard let parsed = parse(claim.statement) else { return nil }
+            return RecentContentThought(claimID: claim.id, statement: parsed.statement, kind: parsed.kind)
+        }
+    }
+
+    /// Multi-segment recordings of one continuous expression read as one entry.
+    /// A changed transcript or permission fails the catalog check, so those
+    /// segments fall back to separate materials instead of merging stale text.
+    private static func verifiedExpressions(_ usable: [SourceRecord], catalog: [String: SourceRecord],
+                                            materialIDs: Set<String>) -> [String: RecordingExpression] {
+        var result: [String: RecordingExpression] = [:]
+        for source in usable where materialIDs.contains(source.id) {
+            guard let expression = source.recordingExpression(in: catalog),
+                  expression.sourceIDs.count > 1,
+                  Set(expression.sourceIDs).isSubset(of: materialIDs) else { continue }
+            result[source.id] = expression
+        }
+        return result
+    }
+
+    private static func expressionItem(_ expression: RecordingExpression, catalog: [String: SourceRecord],
+                                       thoughtsBySource: [String: [CandidateClaim]]) -> RecentContentItem? {
+        let members = expression.sourceIDs.compactMap { catalog[$0] }
+        guard !members.isEmpty else { return nil }
+        let mergedThoughts = dedupe(members.flatMap { thoughts(of: $0, in: thoughtsBySource) })
+        let summary = expression.summary
+        guard !mergedThoughts.isEmpty || !summary.isEmpty || members.contains(where: { !($0.transcript?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty }) else { return nil }
+        let title = expression.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? members[0].displayTitle : expression.title
+        var seen: Set<String> = []
+        let sourceIDs = expression.sourceIDs.filter { seen.insert($0).inserted }
+        return RecentContentItem(id: expression.id, sourceIDs: sourceIDs,
+                                 date: members.map { date(of: $0) }.max() ?? Date(),
+                                 title: title, summary: summary, thoughts: mergedThoughts, excerpts: [],
+                                 kind: .material, duration: members.compactMap(\.duration).reduce(0, +))
+    }
+
     public static func thoughtStatement(_ raw: String) -> String? { parse(raw)?.statement }
 
+    /// The shared parser owns the bracket vocabulary. A review marker keeps the
+    /// thought off the home page even when it rides behind another tag.
     static func parse(_ raw: String) -> (kind: RecentThoughtKind, statement: String)? {
         var text = raw
         if let range = text.range(of: "说明：") { text = String(text[..<range.lowerBound]) }
-        var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        var kind = RecentThoughtKind.note
-        let tags: [(String, RecentThoughtKind)] = [("【观点】", .insight), ("【长期目标】", .goal), ("【问题】", .note), ("【想法】", .note)]
-        if let tag = tags.first(where: { trimmed.hasPrefix($0.0) }) {
-            kind = tag.1
-            trimmed = String(trimmed.dropFirst(tag.0.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.hasSuffix("（待核对）"), !trimmed.hasSuffix("(待核对)") else { return nil }
+        let tagged = StatementTagParser.split(text)
+        let kind: RecentThoughtKind
+        switch tagged.tag {
+        case .insight: kind = .insight
+        case .goal: kind = .goal
+        case .review, .recordingActivity: return nil
+        case .question, .idea, nil: kind = .note
         }
-        trimmed = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "；;，, "))
-        guard !trimmed.hasPrefix("说明："), !trimmed.hasPrefix("【录音中活动】"), !trimmed.hasPrefix("【待核对】"),
-              !trimmed.hasSuffix("（待核对）"), !trimmed.hasSuffix("(待核对)") else { return nil }
-        return trimmed.isEmpty ? nil : (kind, trimmed)
+        let statement = tagged.text.trimmingCharacters(in: CharacterSet(charactersIn: "；;，, "))
+        guard !statement.isEmpty, !statement.hasPrefix("说明："), !statement.hasPrefix("【录音中活动】"),
+              !statement.hasPrefix("【待核对】"),
+              !statement.hasSuffix("（待核对）"), !statement.hasSuffix("(待核对)") else { return nil }
+        return (kind, statement)
     }
 
     private static func claimsBySource(_ claims: [CandidateClaim]) -> [String: [CandidateClaim]] {
