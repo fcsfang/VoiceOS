@@ -85,22 +85,26 @@ final class FollowupDigestChecks: XCTestCase {
     }
 
     func testMigration65BackfillsLegacyRowsAndFirstReadUsesTheStoredDigest() async throws {
-        let store = try await makeStore()
-        let sourceID = try await cloudSource(store)
-        _ = try await store.processRecordingFollowup(sourceID: sourceID, using: DigestFollowupPort())
-        let db = await store.db
-        let before = try storedFollowup(db, sourceID)
-        try db.execute("ALTER TABLE sources DROP COLUMN followup_digest")
-        try db.execute("PRAGMA user_version=64")
+        let prepared: (sourceID: String, before: (json: String, digest: String?)) = try await {
+            let store = try await makeStore()
+            let sourceID = try await cloudSource(store)
+            _ = try await store.processRecordingFollowup(sourceID: sourceID, using: DigestFollowupPort())
+            let db = await store.db
+            let before = try storedFollowup(db, sourceID)
+            try db.execute("ALTER TABLE sources DROP COLUMN followup_digest")
+            try db.execute("PRAGMA user_version=64")
+            return (sourceID, before)
+        }()
+        let sourceID = prepared.sourceID, before = prepared.before
 
-        let migrated = try Database(root.appendingPathComponent("voiceos.sqlite"))
-        XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
-        let rows = try migrated.query("SELECT followup_json,followup_digest FROM sources WHERE id=?", [sourceID])
+        let migrated: Database? = try Database(root.appendingPathComponent("voiceos.sqlite"))
+        XCTAssertEqual(try migrated?.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+        let rows = try XCTUnwrap(migrated).query("SELECT followup_json,followup_digest FROM sources WHERE id=?", [sourceID])
         let row = try XCTUnwrap(rows.first)
         XCTAssertEqual(row["followup_json"], before.json)
         let migratedDigest = try XCTUnwrap(row["followup_digest"])
         XCTAssertEqual(migratedDigest, VoiceOSStore.relevanceHash(Data(before.json.utf8)))
-
+        _ = migrated
         let reopened = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
         try await reopened.recover()
         let receipts = try await reopened.recordingFollowups()

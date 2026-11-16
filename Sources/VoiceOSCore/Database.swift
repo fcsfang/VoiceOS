@@ -1263,7 +1263,10 @@ final class Database {
 
         if try query("PRAGMA user_version").first?["user_version"] == "64" {
             try transaction {
-                try execute("ALTER TABLE sources ADD COLUMN followup_digest TEXT")
+                let columns = try query("PRAGMA table_info(sources)").compactMap { $0["name"] }
+                if !columns.contains("followup_digest") {
+                    try execute("ALTER TABLE sources ADD COLUMN followup_digest TEXT")
+                }
                 // SQLite has no SHA-256; hash each stored archive once, in small
                 // batches so a multi-megabyte archive never materializes twice.
                 while true {
