@@ -146,7 +146,6 @@ extension VoiceOSStore {
         var saved = source.presentation ?? RecordingPresentation(), current = review
         current.transcriptVersionID = version
         current.correction_count = current.correction_count ?? current.corrections?.count
-        current.corrections = nil
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         if let previous = saved.transcriptionReview, try encoder.encode(previous) == encoder.encode(current) { return }
         let affected = current.changed || current.unresolved_issues?.isEmpty == false ||

@@ -133,6 +133,9 @@ struct WorkspaceSourceView: View {
     @State private var chaptersExpanded=false
     @State private var entitiesExpanded=false
     @State private var toast: String? = nil
+    @State private var correctionsExpanded=false
+    @State private var correctionJustSaved=false
+    @State private var showingCorrectionImpacts=false
     @State private var entities:[SourceEntity]=[]
     @State private var chapters:[SourceChapter]=[]
     private var sourceStatus: String {
@@ -407,6 +410,17 @@ struct WorkspaceSourceView: View {
                         Spacer(minLength:0)
                     }
                 }
+                if correctionJustSaved,!model.correctionImpacts.isEmpty {
+                    HStack(alignment:.firstTextBaseline,spacing:12) {
+                        Label("\(model.correctionImpacts.count) 项任务受影响",systemImage:"exclamationmark.triangle")
+                            .vosFont(WorkspaceText.meta.size, weight:.semibold)
+                        Text("这些任务依赖更正前的内容；完成记录与已写入的外部提醒不会被自动删除。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        Spacer(minLength:8)
+                        Button("查看纠错影响") { showingCorrectionImpacts=true }
+                        Button("知道了") { correctionJustSaved=false }.buttonStyle(.borderless)
+                    }.padding(16).frame(maxWidth:.infinity,alignment:.leading)
+                        .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
+                }
                 digestSections
                 SourceFold(title:"原文与回听",icon:"waveform",isExpanded:$originalExpanded) {
                     VStack(alignment:.leading,spacing:16) {
@@ -621,6 +635,25 @@ struct WorkspaceSourceView: View {
                             ForEach(Array(loadedDiscussions.enumerated()),id:\.element.id) { index,session in Button("打开讨论 \(index+1)") { openDiscussion(session.id) } }
                         }.padding(.top,12)
                     }.padding(.vertical,16)
+                    if let corrections=source.transcriptionReview?.corrections,!corrections.isEmpty {
+                        Divider()
+                        DisclosureGroup("转写改写 \(corrections.count) 处",isExpanded:$correctionsExpanded) {
+                            VStack(alignment:.leading,spacing:12) {
+                                ForEach(Array(corrections.enumerated()),id:\.offset) { _,correction in
+                                    VStack(alignment:.leading,spacing:6) {
+                                        HStack(alignment:.firstTextBaseline,spacing:8) {
+                                            Text(correction.before).strikethrough().foregroundStyle(palette.secondaryText)
+                                            Image(systemName:"arrow.right").vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                                            Text(correction.after)
+                                        }.vosFont(WorkspaceText.body).fixedSize(horizontal:false,vertical:true)
+                                        if let context=correction.context_quote?.trimmingCharacters(in:.whitespacesAndNewlines),!context.isEmpty {
+                                            Text("上下文：" + truncatedQuote(context)).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText).textSelection(.enabled)
+                                        }
+                                    }.padding(.vertical,4)
+                                }
+                            }.padding(.top,12)
+                        }.padding(.vertical,16)
+                    }
                     Divider()
                     DisclosureGroup("主题归属与处理情况") {
                         VStack(alignment:.leading,spacing:13) {
@@ -652,7 +685,10 @@ struct WorkspaceSourceView: View {
         readingContent
         .safeAreaInset(edge:.bottom,spacing:0) { playbackBar }
         .workspaceToast($toast)
-        .sheet(item:$editing) { source in WorkspaceTranscriptEditor(model:model,source:source,onSaved:{ toast="原文已更正" }) { editing=nil } }
+        .sheet(item:$editing) { source in WorkspaceTranscriptEditor(model:model,source:source,onSaved:{ toast="原文已更正";correctionJustSaved=true }) { editing=nil } }
+        .sheet(isPresented:$showingCorrectionImpacts) {
+            CorrectionImpactView(model:model,dismiss:{ showingCorrectionImpacts=false;if let id=model.selected,id != source.id { openSource(id) } })
+        }
         .sheet(item:$naming) { source in RecordingTitleEditor(record:source,model:model) { naming=nil } }
         .sheet(item:$claimEditor) { claim in ClaimCorrectionView(claim:claim,model:model,onSaved:{ toast="理解已更新" }) { claimEditor=nil } }
         .sheet(item:$actionClaim) { claim in ActionCreationView(claim:claim,model:model) { actionClaim=nil } }
@@ -993,6 +1029,9 @@ struct WorkspaceSourceView: View {
         selectedRange=NSRange(location:0,length:0)
     }
     private func quote(_ span:TranscriptSpan,text:String) -> String { SourceText.quote(span,in:text) }
+    private func truncatedQuote(_ text:String,limit:Int=60)->String {
+        text.count <= limit ? text : String(text.prefix(limit)) + "…"
+    }
     private func time(_ ms:Int)->String { String(format:"%02d:%02d",ms/60000,ms/1000%60) }
     private func spanIsPlaying(_ span:TranscriptSpan)->Bool {
         guard let ms=playbackMS,let start=span.startMS,let end=span.endMS else { return false }
