@@ -1461,7 +1461,8 @@ struct WorkspaceView: View {
             WorkspaceRow(title:"理解、核对与 AI 助理",subtitle:model.modelSummary,icon:"sparkles") { model.chooseTextModel() }
             sectionTitle("连接与自动入口")
             WorkspaceRow(title:"自动接收录音",subtitle:"VoiceOS 收件箱与语音备忘录",icon:"tray.and.arrow.down") { go(.tool("自动入口")) }
-            WorkspaceRow(title:"Apple 提醒事项",subtitle:model.reminderCalendarTitle,icon:"checklist") { Task { await model.connectReminders() } }
+            WorkspaceRow(title:"Apple 提醒事项",subtitle:model.remindersPermissionDenied ? "系统权限已拒绝，需要在系统设置中允许后重试" : model.reminderCalendarTitle,icon:"checklist") { Task { await model.connectReminders() } }
+            if model.remindersPermissionDenied { Button("打开系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!) } }
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
             sectionTitle("资料与历史")
             HStack(spacing:12) {
@@ -2111,6 +2112,7 @@ struct WorkspaceView: View {
             case .search: if page == .search { searchFocused = true } else { go(.search) }
             case .settings: go(.settings)
             case .discussion: Task { await toggleDiscussion() }
+            case .weeklyReview: showingWeeklyReview = true
             }
         }
         if let id = model.pendingWorkspaceTaskID {
@@ -2120,6 +2122,17 @@ struct WorkspaceView: View {
     }
     private func routeExternalURL(_ url:URL) {
         if CaptureLink.isCapture(url) { Task { await model.acceptCaptureURL(url) } }
+        else if url.scheme?.lowercased() == "voiceos", let host=url.host?.lowercased(), ["action","source"].contains(host) {
+            let id=url.lastPathComponent
+            guard !id.isEmpty else { error="链接缺少条目身份"; return }
+            if host == "action" {
+                guard model.actionRecords.contains(where: { $0.id == id }) else { error="这条行动已不在当前资料库"; return }
+                go(.task(id))
+            } else {
+                guard model.records.contains(where: { $0.id == id }) else { error="这份材料已不在当前资料库"; return }
+                go(.source(id))
+            }
+        }
         else { openReminder(url) }
     }
     private func openReminder(_ url:URL) { Task { if await model.focusReminder(url) { if let id=model.focusedTaskID { go(.task(id)) } else { go(.actions) } } else { error = model.status.isEmpty ? "这条提醒无法定位到当前资料库" : model.status } } }
