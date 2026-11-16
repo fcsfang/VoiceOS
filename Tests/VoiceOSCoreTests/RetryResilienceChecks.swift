@@ -136,7 +136,7 @@ private extension VoiceOSStore {
         var receipts = try recordingFollowups()
         let index = receipts.firstIndex { $0.id == id }!
         receipts[index].retryAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-1))
-        try db.execute("UPDATE sources SET followup_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(receipts.filter { $0.sourceID == receipts[index].sourceID }), as: UTF8.self), receipts[index].sourceID])
+        try db.execute("UPDATE sources SET followup_json=?,followup_digest=NULL WHERE id=?", [String(decoding: try JSONEncoder().encode(receipts.filter { $0.sourceID == receipts[index].sourceID }), as: UTF8.self), receipts[index].sourceID])
     }
 }
 

@@ -499,14 +499,14 @@ private extension VoiceOSStore {
         var receipts = try recordingFollowups()
         let index = receipts.firstIndex { $0.id == id }!
         receipts[index].state = "running"
-        try db.execute("UPDATE sources SET followup_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(receipts.filter { $0.sourceID == receipts[index].sourceID }), as: UTF8.self), receipts[index].sourceID])
+        try db.execute("UPDATE sources SET followup_json=?,followup_digest=NULL WHERE id=?", [String(decoding: try JSONEncoder().encode(receipts.filter { $0.sourceID == receipts[index].sourceID }), as: UTF8.self), receipts[index].sourceID])
         try recoverRecordingFollowups()
     }
     func expireFlowFollowupRetry(_ id: String) throws {
         var receipts = try recordingFollowups()
         let index = receipts.firstIndex { $0.id == id }!
         receipts[index].retryAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-1))
-        try db.execute("UPDATE sources SET followup_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(receipts.filter { $0.sourceID == receipts[index].sourceID }), as: UTF8.self), receipts[index].sourceID])
+        try db.execute("UPDATE sources SET followup_json=?,followup_digest=NULL WHERE id=?", [String(decoding: try JSONEncoder().encode(receipts.filter { $0.sourceID == receipts[index].sourceID }), as: UTF8.self), receipts[index].sourceID])
     }
     func corruptFlowFollowupPath() throws {
         guard let row = try db.query("SELECT id,followup_json FROM sources WHERE followup_json IS NOT NULL LIMIT 1").first,
@@ -519,7 +519,7 @@ private extension VoiceOSStore {
         input["current"] = current
         receipt["input"] = input
         receipts[0] = receipt
-        try db.execute("UPDATE sources SET followup_json=? WHERE id=?", [String(decoding: try JSONSerialization.data(withJSONObject: receipts), as: UTF8.self), row["id"]!])
+        try db.execute("UPDATE sources SET followup_json=?,followup_digest=NULL WHERE id=?", [String(decoding: try JSONSerialization.data(withJSONObject: receipts), as: UTF8.self), row["id"]!])
     }
     func dateFlowExpression(_ id: String, at date: Date) throws {
         try db.execute("UPDATE sources SET created_at=? WHERE id=?", [ISO8601DateFormatter().string(from: date), id])

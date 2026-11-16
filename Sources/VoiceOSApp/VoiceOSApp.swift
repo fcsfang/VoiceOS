@@ -671,6 +671,70 @@ final class ControlCenter: ObservableObject {
     private let reminders = NativeReminders()
     var reminderCalendarTitle: String { reminderCalendars.first { $0.id == reminderCalendarID }?.title ?? (reminderAccess?.enabled == true ? reminderAccess!.title : "未选择清单") }
     var remindersPermissionDenied: Bool { NativeReminders.authorizationStatus() == .denied }
+    /// A completion or reopen that could not reach Apple Reminders. It follows
+    /// the reminder compensation lifecycle: persist the intent first, write
+    /// only after an authorized readback, and drop it once readback agrees.
+    struct PendingReminderSync: Codable, Equatable, Identifiable {
+        let actionID: String
+        let linkID: String
+        let calendarID: String
+        let externalID: String
+        let marker: String
+        let title: String
+        let desiredState: String
+        let createdAt: String
+        var id: String { actionID }
+    }
+    @Published private(set) var pendingReminderSyncs: [String: PendingReminderSync] = [:]
+    @Published var deliveryReadAt: [String: String] = [:]
+    static func loadPendingReminderSyncs() -> [String: PendingReminderSync] {
+        guard let data = UserDefaults.standard.data(forKey: "voiceos.pendingReminderSyncs.v1"),
+              let decoded = try? JSONDecoder().decode([String: PendingReminderSync].self, from: data) else { return [:] }
+        return decoded
+    }
+    static func loadDeliveryReadAt() -> [String: String] {
+        guard let data = UserDefaults.standard.data(forKey: "voiceos.deliveryRead.v1"),
+              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
+        return decoded
+    }
+    var reminderSyncUnavailable: Bool { remindersPermissionDenied || reminderAccess?.enabled != true || !reminders.isAuthorized }
+    func isDeliveryUnread(_ execution: AssistantExecutionRecord) -> Bool {
+        execution.state == "completed" && execution.validity == "current" && deliveryReadAt[execution.id] != execution.updatedAt
+    }
+    var unreadDeliveryCount: Int { assistantExecutions.filter { isDeliveryUnread($0) }.count }
+    var unreadDeliveries: [AssistantExecutionRecord] { assistantExecutions.filter { isDeliveryUnread($0) } }
+    func markDeliveryRead(_ execution: AssistantExecutionRecord) {
+        guard isDeliveryUnread(execution) else { return }
+        deliveryReadAt[execution.id] = execution.updatedAt
+        if let data = try? JSONEncoder().encode(deliveryReadAt) { UserDefaults.standard.set(data, forKey: "voiceos.deliveryRead.v1") }
+    }
+    func sortedAssistantDeliveries(_ executions: [AssistantExecutionRecord]) -> [AssistantExecutionRecord] {
+        executions.sorted { left, right in
+            let leftUnread = isDeliveryUnread(left), rightUnread = isDeliveryUnread(right)
+            if leftUnread != rightUnread { return leftUnread }
+            return left.updatedAt > right.updatedAt
+        }
+    }
+    var pendingReminderSyncList: [PendingReminderSync] { pendingReminderSyncs.values.sorted { $0.createdAt < $1.createdAt } }
+    func pendingReminderSync(for actionID: String) -> PendingReminderSync? { pendingReminderSyncs[actionID] }
+    func canCompleteLocally(_ action: ActionRecord) -> Bool {
+        action.kind == "task" && action.state == LocalActionState.open.rawValue && action.validity == "current"
+            && reminderSyncUnavailable
+            && reminderLinks.contains { $0.actionID == action.id && $0.state == "linked" && $0.externalID != nil }
+    }
+    func savePendingReminderSyncs() {
+        if let data = try? JSONEncoder().encode(pendingReminderSyncs) { UserDefaults.standard.set(data, forKey: "voiceos.pendingReminderSyncs.v1") }
+    }
+    func enqueuePendingReminderSync(_ action: ActionRecord, link: ReminderLink, externalID: String, desiredState: LocalActionState) {
+        pendingReminderSyncs[action.id] = PendingReminderSync(actionID: action.id, linkID: link.id, calendarID: link.calendarID,
+            externalID: externalID, marker: "voiceos-action:" + link.id, title: action.title,
+            desiredState: desiredState.rawValue, createdAt: ISO8601DateFormatter().string(from: Date()))
+        savePendingReminderSyncs()
+    }
+    func removePendingReminderSync(actionID: String) {
+        guard pendingReminderSyncs.removeValue(forKey: actionID) != nil else { return }
+        savePendingReminderSyncs()
+    }
     func recordingActionRequiresReview(_ action:ActionRecord) -> Bool {
         let sourceIDs=Set(claims.first(where: { $0.id == action.claimID })?.references.map(\.sourceID) ?? [])
         return records.contains { source in
@@ -692,6 +756,8 @@ final class ControlCenter: ObservableObject {
     var libraryTitle: String { rootOverride == nil ? "VoiceOS" : "独立资料库 · " + rootOverride!.lastPathComponent }
     init(root: URL? = nil) {
         rootOverride=root
+        pendingReminderSyncs = ControlCenter.loadPendingReminderSyncs()
+        deliveryReadAt = ControlCenter.loadDeliveryReadAt()
         recordingInbox=RecordingInbox(libraryRoot:root ?? ProcessInfo.processInfo.environment["VOICEOS_DATA_DIR"].map { URL(fileURLWithPath:$0) })
         // Only the app's main model (no root) backs the app-level menu action.
         if root == nil, ControlCenter.primary == nil { ControlCenter.primary = self }
@@ -2636,6 +2702,100 @@ final class ControlCenter: ObservableObject {
             await refresh(); reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留"
         } catch { status = error.localizedDescription }
     }
+    /// Reuses the reminder compensation lifecycle for completions the correction
+    /// table cannot express: `reminder_compensation_plans` is gated on a
+    /// correction impact and its executor writes due dates, so the local half of
+    /// this write-readback pair is persisted here and replayed after reconnect.
+    private func changeLinkedActionLocally(_ action: ActionRecord, state: LocalActionState, link: ReminderLink,
+                                           externalID: String, successorID: String?) async throws -> ActionChangeReceipt {
+        guard let store else { throw VoiceOSError("资料库尚未打开") }
+        if state == .completed {
+            let successor = try await store.completeActionWithRecurrence(id: action.id)
+            enqueuePendingReminderSync(action, link: link, externalID: externalID, desiredState: .completed)
+            return ActionChangeReceipt(successorID: successor, keptSuccessorID: nil)
+        }
+        // Undoing a completion that never reached Reminders means dropping the
+        // queued write; the external reminder was never changed.
+        if pendingReminderSyncs[action.id]?.desiredState == LocalActionState.completed.rawValue {
+            removePendingReminderSync(actionID: action.id)
+        } else {
+            enqueuePendingReminderSync(action, link: link, externalID: externalID, desiredState: .open)
+        }
+        let kept = try await store.reopenActionWithRecurrence(id: action.id, successorID: successorID)
+        return ActionChangeReceipt(successorID: nil, keptSuccessorID: kept)
+    }
+    /// The explicit failure action: complete in VoiceOS even when the reminder
+    /// write path cannot be used right now.
+    func completeActionLocally(_ action: ActionRecord) async -> Bool {
+        guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
+        guard let link = reminderLinks.first(where: { $0.actionID == action.id }), let externalID = link.externalID else {
+            status = "这条行动没有可同步的提醒事项关联"; return false
+        }
+        savingAction = true; defer { savingAction = false }
+        do {
+            guard let current = try await store.actions(includeHistory: true).first(where: { $0.id == action.id }),
+                  current.state == LocalActionState.open.rawValue, current.validity == "current" else {
+                throw VoiceOSError("任务已变化，请重新核对")
+            }
+            let receipt = try await changeLinkedActionLocally(current, state: .completed, link: link, externalID: externalID, successorID: nil)
+            recordActionChange(current, from: .open, to: .completed, successorID: receipt.successorID)
+            status = "已本地完成，连接恢复前不会同步到提醒事项"
+            await refresh()
+            await queueActionFollowups([current.id])
+            return true
+        } catch {
+            status = error.localizedDescription
+            await refresh()
+            return false
+        }
+    }
+    @discardableResult
+    private func flushPendingReminderSyncs(access: ReminderAccess) async -> Int {
+        guard let store, reminders.isAuthorized, !pendingReminderSyncs.isEmpty else { return 0 }
+        var written = 0
+        for entry in pendingReminderSyncList where entry.calendarID == access.calendarID {
+            do {
+                guard let link = reminderLinks.first(where: { $0.id == entry.linkID }),
+                      let current = try await store.actions(includeHistory: true).first(where: { $0.id == entry.actionID }) else {
+                    removePendingReminderSync(actionID: entry.actionID)
+                    continue
+                }
+                guard current.state == entry.desiredState else {
+                    // The task moved on locally; the queued write no longer describes the user's intent.
+                    removePendingReminderSync(actionID: entry.actionID)
+                    continue
+                }
+                guard ["linked", "unknown"].contains(link.state) else { continue }
+                try await reminders.setCompletion(calendarID: entry.calendarID, externalID: entry.externalID, marker: entry.marker,
+                                                  completed: entry.desiredState == LocalActionState.completed.rawValue) {
+                    guard let currentAccess = try await store.reminderAccess(), currentAccess.enabled, currentAccess.version == access.version,
+                          let latest = try await store.actions(includeHistory: true).first(where: { $0.id == entry.actionID }),
+                          latest.state == entry.desiredState else { throw VoiceOSError("任务或连接已变化，请重新核对") }
+                }
+                try await store.readReminder(linkID: entry.linkID, calendarID: entry.calendarID, using: reminders, expectedAccessVersion: access.version)
+                removePendingReminderSync(actionID: entry.actionID)
+                written += 1
+            } catch { continue }
+        }
+        return written
+    }
+    /// Manual "稍后核对": retry the queued completions now.
+    func retryPendingReminderSyncs() async {
+        guard let access = reminderAccess, access.enabled else { status = "提醒事项连接已暂停，恢复连接并授权后会自动写入"; return }
+        guard reminders.isAuthorized else { status = "系统提醒事项权限不可用，请在系统设置中允许后重试"; return }
+        guard !remindersBusy else { status = "正在处理其他提醒事项操作，请稍后再试"; return }
+        remindersBusy = true
+        let written = await flushPendingReminderSyncs(access: access)
+        remindersBusy = false
+        if pendingReminderSyncs.isEmpty {
+            status = "本地变更已写入提醒事项并回读"; reminderSyncStatus = status
+        } else if written > 0 {
+            status = "已写入 \(written) 项，其余仍需核对"; reminderSyncStatus = status
+        } else {
+            status = "尚未写入提醒事项，连接恢复后再试"
+        }
+        await refresh()
+    }
     private func installReminderRefresh() {
         guard reminderObservers.isEmpty else { return }
         reminderObservers.append(reminders.observeChanges { [weak self] in self?.requestReminderRefresh() })
@@ -2688,6 +2848,7 @@ final class ControlCenter: ObservableObject {
             }
         }
         do {
+            if await flushPendingReminderSyncs(access: access) > 0 { reminderSyncStatus = "已把本地变更写入提醒事项并回读" }
             // Field inference must not hold up completion readback or recording intake.
             try await store.syncRecordingExpressionReminders(using:reminders)
             if reminderFieldWorker == nil, let reminderFieldModel,
@@ -2930,24 +3091,32 @@ final class ControlCenter: ObservableObject {
         savingAction = true
         var changed = false
         var receipt: ActionChangeReceipt?
+        var localFallback = false
         do {
             if state != .dismissed, let link = reminderLinks.first(where: { $0.actionID == action.id }), let id = link.externalID {
-                guard let access = reminderAccess, access.enabled, access.calendarID == link.calendarID, !remindersBusy else { throw VoiceOSError("请先恢复提醒事项连接，或在 Apple 提醒事项中更改完成状态") }
-                remindersBusy = true; defer { remindersBusy = false; requestReminderRefresh() }
-                try await reminders.setCompletion(calendarID: link.calendarID, externalID: id, marker: "voiceos-action:" + link.id, completed: state == .completed) {
-                    guard let currentAccess = try await store.reminderAccess(), currentAccess.enabled, currentAccess.version == access.version,
-                          let current = try await store.actions(includeHistory: true).first(where: { $0.id == action.id }), current.validity == "current", current.version == action.version else { throw VoiceOSError("任务或连接已变化，请重新核对") }
-                }
-                try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: reminders, expectedAccessVersion: access.version)
-                if state == .completed {
-                    receipt = ActionChangeReceipt(successorID: try await store.completeActionWithRecurrence(id: action.id), keptSuccessorID: nil)
-                    status = "完成状态已同步并回读；可以补充实际结果或收获"
-                } else if state == .open {
-                    let kept = try await store.reopenActionWithRecurrence(id: action.id, successorID: successorID)
-                    receipt = ActionChangeReceipt(successorID: nil, keptSuccessorID: kept)
-                    status = kept == nil ? "行动状态已保存" : "已重新跟进 · 下一次已保留"
-                } else {
-                    status = "行动状态已保存"
+                do {
+                    guard let access = reminderAccess, access.enabled, access.calendarID == link.calendarID, !remindersBusy else { throw VoiceOSError("请先恢复提醒事项连接，或在 Apple 提醒事项中更改完成状态") }
+                    remindersBusy = true; defer { remindersBusy = false; requestReminderRefresh() }
+                    try await reminders.setCompletion(calendarID: link.calendarID, externalID: id, marker: "voiceos-action:" + link.id, completed: state == .completed) {
+                        guard let currentAccess = try await store.reminderAccess(), currentAccess.enabled, currentAccess.version == access.version,
+                              let current = try await store.actions(includeHistory: true).first(where: { $0.id == action.id }), current.validity == "current", current.version == action.version else { throw VoiceOSError("任务或连接已变化，请重新核对") }
+                    }
+                    try await store.readReminder(linkID: link.id, calendarID: link.calendarID, using: reminders, expectedAccessVersion: access.version)
+                    removePendingReminderSync(actionID: action.id)
+                    if state == .completed {
+                        receipt = ActionChangeReceipt(successorID: try await store.completeActionWithRecurrence(id: action.id), keptSuccessorID: nil)
+                        status = "完成状态已同步并回读；可以补充实际结果或收获"
+                    } else if state == .open {
+                        let kept = try await store.reopenActionWithRecurrence(id: action.id, successorID: successorID)
+                        receipt = ActionChangeReceipt(successorID: nil, keptSuccessorID: kept)
+                        status = kept == nil ? "行动状态已保存" : "已重新跟进 · 下一次已保留"
+                    } else {
+                        status = "行动状态已保存"
+                    }
+                } catch {
+                    guard (state == .completed || state == .open), !(error is CancellationError) else { throw error }
+                    receipt = try await changeLinkedActionLocally(action, state: state, link: link, externalID: id, successorID: successorID)
+                    localFallback = true
                 }
             } else {
                 if state == .completed {
@@ -2966,6 +3135,9 @@ final class ControlCenter: ObservableObject {
         savingAction = false
         if changed, !isUndoingActionChange, let previous = LocalActionState(rawValue: action.state) {
             recordActionChange(action, from: previous, to: state, successorID: receipt?.successorID)
+        }
+        if changed, localFallback {
+            status = state == .completed ? "已本地完成，连接恢复前不会同步到提醒事项" : "已本地撤销，连接恢复前不会同步到提醒事项"
         }
         Task { await refresh(); await queueActionFollowups([action.id]) }
         return receipt
