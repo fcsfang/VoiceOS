@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 import AVKit
 import UniformTypeIdentifiers
 import VoiceOSCore
@@ -735,6 +736,7 @@ final class ControlCenter: ObservableObject {
 
     @Published var dictationBusy = false
     @Published var dictationActive = false
+    var dictationHotKeyConflict: Bool { !GlobalHotKeyCenter.shared.isRegistered(.toggleDictation) }
     private var dictationSource: String?
     private var dictationInterrupted = false
     private var dictationFullOrganization = false
@@ -3102,6 +3104,7 @@ final class ControlCenter: ObservableObject {
 final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var dictationKeyMonitor: Any?
     private var appIconObservation: NSKeyValueObservation?
+    private var dictationIconObservation: AnyCancellable?
     private var statusItem: NSStatusItem?
     private var dictationMenuItem: NSMenuItem?
     private var clipboardMenuItem: NSMenuItem?
@@ -3119,6 +3122,9 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
             DispatchQueue.main.async { AppBrand.applyApplicationIcon() }
         }
         installStatusItem()
+        observeDictationIcon()
+        // The scene model may be created after the delegate finishes launching.
+        Task { @MainActor in self.observeDictationIcon() }
         clipboardMonitor.start()
         NSApp.servicesProvider = self
         // SwiftUI accepts only the import command on this scene, so Command-Shift-R is handled here.
@@ -3143,8 +3149,6 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     private func installStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            button.image = AppBrand.menuBarImage() ?? NSImage(systemSymbolName: "waveform", accessibilityDescription: "VoiceOS")
-            button.toolTip = "VoiceOS"
             let drop = StatusItemDropView(frame: button.bounds)
             drop.autoresizingMask = [.width, .height]
             drop.onDrop = { [weak self] urls in self?.acceptDroppedFiles(urls) }
@@ -3180,9 +3184,27 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         quit.target = self
         item.menu = menu
         statusItem = item
+        applyDictationIcon(ControlCenter.primary?.dictationActive == true)
+    }
+
+    private func observeDictationIcon() {
+        guard dictationIconObservation == nil, let model = ControlCenter.primary else { return }
+        dictationIconObservation = model.$dictationActive
+            .removeDuplicates()
+            .sink { [weak self] active in
+                MainActor.assumeIsolated { self?.applyDictationIcon(active) }
+            }
+    }
+
+    private func applyDictationIcon(_ active: Bool) {
+        statusItem?.button?.image = AppBrand.menuBarImage(recording: active)
+            ?? NSImage(systemSymbolName: active ? "record.circle.fill" : "waveform",
+                       accessibilityDescription: active ? "VoiceOS 正在口述" : "VoiceOS")
+        statusItem?.button?.toolTip = active ? "VoiceOS · 正在口述" : "VoiceOS"
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        observeDictationIcon()
         rebuildClipboardHistoryMenu()
         rebuildTodayOverviewMenu(model: ControlCenter.primary)
         guard let model = ControlCenter.primary else {
@@ -3195,7 +3217,9 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
             stopWatchMenuItem?.isEnabled = false
             return
         }
-        dictationMenuItem?.title = (model.dictationActive ? "停止口述并整理" : "开始口述并自动整理") + "（⌥⌘D）"
+        let conflict = model.dictationHotKeyConflict
+        dictationMenuItem?.title = (model.dictationActive ? "停止口述并整理" : "开始口述并自动整理") + (conflict ? "（快捷键 ⌥⌘D 被其它应用占用）" : "（⌥⌘D）")
+        dictationMenuItem?.toolTip = conflict ? "快捷键 ⌥⌘D 被其它应用占用；可从菜单开始口述，或在设置中查看更换指引" : nil
         dictationMenuItem?.isEnabled = model.canToggleCaptureDictation
         clipboardMenuItem?.isEnabled = true
         quickNoteMenuItem?.isEnabled = true
@@ -3255,22 +3279,25 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
 
     private func installGlobalHotKeys() {
         let center = GlobalHotKeyCenter.shared
-        center.register(.toggleDictation) { [weak self] in
+        let dictationRegistered = center.register(.toggleDictation) { [weak self] in
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.toggleDictation()
             }
         }
-        center.register(.captureClipboard) {
+        let clipboardRegistered = center.register(.captureClipboard) {
             MainActor.assumeIsolated {
                 if let model = ControlCenter.primary { model.captureClipboardText() }
             }
         }
-        center.register(.quickNote) {
+        let quickNoteRegistered = center.register(.quickNote) {
             MainActor.assumeIsolated {
                 QuickNoteController.shared.show()
             }
         }
+        if !dictationRegistered { NSLog("VoiceOS 全局快捷键 ⌥⌘D 注册失败：可能被其它应用占用；口述仍可从菜单栏开始") }
+        if !clipboardRegistered { NSLog("VoiceOS 全局快捷键 ⌥⌘V 注册失败：可能被其它应用占用") }
+        if !quickNoteRegistered { NSLog("VoiceOS 全局快捷键 ⌥⌘N 注册失败：可能被其它应用占用") }
     }
 
     @objc private func openMainWindow() {

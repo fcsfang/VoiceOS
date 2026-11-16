@@ -38,7 +38,9 @@ enum AppBrand {
 
     /// The menu bar shows only the V mark. The mask comes from the light tile's
     /// ink, and the template rendering lets the system tint it for the menu bar.
-    static func menuBarImage() -> NSImage? {
+    /// Recording fills the same mark with the system red and opts out of template
+    /// tinting, so the active state reads at a glance without a second asset.
+    static func menuBarImage(recording: Bool = false) -> NSImage? {
         guard let source = image(dark: false) else { return nil }
         let side = 128
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side,
@@ -62,14 +64,23 @@ enum AppBrand {
                                              bytesPerRow: mask.width * 4, bitsPerPixel: 32),
               let maskPixels = maskRep.bitmapData else { return nil }
         var buffer = [UInt8](repeating: 0, count: mask.width * mask.height * 4)
+        let fallback = recording ? NSColor(srgbRed: 1, green: 0.23, blue: 0.19, alpha: 1) : NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 1)
+        let tint = (recording ? NSColor.systemRed : NSColor.black).usingColorSpace(.deviceRGB) ?? fallback
+        let red = Int((tint.redComponent * 255).rounded())
+        let green = Int((tint.greenComponent * 255).rounded())
+        let blue = Int((tint.blueComponent * 255).rounded())
         for index in 0..<mask.alpha.count {
-            buffer[index * 4 + 3] = mask.alpha[index]
+            let alpha = Int(mask.alpha[index])
+            buffer[index * 4] = UInt8(red * alpha / 255)
+            buffer[index * 4 + 1] = UInt8(green * alpha / 255)
+            buffer[index * 4 + 2] = UInt8(blue * alpha / 255)
+            buffer[index * 4 + 3] = UInt8(alpha)
         }
         buffer.withUnsafeBufferPointer { maskPixels.update(from: $0.baseAddress!, count: buffer.count) }
         let height: CGFloat = 12
         let image = NSImage(size: NSSize(width: height * CGFloat(mask.width) / CGFloat(mask.height), height: height))
         image.addRepresentation(maskRep)
-        image.isTemplate = true
+        image.isTemplate = !recording
         return image
     }
 

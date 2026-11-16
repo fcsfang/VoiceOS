@@ -71,7 +71,8 @@ public struct AssistantTaskInput: Codable, Sendable {
         instruction = try container.decode(String.self, forKey: .instruction)
         context = try container.decode(LocalTranscriptContext.self, forKey: .context)
         policyVersions = try container.decode([String: Int].self, forKey: .policyVersions)
-        references = try container.decode([ClaimReference].self, forKey: .references)
+        // Inputs written before references were persisted decode as empty; validation still freezes stale rows.
+        references = (try? container.decodeIfPresent([ClaimReference].self, forKey: .references)) ?? []
         mode = try container.decodeIfPresent(AssistantMode.self, forKey: .mode) ?? .execution
     }
 }
@@ -118,6 +119,8 @@ public struct AssistantExecutionRecord: Identifiable, Codable, Sendable {
     public let sourceIDs: [String]
     public let report: String?
     public let references: [AssistantReference]
+    /// The user quotes the input snapshot was built from, in their original order.
+    public let inputReferences: [ClaimReference]
     public let responseID: String?
     public let error: String?
     public let resultSourceID: String?
@@ -279,7 +282,7 @@ extension VoiceOSStore {
         return try rows.map { row in
             let input = try JSONDecoder().decode(AssistantTaskInput.self, from: Data(row["input_json"]!.utf8))
             let result = try row["result_json"].map { try JSONDecoder().decode(AssistantExecutionResult.self, from: Data($0.utf8)) }
-            return .init(id: row["id"]!,actionID: input.actionID,actionVersion: input.actionVersion,state: row["state"]!,validity: row["validity"]!,title: result?.title ?? input.title,instruction: input.instruction,instructionSourceID: row["instruction_source_id"],sourceIDs: input.context.sources.map(\.sourceID),report: result?.markdown,references: result?.references ?? [],responseID: result?.responseID,error: row["error"],resultSourceID: row["result_source_id"],questionID: row["question_id"],mode: input.mode,createdAt: row["created_at"]!,updatedAt: row["updated_at"]!)
+            return .init(id: row["id"]!,actionID: input.actionID,actionVersion: input.actionVersion,state: row["state"]!,validity: row["validity"]!,title: result?.title ?? input.title,instruction: input.instruction,instructionSourceID: row["instruction_source_id"],sourceIDs: input.context.sources.map(\.sourceID),report: result?.markdown,references: result?.references ?? [],inputReferences: input.references,responseID: result?.responseID,error: row["error"],resultSourceID: row["result_source_id"],questionID: row["question_id"],mode: input.mode,createdAt: row["created_at"]!,updatedAt: row["updated_at"]!)
         }
     }
     /// `fresh` gives the caller a new execution identity even when a completed
