@@ -1986,13 +1986,14 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(savedEntries.map(\.kind), [.observation, .change, .experiment, .result])
         XCTAssertTrue(savedEntries.contains { $0.kind == .result && $0.sourceIDs == [experiment.sourceID] })
         let restoredQueue = try await recovered.assistantExecutions().first { $0.id == manual.id }
-        XCTAssertEqual(restoredQueue?.state, "queued")
+        XCTAssertEqual(restoredQueue?.state, "failed", "恢复的迁移包不自动续跑委托")
+        XCTAssertEqual(restoredQueue?.error, "迁移前委托尚未完成，可手动重试")
         let restoredOrder = try await recovered.assistantExecutions(actionID: ordinaryTask.id)
         XCTAssertEqual(restoredOrder.first?.id, manual.id)
         let resumed = try await recovered.processNextAssistantExecution(using: assistant)
-        XCTAssertTrue(resumed)
+        XCTAssertFalse(resumed)
         let resumedDelivery = try await recovered.assistantExecutions().first { $0.id == manual.id }
-        XCTAssertEqual(resumedDelivery?.state, "completed")
+        XCTAssertEqual(resumedDelivery?.state, "failed")
         let restoredDelivery = try await recovered.assistantExecutions().first { $0.id == delivery.id }
         XCTAssertEqual(restoredDelivery?.report, delivery.report)
         XCTAssertEqual(restoredDelivery?.validity, "current")
