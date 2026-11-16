@@ -319,7 +319,7 @@ public struct RecentContentHomeSnapshot: Equatable, Sendable {
             let claimIDs = Set(item.thoughts.map(\.claimID))
             let tasks = actions
                 .filter { $0.state == "open" && $0.validity == "current" && $0.kind == "task" && claimIDs.contains($0.claimID) }
-                .map { RecentContentTask(id: $0.id, title: $0.title) }
+                .map { RecentContentTask(id: $0.id, title: StatementTagParser.split($0.title).text) }
             digests[item.id] = RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration, tasks: tasks)
         }
         var progressRows: [String: [RecentContentProgressRow]] = [:]
