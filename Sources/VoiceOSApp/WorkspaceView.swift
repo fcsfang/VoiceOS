@@ -265,6 +265,9 @@ struct WorkspaceView: View {
     @State private var reviewAnchor = Date()
     @State private var error = ""
     @State private var actionUndo: ActionUndoState?
+    @State private var resultFeedbackTarget: ActionRecord?
+    @State private var localCompletionOffer: ActionRecord?
+    @State private var showingPendingReminderSyncs = false
     @State private var nextActionOutcome: ActionRecord?
     @State private var completingOutcome: ActionRecord?
     @State private var toastMessage: String?
@@ -284,7 +287,7 @@ struct WorkspaceView: View {
         let ids=Set(topic?.organization?.sections?.flatMap(\.actionIDs) ?? [])
         return model.actionRecords.filter { ids.contains($0.id) && $0.validity == "current" && $0.state != "dismissed" }
     }
-    private var deliveries: [AssistantExecutionRecord] { model.assistantExecutions.filter { $0.validity == "current" && $0.state == "completed" }.sorted { $0.updatedAt > $1.updatedAt } }
+    private var deliveries: [AssistantExecutionRecord] { model.sortedAssistantDeliveries(model.assistantExecutions.filter { $0.validity == "current" && $0.state == "completed" }) }
     private var activeMaterials: [SourceRecord] { model.records.filter { !$0.isArchived && !$0.isTrashed } }
     private var section: String {
         switch page {
@@ -422,6 +425,8 @@ struct WorkspaceView: View {
             .sheet(item:$reminderSettingsTarget) { target in
                 ReminderSettingsView(action:target.action,snapshot:target.snapshot,model:model) { reminderSettingsTarget=nil }
             }
+            .sheet(item:$resultFeedbackTarget) { action in ActionFeedbackView(action:action,model:model) { resultFeedbackTarget=nil } }
+            .sheet(isPresented:$showingPendingReminderSyncs) { pendingReminderSyncSheet }
     }
     private var alertContent: some View {
         sheetContent
@@ -536,7 +541,7 @@ struct WorkspaceView: View {
                 nav("首页",icon:"house",target:.home)
                 nav("主题",icon:"circle.hexagongrid",target:.themes)
                 nav("材料",icon:"books.vertical",target:.materials)
-                nav("行动",icon:"checkmark.circle",target:.actions)
+                nav("行动",icon:"checkmark.circle",target:.actions,badge:model.unreadDeliveryCount)
                 nav("启动",icon:"arrow.up.forward",target:.initiate)
             }
             if !savedViews.isEmpty {
@@ -586,14 +591,23 @@ struct WorkspaceView: View {
             .onAppear { AppBrand.applyApplicationIcon() }
             .onChange(of: colorScheme) { _, _ in AppBrand.applyApplicationIcon() }
     }
-    private func nav(_ title:String,icon:String,target:WorkspacePage) -> some View {
+    private func nav(_ title:String,icon:String,target:WorkspacePage,badge:Int = 0) -> some View {
         Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
-            Label(title,systemImage:icon).vosFont(WorkspaceText.body.size, weight: section == title ? .semibold : .regular)
+            HStack(spacing:8) {
+                Label(title,systemImage:icon).vosFont(WorkspaceText.body.size, weight: section == title ? .semibold : .regular)
+                Spacer(minLength:0)
+                if badge > 0 {
+                    Text(String(badge)).vosFont(WorkspaceText.caption.size, weight: .semibold)
+                        .foregroundStyle(palette.canvas).padding(.horizontal,6).frame(minWidth:18,minHeight:18)
+                        .background(palette.accent,in:Capsule())
+                }
+            }
                 .frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,12).padding(.vertical,11)
                 .background(section == title ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 // Plain buttons otherwise only hit-test the icon and text, leaving the padded row inert.
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityIdentifier("workspace.nav."+title)
+            .accessibilityLabel(badge > 0 ? title + "，AI 交付 \(badge) 份待读" : title)
             .accessibilityAddTraits(section == title ? .isSelected : [])
     }
     private var header: some View {
@@ -1011,6 +1025,16 @@ struct WorkspaceView: View {
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             HStack(alignment:.top,spacing:12) {
                 WorkspaceHeading(eyebrow:"",title:"行动")
+                if model.unreadDeliveryCount > 0 {
+                    Button { actionFilter = "AI 助理"; error = "" } label: {
+                        HStack(spacing:6) {
+                            Image(systemName:"doc.text").vosFont(WorkspaceText.meta.size, weight:.medium)
+                            Text("AI 交付 \(model.unreadDeliveryCount) 份待读").vosFont(WorkspaceText.meta.size, weight:.medium)
+                        }.foregroundStyle(palette.accent).padding(.horizontal,10).frame(height:30)
+                            .background(palette.accent.opacity(0.12),in:Capsule()).contentShape(Capsule())
+                    }.buttonStyle(.plain)
+                        .accessibilityLabel("AI 交付 \(model.unreadDeliveryCount) 份待读，打开列表")
+                }
                 if actionFilter == "我的待办" {
                     Button { beginPlanningToday() } label: {
                         HStack(spacing:6) {
@@ -1036,6 +1060,23 @@ struct WorkspaceView: View {
                 }
             }.sheet(isPresented:$showingClarifyQueue) { ActionClarifyQueueView(model:model, scope:clarifyScope) }
             WorkspaceTabs(selection:$actionFilter,titles:SavedViewPage.actions.filters,style:.filters)
+            if let offer = localCompletionOffer {
+                HStack(spacing:12) {
+                    WorkspaceNoticeText(message: model.status.isEmpty ? "提醒事项不可用；可以先本地完成，稍后核对。" : model.status, severity:.warning)
+                    Spacer(minLength:8)
+                    Button("仅本地完成（稍后核对）") { completeLocally(offer) }
+                    Button("稍后再说") { localCompletionOffer = nil }.buttonStyle(.borderless)
+                }
+            }
+            if !model.pendingReminderSyncs.isEmpty {
+                Button { showingPendingReminderSyncs = true } label: {
+                    HStack(spacing:6) {
+                        Image(systemName:"arrow.triangle.2.circlepath").vosFont(WorkspaceText.meta.size, weight:.medium).foregroundStyle(palette.warning)
+                        Text("\(model.pendingReminderSyncs.count) 项本地完成待同步 · 稍后核对").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        Spacer(minLength:0)
+                    }.contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityLabel("本地完成待同步 \(model.pendingReminderSyncs.count) 项，打开核对")
+            }
             if actionFilter == "全部" {
                 let surface = ActionTimeSurface.build(actions: myTodoActions, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
                 let overdue = surface.today.filter(\.isOverdue).count
@@ -1053,7 +1094,7 @@ struct WorkspaceView: View {
             }
             if ["目标","全部"].contains(actionFilter), !model.stalledOutcomes.isEmpty { stalledBanner }
             let visible = visibleActions
-            let executions = model.assistantExecutions.filter { $0.state != "cancelled" }
+            let executions = model.sortedAssistantDeliveries(model.assistantExecutions.filter { $0.state != "cancelled" })
             let paused = model.workspacePausedTasks
             if ["全部","我的待办"].contains(actionFilter), !focusedActions.isEmpty {
                 WorkspaceListSection(title:"专注",count:focusedActions.count) {
@@ -1252,7 +1293,13 @@ struct WorkspaceView: View {
     }
     @ViewBuilder private func executionRows(_ executions: [AssistantExecutionRecord]) -> some View {
         ForEach(executions) { execution in
-            WorkspaceRow(title:execution.title,subtitle:assistantExecutionLabel(execution),icon:execution.state == "completed" ? "doc.text" : "sparkles",trailing:execution.state == "completed" ? "阅读结果" : "查看进度",trailingStyle:.link) { go(.delivery(execution.id)) }
+            let unread = model.isDeliveryUnread(execution)
+            WorkspaceRow(title:execution.title,
+                         subtitle:(unread ? "未读 · " : "") + assistantExecutionLabel(execution),
+                         icon:execution.state == "completed" ? "doc.text" : "sparkles",
+                         iconTint:unread ? palette.accent : nil,
+                         trailing:unread ? "未读 · 阅读结果" : (execution.state == "completed" ? "阅读结果" : "查看进度"),
+                         trailingStyle:unread ? .status(palette.accent) : .link) { go(.delivery(execution.id)) }
             if execution.id != executions.last?.id { WorkspaceListDivider() }
         }
     }
@@ -1757,12 +1804,20 @@ struct WorkspaceView: View {
         Task {
             await model.changeAction(action,state:state)
             guard model.actionRecords.first(where: { $0.id == action.id })?.state == state.rawValue else {
-                error=model.status.isEmpty ? "状态未能更新，请稍后重试。" : model.status
+                if state == .completed, model.canCompleteLocally(action) {
+                    localCompletionOffer = action
+                    error = ""
+                } else {
+                    error=model.status.isEmpty ? "状态未能更新，请稍后重试。" : model.status
+                }
                 return
             }
+            localCompletionOffer = nil
             error=""
             switch state {
-            case .completed: showActionUndo(action.id,message:"已完成")
+            case .completed:
+                let message = model.pendingReminderSync(for: action.id) != nil ? "已本地完成，连接恢复前不会同步到提醒事项" : "已完成"
+                showActionUndo(action.id,message:message,resultActionID:action.id)
             case .dismissed: showActionUndo(action.id,message:"已放下")
             case .someday: showActionUndo(action.id,message:"已留到以后")
             case .open: actionUndo=nil
@@ -1770,8 +1825,16 @@ struct WorkspaceView: View {
             if let nextHighlight { actionKeyboardHighlightID=nextHighlight }
         }
     }
-    private func showActionUndo(_ id:String,message:String) {
-        actionUndo=ActionUndoState(actionID:id,message:message,token:UUID())
+    private func showActionUndo(_ id:String,message:String,resultActionID:String? = nil) {
+        actionUndo=ActionUndoState(actionID:id,message:message,token:UUID(),resultActionID:resultActionID)
+    }
+    private func completeLocally(_ action:ActionRecord) {
+        Task {
+            if await model.completeActionLocally(action) {
+                localCompletionOffer=nil;error=""
+                showActionUndo(action.id,message:"已本地完成，连接恢复前不会同步到提醒事项",resultActionID:action.id)
+            } else { error=model.status }
+        }
     }
     private func undoActionChange() {
         guard let undo=actionUndo else { return }
@@ -2034,12 +2097,44 @@ struct WorkspaceView: View {
     private var actionUndoBar: some View {
         HStack(spacing:12) {
             Text(actionUndo?.message ?? "").vosFont(WorkspaceText.meta.size, weight: .medium)
+            if let id = actionUndo?.resultActionID,
+               let action = model.actionRecords.first(where: { $0.id == id && $0.state == LocalActionState.completed.rawValue }) {
+                Button("记一句结果") { resultFeedbackTarget = action }
+            }
             Button("撤销") { undoActionChange() }
         }.padding(.horizontal,16).padding(.vertical,10)
             .background(palette.surface,in:Capsule())
             .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
             .shadow(color:.black.opacity(0.18),radius:14,y:6)
             .padding(.bottom,16)
+    }
+    private var pendingReminderSyncSheet: some View {
+        VStack(alignment:.leading,spacing:16) {
+            Text("本地完成待同步").vosFont(WorkspaceText.sectionTitle)
+            Text("这些变更只保存在 VoiceOS。恢复提醒事项连接并授权后，会自动写入 Apple 提醒事项并回读。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            if model.pendingReminderSyncList.isEmpty {
+                Text("没有待同步的本地变更。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            } else {
+                ForEach(model.pendingReminderSyncList) { entry in
+                    HStack(alignment:.top,spacing:10) {
+                        Image(systemName:"clock.arrow.circlepath").foregroundStyle(palette.warning).accessibilityHidden(true)
+                        VStack(alignment:.leading,spacing:4) {
+                            Text(entry.title).vosFont(WorkspaceText.rowTitle).lineLimit(2)
+                            Text(entry.desiredState == LocalActionState.completed.rawValue ? "已在 VoiceOS 完成" : "已在 VoiceOS 撤销完成").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength:8)
+                    }.padding(.vertical,8)
+                    if entry.id != model.pendingReminderSyncList.last?.id { Divider() }
+                }
+            }
+            if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            HStack {
+                Button("关闭") { showingPendingReminderSyncs=false }
+                Spacer()
+                Button("现在核对") { Task { await model.retryPendingReminderSyncs() } }
+                    .disabled(model.remindersBusy || model.pendingReminderSyncs.isEmpty)
+            }
+        }.padding(24).frame(width:520)
     }
     private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
@@ -2275,6 +2370,7 @@ private struct ActionUndoState: Equatable {
     let message: String
     let token: UUID
     var kind: Kind = .stateChange
+    var resultActionID: String? = nil
 }
 
 private struct WorkspaceSearchRow: Identifiable {
