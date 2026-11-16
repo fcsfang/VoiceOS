@@ -102,12 +102,14 @@ struct TaskFeedbackDraft {
     var expanded = false
 }
 
-private struct ActionOriginalQuotes: View {
+struct ActionOriginalQuotes: View {
     @ObservedObject var model: ControlCenter
     let action: ActionRecord
     let openSource: (String) -> Void
+    var explicitReferences: [ClaimReference]? = nil
+    var quoteLimit: Int? = nil
     private var references: [ClaimReference] {
-        model.claims.first { $0.id == action.claimID }?.references ?? []
+        explicitReferences ?? model.claims.first { $0.id == action.claimID }?.references ?? []
     }
     var body: some View {
         ForEach(Array(references.enumerated()), id: \.offset) { _, reference in
@@ -120,7 +122,7 @@ private struct ActionOriginalQuotes: View {
                         Text(source.displayTitle).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
                     }
                     QuoteHoverPreview(sourceTitle: source.displayTitle, snippet: quote(span, text: transcript), open: { openSource(source.id) }) {
-                        Text(quote(span, text: transcript)).vosFont(WorkspaceText.body).lineSpacing(4).textSelection(.enabled)
+                        Text(summary(quote(span, text: transcript))).vosFont(WorkspaceText.body).lineSpacing(4).textSelection(.enabled)
                     }
                     HStack(spacing: 14) {
                         Button("打开材料") { openSource(source.id) }
@@ -149,6 +151,10 @@ private struct ActionOriginalQuotes: View {
         let scalars = Array(text.unicodeScalars)
         guard span.textStart >= 0, span.textEnd <= scalars.count, span.textStart < span.textEnd else { return "原文范围已变化" }
         return String(String.UnicodeScalarView(scalars[span.textStart..<span.textEnd]))
+    }
+    private func summary(_ text: String) -> String {
+        guard let quoteLimit, text.count > quoteLimit else { return text }
+        return String(text.prefix(quoteLimit)) + "…"
     }
 }
 
@@ -273,7 +279,7 @@ struct WorkspaceTaskView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 WorkspaceHeading(eyebrow: eyebrow, title: StatementTagParser.split(action.title).text)
-                if isQuestion { QuestionAnswerSection(model: model, action: action, openDelivery: openDelivery) }
+                if isQuestion { QuestionAnswerSection(model: model, action: action, openDelivery: openDelivery, openSource: openSource) }
                 if let recurrence {
                     HStack(spacing: 12) {
                         Label("重复 · " + recurrence.display, systemImage: "repeat").vosFont(WorkspaceText.meta)

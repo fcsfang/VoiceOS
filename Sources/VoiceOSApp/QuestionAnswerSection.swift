@@ -30,6 +30,7 @@ struct QuestionAnswerSection: View {
     @ObservedObject var model: ControlCenter
     let action: ActionRecord
     let openDelivery: (String) -> Void
+    let openSource: (String) -> Void
     @State private var error = ""
 
     private var latest: AssistantExecutionRecord? {
@@ -92,6 +93,12 @@ struct QuestionAnswerSection: View {
                     WorkspaceExpandableText(text: report, label: "完整回答", lines: 6, size: WorkspaceText.body.size)
                 } else {
                     Text("回答已就绪。").vosFont(WorkspaceText.body)
+                }
+                if !latest.inputReferences.isEmpty {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("依据原话").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
+                        ActionOriginalQuotes(model: model, action: action, openSource: openSource, explicitReferences: latest.inputReferences, quoteLimit: 120)
+                    }
                 }
                 HStack(spacing: 12) {
                     Button("阅读结果", systemImage: "doc.text.magnifyingglass") { openDelivery(latest.id) }
