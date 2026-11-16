@@ -178,7 +178,6 @@ struct WorkspaceTaskView: View {
     @State private var replacementTitle = ""
     @State private var pauseReasons: [String] = []
     @State private var showingNextActionForm = false
-    @State private var nextActionTitle = ""
     @State private var nextActionNotice = ""
     @State private var confirmingCompleteOutcome = false
     @State private var undoMessage: String?
@@ -347,18 +346,13 @@ struct WorkspaceTaskView: View {
                             Button("不再跟进", role: .destructive) { confirmingDismiss = true }.disabled(model.savingAction)
                         }
                     } else if action.canPromoteToTask {
-                        Button("添加下一步") { nextActionTitle = ""; showingNextActionForm = true }
+                        Button("添加下一步") { showingNextActionForm = true }
                             .buttonStyle(.borderedProminent)
                             .disabled(model.savingAction)
                             .accessibilityLabel("添加下一步：" + action.title)
                         Button("标记达成") { confirmingCompleteOutcome = true }
                             .disabled(model.savingAction)
                             .accessibilityLabel("标记达成：" + action.title)
-                        if openNextActions.isEmpty {
-                            Button("转为待办") { promote() }
-                                .disabled(model.savingAction)
-                                .accessibilityLabel("转为待办：" + action.title)
-                        }
                         Button("不再跟进", role: .destructive) { confirmingDismiss = true }
                             .disabled(model.savingAction)
                             .accessibilityLabel("不再跟进：" + action.title)
@@ -542,7 +536,9 @@ struct WorkspaceTaskView: View {
         .sheet(isPresented: $showingSettings) { if let settings { ReminderSettingsView(action: action, snapshot: settings, model: model) { showingSettings = false } } }
         .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
         .sheet(isPresented: $showingFeedback, onDismiss: { Task { await loadFeedback() } }) { ActionFeedbackView(action: action, model: model) { showingFeedback = false } }
-        .sheet(isPresented: $showingNextActionForm) { nextActionForm }
+        .sheet(isPresented: $showingNextActionForm) {
+            NextActionFormSheet(model: model, outcome: action, onAdded: { _ in nextActionNotice = "已添加下一步" })
+        }
         .alert("标记这个目标已达成？", isPresented: $confirmingCompleteOutcome) {
             Button("标记达成") { completeOutcome() }
             Button("取消", role: .cancel) {}
@@ -652,36 +648,6 @@ struct WorkspaceTaskView: View {
             }
         }
     }
-    @ViewBuilder private var nextActionForm: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("添加下一步").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
-            Text("下一步会挂在这个目标下，目标本身保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            TextField("下一步要做的事", text: $nextActionTitle)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { addNextAction() }
-                .accessibilityLabel("下一步标题")
-            HStack {
-                Button("取消") { showingNextActionForm = false }
-                Spacer()
-                Button("添加") { addNextAction() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.savingAction || nextActionTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityLabel("确认添加下一步")
-            }
-        }.padding(24).frame(width: 400)
-    }
-    private func addNextAction() {
-        let title = nextActionTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !title.isEmpty else { return }
-        Task {
-            if await model.addNextAction(outcome: action, title: title) != nil {
-                showingNextActionForm = false
-                nextActionTitle = ""
-                nextActionNotice = "已添加下一步"
-                error = ""
-            } else { error = model.status }
-        }
-    }
     private func completeOutcome() {
         Task {
             if await model.completeOutcome(action) { error = ""; nextActionNotice = "" }
@@ -702,9 +668,6 @@ struct WorkspaceTaskView: View {
     }
     private func clarify(_ decision: ActionClarificationDecision) {
         Task { if await model.clarifyAction(action, decision: decision) { error = "" } else { error = model.status } }
-    }
-    private func promote() {
-        Task { if await model.promoteAction(action) { error = "" } else { error = model.status.isEmpty ? "未能转为待办，请稍后重试。" : model.status } }
     }
     private func saveReplacement(_ claim: CandidateClaim) {
         guard let store=model.store else { return }
@@ -908,5 +871,148 @@ extension ControlCenter {
     func actionLocationLabel(_ actionID: String) async -> String? {
         guard let link = reminderLinks.first(where: { $0.actionID == actionID && $0.state == "linked" }), let externalID = link.externalID else { return nil }
         return await NativeReminders.structuredLocationLabel(externalID: externalID)
+    }
+}
+
+/// Adds a next action under an outcome. One form session keeps one command id,
+/// so a retry after a failed attach reuses the created task instead of creating
+/// a second one. `submitNextAction` and `retryNextActionAttach` below carry the
+/// command; the attach retry never creates a task.
+struct NextActionFormSheet: View {
+    @ObservedObject var model: ControlCenter
+    let outcome: ActionRecord
+    var onAdded: (String) -> Void = { _ in }
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var sessionID = UUID().uuidString
+    @State private var createdActionID: String?
+    @State private var error = ""
+    @State private var busy = false
+
+    private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var sessionCommandID: String {
+        "next-action:" + outcome.id + ":" + trimmedTitle + ":" + sessionID
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("添加下一步").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
+            Text("下一步会挂在这个目标下，目标本身保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            TextField("下一步要做的事", text: $title)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { submit() }
+                .disabled(busy || createdActionID != nil)
+                .accessibilityLabel("下一步标题")
+            if createdActionID != nil {
+                WorkspaceNoticeText(message: "下一步已创建，但未能挂到目标。重试只挂接，不会新建待办。", severity: .warning)
+            }
+            if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
+            HStack {
+                Button("取消") { dismiss() }.disabled(busy)
+                Spacer()
+                if createdActionID != nil {
+                    Button("重试挂接") { retryAttach() }.buttonStyle(.borderedProminent).disabled(busy)
+                        .accessibilityLabel("重试挂接下一步")
+                } else {
+                    Button("添加") { submit() }.buttonStyle(.borderedProminent)
+                        .disabled(busy || trimmedTitle.isEmpty)
+                        .accessibilityLabel("确认添加下一步")
+                }
+            }
+        }.padding(24).frame(width: 420)
+    }
+
+    private func submit() {
+        guard !trimmedTitle.isEmpty, !busy, createdActionID == nil else { return }
+        busy = true
+        error = ""
+        let commandID = sessionCommandID
+        Task {
+            defer { busy = false }
+            guard let id = await model.submitNextAction(outcome: outcome, title: trimmedTitle, commandID: commandID) else {
+                error = model.status
+                return
+            }
+            if model.actionRecords.first(where: { $0.id == id })?.parentID == outcome.id {
+                onAdded(trimmedTitle)
+                dismiss()
+            } else {
+                createdActionID = id
+            }
+        }
+    }
+
+    private func retryAttach() {
+        guard let id = createdActionID, !busy else { return }
+        busy = true
+        error = ""
+        Task {
+            defer { busy = false }
+            if await model.retryNextActionAttach(outcomeID: outcome.id, actionID: id, commandID: sessionCommandID) {
+                onAdded(trimmedTitle)
+                dismiss()
+            } else {
+                error = model.status
+            }
+        }
+    }
+}
+
+extension ControlCenter {
+    /// Form-session command for adding a next action: create once, attach once.
+    /// The caller keeps `commandID` stable, so resubmitting after an attach
+    /// failure returns the task already created instead of making a second one.
+    func submitNextAction(outcome: ActionRecord, title: String, commandID: String) async -> String? {
+        guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return nil }
+        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { status = "下一步不能为空"; return nil }
+        savingAction = true; defer { savingAction = false }
+        do {
+            let id = try await store.createAction(claimID: outcome.claimID, expectedClaimReviewVersion: outcome.claimReviewVersion,
+                                                  title: clean, kind: .task, commandID: commandID)
+            await refresh()
+            if actionRecords.first(where: { $0.id == id })?.parentID == outcome.id {
+                status = "已添加下一步"
+                return id
+            }
+            do {
+                _ = try await store.attachNextAction(outcomeID: outcome.id, actionID: id, commandID: commandID)
+            } catch {
+                await refresh()
+                status = "下一步已创建，但未能挂到目标：" + error.localizedDescription
+                return id
+            }
+            await refresh()
+            guard actionRecords.first(where: { $0.id == id })?.parentID == outcome.id else {
+                status = "下一步已创建，但未能挂到目标，请重试挂接。"
+                return id
+            }
+            status = "已添加下一步"
+            return id
+        } catch {
+            status = error.localizedDescription
+            await refresh()
+            return nil
+        }
+    }
+    /// Retries the attach half of a form-session command. Same `commandID` as the
+    /// create, so the store returns the existing receipt instead of a second task.
+    func retryNextActionAttach(outcomeID: String, actionID: String, commandID: String) async -> Bool {
+        guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return false }
+        savingAction = true; defer { savingAction = false }
+        do {
+            _ = try await store.attachNextAction(outcomeID: outcomeID, actionID: actionID, commandID: commandID)
+            await refresh()
+            guard actionRecords.first(where: { $0.id == actionID })?.parentID == outcomeID else {
+                status = "下一步仍未能挂到目标，请稍后重试"
+                return false
+            }
+            status = "已添加下一步"
+            return true
+        } catch {
+            status = error.localizedDescription
+            await refresh()
+            return false
+        }
     }
 }
