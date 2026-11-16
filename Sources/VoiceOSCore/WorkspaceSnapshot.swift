@@ -136,8 +136,11 @@ extension VoiceOSStore {
         }
         if wantsAssistant {
             let freezesBefore = frozenContextCount
-            result.assistantExecutions = try StartupTrace.measure("snapshot.assistantExecutions") { try assistantExecutions() }
-            result.assistantAssessmentIssues = try StartupTrace.measure("snapshot.assistantAssessmentIssues") { try assistantAssessmentIssues() }
+            var validation: AssistantValidationContext?
+            let executionsToken = StartupTrace.begin("snapshot.assistantExecutions")
+            result.assistantExecutions = try assistantExecutions(context: &validation)
+            StartupTrace.end(executionsToken)
+            result.assistantAssessmentIssues = try StartupTrace.measure("snapshot.assistantAssessmentIssues") { try assistantAssessmentIssues(context: validation) }
             result.contextValidityChanged = result.contextValidityChanged || frozenContextCount != freezesBefore
         }
         if wantsKnowledge {
@@ -145,7 +148,15 @@ extension VoiceOSStore {
         }
         if scope == .full {
             // Validity follows assistant validation, which may freeze contexts.
-            result.followupValidity = try StartupTrace.measure("snapshot.followupValidity") { try recordingFollowupValidities(result.recordingFollowups) }
+            // Reuse this snapshot's reads only when nothing froze after they were
+            // taken; a freeze changes claim validity, so those need a fresh read.
+            let reusable = !result.contextValidityChanged
+            result.followupValidity = try StartupTrace.measure("snapshot.followupValidity") {
+                try recordingFollowupValidities(result.recordingFollowups,
+                    catalogRows: reusable ? result.sources : nil,
+                    claimRows: reusable ? result.claims : nil,
+                    actionRows: reusable ? result.actions : nil)
+            }
         }
         return result
     }

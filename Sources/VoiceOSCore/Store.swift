@@ -8,6 +8,8 @@ public actor VoiceOSStore {
     private let inspector: any MediaInspector
     var ready = false
     var knowledgeReviewPreparations = 0
+    var topicOrganizationCache: (fingerprint: String, input: TopicOrganizationInput?)?
+    var recordingFollowupDecodeCache: [String: (digest: String, receipts: [RecordingFollowupReceipt])] = [:]
     private(set) var knowledgeReviewScanFastPathEnabled = true
     func setKnowledgeReviewScanFastPathEnabled(_ enabled: Bool) { knowledgeReviewScanFastPathEnabled = enabled }
     private var activeImports: Set<String> = []

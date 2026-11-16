@@ -96,8 +96,59 @@ public protocol TopicOrganizationPort: Sendable {
 }
 
 extension VoiceOSStore {
+    /// Cheap change detector for the briefing input. The schema keeps timestamps
+    /// on only some contributing tables, so counts and sums stand in for the
+    /// rest. A miss only delays a new briefing; organizeTopics still revalidates
+    /// the full input before it writes anything.
+    func topicOrganizationFingerprint() throws -> String {
+        let row = try db.query("""
+        SELECT
+          (SELECT COUNT(*) FROM sources) AS sources,
+          (SELECT COALESCE(SUM(CASE WHEN state='saved' THEN 1 ELSE 0 END),0) FROM sources) AS savedSources,
+          (SELECT COALESCE(SUM(CASE WHEN state='reference_only' THEN 1 ELSE 0 END),0) FROM sources) AS referenceSources,
+          (SELECT COALESCE(SUM(local_only),0) FROM sources) AS localOnlySources,
+          (SELECT COALESCE(SUM(policy_version),0) FROM sources) AS sourcePolicies,
+          (SELECT COUNT(*) FROM sources WHERE presentation_json IS NOT NULL) AS presentations,
+          (SELECT COALESCE(SUM(LENGTH(presentation_json)),0) FROM sources) AS presentationBytes,
+          (SELECT COUNT(*) FROM transcript_versions) AS transcriptVersions,
+          (SELECT COALESCE(MAX(version_no),0) FROM transcript_versions) AS transcriptVersionMax,
+          (SELECT COUNT(*) FROM contexts) AS contexts,
+          (SELECT COALESCE(SUM(CASE WHEN state='current' THEN 1 ELSE 0 END),0) FROM contexts) AS currentContexts,
+          (SELECT COUNT(*) FROM claims) AS claims,
+          (SELECT COALESCE(SUM(review_version),0) FROM claims) AS claimReviewSum,
+          (SELECT COALESCE(SUM(CASE WHEN validity='current' THEN 1 ELSE 0 END),0) FROM claims) AS currentClaims,
+          (SELECT COUNT(*) FROM claim_reviews) AS claimReviews,
+          (SELECT COUNT(*) FROM actions) AS actions,
+          (SELECT COALESCE(SUM(version),0) FROM actions) AS actionVersions,
+          (SELECT COALESCE(SUM(CASE WHEN validity='current' THEN 1 ELSE 0 END),0) FROM actions) AS currentActions,
+          (SELECT COUNT(*) FROM action_feedback) AS feedback,
+          (SELECT COALESCE(MAX(created_at),'') FROM action_feedback) AS feedbackAt,
+          (SELECT COUNT(*) FROM reflection_question_entries WHERE state='inactive') AS inactiveEntries,
+          (SELECT COUNT(*) FROM reflection_questions) AS questions,
+          (SELECT COALESCE(MAX(updated_at),'') FROM reflection_questions) AS questionsAt,
+          (SELECT COALESCE(SUM(ai_named),0) FROM reflection_questions) AS aiNamed,
+          (SELECT COUNT(*) FROM reflection_question_sources) AS questionSources,
+          (SELECT COUNT(*) FROM discussion_attempts) AS discussions,
+          (SELECT COALESCE(SUM(CASE WHEN validity='current' AND state='completed' THEN 1 ELSE 0 END),0) FROM discussion_attempts) AS currentDiscussions
+        """).first
+        let keys = ["sources","savedSources","referenceSources","localOnlySources","sourcePolicies","presentations","presentationBytes","transcriptVersions","transcriptVersionMax","contexts","currentContexts","claims","claimReviewSum","currentClaims","claimReviews","actions","actionVersions","currentActions","feedback","feedbackAt","inactiveEntries","questions","questionsAt","aiNamed","questionSources","discussions","currentDiscussions"]
+        return keys.map { row?[$0] ?? "" }.joined(separator: ":")
+    }
+
     public func prepareTopicOrganization() throws -> TopicOrganizationInput? {
         guard ready else { throw VoiceOSError("资料库尚未打开") }
+        let fingerprint = try StartupTrace.measure("briefing.fingerprint") { try topicOrganizationFingerprint() }
+        if let cached = topicOrganizationCache, cached.fingerprint == fingerprint {
+            StartupTrace.mark("briefing.reused")
+            return cached.input
+        }
+        let input = try StartupTrace.measure("briefing.build") { try buildTopicOrganizationInput() }
+        topicOrganizationCache = (fingerprint, input)
+        StartupTrace.mark("briefing.recomputed")
+        return input
+    }
+
+    private func buildTopicOrganizationInput() throws -> TopicOrganizationInput? {
         let withdrawn=Set(try db.query("SELECT source_id FROM reflection_question_entries WHERE state='inactive'").compactMap { $0["source_id"] })
         let catalog = try sources().filter { !withdrawn.contains($0.id) && !$0.localOnly && !$0.needsTranscriptionReview && ($0.presentation?.automaticInput == nil || $0.recordingExpression?.state == "completed") && ["saved","reference_only"].contains($0.state) && !($0.transcript ?? "").isEmpty }
         guard !catalog.isEmpty else { return nil }
