@@ -613,7 +613,7 @@ struct WorkspaceView: View {
                     .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
                     .contentShape(Capsule())
             }.buttonStyle(.plain).onHover { searchHovered=$0 }
-                .accessibilityLabel("搜索").help("搜索全部内容（⌘F）").keyboardShortcut("f",modifiers:.command)
+                .accessibilityLabel("搜索").help("搜索全部内容（⌘F）")
             WorkspaceIconButton(systemImage:"sidebar.right",label:"讨论") { Task { await toggleDiscussion() } }
                 .disabled(model.discussionSaving || model.discussionSending || !homeCanDiscuss)
                 .help(homeCanDiscuss ? "讨论" : "先选择一条材料或全景中的问题")
@@ -1720,7 +1720,7 @@ struct WorkspaceView: View {
                     await model.refresh()
                     actionUndo=nil;error=""
                 } catch {
-                    error=error.localizedDescription
+                    self.error=error.localizedDescription
                     await model.refresh()
                 }
             }
