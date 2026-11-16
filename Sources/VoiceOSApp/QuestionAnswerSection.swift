@@ -7,11 +7,20 @@ enum QuestionAnswerPhase {
     init(_ execution: AssistantExecutionRecord?) {
         guard let execution else { self = .none; return }
         switch execution.state {
-        case "queued", "running": self = .running
+        case "queued", "running", "reserved", "blocked": self = .running
         case "completed": self = .completed
         case "failed", "cancelled": self = .failed
         default: self = .none
         }
+    }
+}
+
+/// Structural model failures read as one retryable message. The raw diagnostic
+/// stays in the execution record and the log, never in the notice.
+enum AssistantFailurePresentation {
+    static func message(_ raw: String?) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        return AssistantFailureMessage.isStructural(raw) ? AssistantFailureMessage.structural : raw
     }
 }
 
@@ -53,7 +62,7 @@ struct QuestionAnswerSection: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("这个问题还没有 VoiceOS 的回答。").vosFont(WorkspaceText.body)
             HStack(spacing: 12) {
-                Button("让 VoiceOS 回答", systemImage: "sparkles") { ask() }
+                Button("让 VoiceOS 回答", systemImage: "sparkles") { ask(fresh: true) }
                     .buttonStyle(.borderedProminent)
                     .disabled(model.assistantBusy || !modelReady)
                 if !modelReady {
@@ -84,14 +93,18 @@ struct QuestionAnswerSection: View {
                 } else {
                     Text("回答已就绪。").vosFont(WorkspaceText.body)
                 }
-                Button("阅读结果", systemImage: "doc.text.magnifyingglass") { openDelivery(latest.id) }
+                HStack(spacing: 12) {
+                    Button("阅读结果", systemImage: "doc.text.magnifyingglass") { openDelivery(latest.id) }
+                    Button("重新回答", systemImage: "arrow.clockwise") { ask(fresh: true) }
+                        .disabled(model.assistantBusy || !modelReady)
+                }
             }
         }.padding(.vertical, 16)
     }
 
     private var failedState: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let message = latest?.error, !message.isEmpty {
+            if let message = AssistantFailurePresentation.message(latest?.error) {
                 WorkspaceNoticeText(message: message, severity: .danger)
             } else {
                 WorkspaceNoticeText(message: "这次回答没有完成。", severity: .danger)
@@ -112,9 +125,9 @@ struct QuestionAnswerSection: View {
         }.padding(.vertical, 16)
     }
 
-    private func ask() {
+    private func ask(fresh: Bool = false) {
         Task {
-            if await model.analyzeThought(action) { error = "" }
+            if await model.analyzeThought(action, fresh: fresh) { error = "" }
             else { error = model.assistantStatus }
         }
     }
