@@ -61,6 +61,15 @@ public struct ActionRevisionRecord: Identifiable, Sendable {
     public let commandID: String
     public let createdAt: String
 }
+/// The goal detail header's read-only derivation; no row is written.
+public struct GoalProgress: Equatable, Sendable {
+    public let nextSteps: Int
+    public let completedSteps: Int
+    public let lastActivityAt: String?
+    public init(nextSteps: Int, completedSteps: Int, lastActivityAt: String?) {
+        self.nextSteps = nextSteps; self.completedSteps = completedSteps; self.lastActivityAt = lastActivityAt
+    }
+}
 extension VoiceOSStore {
     /// Explicit local intent; endorsement alone never creates a task or external reminder.
     @discardableResult
@@ -107,6 +116,27 @@ extension VoiceOSStore {
     private func scopedOutcomes(nature: ActionNature) throws -> [ActionRecord] {
         _ = try candidateClaims(includeFrozen: true)
         return try db.query("SELECT a.*,\(Self.completedAtColumn) FROM actions a WHERE a.kind='opportunity' AND a.nature=? AND a.state='open' AND a.validity='current' ORDER BY a.created_at,a.id", [nature.rawValue]).map(Self.actionRecord)
+    }
+    /// Next steps are the goal's open, current children; completed steps are its
+    /// completed children. The clock is the newest revision across the goal and
+    /// its children, falling back to when the goal was created.
+    public func goalProgress(actionID: String) throws -> GoalProgress {
+        _ = try candidateClaims(includeFrozen: true)
+        guard let goalCreatedAt = try db.query("SELECT created_at FROM actions WHERE id=?", [actionID]).first?["created_at"] else {
+            return GoalProgress(nextSteps: 0, completedSteps: 0, lastActivityAt: nil)
+        }
+        let counts = try db.query("""
+            SELECT
+              (SELECT COUNT(*) FROM actions WHERE parent_id=? AND state='open' AND validity='current') AS next_steps,
+              (SELECT COUNT(*) FROM actions WHERE parent_id=? AND state='completed') AS completed_steps
+            """, [actionID, actionID]).first
+        let lastRevision = try db.query("""
+            SELECT MAX(created_at) AS last_at FROM action_revisions
+            WHERE action_id=? OR action_id IN (SELECT id FROM actions WHERE parent_id=?)
+            """, [actionID, actionID]).first?["last_at"]
+        return GoalProgress(nextSteps: Int(counts?["next_steps"] ?? "") ?? 0,
+                            completedSteps: Int(counts?["completed_steps"] ?? "") ?? 0,
+                            lastActivityAt: lastRevision ?? goalCreatedAt)
     }
     @discardableResult
     public func confirmOpportunityAsTask(actionID: String, expectedVersion: Int, title: String, commandID: String = UUID().uuidString) throws -> String {
