@@ -10,7 +10,7 @@ enum WorkspaceErrorRetry {
 }
 
 enum WorkspaceRoute: Equatable {
-    case actions, search, settings, discussion
+    case actions, search, settings, discussion, weeklyReview
 }
 
 enum WorkspacePageRequest: Equatable {
@@ -142,6 +142,13 @@ final class ControlCenter: ObservableObject {
     @Published var pendingWorkspaceRoute: WorkspaceRoute?
     @Published var pendingWorkspacePageRequest: WorkspacePageRequest?
     @Published var pendingWorkspaceTaskID: String?
+    /// Bumped when a failed processing item is dismissed, so the sidebar dot
+    /// and the processing page re-read the persisted dismissal list.
+    @Published var processingDismissalRevision = 0
+    func ignoreProcessingFailure(_ id: String) {
+        ProcessingDismissals.ignore(id)
+        processingDismissalRevision += 1
+    }
     @Published var showingCaptureComposer = false
     @Published var onboardingRequested = false
     @Published var retrievalResult: RetrievalResult?
@@ -662,6 +669,7 @@ final class ControlCenter: ObservableObject {
     @Published var choosingReminderCalendar = false
     private let reminders = NativeReminders()
     var reminderCalendarTitle: String { reminderCalendars.first { $0.id == reminderCalendarID }?.title ?? (reminderAccess?.enabled == true ? reminderAccess!.title : "未选择清单") }
+    var remindersPermissionDenied: Bool { NativeReminders.authorizationStatus() == .denied }
     func recordingActionRequiresReview(_ action:ActionRecord) -> Bool {
         let sourceIDs=Set(claims.first(where: { $0.id == action.claimID })?.references.map(\.sourceID) ?? [])
         return records.contains { source in
@@ -3300,6 +3308,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         ControlCenter.primary?.pendingWorkspaceRoute = .search
     }
 
+    func openWeeklyReview() {
+        openMainWindow()
+        ControlCenter.primary?.pendingWorkspaceRoute = .weeklyReview
+    }
+
     func openCaptureComposer() {
         openMainWindow()
         ControlCenter.primary?.showingCaptureComposer = true
@@ -3408,6 +3421,8 @@ struct VoiceOSApp: App {
                     Button("行动") { delegate.openWorkspacePage(.actions) }.keyboardShortcut("4")
                     Button("启动") { delegate.openWorkspacePage(.initiate) }.keyboardShortcut("5")
                     Button("返回") { delegate.openWorkspacePage(.back) }.keyboardShortcut("[")
+                    Divider()
+                    Button("每周回顾") { delegate.openWeeklyReview() }
                 }
                 CommandMenu("记录") {
                     Button("口述") { ControlCenter.primary?.toggleCaptureDictation() }.keyboardShortcut("d", modifiers: [.command, .option])
@@ -4215,7 +4230,7 @@ extension ControlCenter {
     }
     func retryAllFailedKnowledgeReviews() async {
         guard let store, knowledgeReviewModel != nil else { return }
-        for review in knowledgeReviews.filter({ $0.validity == "current" && $0.state == "failed" }) {
+        for review in workspaceFailedKnowledgeReviews {
             do {
                 try await ensureTranscriptReviewed(sourceID: review.sourceID)
                 _ = try await store.enqueueKnowledgeReview(sourceID: review.sourceID, retry: true)

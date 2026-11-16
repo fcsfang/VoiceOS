@@ -59,6 +59,7 @@ private enum PackageLayout {
     static let version50Tables = version49Tables + ["task_initiations"]
     static let addedIn51Tables = ["panorama_attempts", "panorama_steps", "panorama_theme_replies", "panorama_themes", "panorama_theme_batches", "panorama_theme_appearances"]
     static let version51Tables = version50Tables + addedIn51Tables
+    static let currentVersion = 51
     static let optionalTables: Set<String> = ["action_recurrence", "source_entities"]
     static let opaqueIDTables: Set<String> = ["panorama_themes"]
     static let identityColumns: [String: [String]] = [
@@ -163,7 +164,8 @@ extension VoiceOSStore {
         let file = try PackageLayout.safeFile(package, "manifest.json")
         guard let size = try file.resourceValues(forKeys:[.fileSizeKey]).fileSize, size > 0, size <= 1048576 else { throw VoiceOSError("迁移清单过大或为空") }
         let manifest = try JSONDecoder().decode(PackageManifest.self,from:Data(contentsOf:file))
-        guard manifest.format == "VoiceOS-local-package", (1...51).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
+        guard manifest.version <= PackageLayout.currentVersion else { throw VoiceOSError("此迁移包由更新版本的 VoiceOS 创建（包版本 \(manifest.version)），请升级后再恢复") }
+        guard manifest.format == "VoiceOS-local-package", (1...PackageLayout.currentVersion).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1),
               let count = manifest.counts["sources"], count >= 0, manifest.counts.values.allSatisfy({ $0 >= 0 && $0 <= 1000000 }) else { throw VoiceOSError("不支持此迁移包格式或记录数量") }
         return PackageSummary(version:manifest.version,createdAt:manifest.createdAt,sourceCount:count,omittedAssetCount:manifest.omittedAssetIDs.count,mediaIncluded:manifest.mediaIncluded)
     }
@@ -232,7 +234,7 @@ extension VoiceOSStore {
                 files.append(verified)
             }
             if includeMedia || !attachments.isEmpty { try DurableFiles.syncDirectory(temporary.appendingPathComponent("assets")) }
-            let manifest = PackageManifest(format: "VoiceOS-local-package", version: 51, databaseSchema: 51, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
+            let manifest = PackageManifest(format: "VoiceOS-local-package", version: PackageLayout.currentVersion, databaseSchema: PackageLayout.currentVersion, createdAt: ISO8601DateFormatter().string(from: Date()), mediaIncluded: includeMedia, counts: counts, files: files, omittedAssetIDs: omissions.sorted())
             let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let manifestFile = temporary.appendingPathComponent("manifest.json")
             try encoder.encode(manifest).write(to: manifestFile, options: .withoutOverwriting)
@@ -249,7 +251,8 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("恢复目标必须是新的空目录；现有资料库不会被覆盖") }
         let manifestURL = try PackageLayout.safeFile(package, "manifest.json")
         let manifest = try JSONDecoder().decode(PackageManifest.self, from: Data(contentsOf: manifestURL))
-        guard manifest.format == "VoiceOS-local-package", (1...51).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
+        guard manifest.version <= PackageLayout.currentVersion else { throw VoiceOSError("此迁移包由更新版本的 VoiceOS 创建（包版本 \(manifest.version)），请升级后再恢复") }
+        guard manifest.format == "VoiceOS-local-package", (1...PackageLayout.currentVersion).contains(manifest.version), manifest.databaseSchema == (manifest.version >= 25 ? manifest.version : manifest.version + 1) else { throw VoiceOSError("不支持此迁移包格式") }
         guard manifest.version >= 26 || !manifest.files.contains(where: { $0.path == "recording_processing_requests.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带录制处理请求") }
         guard manifest.version >= 27 || !manifest.files.contains(where: { $0.path == "segmented_processing_batches.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带分段批次") }
         guard manifest.version >= 28 || !manifest.files.contains(where: { $0.path == "segmented_extraction_attempts.jsonl" }) else { throw VoiceOSError("旧迁移格式不能携带片段尝试") }
@@ -424,6 +427,9 @@ extension VoiceOSStore {
                     }
                     if table == "knowledge_reviews", ["queued", "running"].contains(row["state"] ?? "") {
                         row["state"] = "failed"; row["error"] = "迁移前知识核查尚未完成，可手动重试"
+                    }
+                    if table == "assistant_executions", ["queued", "running"].contains(row["state"] ?? "") {
+                        row["state"] = "failed"; row["error"] = "迁移前委托尚未完成，可手动重试"
                     }
                     if table == "expression_association_attempts" {
                         row["validity"] = "frozen"
