@@ -39,6 +39,10 @@ public final class GlobalHotKeyCenter {
         return true
     }
 
+    public func isRegistered(_ hotKey: GlobalHotKey) -> Bool {
+        registrations[hotKey.identifier] != nil
+    }
+
     public func unregister(_ identifier: UInt32) {
         if let reference = registrations.removeValue(forKey: identifier) {
             UnregisterEventHotKey(reference)
