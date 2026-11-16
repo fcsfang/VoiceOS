@@ -205,9 +205,22 @@ extension PanoramaModelInput {
 
 extension PanoramaModelInput {
     func payloadForScope(_ input: PanoramaInput) throws -> Payload {
-        let sourceIDs=Set(try input.manifest.sourceIDs.map(sources.alias))
-        let claimIDs=Set(try input.manifest.claimIDs.map(claims.alias))
-        return .init(units: payload.units.filter { Set($0.sourceIDs + $0.dependencyIDs).isSubset(of: sourceIDs) },
+        payloadScoped(sourceIDs: Set(try input.manifest.sourceIDs.map(sources.alias)),
+                      claimIDs: Set(try input.manifest.claimIDs.map(claims.alias)))
+    }
+    func payloadForScope(_ target: PanoramaCoverageTarget) throws -> Payload {
+        payloadScoped(sourceIDs: Set(try target.sourceIDs.map(sources.alias)),
+                      claimIDs: Set(try target.claimIDs.map(claims.alias)))
+    }
+    /// Focused generation reads every source transcript as context but may only
+    /// name the claims its target covers; a claim absent from the payload cannot
+    /// be cited into an attribution or coverage failure.
+    func focusedPayloadForModel(_ target: PanoramaCoverageTarget) throws -> Payload {
+        let scoped=try payloadForScope(target)
+        return .init(units: payload.units, sources: payload.sources, claims: scoped.claims)
+    }
+    private func payloadScoped(sourceIDs: Set<String>, claimIDs: Set<String>) -> Payload {
+        .init(units: payload.units.filter { Set($0.sourceIDs + $0.dependencyIDs).isSubset(of: sourceIDs) },
             sources: payload.sources.filter { sourceIDs.contains($0.sourceID) }, claims: payload.claims.filter { claimIDs.contains($0.id) })
     }
 }

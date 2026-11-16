@@ -24,7 +24,8 @@ public struct ResponsesPanoramaPort: PanoramaModelPort {
     }
     public func generate(_ input: PanoramaInput, focus: PanoramaGenerationFocus, target: PanoramaCoverageTarget) async throws -> (PanoramaProposal, PanoramaReceipt) {
         let wire=try PanoramaModelInput(input)
-        let request=PanoramaFocusedGenerationRequest(input: wire.payload, focus: try wire.focusForModel(focus), target: try wire.coverageForModel(target))
+        let request=PanoramaFocusedGenerationRequest(input: try wire.focusedPayloadForModel(target),
+            focus: try wire.focusForModel(focus), target: try wire.coverageForModel(target))
         let (proposal, receipt): (PanoramaProposal, PanoramaReceipt)=try await call(request,
             instructions: Self.generationInstructions+Self.focusedGenerationInstructions, schema: Self.proposalSchema, name: "voiceos_panorama_focus")
         return (try wire.proposalFromModel(proposal), receipt)
@@ -164,7 +165,7 @@ public struct ResponsesPanoramaPort: PanoramaModelPort {
     所有提交 sourceID 与 claimID 都必须明确覆盖。由问题或联系的 evidence 表达的项目不要再列未表达；其他项目分别列 unrepresentedSources/unrepresentedClaims 并写具体原因。这些入口会保留完整原文和认识，不可为了藏掉不合格生成物把它们塞入未表达。不存在值得归纳的问题可以空图，但必须逐项说明。不要限制输入资料、观点、区域、问题或关系数量，不为凑数量硬造联系。
     """
     static let focusedGenerationInstructions="""
-    本次请求只负责一个完整单元中的一个确定性聚焦分片，不是整个单元。input 仍提供该单元的全部完整原文与当前观点；必须通读完整上下文来理解归属、条件与不确定性，不要只读 focus 范围。
+    本次请求只负责一个完整单元中的一个确定性聚焦分片，不是整个单元。input 仍提供该单元的全部完整原文，以及本片 target 内的当前观点；必须通读完整上下文来理解归属、条件与不确定性，不要只读 focus 范围。
     focus 给出本片可引用的全文范围，sourceID、transcriptVersionID 使用本次请求的 s、t 短身份，start/end 是全文 Unicode scalar 零起始闭开范围。每个问题的每条 evidence，以及每条联系的 fromEvidence 和 toEvidence 中的每条 evidence，都必须完全落在本片某个 focus 范围之内；不得引用任何聚焦范围之外的原文，即使它在全文其他位置可以逐字定位。
     target 给出本片唯一可以覆盖的来源与当前观点。只有 target.sourceIDs 中的来源可以出现在 evidence.sourceID；只有 target.claimIDs 中的观点可以出现在 evidence.claimIDs；只有 target 中的项目可以出现在 unrepresentedSources 或 unrepresentedClaims。target 之外的来源和观点只作为理解上下文，不得写入候选、观点归属或未表达清单。
     start/end 始终是全文坐标，不得减去 focus.start，也不得按窗口平移或重新计算。quote 仍须是该范围内逐字连续原文，重复原话必须给出精确范围。
