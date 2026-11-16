@@ -3905,6 +3905,18 @@ extension ControlCenter {
             await refresh(); resumeAssistantExecutions(); return true
         } catch { assistantStatus = error.localizedDescription; await refresh(); return false }
     }
+    /// Queues a question's first answer and returns without waiting for it, so
+    /// the clarify queue can advance to the next item right away.
+    func enqueueTrialAnswer(_ action: ActionRecord) async -> Bool {
+        guard let store else { assistantStatus = "资料库尚未打开"; return false }
+        guard assistantModel != nil else { assistantStatus = "请先配置文本模型"; return false }
+        do {
+            _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: .analysis)
+            assistantStatus = "已让 VoiceOS 先回答这条问题；结果会保存在问题下"
+            Task { await refresh(); resumeAssistantExecutions() }
+            return true
+        } catch { assistantStatus = error.localizedDescription; return false }
+    }
     func retryAssistant(_ execution: AssistantExecutionRecord) async {
         do { try await store?.retryAssistantExecution(id: execution.id); assistantStatus = "已重新排队"; await refresh(); resumeAssistantExecutions() }
         catch { assistantStatus = error.localizedDescription }
