@@ -54,3 +54,12 @@ extension VoiceOSStore {
 
 - 存量：197 = 长期目标 62 + 录音中活动 57 + 问题 43 + 其他陈述 24 + 想法观点 11。
 - 全部 197 条从无修订、无讨论、无 AI 分析；stalled 横幅现为 197，迁移后目标入口应为 62。
+
+## 结果（2026-11-17 凌晨）
+
+- 四单元合并：`work/m23-a`（nature 与迁移 64）、`work/m23-b`（两个入口）、`work/m23-c`（问题详情顶点）、`work/m23-d`（澄清队列分型），集成修复 `cd79edb`。
+- 集成对齐三处：U2 期望的 `ActionClarifyScope` 统一为 U4 的 `ClarifyQueueScope`；归类失败回写 `self.error`（catch 绑定遮蔽）；重复任务后继行动继承 nature。测试侧：种子按抽取派生归类不再重复归类，裸删行动前先删修订行（外键）。
+- 构建 `swift build -j 2` 一次通过 61.5 秒；`swift test -j 2` 405 项 0 失败 20.9 秒（392 基础上新增 13 项：ActionNature 5、问题行状态 5、澄清分型 3）。
+- 隔离副本（DB `.backup` + assets `cp -Rc`）迁移 63→64 精确达标：user_version 64；goal 62、narration 57、question 43、unknown 35，共 197 条，与基线一致。
+- 实机截图（/tmp）：`v23-actions.png`（新标签组）、`v23-questions.png`（43 条问题，问号图标与未回答状态槽）、`v23-goals.png`（62 条目标，停滞横幅同步降到 62）、`v23-tail2.png` 与 `v23-untriaged.png`（系统整理的建议 35 条折叠区块，展开后每条带归类菜单）、`v23-question-detail2.png`（问题详情以「VoiceOS 的回答」为顶点，任务槽全部隐藏，出口为想清楚了/让 VoiceOS 回答/继续思考/这件事我自己做/以后再说/放下）、`v23-clarify-q.png`（问题范围队列：让 VoiceOS 试答/想清楚了/以后再说/跳过，剩余 43 条）。
+- 遗留小项：问题详情的回答区块与动作行各有一个「让 VoiceOS 回答」按钮，重复；记入波 24 候选。
