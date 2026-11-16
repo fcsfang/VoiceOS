@@ -21,6 +21,7 @@ struct WorkspaceTopicReadingView: View {
     @State private var confirmingRejection = false
     @State private var hoveredSectionID: String?
     @State private var hoveredQuestion: String?
+    @State private var localFilter = ""
 
     private var sections: [TopicReadingSection] { topic.organization?.sections ?? [] }
     private var claimIDs: Set<String> { Set(sections.flatMap(\.claimIDs)) }
@@ -32,7 +33,33 @@ struct WorkspaceTopicReadingView: View {
         model.assistantExecutions.filter { $0.validity == "current" && $0.state == "completed" && ($0.questionID == topic.id || actionIDs.contains($0.actionID)) }
     }
     private var outcomes: [ActionFeedbackRecord] { (focus?.outcomes ?? []).filter { feedback in actionIDs.contains(feedback.actionID) && feedback.sourceState != "frozen" && actions.contains { $0.id == feedback.actionID && $0.version == feedback.actionVersion } } }
-    private var displayedSections: [TopicReadingSection] { selectedSection.map { id in sections.filter { $0.id == id } } ?? sections }
+    private var filterTerm: String { localFilter.trimmingCharacters(in:.whitespacesAndNewlines) }
+    private var showsTopicFilter: Bool { sections.count > 4 }
+    private var filteredSections: [TopicReadingSection] {
+        guard !filterTerm.isEmpty else { return sections }
+        return sections.filter { sectionMatches($0,term:filterTerm) }
+    }
+    private var displayedSections: [TopicReadingSection] {
+        if let selectedSection { return filteredSections.filter { $0.id == selectedSection } }
+        return filteredSections
+    }
+    private func sectionMatches(_ section:TopicReadingSection,term:String) -> Bool {
+        if section.title.localizedStandardContains(term) || section.summary.localizedStandardContains(term) { return true }
+        if section.evidence.contains(where: { $0.quote.localizedStandardContains(term) }) { return true }
+        let sectionClaims=claims.filter { section.claimIDs.contains($0.id) }
+        if sectionClaims.contains(where: { $0.statement.localizedStandardContains(term) }) { return true }
+        return actions.contains { section.actionIDs.contains($0.id) && $0.title.localizedStandardContains(term) }
+    }
+    private var topicFilter: some View {
+        HStack(spacing:12) {
+            WorkspaceSearchField(text:$localFilter,placeholder:"筛选小主题、观点与原话")
+                .frame(maxWidth:360)
+            if !filterTerm.isEmpty {
+                Text("\(filteredSections.count) / \(sections.count) 个小主题").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            }
+            Spacer(minLength:0)
+        }
+    }
     // A shared recording alone does not prove a topic relationship. Only show
     // followups anchored to a claim explicitly assigned to this topic.
     private var connections: [ReflectionConnection] {
@@ -47,6 +74,7 @@ struct WorkspaceTopicReadingView: View {
             if mode != "行动与结果" {
                 if sections.isEmpty { preparingCards }
                 else {
+                    if showsTopicFilter { topicFilter }
                     if mode == "概览" {
                         DisclosureGroup(isExpanded:$showingStructure) {
                             structure.padding(.top,14)
@@ -128,7 +156,7 @@ struct WorkspaceTopicReadingView: View {
                 }.buttonStyle(.plain)
                 Rectangle().fill(palette.border).frame(width:1,height:18)
                 LazyVGrid(columns:[GridItem(.adaptive(minimum:210),spacing:12)],alignment:.leading,spacing:12) {
-                    ForEach(Array((showingAllSections ? sections : Array(sections.prefix(6))).enumerated()),id:\.element.id) { index,section in
+                    ForEach(Array((showingAllSections ? filteredSections : Array(filteredSections.prefix(6))).enumerated()),id:\.element.id) { index,section in
                         Button { selectedSection = selectedSection == section.id ? nil : section.id } label: {
                             HStack(alignment:.top,spacing:10) {
                                 Text(String(format:"%02d",index+1)).vosFont(WorkspaceText.caption.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
@@ -143,16 +171,21 @@ struct WorkspaceTopicReadingView: View {
                     }
                 }
             }
-            if sections.count > 6 { Button(showingAllSections ? "收起结构" : "展开全部 \(sections.count) 个小主题") { showingAllSections.toggle() }.vosFont(WorkspaceText.meta) }
+            if filteredSections.isEmpty && !filterTerm.isEmpty { Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            if filteredSections.count > 6 { Button(showingAllSections ? "收起结构" : "展开全部 \(filteredSections.count) 个小主题") { showingAllSections.toggle() }.vosFont(WorkspaceText.meta) }
             Text("连线表示主题下的内容分组").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
         }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
             .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
             .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border.opacity(0.8),lineWidth:1) }
     }
 
-    private var readingCards: some View {
-        LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing:16)],alignment:.leading,spacing:16) {
-            ForEach(displayedSections) { section in readingCard(section) }
+    @ViewBuilder private var readingCards: some View {
+        if displayedSections.isEmpty && !filterTerm.isEmpty {
+            Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+        } else {
+            LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing:16)],alignment:.leading,spacing:16) {
+                ForEach(displayedSections) { section in readingCard(section) }
+            }
         }
     }
 
@@ -386,9 +419,11 @@ struct WorkspaceTopicTile: View {
                     Image(systemName:"arrow.up.right").font(.caption).foregroundStyle(.secondary)
                 }
                 Text(topic.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                Text(topic.organization?.summary ?? "").vosFont(WorkspaceText.body).lineSpacing(4)
-                    .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
-                    .lineLimit(2, reservesSpace: true)
+                if let summary=topic.organization?.summary, !summary.isEmpty {
+                    Text(summary).vosFont(WorkspaceText.body).lineSpacing(4)
+                        .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                }
                 Spacer(minLength:0)
                 HStack(spacing:15) {
                     Label("\(sourceCount) 份材料",systemImage:"doc.text")
