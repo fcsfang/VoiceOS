@@ -1553,7 +1553,8 @@ struct WorkspaceView: View {
         let combined=(expression?.sourceIDs.count ?? 0) > 1
         let first=combined ? expression!.sourceIDs.first.flatMap { catalog[$0] } ?? source : source
         let origin=source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料"
-        let reading=materialReadingStatus(source.id)
+        let issues=source.unresolvedTranscriptionIssueCount
+        let reading:(text:String,color:Color)? = issues > 0 ? ("疑点 \(issues)",palette.warning) : materialReadingStatus(source.id)
         return WorkspaceRow(title:displayTitle(combined ? expression!.title : source.displayTitle),subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:"",trailingStyle:reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary,statusAccessibility:reading?.text ?? "",trailingGutter:trailingGutter) { go(.source(source.id)) }
             .background(highlighted ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             .overlay { if highlighted { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }

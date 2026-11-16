@@ -45,6 +45,20 @@ enum WorkspaceProcessingErrorText {
     }
 }
 
+struct WorkspaceTranscriptReviewPoint: Identifiable {
+    let source: SourceRecord
+    let count: Int
+    var id: String { source.id }
+}
+
+extension SourceRecord {
+    /// Unresolved transcription doubts left by a review of the current version.
+    var unresolvedTranscriptionIssueCount: Int {
+        guard let review = transcriptionReview, review.completed else { return 0 }
+        return review.unresolved_issues?.count ?? 0
+    }
+}
+
 extension ControlCenter {
     var workspaceProcessingStatus: WorkspaceProcessingStatus {
         .init(
@@ -142,8 +156,17 @@ extension ControlCenter {
         records.contains { transcriptReviewIssue(for:$0) != nil } ||
         reminderFieldIssue != nil || !assistantAssessmentIssues.isEmpty
     }
+    var workspaceTranscriptReviewPoints: [WorkspaceTranscriptReviewPoint] {
+        records.compactMap { source -> WorkspaceTranscriptReviewPoint? in
+            guard !source.isTrashed, !source.isArchived else { return nil }
+            let count = source.unresolvedTranscriptionIssueCount
+            guard count > 0 else { return nil }
+            return WorkspaceTranscriptReviewPoint(source: source, count: count)
+        }.sorted { $0.count != $1.count ? $0.count > $1.count : $0.source.displayTitle < $1.source.displayTitle }
+    }
     var workspaceProcessingOutstanding: Bool {
-        workspaceNeedsAttention || !workspaceFailedFollowups.isEmpty || !workspaceFailedKnowledgeReviews.isEmpty ||
+        workspaceNeedsAttention || !workspaceTranscriptReviewPoints.isEmpty ||
+        !workspaceFailedFollowups.isEmpty || !workspaceFailedKnowledgeReviews.isEmpty ||
         recordingRequests.contains { $0.state == "waiting" } ||
         workspaceUnfinishedIntents.contains { $0.state == .queued || $0.state == .running }
     }
@@ -296,6 +319,15 @@ struct WorkspaceProcessingView: View {
                             Button("重试全部完整转写核对（\(reviewSources.count)）") { retryAllTranscriptReviews(reviewSources) }.disabled(!model.modelConfigured || model.transcriptReviewSourceID != nil || model.fullRecordingBusy)
                         } else if let source=reviewSources.first {
                             Button("重试完整转写核对") { Task { await model.reviewTranscription(sourceID:source.id) } }.accessibilityLabel("重试完整转写核对：" + source.displayTitle).disabled(!model.modelConfigured || model.transcriptReviewSourceID != nil || model.fullRecordingBusy)
+                        }
+                    }
+                }
+                let reviewPoints=model.workspaceTranscriptReviewPoints
+                if !reviewPoints.isEmpty {
+                    let issueTotal=reviewPoints.reduce(0) { $0 + $1.count }
+                    WorkspaceSection(title:"转写疑点待核对",subtitle:"\(reviewPoints.count) 份材料的核对已经完成，仍有 \(issueTotal) 条疑点没有解决。打开材料可以逐条回听原音与查看原文。",icon:"exclamationmark.bubble",count:reviewPoints.count) {
+                        ForEach(reviewPoints) { point in
+                            WorkspaceRow(title:point.source.displayTitle,subtitle:"仍有 \(point.count) 条疑点未解决",trailing:"查看材料") { openSource(point.source.id) }
                         }
                     }
                 }

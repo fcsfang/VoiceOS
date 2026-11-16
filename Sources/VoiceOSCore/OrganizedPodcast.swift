@@ -336,7 +336,6 @@ private func finishTranscriptImport(folders: [String], writeReadableCopy: Bool =
         var transcript = try JSONDecoder().decode(CompletedQwenTranscript.self, from: Data(contentsOf: transcriptURL))
         if writeReadableCopy, var review = transcript.transcription_review {
             review.correction_count = review.correction_count ?? review.corrections?.count
-            review.corrections = nil
             transcript.transcription_review = review
             try JSONEncoder().encode(transcript).write(to: transcriptURL, options: .atomic)
         }

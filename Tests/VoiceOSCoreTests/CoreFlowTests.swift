@@ -1002,12 +1002,12 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(retained.count, 2)
         let revised = try await store.sources().first { $0.id == next.sourceID }
         XCTAssertEqual(revised?.transcriptionReview?.correction_count, 1)
-        XCTAssertNil(revised?.transcriptionReview?.corrections)
+        XCTAssertEqual(revised?.transcriptionReview?.corrections?.count, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: nextFolder.appendingPathComponent("Qwen核对逐字稿.json").path))
         let canonical = try JSONSerialization.jsonObject(with: Data(contentsOf: nextFolder.appendingPathComponent("Qwen完整逐字稿.json"))) as? [String: Any]
         XCTAssertEqual(canonical?["text"] as? String, correctedTranscript)
         let revisedContext = try await store.prepareLocalTranscriptContext(sourceIDs: [next.sourceID])
-        XCTAssertNil(revisedContext.sources.first?.transcriptionReview?.corrections)
+        XCTAssertEqual(revisedContext.sources.first?.transcriptionReview?.corrections?.count, 1)
         let contextPackage = root.appendingPathComponent("context-correction-package"), contextRestore = root.appendingPathComponent("context-correction-restore")
         try await store.exportPackage(to: contextPackage, includeMedia: true)
         try await VoiceOSStore.restorePackage(from: contextPackage, to: contextRestore, inspector: NativeMediaInspector())
@@ -1029,7 +1029,7 @@ final class CoreFlowTests: XCTestCase {
         do { _ = try await contextStore.prepareConversationInput(id: historicalDiscussion, expectedVersion: 2, destination: .local); XCTFail("冻结历史不能重新进入模型输入") } catch {}
         let restoredContextSource = try await contextStore.sources().first { $0.id == next.sourceID }
         XCTAssertEqual(restoredContextSource?.transcriptionReview?.correction_count, 1)
-        XCTAssertNil(restoredContextSource?.transcriptionReview?.corrections)
+        XCTAssertEqual(restoredContextSource?.transcriptionReview?.corrections?.count, 1)
         let beforeCorrection = try await store.transcriptHistory(sourceID: next.sourceID)
         _ = try await store.correctTranscript(sourceID: next.sourceID, expectedVersionID: beforeCorrection[0].id, text: correctedTranscript + "补充：需要继续验证。")
         let stale = try await store.actionFeedback(actionID: targetAction.id)

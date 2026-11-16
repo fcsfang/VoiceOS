@@ -442,6 +442,7 @@ struct ThoughtPanoramaView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("问题与联系列表").vosFont(WorkspaceText.rowTitle)
                 Text("与画布一致；键盘可逐项浏览。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                if hasQuery { outlineSearchResults(model) }
                 ForEach(model.regions) { region in
                     DisclosureGroup {
                         VStack(alignment: .leading, spacing: 6) {
@@ -498,6 +499,72 @@ struct ThoughtPanoramaView: View {
             .padding(16)
         }
         .frame(width: 340, height: 480)
+    }
+
+    private struct OutlineSearchHit: Identifiable {
+        let id: String
+        let title: String
+        let detail: String
+        let isRegion: Bool
+    }
+
+    // Mirrors the canvas search semantics: regions match on the same derived
+    // searchText, questions match on their own title and summary, both
+    // lowercased and trimmed before a substring check.
+    private func outlineSearchResults(_ model: ConstellationModel) -> some View {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let regionHits = model.regions.filter { $0.searchText.contains(needle) }.map { region in
+            OutlineSearchHit(id: region.id, title: region.title, detail: "区域 · \(region.questionIDs.count) 个问题", isRegion: true)
+        }
+        let questionHits: [OutlineSearchHit] = model.regions.flatMap { region in
+            region.questionIDs.compactMap { id in
+                guard let question = model.questionByID[id],
+                      (question.title + "\n" + question.summary).lowercased().contains(needle) else { return nil }
+                return OutlineSearchHit(id: id, title: question.title, detail: "所在区域 · " + region.title, isRegion: false)
+            }
+        }
+        let hits = regionHits + questionHits
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("搜索结果 · \(hits.count)").vosFont(WorkspaceText.rowTitle)
+            if hits.isEmpty {
+                Text("没有匹配的区域或问题").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Button("显示全部") { query = "" }
+                    .vosFont(WorkspaceText.meta)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(palette.accent)
+                    .accessibilityLabel("显示全部区域与问题")
+            } else {
+                ForEach(hits) { hit in
+                    Button {
+                        if hit.isRegion {
+                            focusedRegionID = hit.id
+                            selection = nil
+                        } else {
+                            selection = .question(hit.id)
+                        }
+                        recenterToken &+= 1
+                        showOutline = false
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(hit.title)
+                                .vosFont(WorkspaceText.rowTitle)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            Text(hit.detail)
+                                .vosFont(WorkspaceText.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 2)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel((hit.isRegion ? "区域：" : "AI 归纳问题：") + hit.title)
+                }
+            }
+            Divider()
+        }
     }
 
     private func panorama(_ snapshot: PanoramaSnapshot?) -> some View {

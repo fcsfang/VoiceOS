@@ -134,7 +134,9 @@ extension VoiceOSStore {
         try db.transaction {
             if row["ai_named"] != "1" { try db.execute("DELETE FROM reflection_question_sources WHERE question_id=? AND source_id=?", [id,row["title_source_id"]]) }
             try db.execute("INSERT INTO reflection_question_sources(id,question_id,source_id) VALUES(?,?,?)", [UUID().uuidString,id,sourceID])
-            try db.execute("UPDATE reflection_questions SET title=?,title_source_id=?,organization_json=NULL,ai_named=0,version=version+1,updated_at=? WHERE id=?", [title,sourceID,Self.now(),id])
+            // The organization is anchored to evidence versions, not the title;
+            // renaming must not discard reading content the user already has.
+            try db.execute("UPDATE reflection_questions SET title=?,title_source_id=?,ai_named=0,version=version+1,updated_at=? WHERE id=?", [title,sourceID,Self.now(),id])
         }
     }
 
