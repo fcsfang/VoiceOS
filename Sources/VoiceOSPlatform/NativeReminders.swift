@@ -6,6 +6,11 @@ public struct ReminderCalendar: Identifiable, Sendable {
     public let id: String
     public let title: String
 }
+public enum RemindersAuthorization: Sendable {
+    case granted
+    case denied
+    case notDetermined
+}
 public struct ReminderLocationLabel {
     public static func text(title: String, proximity: EKAlarmProximity) -> String? {
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -64,6 +69,14 @@ public final class NativeReminders: RemindersSchedulingPort, RemindersFieldsPort
         return result
     }
     public var isAuthorized: Bool { EKEventStore.authorizationStatus(for: .reminder) == .fullAccess }
+    /// Distinguishes an explicit denial from an untouched prompt so the UI can offer a system-settings deep link only when useful.
+    public nonisolated static func authorizationStatus() -> RemindersAuthorization {
+        switch EKEventStore.authorizationStatus(for: .reminder) {
+        case .fullAccess: return .granted
+        case .notDetermined: return .notDetermined
+        default: return .denied
+        }
+    }
     public static func structuredLocationLabel(externalID: String) async -> String? {
         guard EKEventStore.authorizationStatus(for: .reminder) == .fullAccess else { return nil }
         let fresh = EKEventStore()

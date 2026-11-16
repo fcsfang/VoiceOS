@@ -36,6 +36,11 @@ struct CaptureTextIntent: AppIntent {
     static let title: LocalizedStringResource = "保存一段文字到 VoiceOS"
     static let description: IntentDescription = IntentDescription("把一段文字存入 VoiceOS 收件箱，只在本机保存。")
     static let openAppWhenRun: Bool = true
+    static var parameterSummary: some ParameterSummary {
+        Summary("保存 \(\.$text) 到 VoiceOS") {
+            \.$title
+        }
+    }
     @Parameter(title: "文字")
     var text: String
     @Parameter(title: "标题")
@@ -90,5 +95,26 @@ struct ToggleDictationIntent: AppIntent {
         case .failed(let reason): throw VoiceOSIntentError.dictationFailed(reason)
         case .notReady: throw VoiceOSIntentError.notReady
         }
+    }
+}
+
+struct VoiceOSAppShortcuts: AppShortcutsProvider {
+    static var appShortcuts: [AppShortcut] {
+        AppShortcut(intent: CaptureTextIntent(), phrases: [
+            "用 \(.applicationName) 记录一段文字",
+            "把文字存入 \(.applicationName)"
+        ], shortTitle: "记录文字", systemImageName: "square.and.pencil")
+        AppShortcut(intent: OpenTodayActionsIntent(), phrases: [
+            "在 \(.applicationName) 打开今天的行动",
+            "用 \(.applicationName) 看今天要做什么"
+        ], shortTitle: "今天的行动", systemImageName: "checklist")
+        AppShortcut(intent: OpenSearchIntent(), phrases: [
+            "在 \(.applicationName) 搜索",
+            "用 \(.applicationName) 查找内容"
+        ], shortTitle: "搜索", systemImageName: "magnifyingglass")
+        AppShortcut(intent: ToggleDictationIntent(), phrases: [
+            "用 \(.applicationName) 开始口述",
+            "用 \(.applicationName) 停止口述"
+        ], shortTitle: "口述", systemImageName: "mic")
     }
 }
