@@ -281,19 +281,30 @@ struct RecentContentHome: View {
     }
 
     @ViewBuilder private func tasksSummary(_ tasks: [RecentContentTask]) -> some View {
-        if let first = tasks.first {
+        if !tasks.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 20)
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("这条材料带出了 \(tasks.count) 条待办").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    Spacer(minLength: 0)
-                    Button("查看") { openTask(first.id) }
-                        .buttonStyle(.plain)
-                        .vosFont(WorkspaceText.meta)
-                        .foregroundStyle(palette.accent)
-                        .accessibilityIdentifier("home.tasks.view")
-                }
+                Text("这条材料带出了 \(tasks.count) 条待办").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                VStack(spacing: 0) {
+                    ForEach(tasks) { task in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Image(systemName: "circle").vosFont(WorkspaceText.caption.size, weight: .regular)
+                                .foregroundStyle(palette.tertiaryText)
+                                .accessibilityHidden(true)
+                            Text(task.title).vosFont(WorkspaceText.body).lineSpacing(4)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                            Button("详情") { openTask(task.id) }
+                                .buttonStyle(.plain)
+                                .vosFont(WorkspaceText.meta)
+                                .foregroundStyle(palette.accent)
+                                .accessibilityLabel("打开待办详情：" + task.title)
+                        }.padding(.vertical, 10)
+                        if task.id != tasks.last?.id { WorkspaceListDivider() }
+                    }
+                }.padding(.top, 8)
             }.padding(.top, 54)
+            .accessibilityIdentifier("home.tasks.list")
         }
     }
 
