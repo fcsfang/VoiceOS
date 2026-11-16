@@ -1,13 +1,53 @@
 import Foundation
+import Darwin
 import CSQLite
 
 public enum DatabaseBackup {
-    public static func successText(at date: Date) -> String {
-        "最近备份 " + date.formatted(date: .abbreviated, time: .shortened)
+    public struct Summary: Sendable, Equatable {
+        public let date: Date
+        public let count: Int
+    }
+
+    private static let metaFileName = ".backup-meta"
+
+    public static func successText(at date: Date, count: Int) -> String {
+        "最近备份 " + date.formatted(date: .abbreviated, time: .shortened) + " · 共 \(count) 份"
     }
 
     public static func failureText(_ error: Error) -> String {
         "备份失败：" + error.localizedDescription
+    }
+
+    public static func summary(directory: URL) -> Summary? {
+        let files = backupFiles(directory: directory)
+        guard !files.isEmpty else { return nil }
+        let latest = files.compactMap {
+            try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+        }.max() ?? .distantPast
+        return Summary(date: latest, count: files.count)
+    }
+
+    public static func lastBackupDate(directory: URL) -> Date? {
+        summary(directory: directory)?.date
+    }
+
+    public static func backupCount(directory: URL) -> Int {
+        summary(directory: directory)?.count ?? 0
+    }
+
+    /// Creates at most one backup per local day. The day marker lives next to
+    /// the backups so it survives restarts; existing files cover the case where
+    /// the marker is missing.
+    @discardableResult
+    public static func createDailyIfNeeded(database: URL, directory: URL, retain: Int = 7, now: Date = Date(), calendar: Calendar = .current) throws -> URL? {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let today = dayKey(now, calendar: calendar)
+        if lastBackupDay(directory: directory, calendar: calendar) == today { return nil }
+        let created = try create(database: database, directory: directory, retain: retain, now: now)
+        if let data = (today + "\n").data(using: .utf8) {
+            try? data.write(to: directory.appendingPathComponent(metaFileName), options: .atomic)
+        }
+        return created
     }
 
     @discardableResult
@@ -15,6 +55,12 @@ public enum DatabaseBackup {
         guard retain >= 1 else { throw VoiceOSError("备份保留数量至少为 1") }
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let destination = uniqueDestination(directory: directory, now: now)
+        if cloneCopy(database: database, destination: destination) {
+            try FileManager.default.setAttributes([.posixPermissions: 0o600, .modificationDate: now], ofItemAtPath: destination.path)
+            try prune(directory: directory, retain: retain)
+            return destination
+        }
+        discard(destination)
         var source: OpaquePointer?
         guard sqlite3_open_v2(database.path, &source, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else {
             sqlite3_close(source)
@@ -55,6 +101,43 @@ public enum DatabaseBackup {
         defer { sqlite3_close(handle) }
         sqlite3_busy_timeout(handle, 5000)
         return integrityOK(handle)
+    }
+
+    /// APFS clone of the main database file. A WAL-mode database is consistent
+    /// at its last checkpoint, so the clone is a point-in-time snapshot. The
+    /// integrity check rejects a copy taken during a checkpoint; the caller
+    /// then falls back to the SQLite backup API.
+    private static func cloneCopy(database: URL, destination: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: database.path),
+              clonefile(database.path, destination.path, 0) == 0 else { return false }
+        var handle: OpaquePointer?
+        guard sqlite3_open_v2(destination.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
+            sqlite3_close(handle)
+            return false
+        }
+        defer { sqlite3_close(handle) }
+        sqlite3_busy_timeout(handle, 5000)
+        guard sqlite3_exec(handle, "PRAGMA journal_mode=DELETE", nil, nil, nil) == SQLITE_OK,
+              integrityOK(handle) else { return false }
+        return true
+    }
+
+    private static func backupFiles(directory: URL) -> [URL] {
+        (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey]))?
+            .filter { $0.lastPathComponent.hasPrefix("voiceos-") && $0.pathExtension == "sqlite" } ?? []
+    }
+
+    private static func lastBackupDay(directory: URL, calendar: Calendar) -> String? {
+        let meta = directory.appendingPathComponent(metaFileName)
+        if let stored = try? String(contentsOf: meta, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines), !stored.isEmpty {
+            return stored
+        }
+        return summary(directory: directory).map { dayKey($0.date, calendar: calendar) }
+    }
+
+    private static func dayKey(_ date: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, components.day ?? 0)
     }
 
     private static func uniqueDestination(directory: URL, now: Date) -> URL {

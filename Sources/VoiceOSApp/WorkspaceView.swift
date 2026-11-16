@@ -90,6 +90,7 @@ func workspaceStateLabel(_ value:String) -> String {
     }
 }
 fileprivate func displayTitle(_ raw:String) -> String { MarkdownDocument.plainTitle(raw) }
+fileprivate let recentSearchDefaultsKey = "voiceos.recentSearches.v1"
 struct WorkspaceRow: View {
     enum TrailingStyle {
         case secondary
@@ -249,9 +250,11 @@ struct WorkspaceView: View {
     @State private var searchKeyboardFocus = WorkspaceKeySelection()
     @FocusState private var searchListFocused: Bool
     @State private var searchHits: [SearchHit] = []
+    @State private var searchTotals: [SearchHit.Kind: Int] = [:]
     @State private var searchFailed = false
     @State private var searchBusy = false
     @State private var searchHovered = false
+    @State private var recentSearches: [String] = UserDefaults.standard.stringArray(forKey: recentSearchDefaultsKey) ?? []
     @State private var taskFeedbackDrafts: [String: TaskFeedbackDraft] = [:]
     @State private var creatingTopic = false
     @State private var savingTopic = false
@@ -1284,12 +1287,18 @@ struct WorkspaceView: View {
         let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspaceHeading(eyebrow:"",title:"搜索")
-            WorkspaceSearchField(text:$query,placeholder:"搜索标题、原话、理解、主题或行动",focus:$searchFocused,submit:{ if !searchSections.isEmpty { searchListFocused=true } })
+            WorkspaceSearchField(text:$query,placeholder:"搜索标题、原话、理解、主题或行动",focus:$searchFocused,submit:{ rememberSearch(term); if !searchSections.isEmpty { searchListFocused=true } })
                 .task {
                     // Wait until the lazy field is attached to its native window.
                     do { try await Task.sleep(for:.milliseconds(100)); searchFocused = true } catch {}
                 }
             if term.isEmpty {
+                if !recentSearches.isEmpty {
+                    VStack(alignment:.leading,spacing:8) {
+                        sectionTitle("最近搜索")
+                        recentSearchChips
+                    }
+                }
                 let sources=model.records.filter { !$0.isTrashed }
                 if !sources.isEmpty { sectionTitle("材料与原话 · \(sources.count)") }
                 let catalog=recordCatalog
@@ -1308,9 +1317,9 @@ struct WorkspaceView: View {
         if !sections.isEmpty {
             VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
                 ForEach(sections) { section in
-                    WorkspaceSection(title:section.title,icon:section.icon,count:section.rows.count) {
+                    WorkspaceSection(title:section.title,icon:section.icon,count:section.count) {
                         ForEach(section.rows) { row in
-                            WorkspaceRow(title:row.title,subtitle:row.subtitle,icon:row.icon) { row.open() }
+                            SearchResultRow(title:row.title,subtitle:row.subtitle,icon:row.icon) { row.open() }
                                 .background(searchKeyboardFocus.id == row.id ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                                 .overlay { if searchKeyboardFocus.id == row.id { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
                                 .id(row.id)
@@ -1322,43 +1331,52 @@ struct WorkspaceView: View {
         }
         if !searchBusy && !searchFailed && sections.isEmpty {
             WorkspaceEmptyState(title:"没有找到相关内容",systemImage:"magnifyingglass",description:"换个关键词，或清空搜索查看全部材料。") {
+                if !recentSearches.isEmpty { recentSearchChips }
                 Button("清空搜索") { query="";searchFocused=true }
             }
         }
     }
     private var searchSections: [WorkspaceSearchSection] {
         let catalog = recordCatalog
+        let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
+        let tokens = term.split(whereSeparator: \.isWhitespace).map(String.init)
+        func row(_ id:String,_ title:String,_ subtitle:String,_ icon:String,action:@escaping () -> Void) -> WorkspaceSearchRow {
+            WorkspaceSearchRow(id:id,title:highlighted(title,tokens:tokens),subtitle:highlighted(subtitle,tokens:tokens),icon:icon) {
+                rememberSearch(term)
+                action()
+            }
+        }
         let materials = searchHits.filter { hit in
             guard hit.kind == .material, let source = catalog[hit.refID] else { return false }
             return !source.isTrashed
         }.map { hit in
-            WorkspaceSearchRow(id:"material:" + hit.refID,title:displayTitle(hit.title),subtitle:hit.snippet,icon:"doc.text") { go(.source(hit.refID)) }
+            row("material:" + hit.refID,displayTitle(hit.title),hit.snippet,"doc.text") { go(.source(hit.refID)) }
         }
         let claims = searchHits.filter { hit in
             hit.kind == .claim && model.claims.contains { $0.id == hit.refID && $0.validity == "current" && $0.reviewState != "rejected" }
         }.map { hit in
-            WorkspaceSearchRow(id:"claim:" + hit.refID,title:hit.title,subtitle:hit.snippet,icon:"lightbulb") {
+            row("claim:" + hit.refID,hit.title,hit.snippet,"lightbulb") {
                 if let sourceID=model.claims.first(where: { $0.id == hit.refID })?.references.first?.sourceID { go(.source(sourceID)) }
             }
         }
         let topics = searchHits.filter { hit in
             hit.kind == .topic && model.workspaceTopics.contains { $0.id == hit.refID }
         }.map { hit in
-            WorkspaceSearchRow(id:"topic:" + hit.refID,title:hit.title,subtitle:hit.snippet,icon:"circle.hexagongrid") { selectTopic(hit.refID) }
+            row("topic:" + hit.refID,hit.title,hit.snippet,"circle.hexagongrid") { selectTopic(hit.refID) }
         }
         let actions = searchHits.filter { $0.kind == .action }.map { hit in
-            WorkspaceSearchRow(id:"action:" + hit.refID,title:hit.title,subtitle:hit.snippet,icon:"checkmark.circle") { go(.task(hit.refID)) }
+            row("action:" + hit.refID,hit.title,hit.snippet,"checkmark.circle") { go(.task(hit.refID)) }
         }
         var sections:[WorkspaceSearchSection]=[]
-        if !materials.isEmpty { sections.append(WorkspaceSearchSection(id:"materials",title:"材料",icon:"books.vertical",rows:materials)) }
-        if !topics.isEmpty { sections.append(WorkspaceSearchSection(id:"topics",title:"主题",icon:"circle.hexagongrid",rows:topics)) }
-        if !claims.isEmpty { sections.append(WorkspaceSearchSection(id:"claims",title:"观点",icon:"lightbulb",rows:claims)) }
-        if !actions.isEmpty { sections.append(WorkspaceSearchSection(id:"actions",title:"行动",icon:"checkmark.circle",rows:actions)) }
+        if !materials.isEmpty { sections.append(WorkspaceSearchSection(id:"materials",title:"材料",icon:"books.vertical",count:searchTotals[.material] ?? materials.count,rows:materials)) }
+        if !topics.isEmpty { sections.append(WorkspaceSearchSection(id:"topics",title:"主题",icon:"circle.hexagongrid",count:searchTotals[.topic] ?? topics.count,rows:topics)) }
+        if !claims.isEmpty { sections.append(WorkspaceSearchSection(id:"claims",title:"观点",icon:"lightbulb",count:searchTotals[.claim] ?? claims.count,rows:claims)) }
+        if !actions.isEmpty { sections.append(WorkspaceSearchSection(id:"actions",title:"行动",icon:"checkmark.circle",count:searchTotals[.action] ?? actions.count,rows:actions)) }
         return sections
     }
     private func loadSearchHits(_ term:String) async {
         guard !term.isEmpty else {
-            searchHits=[];searchFailed=false;searchBusy=false;searchKeyboardFocus.id=nil
+            searchHits=[];searchTotals=[:];searchFailed=false;searchBusy=false;searchKeyboardFocus.id=nil
             return
         }
         searchBusy=true
@@ -1366,10 +1384,51 @@ struct WorkspaceView: View {
         do { try await Task.sleep(for:.milliseconds(180)) } catch { return }
         guard !Task.isCancelled else { return }
         if let results=await model.searchAll(term) {
-            searchHits=results;searchFailed=false
+            searchHits=results.hits;searchTotals=results.totals;searchFailed=false
         } else {
-            searchHits=[];searchFailed=true
+            searchHits=[];searchTotals=[:];searchFailed=true
         }
+    }
+    private var recentSearchChips: some View {
+        ScrollView(.horizontal,showsIndicators:false) {
+            HStack(spacing:8) {
+                ForEach(Array(recentSearches.prefix(8)),id:\.self) { term in
+                    Button(term) { query=term; searchFocused=true }
+                        .buttonStyle(.plain)
+                        .vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.secondaryText)
+                        .padding(.horizontal,10).frame(height:WorkspaceMetrics.fieldHeight)
+                        .background(palette.surface,in:Capsule())
+                        .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
+                        .contentShape(Capsule())
+                        .help("搜索「" + term + "」")
+                }
+            }
+        }
+    }
+    private func rememberSearch(_ term: String) {
+        let trimmed = term.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        var list = recentSearches.filter { $0.caseInsensitiveCompare(trimmed) != .orderedSame }
+        list.insert(trimmed, at: 0)
+        recentSearches = Array(list.prefix(8))
+        UserDefaults.standard.set(recentSearches, forKey: recentSearchDefaultsKey)
+    }
+    private func highlighted(_ text: String, tokens: [String]) -> AttributedString {
+        var attributed = AttributedString(text)
+        guard !text.isEmpty, !tokens.isEmpty else { return attributed }
+        for token in tokens where !token.isEmpty {
+            var searchRange = text.startIndex..<text.endIndex
+            while let found = text.range(of: token, options: .caseInsensitive, range: searchRange) {
+                if let lower = AttributedString.Index(found.lowerBound, within: attributed),
+                   let upper = AttributedString.Index(found.upperBound, within: attributed) {
+                    attributed[lower..<upper].backgroundColor = palette.accent.opacity(0.22)
+                }
+                searchRange = found.upperBound..<text.endIndex
+                if searchRange.isEmpty { break }
+            }
+        }
+        return attributed
     }
     private var settings: some View {
         VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
@@ -1413,6 +1472,7 @@ struct WorkspaceView: View {
             HStack(spacing:12) {
                 Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 Button("重试备份") { model.retryBackup() }.vosFont(WorkspaceText.meta)
+                Button("在访达中显示") { model.revealBackups() }.vosFont(WorkspaceText.meta)
             }
             HStack { Button("打开已有资料库") { chooseLibrary() };Button("从迁移包恢复") { go(.tool("恢复资料")) } }
             sectionTitle("回顾与查找")
@@ -2199,8 +2259,8 @@ private struct ActionUndoState: Equatable {
 
 private struct WorkspaceSearchRow: Identifiable {
     let id: String
-    let title: String
-    let subtitle: String
+    let title: AttributedString
+    let subtitle: AttributedString
     let icon: String
     let open: () -> Void
 }
@@ -2209,7 +2269,39 @@ private struct WorkspaceSearchSection: Identifiable {
     let id: String
     let title: String
     let icon: String
+    let count: Int
     let rows: [WorkspaceSearchRow]
+}
+
+private struct SearchResultRow: View {
+    @Environment(\.workspacePalette) private var palette
+    @State private var hovered = false
+    let title: AttributedString
+    let subtitle: AttributedString
+    let icon: String
+    let open: () -> Void
+    private var titleText: String { String(title.characters) }
+    private var subtitleText: String { String(subtitle.characters) }
+    var body: some View {
+        Button(action: open) {
+            HStack(alignment:.top,spacing:14) {
+                Image(systemName:icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                    .frame(width:30,height:30).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                    .accessibilityHidden(true)
+                VStack(alignment:.leading,spacing:3) {
+                    Text(title).vosFont(WorkspaceText.rowTitle).lineSpacing(3).lineLimit(3).fixedSize(horizontal:false,vertical:true).textSelection(.enabled).help(titleText)
+                    if !subtitle.characters.isEmpty {
+                        Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3).lineLimit(2).fixedSize(horizontal:false,vertical:true).textSelection(.enabled).help(subtitleText)
+                    }
+                }
+                Spacer(minLength:8)
+            }.padding(.vertical,10).padding(.horizontal,10)
+                .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                .background(hovered ? palette.selection.opacity(0.5) : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                .accessibilityElement(children:.combine)
+        }.buttonStyle(.plain).onHover { hovered=$0 }
+            .accessibilityLabel(subtitleText.isEmpty ? titleText : titleText + " · " + subtitleText)
+    }
 }
 
 private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
