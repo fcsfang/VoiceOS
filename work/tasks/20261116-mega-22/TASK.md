@@ -75,3 +75,29 @@
 - 只在所属工作树里改文件；绝不触碰主检出 `/Users/joey/01 Projects/VoiceOS` 与实时资料库。
 - 不跑构建与测试；提交到自己的分支，提交信息用中文一句话加常规前缀（feat/fix/perf/docs/test）。
 - 报告：改了哪些文件、每个审计条目的落点（file:line）、新增测试文件名、未决点。不要贴大段代码。
+
+## 结果（2026-11-16）
+
+- 六个单元全部落地并合并，合计新增 392 项测试中的 36 项，`swift build -j 2` 通过，`swift test -j 2` 392 项 0 失败（20.5–22.8 秒）。
+- 集成期修正：`RecordingFollowup` 转发闭包逃逸与 `actions()` 遮蔽（U4）、`=!` 记号（U1）、挂接回执断言前缀（U3 测试）、待核对组内「历史记录」逐行重复（U1 模型 + 测试）、详情页与澄清标题的类型标签（B2 补口）、澄清队列改为写后即推进（不再等整轮刷新）。
+- 删除 U3 与 U1 的重复 addNextAction 实现，保留表单会话 commandID + attach 重试这一条路径。
+
+## 实机与迁移证据（隔离副本 /tmp/vos-m22，实时库只读 .backup 复制）
+
+- 迁移 62→63 副本上成功：`user_version=63`，`state IN ('open','completed','dismissed','someday')`，`state!='someday' OR kind!='task'`，数据行数不变。
+- 逐个澄清：写入两条 someday（`clarify:<id>:someday:<version>` 回执），剩余数 197→195，状态即时推进，按钮在写入完成后立即恢复。
+- 截图：`/tmp/m22-home.png`（四槽位、任务进展聚合、回听与打开材料）、`/tmp/m22-goals.png`（无逐行「还没有下一步」、类型图标替代文字前缀）、`/tmp/m22b-review.png`（待核对无逐行状态）、`/tmp/m22-materials.png`（计数进筛选标签、在读色点）、`/tmp/m22-topics.png`（无摘要卡不留空）、`/tmp/m22-launch.png`（图标与新顺序）、`/tmp/m22-settings.png`（快捷键清单缩减）、`/tmp/m22-panorama.png`（窄窗工具栏收进图标）、`/tmp/m22b-clarify.png`、`/tmp/m22-clarify-after.png`（澄清队列）、`/tmp/m22-detail.png`（详情标题无前缀）。
+- 菜单栏：`View` 内有 讨论 / 首页 / 主题 / 材料 / 行动 / 启动 / 返回，新增「记录」菜单五项（口述、保存剪贴板、速记、在主窗口口述、导入音频或视频）。
+
+## 性能 trace（/tmp/m22-trace.txt，单次运行，隔离副本，后台任务活跃）
+
+| 阶段 | 基线 /tmp/s1b-trace-1.txt | 本次 |
+|---|---|---|
+| 首屏 | 1028ms（dev trace；dist 实测 1183–1290ms） | 1349ms（不同副本，非本波目标） |
+| 简报每轮 | 1331 / 1577ms 重算 | 首次 1332ms，其后 33–39ms 复用 |
+| 助理快照 | 2398ms | 608–656ms |
+| 跟进回执 | 567ms | 589ms 首次，207ms 复用（169/169 命中） |
+| 跟进有效性 | 905ms | 721–816ms |
+| 单轮 reload | 6.6s | 158–764ms；后台任务并发时一次 3.6s |
+
+限制项：单次 trace、无方差；助理 608ms 未达 300ms 目标，剩余为一次核心读与 context 屏障；有效性剩余为逐回执校验。按 Explain the Number，结论只作方向，后续需多轮复测。
