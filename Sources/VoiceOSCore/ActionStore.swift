@@ -35,8 +35,10 @@ public struct ActionRecord: Identifiable, Sendable {
     public let createdAt: String
     public let parentID: String?
     public let nature: String
-    public init(id: String, claimID: String, claimReviewVersion: Int, title: String, kind: String, intentActor: String, note: String, state: String, validity: String, version: Int, autoSend: Bool, intent: ActionIntentMetadata?, commandID: String, createdAt: String, parentID: String?, nature: String = "unknown") {
-        self.id = id; self.claimID = claimID; self.claimReviewVersion = claimReviewVersion; self.title = title; self.kind = kind; self.intentActor = intentActor; self.note = note; self.state = state; self.validity = validity; self.version = version; self.autoSend = autoSend; self.intent = intent; self.commandID = commandID; self.createdAt = createdAt; self.parentID = parentID; self.nature = nature
+    /// Latest revision time that entered `completed`; nil when it never did.
+    public let completedAt: String?
+    public init(id: String, claimID: String, claimReviewVersion: Int, title: String, kind: String, intentActor: String, note: String, state: String, validity: String, version: Int, autoSend: Bool, intent: ActionIntentMetadata?, commandID: String, createdAt: String, parentID: String?, nature: String = "unknown", completedAt: String? = nil) {
+        self.id = id; self.claimID = claimID; self.claimReviewVersion = claimReviewVersion; self.title = title; self.kind = kind; self.intentActor = intentActor; self.note = note; self.state = state; self.validity = validity; self.version = version; self.autoSend = autoSend; self.intent = intent; self.commandID = commandID; self.createdAt = createdAt; self.parentID = parentID; self.nature = nature; self.completedAt = completedAt
     }
     public var isExtracted: Bool { commandID.hasPrefix("extracted:") }
 }
@@ -68,19 +70,21 @@ extension VoiceOSStore {
         try checkpoint(.actionCommitted)
         return id
     }
+    /// The newest revision that entered completed supplies the 已完成 order and the row date.
+    private static let completedAtColumn = "(SELECT MAX(r.created_at) FROM action_revisions r WHERE r.action_id=a.id AND r.state='completed') AS completed_at"
     public func actions(includeHistory: Bool = false) throws -> [ActionRecord] {
         _ = try candidateClaims(includeFrozen: true) // Dynamic source/hash/policy barrier also freezes actions.
-        let clause = includeHistory ? "" : "WHERE validity='current' AND state='open'"
-        return try db.query("SELECT * FROM actions \(clause) ORDER BY created_at,id").map(Self.actionRecord)
+        let clause = includeHistory ? "" : "WHERE a.validity='current' AND a.state='open'"
+        return try db.query("SELECT a.*,\(Self.completedAtColumn) FROM actions a \(clause) ORDER BY a.created_at,a.id").map(Self.actionRecord)
     }
     private static func actionRecord(_ row: [String: String]) throws -> ActionRecord {
-        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1", intent: try row["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self, from: Data($0.utf8)) }, commandID: row["command_id"]!, createdAt: row["created_at"]!, parentID: row["parent_id"], nature: row["nature"] ?? "unknown")
+        ActionRecord(id: row["id"]!, claimID: row["claim_id"]!, claimReviewVersion: Int(row["claim_review_version"]!)!, title: row["title"]!, kind: row["kind"]!, intentActor: row["intent_actor"]!, note: row["note"]!, state: row["state"]!, validity: row["validity"]!, version: Int(row["version"]!)!, autoSend: row["auto_send"] == "1", intent: try row["intent_json"].map { try JSONDecoder().decode(ActionIntentMetadata.self, from: Data($0.utf8)) }, commandID: row["command_id"]!, createdAt: row["created_at"]!, parentID: row["parent_id"], nature: row["nature"] ?? "unknown", completedAt: row["completed_at"])
     }
     /// Active outcomes with no open next action; a saveable "stalled" view.
     public func stalledOutcomes() throws -> [ActionRecord] {
         _ = try candidateClaims(includeFrozen: true)
         return try db.query("""
-            SELECT * FROM actions a
+            SELECT a.*,\(Self.completedAtColumn) FROM actions a
             WHERE a.kind='opportunity' AND a.nature='goal' AND a.state='open' AND a.validity='current'
               AND NOT EXISTS (SELECT 1 FROM actions c WHERE c.parent_id=a.id AND c.state='open')
             ORDER BY a.created_at,a.id
@@ -91,7 +95,7 @@ extension VoiceOSStore {
     public func untriagedSuggestions() throws -> [ActionRecord] { try scopedOutcomes(nature: .unknown) }
     private func scopedOutcomes(nature: ActionNature) throws -> [ActionRecord] {
         _ = try candidateClaims(includeFrozen: true)
-        return try db.query("SELECT * FROM actions WHERE kind='opportunity' AND nature=? AND state='open' AND validity='current' ORDER BY created_at,id", [nature.rawValue]).map(Self.actionRecord)
+        return try db.query("SELECT a.*,\(Self.completedAtColumn) FROM actions a WHERE a.kind='opportunity' AND a.nature=? AND a.state='open' AND a.validity='current' ORDER BY a.created_at,a.id", [nature.rawValue]).map(Self.actionRecord)
     }
     @discardableResult
     public func confirmOpportunityAsTask(actionID: String, expectedVersion: Int, title: String, commandID: String = UUID().uuidString) throws -> String {
@@ -136,6 +140,35 @@ extension VoiceOSStore {
         try db.transaction {
             try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString,actionID,String(next),String(expectedVersion),state.rawValue,note,commandID,hash,ISO8601DateFormatter().string(from: Date())])
             try db.execute("UPDATE actions SET state=?,version=? WHERE id=?", [state.rawValue,String(next),actionID])
+            try checkpoint(.actionStateUncommitted)
+        }
+        try checkpoint(.actionStateCommitted)
+        return next
+    }
+    /// Retracts a user-confirmed external completion. The task returns to open
+    /// and stays frozen, because only the confirmation is withdrawn; the
+    /// read-back evidence and the external reminder are untouched.
+    @discardableResult
+    public func revertExternalCompletion(actionID: String, expectedVersion: Int, commandID: String = UUID().uuidString) throws -> Int {
+        let command = "external-completion-undo:" + commandID
+        let note = "撤销外部完成确认；任务保持冻结，Apple 提醒事项未修改"
+        let hash = try Self.actionHash([actionID, String(expectedVersion), LocalActionState.open.rawValue])
+        if let receipt = try db.query("SELECT version,input_fingerprint FROM action_revisions WHERE command_id=?", [command]).first {
+            guard receipt["input_fingerprint"] == hash else { throw VoiceOSError("同一次撤销外部完成不能更换任务或版本") }
+            return Int(receipt["version"]!)!
+        }
+        guard let current = try actions(includeHistory: true).first(where: { $0.id == actionID }),
+              current.kind == "task", current.validity == "frozen",
+              current.state == LocalActionState.completed.rawValue, current.version == expectedVersion,
+              let latest = try db.query("SELECT state,command_id FROM action_revisions WHERE action_id=? ORDER BY version DESC LIMIT 1", [actionID]).first,
+              latest["state"] == LocalActionState.completed.rawValue,
+              latest["command_id"]?.hasPrefix(Self.externalCompletionCommandPrefix) == true else {
+            throw VoiceOSError("只有刚确认外部完成、且没有后续变更的任务可以撤销")
+        }
+        let next = expectedVersion + 1
+        try db.transaction {
+            try db.execute("INSERT INTO action_revisions(id,action_id,version,from_version,state,note,actor,command_id,input_fingerprint,created_at) VALUES(?,?,?,?,?,?,'user',?,?,?)", [UUID().uuidString, actionID, String(next), String(expectedVersion), LocalActionState.open.rawValue, note, command, hash, ISO8601DateFormatter().string(from: Date())])
+            try db.execute("UPDATE actions SET state=?,version=? WHERE id=?", [LocalActionState.open.rawValue, String(next), actionID])
             try checkpoint(.actionStateUncommitted)
         }
         try checkpoint(.actionStateCommitted)
