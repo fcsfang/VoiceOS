@@ -533,11 +533,11 @@ struct WorkspaceView: View {
                 Text("VoiceOS").vosFont(19, weight: .medium)
             }.padding(.horizontal,9)
             VStack(spacing:5) {
-                nav("首页",icon:"house",target:.home).keyboardShortcut("1",modifiers:.command)
-                nav("主题",icon:"circle.hexagongrid",target:.themes).keyboardShortcut("2",modifiers:.command)
-                nav("材料",icon:"books.vertical",target:.materials).keyboardShortcut("3",modifiers:.command)
-                nav("行动",icon:"checkmark.circle",target:.actions).keyboardShortcut("4",modifiers:.command)
-                nav("启动",icon:"arrow.up.forward",target:.initiate).keyboardShortcut("5",modifiers:.command)
+                nav("首页",icon:"house",target:.home)
+                nav("主题",icon:"circle.hexagongrid",target:.themes)
+                nav("材料",icon:"books.vertical",target:.materials)
+                nav("行动",icon:"checkmark.circle",target:.actions)
+                nav("启动",icon:"arrow.up.forward",target:.initiate)
             }
             if !savedViews.isEmpty {
                 VStack(alignment:.leading,spacing:8) {
@@ -594,6 +594,7 @@ struct WorkspaceView: View {
                 // Plain buttons otherwise only hit-test the icon and text, leaving the padded row inert.
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityIdentifier("workspace.nav."+title)
+            .accessibilityAddTraits(section == title ? .isSelected : [])
     }
     private var header: some View {
         HStack(spacing:12) {
@@ -603,7 +604,7 @@ struct WorkspaceView: View {
                         .frame(width:44,height:44)
                         .background(palette.selection.opacity(0.5),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityLabel("返回").help("返回上一页").keyboardShortcut("[",modifiers:.command)
+                }.buttonStyle(.plain).accessibilityLabel("返回").help("返回上一页")
                 if showsBreadcrumb { Text(breadcrumb).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(1) }
             }
             Spacer()
@@ -902,7 +903,7 @@ struct WorkspaceView: View {
                         VStack(alignment:.leading,spacing:0) {
                             WorkspaceListGroupHeader(title:group.label)
                             ForEach(group.sources) { source in
-                                MaterialMenuRow {
+                                MaterialMenuRow(revealed: materialKeyboardFocus.id == source.id) {
                                     MaterialManagementControls(model:model,source:source,style:.compact)
                                 } row: {
                                     sourceRow(source,catalog:catalog,highlighted:materialKeyboardFocus.id == source.id,trailingGutter: source.isArchived || source.isTrashed ? WorkspaceRowChrome.materialWideGutter : WorkspaceRowChrome.materialGutter).frame(maxWidth:.infinity,alignment:.leading)
@@ -1699,6 +1700,7 @@ struct WorkspaceView: View {
         let showsCompletion = !selectingActions && action.kind == "task" && action.state == "open" && action.validity == "current"
         return WorkspaceActionRowChrome(action:action,
             canTransition:actionable || externalCompletion,
+            revealed:keyboardHighlighted,
             menuItems:{ actionMenuItems(action,focused:focused,canChangeDay:canChangeDay,canTransition:actionable) },
             row:{
                 WorkspaceRow(title:tagged.text,subtitle:layout.meta,icon:icon,
@@ -2324,25 +2326,27 @@ private struct SearchResultRow: View {
 
 private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
     @Environment(\.workspacePalette) private var palette
+    var revealed: Bool = false
     @ViewBuilder let menu: () -> MenuContent
     @ViewBuilder let row: () -> Row
     @State private var hovered = false
 
+    private var menuVisible: Bool { hovered || revealed }
+
     var body: some View {
         row()
             .overlay(alignment:.trailing) {
-                if hovered {
-                    menu()
-                        .vosFont(WorkspaceText.meta)
-                        .padding(.horizontal,8).padding(.vertical,4)
-                        .background(palette.surface,in:Capsule())
-                        .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
-                        .padding(.trailing,12)
-                        .transition(.opacity)
-                }
+                menu()
+                    .vosFont(WorkspaceText.meta)
+                    .padding(.horizontal,8).padding(.vertical,4)
+                    .background(palette.surface,in:Capsule())
+                    .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
+                    .padding(.trailing,12)
+                    .opacity(menuVisible ? 1 : 0)
+                    .allowsHitTesting(menuVisible)
             }
             .onHover { hovered=$0 }
-            .animation(.easeOut(duration:0.12),value:hovered)
+            .animation(.easeOut(duration:0.12),value:menuVisible)
     }
 }
 
@@ -2350,14 +2354,18 @@ private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
     @Environment(\.workspacePalette) private var palette
     let action: ActionRecord
     let canTransition: Bool
+    var revealed: Bool = false
     @ViewBuilder let menuItems: () -> MenuItems
     @ViewBuilder let row: () -> Row
     @State private var hovered = false
+    @FocusState private var menuFocused: Bool
+
+    private var menuVisible: Bool { hovered || revealed || menuFocused }
 
     var body: some View {
         row()
             .overlay(alignment:.trailing) {
-                if hovered && canTransition {
+                if canTransition {
                     Menu {
                         menuItems()
                     } label: {
@@ -2366,16 +2374,18 @@ private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
                             .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
                             .contentShape(Rectangle())
                     }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                        .focused($menuFocused)
                         .help("更多操作")
                         .accessibilityLabel("更多操作：" + action.title)
                         .padding(.horizontal,6).padding(.vertical,3)
                         .background(palette.surface,in:Capsule())
                         .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
                         .padding(.trailing,12)
-                        .transition(.opacity)
+                        .opacity(menuVisible ? 1 : 0)
+                        .allowsHitTesting(menuVisible)
                 }
             }
             .onHover { hovered=$0 }
-            .animation(.easeOut(duration:0.12),value:hovered)
+            .animation(.easeOut(duration:0.12),value:menuVisible)
     }
 }
