@@ -17,6 +17,14 @@ struct WorkspaceDeliveryView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 WorkspaceHeading(eyebrow: "AI 助理 · " + assistantExecutionLabel(execution), title: execution.title)
+                if model.isDeliveryUnread(execution) {
+                    HStack(spacing:10) {
+                        Label("未读交付", systemImage:"circle.fill").vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                        Button("标为已读", systemImage:"checkmark.circle") { model.markDeliveryRead(execution) }
+                            .vosFont(WorkspaceText.meta)
+                            .accessibilityLabel("把这份 AI 交付标为已读")
+                    }
+                }
                 if execution.validity != "current" {
                     Label("依据已变化，这份交付作为历史保留。", systemImage: "pause.circle").foregroundStyle(palette.warning)
                 }
@@ -205,7 +213,7 @@ struct WorkspaceTaskView: View {
     }
     private var executions: [AssistantExecutionRecord] {
         // A question's analysis answers live at the apex exactly once.
-        model.assistantExecutions.filter { $0.actionID == action.id && !(isQuestion && $0.mode == .analysis) }
+        model.sortedAssistantDeliveries(model.assistantExecutions.filter { $0.actionID == action.id && !(isQuestion && $0.mode == .analysis) })
     }
     private var current: Bool { action.validity == "current" && action.state != "dismissed" }
     private var isQuestion: Bool { action.nature == "question" }
@@ -353,6 +361,12 @@ struct WorkspaceTaskView: View {
                         } else {
                             Text(model.reminderAccess?.enabled != true ? "待办已保存在 VoiceOS，连接提醒事项后可同步。" : model.reminderFieldsPending ? "正在核对日期与优先级，完成后同步所选清单。" : "待办已保存，等待同步到所选清单。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         }
+                        if let pending = model.pendingReminderSync(for: action.id) {
+                            Text(pending.desiredState == LocalActionState.completed.rawValue ? "已本地完成，连接恢复前不会同步到提醒事项。" : "已本地撤销，连接恢复前不会同步到提醒事项。")
+                                .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                            Button("稍后核对") { Task { await model.retryPendingReminderSyncs() } }
+                                .vosFont(WorkspaceText.meta).disabled(model.remindersBusy)
+                        }
                         if model.reminderAccess?.enabled == true {
                             Text(model.reminderSyncStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                             Button("核对提醒同步") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderFieldsPending)
@@ -495,7 +509,13 @@ struct WorkspaceTaskView: View {
                 if !executions.isEmpty {
                     WorkspaceSection(title:"AI 的工作与交付",icon:"sparkles",count:executions.count) {
                         ForEach(executions) { execution in
-                            WorkspaceRow(title: execution.title, subtitle: assistantExecutionLabel(execution), icon: "sparkles", trailing: execution.state == "completed" ? "阅读结果" : "查看进度") { openDelivery(execution.id) }
+                            let unread = model.isDeliveryUnread(execution)
+                            WorkspaceRow(title: execution.title,
+                                         subtitle: (unread ? "未读 · " : "") + assistantExecutionLabel(execution),
+                                         icon: execution.state == "completed" ? "doc.text" : "sparkles",
+                                         iconTint: unread ? palette.accent : nil,
+                                         trailing: unread ? "未读 · 阅读结果" : (execution.state == "completed" ? "阅读结果" : "查看进度"),
+                                         trailingStyle: unread ? .status(palette.accent) : .link) { openDelivery(execution.id) }
                             if execution.id != executions.last?.id { Divider() }
                         }
                     }
@@ -832,7 +852,9 @@ struct WorkspaceTaskView: View {
             guard model.actionRecords.first(where: { $0.id == action.id })?.state == state.rawValue else { error=model.status; return }
             error=""
             if state == .completed {
-                showUndo("已完成" + (await model.recurrenceDueLabel(receipt?.successorID)))
+                let localOnly = model.pendingReminderSync(for: action.id) != nil
+                let dueLabel = await model.recurrenceDueLabel(receipt?.successorID)
+                showUndo(localOnly ? "已本地完成，连接恢复前不会同步到提醒事项" : "已完成" + dueLabel)
                 await loadFeedback()
                 if feedbackHistory.isEmpty { askingForResult = true }
             } else {
