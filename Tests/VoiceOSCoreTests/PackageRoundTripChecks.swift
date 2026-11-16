@@ -361,4 +361,48 @@ final class PackageRoundTripChecks: XCTestCase {
         manifest["files"] = files
         try JSONSerialization.data(withJSONObject: manifest, options: [.sortedKeys]).write(to: manifestURL)
     }
+
+    func testRestoreFreezesQueuedAssistantExecution() async throws {
+        let store = try await openStore()
+        let fixture = try await makeFixture(store)
+        let actions = try await store.actions()
+        let action = try XCTUnwrap(actions.first { $0.id == fixture.actionID })
+        let execution = try await store.enqueueAssistantExecution(actionID: fixture.actionID, expectedVersion: action.version)
+        XCTAssertEqual(execution.state, "queued")
+        let package = base.appendingPathComponent("package-queued-execution")
+        try await store.exportPackage(to: package, includeMedia: true)
+
+        let restoredRoot = base.appendingPathComponent("restored-queued-execution")
+        try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
+        let restored = try await openStore(restoredRoot)
+        let restoredDB = await restored.db
+        let row = try XCTUnwrap(restoredDB.query("SELECT state,error FROM assistant_executions WHERE id=?", [execution.id]).first)
+        XCTAssertEqual(row["state"], "failed")
+        XCTAssertEqual(row["error"], "迁移前委托尚未完成，可手动重试")
+        XCTAssertEqual(try restoredDB.query("SELECT count(*) AS n FROM assistant_executions WHERE state IN ('queued','running')").first?["n"], "0")
+    }
+
+    func testRestoreRejectsNewerPackageVersionWithDedicatedMessage() async throws {
+        let store = try await openStore()
+        _ = try await makeFixture(store)
+        let package = base.appendingPathComponent("package-newer")
+        try await store.exportPackage(to: package, includeMedia: true)
+        try rewriteManifest(package, version: 52, dropping: [], removing: [])
+        let message = "此迁移包由更新版本的 VoiceOS 创建（包版本 52），请升级后再恢复"
+
+        do {
+            _ = try VoiceOSStore.packageSummary(at: package)
+            XCTFail("更新版本的迁移包必须在预览时被拒绝")
+        } catch {
+            XCTAssertEqual((error as? VoiceOSError)?.message, message)
+        }
+        let restoredRoot = base.appendingPathComponent("restored-newer")
+        do {
+            try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
+            XCTFail("更新版本的迁移包必须拒绝恢复")
+        } catch {
+            XCTAssertEqual((error as? VoiceOSError)?.message, message)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: restoredRoot.path))
+    }
 }

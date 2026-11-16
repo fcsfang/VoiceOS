@@ -9,6 +9,7 @@ public actor SpotlightIndexer {
         let title: String
         let summary: String
         let modified: String
+        let url: URL?
         var fingerprint: String { id + "\u{1F}" + modified }
     }
 
@@ -40,6 +41,7 @@ public actor SpotlightIndexer {
                 let attributes = CSSearchableItemAttributeSet(contentType: .plainText)
                 attributes.title = entry.title
                 attributes.contentDescription = entry.summary
+                attributes.contentURL = entry.url
                 return CSSearchableItem(uniqueIdentifier: entry.id, domainIdentifier: Self.domainIdentifier, attributeSet: attributes)
             }
             do { try await submit(items) }
@@ -89,16 +91,18 @@ public actor SpotlightIndexer {
         for source in sources where ["saved", "reference_only"].contains(source.state) {
             let excerpt = excerpt(from: source.transcript ?? "", limit: 200)
             entries.append(Entry(id: "source-" + source.id, title: singleLine(source.name), summary: excerpt.isEmpty ? "材料" : excerpt,
-                                 modified: [source.createdAt, source.state, source.transcriptVersionID ?? "", source.name].joined(separator: "\u{1F}")))
+                                 modified: [source.createdAt, source.state, source.transcriptVersionID ?? "", source.name].joined(separator: "\u{1F}"),
+                                 url: URL(string: "voiceos://source/" + source.id)))
         }
         for claim in claims where claim.validity == "current" {
             entries.append(Entry(id: "claim-" + claim.id, title: singleLine(claim.statement), summary: "观点",
-                                 modified: [String(claim.reviewVersion), claim.validity, claim.statement].joined(separator: "\u{1F}")))
+                                 modified: [String(claim.reviewVersion), claim.validity, claim.statement].joined(separator: "\u{1F}"), url: nil))
         }
         for action in actions where action.state == "open" && action.validity == "current" {
             let note = singleLine(action.note)
             entries.append(Entry(id: "action-" + action.id, title: singleLine(action.title), summary: note.isEmpty ? "开放行动" : note,
-                                 modified: [String(action.version), action.state, action.validity, action.title, action.note].joined(separator: "\u{1F}")))
+                                 modified: [String(action.version), action.state, action.validity, action.title, action.note].joined(separator: "\u{1F}"),
+                                 url: URL(string: "voiceos://action/" + action.id)))
         }
         return entries
     }
