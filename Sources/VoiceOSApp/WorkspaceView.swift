@@ -899,6 +899,7 @@ struct WorkspaceView: View {
             Button("让 AI 一起回顾这个周期",systemImage:"sparkles") { Task { do { let focus=try await model.loadQuestionReflection(topic.id,interval:interval,period:reviewPeriod);_ = await openReflection(focus,prompt:reviewPeriod.reviewPrompt(dateLabel:interval.start.formatted(date:.abbreviated,time:.omitted),questionTitle:topic.title)) } catch { self.error=error.localizedDescription } } }.buttonStyle(.borderedProminent)
         }
     }
+    @State private var showingClarifyQueue = false
     private var actions: some View {
         LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             HStack(alignment:.top,spacing:12) {
@@ -914,13 +915,16 @@ struct WorkspaceView: View {
                         .accessibilityLabel("安排今天").help("从即将与随时里挑最多 3 条加入专注")
                 }
                 WorkspaceHeaderMenu {
+                    if actionFilter == "问题与目标" {
+                        Button("逐个澄清", systemImage:"checklist") { showingClarifyQueue=true }
+                    }
                     if ["全部","我的待办"].contains(actionFilter) {
                         Button(selectingActions ? "取消选择" : "选择") { if selectingActions { exitActionSelection() } else { selectingActions=true } }.disabled(batchRunning)
                     }
                     Button("保存当前视图",systemImage:"bookmark") { beginSavingView(.actions,filter:actionFilter) }
                     Button("每周回顾",systemImage:"calendar.badge.clock") { showingWeeklyReview=true }
                 }
-            }
+            }.sheet(isPresented:$showingClarifyQueue) { ActionClarifyQueueView(model:model) }
             WorkspaceTabs(selection:$actionFilter,titles:SavedViewPage.actions.filters,style:.filters)
             if actionFilter == "问题与目标", !model.stalledOutcomes.isEmpty { stalledBanner }
             let visible = visibleActions
@@ -1435,6 +1439,7 @@ struct WorkspaceView: View {
             switch state {
             case .completed: showActionUndo(action.id,message:"已完成")
             case .dismissed: showActionUndo(action.id,message:"已放下")
+            case .someday: showActionUndo(action.id,message:"已留到以后")
             case .open: actionUndo=nil
             }
             if let nextHighlight { actionKeyboardHighlightID=nextHighlight }
