@@ -61,6 +61,8 @@ struct WorkspaceSearchField: View {
                     focus?.wrappedValue = true
                 } label: {
                     Image(systemName: "xmark.circle.fill").vosFont(WorkspaceText.meta.size).foregroundStyle(.tertiary)
+                        .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                        .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("清空搜索")
             }
         }
@@ -173,7 +175,7 @@ struct WorkspaceToast: View {
             Button(action: close) {
                 Image(systemName: "xmark").vosFont(WorkspaceText.caption.size, weight: .semibold)
                     .foregroundStyle(palette.secondaryText)
-                    .frame(width: 18, height: 18)
+                    .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
                     .contentShape(Rectangle())
             }.buttonStyle(.plain).help("关闭提示").accessibilityLabel("关闭提示")
         }
@@ -186,6 +188,7 @@ struct WorkspaceToast: View {
 
 private struct WorkspaceToastModifier: ViewModifier {
     private static let visibleFor: TimeInterval = 3.5
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var message: String?
     @State private var hovered = false
     @State private var remaining = WorkspaceToastModifier.visibleFor
@@ -196,14 +199,14 @@ private struct WorkspaceToastModifier: ViewModifier {
             .overlay(alignment: .bottom) {
                 if let text = message {
                     WorkspaceToast(message: text) {
-                        withAnimation(.easeOut(duration: 0.2)) { message = nil }
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { message = nil }
                     }
                     .padding(.bottom, 18)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(reduceMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
                     .onHover { setHovered($0) }
                 }
             }
-            .animation(.spring(duration: 0.26), value: message)
+            .animation(reduceMotion ? nil : .spring(duration: 0.26), value: message)
             .onChange(of: message) { _, text in
                 guard let text else { deadline = nil; return }
                 remaining = Self.visibleFor
@@ -238,7 +241,7 @@ private struct WorkspaceToastModifier: ViewModifier {
         let wait = deadline.timeIntervalSinceNow
         if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
         guard message != nil, !hovered, self.deadline == deadline else { return }
-        withAnimation(.easeOut(duration: 0.2)) { message = nil }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { message = nil }
         self.deadline = nil
     }
 }
@@ -255,6 +258,7 @@ struct WorkspaceRowChevron: View {
 struct WorkspaceListRow<Trailing: View>: View {
     enum Density { case comfortable, compact }
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var density: Density = .comfortable
     let title: String
     var subtitle: String = ""
@@ -303,7 +307,7 @@ struct WorkspaceListRow<Trailing: View>: View {
         .frame(minHeight: density == .comfortable ? 52 : 44, alignment: .leading)
         .background(rowBackground, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
         .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-        .animation(.easeOut(duration: 0.12), value: hovered)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
     }
 
     private var iconBackground: Color {

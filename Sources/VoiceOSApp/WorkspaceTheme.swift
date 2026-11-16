@@ -25,7 +25,7 @@ struct WorkspacePalette {
     /// Secondary toolbar and metadata copy; one step quieter than `text`.
     var secondaryText: Color { text.opacity(increasesContrast ? 0.85 : 0.72) }
     /// Counts, footers and third-level facts. One step quieter than `secondaryText`.
-    var tertiaryText: Color { text.opacity(increasesContrast ? 0.66 : 0.53) }
+    var tertiaryText: Color { text.opacity(increasesContrast ? 0.80 : 0.70) }
     var accent: Color { theme == .graphite ? adaptive(0x3A4A5C, 0xAEC3D6) : adaptive(0x315F49, 0xB8D9BF) }
     var selection: Color { theme == .graphite ? adaptive(0xE7E7E7, 0x333333) : adaptive(0xE6EEE5, 0x303F33) }
     var border: Color {
@@ -36,7 +36,7 @@ struct WorkspacePalette {
     var hover: Color { selection.opacity(0.55) }
     var pressed: Color { selection.opacity(0.9) }
     var disabledText: Color { text.opacity(increasesContrast ? 0.6 : 0.35) }
-    var focusRing: Color { accent.opacity(0.5) }
+    var focusRing: Color { accent }
     // Graph colors distinguish kinds of evidence without tinting the workspace.
     var action: Color { adaptive(0x526B82, 0xA9BED1) }
     var outcome: Color { adaptive(0x826B52, 0xCDB99E) }
