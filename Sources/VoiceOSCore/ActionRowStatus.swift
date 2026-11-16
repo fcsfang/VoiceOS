@@ -41,6 +41,8 @@ public struct ActionRowFacts: Sendable {
     public var state = "open"
     public var validity = "current"
     public var due: String? = nil
+    /// Display text for the newest completion; empty when the action never completed.
+    public var completedAt = ""
     public var sourceTitle: String? = nil
     public var nextStepCount = 0
     public var requiresReview = false
@@ -68,7 +70,9 @@ public enum ActionRowLayout {
     /// page banner already says so.
     public static func status(_ facts: ActionRowFacts) -> ActionRowStatus {
         var meta = ""
-        if let due = facts.due, !due.isEmpty {
+        if facts.group == .completed, !facts.completedAt.isEmpty {
+            meta = facts.completedAt
+        } else if let due = facts.due, !due.isEmpty {
             meta = due
         } else if let source = facts.sourceTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !source.isEmpty {
             meta = "来自『" + source + "』"
@@ -87,6 +91,7 @@ public enum ActionRowLayout {
             switch facts.answerState {
             case "completed": return row("已回答", .success)
             case "queued", "running", "reserved", "blocked": return row("回答中", .secondary)
+            case "failed", "cancelled": return row("回答失败", .warning)
             default: return row("未回答", .secondary)
             }
         }

@@ -99,4 +99,31 @@ final class ClarifyNatureQueueChecks: XCTestCase {
         let stillOpen = try await store.openQuestions()
         XCTAssertTrue(stillOpen.contains { $0.id == item.id }, "试答不会把问题移出队列")
     }
+
+    func testFreshEnqueueReopensACompletedAnswerButKeepsQueuedWorkConverged() async throws {
+        let store = try await openStore()
+        let item = try await addAction(store, title: "【问题】重新回答会产生新的执行")
+        let questions = try await store.openQuestions()
+        let question = try XCTUnwrap(questions.first { $0.id == item.id })
+
+        let first = try await store.enqueueAssistantExecution(actionID: question.id, expectedVersion: question.version, mode: .analysis, fresh: true)
+        let repeatedWhileQueued = try await store.enqueueAssistantExecution(actionID: question.id, expectedVersion: question.version, mode: .analysis, fresh: true)
+        XCTAssertEqual(repeatedWhileQueued.id, first.id, "排队中的 fresh 请求仍收敛到同一个执行")
+
+        let db = await store.db
+        try db.execute("UPDATE assistant_executions SET state='completed',updated_at=created_at WHERE id=?", [first.id])
+
+        let cached = try await store.enqueueAssistantExecution(actionID: question.id, expectedVersion: question.version, mode: .analysis)
+        XCTAssertEqual(cached.id, first.id, "默认入队仍复用同版本的已完成回答")
+
+        let fresh = try await store.enqueueAssistantExecution(actionID: question.id, expectedVersion: question.version, mode: .analysis, fresh: true)
+        XCTAssertNotEqual(fresh.id, first.id, "fresh 跳过已完成去重，产生新的执行")
+        XCTAssertEqual(fresh.state, "queued")
+        let converged = try await store.enqueueAssistantExecution(actionID: question.id, expectedVersion: question.version, mode: .analysis, fresh: true)
+        XCTAssertEqual(converged.id, fresh.id)
+
+        let executions = try await store.assistantExecutions(actionID: question.id)
+        XCTAssertEqual(executions.filter { $0.state == "queued" }.count, 1)
+        XCTAssertEqual(executions.count, 2)
+    }
 }
