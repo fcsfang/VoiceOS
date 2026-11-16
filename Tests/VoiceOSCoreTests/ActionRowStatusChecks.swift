@@ -117,4 +117,53 @@ final class ActionRowStatusChecks: XCTestCase {
         ]
         XCTAssertEqual(ActionRowLayout.nextStepCounts(actions), ["goal": 2, "other": 1])
     }
+
+    func testQuestionWithoutAnalysisShowsUnanswered() {
+        let row = facts { facts in
+            facts.isQuestion = true
+            facts.sourceTitle = "早餐时的想法"
+        }
+        XCTAssertEqual(row.status, "未回答")
+        XCTAssertEqual(row.tone, .secondary)
+        XCTAssertEqual(row.meta, "来自『早餐时的想法』")
+    }
+
+    func testQuestionWaitingOrRunningShowsAnswering() {
+        for state in ["queued", "running", "reserved"] {
+            let row = facts { facts in
+                facts.isQuestion = true
+                facts.answerState = state
+            }
+            XCTAssertEqual(row.status, "回答中", state)
+            XCTAssertEqual(row.tone, .secondary, state)
+        }
+    }
+
+    func testQuestionWithCompletedAnalysisShowsAnswered() {
+        let row = facts { facts in
+            facts.isQuestion = true
+            facts.answerState = "completed"
+        }
+        XCTAssertEqual(row.status, "已回答")
+        XCTAssertEqual(row.tone, .success)
+    }
+
+    func testQuestionWithFailedAnalysisInvitesAnotherAnswer() {
+        for state in ["failed", "cancelled", "unknown"] {
+            let row = facts { facts in
+                facts.isQuestion = true
+                facts.answerState = state
+            }
+            XCTAssertEqual(row.status, "未回答", state)
+        }
+    }
+
+    func testQuestionStatusWinsOverNextStepCount() {
+        let row = facts { facts in
+            facts.isQuestion = true
+            facts.nextStepCount = 2
+        }
+        XCTAssertEqual(row.status, "未回答")
+        XCTAssertEqual(row.meta, "")
+    }
 }
