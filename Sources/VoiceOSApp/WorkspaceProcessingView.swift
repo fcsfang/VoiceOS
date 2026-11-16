@@ -6,6 +6,45 @@ struct WorkspaceProcessingActivity {
     let label: String
 }
 
+/// Failed processing items the user chose not to chase. The
+/// cognitive_feedback_ignores table is bound to relevance receipts, so these
+/// view-level dismissals persist in UserDefaults under stable record IDs.
+enum ProcessingDismissals {
+    private static let key = "voiceos.processing.ignoredFailures.v1"
+    static func isIgnored(_ id: String) -> Bool { UserDefaults.standard.stringArray(forKey: key)?.contains(id) == true }
+    static func ignore(_ id: String) {
+        var ids = UserDefaults.standard.stringArray(forKey: key) ?? []
+        guard !ids.contains(id) else { return }
+        ids.append(id)
+        UserDefaults.standard.set(ids, forKey: key)
+    }
+}
+
+/// One place that turns stored model failures into the three interface
+/// categories. The raw message stays in the record and the log.
+enum WorkspaceProcessingErrorText {
+    static let format = "AI 返回格式异常，原文已保留，可重试"
+    static let network = "网络中断，可重试"
+    private static let formatMarkers = ["解码", "格式", "结构", "缺少", "JSON", "Decod",
+                                        "couldn’t be read", "couldn't be read", "correct format",
+                                        "keyNotFound", "typeMismatch", "valueNotFound", "dataCorrupted"]
+    private static let networkMarkers = ["网络", "超时", "timed out", "timeout", "offline", "internet",
+                                         "TLS", "secure connection", "URLError", "-1001", "-1005", "-1009"]
+    static func display(_ raw: String) -> String {
+        let message = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty else { return raw }
+        if AssistantFailureMessage.isStructural(message) || formatMarkers.contains(where: { message.localizedCaseInsensitiveContains($0) }) {
+            NSLog("VoiceOS processing format failure: %@", message)
+            return format
+        }
+        if networkMarkers.contains(where: { message.localizedCaseInsensitiveContains($0) }) {
+            NSLog("VoiceOS processing network failure: %@", message)
+            return network
+        }
+        return raw
+    }
+}
+
 extension ControlCenter {
     var workspaceProcessingStatus: WorkspaceProcessingStatus {
         .init(
@@ -85,12 +124,28 @@ extension ControlCenter {
         var seen=Set<String>()
         return recordingFollowups.reversed().filter { seen.insert($0.sourceID).inserted }.filter { $0.state == "failed" }
     }
+    var workspacePanoramaFailure: (status: String, reason: String?)? {
+        guard let state = panorama.state, ["failed","unknown"].contains(state.status) else { return nil }
+        return (state.status, state.error)
+    }
+    var workspaceFailedKnowledgeReviews: [KnowledgeReviewRecord] {
+        knowledgeReviews.filter { $0.validity == "current" && $0.state == "failed" && !ProcessingDismissals.isIgnored("knowledge:" + $0.id) }
+    }
+    var workspaceFailedAssistantExecutions: [AssistantExecutionRecord] {
+        assistantExecutions.filter { $0.validity == "current" && $0.state == "failed" && !ProcessingDismissals.isIgnored("assistant:" + $0.id) }
+    }
     var workspaceNeedsAttention: Bool {
         !startupIssue.isEmpty || !workspacePausedTasks.isEmpty || records.contains { ["failed","blocked"].contains($0.jobState ?? "") || ["interrupted","quarantined"].contains($0.state) } ||
         workspaceUnfinishedIntents.contains { [.blocked,.unknown,.rejected].contains($0.state) } ||
-        recordingRequests.contains { $0.state == "blocked" } || assistantExecutions.contains { $0.validity == "current" && $0.state == "failed" } ||
+        recordingRequests.contains { $0.state == "blocked" } || !workspaceFailedAssistantExecutions.isEmpty ||
+        workspacePanoramaFailure != nil ||
         records.contains { transcriptReviewIssue(for:$0) != nil } ||
         reminderFieldIssue != nil || !assistantAssessmentIssues.isEmpty
+    }
+    var workspaceProcessingOutstanding: Bool {
+        workspaceNeedsAttention || !workspaceFailedFollowups.isEmpty || !workspaceFailedKnowledgeReviews.isEmpty ||
+        recordingRequests.contains { $0.state == "waiting" } ||
+        workspaceUnfinishedIntents.contains { $0.state == .queued || $0.state == .running }
     }
 }
 
@@ -149,6 +204,15 @@ struct WorkspaceProcessingView: View {
                 } else {
                     Label(WorkspaceProcessingStatus.idleTitle,systemImage:"checkmark.circle").foregroundStyle(.secondary)
                 }
+                if let failure = model.workspacePanoramaFailure {
+                    WorkspaceSection(title:"全景生成未完成",subtitle:"已有材料与已核对区域保留；失败不会删除原文，可以明确重试。",icon:"circle.hexagongrid") {
+                        Text(failure.status == "unknown" ? "上次生成在进程退出前未登记结果，没有自动重发。" : "上一次生成没有完成。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top,12)
+                        if let error = failure.reason { reason(error) }
+                        Button("重试生成全景") { model.retryPanorama() }
+                            .disabled(!model.panorama.modelConfigured || model.panorama.isGenerating || model.panorama.state?.status == "running")
+                            .accessibilityLabel("重试生成全景")
+                    }
+                }
                 if !model.workspaceUnfinishedIntents.isEmpty {
                     WorkspaceSection(title:"文字理解与关联",icon:"text.bubble",count:model.workspaceUnfinishedIntents.count) {
                         ForEach(model.workspaceUnfinishedIntents) { intent in
@@ -156,6 +220,9 @@ struct WorkspaceProcessingView: View {
                                 WorkspaceRow(title:name(intent.sourceID),subtitle:intentLabel(intent),trailing:"核对材料") { openSource(intent.sourceID) }
                                 if let error=intent.error { reason(error) }
                                 if intent.state == .queued && !model.modelConfigured { Button("配置模型后继续",action:openSettings).accessibilityLabel("配置模型后继续：" + name(intent.sourceID)) }
+                                if intent.state == .queued || intent.state == .running {
+                                    Button("停止处理") { Task { await model.cancelProcessingIntent(intent) } }.accessibilityLabel("停止处理：" + name(intent.sourceID))
+                                }
                             }
                         }
                     }
@@ -185,7 +252,10 @@ struct WorkspaceProcessingView: View {
                 if !waiting.isEmpty {
                     WorkspaceSection(title:"录音处理请求",icon:"tray",count:waiting.count) {
                         ForEach(waiting) { request in
-                            WorkspaceRow(title:name(request.sourceID),subtitle:request.state == "blocked" ? "处理条件已变化，需要重新核对" : "等待完整转写与原文核对，随后继续理解",trailing:"查看材料") { openSource(request.sourceID) }
+                            VStack(alignment:.leading,spacing:6) {
+                                WorkspaceRow(title:name(request.sourceID),subtitle:request.state == "blocked" ? "处理条件已变化，需要重新核对" : "等待完整转写与原文核对，随后继续理解",trailing:"查看材料") { openSource(request.sourceID) }
+                                Button("停止处理") { Task { await model.cancelRecordingRequest(request) } }.accessibilityLabel("停止处理录音处理请求：" + name(request.sourceID)).padding(.bottom,8)
+                            }
                         }
                         reasons(waiting.compactMap { request in request.error.map { (name(request.sourceID),$0) } })
                     }
@@ -244,12 +314,15 @@ struct WorkspaceProcessingView: View {
                         }
                     }
                 }
-                let failedKnowledgeReviews=model.knowledgeReviews.filter { $0.validity == "current" && $0.state == "failed" }
+                let failedKnowledgeReviews=model.workspaceFailedKnowledgeReviews
                 if !failedKnowledgeReviews.isEmpty {
                     let knowledgeErrors=failedKnowledgeReviews.compactMap { review in review.error.map { (name(review.sourceID),$0) } }
-                    WorkspaceSection(title:"知识核查未完成",subtitle:"当前理解与核查结论分别保留。",icon:"lightbulb",count:failedKnowledgeReviews.count) {
+                    WorkspaceSection(title:"知识核查未完成",subtitle:"当前理解与核查结论分别保留；不再跟进的可忽略这次。",icon:"lightbulb",count:failedKnowledgeReviews.count) {
                         ForEach(failedKnowledgeReviews) { review in
                             WorkspaceRow(title:name(review.sourceID),subtitle:"",trailing:"查看材料") { openSource(review.sourceID) }
+                            Button("忽略这次") { model.ignoreProcessingFailure("knowledge:" + review.id) }
+                                .accessibilityLabel("忽略这次知识核查：" + name(review.sourceID))
+                                .padding(.bottom,8)
                         }
                         reasons(knowledgeErrors)
                         if failedKnowledgeReviews.count > 1 {
@@ -259,11 +332,14 @@ struct WorkspaceProcessingView: View {
                         }
                     }
                 }
-                ForEach(model.assistantExecutions.filter { $0.validity == "current" && $0.state == "failed" }) { execution in
+                ForEach(model.workspaceFailedAssistantExecutions) { execution in
                     WorkspaceSection(title:"AI 代办未完成",icon:"sparkles") {
                         Text(execution.title).vosFont(WorkspaceText.rowTitle).padding(.vertical,12)
                         if let error=execution.error { reason(error) }
-                        Button("查看委托与重试") { model.showTask(execution.actionID) }.accessibilityLabel("查看委托与重试：" + execution.title)
+                        HStack(spacing:16) {
+                            Button("查看委托与重试") { model.showTask(execution.actionID) }.accessibilityLabel("查看委托与重试：" + execution.title)
+                            Button("忽略这次") { model.ignoreProcessingFailure("assistant:" + execution.id) }.accessibilityLabel("忽略这次 AI 代办：" + execution.title)
+                        }
                     }
                 }
                 ForEach(model.assistantAssessmentIssues) { issue in
@@ -287,6 +363,11 @@ struct WorkspaceProcessingView: View {
                     }
                     Button("检查连接与配置",action:openSettings).padding(.top,12)
                 } }
+                if model.initialized, !model.workspaceProcessingOutstanding, !model.workspaceProcessingBarVisible,
+                   inbox.pendingItems.isEmpty, inbox.folderErrors.isEmpty {
+                    Label("已全部处理",systemImage:"checkmark.circle").foregroundStyle(.secondary)
+                        .accessibilityLabel("已全部处理，没有需要查看的处理结果")
+                }
             }.frame(maxWidth:860,alignment:.leading).padding(30).frame(maxWidth:.infinity,alignment:.top)
         }
     }
@@ -296,10 +377,10 @@ struct WorkspaceProcessingView: View {
             DisclosureGroup("查看原因") {
                 VStack(alignment:.leading,spacing:8) {
                     ForEach(entries.indices,id:\.self) { index in
-                        Text(entries[index].0 + "：" + entries[index].1).vosFont(WorkspaceText.body).textSelection(.enabled)
+                        Text(entries[index].0 + "：" + WorkspaceProcessingErrorText.display(entries[index].1)).vosFont(WorkspaceText.body).textSelection(.enabled)
                     }
                 }.padding(.top,8)
-            }.accessibilityHint(entries.map { $0.1 }.joined(separator:"\n")).padding(.bottom,12)
+            }.accessibilityHint(entries.map { WorkspaceProcessingErrorText.display($0.1) }.joined(separator:"\n")).padding(.bottom,12)
         }
     }
     private func retryAllTranscriptions(_ sources:[SourceRecord]) {
@@ -308,7 +389,10 @@ struct WorkspaceProcessingView: View {
     private func retryAllTranscriptReviews(_ sources:[SourceRecord]) {
         Task { for source in sources { await model.reviewTranscription(sourceID:source.id) } }
     }
-    private func reason(_ text:String) -> some View { DisclosureGroup("查看原因") { Text(text).vosFont(WorkspaceText.body).textSelection(.enabled) }.accessibilityHint(text).padding(.bottom,12) }
+    private func reason(_ text:String) -> some View {
+        let display = WorkspaceProcessingErrorText.display(text)
+        return DisclosureGroup("查看原因") { Text(display).vosFont(WorkspaceText.body).textSelection(.enabled) }.accessibilityHint(display).padding(.bottom,12)
+    }
     private func intentLabel(_ intent:ExpressionProcessingIntentRecord) -> String {
         switch intent.state {
         case .queued: return model.modelConfigured ? "已保存，等待理解与关联" : "已保存，等待配置模型"
