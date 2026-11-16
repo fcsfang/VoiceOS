@@ -16,9 +16,12 @@ struct WeeklyReviewView: View {
     @State private var focusLoaded = false
     @State private var undoEntry: UndoEntry?
     @State private var somedayRows: [ActionRecord] = []
+    @State private var showingClarifyQueue = false
+    @State private var nextStepGoal: ActionRecord?
+    @State private var nextStepNotice = ""
 
     private enum ReviewFilter: String {
-        case todo = "我的待办", review = "待核对", completed = "已完成", history = "历史记录"
+        case todo = "我的待办", review = "待核对", completed = "已完成"
     }
     private struct UndoEntry: Identifiable, Equatable {
         let id = UUID()
@@ -66,15 +69,20 @@ struct WeeklyReviewView: View {
             .filter { $0.date >= cutoff }
             .sorted { $0.date > $1.date }
     }
-    private var pausedTasks: [ActionRecord] {
-        var seen = Set<String>()
-        return (model.workspacePausedTasks + model.actionRecords.filter { $0.validity != "current" })
-            .filter { seen.insert($0.id).inserted }
+    private var weekCompleted: [ActionRecord] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? .distantPast
+        return model.actionRecords
+            .filter { action in
+                guard action.state == "completed" else { return false }
+                return completedDate(action).map { $0 >= cutoff } ?? false
+            }
+            .sorted { (completedDate($0) ?? .distantPast) > (completedDate($1) ?? .distantPast) }
     }
+    private var pausedTasks: [ActionRecord] { model.workspacePausedTasks }
     private var stalledGoals: [ActionRecord] { model.stalledOutcomes }
     private var isEmpty: Bool {
         dailyReview.today.isEmpty && dailyReview.overdue.isEmpty && dailyReview.remaining.isEmpty &&
-            staleTasks.isEmpty && unclarifiedTasks.isEmpty && weekProgress.isEmpty && pausedTasks.isEmpty &&
+            staleTasks.isEmpty && unclarifiedTasks.isEmpty && weekCompleted.isEmpty && weekProgress.isEmpty && pausedTasks.isEmpty &&
             stalledGoals.isEmpty && somedayRows.isEmpty &&
             nextWeekEntries.isEmpty
     }
@@ -98,6 +106,7 @@ struct WeeklyReviewView: View {
                 if !unclarifiedTasks.isEmpty { unclarifiedSection }
                 if !stalledGoals.isEmpty { stalledGoalsSection }
                 if !somedayRows.isEmpty { somedaySection }
+                if !weekCompleted.isEmpty { weekCompletedSection }
                 if !weekProgress.isEmpty { progressSection }
                 if !pausedTasks.isEmpty { pausedSection }
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding)
@@ -114,6 +123,10 @@ struct WeeklyReviewView: View {
             guard let id = undoEntry?.id else { return }
             do { try await Task.sleep(for: .seconds(8)) } catch { return }
             if undoEntry?.id == id { withAnimation { undoEntry = nil } }
+        }
+        .sheet(isPresented: $showingClarifyQueue) { ActionClarifyQueueView(model: model, scope: .goals) }
+        .sheet(item: $nextStepGoal) { goal in
+            NextActionFormSheet(model: model, outcome: goal, onAdded: { _ in nextStepNotice = "已添加下一步" })
         }
     }
 
@@ -259,8 +272,7 @@ struct WeeklyReviewView: View {
     private func dailySubtitle(_ entry: ActionTimeEntry) -> String {
         var parts: [String] = []
         if let title = actionSourceTitle(entry.action) {
-            let shortened = title.count > 12 ? String(title.prefix(12)) + "…" : title
-            parts.append("来自『\(shortened)』")
+            parts.append("来自『\(shortenedSourceName(title))』")
         }
         if let due = entry.due { parts.append(due.summary) }
         return parts.joined(separator: " · ")
@@ -274,6 +286,22 @@ struct WeeklyReviewView: View {
             if !title.isEmpty { return title }
         }
         return nil
+    }
+
+    private func shortenedSourceName(_ title: String) -> String {
+        title.count > 12 ? String(title.prefix(12)) + "…" : title
+    }
+
+    private func actionSourceLabel(_ action: ActionRecord) -> String {
+        if let title = actionSourceTitle(action) {
+            return "来自『\(shortenedSourceName(title))』"
+        }
+        let fallback = model.claims.first { $0.id == action.claimID }?.references.first?.sourceID ?? action.claimID
+        return "来自『\(fallback.prefix(8))』"
+    }
+
+    private func completedDate(_ action: ActionRecord) -> Date? {
+        action.completedAt.flatMap(ConversationReflectionFocus.date)
     }
 
     private var nextWeekSection: some View {
@@ -381,44 +409,105 @@ struct WeeklyReviewView: View {
                 if index > 0 { Divider() }
                 reviewRow(title: action.title, subtitle: "打开任务页完成一次三选一澄清。", trailing: "待确认", icon: "questionmark.circle") { openTask(action.id) }
             }
-            if unclarifiedTasks.count > rows.count { allButton(unclarifiedTasks.count, .review) }
+            if unclarifiedTasks.count > rows.count { linkButton("到待核对查看", .review).padding(.top, 10) }
         }
     }
     private var progressSection: some View {
         let rows = Array(weekProgress.prefix(5))
-        return WorkspaceSection(title: "本周完成与结果", subtitle: "最近 7 天记录的完成、进展与结果。", icon: "checkmark.seal", count: weekProgress.count) {
+        return WorkspaceSection(title: "本周结果", subtitle: "最近 7 天记录的结果与进展。", icon: "checkmark.seal", count: weekProgress.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 if index > 0 { Divider() }
                 reviewRow(title: row.taskTitle, subtitle: row.relationLabel, detail: row.text,
                           trailing: dayLabel(row.date), enabled: row.isTaskAvailable) { openTask(row.actionID) }
             }
-            if weekProgress.count > rows.count { allButton(weekProgress.count, .completed) }
+            if weekProgress.count > rows.count {
+                Text("还有 \(weekProgress.count - rows.count) 条结果，到对应任务详情查看。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
+            }
         }
     }
+    private var weekCompletedSection: some View {
+        WorkspaceSection(title: "本周完成", subtitle: "最近 7 天登记完成的行动，按完成时间倒序；没有记录结果的仍留在列表里。", icon: "checkmark.circle", count: weekCompleted.count) {
+            ForEach(Array(weekCompleted.enumerated()), id: \.element.id) { index, action in
+                if index > 0 { Divider() }
+                weekCompletedRow(action)
+            }
+            HStack(spacing: 8) {
+                Text("全部完成事项按完成时间列在「已完成」。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+                linkButton("去「已完成」查看", .completed)
+            }.padding(.top, 10)
+        }
+    }
+
+    private func weekCompletedRow(_ action: ActionRecord) -> some View {
+        let subtitle = completedDate(action).map { "完成于 " + dayLabel($0) } ?? "完成时间未知"
+        let pending = model.visibleOutcomeFollowups.contains { $0.id == action.id }
+        return reviewRow(title: action.title, subtitle: subtitle + " · " + actionSourceLabel(action),
+                         trailing: pending ? "待补结果" : "", icon: "checkmark.circle") { openTask(action.id) }
+    }
+
+    private func linkButton(_ label: String, _ filter: ReviewFilter) -> some View {
+        Button(label + " →") { jump(filter) }
+            .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+    }
+
     private var pausedSection: some View {
         let rows = Array(pausedTasks.prefix(5))
-        return WorkspaceSection(title: "暂停与冻结", subtitle: "AI 提取暂停或不再随当前理解更新的行动，状态保留。", icon: "pause.circle", count: pausedTasks.count) {
+        return WorkspaceSection(title: "暂停与冻结", subtitle: "AI 提取暂停或行动关系待核对、暂不同步的待办；状态保留。", icon: "pause.circle", count: pausedTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
                 reviewRow(title: action.title, subtitle: model.workspaceActionStatus(action),
-                          trailing: action.validity == "current" ? "待核对" : "已冻结", icon: "pause.circle") { openTask(action.id) }
+                          trailing: "待核对", icon: "pause.circle") { openTask(action.id) }
             }
-            if pausedTasks.count > rows.count { allButton(pausedTasks.count, .history) }
+            if pausedTasks.count > rows.count { linkButton("到待核对查看", .review).padding(.top, 10) }
         }
     }
 
     private var stalledGoalsSection: some View {
         let rows = Array(stalledGoals.prefix(5))
-        return WorkspaceSection(title: "没有下一步的目标", subtitle: "目标还没有可以推进的下一步。", icon: "exclamationmark.circle", count: stalledGoals.count) {
+        return WorkspaceSection(title: "没有下一步的目标", subtitle: "目标还没有可以推进的下一步；逐个澄清，或直接加一个下一步。", icon: "exclamationmark.circle", count: stalledGoals.count,
+                                actionTitle: "逐个澄清", action: { showingClarifyQueue = true }) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
                 if index > 0 { Divider() }
-                reviewRow(title: goal.title, subtitle: "还没有下一步", trailing: "停滞", icon: "exclamationmark.circle",
-                          accessibilityLabel: "目标：" + goal.title + "，还没有下一步") { openTask(goal.id) }
+                stalledGoalRow(goal)
             }
             if stalledGoals.count > rows.count {
                 Text("还有 \(stalledGoals.count - rows.count) 个目标，到问题与目标页查看。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
             }
+            if !nextStepNotice.isEmpty {
+                Text(nextStepNotice).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
+            }
         }
+    }
+
+    private func stalledGoalRow(_ goal: ActionRecord) -> some View {
+        let title = StatementTagParser.split(goal.title).text
+        return HStack(alignment: .top, spacing: 12) {
+            Button { openTask(goal.id) } label: {
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "exclamationmark.circle").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                        .frame(width: 34, height: 34)
+                        .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
+                        Text("还没有下一步").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                    }
+                    Spacer(minLength: 8)
+                    Text("停滞").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
+                    Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("目标：" + title + "，还没有下一步")
+            }.buttonStyle(.plain)
+            Button("加下一步") { nextStepNotice = ""; nextStepGoal = goal }
+                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .accessibilityLabel("加下一步：" + title)
+        }
+        .padding(.vertical, 10).padding(.horizontal, 10)
+        .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
     }
 
     private var somedaySection: some View {
@@ -491,7 +580,7 @@ struct WeeklyReviewView: View {
                     .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
+                    Text(StatementTagParser.split(title).text).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
                     if !subtitle.isEmpty {
                         Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
                     }
