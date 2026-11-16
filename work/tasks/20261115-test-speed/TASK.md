@@ -53,3 +53,8 @@ owner: coordinator
 ## 链接
 
 - `Tests/VoiceOSCoreTests/CoreFlowTests.swift`
+
+
+## 补记（2026-11-16）
+
+重试 seam 接入（`work/mega-21`）：`VoiceOSStore.defaultPanoramaRetryDelay` 静态默认（产品默认仍是 Task.sleep），测试 setUp 置空；CoreFlowTests 三个端口构造改内部 init 传零延迟；RetryResilienceChecks 保留自己的延迟记录闭包不动。全量 356 项 0 失败，21.75 秒（原 54.03 秒）。
