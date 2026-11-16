@@ -44,6 +44,25 @@ struct PanoramaSliceGenerationInput: Codable, Sendable {
     let focus: PanoramaGenerationFocus
     let target: PanoramaCoverageTarget
     let input: PanoramaInput
+    /// Digest over everything this slice's request depends on: the policy, the
+    /// focus, the target, the unit's source transcripts and the target claims.
+    /// Library-wide digests and display fields stay out, so a plan rebuilt after
+    /// an unrelated transcript changes still replays the completed slice.
+    let evidence: String
+}
+
+extension PanoramaSliceGenerationInput: PanoramaEvidenceScopedInput {
+    func panoramaEvidenceJSON() throws -> String {
+        try VoiceOSStore.relevanceJSON(PanoramaSliceEvidenceKey(policy: policy, unitID: unitID, ordinal: ordinal, count: count, evidence: evidence))
+    }
+}
+
+private struct PanoramaSliceEvidenceKey: Encodable {
+    let policy: String
+    let unitID: String
+    let ordinal: Int
+    let count: Int
+    let evidence: String
 }
 
 struct PanoramaSliceRepairInput: Codable, Sendable {
@@ -147,8 +166,9 @@ struct PanoramaUnitSlicePlan: Sendable {
             let focus=PanoramaGenerationFocus(unitID: unitID, ordinal: ordinal, count: count, ranges: ranges)
             let target=try coverageTarget(ranges: ranges, claims: claims, spans: spans, sourceVersions: sourceVersions)
             let scope=scope(input: input, target: target, digest: sliceDigest(planDigest: digest, ordinal: ordinal))
+            let evidence=try sliceEvidence(unitID: unitID, policy: policy, focus: focus, target: target, input: input)
             let step=PanoramaSliceGenerationInput(policy: policy.version, planDigest: digest, unitID: unitID, ordinal: ordinal, count: count,
-                focus: focus, target: target, input: input)
+                focus: focus, target: target, input: input, evidence: evidence)
             return Slice(focus: focus, target: target, scope: scope, stepInput: step)
         }
         return PanoramaUnitSlicePlan(unitID: unitID, input: input, policy: policy, slices: slices, digest: digest)
@@ -203,6 +223,17 @@ struct PanoramaUnitSlicePlan: Sendable {
     }
 
     static func partPrefix(_ ordinal: Int) -> String { "part[\(ordinal)]/" }
+
+    private static func sliceEvidence(unitID: String, policy: PanoramaUnitSlicePolicy, focus: PanoramaGenerationFocus,
+        target: PanoramaCoverageTarget, input: PanoramaInput) throws -> String {
+        let scoped=input.panoramaEvidenceScoped
+        let claimIDs=Set(target.claimIDs)
+        let evidence=PanoramaInput(manifest: .init(digest: "", sourceIDs: scoped.manifest.sourceIDs, claimIDs: target.claimIDs.sorted(),
+                unitIDs: scoped.manifest.unitIDs),
+            units: scoped.units, sources: scoped.sources, claims: scoped.claims.filter { claimIDs.contains($0.id) }, exclusions: [])
+        return VoiceOSStore.relevanceHash(Data(try VoiceOSStore.relevanceJSON(
+            PanoramaSliceEvidence(unitID: unitID, policy: policy, focus: focus, target: target, input: evidence)).utf8))
+    }
 
     private static func focusRanges(_ source: PanoramaSource, budget: Int) throws -> [PanoramaFocusRange] {
         let transcript=source.transcript
@@ -269,6 +300,14 @@ struct PanoramaUnitSlicePlan: Sendable {
     private static func sliceDigest(planDigest: String, ordinal: Int) -> String {
         VoiceOSStore.relevanceHash(Data(("panorama-unit-slice-v1|"+planDigest+"|"+String(ordinal)).utf8))
     }
+}
+
+private struct PanoramaSliceEvidence: Encodable {
+    let unitID: String
+    let policy: PanoramaUnitSlicePolicy
+    let focus: PanoramaGenerationFocus
+    let target: PanoramaCoverageTarget
+    let input: PanoramaInput
 }
 
 private struct PanoramaUnitSlicePlanDigest: Encodable {
