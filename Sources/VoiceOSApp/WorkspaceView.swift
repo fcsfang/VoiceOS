@@ -268,6 +268,7 @@ struct WorkspaceView: View {
     @State private var resultFeedbackTarget: ActionRecord?
     @State private var localCompletionOffer: ActionRecord?
     @State private var showingPendingReminderSyncs = false
+    @State private var showingBackupRestore = false
     @State private var nextActionOutcome: ActionRecord?
     @State private var completingOutcome: ActionRecord?
     @State private var toastMessage: String?
@@ -427,6 +428,7 @@ struct WorkspaceView: View {
             }
             .sheet(item:$resultFeedbackTarget) { action in ActionFeedbackView(action:action,model:model) { resultFeedbackTarget=nil } }
             .sheet(isPresented:$showingPendingReminderSyncs) { pendingReminderSyncSheet }
+            .sheet(isPresented:$showingBackupRestore) { BackupLibraryRestoreView(currentRoot:model.libraryRoot) { showingBackupRestore=false } }
     }
     private var alertContent: some View {
         sheetContent
@@ -1510,7 +1512,12 @@ struct WorkspaceView: View {
             Divider()
             sectionTitle("模型与服务")
             WorkspaceRow(title:"语音转文字",subtitle:model.speechSummary,icon:"waveform") { model.chooseLocalSpeech() }
-            WorkspaceRow(title:"理解、核对与 AI 助理",subtitle:model.modelSummary,icon:"sparkles") { model.chooseTextModel() }
+            WorkspaceRow(title:"理解、核对与 AI 助理",subtitle:model.textModelConfigured ? (model.modelConfigurationName ?? model.modelSummary) : "尚未配置文本模型",icon:"sparkles") { model.chooseTextModel() }
+                .help(model.modelConfigurationPath ?? "选择本地的 .env 或模型 JSON 配置文件；配置后这里显示文件名")
+                .contextMenu {
+                    Button("更换配置…") { model.chooseTextModel() }
+                    Button("清除配置", role: .destructive) { model.clearTextModel() }.disabled(!model.modelConfigured)
+                }
             sectionTitle("连接与自动入口")
             WorkspaceRow(title:"自动接收录音",subtitle:"VoiceOS 收件箱与语音备忘录",icon:"tray.and.arrow.down") { go(.tool("自动入口")) }
             WorkspaceRow(title:"Apple 提醒事项",subtitle:model.remindersPermissionDenied ? "系统权限已拒绝，需要在系统设置中允许后重试" : model.reminderCalendarTitle,icon:"checklist") { Task { await model.connectReminders() } }
@@ -1526,6 +1533,15 @@ struct WorkspaceView: View {
                 Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 Button("重试备份") { model.retryBackup() }.vosFont(WorkspaceText.meta)
                 Button("在访达中显示") { model.revealBackups() }.vosFont(WorkspaceText.meta)
+            }
+            HStack(spacing:12) {
+                Button(model.checkingLibraryHealth ? "正在检查资料库…" : "检查资料库") { model.checkLibraryHealth() }.vosFont(WorkspaceText.meta).disabled(model.checkingLibraryHealth || model.libraryRoot == nil)
+                Button("从最近备份新建资料库") { showingBackupRestore = true }.vosFont(WorkspaceText.meta).disabled(model.lastBackupAt == nil || model.libraryRoot == nil)
+            }
+            if !model.libraryHealthText.isEmpty {
+                Text(model.libraryHealthText).vosFont(WorkspaceText.meta)
+                    .foregroundStyle(model.libraryHealthProblem ? palette.warning : palette.secondaryText)
+                    .textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
             }
             HStack { Button("打开已有资料库") { chooseLibrary() };Button("从迁移包恢复") { go(.tool("恢复资料")) } }
             sectionTitle("回顾与查找")
