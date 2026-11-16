@@ -198,12 +198,19 @@ struct WorkspaceTaskView: View {
     }
     private var executions: [AssistantExecutionRecord] { model.assistantExecutions.filter { $0.actionID == action.id } }
     private var current: Bool { action.validity == "current" && action.state != "dismissed" }
+    private var isQuestion: Bool { action.nature == "question" }
+    private var latestAnalysis: AssistantExecutionRecord? {
+        model.assistantExecutions.first { $0.actionID == action.id && $0.mode == .analysis }
+    }
+    private var hasAnswer: Bool { latestAnalysis != nil }
     private var eyebrow: String {
         if current {
-            if action.state == "completed" { return "行动 · 已完成" }
-            return action.kind == "task" ? "行动 · 待跟进" : "问题与目标"
+            if action.state == "completed" { return isQuestion ? "问题 · 已回答" : "行动 · 已完成" }
+            if action.kind == "task" { return "行动 · 待跟进" }
+            if action.nature == "goal" { return "目标" }
+            return isQuestion ? "问题" : "问题与目标"
         }
-        if action.kind != "task", action.validity == "current" { return "问题与目标 · 已放下" }
+        if action.kind != "task", action.validity == "current" { return (isQuestion ? "问题" : action.nature == "goal" ? "目标" : "问题与目标") + " · 已放下" }
         return model.workspaceActionStatus(action)
     }
     private var showsClarification: Bool {
@@ -253,13 +260,14 @@ struct WorkspaceTaskView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 WorkspaceHeading(eyebrow: eyebrow, title: StatementTagParser.split(action.title).text)
+                if isQuestion { QuestionAnswerSection(model: model, action: action, openDelivery: openDelivery) }
                 if let recurrence {
                     HStack(spacing: 12) {
                         Label("重复 · " + recurrence.display, systemImage: "repeat").vosFont(WorkspaceText.meta)
                         if let due = currentDue { Text("当前到期 " + due.summary).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                     }
                 }
-                if current || actionEstimate != nil {
+                if !isQuestion, current || actionEstimate != nil {
                     HStack(spacing: 14) {
                         Text("预计时长").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         ForEach([15, 30, 60], id: \.self) { minutes in
@@ -332,57 +340,66 @@ struct WorkspaceTaskView: View {
                     }
                 }
                 HStack {
-                    if current, action.kind == "task" {
-                        Button(action.state == "completed" ? "重新跟进" : "标记已完成") { changeState() }
-                            .buttonStyle(.borderedProminent).disabled(model.savingAction || model.remindersBusy)
-                        if model.remindersBusy {
-                            HStack(spacing: 6) {
-                                ProgressView().controlSize(.small)
-                                Text("正在同步提醒事项，稍后可操作").vosFont(WorkspaceText.meta).foregroundStyle(palette.disabledText)
-                            }.accessibilityElement(children: .combine)
-                        }
-                        if action.state == "open" {
-                            Button("改天") { openReminderSettings() }.disabled(model.savingAction || model.remindersBusy)
-                            Button("不再跟进", role: .destructive) { confirmingDismiss = true }.disabled(model.savingAction)
-                        }
-                    } else if action.canPromoteToTask {
-                        Button("添加下一步") { showingNextActionForm = true }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(model.savingAction)
-                            .accessibilityLabel("添加下一步：" + action.title)
-                        Button("标记达成") { confirmingCompleteOutcome = true }
-                            .disabled(model.savingAction)
-                            .accessibilityLabel("标记达成：" + action.title)
-                        Button("不再跟进", role: .destructive) { confirmingDismiss = true }
-                            .disabled(model.savingAction)
-                            .accessibilityLabel("不再跟进：" + action.title)
-                    } else if action.validity == "current", action.state == "dismissed" {
-                        Button("重新跟进") { confirmingReopen = true }.buttonStyle(.borderedProminent).disabled(model.savingAction)
-                            .alert("重新跟进这条行动？", isPresented: $confirmingReopen) {
-                                Button("重新跟进") { reopen() }
-                                Button("取消", role: .cancel) {}
-                            } message: {
-                                Text("会恢复为待办，历史记录保留。")
+                    if current, isQuestion {
+                        questionActions
+                    } else {
+                        if current, action.kind == "task" {
+                            Button(action.state == "completed" ? "重新跟进" : "标记已完成") { changeState() }
+                                .buttonStyle(.borderedProminent).disabled(model.savingAction || model.remindersBusy)
+                            if model.remindersBusy {
+                                HStack(spacing: 6) {
+                                    ProgressView().controlSize(.small)
+                                    Text("正在同步提醒事项，稍后可操作").vosFont(WorkspaceText.meta).foregroundStyle(palette.disabledText)
+                                }.accessibilityElement(children: .combine)
                             }
-                    } else if current, action.intentActor == "user" { Button("核对为待办") { confirming = true } }
-                    if current {
-                        Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
-                        if action.state == "open", action.intentActor == "user" {
-                            if action.kind == "task" {
-                                Button("交给 AI", systemImage: "sparkles") { instruction = action.title + "\n\n请给出清晰的结论和可用的交付物；调研时附可核查的来源。"; delegating.toggle() }
-                            } else {
-                                Button("让 VoiceOS 分析", systemImage: "text.magnifyingglass") { analyze() }
-                                    .disabled(model.assistantBusy || !model.modelConfigured)
+                            if action.state == "open" {
+                                Button("改天") { openReminderSettings() }.disabled(model.savingAction || model.remindersBusy)
+                                Button("不再跟进", role: .destructive) { confirmingDismiss = true }.disabled(model.savingAction)
+                            }
+                            Button(draft.expanded ? "收起记录" : (action.state == "completed" ? "记录这次的结果或收获" : "记录实际进展")) { draft.expanded.toggle() }
+                                .disabled(model.savingFeedback)
+                        } else if action.canPromoteToTask {
+                            Button("添加下一步") { showingNextActionForm = true }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(model.savingAction)
+                                .accessibilityLabel("添加下一步：" + action.title)
+                            Button("标记达成") { confirmingCompleteOutcome = true }
+                                .disabled(model.savingAction)
+                                .accessibilityLabel("标记达成：" + action.title)
+                            Button("不再跟进", role: .destructive) { confirmingDismiss = true }
+                                .disabled(model.savingAction)
+                                .accessibilityLabel("不再跟进：" + action.title)
+                        } else if action.validity == "current", action.state == "dismissed" {
+                            Button(isQuestion ? "重新打开" : "重新跟进") { confirmingReopen = true }.buttonStyle(.borderedProminent).disabled(model.savingAction)
+                                .alert(isQuestion ? "重新打开这个问题？" : "重新跟进这条行动？", isPresented: $confirmingReopen) {
+                                    Button(isQuestion ? "重新打开" : "重新跟进") { reopen() }
+                                    Button("取消", role: .cancel) {}
+                                } message: {
+                                    Text(isQuestion ? "会回到问题列表，回答与讨论都保留。" : "会恢复为待办，历史记录保留。")
+                                }
+                        } else if current, action.intentActor == "user" { Button("核对为待办") { confirming = true } }
+                        if current {
+                            Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
+                            if action.state == "open", action.intentActor == "user" {
+                                if action.kind == "task" {
+                                    Button("交给 AI", systemImage: "sparkles") { instruction = action.title + "\n\n请给出清晰的结论和可用的交付物；调研时附可核查的来源。"; delegating.toggle() }
+                                } else {
+                                    Button("让 VoiceOS 分析", systemImage: "text.magnifyingglass") { analyze() }
+                                        .disabled(model.assistantBusy || !model.modelConfigured)
+                                }
                             }
                         }
                     }
-                }.alert(action.kind == "task" ? "不再跟进这项任务？" : "不再跟进这个目标？", isPresented: $confirmingDismiss) {
-                    Button("不再跟进", role: .destructive) { stopFollowing() }
+                }.alert(isQuestion ? "放下这个问题？" : (action.kind == "task" ? "不再跟进这项任务？" : "不再跟进这个目标？"), isPresented: $confirmingDismiss) {
+                    Button(isQuestion ? "放下" : "不再跟进", role: .destructive) { stopFollowing() }
                     Button("取消", role: .cancel) {}
                 } message: {
-                    Text(action.kind == "task" ? "会移入历史记录，之后仍可找回。Apple 提醒事项中的提醒需单独处理。" : "会移到历史记录，之后仍可找回；已经添加的下一步仍会保留。")
+                    Text(isQuestion ? "会移到历史记录，之后仍可找回；VoiceOS 的回答和讨论都会保留。" : (action.kind == "task" ? "会移入历史记录，之后仍可找回。Apple 提醒事项中的提醒需单独处理。" : "会移到历史记录，之后仍可找回；已经添加的下一步仍会保留。"))
                 }
-                if action.kind != "task" { nextActionSection }
+                if action.kind == "task", current, draft.expanded {
+                    feedbackDraftEditor.padding(18).background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                }
+                if action.kind != "task", !isQuestion || !nextActions.isEmpty { nextActionSection }
                 if action.kind == "task" || recurrence != nil {
                     WorkspaceSection(title:"重复",subtitle:recurrence.map { "完成后按「" + $0.display + "」生成下一次行动。" } ?? "这次完成后不再生成新的行动。",icon:"repeat") {
                         HStack(spacing: 14) {
@@ -396,7 +413,7 @@ struct WorkspaceTaskView: View {
                         }.padding(.vertical, 12)
                     }
                 }
-                if current || !subtasks.isEmpty {
+                if !isQuestion, current || !subtasks.isEmpty {
                     WorkspaceSection(title:"子任务",subtitle:subtaskSummary,icon:"checklist",count:subtasks.isEmpty ? nil : subtasks.count) {
                         ForEach(subtasks, id: \.id) { subtask in
                             HStack(spacing: 12) {
@@ -432,7 +449,7 @@ struct WorkspaceTaskView: View {
                         }
                     }
                 }
-                if !action.note.isEmpty {
+                if !isQuestion, !action.note.isEmpty {
                     WorkspaceSection(title:"任务说明",icon:"text.alignleft") {
                         WorkspaceExpandableText(text:action.note,label:"完整说明",size:WorkspaceText.body.size).padding(.top,10)
                     }
@@ -482,19 +499,9 @@ struct WorkspaceTaskView: View {
                     }
                 }
                 WorkspaceSection(title:"记录与依据",icon:"quote.bubble") {
-                    if current {
+                    if current, !isQuestion, action.kind != "task" {
                         DisclosureGroup(action.state == "completed" ? "记录这次的结果或收获" : "记录实际进展", isExpanded: $draft.expanded) {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Picker("记录类型", selection: $draft.kind) { Text("实际结果 / 进展").tag(ActionFeedbackKind.outcome); Text("我的反思").tag(ActionFeedbackKind.reflection) }.pickerStyle(.menu).disabled(model.savingFeedback)
-                                TextEditor(text: $draft.text).frame(minHeight: 100).workspaceEditorSurface()
-                                    .accessibilityLabel("实际进展与收获草稿").disabled(model.savingFeedback)
-                                Text("本窗口内切页保留草稿；正式保存后才接回任务，关闭窗口前请保存。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                                HStack {
-                                    Button("口述进展或结果") { showingFeedback = true }
-                                    Spacer()
-                                    Button("保存并接回原任务") { saveFeedback() }.buttonStyle(.borderedProminent).disabled(model.savingFeedback || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                }
-                            }.padding(.top, 12)
+                            feedbackDraftEditor.padding(.top, 12)
                         }.padding(.vertical,16)
                         Divider()
                     }
@@ -502,7 +509,7 @@ struct WorkspaceTaskView: View {
                         VStack(alignment: .leading, spacing: 14) {
                             ActionOriginalQuotes(model: model, action: action, openSource: openSource)
                             if current {
-                                Button("回听任务原话") { Task { _ = await model.playActionOriginal(action) } }
+                                Button(isQuestion ? "回听问题原话" : "回听任务原话") { Task { _ = await model.playActionOriginal(action) } }
                                 if let player = model.player { NativePlayerView(player: player).frame(height: 65) }
                             }
                         }.padding(.top, 10)
@@ -539,11 +546,11 @@ struct WorkspaceTaskView: View {
         .sheet(isPresented: $showingNextActionForm) {
             NextActionFormSheet(model: model, outcome: action, onAdded: { _ in nextActionNotice = "已添加下一步" })
         }
-        .alert("标记这个目标已达成？", isPresented: $confirmingCompleteOutcome) {
-            Button("标记达成") { completeOutcome() }
+        .alert(isQuestion ? "想清楚了？" : "标记这个目标已达成？", isPresented: $confirmingCompleteOutcome) {
+            Button(isQuestion ? "想清楚了" : "标记达成") { completeOutcome() }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("目标会移到已完成，已经添加的下一步不受影响。")
+            Text(isQuestion ? "这条问题会标记为已回答；VoiceOS 的回答和讨论都会保留。" : "目标会移到已完成，已经添加的下一步不受影响。")
         }
         .alert("已完成。要记一句结果吗？", isPresented: $askingForResult) {
             Button("记录结果") { showingFeedback = true }
@@ -618,8 +625,8 @@ struct WorkspaceTaskView: View {
         }
     }
     @ViewBuilder private var nextActionSection: some View {
-        WorkspaceSection(title: "下一步",
-                         subtitle: openNextActions.isEmpty ? "这个目标还没有下一步。" : "还有 \(openNextActions.count) 个下一步未完成。",
+        WorkspaceSection(title: isQuestion ? "我自己做" : "下一步",
+                         subtitle: openNextActions.isEmpty ? (isQuestion ? "还没有要自己做的事。" : "这个目标还没有下一步。") : (isQuestion ? "还有 \(openNextActions.count) 项未完成。" : "还有 \(openNextActions.count) 个下一步未完成。"),
                          icon: "arrow.turn.down.right", count: nextActions.isEmpty ? nil : nextActions.count) {
             ForEach(nextActions) { child in
                 HStack(spacing: 12) {
@@ -645,6 +652,43 @@ struct WorkspaceTaskView: View {
             if !nextActionNotice.isEmpty {
                 Label(nextActionNotice, systemImage: "checkmark.circle").vosFont(WorkspaceText.meta)
                     .foregroundStyle(palette.success).padding(.top, 8)
+            }
+        }
+    }
+    @ViewBuilder private var questionActions: some View {
+        if action.state == "open" {
+            Button("想清楚了") { confirmingCompleteOutcome = true }
+                .buttonStyle(.borderedProminent)
+                .disabled(model.savingAction)
+                .accessibilityLabel("想清楚了：" + action.title)
+            Button(hasAnswer ? "重新回答" : "让 VoiceOS 回答", systemImage: "sparkles") { analyze() }
+                .disabled(model.assistantBusy || !model.modelConfigured)
+            Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
+            Button("这件事我自己做") { showingNextActionForm = true }
+                .disabled(model.savingAction)
+                .accessibilityLabel("这件事我自己做：" + action.title)
+            Button("以后再说") { someday() }
+                .disabled(model.savingAction)
+                .accessibilityLabel("以后再说：" + action.title)
+            Button("放下", role: .destructive) { confirmingDismiss = true }
+                .disabled(model.savingAction)
+                .accessibilityLabel("放下：" + action.title)
+        } else if action.state == "completed" {
+            Button(hasAnswer ? "重新回答" : "让 VoiceOS 回答", systemImage: "sparkles") { analyze() }
+                .disabled(model.assistantBusy || !model.modelConfigured)
+            Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
+        }
+    }
+    @ViewBuilder private var feedbackDraftEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("记录类型", selection: $draft.kind) { Text("实际结果 / 进展").tag(ActionFeedbackKind.outcome); Text("我的反思").tag(ActionFeedbackKind.reflection) }.pickerStyle(.menu).disabled(model.savingFeedback)
+            TextEditor(text: $draft.text).frame(minHeight: 100).workspaceEditorSurface()
+                .accessibilityLabel("实际进展与收获草稿").disabled(model.savingFeedback)
+            Text("本窗口内切页保留草稿；正式保存后才接回任务，关闭窗口前请保存。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            HStack {
+                Button("口述进展或结果") { showingFeedback = true }
+                Spacer()
+                Button("保存并接回原任务") { saveFeedback() }.buttonStyle(.borderedProminent).disabled(model.savingFeedback || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }
@@ -779,14 +823,21 @@ struct WorkspaceTaskView: View {
     private func stopFollowing() {
         Task {
             await model.changeAction(action, state: .dismissed)
-            if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.dismissed.rawValue { error = "";showUndo("已不再跟进") }
+            if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.dismissed.rawValue { error = "";showUndo(isQuestion ? "已放下" : "已不再跟进") }
+            else { error = model.status }
+        }
+    }
+    private func someday() {
+        Task {
+            await model.changeAction(action, state: .someday)
+            if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.someday.rawValue { error = "";showUndo("已留到以后") }
             else { error = model.status }
         }
     }
     private func reopen() {
         Task {
             await model.changeAction(action, state: .open)
-            if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.open.rawValue { error = "";showUndo("已重新跟进");undoReopen = true }
+            if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.open.rawValue { error = "";showUndo(isQuestion ? "已重新打开" : "已重新跟进");undoReopen = true }
             else { error = model.status }
         }
     }
