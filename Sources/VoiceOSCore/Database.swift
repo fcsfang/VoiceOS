@@ -1261,7 +1261,30 @@ final class Database {
             }
         }
 
+        try ensureSearchTriggers()
     }
+
+    // Writes that leave searchable text alone (follow-up receipts, presentation
+    // JSON, policy switches, action state and nature) must not dirty the index.
+    // Recreated on every open so existing libraries pick up the narrower
+    // triggers without a schema version bump.
+    func ensureSearchTriggers() throws {
+        let tables = try query("SELECT name FROM sqlite_master WHERE type='table' AND name='search_index_meta'")
+        guard !tables.isEmpty else { return }
+        try transaction {
+            for (table, columns) in [("sources", "name, state"), ("claims", "statement"), ("actions", "title, note"), ("transcripts", "current_version_id, text")] {
+                try execute("DROP TRIGGER IF EXISTS search_dirty_\(table)")
+                try execute("""
+                CREATE TRIGGER search_dirty_\(table) AFTER UPDATE OF \(columns) ON \(table) BEGIN
+                  INSERT INTO search_index_meta(key, value) VALUES('dirty', '1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;
+                END
+                """)
+            }
+            // The rebuild flight lock is per process; a crash may leave it set.
+            try execute("DELETE FROM search_index_meta WHERE key='rebuild_pending'")
+        }
+    }
+
     /// Only called for pre-sequence schemas/packages. Retrospective order is a baseline,
     /// not evidence of the original wall-clock order; all new producers follow it.
     func backfillModelProducerSequence() throws {
