@@ -42,3 +42,13 @@
 ## 验证基线
 
 - 实时库：近 7 天完成 21 条（action_feedback 仅 2 条）；暂停与冻结 229 条；62 个 goal 全停滞；panorama_attempts 21 条 0 成功；reminder_links missing 6；knowledge_reviews failed 2、frozen 10。
+
+## 结果（2026-11-17 凌晨）
+
+- 三单元合并：`work/m26-k`（本周完成与回顾收口）、`work/m26-l`（全景注意力、错误中文化、忽略与停止处理、Spotlight 路由、提醒深链、每周回顾菜单）、`work/m26-m`（恢复冻结委托、包版本文案、Spotlight contentURL、授权状态、AppShortcutsProvider），集成修复一处测试对齐。
+- `swift build -j 2` 53.8 秒通过；`swift test -j 2` 420 项 0 失败 22.1 秒（418 基础上新增 2：恢复冻结与版本文案；另改一处既有测试：迁移包恢复后 queued 委托变为 failed 且不再自动续跑）。
+- 回顾：本周完成 21 条全量可见（完成日期 + 来源），暂停段收窄到 workspacePausedTasks（229 条冻结历史噪声退出），停滞目标接逐个澄清与行尾加下一步，全部行标题去标签。
+- 注意力：全景 failed/unknown 并入 workspaceNeedsAttention，处理页新段带重试；限制：PanoramaScreenModel 只暴露当前一次尝试状态，聚合的是当前失败而非历史计数（如需计数要给 store 加读取接口，留待后续）。
+- 处理页：错误三类中文映射；失败项可忽略（UserDefaults `voiceos.processing.ignoredFailures.v1`）或停止处理（复用既有 cancel）；「已全部处理」清空态。
+- 恢复语义：queued/running 的 assistant_executions 冻结为 failed（迁移前委托尚未完成，可手动重试）；包版本过新有专门文案。
+- 未做：界面截图仍受锁屏阻断（回顾新段、处理页新段与清空态、设置页提醒深链按钮），解锁后补拍。
