@@ -13,6 +13,11 @@ private struct SourceEntityGroup:Identifiable {
     let entities:[SourceEntity]
     var id:String { kind }
 }
+private struct TranscriptParagraph:Identifiable {
+    let span:TranscriptSpan
+    let text:String
+    var id:String { span.id }
+}
 private struct SourceFold<Content: View>: View {
     @Environment(\.workspacePalette) private var palette
     let title:String
@@ -47,6 +52,7 @@ private struct SourceFold<Content: View>: View {
 }
 struct WorkspaceSourceView: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
     @ObservedObject var model:ControlCenter
     let source:SourceRecord
     let openTask:(String)->Void
@@ -115,6 +121,7 @@ struct WorkspaceSourceView: View {
     @State private var attachmentURL:URL?
     @State private var attachmentMime:String?
     @State private var playbackMS:Int?
+    @State private var autoScrolledSpanID:String?
     @State private var selectedText=""
     @State private var selectedRange=NSRange(location:0,length:0)
     @State private var fullTextExpanded=false
@@ -343,9 +350,9 @@ struct WorkspaceSourceView: View {
     private var sourceActions: some View {
         HStack(spacing:10) {
             if ["audio","video"].contains(source.kind) {
-                Button("回听片段",systemImage:"play.circle") { Task { await model.play(source) } }
+                Button("回听",systemImage:"play.circle") { Task { _=await model.playSpan(source,milliseconds:0) } }
                     .disabled(source.state != "saved")
-                    .help(source.state == "saved" ? "播放这段录音" : "录音尚未就绪，暂时无法回听")
+                    .help(source.state == "saved" ? "在页内从开头回听" : "录音尚未就绪，暂时无法回听")
             } else {
                 Button("开始按天读",systemImage:"book") { showingIncrementalReading=true }
                     .disabled(source.transcript == nil)
@@ -403,8 +410,7 @@ struct WorkspaceSourceView: View {
                 digestSections
                 SourceFold(title:"原文与回听",icon:"waveform",isExpanded:$originalExpanded) {
                     VStack(alignment:.leading,spacing:16) {
-                        if let transcript=source.transcript { MarkdownText(transcript) }
-                        else { Text("尚无可用转写 · " + (source.error ?? workspaceStateLabel(source.jobState ?? source.state))).foregroundStyle(.secondary) }
+                        transcriptBody
                         if source.state == "saved" { Button("打开保存的原件",systemImage:"play.circle") { Task { await model.play(source) } } }
                         ForEach(source.spans.filter { $0.startMS != nil && $0.endMS != nil }) { span in
                             let active=spanIsPlaying(span)
@@ -416,7 +422,6 @@ struct WorkspaceSourceView: View {
                                     .contentShape(Rectangle())
                             }.buttonStyle(.plain).id("source-span-"+span.id)
                         }
-                        if let player=model.player { NativePlayerView(player:player).frame(height:source.kind == "video" ? 240 : 70) }
                         Text("原文件：" + source.name).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                         if source.transcript != nil {
                             Divider()
@@ -431,7 +436,7 @@ struct WorkspaceSourceView: View {
                             }
                         }
                     }
-                }
+                }.id("source-original-fold")
                 if !programPairs.isEmpty {
                     WorkspaceSection(title:"节目与我的思考",icon:"waveform",count:contextLinks.count) {
                         ForEach(programPairs,id:\.externalSourceID) { pair in
@@ -595,7 +600,17 @@ struct WorkspaceSourceView: View {
                         VStack(alignment:.leading,spacing:13) {
                             if let review=source.transcriptionReview {
                                 Text("转写校正已保存，原始版本可追溯。").vosFont(WorkspaceText.meta)
-                                ForEach(Array((review.unresolved_issues ?? []).enumerated()),id:\.offset) { _,issue in Text(issue.reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
+                                ForEach(Array((review.unresolved_issues ?? []).enumerated()),id:\.offset) { _,issue in
+                                    VStack(alignment:.leading,spacing:7) {
+                                        Text(issue.reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                                        HStack(spacing:14) {
+                                            Button(unresolvedIssuePlaybackLabel(issue),systemImage:"play.circle") { playUnresolvedIssue(issue) }
+                                                .disabled(!playbackAvailable)
+                                                .help(playbackAvailable ? "播放这条核对项对应的原话" : "这份材料当前没有可播放的录音")
+                                            Button("跳到原文",systemImage:"text.magnifyingglass") { jumpToOriginal(spanID:issue.span_id) }
+                                        }.vosFont(WorkspaceText.meta)
+                                    }.padding(.vertical,4)
+                                }
                             }
                             Button("查看全部原文版本", action:loadHistory)
                             historyVersions
@@ -635,6 +650,7 @@ struct WorkspaceSourceView: View {
     }
     var body:some View {
         readingContent
+        .safeAreaInset(edge:.bottom,spacing:0) { playbackBar }
         .workspaceToast($toast)
         .sheet(item:$editing) { source in WorkspaceTranscriptEditor(model:model,source:source,onSaved:{ toast="原文已更正" }) { editing=nil } }
         .sheet(item:$naming) { source in RecordingTitleEditor(record:source,model:model) { naming=nil } }
@@ -723,11 +739,132 @@ struct WorkspaceSourceView: View {
         .onChange(of:source.id) { _,_ in clearSelection();originalExpanded=transcriptStartsExpanded(source.transcript) }
         .onChange(of:source.transcript) { _,_ in clearSelection();resetBilingual();originalExpanded=transcriptStartsExpanded(source.transcript) }
         .onChange(of:fullTextExpanded) { _,_ in if !fullTextExpanded { clearSelection() } }
+        .onChange(of:playbackMS) { _,_ in followPlaybackHighlight() }
         .task {
             while !Task.isCancelled {
                 refreshPlaybackPosition()
                 do { try await Task.sleep(for:.milliseconds(300)) } catch { return }
             }
+        }
+    }
+    private var playbackAvailable:Bool { ["audio","video"].contains(source.kind) && source.state == "saved" }
+    private var playbackBarPlaying:Bool { model.player?.timeControlStatus == .playing }
+    private var displayedPlaybackMS:Int {
+        if let playbackMS { return playbackMS }
+        guard let player=model.player else { return 0 }
+        let seconds=player.currentTime().seconds
+        return seconds.isFinite ? Int((seconds*1000).rounded()) : 0
+    }
+    @ViewBuilder private var playbackBar:some View {
+        if playbackAvailable {
+            VStack(spacing:0) {
+                HStack(spacing:12) {
+                    Button {
+                        if let player=model.player {
+                            if player.timeControlStatus == .playing { player.pause() } else { player.play() }
+                        } else { Task { _=await model.playSpan(source,milliseconds:0) } }
+                    } label: {
+                        Image(systemName:playbackBarPlaying ? "pause.fill" : "play.fill").vosFont(WorkspaceText.rowTitle)
+                    }
+                    .buttonStyle(.plain).frame(width:WorkspaceMetrics.iconButtonSize,height:WorkspaceMetrics.iconButtonSize)
+                    .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+                    .accessibilityLabel(playbackBarPlaying ? "暂停回听" : "开始或继续回听")
+                    Text(time(displayedPlaybackMS)).vosFont(WorkspaceText.meta.size,monospacedDigit:true).foregroundStyle(palette.secondaryText)
+                    if let duration=source.duration,duration>0 {
+                        ProgressView(value:min(Double(displayedPlaybackMS)/1000,duration),total:duration).progressViewStyle(.linear).frame(maxWidth:280)
+                        Text(time(Int(duration*1000))).vosFont(WorkspaceText.meta.size,monospacedDigit:true).foregroundStyle(palette.tertiaryText)
+                    }
+                    Spacer(minLength:8)
+                    Text(source.displayTitle).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText).lineLimit(1)
+                }.padding(.horizontal,20).padding(.vertical,10)
+                if let player=model.player {
+                    NativePlayerView(player:player).frame(height:source.kind == "video" ? 200 : 56)
+                }
+            }
+            .background(palette.surface)
+            .overlay(alignment:.top) { Rectangle().fill(palette.border).frame(height:1) }
+            .accessibilityElement(children:.contain)
+            .accessibilityLabel("页内回听")
+        }
+    }
+    @ViewBuilder private var transcriptBody:some View {
+        if let transcript=source.transcript {
+            if transcriptParagraphs.isEmpty {
+                MarkdownText(transcript)
+            } else {
+                VStack(alignment:.leading,spacing:WorkspaceText.body.size * textScale * 1.125) {
+                    ForEach(transcriptParagraphs) { paragraph in
+                        let active=paragraph.id == activeParagraphID
+                        Text(paragraph.text)
+                            .vosFont(WorkspaceText.body)
+                            .foregroundStyle(palette.text)
+                            .lineSpacing(WorkspaceText.body.size * textScale * 0.5)
+                            .fixedSize(horizontal:false,vertical:true)
+                            .padding(.horizontal,8).padding(.vertical,4)
+                            .background(active ? palette.selection : Color.clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+                            .id("source-para-"+paragraph.id)
+                    }
+                }.textSelection(.enabled)
+            }
+        } else {
+            Text("尚无可用转写 · " + (source.error ?? workspaceStateLabel(source.jobState ?? source.state))).foregroundStyle(.secondary)
+        }
+    }
+    private var timedTranscriptSpans:[TranscriptSpan] {
+        guard ["audio","video"].contains(source.kind),source.transcript != nil,!source.spans.isEmpty,
+              source.spans.allSatisfy({ $0.startMS != nil && $0.endMS != nil }) else { return [] }
+        return source.spans
+    }
+    private var transcriptParagraphs:[TranscriptParagraph] {
+        guard let transcript=source.transcript else { return [] }
+        return timedTranscriptSpans.compactMap { span in
+            let text=SourceText.quote(span,in:transcript)
+            return text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty ? nil : TranscriptParagraph(span:span,text:text)
+        }
+    }
+    private var activeParagraphID:String? {
+        guard let ms=playbackMS else { return nil }
+        return transcriptParagraphs.first { paragraph in
+            guard let start=paragraph.span.startMS,let end=paragraph.span.endMS else { return false }
+            return ms>=start && ms<end
+        }?.id
+    }
+    private func followPlaybackHighlight() {
+        guard let ms=playbackMS else { autoScrolledSpanID=nil;return }
+        guard originalExpanded,let scroll else { return }
+        guard let paragraph=transcriptParagraphs.first(where: { paragraph in
+            guard let start=paragraph.span.startMS,let end=paragraph.span.endMS else { return false }
+            return ms>=start && ms<end
+        }),paragraph.id != autoScrolledSpanID else { return }
+        autoScrolledSpanID=paragraph.id
+        let anchor="source-para-"+paragraph.id
+        Task { @MainActor in
+            await Task.yield()
+            scroll.wrappedValue.scrollTo(id:anchor,anchor:.center)
+        }
+    }
+    private func jumpToOriginal(spanID:String) {
+        if !originalExpanded { originalExpanded=true }
+        guard let scroll else { return }
+        let anchor:String
+        if transcriptParagraphs.contains(where: { $0.id == spanID }) { anchor="source-para-"+spanID }
+        else if source.spans.contains(where: { $0.id == spanID }) { anchor="source-span-"+spanID }
+        else { anchor="source-original-fold" }
+        Task { @MainActor in
+            await Task.yield()
+            scroll.wrappedValue.scrollTo(id:anchor,anchor:.center)
+        }
+    }
+    private func unresolvedIssuePlaybackLabel(_ issue:TranscriptionReview.Issue)->String {
+        guard let span=source.spans.first(where: { $0.id == issue.span_id }),span.startMS != nil,span.endMS != nil else { return "回听整段" }
+        return "回听"
+    }
+    private func playUnresolvedIssue(_ issue:TranscriptionReview.Issue) {
+        guard playbackAvailable else { return }
+        if let span=source.spans.first(where: { $0.id == issue.span_id }),let start=span.startMS,let end=span.endMS {
+            Task { _=await model.playSpan(source,milliseconds:start,endMilliseconds:end) }
+        } else {
+            Task { _=await model.playSpan(source,milliseconds:0) }
         }
     }
     private func captureLink(_ value:String?)->URL? {
