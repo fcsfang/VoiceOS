@@ -41,6 +41,12 @@ extension ControlCenter {
         }
         return workspaceProcessingStatus.visibleTitle(preferringPausedBatch: batchTitle)
     }
+    var workspaceProcessingHasScheduledRetry: Bool {
+        workspaceFailedFollowups.contains { $0.retryAt != nil }
+    }
+    var workspaceProcessingBarVisible: Bool {
+        workspaceProcessingTitle != nil || workspaceProcessingHasScheduledRetry
+    }
     var workspaceProcessingSourceID: String? { pausedActionBatch?.currentSourceID ?? transcriptReviewSourceID ?? processingActivity?.sourceID ?? understandingSource ?? fullRecordingSourceID }
     var workspaceUnfinishedIntents: [ExpressionProcessingIntentRecord] {
         processingIntents.filter { intent in
@@ -91,7 +97,6 @@ extension ControlCenter {
 struct WorkspaceProcessingBar: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
-    @ObservedObject var inbox: RecordingInbox
     let open: () -> Void
     var body: some View {
         let status = model.workspaceProcessingStatus
@@ -102,8 +107,8 @@ struct WorkspaceProcessingBar: View {
                     Text(title).lineLimit(1)
                     if let id=model.workspaceProcessingSourceID,let source=model.records.first(where: { $0.id == id }) { Text(source.displayTitle).foregroundStyle(.secondary).lineLimit(1) }
                 }
-            } else if model.workspaceNeedsAttention || inbox.pendingItems.contains(where: { $0.state == .needsAttention }) || !inbox.folderErrors.isEmpty {
-                Label("有事项需要查看",systemImage:"exclamationmark.circle").foregroundStyle(.orange)
+            } else if model.workspaceProcessingHasScheduledRetry {
+                Label("等待自动重试",systemImage:"clock.arrow.circlepath").foregroundStyle(.secondary).lineLimit(1)
             } else { Text(status.title).foregroundStyle(.secondary).lineLimit(1) }
             Spacer(minLength:8)
             if model.dictationActive { Button("停止并整理") { model.stopDictation() } }
@@ -162,11 +167,17 @@ struct WorkspaceProcessingView: View {
                 }
                 let failedSources=model.records.filter { !quarantinedIDs.contains($0.id) && (["failed","blocked"].contains($0.jobState ?? "") || $0.state == "interrupted") }
                 if !failedSources.isEmpty {
-                    WorkspaceSection(title:"录音与转写需要查看",icon:"waveform",count:failedSources.count) {
+                    let retryableSources=failedSources.filter { $0.state == "saved" }
+                    let sourceErrors=failedSources.compactMap { source in source.error.map { (source.displayTitle,$0) } }
+                    WorkspaceSection(title:"录音与转写需要查看",subtitle:"录音被中断时已保存的片段仍保留；本地转写失败时原件仍保留。",icon:"waveform",count:failedSources.count) {
                         ForEach(failedSources) { source in
-                            WorkspaceRow(title:source.displayTitle,subtitle:source.state == "interrupted" ? "录音被中断，已保存的片段仍保留" : "本地转写未完成，原件仍保留",trailing:"查看材料") { openSource(source.id) }
-                            if let error=source.error { reason(error) }
-                            if source.state == "saved" { Button("重试本地转写") { Task { await model.retry(source) } }.accessibilityLabel("重试本地转写：" + source.displayTitle).disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil) }
+                            WorkspaceRow(title:source.displayTitle,subtitle:source.state == "interrupted" ? "录音被中断" : "本地转写未完成",trailing:"查看材料") { openSource(source.id) }
+                        }
+                        reasons(sourceErrors)
+                        if retryableSources.count > 1 {
+                            Button("重试全部本地转写（\(retryableSources.count)）") { retryAllTranscriptions(retryableSources) }.disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil)
+                        } else if let source=retryableSources.first {
+                            Button("重试本地转写") { Task { await model.retry(source) } }.accessibilityLabel("重试本地转写：" + source.displayTitle).disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil)
                         }
                     }
                 }
@@ -175,8 +186,8 @@ struct WorkspaceProcessingView: View {
                     WorkspaceSection(title:"录音处理请求",icon:"tray",count:waiting.count) {
                         ForEach(waiting) { request in
                             WorkspaceRow(title:name(request.sourceID),subtitle:request.state == "blocked" ? "处理条件已变化，需要重新核对" : "等待完整转写与原文核对，随后继续理解",trailing:"查看材料") { openSource(request.sourceID) }
-                            if let error=request.error { reason(error) }
                         }
+                        reasons(waiting.compactMap { request in request.error.map { (name(request.sourceID),$0) } })
                     }
                 }
                 if !model.workspacePausedTasks.isEmpty {
@@ -203,33 +214,49 @@ struct WorkspaceProcessingView: View {
                         PausedActionBatchControl(model:model)
                     }
                 }
-                ForEach(model.records.filter { model.transcriptReviewIssue(for:$0) != nil }) { source in
-                    WorkspaceSection(title:"完整转写核对未完成",icon:"waveform.badge.exclamationmark") {
-                        WorkspaceRow(title:source.displayTitle,subtitle:"原音与原文保留，尚未进入云端理解",trailing:"查看材料") { openSource(source.id) }
-                        if let error=model.transcriptReviewIssue(for:source) { reason(error) }
-                        Button("重试完整转写核对") { Task { await model.reviewTranscription(sourceID:source.id) } }.accessibilityLabel("重试完整转写核对：" + source.displayTitle).disabled(!model.modelConfigured || model.transcriptReviewSourceID != nil || model.fullRecordingBusy)
+                let reviewSources=model.records.filter { model.transcriptReviewIssue(for:$0) != nil }
+                if !reviewSources.isEmpty {
+                    let reviewErrors=reviewSources.compactMap { source in model.transcriptReviewIssue(for:source).map { (source.displayTitle,$0) } }
+                    WorkspaceSection(title:"完整转写核对未完成",subtitle:"原音与原文保留，尚未进入云端理解。",icon:"waveform.badge.exclamationmark",count:reviewSources.count) {
+                        ForEach(reviewSources) { source in
+                            WorkspaceRow(title:source.displayTitle,subtitle:"",trailing:"查看材料") { openSource(source.id) }
+                        }
+                        reasons(reviewErrors)
+                        if reviewSources.count > 1 {
+                            Button("重试全部完整转写核对（\(reviewSources.count)）") { retryAllTranscriptReviews(reviewSources) }.disabled(!model.modelConfigured || model.transcriptReviewSourceID != nil || model.fullRecordingBusy)
+                        } else if let source=reviewSources.first {
+                            Button("重试完整转写核对") { Task { await model.reviewTranscription(sourceID:source.id) } }.accessibilityLabel("重试完整转写核对：" + source.displayTitle).disabled(!model.modelConfigured || model.transcriptReviewSourceID != nil || model.fullRecordingBusy)
+                        }
                     }
                 }
                 let failedFollowups=model.workspaceFailedFollowups
                 if !failedFollowups.isEmpty {
-                    WorkspaceSection(title:"思想与目标跟进未完成",icon:"arrow.triangle.branch",count:failedFollowups.count) {
+                    let followupErrors=failedFollowups.compactMap { receipt in receipt.error.map { (name(receipt.sourceID),$0) } }
+                    WorkspaceSection(title:"思想与目标跟进未完成",subtitle:"原文和已有任务已保存；失败后可以重试。",icon:"arrow.triangle.branch",count:failedFollowups.count) {
                         ForEach(failedFollowups) { receipt in
-                            WorkspaceRow(title:name(receipt.sourceID),subtitle:receipt.retryAt == nil ? "原文和已有任务已保存，可重试跟进" : "已有结果保留，已安排自动重试",trailing:"查看材料") { openSource(receipt.sourceID) }
-                            if let error=receipt.error { reason(error) }
+                            WorkspaceRow(title:name(receipt.sourceID),subtitle:receipt.retryAt == nil ? "未安排自动重试" : "已安排自动重试",trailing:"查看材料") { openSource(receipt.sourceID) }
+                        }
+                        reasons(followupErrors)
+                        if failedFollowups.count > 1 {
+                            Button("全部重试（\(failedFollowups.count)）") { model.retryAllFailedFollowups() }.accessibilityLabel("全部重试思想与下一步（\(failedFollowups.count)）").disabled(!model.modelConfigured || model.followupBusy)
+                        } else if let receipt=failedFollowups.first {
                             Button("立即重试") { model.refreshFollowup(receipt.sourceID) }.accessibilityLabel("立即重试思想与下一步：" + name(receipt.sourceID)).disabled(!model.modelConfigured || model.followupBusy)
                         }
-                        Button("全部重试（\(failedFollowups.count)）") { model.retryAllFailedFollowups() }.accessibilityLabel("全部重试思想与下一步（\(failedFollowups.count)）").disabled(!model.modelConfigured || model.followupBusy)
                     }
                 }
                 let failedKnowledgeReviews=model.knowledgeReviews.filter { $0.validity == "current" && $0.state == "failed" }
                 if !failedKnowledgeReviews.isEmpty {
-                    WorkspaceSection(title:"知识核查未完成",icon:"lightbulb",count:failedKnowledgeReviews.count) {
+                    let knowledgeErrors=failedKnowledgeReviews.compactMap { review in review.error.map { (name(review.sourceID),$0) } }
+                    WorkspaceSection(title:"知识核查未完成",subtitle:"当前理解与核查结论分别保留。",icon:"lightbulb",count:failedKnowledgeReviews.count) {
                         ForEach(failedKnowledgeReviews) { review in
-                            WorkspaceRow(title:name(review.sourceID),subtitle:"当前理解与核查结论分别保留",trailing:"查看材料") { openSource(review.sourceID) }
-                            if let error=review.error { reason(error) }
+                            WorkspaceRow(title:name(review.sourceID),subtitle:"",trailing:"查看材料") { openSource(review.sourceID) }
+                        }
+                        reasons(knowledgeErrors)
+                        if failedKnowledgeReviews.count > 1 {
+                            Button("全部重试（\(failedKnowledgeReviews.count)）") { Task { await model.retryAllFailedKnowledgeReviews() } }.accessibilityLabel("全部重试知识核查（\(failedKnowledgeReviews.count)）").disabled(!model.modelConfigured || model.knowledgeReviewBusy)
+                        } else if let review=failedKnowledgeReviews.first {
                             Button("重试知识核查") { Task { await model.reviewKnowledge(sourceID:review.sourceID,retry:true) } }.accessibilityLabel("重试知识核查：" + name(review.sourceID)).disabled(!model.modelConfigured || model.knowledgeReviewBusy)
                         }
-                        Button("全部重试（\(failedKnowledgeReviews.count)）") { Task { await model.retryAllFailedKnowledgeReviews() } }.accessibilityLabel("全部重试知识核查（\(failedKnowledgeReviews.count)）").disabled(!model.modelConfigured || model.knowledgeReviewBusy)
                     }
                 }
                 ForEach(model.assistantExecutions.filter { $0.validity == "current" && $0.state == "failed" }) { execution in
@@ -264,6 +291,23 @@ struct WorkspaceProcessingView: View {
         }
     }
     private func name(_ id:String) -> String { model.records.first(where: { $0.id == id })?.displayTitle ?? "已保存的材料" }
+    @ViewBuilder private func reasons(_ entries:[(String,String)]) -> some View {
+        if !entries.isEmpty {
+            DisclosureGroup("查看原因") {
+                VStack(alignment:.leading,spacing:8) {
+                    ForEach(entries.indices,id:\.self) { index in
+                        Text(entries[index].0 + "：" + entries[index].1).vosFont(WorkspaceText.body).textSelection(.enabled)
+                    }
+                }.padding(.top,8)
+            }.accessibilityHint(entries.map { $0.1 }.joined(separator:"\n")).padding(.bottom,12)
+        }
+    }
+    private func retryAllTranscriptions(_ sources:[SourceRecord]) {
+        Task { for source in sources { await model.retry(source) } }
+    }
+    private func retryAllTranscriptReviews(_ sources:[SourceRecord]) {
+        Task { for source in sources { await model.reviewTranscription(sourceID:source.id) } }
+    }
     private func reason(_ text:String) -> some View { DisclosureGroup("查看原因") { Text(text).vosFont(WorkspaceText.body).textSelection(.enabled) }.accessibilityHint(text).padding(.bottom,12) }
     private func intentLabel(_ intent:ExpressionProcessingIntentRecord) -> String {
         switch intent.state {
