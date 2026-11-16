@@ -310,19 +310,31 @@ extension VoiceOSStore {
         return try sourceIDs.sorted().map { try enqueueRecordingFollowup(sourceID: $0) }
     }
 
-    /// Decoding every follow-up archive on each refresh dominated the secondary
-    /// read. Reuse a decoded history while its stored bytes are unchanged; the
-    /// bytes themselves are the identity, so a write cannot go unnoticed.
+    /// The stored digest is the archive identity. A cache hit reuses the decoded
+    /// history without the body leaving SQLite; only a row whose digest is
+    /// missing or no longer matches the cache is read, and a missing digest is
+    /// hashed and written back once.
     public func recordingFollowups() throws -> [RecordingFollowupReceipt] {
-        let rows = try db.query("SELECT id,followup_json FROM sources WHERE followup_json IS NOT NULL ORDER BY created_at")
+        let rows = try db.query("SELECT id,followup_digest FROM sources WHERE followup_json IS NOT NULL ORDER BY created_at")
         var decoded: [RecordingFollowupReceipt] = []
         var cache = recordingFollowupDecodeCache
-        var reused = 0, parsed = 0
+        var reused = 0, parsed = 0, backfilled = 0
         let token = StartupTrace.begin("followups.decode")
         for row in rows {
-            guard let id = row["id"], let json = row["followup_json"] else { continue }
-            let digest = Self.relevanceHash(Data(json.utf8))
+            guard let id = row["id"] else { continue }
+            if let digest = row["followup_digest"], let cached = cache[id], cached.digest == digest {
+                decoded.append(contentsOf: cached.receipts); reused += cached.receipts.count; continue
+            }
+            guard let json = try db.query("SELECT followup_json FROM sources WHERE id=?", [id]).first?["followup_json"] else { continue }
+            let digest: String
+            if let stored = row["followup_digest"] { digest = stored }
+            else {
+                digest = Self.relevanceHash(Data(json.utf8))
+                try db.execute("UPDATE sources SET followup_digest=? WHERE id=?", [digest, id])
+                backfilled += 1
+            }
             if let cached = cache[id], cached.digest == digest {
+                cache[id] = (digest, cached.receipts)
                 decoded.append(contentsOf: cached.receipts); reused += cached.receipts.count; continue
             }
             let receipts = try decodeWithPath([RecordingFollowupReceipt].self, from: Data(json.utf8), label: "跟进回执")
@@ -332,7 +344,7 @@ extension VoiceOSStore {
         StartupTrace.end(token)
         let live = Set(rows.compactMap { $0["id"] })
         recordingFollowupDecodeCache = cache.filter { live.contains($0.key) }
-        StartupTrace.mark("followups=\(decoded.count) reused=\(reused) parsed=\(parsed)")
+        StartupTrace.mark("followups=\(decoded.count) reused=\(reused) parsed=\(parsed) backfilled=\(backfilled)")
         return decoded.sorted { $0.createdAt < $1.createdAt }
     }
     /// Requeues interrupted receipts and compacts legacy histories. Runs after the
@@ -395,7 +407,10 @@ extension VoiceOSStore {
         let receipt = compactFollowup(value)
         var history = try db.query("SELECT followup_json FROM sources WHERE id=?", [receipt.sourceID]).first?["followup_json"].map { try decodeWithPath([RecordingFollowupReceipt].self, from: Data($0.utf8), label: "跟进回执") } ?? []
         if let index = history.firstIndex(where: { $0.id == receipt.id }) { history[index] = receipt } else { history.append(receipt) }
-        try db.execute("UPDATE sources SET followup_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(history), as: UTF8.self), receipt.sourceID])
+        let json = String(decoding: try JSONEncoder().encode(history), as: UTF8.self)
+        let digest = Self.relevanceHash(Data(json.utf8))
+        try db.execute("UPDATE sources SET followup_json=?,followup_digest=? WHERE id=?", [json, digest, receipt.sourceID])
+        recordingFollowupDecodeCache[receipt.sourceID] = (digest, history)
     }
     public func recordingFollowupValidity(_ receipt: RecordingFollowupReceipt) throws -> RecordingFollowupValidity {
         try recordingFollowupValidities([receipt])[receipt.id] ?? .init(sourceCurrent: false, thoughtClaimIDs: [], goalIDs: [], english: false)

@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...64).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...65).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1258,6 +1258,23 @@ final class Database {
                   ELSE 'unknown' END
                 """)
                 try execute("PRAGMA user_version=64")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "64" {
+            try transaction {
+                try execute("ALTER TABLE sources ADD COLUMN followup_digest TEXT")
+                // SQLite has no SHA-256; hash each stored archive once, in small
+                // batches so a multi-megabyte archive never materializes twice.
+                while true {
+                    let rows = try query("SELECT id,followup_json FROM sources WHERE followup_json IS NOT NULL AND followup_digest IS NULL LIMIT 8")
+                    if rows.isEmpty { break }
+                    for row in rows {
+                        guard let id = row["id"], let json = row["followup_json"] else { continue }
+                        try execute("UPDATE sources SET followup_digest=? WHERE id=?", [VoiceOSStore.relevanceHash(Data(json.utf8)), id])
+                    }
+                }
+                try execute("PRAGMA user_version=65")
             }
         }
 
