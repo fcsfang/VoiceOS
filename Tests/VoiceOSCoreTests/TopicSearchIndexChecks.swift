@@ -54,7 +54,8 @@ final class TopicSearchIndexChecks: XCTestCase {
         let hits = try await store.search(query: "沟通")
         XCTAssertEqual(hits.map(\.refID), [topic])
         XCTAssertEqual(hits.first?.kind, .topic)
-        XCTAssertEqual(try await store.searchAll(query: "沟通", perKindLimit: 20).total(for: .topic), 1)
+        let topicTotal = try await store.searchAll(query: "沟通", perKindLimit: 20).total(for: .topic)
+        XCTAssertEqual(topicTotal, 1)
     }
 
     func testTopicRenameRefreshesIndex() async throws {

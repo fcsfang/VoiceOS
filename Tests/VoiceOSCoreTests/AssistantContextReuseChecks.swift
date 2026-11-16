@@ -83,7 +83,8 @@ final class AssistantContextReuseChecks: XCTestCase {
 
         let repeated = try await batch.discoverAutomaticAssistantExecutions(using: port)
         XCTAssertFalse(repeated)
-        XCTAssertEqual(try await batch.assistantExecutions().count, 2)
+        let batchCount = try await batch.assistantExecutions().count
+        XCTAssertEqual(batchCount, 2)
     }
 
     func testDiscoveryRebuildsAfterFreezeAndQueuesRemainingTasks() async throws {
@@ -104,7 +105,8 @@ final class AssistantContextReuseChecks: XCTestCase {
         XCTAssertEqual(queued.state, "queued")
         XCTAssertEqual(queued.validity, "current")
         XCTAssertEqual(executions.filter { $0.actionID == valid.action.id }.count, 1)
-        XCTAssertFalse(try await store.discoverAutomaticAssistantExecutions(using: port))
+        let discoveredAgain = try await store.discoverAutomaticAssistantExecutions(using: port)
+        XCTAssertFalse(discoveredAgain)
     }
 
     func testFollowupValidityBatchWithPreloadedRowsMatchesSingles() async throws {

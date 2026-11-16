@@ -118,7 +118,8 @@ final class SearchIndexChecks: XCTestCase {
         let blank = try await store.search(query: " \n ")
         XCTAssertTrue(empty.isEmpty)
         XCTAssertTrue(blank.isEmpty)
-        XCTAssertEqual(try await store.searchAll(query: "", perKindLimit: 20).total(for: .claim), 0)
+        let emptyTotal = try await store.searchAll(query: "", perKindLimit: 20).total(for: .claim)
+        XCTAssertEqual(emptyTotal, 0)
     }
 
     func testQueryWithoutMatchesReturnsNoHits() async throws {
@@ -199,7 +200,8 @@ final class SearchIndexChecks: XCTestCase {
         XCTAssertEqual(result.total(for: .material), 0)
         XCTAssertTrue(result.hits(for: .claim).allSatisfy { $0.kind == .claim })
         XCTAssertTrue(result.hits(for: .action).allSatisfy { $0.kind == .action })
-        XCTAssertEqual(try await store.search(query: "复盘", limit: 2).count, 2)
+        let limitedCount = try await store.search(query: "复盘", limit: 2).count
+        XCTAssertEqual(limitedCount, 2)
     }
 
     func testInPlaceActionEditReturnsStaleThenRebuilds() async throws {
