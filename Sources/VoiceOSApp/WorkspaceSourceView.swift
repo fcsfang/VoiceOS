@@ -207,6 +207,11 @@ struct WorkspaceSourceView: View {
         if let summary=expression?.summary,!summary.isEmpty { return summary }
         return nil
     }
+    private var readingWidth: CGFloat { min(760, max(640, WorkspaceMetrics.readerWidth)) }
+    private static let collapsedTranscriptLimit = 2000
+    private func transcriptStartsExpanded(_ transcript: String?) -> Bool {
+        (transcript?.count ?? 0) <= Self.collapsedTranscriptLimit
+    }
     private var review:KnowledgeReviewRecord? { model.knowledgeReviews.filter { $0.sourceID == source.id && $0.validity == "current" }.sorted { $0.createdAt > $1.createdAt }.first }
     private var processing:Bool { model.fullRecordingBusy && model.fullRecordingSourceID.map { expressionIDs.contains($0) } == true || model.understandingSource == source.id || model.processingIntents.contains { $0.sourceID == source.id && [.queued,.running].contains($0.state) } }
     private var organizationStatusText:String {
@@ -226,6 +231,108 @@ struct WorkspaceSourceView: View {
         guard !selectedText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,let transcript=source.transcript,
               let offset=SelectableText.scalarOffset(ofUTF16Offset:selectedRange.location,in:transcript) else { return nil }
         return source.spans.first { $0.textStart <= offset && offset < $0.textEnd && $0.startMS != nil && $0.endMS != nil }
+    }
+    /// Reading order: conclusions first, the verbatim transcript on demand.
+    @ViewBuilder private var digestSections: some View {
+        if let expression,expression.sourceIDs.count > 1 {
+            SourceFold(title:"整体理解",icon:"waveform.path",count:expression.sourceIDs.count,isExpanded:$overallExpanded) {
+                WorkspaceExpandableText(text:expression.summary,label:"整体摘要",size:WorkspaceText.body.size)
+                if let ledger = model.actionReviewLedgers[expression.id], ledger.canAcknowledge {
+                    ActionReviewAcknowledgementControl(model:model,expressionID:expression.id)
+                }
+                DisclosureGroup("本次表达的录音与合并依据") {
+                    Text(expression.reason).vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical,10)
+                    ForEach(Array(expression.sourceIDs.enumerated()),id:\.element) { index,id in
+                        if let member=model.records.first(where: { $0.id == id }) {
+                            Button("第 \(index+1) 段 · "+member.name+(id == source.id ? "（当前原文）" : "")) { openSource(id) }.padding(.vertical,5).disabled(id == source.id)
+                        }
+                    }
+                }.padding(.top,12)
+            }
+        }
+        if (expression?.sourceIDs.count ?? 0) <= 1,let summary=source.contentSummary,!summary.isEmpty {
+            SourceFold(title:"内容摘要",icon:"text.alignleft",isExpanded:$digestExpanded) {
+                WorkspaceExpandableText(text:summary,label:"完整摘要",size:WorkspaceText.body.size).padding(.top,10)
+            }
+        }
+        if !thoughts.isEmpty {
+            SourceFold(title:"核心要点",icon:"lightbulb",count:thoughts.count,isExpanded:$thoughtsExpanded) {
+                let digest=readingDigest
+                if !digest.isEmpty {
+                    DisclosureGroup("逐层读") {
+                        VStack(alignment:.leading,spacing:16) {
+                            if let excerpt=digest.excerpt { readingLayerRow("原文摘录",excerpt) }
+                            if !digest.points.isEmpty {
+                                VStack(alignment:.leading,spacing:8) {
+                                    Text("要点").vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
+                                    ForEach(Array(digest.points.enumerated()),id:\.offset) { _,point in
+                                        HStack(alignment:.top,spacing:8) {
+                                            Text("·").foregroundStyle(.secondary)
+                                            Text(point).vosFont(WorkspaceText.body).lineSpacing(4).fixedSize(horizontal:false,vertical:true).textSelection(.enabled)
+                                        }
+                                    }
+                                }
+                            }
+                            if let sentence=digest.sentence { readingLayerRow("一句话",sentence) }
+                        }.padding(.top,12)
+                    }.padding(.bottom,14)
+                    Divider()
+                }
+                ForEach(Array((showAllThoughts ? thoughts : Array(thoughts.prefix(3))).enumerated()),id:\.element.id) { index,thought in
+                    HStack(alignment:.top,spacing:14) {
+                        Text(String(format:"%02d",index+1)).vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced).foregroundStyle(.secondary).padding(.top,3)
+                        VStack(alignment:.leading,spacing:12) {
+                            WorkspaceExpandableText(text:thought.statement,label:"完整要点",lines:4,size:WorkspaceText.body.size)
+                            Text(thought.ownership == "ai_candidate" ? "AI 分析与建议" : thought.ownership == "external" ? "外部观点" : "从我的表达中提取").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            HStack {
+                                Button("更正理解或归属",systemImage:"pencil") { claimEditor=thought }
+                                Button("停止使用") { pendingRejection=thought;confirmingRejection=true }
+                                Button("记录行动意图") { actionClaim=thought }.disabled(thought.validity == "frozen" || thought.reviewState == "rejected")
+                            }.vosFont(WorkspaceText.meta).disabled(model.reviewingClaim)
+                            ClaimNoteRow(model:model,claimID:thought.id,notes:$claimNotes)
+                            DisclosureGroup("原话依据与调整") {
+                                VStack(alignment:.leading,spacing:10) {
+                                    ForEach(Array(thought.references.enumerated()),id:\.offset) { _,ref in
+                                        if let member=model.records.first(where: { $0.id == ref.sourceID }),expressionIDs.contains(member.id),ref.transcriptVersionID == member.transcriptVersionID,
+                                           let span=member.spans.first(where: { $0.id == ref.spanID }),let text=member.transcript {
+                                            if expressionIDs.count > 1 {
+                                                QuoteHoverPreview(sourceTitle:member.displayTitle,snippet:quote(span,text:text),open:{ openSource(member.id) }) {
+                                                    Text(member.name).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                                }
+                                            }
+                                            if let start=span.startMS,let end=span.endMS {
+                                                Button { Task { _=await model.playSpan(member,milliseconds:start,endMilliseconds:end) } } label: {
+                                                    Text(quote(span,text:text)).foregroundStyle(.secondary).multilineTextAlignment(.leading).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+                                                }.buttonStyle(.plain)
+                                            } else {
+                                                Text(quote(span,text:text)).foregroundStyle(.secondary).textSelection(.enabled)
+                                            }
+                                            if let start=span.startMS,let end=span.endMS { Button("回听这段原话",systemImage:"play.circle") { Task { _=await model.playSpan(member,milliseconds:start,endMilliseconds:end) } } }
+                                        }
+                                    }
+                                    HStack {
+                                        Button("审阅历史") { Task { await model.reviewHistory(thought); historyClaimID=thought.id; loadedClaimHistory=model.claimHistory } }
+                                    }
+                                    if historyClaimID == thought.id {
+                                        ForEach(loadedClaimHistory) { revision in Text("第 \(revision.version) 版 · " + revision.statement).vosFont(WorkspaceText.meta).textSelection(.enabled) }
+                                    }
+                                    if let origin=model.claimOrigins.first(where: { $0.claimID == thought.id }) {
+                                        Button("查看原讨论") { openDiscussion(origin.conversationID) }
+                                    }
+                                }.padding(.top,9)
+                            }.vosFont(WorkspaceText.meta)
+                        }
+                    }.padding(.vertical,20)
+                    if thought.id != (showAllThoughts ? thoughts.last?.id : thoughts.prefix(3).last?.id) { Divider() }
+                }
+                if thoughts.count > 3 {
+                    Divider()
+                    Button(showAllThoughts ? "收起要点" : "展开全部 \(thoughts.count) 条要点",systemImage:showAllThoughts ? "chevron.up" : "chevron.down") { showAllThoughts.toggle() }.vosFont(WorkspaceText.meta).buttonStyle(.borderless).padding(.top,18)
+                }
+            }
+        } else if source.transcript != nil {
+            if pausedThoughts.isEmpty { Text(source.localOnly ? "完整原文已保存。允许云端后可理解并连接主题。" : processing || model.fullRecordingBusy ? "正在整理完整内容。" : "原文已保留，整理尚未就绪，可在“更多”中重试。").foregroundStyle(.secondary) }
+        }
     }
     @ViewBuilder private var readingContent:some View {
         if let scroll { readingScrollView.scrollPosition(scroll) } else { readingScrollView }
@@ -293,6 +400,7 @@ struct WorkspaceSourceView: View {
                         Spacer(minLength:0)
                     }
                 }
+                digestSections
                 SourceFold(title:"原文与回听",icon:"waveform",isExpanded:$originalExpanded) {
                     VStack(alignment:.leading,spacing:16) {
                         if let transcript=source.transcript { MarkdownText(transcript) }
@@ -322,22 +430,6 @@ struct WorkspaceSourceView: View {
                                 }.padding(.top,12)
                             }
                         }
-                    }
-                }
-                if let expression,expression.sourceIDs.count > 1 {
-                    SourceFold(title:"整体理解",icon:"waveform.path",count:expression.sourceIDs.count,isExpanded:$overallExpanded) {
-                        WorkspaceExpandableText(text:expression.summary,label:"整体摘要",size:WorkspaceText.body.size)
-                        if let ledger = model.actionReviewLedgers[expression.id], ledger.canAcknowledge {
-                            ActionReviewAcknowledgementControl(model:model,expressionID:expression.id)
-                        }
-                        DisclosureGroup("本次表达的录音与合并依据") {
-                            Text(expression.reason).vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical,10)
-                            ForEach(Array(expression.sourceIDs.enumerated()),id:\.element) { index,id in
-                                if let member=model.records.first(where: { $0.id == id }) {
-                                    Button("第 \(index+1) 段 · "+member.name+(id == source.id ? "（当前原文）" : "")) { openSource(id) }.padding(.vertical,5).disabled(id == source.id)
-                                }
-                            }
-                        }.padding(.top,12)
                     }
                 }
                 if !programPairs.isEmpty {
@@ -422,89 +514,6 @@ struct WorkspaceSourceView: View {
                             WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
                         }
                     }
-                }
-                if (expression?.sourceIDs.count ?? 0) <= 1,let summary=source.contentSummary,!summary.isEmpty {
-                    SourceFold(title:"内容摘要",icon:"text.alignleft",isExpanded:$digestExpanded) {
-                        WorkspaceExpandableText(text:summary,label:"完整摘要",size:WorkspaceText.body.size).padding(.top,10)
-                    }
-                }
-                if !thoughts.isEmpty {
-                    SourceFold(title:"核心要点",icon:"lightbulb",count:thoughts.count,isExpanded:$thoughtsExpanded) {
-                        let digest=readingDigest
-                        if !digest.isEmpty {
-                            DisclosureGroup("逐层读") {
-                                VStack(alignment:.leading,spacing:16) {
-                                    if let excerpt=digest.excerpt { readingLayerRow("原文摘录",excerpt) }
-                                    if !digest.points.isEmpty {
-                                        VStack(alignment:.leading,spacing:8) {
-                                            Text("要点").vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
-                                            ForEach(Array(digest.points.enumerated()),id:\.offset) { _,point in
-                                                HStack(alignment:.top,spacing:8) {
-                                                    Text("·").foregroundStyle(.secondary)
-                                                    Text(point).vosFont(WorkspaceText.body).lineSpacing(4).fixedSize(horizontal:false,vertical:true).textSelection(.enabled)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if let sentence=digest.sentence { readingLayerRow("一句话",sentence) }
-                                }.padding(.top,12)
-                            }.padding(.bottom,14)
-                            Divider()
-                        }
-                        ForEach(Array((showAllThoughts ? thoughts : Array(thoughts.prefix(3))).enumerated()),id:\.element.id) { index,thought in
-                            HStack(alignment:.top,spacing:14) {
-                                Text(String(format:"%02d",index+1)).vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced).foregroundStyle(.secondary).padding(.top,3)
-                                VStack(alignment:.leading,spacing:12) {
-                                    WorkspaceExpandableText(text:thought.statement,label:"完整要点",lines:4,size:WorkspaceText.body.size)
-                                    Text(thought.ownership == "ai_candidate" ? "AI 分析与建议" : thought.ownership == "external" ? "外部观点" : "从我的表达中提取").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                                    HStack {
-                                        Button("更正理解或归属",systemImage:"pencil") { claimEditor=thought }
-                                        Button("停止使用") { pendingRejection=thought;confirmingRejection=true }
-                                        Button("记录行动意图") { actionClaim=thought }.disabled(thought.validity == "frozen" || thought.reviewState == "rejected")
-                                    }.vosFont(WorkspaceText.meta).disabled(model.reviewingClaim)
-                                    ClaimNoteRow(model:model,claimID:thought.id,notes:$claimNotes)
-                                    DisclosureGroup("原话依据与调整") {
-                                        VStack(alignment:.leading,spacing:10) {
-                                            ForEach(Array(thought.references.enumerated()),id:\.offset) { _,ref in
-                                                if let member=model.records.first(where: { $0.id == ref.sourceID }),expressionIDs.contains(member.id),ref.transcriptVersionID == member.transcriptVersionID,
-                                                   let span=member.spans.first(where: { $0.id == ref.spanID }),let text=member.transcript {
-                                                    if expressionIDs.count > 1 {
-                                                        QuoteHoverPreview(sourceTitle:member.displayTitle,snippet:quote(span,text:text),open:{ openSource(member.id) }) {
-                                                            Text(member.name).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                                                        }
-                                                    }
-                                                    if let start=span.startMS,let end=span.endMS {
-                                                        Button { Task { _=await model.playSpan(member,milliseconds:start,endMilliseconds:end) } } label: {
-                                                            Text(quote(span,text:text)).foregroundStyle(.secondary).multilineTextAlignment(.leading).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
-                                                        }.buttonStyle(.plain)
-                                                    } else {
-                                                        Text(quote(span,text:text)).foregroundStyle(.secondary).textSelection(.enabled)
-                                                    }
-                                                    if let start=span.startMS,let end=span.endMS { Button("回听这段原话",systemImage:"play.circle") { Task { _=await model.playSpan(member,milliseconds:start,endMilliseconds:end) } } }
-                                                }
-                                            }
-                                            HStack {
-                                                Button("审阅历史") { Task { await model.reviewHistory(thought); historyClaimID=thought.id; loadedClaimHistory=model.claimHistory } }
-                                            }
-                                            if historyClaimID == thought.id {
-                                                ForEach(loadedClaimHistory) { revision in Text("第 \(revision.version) 版 · " + revision.statement).vosFont(WorkspaceText.meta).textSelection(.enabled) }
-                                            }
-                                            if let origin=model.claimOrigins.first(where: { $0.claimID == thought.id }) {
-                                                Button("查看原讨论") { openDiscussion(origin.conversationID) }
-                                            }
-                                        }.padding(.top,9)
-                                    }.vosFont(WorkspaceText.meta)
-                                }
-                            }.padding(.vertical,20)
-                            if thought.id != (showAllThoughts ? thoughts.last?.id : thoughts.prefix(3).last?.id) { Divider() }
-                        }
-                        if thoughts.count > 3 {
-                            Divider()
-                            Button(showAllThoughts ? "收起要点" : "展开全部 \(thoughts.count) 条要点",systemImage:showAllThoughts ? "chevron.up" : "chevron.down") { showAllThoughts.toggle() }.vosFont(WorkspaceText.meta).buttonStyle(.borderless).padding(.top,18)
-                        }
-                    }
-                } else if source.transcript != nil {
-                    if pausedThoughts.isEmpty { Text(source.localOnly ? "完整原文已保存。允许云端后可理解并连接主题。" : processing || model.fullRecordingBusy ? "正在整理完整内容。" : "原文已保留，整理尚未就绪，可在“更多”中重试。").foregroundStyle(.secondary) }
                 }
                 if !outlineSections.isEmpty {
                     SourceFold(title:"逐字稿大纲",icon:"list.bullet",count:outlineSections.count,isExpanded:$outlineExpanded) {
@@ -616,7 +625,7 @@ struct WorkspaceSourceView: View {
                     }.padding(.vertical,16)
                 }
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
-            }.frame(maxWidth:WorkspaceMetrics.pageWidth,alignment:.leading)
+            }.frame(maxWidth:readingWidth,alignment:.leading)
                 .padding(.horizontal,WorkspaceMetrics.pagePadding)
                 .padding(.top,16)
                 .padding(.bottom,WorkspaceMetrics.pagePadding)
@@ -710,8 +719,9 @@ struct WorkspaceSourceView: View {
             } catch is CancellationError {}
             catch { self.error="旁注读取失败：" + error.localizedDescription }
         }
-        .onChange(of:source.id) { _,_ in clearSelection() }
-        .onChange(of:source.transcript) { _,_ in clearSelection();resetBilingual() }
+        .onAppear { originalExpanded=transcriptStartsExpanded(source.transcript) }
+        .onChange(of:source.id) { _,_ in clearSelection();originalExpanded=transcriptStartsExpanded(source.transcript) }
+        .onChange(of:source.transcript) { _,_ in clearSelection();resetBilingual();originalExpanded=transcriptStartsExpanded(source.transcript) }
         .onChange(of:fullTextExpanded) { _,_ in if !fullTextExpanded { clearSelection() } }
         .task {
             while !Task.isCancelled {
