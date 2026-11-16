@@ -189,7 +189,8 @@ extension VoiceOSStore {
                 let actor = action.kind == .aiSuggestion ? "ai" : "user"
                 let command = "extracted:" + attemptID + ":" + String(ordinal)
                 let fingerprint = try Self.actionHash([id,"0",action.title,action.kind.rawValue,actor,action.quote])
-                try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,auto_send) VALUES(?,?,0,?,?,?,?,'open','current',?,?,?,?)", [UUID().uuidString,id,action.title,action.kind.rawValue,actor,action.quote,command,fingerprint,timestamp(),action.autoSend ? "1" : "0"])
+                let nature = ActionNature.derive(title: action.title, contentKind: proposal.contentKind)
+                try db.execute("INSERT INTO actions(id,claim_id,claim_review_version,title,kind,intent_actor,note,state,validity,command_id,input_fingerprint,created_at,auto_send,nature) VALUES(?,?,0,?,?,?,?,'open','current',?,?,?,?,?)", [UUID().uuidString,id,action.title,action.kind.rawValue,actor,action.quote,command,fingerprint,timestamp(),action.autoSend ? "1" : "0",nature.rawValue])
             }
         }
         try db.execute("UPDATE model_attempts SET state='completed',result_digest=? WHERE id=? AND state='reserved'", [digest,attemptID])
