@@ -49,7 +49,7 @@ struct WorkspaceDeliveryView: View {
                     }.padding(.vertical, 30)
                     Text("可以继续阅读其他材料，VoiceOS 保持运行就会继续处理。").foregroundStyle(.secondary)
                 }
-                if let message = execution.error, !message.isEmpty { WorkspaceNoticeText(message:message,severity:.danger) }
+                if let message = AssistantFailurePresentation.message(execution.error) { WorkspaceNoticeText(message:message,severity:.danger) }
                 WorkspaceSection(title:"继续使用这份成果",icon:"arrow.right.circle") {
                     HStack {
                         Button("原任务与使用结果") { openTask(execution.actionID) }
@@ -196,19 +196,32 @@ struct WorkspaceTaskView: View {
         let ids = Set(model.claims.first { $0.id == action.claimID }?.references.map(\.sourceID) ?? [])
         return model.records.filter { ids.contains($0.id) }
     }
-    private var executions: [AssistantExecutionRecord] { model.assistantExecutions.filter { $0.actionID == action.id } }
+    private var executions: [AssistantExecutionRecord] {
+        // A question's analysis answers live at the apex exactly once.
+        model.assistantExecutions.filter { $0.actionID == action.id && !(isQuestion && $0.mode == .analysis) }
+    }
     private var current: Bool { action.validity == "current" && action.state != "dismissed" }
     private var isQuestion: Bool { action.nature == "question" }
     private var latestAnalysis: AssistantExecutionRecord? {
         model.assistantExecutions.first { $0.actionID == action.id && $0.mode == .analysis }
     }
-    private var hasAnswer: Bool { latestAnalysis != nil }
+    /// The same semantic the row status and the answer section use: a completed
+    /// answer wins, a closed question without one is "thought through", and a
+    /// failed last attempt is named as such while the question stays open.
+    private var questionEyebrow: String {
+        switch QuestionAnswerPhase(latestAnalysis) {
+        case .completed: return "问题 · 已回答"
+        case .failed: return action.state == "completed" ? "想清楚了 · 无回答" : "回答失败"
+        case .running, .none: return action.state == "completed" ? "想清楚了 · 无回答" : "问题"
+        }
+    }
     private var eyebrow: String {
         if current {
-            if action.state == "completed" { return isQuestion ? "问题 · 已回答" : "行动 · 已完成" }
+            if isQuestion { return questionEyebrow }
+            if action.state == "completed" { return "行动 · 已完成" }
             if action.kind == "task" { return "行动 · 待跟进" }
             if action.nature == "goal" { return "目标" }
-            return isQuestion ? "问题" : "问题与目标"
+            return "问题与目标"
         }
         if action.kind != "task", action.validity == "current" { return (isQuestion ? "问题" : action.nature == "goal" ? "目标" : "问题与目标") + " · 已放下" }
         return model.workspaceActionStatus(action)
@@ -661,8 +674,6 @@ struct WorkspaceTaskView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(model.savingAction)
                 .accessibilityLabel("想清楚了：" + action.title)
-            Button(hasAnswer ? "重新回答" : "让 VoiceOS 回答", systemImage: "sparkles") { analyze() }
-                .disabled(model.assistantBusy || !model.modelConfigured)
             Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
             Button("这件事我自己做") { showingNextActionForm = true }
                 .disabled(model.savingAction)
@@ -674,8 +685,6 @@ struct WorkspaceTaskView: View {
                 .disabled(model.savingAction)
                 .accessibilityLabel("放下：" + action.title)
         } else if action.state == "completed" {
-            Button(hasAnswer ? "重新回答" : "让 VoiceOS 回答", systemImage: "sparkles") { analyze() }
-                .disabled(model.assistantBusy || !model.modelConfigured)
             Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
         }
     }

@@ -127,6 +127,18 @@ public struct AssistantExecutionRecord: Identifiable, Codable, Sendable {
     public let updatedAt: String
 }
 
+/// Assistant failures that describe a malformed model response read as one
+/// retryable message in the interface; the raw diagnostic stays in the record
+/// and the log.
+public enum AssistantFailureMessage {
+    public static let structural = "AI 返回格式异常，已保留可重试"
+    public static func isStructural(_ message: String) -> Bool {
+        ["模型响应不符合结构", "结构无法解码", "缺少必需字段", "输出不是有效 JSON", "响应身份缺失",
+         "助理交付未完成", "助理消息尚未完成", "响应外层格式无效", "output 缺失或格式无效", "响应包含不支持"]
+            .contains { message.contains($0) }
+    }
+}
+
 /// One coherent read shared by every assistant validation in a call. Validation
 /// freezes rows by writing, so a caller drops this after a freeze instead of
 /// trusting reads taken before it.
@@ -262,11 +274,14 @@ extension VoiceOSStore {
             return .init(id: row["id"]!,actionID: input.actionID,actionVersion: input.actionVersion,state: row["state"]!,validity: row["validity"]!,title: result?.title ?? input.title,instruction: input.instruction,instructionSourceID: row["instruction_source_id"],sourceIDs: input.context.sources.map(\.sourceID),report: result?.markdown,references: result?.references ?? [],responseID: result?.responseID,error: row["error"],resultSourceID: row["result_source_id"],questionID: row["question_id"],mode: input.mode,createdAt: row["created_at"]!,updatedAt: row["updated_at"]!)
         }
     }
+    /// `fresh` gives the caller a new execution identity even when a completed
+    /// one already answers the same version and mode. Queued or running work
+    /// still converges, so a double click cannot queue twice.
     @discardableResult
-    public func enqueueAssistantExecution(actionID: String, expectedVersion: Int, instruction: String = "", questionID: String? = nil, allowInstructionCloud: Bool = false, mode: AssistantMode = .execution) throws -> AssistantExecutionRecord {
+    public func enqueueAssistantExecution(actionID: String, expectedVersion: Int, instruction: String = "", questionID: String? = nil, allowInstructionCloud: Bool = false, mode: AssistantMode = .execution, fresh: Bool = false) throws -> AssistantExecutionRecord {
         _ = try assistantExecutions()
         let instruction = mode == .analysis ? "" : instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let existing = try assistantExecutions(actionID: actionID).first(where: { $0.actionVersion == expectedVersion && $0.mode == mode && $0.validity == "current" && $0.instruction == instruction && ["queued","running","completed"].contains($0.state) }) { return existing }
+        if let existing = try assistantExecutions(actionID: actionID).first(where: { $0.actionVersion == expectedVersion && $0.mode == mode && $0.validity == "current" && $0.instruction == instruction && (["queued","running"].contains($0.state) || (!fresh && $0.state == "completed")) }) { return existing }
         _ = try assistantInput(actionID: actionID, expectedVersion: expectedVersion, instruction: "", mode: mode)
         if let questionID { guard try reflectionQuestions().contains(where: { $0.id == questionID }) else { throw VoiceOSError("主题不存在") } }
         let instructionID = instruction.isEmpty ? nil : try recordUserExpression(instruction)
@@ -376,9 +391,14 @@ extension VoiceOSStore {
         }
     }
     private static func assistantError(_ error: Error) -> String {
-        if case ModelPortFailure.rejected(let reason, _, _) = error { return reason }
+        if case ModelPortFailure.rejected(let reason, _, _) = error {
+            if AssistantFailureMessage.isStructural(reason) { NSLog("VoiceOS assistant format failure: %@", reason) }
+            return reason
+        }
         if error is CancellationError { return "请求已中断，结果未接纳" }
-        return error.localizedDescription
+        let message = error.localizedDescription
+        if AssistantFailureMessage.isStructural(message) { NSLog("VoiceOS assistant format failure: %@", message) }
+        return message
     }
     private func runAssistantAssessment(_ input: AssistantTaskInput, key: String, using port: any AssistantModelPort) async throws -> AssistantAssessment {
         let request = Task { let result = try await port.assess(input); try Task.checkCancellation(); return result }

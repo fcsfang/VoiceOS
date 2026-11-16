@@ -142,6 +142,7 @@ final class ControlCenter: ObservableObject {
     @Published var pendingWorkspaceRoute: WorkspaceRoute?
     @Published var pendingWorkspacePageRequest: WorkspacePageRequest?
     @Published var pendingWorkspaceTaskID: String?
+    @Published var showingCaptureComposer = false
     @Published var onboardingRequested = false
     @Published var retrievalResult: RetrievalResult?
     @Published var retrievalStatus = ""
@@ -3282,6 +3283,16 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         ControlCenter.primary?.pendingWorkspacePageRequest = request
     }
 
+    func openWorkspaceSearch() {
+        openMainWindow()
+        ControlCenter.primary?.pendingWorkspaceRoute = .search
+    }
+
+    func openCaptureComposer() {
+        openMainWindow()
+        ControlCenter.primary?.showingCaptureComposer = true
+    }
+
     private func rebuildTodayOverviewMenu(model: ControlCenter?) {
         guard let menu = statusItem?.menu, let clipboard = clipboardMenuItem else { return }
         for item in todayOverviewMenuItems { menu.removeItem(item) }
@@ -3363,11 +3374,21 @@ struct VoiceOSApp: App {
     @FocusedValue(\.voiceOSController) private var focusedModel
     init() { StartupTrace.mark("app.init") }
     var body: some Scene {
-        Window("VoiceOS", id: "control-center") { WorkspaceView(model: model).onboarding(model: model) }
+        Window("VoiceOS", id: "control-center") {
+            WorkspaceView(model: model).onboarding(model: model)
+                .sheet(isPresented: $model.showingCaptureComposer) {
+                    TextCaptureView(model: model, draft: $model.textCaptureDraft,
+                                    onSaved: { _ in model.showingCaptureComposer = false },
+                                    dismiss: { model.showingCaptureComposer = false })
+                        .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 560)
+                }
+        }
             .commands {
                 CommandGroup(replacing: .appSettings) { Button("设置…") { delegate.openSettings() }.keyboardShortcut(",") }
                 CommandGroup(after: .sidebar) {
                     Button("讨论") { delegate.openDiscussion() }
+                    Button("查找…") { delegate.openWorkspaceSearch() }.keyboardShortcut("f")
+                    Button("记录想法") { delegate.openCaptureComposer() }
                     Divider()
                     Button("首页") { delegate.openWorkspacePage(.home) }.keyboardShortcut("1")
                     Button("主题") { delegate.openWorkspacePage(.themes) }.keyboardShortcut("2")
@@ -3897,10 +3918,10 @@ extension ControlCenter {
             await refresh(); resumeAssistantExecutions(); return true
         } catch { assistantStatus = error.localizedDescription; await refresh(); return false }
     }
-    func analyzeThought(_ action: ActionRecord) async -> Bool {
+    func analyzeThought(_ action: ActionRecord, fresh: Bool = false) async -> Bool {
         guard let store, assistantModel != nil else { assistantStatus = "请先配置文本模型"; return false }
         do {
-            _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: .analysis)
+            _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: .analysis, fresh: fresh)
             assistantStatus = "已开始分析；结果会保存在这条内容下"
             await refresh(); resumeAssistantExecutions(); return true
         } catch { assistantStatus = error.localizedDescription; await refresh(); return false }
@@ -3911,7 +3932,7 @@ extension ControlCenter {
         guard let store else { assistantStatus = "资料库尚未打开"; return false }
         guard assistantModel != nil else { assistantStatus = "请先配置文本模型"; return false }
         do {
-            _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: .analysis)
+            _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: .analysis, fresh: true)
             assistantStatus = "已让 VoiceOS 先回答这条问题；结果会保存在问题下"
             Task { await refresh(); resumeAssistantExecutions() }
             return true
