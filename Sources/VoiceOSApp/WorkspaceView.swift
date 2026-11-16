@@ -125,6 +125,21 @@ struct WorkspaceRow: View {
         }
     }
 }
+private struct WorkspaceAttentionDot: View {
+    @ObservedObject var model: ControlCenter
+    @ObservedObject var inbox: RecordingInbox
+    let open: () -> Void
+    var body: some View {
+        if model.workspaceNeedsAttention || inbox.pendingItems.contains(where: { $0.state == .needsAttention }) || !inbox.folderErrors.isEmpty {
+            Button(action:open) {
+                HStack(spacing:7) {
+                    Circle().fill(.orange).frame(width:7,height:7)
+                    Text("有事项需要查看").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain).help("打开处理情况").accessibilityLabel("有事项需要查看，打开处理情况")
+        }
+    }
+}
 struct WorkspaceView: View {
     @ObservedObject var model: ControlCenter
     @AppStorage("voiceos.workspaceTheme") private var theme = WorkspaceTheme.graphite
@@ -422,7 +437,9 @@ struct WorkspaceView: View {
                 } else { pageContent }
             }.frame(maxWidth:.infinity,maxHeight:.infinity)
             if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled).padding(12) }
-            WorkspaceProcessingBar(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
+            if model.workspaceProcessingBarVisible, page != .tool("处理情况") {
+                WorkspaceProcessingBar(model: model) { go(.tool("处理情况")) }
+            }
         }.frame(minWidth:440)
     }
     @ViewBuilder private var workspaceErrorBanner: some View {
@@ -484,8 +501,23 @@ struct WorkspaceView: View {
                     if model.organizingTopics || model.assistantBusy || model.followupBusy { ProgressView().controlSize(.mini) }
                     if model.organizingTopics { Text("AI 正在连接主题").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                 }
+                if page != .tool("处理情况") {
+                    WorkspaceAttentionDot(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
+                }
                 Button { go(.settings);showingDiscussion=false } label: { Label("设置",systemImage:"slider.horizontal.3").foregroundStyle(.secondary) }.buttonStyle(.plain)
             }.padding(.horizontal,8)
+                .onChange(of:model.pendingWorkspacePageRequest) { _, request in
+                    guard let request else { return }
+                    model.pendingWorkspacePageRequest = nil
+                    switch request {
+                    case .home: path=[];page = .home;error=""
+                    case .themes: path=[];page = .themes;topicID=nil;topicFocus=nil;error=""
+                    case .materials: path=[];page = .materials;error=""
+                    case .actions: path=[];page = .actions;error=""
+                    case .initiate: path=[];page = .initiate;error=""
+                    case .back: back()
+                    }
+                }
         }.padding(.horizontal,13).padding(.vertical,28).frame(width:172).background(palette.sidebar)
             .onAppear { AppBrand.applyApplicationIcon() }
             .onChange(of: colorScheme) { _, _ in AppBrand.applyApplicationIcon() }
@@ -1139,25 +1171,14 @@ struct WorkspaceView: View {
             Text("配色即时生效，并在下次打开时沿用。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Divider()
             sectionTitle("键盘快捷键")
-            HStack(alignment:.top,spacing:40) {
-                VStack(alignment:.leading,spacing:6) {
-                    Text("⌥⌘D 口述 · 全局")
-                    Text("⌥⌘V 保存剪贴板 · 全局")
-                    Text("⌥⌘N 速记 · 全局")
-                    Text("⌘I 导入音频或视频 · 全局")
-                    Text("⌘F 搜索 · 主窗口")
-                    Text("⌘1 到 ⌘5 切换页面 · 主窗口")
-                    Text("⌘[ 返回 · 主窗口")
-                }
-                VStack(alignment:.leading,spacing:6) {
-                    Text("⌘⇧R 口述 · 仅主窗口")
-                    Text("↑↓ 选择 · 列表聚焦时")
-                    Text("↵ 打开 · 列表聚焦时")
-                    Text("x 完成 · 列表聚焦时")
-                    Text("z 不再跟进 · 列表聚焦时")
-                    Text("⌥⌘Z 撤销 · 仅本次运行")
-                    Text("撤销只对当前会话有效")
-                }
+            VStack(alignment:.leading,spacing:6) {
+                Text("↑↓ 选择 · 列表聚焦时")
+                Text("↵ 打开 · 列表聚焦时")
+                Text("x 完成 · 列表聚焦时")
+                Text("z 不再跟进 · 列表聚焦时")
+                Text("⌥⌘Z 撤销 · 仅本次运行")
+                Text("撤销只对当前会话有效")
+                Text("口述、剪贴板、速记、导入与页面切换在菜单栏的「记录」与「显示」菜单。")
             }.vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Button("再看一次引导") { model.onboardingRequested = true }
             Divider()

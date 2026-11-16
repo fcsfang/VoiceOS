@@ -13,6 +13,10 @@ enum WorkspaceRoute: Equatable {
     case actions, search, settings, discussion
 }
 
+enum WorkspacePageRequest: Equatable {
+    case home, themes, materials, actions, initiate, back
+}
+
 @MainActor
 final class ControlCenter: ObservableObject {
     let panorama = PanoramaScreenModel()
@@ -136,6 +140,7 @@ final class ControlCenter: ObservableObject {
     @Published var pendingWorkspaceSourceID: String?
     func requestWorkspaceSource(_ id: String) { pendingWorkspaceSourceID = id }
     @Published var pendingWorkspaceRoute: WorkspaceRoute?
+    @Published var pendingWorkspacePageRequest: WorkspacePageRequest?
     @Published var pendingWorkspaceTaskID: String?
     @Published var onboardingRequested = false
     @Published var retrievalResult: RetrievalResult?
@@ -2874,7 +2879,8 @@ final class ControlCenter: ObservableObject {
     }
     func saveFeedback(_ action: ActionRecord, kind: ActionFeedbackKind, text: String, recordingSourceID: String? = nil, commandID: String, allowCloud: Bool = true) async -> Bool {
         guard let store, !savingFeedback else { return false }
-        savingFeedback = true; defer { savingFeedback = false }
+        savingFeedback = true
+        var saved = true
         do {
             selected = try await store.recordActionFeedback(actionID: action.id, expectedVersion: action.version, kind: kind, text: text, recordingSourceID: recordingSourceID, commandID: commandID)
             if allowCloud, let id = selected {
@@ -2887,16 +2893,18 @@ final class ControlCenter: ObservableObject {
                     catch { followupStatus = "结果已保存，知识整理尚未排入：" + error.localizedDescription }
                 }
             }
-            await refresh(); scheduleProcessing()
             status = allowCloud ? "结果原话已关联原行动，知识与思想跟进将在后台整理" : "结果原话已关联原行动 · 仅本地保存"
-            return true
-        } catch { status = error.localizedDescription; await refresh(); return false }
+        } catch { status = error.localizedDescription; saved = false }
+        savingFeedback = false
+        if saved { scheduleProcessing() }
+        Task { await refresh() }
+        return saved
     }
     @discardableResult
     func changeAction(_ action: ActionRecord, state: LocalActionState, successorID: String? = nil) async -> ActionChangeReceipt? {
         guard let store else { return nil }
         guard !savingAction else { status = "正在保存其他更改，请稍后重试"; return nil }
-        savingAction = true; defer { savingAction = false }
+        savingAction = true
         var changed = false
         var receipt: ActionChangeReceipt?
         do {
@@ -2932,10 +2940,11 @@ final class ControlCenter: ObservableObject {
             }
             changed = true
         } catch { status = error.localizedDescription }
+        savingAction = false
         if changed, !isUndoingActionChange, let previous = LocalActionState(rawValue: action.state) {
             recordActionChange(action, from: previous, to: state, successorID: receipt?.successorID)
         }
-        await refresh(); await queueActionFollowups([action.id])
+        Task { await refresh(); await queueActionFollowups([action.id]) }
         return receipt
     }
     func promoteAction(_ action: ActionRecord) async -> Bool {
@@ -2953,22 +2962,37 @@ final class ControlCenter: ObservableObject {
     func openNextActions(of outcomeID: String) -> [ActionRecord] {
         actionRecords.filter { $0.parentID == outcomeID && $0.state == "open" }
     }
+    private struct NextActionAttempt {
+        let commandID: String
+        var createdActionID: String?
+    }
+    private var nextActionAttempts: [String: NextActionAttempt] = [:]
     func addNextAction(outcome: ActionRecord, title: String) async -> String? {
         guard let store, !savingAction else { status = "正在保存其他更改，请稍后重试"; return nil }
         let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { status = "下一步不能为空"; return nil }
         savingAction = true; defer { savingAction = false }
-        let commandID = "workspace-next-action:" + UUID().uuidString
+        let key = outcome.id + "\u{1}" + clean
+        var attempt = nextActionAttempts[key] ?? NextActionAttempt(commandID: "workspace-next-action:" + outcome.id + ":" + UUID().uuidString, createdActionID: nil)
+        nextActionAttempts[key] = attempt
         do {
-            let id = try await store.createAction(claimID: outcome.claimID, expectedClaimReviewVersion: outcome.claimReviewVersion,
-                                                  title: clean, kind: .task, commandID: commandID)
+            let id: String
+            if let created = attempt.createdActionID {
+                id = created
+            } else {
+                id = try await store.createAction(claimID: outcome.claimID, expectedClaimReviewVersion: outcome.claimReviewVersion,
+                                                  title: clean, kind: .task, commandID: attempt.commandID)
+                attempt.createdActionID = id
+                nextActionAttempts[key] = attempt
+            }
             do {
-                _ = try await store.attachNextAction(outcomeID: outcome.id, actionID: id, commandID: commandID)
+                _ = try await store.attachNextAction(outcomeID: outcome.id, actionID: id, commandID: attempt.commandID + ":attach")
             } catch {
                 await refresh()
-                status = "下一步已创建，但未能挂到目标：" + error.localizedDescription
+                status = "下一步已创建，但未能挂到目标：" + error.localizedDescription + "。再次添加会重试挂接，不会重复创建。"
                 return nil
             }
+            nextActionAttempts[key] = nil
             await refresh()
             guard actionRecords.first(where: { $0.id == id })?.parentID == outcome.id else { throw VoiceOSError("添加下一步未能保存，请重试") }
             status = "已添加下一步"
@@ -3290,6 +3314,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         ControlCenter.primary?.pendingWorkspaceRoute = .discussion
     }
 
+    func openWorkspacePage(_ request: WorkspacePageRequest) {
+        openMainWindow()
+        ControlCenter.primary?.pendingWorkspacePageRequest = request
+    }
+
     private func rebuildTodayOverviewMenu(model: ControlCenter?) {
         guard let menu = statusItem?.menu, let clipboard = clipboardMenuItem else { return }
         for item in todayOverviewMenuItems { menu.removeItem(item) }
@@ -3374,13 +3403,28 @@ struct VoiceOSApp: App {
         Window("VoiceOS", id: "control-center") { WorkspaceView(model: model).onboarding(model: model) }
             .commands {
                 CommandGroup(replacing: .appSettings) { Button("设置…") { delegate.openSettings() }.keyboardShortcut(",") }
-                CommandGroup(after: .sidebar) { Button("讨论") { delegate.openDiscussion() } }
+                CommandGroup(after: .sidebar) {
+                    Button("讨论") { delegate.openDiscussion() }
+                    Divider()
+                    Button("首页") { delegate.openWorkspacePage(.home) }.keyboardShortcut("1")
+                    Button("主题") { delegate.openWorkspacePage(.themes) }.keyboardShortcut("2")
+                    Button("材料") { delegate.openWorkspacePage(.materials) }.keyboardShortcut("3")
+                    Button("行动") { delegate.openWorkspacePage(.actions) }.keyboardShortcut("4")
+                    Button("启动") { delegate.openWorkspacePage(.initiate) }.keyboardShortcut("5")
+                    Button("返回") { delegate.openWorkspacePage(.back) }.keyboardShortcut("[")
+                }
+                CommandMenu("记录") {
+                    Button("口述") { ControlCenter.primary?.toggleCaptureDictation() }.keyboardShortcut("d", modifiers: [.command, .option])
+                    Button("保存剪贴板") { ControlCenter.primary?.captureClipboardText() }.keyboardShortcut("v", modifiers: [.command, .option])
+                    Button("速记") { QuickNoteController.shared.show() }.keyboardShortcut("n", modifiers: [.command, .option])
+                    Button("在主窗口口述") { focusedModel?.toggleCaptureDictation() }.keyboardShortcut("r", modifiers: [.command, .shift]).disabled(focusedModel?.canToggleCaptureDictation != true)
+                    Button("导入音频或视频…") { focusedModel?.chooseFullRecording() }.keyboardShortcut("i").disabled(focusedModel?.initialized != true || focusedModel?.importing == true)
+                }
             }
         WindowGroup("独立资料库", id: "restored-library", for: String.self) { path in
             if let path = path.wrappedValue { RestoredLibraryView(path: path) }
         }
         .commands {
-            CommandGroup(after: .newItem) { Button("导入音频或视频…") { focusedModel?.chooseFullRecording() }.keyboardShortcut("i").disabled(focusedModel?.initialized != true || focusedModel?.importing == true) }
             CommandGroup(after: .undoRedo) { Button("撤销上一次变更") { Task { await focusedModel?.undoLastChange() } }.keyboardShortcut("z", modifiers: [.command, .option]).disabled(focusedModel?.canUndoChange != true) }
         }
     }
