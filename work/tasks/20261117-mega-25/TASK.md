@@ -39,3 +39,12 @@
 
 - 实时库：79 材料、1052 认识、524 行动、备份 7 份共约 1.9GB、库 291MB。
 - 波 24 刚合并（PR #196），reload 段 trace 标记与调用点以当前 main 为准。
+
+## 结果（2026-11-17 凌晨）
+
+- 三单元合并：`work/m25-f`（校验上下文复用与预载公开）、`work/m25-g`（预载接线、删 200ms 睡眠、每日备份与入口、搜索界面）、`work/m25-i`（两字词 trigram、per-kind API、索引离键、触发器收窄），集成修复对齐搜索适配层与测试 async 自动闭包。
+- `swift build -j 2` 56.5 秒通过；`swift test -j 2` 418 项 0 失败 23.8 秒（409 基础上新增 9：上下文复用 3、搜索 6）。
+- 隔离实例 trace（/tmp/v25-trace.txt，25 秒启动风暴）：4 次 reload 全部 `validity.reused` 命中，`validity.sources/claims/actions` 为 0（此前每次约 406ms 的三张全表读消失）；`validity.latest` 126ms 仍在；reload.firstScreen 稳定 187-206ms；assistantContext.actions 25 秒内 18 次（此前 30 分钟 1032 次，发现循环已共享上下文）。单次 trace、后台任务活跃，数字只作方向与量级。
+- 搜索核心在临时库实测：trigram 对两字中文加空格后命中并按 bm25 排序；近期权重为乘性 5%（加性会压过相关度）；触发器收窄为 sources(name,state)、claims(statement)、actions(title,note)、transcripts(current_version_id,text)。
+- 备份改为每日至多一次 + `clonefile` 快照（失败回退 sqlite3_backup），设置页显示「最近备份 时间 · 共 N 份」与「在访达中显示」。
+- 未做：界面实机截图仍受锁屏阻断（搜索高亮、组计数、最近搜索胶囊、备份行），解锁后补拍。
