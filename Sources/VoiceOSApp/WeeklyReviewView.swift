@@ -15,6 +15,7 @@ struct WeeklyReviewView: View {
     @State private var focusSaving = false
     @State private var focusLoaded = false
     @State private var undoEntry: UndoEntry?
+    @State private var somedayRows: [ActionRecord] = []
 
     private enum ReviewFilter: String {
         case todo = "我的待办", review = "待核对", completed = "已完成", history = "历史记录"
@@ -74,7 +75,7 @@ struct WeeklyReviewView: View {
     private var isEmpty: Bool {
         dailyReview.today.isEmpty && dailyReview.overdue.isEmpty && dailyReview.remaining.isEmpty &&
             staleTasks.isEmpty && unclarifiedTasks.isEmpty && weekProgress.isEmpty && pausedTasks.isEmpty &&
-            stalledGoals.isEmpty &&
+            stalledGoals.isEmpty && somedayRows.isEmpty &&
             nextWeekEntries.isEmpty
     }
     private var undoHint: some View {
@@ -96,6 +97,7 @@ struct WeeklyReviewView: View {
                 if !staleTasks.isEmpty { staleSection }
                 if !unclarifiedTasks.isEmpty { unclarifiedSection }
                 if !stalledGoals.isEmpty { stalledGoalsSection }
+                if !somedayRows.isEmpty { somedaySection }
                 if !weekProgress.isEmpty { progressSection }
                 if !pausedTasks.isEmpty { pausedSection }
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding)
@@ -105,6 +107,7 @@ struct WeeklyReviewView: View {
         .animation(.easeOut(duration: 0.2), value: undoEntry?.id)
         .task {
             focusedIDs = await model.focusedActionIDs()
+            somedayRows = await model.somedayReviewCandidates()
             focusLoaded = true
         }
         .task(id: undoEntry?.id) {
@@ -415,6 +418,67 @@ struct WeeklyReviewView: View {
             if stalledGoals.count > rows.count {
                 Text("还有 \(stalledGoals.count - rows.count) 个目标，到问题与目标页查看。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
             }
+        }
+    }
+
+    private var somedaySection: some View {
+        let rows = Array(somedayRows.prefix(5))
+        return WorkspaceSection(title: "留到以后的问题与目标", subtitle: "超过 60 天没有回看；回看后恢复为目标或放手。", icon: "tray", count: somedayRows.count) {
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
+                if index > 0 { Divider() }
+                somedayRow(goal)
+            }
+            if somedayRows.count > rows.count {
+                Text("还有 \(somedayRows.count - rows.count) 个目标，回看一批后再处理。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
+            }
+            if !actionError.isEmpty {
+                Text(actionError).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning).padding(.top, 10)
+            }
+        }
+    }
+
+    private func somedayRow(_ goal: ActionRecord) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Button { openTask(goal.id) } label: {
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "tray").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                        .frame(width: 34, height: 34)
+                        .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(goal.title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
+                        Text("将来也许 · 留到以后").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
+            }.buttonStyle(.plain)
+            Button("恢复为目标") { applySomeday(goal, .restore) }
+                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .accessibilityLabel("恢复为目标：" + goal.title)
+            Button("仍留到以后") { applySomeday(goal, .keep) }
+                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .accessibilityLabel("记录回看：" + goal.title)
+            Button("放弃") { applySomeday(goal, .abandon) }
+                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .accessibilityLabel("放弃：" + goal.title)
+        }
+        .padding(.vertical, 10).padding(.horizontal, 10)
+        .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
+    }
+
+    private func applySomeday(_ goal: ActionRecord, _ decision: SomedayReviewDecision) {
+        Task {
+            let saved: Bool
+            switch decision {
+            case .keep: saved = await model.revisitSomeday(goal)
+            case .restore: saved = await model.restoreSomeday(goal)
+            case .abandon: saved = await model.abandonSomeday(goal)
+            }
+            actionError = saved ? "" : (model.status.isEmpty ? "回看未能保存，请稍后重试" : model.status)
+            somedayRows = await model.somedayReviewCandidates()
         }
     }
     private func reviewRow(title: String, subtitle: String, detail: String = "", trailing: String = "",
