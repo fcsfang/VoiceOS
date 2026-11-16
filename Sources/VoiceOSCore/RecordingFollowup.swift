@@ -406,7 +406,7 @@ extension VoiceOSStore {
     /// Snapshot callers pass arrays they already read. Within one call every
     /// distinct source transcript and continuous-expression context is validated
     /// once, instead of once per receipt.
-    func recordingFollowupValidities(_ receipts: [RecordingFollowupReceipt], catalogRows preloadedCatalog: [SourceRecord]? = nil, claimRows preloadedClaims: [CandidateClaim]? = nil, actionRows preloadedActions: [ActionRecord]? = nil) throws -> [String: RecordingFollowupValidity] {
+    public func recordingFollowupValidities(_ receipts: [RecordingFollowupReceipt], catalogRows preloadedCatalog: [SourceRecord]? = nil, claimRows preloadedClaims: [CandidateClaim]? = nil, actionRows preloadedActions: [ActionRecord]? = nil) throws -> [String: RecordingFollowupValidity] {
         let completed = receipts.filter { $0.state == "completed" && $0.result != nil }
         guard !completed.isEmpty else { return [:] }
         let catalogRows: [SourceRecord]

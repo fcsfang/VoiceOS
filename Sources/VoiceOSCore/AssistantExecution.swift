@@ -172,6 +172,14 @@ extension VoiceOSStore {
                      sources: Dictionary(uniqueKeysWithValues: sourceRows.map { ($0.id, $0) }),
                      policyVersions: Dictionary(uniqueKeysWithValues: sourceRows.map { ($0.id, $0.policyVersion) }))
     }
+    /// Batch paths keep one coherent read. Freezes clear the shared context, so
+    /// the step after one rebuilds it once from fresh rows.
+    private func sharedAssistantValidation(_ context: inout AssistantValidationContext?) throws -> AssistantValidationContext {
+        if let context { return context }
+        let built = try StartupTrace.measure("assistantContext") { try assistantValidationContext() }
+        context = built
+        return built
+    }
     private func assistantInput(actionID: String, expectedVersion: Int, instruction: String, instructionSourceID: String? = nil, allowsCompleted: Bool = false, destination: ModelDestination = .local, mode: AssistantMode = .execution) throws -> AssistantTaskInput {
         var context = try assistantValidationContext()
         return try assistantInput(actionID: actionID, expectedVersion: expectedVersion, instruction: instruction, instructionSourceID: instructionSourceID, allowsCompleted: allowsCompleted, destination: destination, mode: mode, context: &context)
@@ -297,7 +305,8 @@ extension VoiceOSStore {
         guard !assistantDiscoveryActive else { return false }; assistantDiscoveryActive = true
         defer { assistantDiscoveryActive = false }
         var changed = false
-        _ = try assistantExecutions()
+        var context: AssistantValidationContext?
+        _ = try assistantExecutions(context: &context)
         for action in try actions() where action.kind == "task" && action.intentActor == "user" && action.state == "open" && action.validity == "current" {
             try Task.checkCancellation()
             let prior = try db.query("SELECT * FROM assistant_assessments WHERE action_id=? AND action_version=?", [action.id,String(action.version)]).first
@@ -311,24 +320,27 @@ extension VoiceOSStore {
                    let assessment = try? JSONDecoder().decode(AssistantAssessment.self, from: Data(json.utf8)),
                    let mode = Self.queuedMode(for: assessment),
                    let cached = try? JSONDecoder().decode(AssistantTaskInput.self, from: Data((prior["input_json"] ?? "").utf8)),
-                   (try? validateAssistantInput(cached, destination: port.configuration.destination)) != nil,
-                   try assistantExecutions(actionID: action.id).isEmpty {
-                    let record = try enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: mode)
-                    try db.execute("UPDATE assistant_executions SET assessment_json=? WHERE id=?", [json,record.id])
-                    changed = true
+                   try assistantExecutions(actionID: action.id, context: &context).isEmpty {
+                    var validation = try sharedAssistantValidation(&context)
+                    if (try? validateAssistantInput(cached, destination: port.configuration.destination, context: &validation)) != nil {
+                        let record = try enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: mode)
+                        try db.execute("UPDATE assistant_executions SET assessment_json=? WHERE id=?", [json,record.id])
+                        changed = true
+                    }
                 }
                 continue
             }
-            guard try assistantExecutions(actionID: action.id).isEmpty,
-                  let input = try? assistantInput(actionID: action.id, expectedVersion: action.version, instruction: ""),
-                  (try? validateAssistantInput(input, destination: port.configuration.destination)) != nil else { continue }
+            guard try assistantExecutions(actionID: action.id, context: &context).isEmpty else { continue }
+            var validation = try sharedAssistantValidation(&context)
+            guard let input = try? assistantInput(actionID: action.id, expectedVersion: action.version, instruction: "", context: &validation),
+                  (try? validateAssistantInput(input, destination: port.configuration.destination, context: &validation)) != nil else { continue }
             let id: String
             if let prior { id = prior["id"]!; try db.execute("UPDATE assistant_assessments SET state='running',input_json=?,error=NULL WHERE id=?", [try Self.relevanceJSON(input),id]) }
             else { id = UUID().uuidString; try db.execute("INSERT INTO assistant_assessments(id,action_id,action_version,input_json,state,created_at) VALUES(?,?,?,?,'running',?)", [id,action.id,String(action.version),try Self.relevanceJSON(input),Self.now()]) }
             changed = true
             do {
                 let result = try await runAssistantAssessment(input, key: "assessment:"+id, using: port)
-                try validateAssistantInput(input, destination: port.configuration.destination)
+                try validateAssistantInput(input, destination: port.configuration.destination, context: &validation)
                 try db.execute("UPDATE assistant_assessments SET state='completed',assessment_json=? WHERE id=?", [try Self.relevanceJSON(result),id])
                 changed = true
                 if let mode = Self.queuedMode(for: result) {
