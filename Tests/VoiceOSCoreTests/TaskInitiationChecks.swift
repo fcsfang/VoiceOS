@@ -267,42 +267,51 @@ final class TaskInitiationChecks: XCTestCase {
     }
 
     func testArchiveOnlyConfirmedHidesFromDefaultListAndKeepsSemantics() async throws {
-        let store = try await openStore()
-        let source = try await personalSource(store, text: "给 Codex 写一个开发提示词。")
-        let draft = try await store.recordTaskInitiation(try await input(store, source: source),
-                                                         proposal: TaskInitiationFixtures.handoff())
-        await expectFailure({ _ = try await store.archiveTaskInitiation(id: draft.id) }, "草稿不能归档")
+        var confirmedID = ""
+        var liveID = ""
+        var archivedAt: String?
+        do {
+            let store = try await openStore()
+            let source = try await personalSource(store, text: "给 Codex 写一个开发提示词。")
+            let draft = try await store.recordTaskInitiation(try await input(store, source: source),
+                                                             proposal: TaskInitiationFixtures.handoff())
+            await expectFailure({ _ = try await store.archiveTaskInitiation(id: draft.id) }, "草稿不能归档")
 
-        let copied = try await store.markTaskInitiationCopied(id: draft.id, artifact: draft.artifact)
-        let confirmed = try await store.confirmTaskInitiation(id: draft.id, artifact: copied.artifact)
-        XCTAssertEqual(confirmed.state, "confirmed")
-        XCTAssertFalse(confirmed.isArchived)
+            let copied = try await store.markTaskInitiationCopied(id: draft.id, artifact: draft.artifact)
+            let confirmed = try await store.confirmTaskInitiation(id: draft.id, artifact: copied.artifact)
+            XCTAssertEqual(confirmed.state, "confirmed")
+            XCTAssertFalse(confirmed.isArchived)
 
-        let archived = try await store.archiveTaskInitiation(id: confirmed.id)
-        XCTAssertTrue(archived.isArchived)
-        XCTAssertEqual(archived.state, "confirmed")
-        XCTAssertEqual(archived.copiedAt, confirmed.copiedAt)
-        XCTAssertEqual(archived.artifact, confirmed.artifact)
+            let archived = try await store.archiveTaskInitiation(id: confirmed.id)
+            XCTAssertTrue(archived.isArchived)
+            XCTAssertEqual(archived.state, "confirmed")
+            XCTAssertEqual(archived.copiedAt, confirmed.copiedAt)
+            XCTAssertEqual(archived.artifact, confirmed.artifact)
+            archivedAt = archived.input.presentation?.archivedAt
 
-        let live = try await store.recordTaskInitiation(try await input(store, source: source),
-                                                        proposal: TaskInitiationFixtures.guided())
-        let liveOnly = try await store.taskInitiations()
-        XCTAssertEqual(liveOnly.map(\.id), [live.id])
-        let all = try await store.taskInitiations(includeArchived: true)
-        XCTAssertEqual(Set(all.map(\.id)), Set([live.id, confirmed.id]))
-        XCTAssertEqual(all.first(where: { $0.id == confirmed.id })?.input.presentation?.archivedAt,
-                       archived.input.presentation?.archivedAt)
+            let live = try await store.recordTaskInitiation(try await input(store, source: source),
+                                                            proposal: TaskInitiationFixtures.guided())
+            confirmedID = confirmed.id
+            liveID = live.id
+            let liveOnly = try await store.taskInitiations()
+            XCTAssertEqual(liveOnly.map(\.id), [live.id])
+            let all = try await store.taskInitiations(includeArchived: true)
+            XCTAssertEqual(Set(all.map(\.id)), Set([live.id, confirmed.id]))
+            XCTAssertEqual(all.first(where: { $0.id == confirmed.id })?.input.presentation?.archivedAt,
+                           archived.input.presentation?.archivedAt)
 
-        let again = try await store.archiveTaskInitiation(id: confirmed.id)
-        XCTAssertEqual(again.input.presentation?.archivedAt, archived.input.presentation?.archivedAt)
-        await expectFailure({ try await store.discardTaskInitiation(id: confirmed.id) },
-                            "已确认的启动包不能删除")
+            let again = try await store.archiveTaskInitiation(id: confirmed.id)
+            XCTAssertEqual(again.input.presentation?.archivedAt, archived.input.presentation?.archivedAt)
+            await expectFailure({ try await store.discardTaskInitiation(id: confirmed.id) },
+                                "已确认的启动包不能删除")
+        }
 
         let reopened = try await makeStore(at: root)
         let reopenedLive = try await reopened.taskInitiations()
-        XCTAssertEqual(reopenedLive.map(\.id), [live.id])
+        XCTAssertEqual(reopenedLive.map(\.id), [liveID])
         let reopenedAll = try await reopened.taskInitiations(includeArchived: true)
-        XCTAssertEqual(reopenedAll.first(where: { $0.id == confirmed.id })?.isArchived, true)
+        XCTAssertEqual(reopenedAll.first(where: { $0.id == confirmedID })?.isArchived, true)
+        XCTAssertEqual(reopenedAll.first(where: { $0.id == confirmedID })?.input.presentation?.archivedAt, archivedAt)
     }
 
     func testInvalidOrIncompleteProposalNeverPersists() async throws {
