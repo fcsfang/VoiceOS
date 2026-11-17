@@ -1057,7 +1057,7 @@ struct WorkspaceView: View {
     }
     private func topicReading(_ topic:ReflectionQuestion,mode:String) -> some View {
         WorkspaceTopicReadingView(model:model,topic:topic,mode:mode,focus:topicFocus,
-            openSource:{ go(.source($0)) },openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },
+            openSource:{ go(.source($0)) },openTopic:{ selectTopic($0) },openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },
             discuss:{ prompt in Task { await toggleDiscussion(force:true,prompt:prompt) } },showActions:{ topicTab="行动与结果" },
             showUnderstanding:{ topicTab="认识与问题";topicReadingMode="卡片" })
             .id(topic.id + mode)
