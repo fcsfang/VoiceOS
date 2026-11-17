@@ -17,7 +17,7 @@ enum WorkspaceRoute: Equatable {
 }
 
 enum WorkspacePageRequest: Equatable {
-    case home, themes, materials, actions, initiate, back
+    case home, themes, materials, actions, initiate, back, processing
 }
 
 /// Which workspace segments one refresh publishes. Interactive keeps the fast
@@ -242,6 +242,8 @@ final class ControlCenter: ObservableObject {
     @Published var pendingWorkspaceRoute: WorkspaceRoute?
     @Published var pendingWorkspacePageRequest: WorkspacePageRequest?
     @Published var pendingWorkspaceTaskID: String?
+    @Published var recentCompletions: [WorkspaceCompletionRecord] = []
+    @Published var noticeAuthorization: LocalNoticeAuthorization = .notRequested
     /// Bumped when a failed processing item is dismissed, so the sidebar dot
     /// and the processing page re-read the persisted dismissal list.
     @Published var processingDismissalRevision = 0
@@ -2055,6 +2057,7 @@ final class ControlCenter: ObservableObject {
                     try await runSavedRecordingOrganization(sourceID: sourceID, transcribeFirst: true, inputs: inputs)
                     refreshTask.cancel()
                     setFullRecordingStatus("上一段口述已整理完成 · 可查看观点与任务")
+                    recordCompletion(category: "口述整理", title: title, sourceID: sourceID)
                     LocalNotice.post(title: "口述整理完成", body: "「" + title + "」的观点与任务已保存。", sourceID: sourceID)
                 } catch is CancellationError {
                     refreshTask.cancel()
@@ -2063,7 +2066,7 @@ final class ControlCenter: ObservableObject {
                     refreshTask.cancel()
                     let reason = error.localizedDescription
                     setFullRecordingStatus("上一段口述整理未完成：" + reason)
-                    LocalNotice.post(title: "口述整理未完成", body: "「" + title + "」：" + reason)
+                    LocalNotice.post(title: "口述整理未完成", body: "「" + title + "」：" + reason, sourceID: sourceID)
                 }
                 processingActivity = nil
                 fullRecordingLog = nil
@@ -2901,11 +2904,15 @@ final class ControlCenter: ObservableObject {
         importing = true
         defer { importing = false }
         var results: [ImportFileResult] = []
+        var importedIDs: [String] = []
         for url in urls {
             let access = url.startAccessingSecurityScopedResource()
             status = "正在保存：\(url.lastPathComponent)"
             do {
-                selected = personalAudio ? try await store.importPersonalAudio(url) : try await store.importFile(url)
+                let id = personalAudio ? try await store.importPersonalAudio(url) : try await store.importFile(url)
+                selected = id
+                importedIDs.append(id)
+                recordCompletion(category: "导入", title: url.lastPathComponent, sourceID: id)
                 results.append(.init(fileName: url.lastPathComponent, succeeded: true, message: "已保存原件，正在本地转写"))
             } catch {
                 status = error.localizedDescription
@@ -2923,17 +2930,20 @@ final class ControlCenter: ObservableObject {
         if failures == 0 { status = "已可靠保存 \(urls.count) 个原件 · 正在本地转写" }
         scheduleProcessing()
         if failures == 0 { status = "导入完成 · 可查看原件和转写状态" }
-        if notify { notifyImportFinished(results) }
+        if notify { notifyImportFinished(results, importedIDs: importedIDs) }
         return failures == 0
     }
-    private func notifyImportFinished(_ results: [ImportFileResult]) {
+    private func notifyImportFinished(_ results: [ImportFileResult], importedIDs: [String] = []) {
         guard !results.isEmpty else { return }
         let failures = results.filter { !$0.succeeded }
+        var remainingIDs = importedIDs.makeIterator()
+        let succeededIDs = results.compactMap { $0.succeeded ? remainingIDs.next() : nil }
+        let sourceID = succeededIDs.count == 1 ? succeededIDs[0] : nil
         if failures.isEmpty {
-            LocalNotice.post(title: "导入完成", body: "已可靠保存 \(results.count) 份材料，正在本地转写。")
+            LocalNotice.post(title: "导入完成", body: "已可靠保存 \(results.count) 份材料，正在本地转写。", sourceID: sourceID)
         } else {
             let detail = failures.prefix(3).map { $0.fileName + "：" + $0.message }.joined(separator: "；")
-            LocalNotice.post(title: "导入未全部完成", body: "成功 \(results.count - failures.count) 份，失败 \(failures.count) 份。" + detail + (failures.count > 3 ? "；等" : ""))
+            LocalNotice.post(title: "导入未全部完成", body: "成功 \(results.count - failures.count) 份，失败 \(failures.count) 份。" + detail + (failures.count > 3 ? "；等" : ""), sourceID: sourceID)
         }
     }
     private func scheduleProcessing() {
@@ -3344,7 +3354,7 @@ final class ControlCenter: ObservableObject {
     private func installReminderRefresh() {
         guard reminderObservers.isEmpty else { return }
         reminderObservers.append(reminders.observeChanges { [weak self] in self?.requestReminderRefresh() })
-        reminderObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in await self?.refresh(.full); self?.requestReminderRefresh(); self?.resumeRecordingFollowups(); self?.resumeKnowledgeReviews() } })
+        reminderObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in await self?.refresh(.full); self?.requestReminderRefresh(); self?.resumeRecordingFollowups(); self?.resumeKnowledgeReviews(); await self?.refreshNoticeAuthorization() } })
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh(); self?.resumeRecordingFollowups(); self?.resumeKnowledgeReviews() } }
         reminderTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh() } }
         followupTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in await self?.refresh(.full); self?.resumeRecordingFollowups(); self?.resumeAssistantExecutions(); self?.resumeKnowledgeReviews() } }
@@ -3817,6 +3827,28 @@ final class ControlCenter: ObservableObject {
     }
 }
 
+enum LocalNoticeAuthorization: Equatable {
+    case notRequested, authorized, denied
+}
+
+extension ControlCenter {
+    var noticeAuthorizationDetail: String {
+        switch noticeAuthorization {
+        case .notRequested: return "未请求 · 第一次完成长任务时会询问一次；处理页也保留最近完成"
+        case .authorized: return "已允许 · 长任务完成与核对结果会出现在通知中心"
+        case .denied: return "系统已拒绝 · 完成提醒不会出现；可在系统通知设置中允许"
+        }
+    }
+    func refreshNoticeAuthorization() async {
+        let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        let next: LocalNoticeAuthorization = status == .notDetermined ? .notRequested : status == .denied ? .denied : .authorized
+        if noticeAuthorization != next { noticeAuthorization = next }
+    }
+    func openNoticeSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension")!)
+    }
+}
+
 /// Local completion notices for long work. The first notifiable event asks
 /// once; a refused request stays silent and the in-app processing page is the
 /// fallback surface.
@@ -3861,11 +3893,18 @@ final class NoticeDelegate: NSObject, UNUserNotificationCenterDelegate {
         [.banner, .sound]
     }
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard response.actionIdentifier == LocalNotice.openSourceAction,
-              let sourceID = response.notification.request.content.userInfo["sourceID"] as? String else { return }
-        await MainActor.run {
-            (NSApp.delegate as? ApplicationDelegate)?.openMainWindow()
-            ControlCenter.primary?.selected = sourceID
+        let sourceID = response.notification.request.content.userInfo["sourceID"] as? String
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+            await MainActor.run {
+                (NSApp.delegate as? ApplicationDelegate)?.openMainWindow()
+                if let sourceID { ControlCenter.primary?.selected = sourceID }
+                else { ControlCenter.primary?.pendingWorkspacePageRequest = .processing }
+            }
+        } else if response.actionIdentifier == LocalNotice.openSourceAction, let sourceID {
+            await MainActor.run {
+                (NSApp.delegate as? ApplicationDelegate)?.openMainWindow()
+                ControlCenter.primary?.selected = sourceID
+            }
         }
     }
 }
@@ -5175,14 +5214,15 @@ extension ControlCenter {
             transcriptReviewFailures[key] = nil
             try? await store.clearTranscriptionReviewFailure(sourceID: sourceID)
             transcriptReviewStatus = "全文转写校正已完成；仍有疑点的地方保留待核对。"
-            LocalNotice.post(title: "完整转写核对完成", body: "「\(source.displayTitle)」已可继续云端理解。")
+            recordCompletion(category: "转写核对", title: source.displayTitle, sourceID: sourceID)
+            LocalNotice.post(title: "完整转写核对完成", body: "「\(source.displayTitle)」已可继续云端理解。", sourceID: sourceID)
             await refresh()
         } catch {
             let reason = error.localizedDescription
             transcriptReviewFailures[key] = reason
             try? await store.recordTranscriptionReviewFailure(sourceID: sourceID, reason: reason)
             transcriptReviewStatus = "转写校正尚未完成：" + reason
-            LocalNotice.post(title: "完整转写核对未完成", body: "「\(source.displayTitle)」：" + reason)
+            LocalNotice.post(title: "完整转写核对未完成", body: "「\(source.displayTitle)」：" + reason, sourceID: sourceID)
             throw error
         }
     }
