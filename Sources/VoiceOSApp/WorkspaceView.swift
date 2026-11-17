@@ -619,6 +619,7 @@ struct WorkspaceView: View {
                     case .materials: path=[];page = .materials;error=""
                     case .actions: path=[];page = .actions;error=""
                     case .initiate: path=[];page = .initiate;error=""
+                    case .processing: path=[];page = .tool("处理情况");error=""
                     case .back: back()
                     }
                 }
@@ -1612,6 +1613,9 @@ struct WorkspaceView: View {
             WorkspaceRow(title:"Apple 提醒事项",subtitle:model.remindersPermissionDenied ? "系统权限已拒绝，需要在系统设置中允许后重试" : model.reminderCalendarTitle,icon:"checklist") { Task { await model.connectReminders() } }
             if model.remindersPermissionDenied { Button("打开系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!) } }
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
+            WorkspaceRow(title:"系统通知",subtitle:model.noticeAuthorizationDetail,icon:"bell") { model.openNoticeSettings() }
+                .task { await model.refreshNoticeAuthorization() }
+            if model.noticeAuthorization == .denied { Button("打开系统通知设置") { model.openNoticeSettings() } }
             Toggle("登录时启动", isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLogin($0) }))
                 .toggleStyle(.switch).frame(maxWidth: 360, alignment: .leading)
             Text(model.launchAtLoginStatus).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
