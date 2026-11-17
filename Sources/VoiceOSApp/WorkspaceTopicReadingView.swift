@@ -8,6 +8,7 @@ struct WorkspaceTopicReadingView: View {
     let mode: String
     let focus: ConversationReflectionFocus?
     let openSource: (String) -> Void
+    let openTopic: (String) -> Void
     let openTask: (String) -> Void
     let openDelivery: (String) -> Void
     let discuss: (String) -> Void
@@ -72,6 +73,32 @@ struct WorkspaceTopicReadingView: View {
             connectionDate($0) > connectionDate($1)
         }
     }
+    private struct AdjacentTopic: Identifiable {
+        let topic: ReflectionQuestion
+        let sharedCount: Int
+        var id: String { topic.id }
+    }
+    private var adjacentTopics: [AdjacentTopic] {
+        let sourceIDs = Set(model.workspaceTopicSources[topic.id] ?? [])
+        guard !sourceIDs.isEmpty else { return [] }
+        return model.workspaceTopics.compactMap { other -> AdjacentTopic? in
+            guard other.id != topic.id else { return nil }
+            let shared = Set(model.workspaceTopicSources[other.id] ?? []).intersection(sourceIDs).count
+            return shared > 0 ? AdjacentTopic(topic: other, sharedCount: shared) : nil
+        }.sorted { left, right in
+            if left.sharedCount != right.sharedCount { return left.sharedCount > right.sharedCount }
+            return left.topic.title.localizedStandardCompare(right.topic.title) == .orderedAscending
+        }
+    }
+    @ViewBuilder private var adjacentTopicsSection: some View {
+        if !adjacentTopics.isEmpty {
+            WorkspaceSection(title:"相邻主题",icon:"point.3.connected.trianglepath.dotted",count:adjacentTopics.count) {
+                ForEach(adjacentTopics) { adjacent in
+                    WorkspaceRow(title:adjacent.topic.title,subtitle:"共享 \(adjacent.sharedCount) 份材料",icon:"circle.hexagongrid",trailing:"查看") { openTopic(adjacent.topic.id) }
+                }
+            }
+        }
+    }
 
     var body: some View {
         VStack(alignment:.leading,spacing:28) {
@@ -88,6 +115,7 @@ struct WorkspaceTopicReadingView: View {
                     } else { structure }
                     if mode == "概览" { overviewReadingCards } else { readingCards }
                 }
+                adjacentTopicsSection
                 connectionsSection
                 TopicUnlinkedReferencesSection(model:model,topic:topic)
                 if mode == "认识与问题" { questions; personalEntries }
