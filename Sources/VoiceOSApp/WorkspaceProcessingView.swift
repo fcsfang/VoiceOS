@@ -163,12 +163,24 @@ extension ControlCenter {
     var workspaceFailedAssistantExecutions: [AssistantExecutionRecord] {
         assistantExecutions.filter { $0.validity == "current" && $0.state == "failed" && !ProcessingDismissals.isIgnored("assistant:" + $0.id) }
     }
+    /// The newest segmented batch per source. An older rejected record becomes
+    /// history once a retry or a correction produced a newer batch.
+    var workspaceSegmentedBatchFailures: [SegmentedProcessingBatch] {
+        var latest: [String: SegmentedProcessingBatch] = [:]
+        for batch in segmentedBatches {
+            let sourceID = batch.scope.plan.source.sourceID
+            if let current = latest[sourceID], (current.createdAt, current.id) > (batch.createdAt, batch.id) { continue }
+            latest[sourceID] = batch
+        }
+        return latest.values.filter { [.rejected, .unknown].contains($0.state) }
+            .sorted { ($0.createdAt, $0.id) > ($1.createdAt, $1.id) }
+    }
     var workspaceNeedsAttention: Bool {
         !startupIssue.isEmpty || !workspacePausedTasks.isEmpty || records.contains { ["failed","blocked"].contains($0.jobState ?? "") || ["interrupted","quarantined"].contains($0.state) } ||
         records.contains { $0.needsEmptyTranscriptionReview } ||
         workspaceUnfinishedIntents.contains { [.blocked,.unknown,.rejected].contains($0.state) } ||
         recordingRequests.contains { $0.state == "blocked" } || !workspaceFailedAssistantExecutions.isEmpty ||
-        workspacePanoramaFailure != nil ||
+        workspacePanoramaFailure != nil || !workspaceSegmentedBatchFailures.isEmpty ||
         records.contains { transcriptReviewIssue(for:$0) != nil } ||
         reminderFieldIssue != nil || !assistantAssessmentIssues.isEmpty
     }
@@ -330,6 +342,23 @@ struct WorkspaceProcessingView: View {
                             }
                         }
                         reasons(waiting.compactMap { request in request.error.map { (name(request.sourceID),$0) } })
+                    }
+                }
+                let segmentedFailures=model.workspaceSegmentedBatchFailures
+                if !segmentedFailures.isEmpty {
+                    WorkspaceSection(title:"长录音分段理解未完成",subtitle:"模型输出未通过本地校验，原文与旧处理记录保留。整批重试会作为新的处理任务发送，不覆盖这次记录。",icon:"rectangle.3.group.bubble",count:segmentedFailures.count) {
+                        ForEach(segmentedFailures) { batch in
+                            VStack(alignment:.leading,spacing:6) {
+                                WorkspaceRow(title:name(batch.scope.plan.source.sourceID),subtitle:batch.state.allowsExplicitRetry ? "输出未通过校验，可整批重试" : "结果未知，未自动重发",trailing:"查看材料") { openSource(batch.scope.plan.source.sourceID) }
+                                if let error=batch.error { reason(error) }
+                                if batch.state.allowsExplicitRetry {
+                                    Button("整批重试") { model.retrySegmentedBatch(batch) }
+                                        .disabled(model.understandingSource != nil || !model.modelConfigured || model.fullRecordingBusy)
+                                        .accessibilityLabel("整批重试长录音分段理解：" + name(batch.scope.plan.source.sourceID))
+                                        .padding(.leading,44).padding(.bottom,8)
+                                }
+                            }
+                        }
                     }
                 }
                 WorkspaceExternalCompletionBatchSection(model:model)
