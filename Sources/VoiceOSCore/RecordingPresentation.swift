@@ -25,6 +25,15 @@ public struct RecordingPresentation: Codable, Sendable {
     public var correctedActionIDs: [String]?
     public var correctedSourceIDs: [String]?
     public var recordingUnderstandingIsCorrection: Bool?
+    public var transcriptionReviewFailure: TranscriptionReviewFailure?
+}
+/// Why the last full-transcript review failed, scoped to the transcript and
+/// policy version it ran against so a later correction retires it.
+public struct TranscriptionReviewFailure: Codable, Sendable, Equatable {
+    public let reason: String
+    public let transcriptVersionID: String
+    public let policyVersion: Int
+    public let failedAt: Date
 }
 public struct TranscriptionReview: Codable, Sendable {
     public struct Correction: Codable, Sendable {
@@ -292,5 +301,47 @@ extension VoiceOSStore {
             }
         }
         return detached.count
+    }
+}
+
+public extension SourceRecord {
+    /// The stored full-transcript review failure, valid only for the current
+    /// transcript and policy version.
+    var transcriptionReviewFailure: TranscriptionReviewFailure? {
+        guard let failure = presentation?.transcriptionReviewFailure,
+              failure.transcriptVersionID == transcriptVersionID,
+              failure.policyVersion == policyVersion else { return nil }
+        return failure
+    }
+}
+
+extension VoiceOSStore {
+    public func recordTranscriptionReviewFailure(sourceID: String, reason: String) throws {
+        guard let source = try sources().first(where: { $0.id == sourceID }), let version = source.transcriptVersionID else {
+            throw VoiceOSError("转写核对失败无法留存：缺少当前文字版本")
+        }
+        let clean = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { throw VoiceOSError("转写核对失败需要原因") }
+        var saved = source.presentation ?? RecordingPresentation()
+        let previous = saved.transcriptionReviewFailure
+        let failure = TranscriptionReviewFailure(reason: clean, transcriptVersionID: version,
+            policyVersion: source.policyVersion, failedAt: previous?.failedAt ?? Date())
+        guard previous != failure else { return }
+        saved.transcriptionReviewFailure = failure
+        try savePresentation(saved, sourceID: sourceID)
+    }
+    public func clearTranscriptionReviewFailure(sourceID: String) throws {
+        guard let source = try sources().first(where: { $0.id == sourceID }), var saved = source.presentation,
+              saved.transcriptionReviewFailure != nil else { return }
+        saved.transcriptionReviewFailure = nil
+        try savePresentation(saved, sourceID: sourceID)
+    }
+    /// Failures still matching their material's current transcript and policy
+    /// version, keyed exactly as the in-memory review dictionary.
+    public func storedTranscriptionReviewFailures() throws -> [String: String] {
+        Dictionary(uniqueKeysWithValues: try sources().compactMap { source in
+            guard let failure = source.transcriptionReviewFailure else { return nil }
+            return (source.id + ":" + failure.transcriptVersionID + ":" + String(failure.policyVersion), failure.reason)
+        })
     }
 }
