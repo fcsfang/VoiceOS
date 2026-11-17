@@ -4254,6 +4254,15 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
             appendTodayOverviewSection("逾期", entries: overdue, to: &items)
             appendTodayOverviewSection("今天", entries: dueToday, to: &items)
         }
+        let unscheduled = surface.anytime.filter { $0.due == nil }.count
+        if unscheduled > 0 {
+            let note = NSMenuItem(title: "另有 \(unscheduled) 条未排期任务", action: nil, keyEquivalent: "")
+            note.isEnabled = false
+            items.append(note)
+        }
+        let viewAllActions = NSMenuItem(title: "查看全部行动…", action: #selector(openTodayOverviewActions(_:)), keyEquivalent: "")
+        viewAllActions.target = self
+        items.append(viewAllActions)
         items.append(.separator())
         let index = menu.index(of: clipboard) + 1
         for (offset, item) in items.enumerated() { menu.insertItem(item, at: index + offset) }
@@ -4278,6 +4287,10 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         guard let id = sender.representedObject as? String, let model = ControlCenter.primary else { return }
         openMainWindow()
         model.pendingWorkspaceTaskID = id
+    }
+
+    @objc private func openTodayOverviewActions(_ sender: NSMenuItem) {
+        openWorkspacePage(.actions)
     }
 
     @objc private func quitApplication() { NSApp.terminate(nil) }
@@ -4340,7 +4353,7 @@ struct VoiceOSApp: App {
                     Button("启动") { delegate.openWorkspacePage(.initiate) }.keyboardShortcut("5")
                     Button("返回") { delegate.openWorkspacePage(.back) }.keyboardShortcut("[")
                     Divider()
-                    Button("每周回顾") { delegate.openWeeklyReview() }
+                    Button("每周回顾") { delegate.openWeeklyReview() }.keyboardShortcut("e", modifiers: [.command, .shift])
                 }
                 CommandMenu("记录") {
                     Button("口述") { ControlCenter.primary?.toggleCaptureDictation() }.keyboardShortcut("d", modifiers: [.command, .option])

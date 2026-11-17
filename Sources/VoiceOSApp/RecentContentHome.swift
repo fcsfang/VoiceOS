@@ -42,15 +42,18 @@ struct RecentContentHome: View {
     }
 
     var body: some View {
-        Group {
-            if items.isEmpty {
-                empty.onAppear { StartupTrace.mark("home.appear.empty") }
-            } else {
-                HStack(spacing: 0) {
-                    timeline.frame(width: 264)
-                    Rectangle().fill(palette.border).frame(width: 1)
-                    reader
-                }.onAppear { StartupTrace.mark("home.appear items=\(items.count)") }
+        VStack(spacing: 0) {
+            homeHeader
+            Group {
+                if items.isEmpty {
+                    empty.onAppear { StartupTrace.mark("home.appear.empty") }
+                } else {
+                    HStack(spacing: 0) {
+                        timeline.frame(width: 264)
+                        Rectangle().fill(palette.border).frame(width: 1)
+                        reader
+                    }.onAppear { StartupTrace.mark("home.appear items=\(items.count)") }
+                }
             }
         }
         .onAppear { syncSelection() }
@@ -67,6 +70,23 @@ struct RecentContentHome: View {
     private func syncSelection() {
         RecentContentHomeSelection.shared.itemID = selected?.id
         if let id = selected?.id, id != storedSelection { storedSelection = id }
+    }
+
+    private var homeHeader: some View {
+        HStack(spacing: 12) {
+            Spacer()
+            Button("每周回顾", systemImage: "calendar.badge.clock") { openWeeklyReview() }
+                .buttonStyle(.plain).vosFont(WorkspaceText.meta.size, weight: .medium)
+                .foregroundStyle(palette.accent)
+                .help("打开每周回顾：完成、待补结果、停滞目标与待确认")
+        }
+        .padding(.horizontal, 18).padding(.vertical, 8)
+        .background(palette.canvas)
+        .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
+    }
+
+    private func openWeeklyReview() {
+        model.pendingWorkspaceRoute = .weeklyReview
     }
 
     private var empty: some View {
@@ -261,7 +281,11 @@ struct RecentContentHome: View {
                     .vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText)
                     .accessibilityAddTraits(.isHeader)
                 if let badge = outcomeBadge {
-                    Text(badge).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                    Button(badge) { openWeeklyReview() }
+                        .buttonStyle(.plain)
+                        .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                        .help("打开每周回顾，记录这些结果")
+                        .accessibilityLabel("待补结果，" + badge + "，打开每周回顾")
                 }
                 Spacer(minLength: 0)
             }
