@@ -138,6 +138,17 @@ public struct RecordingFollowupReceipt: Codable, Sendable, Identifiable {
     public var rejectedResponses: [RecordingFollowupRejectedResponse]? = nil
     public var sourceID: String { input.current.sources[0].sourceID }
 }
+/// Versioned launch summary of stored receipts. It keeps everything the
+/// workspace renders, but drops transcript texts and spans so a large archive
+/// never needs a full JSON decode at startup.
+public struct FollowupReceiptDigest: Codable, Sendable {
+    public static let currentVersion = 1
+    public let version: Int
+    public let receipts: [RecordingFollowupReceipt]
+    public init(version: Int = FollowupReceiptDigest.currentVersion, receipts: [RecordingFollowupReceipt]) {
+        self.version = version; self.receipts = receipts
+    }
+}
 public struct RecordingFollowupValidity: Sendable {
     public let sourceCurrent: Bool
     public let thoughtClaimIDs: Set<String>
@@ -272,8 +283,8 @@ extension VoiceOSStore {
                   old.policyVersion == prior.input.policyVersion, let version = old.transcriptVersionID,
                   version == prior.input.current.sources[0].transcriptVersionID, let text = old.transcript,
                   !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  (try? validateLocalTranscriptContext(prior.input.current)) != nil,
-                  (try? validateContinuousRecordingContext(prior.input.continuousExpression, sourceID: old.id)) != nil,
+                  (try? followupContextIsCurrent(prior.input.current)) != nil,
+                  (try? followupContinuousIsCurrent(prior.input.continuousExpression, sourceID: old.id)) != nil,
                   let english = prior.result?.english else { continue }
             let ownFeedback = PracticeFollowup(isPractice: english.isPractice, evidenceQuote: english.evidenceQuote,
                 suggestions: english.suggestions, comparisons: [], nextExercise: english.nextExercise)
@@ -311,40 +322,51 @@ extension VoiceOSStore {
     }
 
     /// The stored digest is the archive identity. A cache hit reuses the decoded
-    /// history without the body leaving SQLite; only a row whose digest is
-    /// missing or no longer matches the cache is read, and a missing digest is
-    /// hashed and written back once.
+    /// history without the body leaving SQLite; a row with a current receipt
+    /// digest decodes only that small document. Only a missing or mismatched
+    /// digest reads the body, then writes the receipt digest back once.
     public func recordingFollowups() throws -> [RecordingFollowupReceipt] {
-        let rows = try db.query("SELECT id,followup_digest FROM sources WHERE followup_json IS NOT NULL ORDER BY created_at")
+        let rows = try db.query("SELECT id,followup_digest,followup_receipt_digest FROM sources WHERE followup_json IS NOT NULL ORDER BY created_at")
         var decoded: [RecordingFollowupReceipt] = []
         var cache = recordingFollowupDecodeCache
-        var reused = 0, parsed = 0, backfilled = 0
+        var reused = 0, parsed = 0, digested = 0, backfilled = 0
         let token = StartupTrace.begin("followups.decode")
         for row in rows {
             guard let id = row["id"] else { continue }
             if let digest = row["followup_digest"], let cached = cache[id], cached.digest == digest {
                 decoded.append(contentsOf: cached.receipts); reused += cached.receipts.count; continue
             }
+            // The receipt digest is written together with the body hash. When
+            // the hash is gone the body may have been replaced, so fall through.
+            if let digest = row["followup_digest"], let stored = row["followup_receipt_digest"],
+               let document = try? JSONDecoder().decode(FollowupReceiptDigest.self, from: Data(stored.utf8)),
+               document.version == FollowupReceiptDigest.currentVersion {
+                cache[id] = (digest, document.receipts)
+                decoded.append(contentsOf: document.receipts); digested += document.receipts.count; continue
+            }
             guard let json = try db.query("SELECT followup_json FROM sources WHERE id=?", [id]).first?["followup_json"] else { continue }
             let digest: String
             if let stored = row["followup_digest"] { digest = stored }
             else {
                 digest = Self.relevanceHash(Data(json.utf8))
-                try db.execute("UPDATE sources SET followup_digest=? WHERE id=?", [digest, id])
                 backfilled += 1
             }
+            let receipts: [RecordingFollowupReceipt]
             if let cached = cache[id], cached.digest == digest {
-                cache[id] = (digest, cached.receipts)
-                decoded.append(contentsOf: cached.receipts); reused += cached.receipts.count; continue
+                receipts = cached.receipts; reused += receipts.count
+            } else {
+                receipts = try decodeWithPath([RecordingFollowupReceipt].self, from: Data(json.utf8), label: "跟进回执")
+                parsed += receipts.count
             }
-            let receipts = try decodeWithPath([RecordingFollowupReceipt].self, from: Data(json.utf8), label: "跟进回执")
-            cache[id] = (digest, receipts)
-            decoded.append(contentsOf: receipts); parsed += receipts.count
+            let slim = Self.followupDigestReceipts(receipts)
+            try db.execute("UPDATE sources SET followup_digest=?,followup_receipt_digest=? WHERE id=?", [digest, try Self.followupDigestJSON(receipts), id])
+            cache[id] = (digest, slim)
+            decoded.append(contentsOf: slim)
         }
         StartupTrace.end(token)
         let live = Set(rows.compactMap { $0["id"] })
         recordingFollowupDecodeCache = cache.filter { live.contains($0.key) }
-        StartupTrace.mark("followups=\(decoded.count) reused=\(reused) parsed=\(parsed) backfilled=\(backfilled)")
+        StartupTrace.mark("followups=\(decoded.count) reused=\(reused) parsed=\(parsed) digested=\(digested) backfilled=\(backfilled)")
         return decoded.sorted { $0.createdAt < $1.createdAt }
     }
     /// Requeues interrupted receipts and compacts legacy histories. Runs after the
@@ -404,13 +426,72 @@ extension VoiceOSStore {
         }.reversed()
     }
     private func saveRecordingFollowup(_ value: RecordingFollowupReceipt) throws {
-        let receipt = compactFollowup(value)
-        var history = try db.query("SELECT followup_json FROM sources WHERE id=?", [receipt.sourceID]).first?["followup_json"].map { try decodeWithPath([RecordingFollowupReceipt].self, from: Data($0.utf8), label: "跟进回执") } ?? []
+        var history = try db.query("SELECT followup_json FROM sources WHERE id=?", [value.sourceID]).first?["followup_json"].map { try decodeWithPath([RecordingFollowupReceipt].self, from: Data($0.utf8), label: "跟进回执") } ?? []
+        var receipt = value
+        // Callers that mutate a receipt read from the digest hand back a bodyless
+        // copy; keep the full stored input so the archive retains source text.
+        if Self.isDigestReceipt(receipt), let stored = history.first(where: { $0.id == receipt.id }), stored.inputDigest == receipt.inputDigest {
+            receipt.input = stored.input
+        }
+        receipt = compactFollowup(receipt)
         if let index = history.firstIndex(where: { $0.id == receipt.id }) { history[index] = receipt } else { history.append(receipt) }
         let json = String(decoding: try JSONEncoder().encode(history), as: UTF8.self)
         let digest = Self.relevanceHash(Data(json.utf8))
-        try db.execute("UPDATE sources SET followup_json=?,followup_digest=? WHERE id=?", [json, digest, receipt.sourceID])
-        recordingFollowupDecodeCache[receipt.sourceID] = (digest, history)
+        try db.execute("UPDATE sources SET followup_json=?,followup_digest=?,followup_receipt_digest=? WHERE id=?", [json, digest, try Self.followupDigestJSON(history), receipt.sourceID])
+        recordingFollowupDecodeCache[receipt.sourceID] = (digest, Self.followupDigestReceipts(history))
+    }
+    /// Receipts the launch snapshot can render without transcript bodies: result
+    /// and metadata stay, only long source texts, practices and spans are gone.
+    static func followupDigestReceipts(_ receipts: [RecordingFollowupReceipt]) -> [RecordingFollowupReceipt] {
+        receipts.map(digestReceipt)
+    }
+    static func followupDigestJSON(_ receipts: [RecordingFollowupReceipt]) throws -> String {
+        try relevanceJSON(FollowupReceiptDigest(receipts: followupDigestReceipts(receipts)))
+    }
+    private static func digestReceipt(_ receipt: RecordingFollowupReceipt) -> RecordingFollowupReceipt {
+        let input = receipt.input
+        var slim = receipt
+        slim.input = RecordingFollowupInput(current: digestContext(input.current), policyVersion: input.policyVersion, recordedAt: input.recordedAt,
+            thoughts: input.thoughts, goals: input.goals, tasks: input.tasks,
+            practices: input.practices.map { PracticeHistory(sourceID: $0.sourceID, transcriptVersionID: $0.transcriptVersionID, text: "", feedback: $0.feedback, policyVersion: $0.policyVersion) },
+            currentUnderstanding: input.currentUnderstanding, feedbackActionID: input.feedbackActionID,
+            continuousExpression: input.continuousExpression.map {
+                ContinuousRecordingContext(expressionID: $0.expressionID, digest: $0.digest, context: digestContext($0.context), policies: $0.policies)
+            })
+        return slim
+    }
+    private static func digestContext(_ context: LocalTranscriptContext) -> LocalTranscriptContext {
+        LocalTranscriptContext(sources: context.sources.map {
+            ContextTranscript(sourceID: $0.sourceID, sourceVersionID: $0.sourceVersionID, transcriptVersionID: $0.transcriptVersionID,
+                origin: $0.origin, speaker: $0.speaker, localOnly: $0.localOnly, text: "", spans: [], transcriptionReview: $0.transcriptionReview)
+        }, scalarBudget: context.scalarBudget, contentDigest: context.contentDigest,
+            conversationFocus: context.conversationFocus, reflectionFocus: context.reflectionFocus,
+            recordingContexts: context.recordingContexts)
+    }
+    static func isDigestReceipt(_ receipt: RecordingFollowupReceipt) -> Bool { isDigestContext(receipt.input.current) }
+    private static func isDigestContext(_ context: LocalTranscriptContext) -> Bool {
+        !context.sources.isEmpty && context.sources.allSatisfy { $0.text.isEmpty }
+    }
+    /// Digest receipts carry no transcript text, so re-hash the current read and
+    /// compare digests instead of re-hashing the stored sources.
+    private func followupContextIsCurrent(_ context: LocalTranscriptContext) throws {
+        guard Self.isDigestContext(context) else { try validateLocalTranscriptContext(context); return }
+        let current = try prepareLocalTranscriptContext(sourceIDs: context.sources.map(\.sourceID), scalarBudget: context.scalarBudget)
+        guard try Self.relevanceJSON(current.recordingContexts) == Self.relevanceJSON(context.recordingContexts),
+              current.contentDigest == context.contentDigest else { throw VoiceOSError("上下文来源或逐字稿已变化，请重新准备") }
+    }
+    private func followupContinuousIsCurrent(_ input: ContinuousRecordingContext?, sourceID: String) throws {
+        try followupContinuousIsCurrent(input, sourceID: sourceID, catalog: try sources(), expressions: try recordingExpressions())
+    }
+    private func followupContinuousIsCurrent(_ input: ContinuousRecordingContext?, sourceID: String, catalog: [SourceRecord], expressions: [RecordingExpression]) throws {
+        guard let input, Self.isDigestContext(input.context) else {
+            try validateContinuousRecordingContext(input, sourceID: sourceID, catalog: catalog, expressions: expressions); return
+        }
+        guard let current = try continuousRecordingContext(sourceID: sourceID, catalog: catalog, expressions: expressions),
+              current.expressionID == input.expressionID, current.digest == input.digest,
+              current.policies == input.policies, current.context.scalarBudget == input.context.scalarBudget,
+              try Self.relevanceJSON(current.context.recordingContexts) == Self.relevanceJSON(input.context.recordingContexts),
+              current.context.contentDigest == input.context.contentDigest else { throw VoiceOSError("连续表达的分段、原话或授权已变化") }
     }
     public func recordingFollowupValidity(_ receipt: RecordingFollowupReceipt) throws -> RecordingFollowupValidity {
         try recordingFollowupValidities([receipt])[receipt.id] ?? .init(sourceCurrent: false, thoughtClaimIDs: [], goalIDs: [], english: false)
@@ -461,7 +542,7 @@ extension VoiceOSStore {
         func contextIsCurrent(_ context: LocalTranscriptContext) -> Bool {
             let key = context.contentDigest + "|" + String(context.scalarBudget) + "|" + ((try? Self.relevanceJSON(context.recordingContexts)) ?? "")
             if let cached = contextValidity[key] { return cached }
-            let current = (try? validateLocalTranscriptContext(context)) != nil
+            let current = (try? followupContextIsCurrent(context)) != nil
             contextValidity[key] = current
             return current
         }
@@ -472,7 +553,7 @@ extension VoiceOSStore {
                 key = sourceID + "|" + input.expressionID + "|" + input.digest + "|" + ((try? Self.relevanceJSON(input.policies)) ?? "")
             } else { key = sourceID + "|none" }
             if let cached = continuousValidity[key] { return cached }
-            let current = (try? validateContinuousRecordingContext(input, sourceID: sourceID, catalog: catalogRows, expressions: expressions)) != nil
+            let current = (try? followupContinuousIsCurrent(input, sourceID: sourceID, catalog: catalogRows, expressions: expressions)) != nil
             continuousValidity[key] = current
             return current
         }
