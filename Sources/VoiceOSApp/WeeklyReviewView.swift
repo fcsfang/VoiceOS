@@ -417,14 +417,46 @@ struct WeeklyReviewView: View {
         return WorkspaceSection(title: "本周结果", subtitle: "最近 7 天记录的结果与进展。", icon: "checkmark.seal", count: weekProgress.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 if index > 0 { Divider() }
-                reviewRow(title: row.taskTitle, subtitle: row.relationLabel, detail: row.text,
-                          trailing: dayLabel(row.date), enabled: row.isTaskAvailable) { openTask(row.actionID) }
+                if row.isTaskAvailable {
+                    reviewRow(title: row.taskTitle, subtitle: row.relationLabel, detail: row.text,
+                              trailing: dayLabel(row.date)) { openTask(row.actionID) }
+                } else {
+                    unavailableProgressRow(row)
+                }
             }
             if weekProgress.count > rows.count {
                 Text("还有 \(weekProgress.count - rows.count) 条结果，到对应任务详情查看。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
             }
         }
     }
+    private func unavailableProgressRow(_ row: RecentContentProgressRow) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "circle").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                .frame(width: 34, height: 34)
+                .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(StatementTagParser.split(row.taskTitle).text).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
+                Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                Text(row.text).vosFont(WorkspaceText.body).lineSpacing(3).lineLimit(3).multilineTextAlignment(.leading)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(progressUnavailableReason(row)).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
+                if model.records.contains(where: { $0.id == row.id }) {
+                    Button("查看材料") { model.requestWorkspaceSource(row.id); dismiss() }
+                        .buttonStyle(.bordered).controlSize(.small)
+                }
+            }
+        }
+        .padding(.vertical, 14).padding(.horizontal, 10)
+    }
+
+    private func progressUnavailableReason(_ row: RecentContentProgressRow) -> String {
+        guard let action = model.actionRecords.first(where: { $0.id == row.actionID }) else { return "任务已结束" }
+        return model.workspaceTaskRequiresReview(action) ? "任务已暂停" : "任务已结束"
+    }
+
     private var weekCompletedSection: some View {
         WorkspaceSection(title: "本周完成", subtitle: "最近 7 天登记完成的行动，按完成时间倒序；没有记录结果的仍留在列表里。", icon: "checkmark.circle", count: weekCompleted.count) {
             ForEach(Array(weekCompleted.enumerated()), id: \.element.id) { index, action in
@@ -571,7 +603,7 @@ struct WeeklyReviewView: View {
         }
     }
     private func reviewRow(title: String, subtitle: String, detail: String = "", trailing: String = "",
-                           icon: String = "circle", enabled: Bool = true, accessibilityLabel: String? = nil,
+                           icon: String = "circle", accessibilityLabel: String? = nil,
                            open: @escaping () -> Void) -> some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 14) {
@@ -597,7 +629,7 @@ struct WeeklyReviewView: View {
             .padding(.vertical, 14).padding(.horizontal, 10)
             .contentShape(Rectangle())
             .accessibilityElement(children: .combine)
-        }.buttonStyle(.plain).disabled(!enabled)
+        }.buttonStyle(.plain)
             .accessibilityLabelIfPresent(accessibilityLabel)
             .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
     }
