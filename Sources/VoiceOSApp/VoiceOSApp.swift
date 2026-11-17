@@ -177,6 +177,28 @@ final class ControlCenter: ObservableObject {
             await refresh(); queueRecordingTitles(); return true
         } catch { recordingTitleStatus = error.localizedDescription; return false }
     }
+    @Published var recentClueOverrides: [RecentClueOverride] = []
+    func renameRecentClue(_ clue: String, title: String?) async -> Bool {
+        guard let store else { status = "资料库尚未打开，无法修改线索标题"; return false }
+        do {
+            try await store.setRecentClueTitle(clue: clue, title: title, commandID: "recent-clue-title:" + UUID().uuidString)
+            await refresh(); return true
+        } catch { status = error.localizedDescription; return false }
+    }
+    func mergeRecentClue(_ clue: String, into target: String) async -> Bool {
+        guard let store else { status = "资料库尚未打开，无法合并线索"; return false }
+        do {
+            try await store.mergeRecentClue(clue, into: target, commandID: "recent-clue-merge:" + UUID().uuidString)
+            await refresh(); return true
+        } catch { status = error.localizedDescription; return false }
+    }
+    func setRecentClueHidden(_ clue: String, hidden: Bool) async -> Bool {
+        guard let store else { status = "资料库尚未打开，无法隐藏线索"; return false }
+        do {
+            try await store.setRecentClueHidden(clue: clue, hidden: hidden, commandID: "recent-clue-hidden:" + UUID().uuidString)
+            await refresh(); return true
+        } catch { status = error.localizedDescription; return false }
+    }
     func manageMaterial(_ record: SourceRecord, disposition: MaterialDisposition) async {
         guard let store else { return }
         do {
@@ -1191,7 +1213,7 @@ final class ControlCenter: ObservableObject {
     /// Recompute the home snapshot from the published arrays it derives from,
     /// so a render only reads it.
     private func publishHomeSnapshot() {
-        homeSnapshot = RecentContentHomeSnapshot.build(sources: records, claims: claims, actions: actionRecords)
+        homeSnapshot = RecentContentHomeSnapshot.build(sources: records, claims: claims, actions: actionRecords, overrides: recentClueOverrides)
     }
     private func applyCoreSnapshot(_ snapshot: WorkspaceSnapshot) {
         records = snapshot.sources
@@ -1203,6 +1225,7 @@ final class ControlCenter: ObservableObject {
         outcomeOrigins = snapshot.outcomeOrigins
         actionRecords = snapshot.actions
         actionClarifications = snapshot.actionClarifications
+        recentClueOverrides = snapshot.recentClueOverrides
         publishHomeSnapshot()
         actionReviewLedgers = snapshot.actionReviewLedgers
         taskInitiations = snapshot.taskInitiations

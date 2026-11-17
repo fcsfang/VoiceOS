@@ -24,6 +24,9 @@ struct RecentContentHome: View {
     @SceneStorage("recentHome.timelineAnchor") private var storedTimelineAnchor = ""
     @State private var timelineRestored = false
     @State private var readingStates: [String: SourceReadingState] = [:]
+    @State private var clueRename: ClueRenameRequest?
+    @State private var clueFailureText = ""
+    @State private var showingClueFailure = false
     @State private var organizeAttemptSourceID: String?
     @FocusState private var timelineFocused: Bool
     private let topAnchor = "home.top"
@@ -53,6 +56,12 @@ struct RecentContentHome: View {
         .onAppear { syncSelection() }
         .onChange(of: selected?.id) { _, _ in syncSelection() }
         .task(id: model.initialized) { if model.initialized { readingStates = await model.readingStates() } }
+        .sheet(item: $clueRename) { request in
+            RecentClueRenameSheet(model: model, clue: request.clue, title: request.title, resettable: request.resettable) { clueRename = nil }
+        }
+        .alert("操作未完成", isPresented: $showingClueFailure) {
+            Button("好", role: .cancel) {}
+        } message: { Text(clueFailureText) }
     }
 
     private func syncSelection() {
@@ -315,7 +324,7 @@ struct RecentContentHome: View {
     }
 
     private func materialReader(_ item: RecentContentItem) -> some View {
-        let digest = model.homeSnapshot.digests[item.id] ?? RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration)
+        let digest = model.homeSnapshot.digests[item.id] ?? RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration, overrides: model.recentClueOverrides)
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 Text(readerMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
@@ -342,10 +351,11 @@ struct RecentContentHome: View {
                 organizePrompt(item).padding(.top, 44)
             } else {
                 ForEach(digest.threads) { thread in
-                    threadSection(thread)
+                    threadSection(thread, siblings: digest.threads.filter { $0.id != thread.id })
                         .padding(.top, 44)
                         .id("home.thread.\(thread.id)")
                 }
+            }
             }
             tasksSummary(digest.tasks)
         }
@@ -358,13 +368,20 @@ struct RecentContentHome: View {
         return parts.joined(separator: " · ")
     }
 
-    private func threadSection(_ thread: RecentContentThread) -> some View {
+    private func threadSection(_ thread: RecentContentThread, siblings: [RecentContentThread]) -> some View {
         let notes = thread.thoughts.filter { $0.kind != .goal }
         return VStack(alignment: .leading, spacing: 0) {
             Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 18)
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
                 Text(thread.title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
+                ClueHeaderMenu(title: thread.title,
+                               siblings: siblings,
+                               hidden: model.recentClueOverrides.filter(\.hidden),
+                               rename: { beginClueRename(thread) },
+                               merge: { target in mergeClue(thread, into: target) },
+                               hide: { setClueHidden(thread.id, hidden: true) },
+                               restore: { override in setClueHidden(override.clue, hidden: false) })
             }
             if !notes.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
@@ -391,6 +408,24 @@ struct RecentContentHome: View {
                 .padding(.top, 20).padding(.leading, 42)
             }
         }.accessibilityIdentifier("home.thread")
+    }
+
+    private func beginClueRename(_ thread: RecentContentThread) {
+        let override = model.recentClueOverrides.first { $0.clue == thread.id }
+        clueRename = ClueRenameRequest(clue: thread.id, title: thread.title, resettable: override?.displayTitle != nil)
+    }
+
+    private func mergeClue(_ thread: RecentContentThread, into target: RecentContentThread) {
+        Task { if !(await model.mergeRecentClue(thread.id, into: target.id)) { showClueFailure() } }
+    }
+
+    private func setClueHidden(_ clue: String, hidden: Bool) {
+        Task { if !(await model.setRecentClueHidden(clue, hidden: hidden)) { showClueFailure() } }
+    }
+
+    private func showClueFailure() {
+        clueFailureText = model.status.isEmpty ? "操作未完成，请稍后重试。" : model.status
+        showingClueFailure = true
     }
 
     private func openOriginal(_ thought: RecentContentThought) {
@@ -523,6 +558,110 @@ struct RecentContentHome: View {
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: date)
+    }
+}
+
+private struct ClueRenameRequest: Identifiable {
+    let clue: String
+    let title: String
+    let resettable: Bool
+    var id: String { clue }
+}
+
+private struct ClueHeaderMenu: View {
+    @Environment(\.workspacePalette) private var palette
+    let title: String
+    let siblings: [RecentContentThread]
+    let hidden: [RecentClueOverride]
+    let rename: () -> Void
+    let merge: (RecentContentThread) -> Void
+    let hide: () -> Void
+    let restore: (RecentClueOverride) -> Void
+    @State private var hovered = false
+    @FocusState private var focused: Bool
+
+    private var visible: Bool { hovered || focused }
+
+    var body: some View {
+        Menu {
+            Button("重命名…", action: rename)
+            if !siblings.isEmpty {
+                Menu("合并到…") {
+                    ForEach(siblings) { target in
+                        Button("并入「\(target.title)」") { merge(target) }
+                    }
+                }
+            }
+            Button("隐藏", action: hide)
+            if !hidden.isEmpty {
+                Divider()
+                Menu("显示隐藏的线索") {
+                    ForEach(hidden, id: \.clue) { override in
+                        Button("恢复「\(override.displayTitle ?? RecentContentDigest.threadTitle(override.clue))」") { restore(override) }
+                    }
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis").vosFont(WorkspaceText.meta.size, weight: .semibold)
+                .foregroundStyle(palette.secondaryText)
+                .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .focused($focused)
+        .help("更多操作")
+        .accessibilityLabel("更多操作：" + title)
+        .padding(.horizontal, 6).padding(.vertical, 3)
+        .background(palette.surface, in: Capsule())
+        .overlay { Capsule().strokeBorder(palette.border, lineWidth: 1) }
+        .opacity(visible ? 1 : 0)
+        .allowsHitTesting(visible)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: visible)
+    }
+}
+
+private struct RecentClueRenameSheet: View {
+    @ObservedObject var model: ControlCenter
+    let clue: String
+    let resettable: Bool
+    let dismiss: () -> Void
+    @State private var title: String
+    @State private var saving = false
+
+    init(model: ControlCenter, clue: String, title: String, resettable: Bool, dismiss: @escaping () -> Void) {
+        self.model = model; self.clue = clue; self.resettable = resettable; self.dismiss = dismiss
+        _title = State(initialValue: title)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("修改线索标题").vosFont(WorkspaceText.sectionTitle)
+            TextField("线索标题", text: $title)
+            Text("只改变这条线索的显示名，原始想法不变；留空或恢复默认后回到「\(RecentContentDigest.threadTitle(clue))」。")
+                .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            if !model.status.isEmpty {
+                Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            HStack {
+                if resettable {
+                    Button("恢复默认") {
+                        saving = true
+                        Task { if await model.renameRecentClue(clue, title: nil) { dismiss() }; saving = false }
+                    }
+                }
+                Spacer()
+                Button("取消", action: dismiss).keyboardShortcut(.cancelAction)
+                Button("保存") {
+                    saving = true
+                    let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    Task {
+                        if await model.renameRecentClue(clue, title: trimmed.isEmpty ? nil : trimmed) { dismiss() }
+                        saving = false
+                    }
+                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(title.count > 100)
+            }.disabled(saving)
+        }.padding(24).frame(width: 520)
     }
 }
 
