@@ -4,15 +4,19 @@ import XCTest
 import VoiceOSPlatform
 
 // Pseudoports drive the segmented retry state machine without a model service.
-private let retryConfiguration = ModelConfiguration(provider: "fixture", model: "segmented-retry",
-    promptVersion: "v1", schemaVersion: "v1", destination: .local)
+// Production identities keep the evidence budget at the real 128k instead of
+// the 4k fallback, so the fixture exercises retry rather than the budget guard.
+private let extractionConfiguration = ModelConfiguration(provider: "fixture", model: "segmented-retry",
+    promptVersion: "segment-extraction-v4-wait600-stream", schemaVersion: "segment-extraction-v4-wait600-stream", destination: .local)
+private let aggregationConfiguration = ModelConfiguration(provider: "fixture", model: "segmented-retry",
+    promptVersion: "segment-aggregation-v4-wait600-stream", schemaVersion: "segment-aggregation-v4-wait600-stream", destination: .local)
 
 private actor RetrySegmentExtraction: SegmentExtractionPort {
     enum Behavior { case valid, invalidEvidence, transient }
     let configuration: ModelConfiguration
     var behavior: Behavior
     var calls = 0
-    init(_ behavior: Behavior) { configuration = retryConfiguration; self.behavior = behavior }
+    init(_ behavior: Behavior) { configuration = extractionConfiguration; self.behavior = behavior }
     func extract(_ request: SegmentExtractionRequest) async throws -> SegmentExtractionResponse {
         calls += 1
         switch behavior {
@@ -33,7 +37,7 @@ private actor RetrySegmentExtraction: SegmentExtractionPort {
 private actor RetrySegmentAggregation: SegmentAggregationPort {
     let configuration: ModelConfiguration
     var calls = 0
-    init() { configuration = retryConfiguration }
+    init() { configuration = aggregationConfiguration }
     func aggregate(_ request: SegmentAggregationRequest) async throws -> SegmentAggregationResponse {
         calls += 1
         let ledger = request.ledger
@@ -57,9 +61,9 @@ final class SegmentedRetryChecks: XCTestCase {
         let text = (1...9).map { "第\($0)段完整表达，验证长录音分段理解在本地校验失败后可以显式整批重试。" }.joined()
         let sourceID = try await store.recordUserExpression(text)
         let scope = try await store.prepareSegmentedExpressionProcessingScope(sourceID: sourceID,
-            extraction: retryConfiguration, aggregation: retryConfiguration, segmentScalarBudget: 40)
+            extraction: extractionConfiguration, aggregation: aggregationConfiguration, segmentScalarBudget: 40)
         let batch = try await store.enqueueSegmentedProcessingBatch(scope, commandID: "segmented-test:" + sourceID,
-            extraction: retryConfiguration, aggregation: retryConfiguration)
+            extraction: extractionConfiguration, aggregation: aggregationConfiguration)
         return (store, batch)
     }
 
@@ -94,7 +98,7 @@ final class SegmentedRetryChecks: XCTestCase {
             extraction: RetrySegmentExtraction(.invalidEvidence), aggregation: RetrySegmentAggregation())
         let rejectedState = try await store.segmentedProcessingBatch(id: batch.id).state
         XCTAssertEqual(rejectedState, .rejected)
-        let fresh = try await store.retryRejectedSegmentedBatch(id: batch.id, extraction: retryConfiguration, aggregation: retryConfiguration)
+        let fresh = try await store.retryRejectedSegmentedBatch(id: batch.id, extraction: extractionConfiguration, aggregation: aggregationConfiguration)
         XCTAssertNotEqual(fresh.id, batch.id)
         XCTAssertEqual(fresh.commandID, "segmented-retry:" + batch.id + ":1")
         XCTAssertNotEqual(fresh.commandID, batch.commandID)
@@ -107,7 +111,7 @@ final class SegmentedRetryChecks: XCTestCase {
         XCTAssertEqual(committed ?? [], ids)
         let retainedState = try await store.segmentedProcessingBatch(id: batch.id).state
         XCTAssertEqual(retainedState, .rejected)
-        let repeated = try await store.retryRejectedSegmentedBatch(id: batch.id, extraction: retryConfiguration, aggregation: retryConfiguration)
+        let repeated = try await store.retryRejectedSegmentedBatch(id: batch.id, extraction: extractionConfiguration, aggregation: aggregationConfiguration)
         XCTAssertEqual(repeated.id, fresh.id)
         let extractionCalls = await extraction.calls
         XCTAssertEqual(extractionCalls, fresh.scope.plan.segments.count)
@@ -123,7 +127,7 @@ final class SegmentedRetryChecks: XCTestCase {
         let reason = try XCTUnwrap(failed.error)
         XCTAssertTrue(reason.contains("超时"), reason)
         do {
-            _ = try await store.retryRejectedSegmentedBatch(id: batch.id, extraction: retryConfiguration, aggregation: retryConfiguration)
+            _ = try await store.retryRejectedSegmentedBatch(id: batch.id, extraction: extractionConfiguration, aggregation: aggregationConfiguration)
             XCTFail("未知结果不能显式重试")
         } catch {}
         _ = try await store.processSegmentedCognition(batchID: batch.id, extraction: extraction, aggregation: aggregation)

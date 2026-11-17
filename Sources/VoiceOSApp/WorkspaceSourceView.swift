@@ -854,7 +854,7 @@ struct WorkspaceSourceView: View {
             } catch is CancellationError {}
             catch { self.error="旁注读取失败：" + error.localizedDescription }
         }
-        .task(id: source.id + (source.transcriptVersionID ?? "") + (expression?.state ?? "") + String(thoughts.count)) {
+        .task(id: extractionFlagRefreshKey) {
             extractionFlag=nil
             guard let store=model.store else { return }
             extractionFlag=try? await store.sourceExtractionFlag(sourceID:source.id)
@@ -872,6 +872,11 @@ struct WorkspaceSourceView: View {
         }
     }
     private var playbackAvailable:Bool { ["audio","video"].contains(source.kind) && source.state == "saved" }
+    // Kept out of the .task(id:) call site: the concatenation there is too
+    // heavy for the type checker.
+    private var extractionFlagRefreshKey:String {
+        [source.id, source.transcriptVersionID ?? "", expression?.state ?? "", String(thoughts.count)].joined(separator: "|")
+    }
     private var playbackBarPlaying:Bool { model.player?.timeControlStatus == .playing }
     private var displayedPlaybackMS:Int {
         if let playbackMS { return playbackMS }

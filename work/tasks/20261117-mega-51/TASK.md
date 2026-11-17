@@ -50,3 +50,15 @@
 - 8e3c9f7（处理页）：`workspaceSegmentedBatchFailures` 按来源取最新批次，并入 `workspaceNeedsAttention`，区块显示原因与「整批重试」，unknown 不可重试。
 - 测试：SegmentedRetryChecks 三用例（rejected 可见与原因、新命令号重试成功且旧批次保留、超时 unknown 不重发）。
 - 集成构建/测试结果补下方。
+
+## ZC 结果（2026-11-17）
+
+- ec25018：`SourceExtractionFlag` 两态（empty→acknowledged 单向由 store 守卫）；判据 `indicatesEmptyExtraction`（origin/speaker 为 user、≥200 标量、表达 nil 或 completed、0 引用）；检测挂在整理导入成功与表达落定两处；材料页提示行与「重新整理这段」「视为无观点」两个出口；schema 70，Database 版本上限与 TestSchema 同步。
+- 落地口径：0 引用 = 最近一次完成 organized_import 中引用该材料的 claim 数（citation_status 不持久化，未定位引用仍会生成回退 span 的 claim，不标记）。
+- 测试：SourceExtractionFlagChecks（判据边界、写入读取、确认后不重标、表达门闸、迁移幂等）。
+
+## 集成结果（2026-11-17）
+
+- 修复：`WorkspaceSourceView.swift:868` 的 `.task(id:)` 拼接表达式触发类型检查超时，抽成 `extractionFlagRefreshKey` 计算属性。
+- 修复：SegmentedRetryChecks 伪端口用生产识别度身份（v4-wait600-stream），否则 4k 回退证据预算把重试用例卡在预算守卫（UD 预警的残留风险坐实）。
+- 构建 build_exit=0（109s）；测试 test_exit=0，527 项 0 失败（38s）。
