@@ -209,13 +209,16 @@ private struct WorkspaceAttentionDot: View {
     @ObservedObject var inbox: RecordingInbox
     let open: () -> Void
     var body: some View {
-        if model.workspaceNeedsAttention || inbox.pendingItems.contains(where: { $0.state == .needsAttention }) || !inbox.folderErrors.isEmpty {
+        let count = model.workspaceAttentionCount
+        let inboxNeedsAttention = inbox.pendingItems.contains(where: { $0.state == .needsAttention }) || !inbox.folderErrors.isEmpty
+        if count > 0 || inboxNeedsAttention {
+            let title = count > 0 ? "有 \(count) 项需要查看" : "有事项需要查看"
             Button(action:open) {
                 HStack(spacing:7) {
                     Circle().fill(.orange).frame(width:7,height:7)
-                    Text("有事项需要查看").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text(title).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }.contentShape(Rectangle())
-            }.buttonStyle(.plain).help("打开处理情况").accessibilityLabel("有事项需要查看，打开处理情况")
+            }.buttonStyle(.plain).help("打开处理情况").accessibilityLabel(title + "，打开处理情况")
         }
     }
 }
@@ -1145,6 +1148,8 @@ struct WorkspaceView: View {
             }
             if ["目标","全部"].contains(actionFilter), !model.stalledOutcomes.isEmpty { stalledBanner }
             let visible = visibleActions
+            let focusedIDs = Set(focusedActions.map(\.id))
+            let listed = actionFilter == "全部" ? visible.filter { !focusedIDs.contains($0.id) } : visible
             let executions = model.sortedAssistantDeliveries(model.assistantExecutions.filter { $0.state != "cancelled" })
             let paused = model.workspacePausedTasks
             if ["全部","我的待办"].contains(actionFilter), !focusedActions.isEmpty {
@@ -1180,9 +1185,9 @@ struct WorkspaceView: View {
                 if !executions.isEmpty {
                     WorkspaceListSection(title:"AI 助理的工作",count:executions.count) { executionRows(executions) }
                 }
-            } else if !visible.isEmpty {
-                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "问题" ? "VoiceOS 先回答；想清楚了可以转成下一步。" : actionFilter == "目标" ? "你要长期达到的结果；转成待办后可提醒。" : "",count:visible.count) {
-                    ForEach(visible) { action in actionRow(action,group:listGroup,nature:listNature,nextStepCounts:nextStepCounts);if action.id != visible.last?.id { WorkspaceListDivider() } }
+            } else if !listed.isEmpty {
+                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "问题" ? "VoiceOS 先回答；想清楚了可以转成下一步。" : actionFilter == "目标" ? "你要长期达到的结果；转成待办后可提醒。" : "",count:listed.count) {
+                    ForEach(listed) { action in actionRow(action,group:listGroup,nature:listNature,nextStepCounts:nextStepCounts);if action.id != listed.last?.id { WorkspaceListDivider() } }
                 }
             }
             if actionFilter == "全部", !paused.isEmpty {
