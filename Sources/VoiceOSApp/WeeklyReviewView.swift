@@ -22,6 +22,10 @@ struct WeeklyReviewView: View {
     @State private var outcomeDrafts: [String: TaskFeedbackDraft] = [:]
     @State private var expandedOutcomeID: String?
     @State private var outcomeError = ""
+    @State private var showingReflectionMap = false
+    @State private var showingDiscussion = false
+    @State private var discussionDraft = ""
+    @State private var loadError = ""
 
     private enum ReviewFilter: String {
         case todo = "我的待办", review = "待核对", completed = "已完成"
@@ -93,43 +97,121 @@ struct WeeklyReviewView: View {
         Text("完成或不再跟进后可立即撤销，任务页也保留撤销。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
     }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                HStack(alignment: .top) {
-                    WorkspaceHeading(eyebrow: "行动 · 每周回顾", title: "这一周，行动走到了哪里", subtitle: "今天收尾可直接完成或不再跟进；点开任意一条查看任务、原话与结果。")
-                    Button("关闭") { dismiss() }
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    HStack(alignment: .top) {
+                        WorkspaceHeading(eyebrow: "行动 · 每周回顾", title: "这一周，行动走到了哪里", subtitle: "今天收尾可直接完成或不再跟进；点开任意一条查看任务、原话与结果。")
+                        Button("认知地图", systemImage: "point.3.connected.trianglepath.dotted") { showingReflectionMap = true }
+                            .help("周期切换、认知对照与一起回顾都在这里")
+                        Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
+                    }
+                    summaryRow(proxy)
+                    if !loadError.isEmpty { WorkspaceNoticeText(message: loadError, severity: .danger) }
+                    undoHint
+                    dailyCloseSection
+                    if isEmpty {
+                        Text("这一周没有需要回顾的行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                    }
+                    if !nextWeekEntries.isEmpty { nextWeekSection }
+                    if !staleTasks.isEmpty { staleSection }
+                    if !unclarifiedTasks.isEmpty { unclarifiedSection.id("review.unclarified") }
+                    if !stalledGoals.isEmpty { stalledGoalsSection.id("review.stalled") }
+                    if !somedayRows.isEmpty { somedaySection }
+                    if !weekCompleted.isEmpty { weekCompletedSection.id("review.completed") }
+                    if !weekProgress.isEmpty { progressSection }
+                    if !pausedTasks.isEmpty { pausedSection }
+                }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding)
+            }
+            .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 560)
+            .overlay(alignment: .bottom) { undoBar }
+            .animation(.easeOut(duration: 0.2), value: undoEntry?.id)
+            .task {
+                loadError = ""
+                let previousStatus = model.status
+                focusedIDs = await model.focusedActionIDs()
+                somedayRows = await model.somedayReviewCandidates()
+                focusLoaded = true
+                if model.status != previousStatus { loadError = model.status }
+            }
+            .task(id: undoEntry?.id) {
+                guard let id = undoEntry?.id else { return }
+                do { try await Task.sleep(for: .seconds(8)) } catch { return }
+                if undoEntry?.id == id { withAnimation { undoEntry = nil } }
+            }
+            .sheet(isPresented: $showingClarifyQueue) { ActionClarifyQueueView(model: model, scope: .goals) }
+            .sheet(item: $nextStepGoal) { goal in
+                NextActionFormSheet(model: model, outcome: goal, onAdded: { _ in nextStepNotice = "已添加下一步" })
+            }
+            .sheet(isPresented: $showingReflectionMap) { reflectionMapSheet }
+        }
+    }
+
+    private var pendingOutcomeAnchor: String {
+        guard let action = weekCompleted.first(where: { action in
+            model.visibleOutcomeFollowups.contains { $0.id == action.id }
+        }) else { return "review.completed" }
+        return "review.pending." + action.id
+    }
+
+    private func summaryRow(_ proxy: ScrollViewProxy) -> some View {
+        HStack(spacing: 10) {
+            summaryButton("本周完成 \(weekCompleted.count)", target: "review.completed", proxy: proxy)
+            Text("·").foregroundStyle(palette.tertiaryText)
+            summaryButton("待补结果 \(model.visibleOutcomeFollowups.count)", target: pendingOutcomeAnchor, proxy: proxy)
+            Text("·").foregroundStyle(palette.tertiaryText)
+            summaryButton("停滞目标 \(stalledGoals.count)", target: "review.stalled", proxy: proxy)
+            Text("·").foregroundStyle(palette.tertiaryText)
+            summaryButton("待确认 \(unclarifiedTasks.count)", target: "review.unclarified", proxy: proxy)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func summaryButton(_ label: String, target: String, proxy: ScrollViewProxy) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(target, anchor: .top) }
+        } label: {
+            Text(label).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.accent)
+        }
+        .buttonStyle(.plain)
+        .help("跳到「" + label + "」所在区块")
+    }
+
+    private var reflectionMapSheet: some View {
+        ReflectionTimelineView(
+            model: model,
+            startPeriodic: true,
+            openSource: { id in
+                showingReflectionMap = false
+                dismiss()
+                model.requestWorkspaceSource(id)
+            },
+            dismiss: { showingReflectionMap = false },
+            discuss: { claim in
+                Task {
+                    if await model.beginThoughtDiscussion(claim) { showingDiscussion = true }
+                    else { loadError = model.status.isEmpty ? "讨论未能开始，请稍后重试" : model.status }
                 }
-                undoHint
-                dailyCloseSection
-                if isEmpty {
-                    Text("这一周没有需要回顾的行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            },
+            reflect: { focus, prompt in
+                guard await model.beginReflectionDiscussion(focus) else {
+                    loadError = model.status.isEmpty ? "回顾未能开始，请稍后重试" : model.status
+                    return false
                 }
-                if !nextWeekEntries.isEmpty { nextWeekSection }
-                if !staleTasks.isEmpty { staleSection }
-                if !unclarifiedTasks.isEmpty { unclarifiedSection }
-                if !stalledGoals.isEmpty { stalledGoalsSection }
-                if !somedayRows.isEmpty { somedaySection }
-                if !weekCompleted.isEmpty { weekCompletedSection }
-                if !weekProgress.isEmpty { progressSection }
-                if !pausedTasks.isEmpty { pausedSection }
-            }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding)
-        }
-        .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 560)
-        .overlay(alignment: .bottom) { undoBar }
-        .animation(.easeOut(duration: 0.2), value: undoEntry?.id)
-        .task {
-            focusedIDs = await model.focusedActionIDs()
-            somedayRows = await model.somedayReviewCandidates()
-            focusLoaded = true
-        }
-        .task(id: undoEntry?.id) {
-            guard let id = undoEntry?.id else { return }
-            do { try await Task.sleep(for: .seconds(8)) } catch { return }
-            if undoEntry?.id == id { withAnimation { undoEntry = nil } }
-        }
-        .sheet(isPresented: $showingClarifyQueue) { ActionClarifyQueueView(model: model, scope: .goals) }
-        .sheet(item: $nextStepGoal) { goal in
-            NextActionFormSheet(model: model, outcome: goal, onAdded: { _ in nextStepNotice = "已添加下一步" })
+                if !prompt.isEmpty { discussionDraft = prompt }
+                showingDiscussion = true
+                return true
+            }
+        )
+        .sheet(isPresented: $showingDiscussion) {
+            WorkspaceDiscussionView(model: model, draft: $discussionDraft,
+                close: { showingDiscussion = false },
+                openSource: { id in
+                    showingDiscussion = false
+                    showingReflectionMap = false
+                    dismiss()
+                    model.requestWorkspaceSource(id)
+                })
         }
     }
 
@@ -464,7 +546,7 @@ struct WeeklyReviewView: View {
         WorkspaceSection(title: "本周完成", subtitle: "最近 7 天登记完成的行动，按完成时间倒序；没有记录结果的仍留在列表里。", icon: "checkmark.circle", count: weekCompleted.count) {
             ForEach(Array(weekCompleted.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
-                weekCompletedRow(action)
+                weekCompletedRow(action).id("review.pending." + action.id)
             }
             HStack(spacing: 8) {
                 Text("全部完成事项按完成时间列在「已完成」。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)

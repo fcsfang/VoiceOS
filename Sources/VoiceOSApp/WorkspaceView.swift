@@ -1408,6 +1408,9 @@ struct WorkspaceView: View {
                     // Wait until the lazy field is attached to its native window.
                     do { try await Task.sleep(for:.milliseconds(100)); searchFocused = true } catch {}
                 }
+            if term.count >= 2, !searchSuggestions.isEmpty {
+                searchSuggestionList(term)
+            }
             if term.isEmpty {
                 if !recentSearches.isEmpty {
                     VStack(alignment:.leading,spacing:8) {
@@ -1473,10 +1476,8 @@ struct WorkspaceView: View {
             hit.kind == .claim && model.claims.contains { $0.id == hit.refID && $0.validity == "current" && $0.reviewState != "rejected" }
         }.map { hit in
             row("claim:" + hit.refID,hit.title,hit.snippet,"lightbulb") {
-                guard let reference=model.claims.first(where: { $0.id == hit.refID })?.references.first else { return }
-                let spanExists=model.records.first(where: { $0.id == reference.sourceID })?.spans.contains(where: { $0.id == reference.spanID }) == true
-                if spanExists { sourceScrollPositions[reference.sourceID]=ScrollPosition(id:"source-span-"+reference.spanID) }
-                go(.source(reference.sourceID))
+                guard let claim=model.claims.first(where: { $0.id == hit.refID }) else { return }
+                openClaimSource(claim)
             }
         }
         let topics = searchHits.filter { hit in
@@ -1528,22 +1529,72 @@ struct WorkspaceView: View {
             return counts[hit.kind, default: 0] <= 20
         }
     }
+    private var searchSuggestions: [WorkspaceSearchSuggestion] {
+        let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
+        guard term.count >= 2 else { return [] }
+        let key = term.lowercased()
+        func prefixed(_ text: String) -> Bool { !text.isEmpty && text.lowercased().hasPrefix(key) }
+        let materials = model.records.filter { !$0.isTrashed && prefixed(displayTitle($0.name)) }.map { source in
+            WorkspaceSearchSuggestion(id:"suggestion:material:" + source.id,title:displayTitle(source.name),subtitle:"材料",icon:"doc.text") { go(.source(source.id)) }
+        }
+        let topics = model.workspaceTopics.filter { prefixed($0.title) }.map { topic in
+            WorkspaceSearchSuggestion(id:"suggestion:topic:" + topic.id,title:topic.title,subtitle:"主题",icon:"circle.hexagongrid") { selectTopic(topic.id) }
+        }
+        let tasks = model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" && prefixed($0.title) }.map { action in
+            WorkspaceSearchSuggestion(id:"suggestion:task:" + action.id,title:action.title,subtitle:"开放任务",icon:"checkmark.circle") { go(.task(action.id)) }
+        }
+        let claims = model.claims.filter { $0.validity == "current" && $0.reviewState != "rejected" && prefixed($0.statement) }.map { claim in
+            WorkspaceSearchSuggestion(id:"suggestion:claim:" + claim.id,title:claim.statement,subtitle:"观点",icon:"lightbulb") { openClaimSource(claim) }
+        }
+        var picked:[WorkspaceSearchSuggestion] = []
+        var depth = 0
+        while picked.count < 5 {
+            let before = picked.count
+            for bucket in [materials,topics,tasks,claims] where depth < bucket.count {
+                picked.append(bucket[depth])
+                if picked.count == 5 { break }
+            }
+            guard picked.count > before else { break }
+            depth += 1
+        }
+        return picked
+    }
+    private func searchSuggestionList(_ term: String) -> some View {
+        let suggestions = searchSuggestions
+        return VStack(alignment:.leading,spacing:0) {
+            ForEach(Array(suggestions.enumerated()),id:\.element.id) { index,suggestion in
+                SearchResultRow(title:AttributedString(suggestion.title),subtitle:AttributedString(suggestion.subtitle),icon:suggestion.icon) {
+                    rememberSearch(term)
+                    suggestion.open()
+                }
+                if index < suggestions.count - 1 { Divider() }
+            }
+        }
+        .background(palette.surface,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+        .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.border,lineWidth:1) }
+    }
+    private func openClaimSource(_ claim: CandidateClaim) {
+        guard let reference=claim.references.first else { return }
+        let spanExists=model.records.first(where: { $0.id == reference.sourceID })?.spans.contains(where: { $0.id == reference.spanID }) == true
+        if spanExists { sourceScrollPositions[reference.sourceID]=ScrollPosition(id:"source-span-"+reference.spanID) }
+        go(.source(reference.sourceID))
+    }
     private var recentSearchChips: some View {
         ScrollView(.horizontal,showsIndicators:false) {
             HStack(spacing:8) {
                 ForEach(Array(recentSearches.prefix(8)),id:\.self) { term in
-                    Button(term) { query=term; searchFocused=true }
-                        .buttonStyle(.plain)
-                        .vosFont(WorkspaceText.meta)
-                        .foregroundStyle(palette.secondaryText)
-                        .padding(.horizontal,10).frame(height:WorkspaceMetrics.fieldHeight)
-                        .background(palette.surface,in:Capsule())
-                        .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
-                        .contentShape(Capsule())
-                        .help("搜索「" + term + "」")
+                    RecentSearchChip(term:term) {
+                        query=term;searchFocused=true
+                    } remove: {
+                        removeRecentSearch(term)
+                    }
                 }
             }
         }
+    }
+    private func removeRecentSearch(_ term:String) {
+        recentSearches.removeAll { $0 == term }
+        UserDefaults.standard.set(recentSearches,forKey:recentSearchDefaultsKey)
     }
     private func rememberSearch(_ term: String) {
         let trimmed = term.trimmingCharacters(in:.whitespacesAndNewlines)
@@ -2251,8 +2302,9 @@ struct WorkspaceView: View {
     }
     private func openSearchSelection() {
         let rows=searchSections.flatMap(\.rows)
-        guard let row=rows.first(where: { $0.id == searchKeyboardFocus.id }) ?? rows.first else { return }
-        row.open()
+        if let row=rows.first(where: { $0.id == searchKeyboardFocus.id }) { row.open(); return }
+        if let suggestion=searchSuggestions.first { rememberSearch(query.trimmingCharacters(in:.whitespacesAndNewlines)); suggestion.open(); return }
+        rows.first?.open()
     }
     private func installSearchArrowMonitor() {
         guard searchArrowMonitor == nil else { return }
@@ -2443,10 +2495,13 @@ struct WorkspaceView: View {
     }
     private func routeExternalURL(_ url:URL) {
         if CaptureLink.isCapture(url) { Task { await model.acceptCaptureURL(url) } }
-        else if url.scheme?.lowercased() == "voiceos", let host=url.host?.lowercased(), ["action","source"].contains(host) {
+        else if url.scheme?.lowercased() == "voiceos", let host=url.host?.lowercased(), ["action","source","topic"].contains(host) {
             let id=url.lastPathComponent
             guard !id.isEmpty else { error="链接缺少条目身份"; return }
-            if host == "action" {
+            if host == "topic" {
+                guard model.workspaceTopics.contains(where: { $0.id == id }) else { error="这个主题已不在当前资料库"; return }
+                selectTopic(id)
+            } else if host == "action" {
                 guard model.actionRecords.contains(where: { $0.id == id }) else { error="这条行动已不在当前资料库"; return }
                 go(.task(id))
             } else {
@@ -2643,6 +2698,44 @@ private struct ActionUndoState: Equatable {
     let token: UUID
     var kind: Kind = .stateChange
     var resultActionID: String? = nil
+}
+
+private struct WorkspaceSearchSuggestion: Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let icon: String
+    let open: () -> Void
+}
+
+private struct RecentSearchChip: View {
+    @Environment(\.workspacePalette) private var palette
+    let term: String
+    let open: () -> Void
+    let remove: () -> Void
+    @State private var hovered = false
+    var body: some View {
+        HStack(spacing:4) {
+            Button(action:open) {
+                Text(term).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
+                    .frame(maxHeight:.infinity)
+            }.buttonStyle(.plain)
+                .help("搜索「" + term + "」").accessibilityLabel("搜索「" + term + "」")
+            Button(action:remove) {
+                Image(systemName:"xmark").vosFont(WorkspaceText.caption.size, weight: .semibold)
+                    .foregroundStyle(palette.secondaryText)
+                    .frame(width:14,height:14).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+                .help("删除这条最近搜索").accessibilityLabel("删除最近搜索：" + term)
+                .opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
+        }
+        .padding(.horizontal,10).frame(height:WorkspaceMetrics.fieldHeight)
+        .background(palette.surface,in:Capsule())
+        .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
+        .onHover { hovered=$0 }
+        .contextMenu { Button("删除这条最近搜索",role:.destructive,action:remove) }
+        .animation(.easeOut(duration:0.12),value:hovered)
+    }
 }
 
 private struct WorkspaceSearchRow: Identifiable {
