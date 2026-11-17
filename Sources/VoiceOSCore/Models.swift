@@ -45,6 +45,15 @@ public struct SourceRecord: Identifiable, Sendable {
     public let timeZone: String
     public let presentation: RecordingPresentation?
 }
+public extension SourceRecord {
+    static let emptyTranscriptJobError = "转写为空，未生成文字；可重新转写或移入回收站"
+    var needsEmptyTranscriptionReview: Bool {
+        guard !isTrashed, !isArchived else { return false }
+        if jobState == "blocked", error == SourceRecord.emptyTranscriptJobError { return true }
+        guard jobState == "completed", let transcript else { return false }
+        return transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
 public enum SaveCheckpoint: String, Sendable {
     case intent, copyChunk, copyComplete, sealed, renamed, savedUncommitted, savedCommitted
     case jobClaimed, transcriptUncommitted, transcriptCommitted
