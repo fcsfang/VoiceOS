@@ -21,6 +21,7 @@ public struct WorkspaceSnapshot: Sendable {
     public var taskInitiations: [TaskInitiationRecord] = []
     public var knowledgeReviews: [KnowledgeReviewRecord] = []
     public var recentOutcomes: [ActionFeedbackRecord] = []
+    public var recentClueOverrides: [RecentClueOverride] = []
     public var outcomeFollowups: [ActionRecord] = []
     public var correctionImpacts: [CorrectionActionImpact] = []
     public var compensationPlans: [ReminderCompensationPlan] = []
@@ -69,6 +70,7 @@ extension VoiceOSStore {
             result.outcomeOrigins = try StartupTrace.measure("snapshot.outcomeOrigins") { try conversationOutcomeOrigins() }
             result.taskInitiations = try StartupTrace.measure("snapshot.taskInitiations") { try taskInitiations() }
             result.recentOutcomes = try StartupTrace.measure("snapshot.recentOutcomes") { try recentActionOutcomes() }
+            result.recentClueOverrides = try StartupTrace.measure("snapshot.recentClueOverrides") { try recentClueOverrides() }
             result.compensationPlans = try StartupTrace.measure("snapshot.compensationPlans") { try reminderCompensationPlans() }
             result.compensationGrants = try StartupTrace.measure("snapshot.compensationGrants") { try reminderCompensationGrants() }
             result.compensationOperations = try StartupTrace.measure("snapshot.compensationOperations") { try reminderCompensationOperations() }
