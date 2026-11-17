@@ -160,6 +160,7 @@ struct WorkspaceSourceView: View {
     @State private var chaptersExpanded=false
     @State private var entitiesExpanded=false
     @State private var toast: String? = nil
+    @State private var extractionFlag: SourceExtractionFlag? = nil
     @State private var correctionsExpanded=false
     @State private var correctionJustSaved=false
     @State private var showingCorrectionImpacts=false
@@ -445,6 +446,24 @@ struct WorkspaceSourceView: View {
                         }
                         Spacer(minLength:0)
                     }
+                }
+                if extractionFlag == .empty {
+                    VStack(alignment:.leading,spacing:10) {
+                        Label("这段没有提取到想法",systemImage:"circle.dashed")
+                            .vosFont(WorkspaceText.meta.size, weight:.semibold)
+                            .foregroundStyle(palette.warning)
+                            .accessibilityAddTraits(.isHeader)
+                        Text("整理已经运行过，但没有找到能归属到这段的观点，这段目前对整段理解没有贡献。")
+                            .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        HStack(spacing:14) {
+                            Button("重新整理这段",systemImage:"arrow.clockwise") { organize() }
+                                .disabled(source.transcript == nil || source.localOnly || !model.modelConfigured)
+                                .help(source.localOnly ? "仅本机保存的文字不能交给模型整理" : !model.modelConfigured ? "先配置文本模型才能重新整理" : "会重做整段表达：这段和同一表达的其他分段都会重新整理")
+                            Button("视为无观点",systemImage:"checkmark.circle") { Task { await markExtractionAcknowledged() } }
+                                .help("确认这段没有可归属的观点；这条提示不会再出现")
+                        }.vosFont(WorkspaceText.meta)
+                    }.padding(16).frame(maxWidth:.infinity,alignment:.leading)
+                        .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
                 }
                 if let issues=source.transcriptionReview?.unresolved_issues,!issues.isEmpty {
                     UnresolvedIssuesBlock(issues:issues,playbackAvailable:playbackAvailable,playbackLabel:{ unresolvedIssuePlaybackLabel($0) },play:{ playUnresolvedIssue($0) },jump:{ jumpToOriginal(spanID:$0) })
@@ -835,6 +854,11 @@ struct WorkspaceSourceView: View {
             } catch is CancellationError {}
             catch { self.error="旁注读取失败：" + error.localizedDescription }
         }
+        .task(id: extractionFlagRefreshKey) {
+            extractionFlag=nil
+            guard let store=model.store else { return }
+            extractionFlag=try? await store.sourceExtractionFlag(sourceID:source.id)
+        }
         .onAppear { originalExpanded=transcriptStartsExpanded(source.transcript) }
         .onChange(of:source.id) { _,_ in clearSelection();originalExpanded=transcriptStartsExpanded(source.transcript) }
         .onChange(of:source.transcript) { _,_ in clearSelection();resetBilingual();originalExpanded=transcriptStartsExpanded(source.transcript) }
@@ -848,6 +872,11 @@ struct WorkspaceSourceView: View {
         }
     }
     private var playbackAvailable:Bool { ["audio","video"].contains(source.kind) && source.state == "saved" }
+    // Kept out of the .task(id:) call site: the concatenation there is too
+    // heavy for the type checker.
+    private var extractionFlagRefreshKey:String {
+        [source.id, source.transcriptVersionID ?? "", expression?.state ?? "", String(thoughts.count)].joined(separator: "|")
+    }
     private var playbackBarPlaying:Bool { model.player?.timeControlStatus == .playing }
     private var displayedPlaybackMS:Int {
         if let playbackMS { return playbackMS }
@@ -995,6 +1024,13 @@ struct WorkspaceSourceView: View {
     private func organize() {
         guard let current=model.records.first(where: { $0.id == source.id }),!current.localOnly else { return }
         model.reidentify(current)
+    }
+    private func markExtractionAcknowledged() async {
+        guard let store=model.store else { return }
+        do {
+            try await store.acknowledgeEmptyExtraction(sourceID:source.id)
+            extractionFlag=try await store.sourceExtractionFlag(sourceID:source.id)
+        } catch { self.error=error.localizedDescription }
     }
     private func generateBilingual() {
         guard bilingualPhase != .loading,let transcript=source.transcript else { return }

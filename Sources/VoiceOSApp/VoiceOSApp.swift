@@ -2381,6 +2381,33 @@ final class ControlCenter: ObservableObject {
         understandingWorker=task
         return task
     }
+    /// Explicit whole-batch retry for a long-recording batch whose model output
+    /// failed local validation. The store keeps the rejected record as history
+    /// and enqueues a fresh batch under a new command; this only drives it.
+    @discardableResult
+    func retrySegmentedBatch(_ batch: SegmentedProcessingBatch) -> Task<Void, Never>? {
+        guard let store,let extraction=segmentExtractionModel,let aggregation=segmentAggregationModel,
+              understandingWorker == nil,!discussionExtracting else { return nil }
+        let sourceID=batch.scope.plan.source.sourceID
+        understandingSource=sourceID;status="正在整批重试长录音的分段理解 · 原文与旧记录保留"
+        let task=Task {
+            do {
+                let fresh=try await store.retryRejectedSegmentedBatch(id:batch.id,extraction:extraction.configuration,aggregation:aggregation.configuration)
+                segmentedBatches=try await store.segmentedProcessingBatches()
+                let result=try await store.processSegmentedCognition(batchID:fresh.id,extraction:extraction,aggregation:aggregation)
+                if let ids=result.claimIDs {
+                    status="长表达认知已保存 · \(ids.count) 条候选；正在核对历史关联"
+                    await associateUnderstoodExpression(sourceID,segmentedBatchID:fresh.id)
+                    status="长表达认知已保存 · \(ids.count) 条候选；"+(associationStatuses[sourceID] ?? "关联未完成")
+                }
+                else { status="分段重试记录：\(workspaceStateLabel(result.state.rawValue)) · 未重复发送未知或已结束的请求" }
+            } catch { status=error.localizedDescription }
+            await refresh();requestReminderRefresh();resumeKnowledgeReviews()
+            understandingSource=nil;understandingWorker=nil
+        }
+        understandingWorker=task
+        return task
+    }
     func cancelSegmented(_ id: String) {
         guard let store else { return }
         Task {

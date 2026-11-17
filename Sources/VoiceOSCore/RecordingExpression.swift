@@ -125,6 +125,7 @@ extension VoiceOSStore {
         var completed=expression;completed.state="completed"
         var presentation=source.presentation!;presentation.expression=completed
         try saveExpressionPresentation(presentation,sourceID:id)
+        try evaluateSourceExtractionFlags(sourceIDs: [id])
         return true
     }
     func saveExpressionPresentation(_ presentation:RecordingPresentation,sourceID:String) throws {
@@ -278,5 +279,7 @@ extension VoiceOSStore {
             }
             try Self.validateStoredExpressionActionReviews(db)
         }
+        // The group just settled; each member's zero-extraction state is now final.
+        try evaluateSourceExtractionFlags(sourceIDs: Set(completed.sourceIDs))
     }
 }
