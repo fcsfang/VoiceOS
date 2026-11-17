@@ -1,5 +1,5 @@
 @testable import VoiceOSCore
 
 enum TestSchema {
-    static let currentVersion = "70"
+    static let currentVersion = "71"
 }
