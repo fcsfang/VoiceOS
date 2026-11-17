@@ -40,3 +40,10 @@
 - 锁屏时界面实拍留待解锁。
 
 ## 结果（完成后填）
+
+## 结果（2026-11-17 晚）
+
+- P1：失败/中断状态行改为「已有 N/M 个单元通过核对，可先生成带候选联系的综合草稿」并把草稿升为主按钮（复用既有草稿通道，不重跑核对）；运行中显示「正在核对〈材料标题〉· 分片 i/n」（来自 panorama_steps 的 running 行与 input_json 分片序号）；错误文本与 tooltip 去 UUID，unit 映射为材料标题并按五类错误各给一句建议；旧尝试的错误也按文本归类。新增测试 2 条。
+- Q1：searchAll 两条路径（trigram 与子串）都在 JOIN 后、截断前过滤（行动 open 且 current，观点 current 且非 rejected），段头计数与可见集合一致；观点结果直达原话段落（span 锚点，缺失退回顶部）；每类段头「显示全部」（perKindLimit 200 重查、换词重置）。新增测试 3 条。
+- 验证（真实退出码）：swift build 0（Build complete! 66.68s）；swift test 0，471 项 0 失败（465 基础上新增 6）。
+- 说明：通用 store.search 同样只返回 current/open 集合（Q1 报告注明）；显示全部上限 200。
