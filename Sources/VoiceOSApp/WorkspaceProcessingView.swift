@@ -286,6 +286,7 @@ struct WorkspaceProcessingView: View {
                         reasons(waiting.compactMap { request in request.error.map { (name(request.sourceID),$0) } })
                     }
                 }
+                WorkspaceExternalCompletionBatchSection(model:model)
                 if !model.workspacePausedTasks.isEmpty {
                     WorkspaceSection(title:"这些待办需要核对",subtitle:"以下事项尚未登记完成，行动关系待核对或 AI 提取已暂停。逐条核对：同一件事会接回原记录，两件事会保留两条；核对后即可继续同步。",icon:"pause.circle",count:model.workspacePausedTasks.count) {
                         let ids=Set(model.workspacePausedTasks.flatMap { task in model.claims.first(where: { $0.id == task.claimID })?.references.map(\.sourceID) ?? [] })
@@ -471,5 +472,105 @@ struct WorkspaceExternalCompletionButton: View {
             return
         }
         Task { error = await model.confirmExternalCompletion(candidate) ? "" : model.status }
+    }
+}
+
+struct WorkspaceExternalCompletionItem: Identifiable {
+    let action: ActionRecord
+    var id: String { action.id }
+}
+
+struct WorkspaceExternalCompletionGroup: Identifiable {
+    let sourceID: String
+    let title: String
+    let items: [WorkspaceExternalCompletionItem]
+    var id: String { sourceID }
+}
+
+struct WorkspaceExternalCompletionBatchSection: View {
+    @Environment(\.workspacePalette) private var palette
+    @ObservedObject var model: ControlCenter
+    @State private var pending: WorkspaceExternalCompletionGroup?
+    @State private var confirming = false
+    @State private var busy = false
+    @State private var result = ""
+    @State private var failed = false
+    private var groups: [WorkspaceExternalCompletionGroup] {
+        let items = model.actionRecords.compactMap { action -> WorkspaceExternalCompletionItem? in
+            model.workspaceExternalCompletion(action) == nil ? nil : WorkspaceExternalCompletionItem(action: action)
+        }
+        let grouped = Dictionary(grouping: items) { item in
+            model.claims.first { $0.id == item.action.claimID }?.references.first?.sourceID ?? ""
+        }
+        return grouped.map { sourceID, items in
+            let title = sourceID.isEmpty ? "已保存的材料" : (model.records.first { $0.id == sourceID }?.displayTitle ?? "已保存的材料")
+            return WorkspaceExternalCompletionGroup(sourceID: sourceID, title: title, items: items.sorted { $0.action.title < $1.action.title })
+        }.sorted { $0.title < $1.title }
+    }
+    var body: some View {
+        let groups = self.groups
+        if !groups.isEmpty {
+            let total = groups.reduce(0) { $0 + $1.items.count }
+            WorkspaceSection(title:"提醒事项已完成待登记",subtitle:"共 \(total) 条，来自 \(groups.count) 份材料；确认后进入结果队列，Apple 提醒事项本身不会被修改。",icon:"checklist",count:total) {
+                ForEach(groups) { group in
+                    VStack(alignment:.leading,spacing:0) {
+                        HStack(spacing:12) {
+                            Image(systemName:"doc.text").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                                .frame(width:30,height:30).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+                                .accessibilityHidden(true)
+                            Text(group.title).vosFont(WorkspaceText.rowTitle)
+                            Text("\(group.items.count) 条").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                            Spacer(minLength:8)
+                            Button("全部确认（\(group.items.count)）") { pending = group; confirming = true }
+                                .disabled(busy || model.savingAction)
+                                .accessibilityLabel("全部确认「\(group.title)」的 \(group.items.count) 条提醒事项已完成")
+                        }.padding(.vertical,10).padding(.horizontal,10)
+                        ForEach(group.items) { item in
+                            WorkspaceRow(title:item.action.title,subtitle:model.workspaceExternalCompletionNote(item.action) ?? model.workspaceActionStatus(item.action),icon:"circle",trailing:"查看任务") { model.showTask(item.action.id) }
+                                .padding(.leading,40)
+                        }
+                    }.padding(.bottom,8)
+                }
+                if !result.isEmpty {
+                    Text(result).vosFont(WorkspaceText.meta).foregroundStyle(failed ? palette.danger : palette.secondaryText).textSelection(.enabled).padding(.top,12)
+                }
+            }
+            .alert(confirmTitle, isPresented:$confirming) {
+                Button("全部确认") { if let group = pending { confirm(group) }; pending = nil }
+                Button("取消", role:.cancel) { pending = nil }
+            } message: {
+                Text("这些任务将标记为已完成并进入结果队列。原始声明与理解继续冻结保留，Apple 提醒事项本身不会被修改。")
+            }
+        }
+    }
+    private var confirmTitle: String {
+        guard let pending = pending else { return "" }
+        return "把「\(pending.title)」的 \(pending.items.count) 条提醒事项登记为已完成？"
+    }
+    private func confirm(_ group: WorkspaceExternalCompletionGroup) {
+        guard !busy else { return }
+        busy = true
+        result = ""
+        failed = false
+        Task {
+            defer { busy = false }
+            var done = 0
+            for item in group.items {
+                guard let action = model.actionRecords.first(where: { $0.id == item.action.id }),
+                      let candidate = model.workspaceExternalCompletion(action) else {
+                    result = "已确认 \(done) 条；「\(item.action.title)」的提醒回读已变化，请查看最新状态"
+                    failed = true
+                    return
+                }
+                if await model.confirmExternalCompletion(candidate) {
+                    done += 1
+                } else {
+                    result = "已确认 \(done) 条；「\(item.action.title)」未登记：" + model.status
+                    failed = true
+                    return
+                }
+            }
+            result = "已确认 \(done) 条"
+        }
     }
 }
