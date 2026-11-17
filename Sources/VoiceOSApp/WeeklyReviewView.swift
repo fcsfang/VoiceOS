@@ -19,6 +19,9 @@ struct WeeklyReviewView: View {
     @State private var showingClarifyQueue = false
     @State private var nextStepGoal: ActionRecord?
     @State private var nextStepNotice = ""
+    @State private var outcomeDrafts: [String: TaskFeedbackDraft] = [:]
+    @State private var expandedOutcomeID: String?
+    @State private var outcomeError = ""
 
     private enum ReviewFilter: String {
         case todo = "我的待办", review = "待核对", completed = "已完成"
@@ -442,8 +445,67 @@ struct WeeklyReviewView: View {
     private func weekCompletedRow(_ action: ActionRecord) -> some View {
         let subtitle = completedDate(action).map { "完成于 " + dayLabel($0) } ?? "完成时间未知"
         let pending = model.visibleOutcomeFollowups.contains { $0.id == action.id }
-        return reviewRow(title: action.title, subtitle: subtitle + " · " + actionSourceLabel(action),
-                         trailing: pending ? "待补结果" : "", icon: "checkmark.circle") { openTask(action.id) }
+        let expanded = expandedOutcomeID == action.id
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Button { openTask(action.id) } label: {
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: "checkmark.circle").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                            .frame(width: 34, height: 34)
+                            .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(StatementTagParser.split(action.title).text).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
+                            Text(subtitle + " · " + actionSourceLabel(action)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                        }
+                        Spacer(minLength: 8)
+                        if pending {
+                            Text("待补结果").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
+                        }
+                        Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .accessibilityElement(children: .combine)
+                }.buttonStyle(.plain)
+                if pending {
+                    Button(expanded ? "收起" : "记录结果") {
+                        outcomeError = ""
+                        withAnimation { expandedOutcomeID = expanded ? nil : action.id }
+                    }
+                    .buttonStyle(.bordered).controlSize(.small).disabled(model.savingFeedback)
+                    .accessibilityLabel("记录结果：" + action.title)
+                }
+            }
+            if pending && expanded {
+                TaskFeedbackEditor(model: model, draft: outcomeDraft(action.id), onSave: { saveOutcome(action) })
+                    .padding(18)
+                    .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+            }
+            if expanded, !outcomeError.isEmpty {
+                WorkspaceNoticeText(message: outcomeError, severity: .danger)
+            }
+        }
+        .padding(.vertical, 10).padding(.horizontal, 10)
+        .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
+    }
+
+    private func outcomeDraft(_ id: String) -> Binding<TaskFeedbackDraft> {
+        Binding(get: { outcomeDrafts[id] ?? TaskFeedbackDraft() },
+                set: { outcomeDrafts[id] = $0 })
+    }
+
+    private func saveOutcome(_ action: ActionRecord) {
+        let input = outcomeDrafts[action.id] ?? TaskFeedbackDraft()
+        Task {
+            if await model.saveFeedback(action, kind: input.kind, text: input.text, commandID: input.commandID) {
+                outcomeDrafts[action.id] = TaskFeedbackDraft()
+                outcomeError = ""
+                withAnimation { expandedOutcomeID = nil }
+            } else {
+                outcomeError = model.status.isEmpty ? "结果未能保存，请稍后重试" : model.status
+            }
+        }
     }
 
     private func linkButton(_ label: String, _ filter: ReviewFilter) -> some View {
