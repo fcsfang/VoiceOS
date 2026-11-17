@@ -56,3 +56,10 @@ func setRecentClueHidden(_ clue: String, hidden: Bool) async -> Bool
 - 用户可能在用机器：界面实拍与重启进空闲窗口。
 
 ## 结果（完成后填）
+
+## 结果（2026-11-17 傍晚）
+
+- C1：迁移 66（recent_clue_overrides，表存在加版本双守卫）；Store 四方法（command 幂等，同命令重放不重复写）；Digest.build 应用重命名/合并/隐藏（hidden 优先，链式合并一跳）；快照 core 段携带覆盖，交互刷新即生效；8 条新测试。
+- U1：线索段落头悬停菜单（重命名 sheet、合并到子菜单、隐藏、显示隐藏的线索恢复），无障碍标签齐全；ControlCenter 包装函数按契约命名，失败弹 alert 或显示 status，成功 refresh。
+- swift build -j 2 通过；swift test -j 2 461 项 0 失败（456 基础上净增 5）。
+- 隔离副本（306MB 实时库快照）：启动即自 65 升至 66，recent_clue_overrides 表就位。界面菜单的实机核对被锁屏阻断（AX 全域不可见），留待解锁后补拍；渲染与交互由两单元报告的行号与代码路径保证。
