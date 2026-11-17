@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...72).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...74).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1426,6 +1426,94 @@ final class Database {
             }
         }
 
+        // Schema 73 (processing-page failure exits) may already exist in the
+        // integration branch. Accepting 72 as well keeps this branch's own
+        // databases consistent; at merge time the 72→73 block must run first.
+        if let version = try query("PRAGMA user_version").first?["user_version"], ["72", "73"].contains(version) {
+            try transaction {
+                // Daily message monitoring is its own domain: sources, collected
+                // messages, per-source cursors, daily reports and follow-up items.
+                // It never writes claims, knowledge or actions.
+                try execute("""
+                CREATE TABLE IF NOT EXISTS monitor_sources (
+                  id TEXT PRIMARY KEY,
+                  kind TEXT NOT NULL CHECK(kind IN ('qq-group','website-column')),
+                  display_name TEXT NOT NULL,
+                  config_json TEXT NOT NULL,
+                  enabled INTEGER NOT NULL DEFAULT 1,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE IF NOT EXISTS monitor_messages (
+                  id TEXT PRIMARY KEY,
+                  source_id TEXT NOT NULL REFERENCES monitor_sources(id),
+                  external_id TEXT NOT NULL,
+                  kind TEXT NOT NULL CHECK(kind IN ('text','image','file','forward','article','other')),
+                  sender_name TEXT,
+                  sent_at TEXT,
+                  collected_at TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  content_sha256 TEXT NOT NULL,
+                  meta_json TEXT,
+                  UNIQUE(source_id, external_id)
+                )
+                """)
+                try execute("CREATE INDEX IF NOT EXISTS monitor_message_source_time ON monitor_messages(source_id, sent_at)")
+                try execute("""
+                CREATE TABLE IF NOT EXISTS monitor_cursors (
+                  source_id TEXT PRIMARY KEY REFERENCES monitor_sources(id),
+                  cursor_json TEXT NOT NULL,
+                  last_success_at TEXT,
+                  last_error TEXT,
+                  updated_at TEXT NOT NULL
+                )
+                """)
+                try execute("""
+                CREATE TABLE IF NOT EXISTS monitor_reports (
+                  id TEXT PRIMARY KEY,
+                  report_date TEXT NOT NULL UNIQUE,
+                  state TEXT NOT NULL CHECK(state IN ('complete','incomplete','failed')),
+                  headline TEXT NOT NULL,
+                  summary TEXT NOT NULL,
+                  source_status_json TEXT NOT NULL,
+                  item_count INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL,
+                  delivered_at TEXT,
+                  delivery_state TEXT NOT NULL DEFAULT 'pending' CHECK(delivery_state IN ('pending','delivered','failed')),
+                  delivery_error TEXT,
+                  payload_json TEXT
+                )
+                """)
+                try execute("""
+                CREATE TABLE IF NOT EXISTS monitor_items (
+                  id TEXT PRIMARY KEY,
+                  report_id TEXT NOT NULL REFERENCES monitor_reports(id),
+                  title TEXT NOT NULL,
+                  why_relevant TEXT NOT NULL,
+                  suggested_action TEXT NOT NULL,
+                  deadline_text TEXT,
+                  deadline_date TEXT,
+                  conditions TEXT,
+                  evidence_quote TEXT NOT NULL,
+                  source_refs_json TEXT NOT NULL,
+                  uncertainty TEXT,
+                  category TEXT NOT NULL CHECK(category IN ('applicable','needs_check')),
+                  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','done','dismissed')),
+                  related_item_id TEXT,
+                  first_seen_date TEXT NOT NULL,
+                  last_updated_date TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                )
+                """)
+                try execute("CREATE INDEX IF NOT EXISTS monitor_item_report ON monitor_items(report_id)")
+                try execute("CREATE INDEX IF NOT EXISTS monitor_item_status ON monitor_items(status)")
+                try execute("PRAGMA user_version=74")
+            }
+        }
+
         try ensureSearchTriggers()
     }
 
@@ -1464,6 +1552,8 @@ final class Database {
     }
     deinit { sqlite3_close(handle) }
     func execute(_ sql: String, _ arguments: [String?] = []) throws { _ = try query(sql, arguments) }
+    /// Rows touched by the last statement; distinguishes an ignored duplicate insert.
+    func lastChangeCount() -> Int { Int(sqlite3_changes(handle)) }
     func query(_ sql: String, _ arguments: [String?] = []) throws -> [[String: String]] {
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { throw error(sql) }
