@@ -3,17 +3,46 @@ import XCTest
 import VoiceOSPlatform
 
 private actor TaskInitiationFakePort: TaskInitiationModelPort {
-    let configuration = ModelConfiguration(provider: "fixture", model: "initiation", promptVersion: "task-initiation-v1",
-                                           schemaVersion: "task-initiation-v1", destination: .cloud)
+    let configuration = ModelConfiguration(provider: "fixture", model: "initiation", promptVersion: "task-initiation-v2",
+                                           schemaVersion: "task-initiation-v2", destination: .cloud)
     private let proposal: TaskInitiationProposal?
     private let failure: VoiceOSError?
+    private let reply: String
     private(set) var received: [TaskInitiationInput] = []
-    init(proposal: TaskInitiationProposal) { self.proposal = proposal; failure = nil }
-    init(error: VoiceOSError) { proposal = nil; failure = error }
+    private(set) var answered: [TaskInitiationInput] = []
+    init(proposal: TaskInitiationProposal) { self.proposal = proposal; failure = nil; reply = "" }
+    init(error: VoiceOSError) { proposal = nil; failure = error; reply = "" }
+    init(answer: String) { proposal = nil; failure = nil; reply = answer }
     func initiate(_ input: TaskInitiationInput) async throws -> TaskInitiationProposal {
         received.append(input)
         if let failure { throw failure }
         return proposal!
+    }
+    func answer(_ input: TaskInitiationInput) async throws -> String {
+        answered.append(input)
+        if let failure { throw failure }
+        guard !reply.isEmpty else { throw VoiceOSError("fixture 没有回答") }
+        return reply
+    }
+}
+
+/// Replays a scripted structured or plain text reply and records what the
+/// real Responses port built, including whether it requested JSON output.
+private actor TaskInitiationWireTransport: ModelHTTPTransport {
+    private let reply: String
+    private(set) var instructions: [String] = []
+    private(set) var inputs: [String] = []
+    private(set) var hasResponseFormat: [Bool] = []
+    init(reply: String) { self.reply = reply }
+    func send(_ request: URLRequest) async throws -> ModelHTTPReply {
+        let payload = (try? JSONSerialization.jsonObject(with: request.httpBody ?? Data())) as? [String: Any]
+        instructions.append(payload?["instructions"] as? String ?? "")
+        inputs.append((payload?["input"] as? [[String: Any]])?.first?["content"] as? String ?? "")
+        hasResponseFormat.append(payload?["text"] != nil)
+        let envelope: [String: Any] = ["status": "completed", "output": [
+            ["type": "message", "role": "assistant", "status": "completed",
+             "content": [["type": "output_text", "text": reply]]]]]
+        return .init(status: 200, body: try JSONSerialization.data(withJSONObject: envelope, options: [.sortedKeys]))
     }
 }
 
@@ -47,6 +76,10 @@ private enum TaskInitiationFixtures {
     static func capture() -> TaskInitiationProposal {
         .init(isTaskInitiation: false, route: .agentHandoff, title: "只想吐槽",
               reason: "用户明确只想记录，不要安排任务")
+    }
+    static func answer(_ body: String = "Git Hook 是 Git 在提交等动作前后自动运行的脚本。\n\n常见用途是提交前检查。") -> TaskInitiationProposal {
+        .init(isTaskInitiation: false, route: .answer, title: "Git Hook 是什么",
+              reason: "用户在提问，可以直接回答", answer: body)
     }
 }
 
@@ -144,6 +177,127 @@ final class TaskInitiationChecks: XCTestCase {
         let claims = try await store.candidateClaims(includeFrozen: true)
         XCTAssertTrue(actions.isEmpty)
         XCTAssertTrue(claims.isEmpty)
+    }
+
+    func testAnswerRouteRecordsBodyWithoutTaskSideEffects() async throws {
+        let store = try await openStore()
+        let source = try await personalSource(store, text: "Git Hook 是什么？能一句话解释吗？")
+        let sourcesBefore = try await store.sources().count
+        let row = try await store.recordTaskInitiation(try await input(store, source: source),
+                                                       proposal: TaskInitiationFixtures.answer())
+        XCTAssertEqual(row.route, .answer)
+        XCTAssertEqual(row.state, "draft")
+        XCTAssertEqual(row.artifact, TaskInitiationFixtures.answer().answer)
+        XCTAssertNil(row.input.preferredRoute)
+        let sourcesAfter = try await store.sources().count
+        XCTAssertEqual(sourcesAfter, sourcesBefore)
+        let actions = try await store.actions(includeHistory: true)
+        let claims = try await store.candidateClaims(includeFrozen: true)
+        let executions = try await store.assistantExecutions()
+        XCTAssertTrue(actions.isEmpty)
+        XCTAssertTrue(claims.isEmpty)
+        XCTAssertTrue(executions.isEmpty)
+
+        let copied = try await store.markTaskInitiationCopied(id: row.id, artifact: row.artifact)
+        XCTAssertNotNil(copied.copiedAt)
+        let saved = try await store.confirmTaskInitiation(id: row.id, artifact: copied.artifact)
+        XCTAssertEqual(saved.state, "confirmed")
+        XCTAssertTrue(saved.isArchived)
+        XCTAssertEqual(saved.artifact, TaskInitiationFixtures.answer().answer)
+        let live = try await store.taskInitiations()
+        XCTAssertTrue(live.isEmpty)
+        let archived = try await store.taskInitiations(includeArchived: true)
+        XCTAssertEqual(archived.map(\.id), [row.id])
+        let actionsAfter = try await store.actions(includeHistory: true)
+        XCTAssertTrue(actionsAfter.isEmpty)
+    }
+
+    func testAnswerWithoutBodyFailsAndPageFallsBackToClarify() async throws {
+        let store = try await openStore()
+        let source = try await personalSource(store, text: "这个问题能直接回答吗？")
+        let input = try await input(store, source: source)
+        let empty = TaskInitiationProposal(isTaskInitiation: false, route: .answer, reason: "用户在提问")
+        XCTAssertTrue(TaskInitiationComposer.needsClarifyFallback(empty))
+        XCTAssertTrue(TaskInitiationComposer.clarifyFallbackMessage.contains("更具体"))
+        do {
+            _ = try await store.recordTaskInitiation(input, proposal: empty)
+            XCTFail("缺少回答正文不应落行")
+        } catch let error as VoiceOSError {
+            XCTAssertTrue(error.message.contains("回答正文"))
+        }
+        let rows = try await store.taskInitiations()
+        XCTAssertTrue(rows.isEmpty)
+
+        let valid = TaskInitiationFixtures.answer()
+        XCTAssertFalse(TaskInitiationComposer.needsClarifyFallback(valid))
+        XCTAssertEqual(TaskInitiationComposer.render(valid), valid.answer)
+        let oversized = TaskInitiationProposal(isTaskInitiation: false, route: .answer,
+                                               answer: String(repeating: "字", count: TaskInitiationComposer.answerLimit + 1))
+        XCTAssertThrowsError(try TaskInitiationComposer.validate(oversized, mode: .direct, preferredRoute: nil))
+    }
+
+    func testAnswerRecordSurvivesReopenUnderSchema72() async throws {
+        var id = ""
+        do {
+            let store = try await openStore()
+            let source = try await personalSource(store, text: "什么是范围经济？")
+            id = try await store.recordTaskInitiation(try await input(store, source: source),
+                                                      proposal: TaskInitiationFixtures.answer()).id
+        }
+        let reopened = try await makeStore(at: root)
+        let rows = try await reopened.taskInitiations(includeArchived: true)
+        XCTAssertEqual(rows.map(\.id), [id])
+        XCTAssertEqual(rows.first?.route, .answer)
+        XCTAssertEqual(rows.first?.proposal.answer, TaskInitiationFixtures.answer().answer)
+        let database = try Database(root.appendingPathComponent("voiceos.sqlite"))
+        XCTAssertEqual(try database.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
+    }
+
+    func testManualAnswerReusesOriginalWordsAndParsesPlainReply() async throws {
+        let store = try await openStore()
+        let source = try await personalSource(store, text: "什么是沉没成本？")
+        let record = try await store.recordTaskInitiation(try await input(store, source: source),
+                                                          proposal: TaskInitiationFixtures.handoff())
+        let fake = TaskInitiationFakePort(answer: "沉没成本是已经发生且无法收回的成本。")
+        let fakeReply = try await fake.answer(record.input)
+        XCTAssertEqual(fakeReply, "沉没成本是已经发生且无法收回的成本。")
+        let answered = await fake.answered
+        XCTAssertEqual(answered.first?.text, record.input.text)
+
+        let wire = TaskInitiationWireTransport(reply: "沉没成本是已经发生且无法收回的成本。\n\n所以决策时应忽略它。")
+        let port = try ResponsesTaskInitiationPort(baseURL: URL(string: "https://example.com/v1")!,
+                                                   apiKey: "fixture", model: "fixture-model", transport: wire)
+        XCTAssertEqual(port.configuration.promptVersion, "task-initiation-v2")
+        let input = TaskInitiationInput(sourceID: "source", transcriptVersionID: "version", text: "什么是沉没成本？",
+                                        answer: "一句话解释即可", mode: .direct, preferredRoute: nil,
+                                        recordedAt: "2026-11-17T00:00:00Z", timeZone: "Asia/Shanghai")
+        let text = try await port.answer(input)
+        XCTAssertTrue(text.contains("沉没成本"))
+        let inputs = await wire.inputs
+        XCTAssertTrue(inputs.first?.contains("什么是沉没成本？") == true)
+        XCTAssertTrue(inputs.first?.contains("一句话解释即可") == true)
+        let instructions = await wire.instructions
+        XCTAssertTrue(instructions.first?.contains("直接回答") == true)
+        let structured = await wire.hasResponseFormat
+        XCTAssertEqual(structured, [false])
+    }
+
+    func testClassificationWireAcceptsAnswerRouteWithBody() async throws {
+        let body = #"{"is_task_initiation":false,"route":"answer","title":"Git Hook 是什么","objective":"","known_facts":[],"assumptions":[],"missing_information":[],"constraints":[],"acceptance_criteria":[],"execution_preference":"quick_delivery","target_executor":"","deliverables":[],"guide_prerequisites":[],"guide_steps":[],"first_action":"","verification":"","clarify_question":"","reason":"用户在提问","answer":"Git Hook 是自动运行的脚本。"}"#
+        let wire = TaskInitiationWireTransport(reply: body)
+        let port = try ResponsesTaskInitiationPort(baseURL: URL(string: "https://example.com/v1")!,
+                                                   apiKey: "fixture", model: "fixture-model", transport: wire)
+        let input = TaskInitiationInput(sourceID: "source", transcriptVersionID: "version", text: "Git Hook 是什么？",
+                                        answer: "", mode: .direct, preferredRoute: nil,
+                                        recordedAt: "2026-11-17T00:00:00Z", timeZone: "Asia/Shanghai")
+        let proposal = try await port.initiate(input)
+        XCTAssertEqual(proposal.route, .answer)
+        XCTAssertFalse(proposal.isTaskInitiation)
+        XCTAssertEqual(proposal.answer, "Git Hook 是自动运行的脚本。")
+        let structured = await wire.hasResponseFormat
+        XCTAssertEqual(structured, [true])
+        let instructions = await wire.instructions
+        XCTAssertTrue(instructions.first?.contains("answer") == true)
     }
 
     func testClarifyAsksOneQuestionThenBecomesDraft() async throws {

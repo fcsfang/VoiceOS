@@ -550,7 +550,7 @@ final class ControlCenter: ObservableObject {
         guard !initiationBusy else { return false }
         guard let store else { initiationStatus = "资料库尚未打开"; return false }
         guard let port = initiationModel else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return false }
-        guard allowCloud else { initiationStatus = "请先允许这段原话用于云端，再生成启动材料"; return false }
+        guard allowCloud else { initiationStatus = "请先允许这段原话用于云端，再继续"; return false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { initiationStatus = "先写下或从材料带入一段原话"; return false }
         guard trimmed.unicodeScalars.count <= 4000 else { initiationStatus = "原话超过 4000 字；请拆分或精简后再生成"; return false }
@@ -562,13 +562,18 @@ final class ControlCenter: ObservableObject {
                 _ = try await store.setSourceLocalOnly(sourceID: chosenID, expectedVersion: source.policyVersion, localOnly: false)
             }
             let input = try await store.taskInitiationInput(sourceID: chosenID, mode: mode)
-            initiationStatus = "正在整理可以开始的下一步…"
+            initiationStatus = "正在判断是直接回答，还是整理成启动材料…"
             let proposal = try await port.initiate(input)
+            guard !TaskInitiationComposer.needsClarifyFallback(proposal) else {
+                initiationStatus = TaskInitiationComposer.clarifyFallbackMessage
+                return false
+            }
             _ = try await store.recordTaskInitiation(input, proposal: proposal)
             initiationText = ""; initiationSourceID = nil
             await refresh()
             initiationStatus = proposal.route == .captureOnly ? "已按原意仅记录；没有生成提示词、教程或任务。"
                 : proposal.route == .clarify ? "需要先回答一个关键问题，才能继续。"
+                : proposal.route == .answer ? "已直接回答；可以复制回答，或归档保存。"
                 : "启动材料已生成；可以预览、编辑或复制。"
             return true
         } catch {
@@ -583,6 +588,22 @@ final class ControlCenter: ObservableObject {
             return source.id
         }
         return try await store.recordUserExpression(text)
+    }
+    func directAnswerTaskInitiation(_ record: TaskInitiationRecord, allowCloud: Bool) async -> String? {
+        guard !initiationBusy else { return nil }
+        guard allowCloud else { initiationStatus = "请先允许这段原话用于云端，再直接回答"; return nil }
+        guard let port = initiationModel else { initiationStatus = "尚未配置文本模型；请先在设置中连接模型"; return nil }
+        initiationBusy = true
+        defer { initiationBusy = false }
+        initiationStatus = "正在直接回答…"
+        do {
+            let reply = try await port.answer(record.input)
+            initiationStatus = "已直接回答；可以复制这段回答。"
+            return reply
+        } catch {
+            initiationStatus = "直接回答未完成：" + error.localizedDescription
+            return nil
+        }
     }
     func answerTaskInitiation(_ record: TaskInitiationRecord, answer: String) async -> Bool {
         guard !initiationBusy else { return false }
@@ -673,7 +694,9 @@ final class ControlCenter: ObservableObject {
         do {
             _ = try await store.confirmTaskInitiation(id: record.id, artifact: artifact)
             await refresh()
-            initiationStatus = "已确认这份启动材料；尚未执行，也没有创建任务或提醒。"
+            initiationStatus = record.route == .answer
+                ? "已归档保存这条回答；可在启动记录里打开「查看归档」。"
+                : "已确认这份启动材料；尚未执行，也没有创建任务或提醒。"
             return true
         } catch {
             initiationStatus = error.localizedDescription
