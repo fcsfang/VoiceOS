@@ -23,13 +23,13 @@ public actor SpotlightIndexer {
         self.minimumInterval = minimumInterval
     }
 
-    public func index(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord]) async {
+    public func index(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord], topics: [ReflectionQuestion] = []) async {
         guard CSSearchableIndex.isIndexingAvailable() else { return }
         if !purged {
             purged = true
             do { try await purgeDomain() } catch { NSLog("VoiceOS Spotlight 清理旧索引失败：\(error.localizedDescription)") }
         }
-        let entries = makeEntries(sources: sources, claims: claims, actions: actions)
+        let entries = makeEntries(sources: sources, claims: claims, actions: actions, topics: topics)
         let current = Dictionary(uniqueKeysWithValues: entries.map { ($0.id, $0.fingerprint) })
         let changed = entries.filter { fingerprints[$0.id] != $0.fingerprint }
         let removed = Set(fingerprints.keys).subtracting(current.keys)
@@ -86,7 +86,7 @@ public actor SpotlightIndexer {
         }
     }
 
-    private func makeEntries(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord]) -> [Entry] {
+    private func makeEntries(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord], topics: [ReflectionQuestion]) -> [Entry] {
         var entries: [Entry] = []
         for source in sources where ["saved", "reference_only"].contains(source.state) {
             let excerpt = excerpt(from: source.transcript ?? "", limit: 200)
@@ -96,13 +96,19 @@ public actor SpotlightIndexer {
         }
         for claim in claims where claim.validity == "current" {
             entries.append(Entry(id: "claim-" + claim.id, title: singleLine(claim.statement), summary: "观点",
-                                 modified: [String(claim.reviewVersion), claim.validity, claim.statement].joined(separator: "\u{1F}"), url: nil))
+                                 modified: [String(claim.reviewVersion), claim.validity, claim.statement, claim.references.first?.sourceID ?? ""].joined(separator: "\u{1F}"),
+                                 url: claim.references.first.flatMap { URL(string: "voiceos://source/" + $0.sourceID) }))
         }
         for action in actions where action.state == "open" && action.validity == "current" {
             let note = singleLine(action.note)
             entries.append(Entry(id: "action-" + action.id, title: singleLine(action.title), summary: note.isEmpty ? "开放行动" : note,
                                  modified: [String(action.version), action.state, action.validity, action.title, action.note].joined(separator: "\u{1F}"),
                                  url: URL(string: "voiceos://action/" + action.id)))
+        }
+        for topic in topics {
+            entries.append(Entry(id: "topic-" + topic.id, title: singleLine(topic.title), summary: "主题",
+                                 modified: [topic.title, topic.updatedAt].joined(separator: "\u{1F}"),
+                                 url: URL(string: "voiceos://topic/" + topic.id)))
         }
         return entries
     }
