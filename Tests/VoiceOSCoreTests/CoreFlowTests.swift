@@ -1653,7 +1653,7 @@ final class CoreFlowTests: XCTestCase {
         let starvationCalls=await starvationPort.generatedSourceIDs
         XCTAssertTrue(starvationCalls.contains { $0.contains(starvationIDs[2]) }, "后续单元必须继续尝试；实际调用：\(starvationCalls)")
         XCTAssertEqual(Set(starvationState.snapshot?.workflow?.verifiedUnitIDs ?? []), Set([starvationIDs[0], starvationIDs[2]]), "部分快照应保留已核对单元")
-        XCTAssertTrue(starvationState.error?.contains(starvationIDs[1]) == true, "失败信息应点名失败单元：\(starvationState.error ?? "nil")")
+        XCTAssertFalse(starvationState.error?.contains(starvationIDs[1]) == true, "失败信息应点名材料而非单元 id：\(starvationState.error ?? "nil")")
         XCTAssertTrue(starvationState.error?.contains("已核对 2/3 个") == true, "失败信息应带核对进度：\(starvationState.error ?? "nil")")
         let starvationSteps=try Database(starvationDirectory.appendingPathComponent("voiceos.sqlite")).query("SELECT state FROM panorama_steps WHERE stage='unit.generate' AND scope_id=? ORDER BY rowid", [starvationIDs[1]])
         XCTAssertFalse(starvationSteps.isEmpty)

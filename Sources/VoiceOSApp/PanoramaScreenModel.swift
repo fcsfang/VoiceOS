@@ -36,7 +36,7 @@ final class PanoramaScreenModel: ObservableObject {
             }
             state = current
             readError = nil
-            message = current.error ?? statusMessage(current, configured: port != nil)
+            message = statusMessage(current, configured: port != nil)
             guard worker == nil, current.canGenerate, let port else { return }
             generate(store: store, port: port, retry: false)
         } catch {
@@ -76,7 +76,20 @@ final class PanoramaScreenModel: ObservableObject {
         }
     }
     private func statusMessage(_ state: PanoramaState, configured: Bool) -> String {
+        if ["failed", "unknown"].contains(state.status) {
+            if let snapshot=state.snapshot, snapshot.isPartial {
+                let verified=snapshot.workflow?.verifiedUnitIDs.count ?? state.progress?.verifiedUnitCount ?? 0
+                let total=state.progress?.totalUnitCount ?? state.input.units.count
+                if verified > 0 {
+                    return snapshot.proposal.relations.isEmpty
+                        ? "已有 \(verified)/\(total) 个单元通过核对，可先生成带候选联系的综合草稿"
+                        : "已有 \(verified)/\(total) 个单元通过核对"
+                }
+            }
+            return state.error ?? "全景未完成，可继续核对"
+        }
         if let progress=state.progress, state.snapshot?.isPartial == true || state.status == "running" {
+            if let phrase=activePhrase(progress, input: state.input) { return phrase }
             let count="已核对 \(progress.verifiedUnitCount)/\(progress.totalUnitCount) 个完整单元"
             let remaining=progress.phase == .units ? "其余材料仍在核对" : "跨单元联系与全局覆盖仍在核对"
             return count + " · " + remaining + "；当前仅显示已核对区域，尚非完整全景"
@@ -85,5 +98,15 @@ final class PanoramaScreenModel: ObservableObject {
         if state.input.units.isEmpty { return "完整整理后的授权材料将在这里形成思考全景；可先打开材料或记录想法" }
         if !configured { return "材料已就绪，请选择文本模型配置后生成全景" }
         return state.status == "running" ? "正在生成并独立核对全景，材料仍可使用" : "当前完整材料等待生成全景"
+    }
+    private func activePhrase(_ progress: PanoramaProgress, input: PanoramaInput) -> String? {
+        guard let scope=progress.activeScope else { return nil }
+        let unitID=scope.split(separator: "#").first.map(String.init) ?? scope
+        guard let unit=input.units.first(where: { $0.id == unitID }),
+              let title=unit.sourceIDs.compactMap({ id in input.sources.first(where: { $0.id == id })?.title }).first else { return nil }
+        if let ordinal=progress.activeOrdinal, let count=progress.activeSliceCount {
+            return "正在核对〈\(title)〉· 分片 \(ordinal)/\(count)"
+        }
+        return "正在核对〈\(title)〉"
     }
 }

@@ -219,6 +219,9 @@ public struct PanoramaProgress: Sendable {
     public let verifiedUnitCount: Int
     public let totalUnitCount: Int
     public let activeStage: String?
+    public let activeScope: String?
+    public let activeOrdinal: Int?
+    public let activeSliceCount: Int?
 }
 public struct PanoramaSnapshot: Codable, Sendable, Identifiable {
     public let id: String
