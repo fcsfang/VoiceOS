@@ -4310,6 +4310,17 @@ extension ControlCenter {
             await refresh(); resumeAssistantExecutions(); return true
         } catch { assistantStatus = error.localizedDescription; await refresh(); return false }
     }
+    /// A follow-up is its own analysis execution anchored to the same action.
+    func askFollowup(_ action: ActionRecord, instruction: String) async -> Bool {
+        guard let store, assistantModel != nil else { assistantStatus = "请先配置文本模型"; return false }
+        let text = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { assistantStatus = "请写下要追问的内容"; return false }
+        do {
+            _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, instruction: text, mode: .analysis, fresh: true)
+            assistantStatus = "追问已排队；结果会保存在这条问题下"
+            await refresh(); resumeAssistantExecutions(); return true
+        } catch { assistantStatus = error.localizedDescription; await refresh(); return false }
+    }
     /// Queues a question's first answer and returns without waiting for it, so
     /// the clarify queue can advance to the next item right away.
     func enqueueTrialAnswer(_ action: ActionRecord) async -> Bool {

@@ -220,7 +220,8 @@ struct WorkspaceTaskView: View {
     private var current: Bool { action.validity == "current" && action.state != "dismissed" }
     private var isQuestion: Bool { action.nature == "question" }
     private var latestAnalysis: AssistantExecutionRecord? {
-        model.assistantExecutions.first { $0.actionID == action.id && $0.mode == .analysis }
+        // Follow-ups live under the answer; the eyebrow still describes the answer itself.
+        model.assistantExecutions.first { $0.actionID == action.id && $0.mode == .analysis && $0.instruction.isEmpty }
     }
     /// The same semantic the row status and the answer section use: a completed
     /// answer wins, a closed question without one is "thought through", and a
