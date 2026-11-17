@@ -70,21 +70,22 @@ public enum DatabaseBackup {
     }
 
     public static func directoryBytes(at url: URL, fileManager: FileManager = .default) -> Int64 {
-        guard let enumerator = fileManager.enumerator(
+        // Foundation 的 enumerator 在遇到指向目录的符号链接并 skipDescendants 时
+        // 会连带跳过后续兄弟目录的子项，这里改用手写递归。
+        guard let entries = try? fileManager.contentsOfDirectory(
             at: url,
-            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],
-            options: [],
-            errorHandler: { _, _ in true }
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey],
+            options: []
         ) else { return 0 }
         var total: Int64 = 0
-        for case let file as URL in enumerator {
-            guard let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]) else { continue }
-            if values.isSymbolicLink == true {
-                enumerator.skipDescendants()
-                continue
+        for entry in entries {
+            guard let values = try? entry.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey]) else { continue }
+            if values.isSymbolicLink == true { continue }
+            if values.isRegularFile == true {
+                total += Int64(values.fileSize ?? 0)
+            } else if values.isDirectory == true {
+                total += directoryBytes(at: entry, fileManager: fileManager)
             }
-            guard values.isRegularFile == true else { continue }
-            total += Int64(values.fileSize ?? 0)
         }
         return total
     }
