@@ -356,7 +356,6 @@ struct RecentContentHome: View {
                         .id("home.thread.\(thread.id)")
                 }
             }
-            }
             tasksSummary(digest.tasks)
         }
     }
