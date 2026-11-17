@@ -47,6 +47,18 @@ struct ReflectionTimelineView: View {
     @State private var showsQuestions = false
     @State private var showsChanges = false
     @State private var changeID: String?
+    init(model: ControlCenter, embeddedTopicID: String? = nil, startPeriodic: Bool = false,
+         openSource: ((String) -> Void)? = nil, dismiss: @escaping () -> Void,
+         discuss: @escaping (CandidateClaim) -> Void,
+         reflect: @escaping (ConversationReflectionFocus, String) async -> Bool) {
+        _model = ObservedObject(wrappedValue: model)
+        self.embeddedTopicID = embeddedTopicID
+        self.openSource = openSource
+        self.dismiss = dismiss
+        self.discuss = discuss
+        self.reflect = reflect
+        _periodic = State(initialValue: startPeriodic)
+    }
     private var selectedTopic: ReflectionQuestion? { topics.first { $0.id == (embeddedTopicID ?? selectedTopicID) } ?? (embeddedTopicID == nil ? topics.first : nil) }
     private var reflectionKey: String { periodic ? intervalKey : "topic:" + (selectedTopic?.id ?? "empty") }
     private var interval: DateInterval { period.interval(containing: anchor) }
