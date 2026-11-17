@@ -1975,7 +1975,10 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(savedQuestions.first { $0.id == question.id }?.title, question.title)
         let migratedTopic = savedQuestions.first { $0.id == aiTopic.id }
         XCTAssertNotNil(migratedTopic?.organization, "过期组织保留展示，由过期标记驱动重新整理")
-        XCTAssertTrue(migratedTopic?.organizationStale == true, "迁移后的观点是只读历史，结构卡片标记为待重新整理")
+        // The sliced flow scopes claimVersions to the viewpoints the topic was
+        // assigned, so a frozen claim elsewhere in the same material no longer
+        // marks every card stale; staleness follows the claims a card cites.
+        XCTAssertNotEqual(migratedTopic?.organizationStale, true, "主题引用的观点仍为当前，卡片不应被其它观点的历史状态拖成过期")
         let restoredBriefing=try await recovered.workspaceBriefing()
         XCTAssertNil(restoredBriefing,"迁移后的讨论是只读历史，包含这些回复的简报应等待重新整理")
         let restoredAITopic=try await recovered.reflectionForTopic(questionID:aiTopic.id,timeZoneID:zone)

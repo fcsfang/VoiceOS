@@ -1397,7 +1397,7 @@ final class Database {
     func execute(_ sql: String, _ arguments: [String?] = []) throws { _ = try query(sql, arguments) }
     func query(_ sql: String, _ arguments: [String?] = []) throws -> [[String: String]] {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { throw error() }
+        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { throw error(sql) }
         defer { sqlite3_finalize(stmt) }
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         for (i, value) in arguments.enumerated() {
@@ -1414,7 +1414,7 @@ final class Database {
         while true {
             let result = sqlite3_step(stmt)
             if result == SQLITE_DONE { return rows }
-            guard result == SQLITE_ROW else { throw error() }
+            guard result == SQLITE_ROW else { throw error(sql) }
             var row: [String: String] = [:]
             for i in 0..<sqlite3_column_count(stmt) where sqlite3_column_type(stmt, i) != SQLITE_NULL {
                 let key = String(cString: sqlite3_column_name(stmt, i))
@@ -1437,5 +1437,10 @@ final class Database {
             try execute("UPDATE transcripts SET current_version_id=? WHERE id=?", [versionID,row["id"]])
         }
     }
-    private func error() -> VoiceOSError { VoiceOSError("资料库错误：\(String(cString: sqlite3_errmsg(handle)))") }
+    private func error(_ sql: String? = nil) -> VoiceOSError {
+        let message=String(cString: sqlite3_errmsg(handle))
+        guard let sql else { return VoiceOSError("资料库错误：\(message)") }
+        let statement=sql.split(whereSeparator: \.isWhitespace).prefix(14).joined(separator: " ")
+        return VoiceOSError("资料库错误：\(message)｜\(statement)")
+    }
 }

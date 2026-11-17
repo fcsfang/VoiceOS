@@ -319,7 +319,10 @@ extension VoiceOSStore {
     }
 
     public func needsTopicOrganizationRefresh() throws -> Bool {
-        guard let input = try prepareTopicOrganization(), !input.knowledge.isEmpty else { return false }
+        // No knowledge guard here: a transcript correction freezes viewpoints and
+        // the saved organization is still stale for reading; hiding that would
+        // strand the topic until understanding re-runs.
+        guard let input = try prepareTopicOrganization() else { return false }
         return try !topicOrganizationsAreCurrent(input: input)
     }
 
@@ -542,12 +545,6 @@ extension VoiceOSStore {
                 if let claimID = task.claimID { return claimIDs.contains(claimID) }
                 return !refs.isDisjoint(with: task.sourceIDs)
             }
-            // Re-assert the assignment's links on every apply: a stale topic
-            // whose material was unlinked becomes current without a new call.
-            for sourceID in refs.sorted() {
-                try db.execute("INSERT OR IGNORE INTO reflection_question_sources(id,question_id,source_id) VALUES(?,?,?)", [UUID().uuidString, id, sourceID])
-                try db.execute("UPDATE assistant_executions SET question_id=? WHERE result_source_id=? AND question_id IS NULL AND validity='current'", [id, sourceID])
-            }
             var summary = TopicOrganizationSummary(
                 summary: proposal.summary, questions: questions,
                 sourceVersions: sourceVersions, policyVersions: policyVersions,
@@ -563,6 +560,10 @@ extension VoiceOSStore {
                old.summary == summary.summary, old.questions == summary.questions,
                old.claimVersions == summary.claimVersions, old.sourceVersions == summary.sourceVersions,
                old.taskStates == summary.taskStates, old.discussionContextIDs == summary.discussionContextIDs {
+                for sourceID in refs.sorted() {
+                    try db.execute("INSERT OR IGNORE INTO reflection_question_sources(id,question_id,source_id) VALUES(?,?,?)", [UUID().uuidString, id, sourceID])
+                    try db.execute("UPDATE assistant_executions SET question_id=? WHERE result_source_id=? AND question_id IS NULL AND validity='current'", [id, sourceID])
+                }
                 applied.append((id, title, summary.summary, questions, refs.sorted()))
                 continue
             }
@@ -577,6 +578,12 @@ extension VoiceOSStore {
                 try db.execute("INSERT INTO reflection_questions(id,title,title_source_id,organization_json,ai_named,created_at,updated_at) VALUES(?,?,?,?,1,?,?)",
                                [id, title, titleSource, json, Self.now(), Self.now()])
                 existing[id] = (title, true, json)
+            }
+            // Links land after the topic row exists: the FK on question_id aborts
+            // the insert and INSERT OR IGNORE does not swallow FK failures.
+            for sourceID in refs.sorted() {
+                try db.execute("INSERT OR IGNORE INTO reflection_question_sources(id,question_id,source_id) VALUES(?,?,?)", [UUID().uuidString, id, sourceID])
+                try db.execute("UPDATE assistant_executions SET question_id=? WHERE result_source_id=? AND question_id IS NULL AND validity='current'", [id, sourceID])
             }
             applied.append((id, title, summary.summary, questions, refs.sorted()))
         }

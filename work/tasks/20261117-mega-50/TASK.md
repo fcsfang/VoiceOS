@@ -64,3 +64,10 @@
 - UC（de15fb9）：周回顾 0 计数假按钮、加载失败重试、讨论页未配置模型说明与入口、认知地图假空态、查不到原话提示；另接两处「到行动页移出」跳转。
 - 协调者补线：处理页「主题整理未完成」区块（待补齐横幅、继续补齐/立即重试，立即重试走 retry 绕过冷却），`workspaceAttentionCount` 与 `workspaceProcessingOutstanding` 纳入主题整理未完成；首页注意力经同一计数生效。
 - 待做：合并后单次构建与全量测试，结果补此文件。
+- 集成修复（协调者）：
+  - `Database.swift:20` 版本上限 0...68 → 0...69（TS 升 schema 时漏改，导致 51 个测试报「资料库格式比此应用更新」）。
+  - `applyTopicSkeleton` 先插 `reflection_question_sources` 再建 `reflection_questions` 行触发外键失败（`INSERT OR IGNORE` 不吞 FK 错误）；链接改到主题行落库之后，两处应用路径同步。
+  - `needsTopicOrganizationRefresh` 去掉 `!input.knowledge.isEmpty` 守卫：原文更正冻结观点后，过期主题仍需提示刷新。
+  - `Database.error()` 附带语句文本，SQL 失败可定位。
+  - 恢复后过期语义：两段式把 claimVersions 收窄到该主题分配的观点，同材料其他观点冻结不再把卡片拖成过期；CoreFlow 断言按此更新。
+- 构建 build_exit=0（80s）；测试 test_exit=0，520 项 0 失败（32s）。请求体实测：骨架 11,078 字节，正文批 9,795/9,761/9,761 字节。
