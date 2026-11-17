@@ -1218,8 +1218,11 @@ final class ControlCenter: ObservableObject {
         StartupTrace.mark("reload.panoramaChecked")
         var contextsFroze = false
         var coreSnapshotApplied = false
+        var latestClaimsBySource: [String: [CandidateClaim]]?
+        var assistantSnapshot: WorkspaceSnapshot?
         do {
             let snapshot = try await StartupTrace.measureAsync("reload.workspaceSnapshot") { try await store.workspaceSnapshot(.core) }
+            latestClaimsBySource = snapshot.currentClaimsBySource
             // Publish the core lists together, without awaits between related data sets.
             applyCoreSnapshot(snapshot)
             coreSnapshotApplied = true
@@ -1248,6 +1251,7 @@ final class ControlCenter: ObservableObject {
             try? await Task.yield()
             let assistant = try await StartupTrace.measureAsync("reload.assistantSnapshot") { try await store.workspaceSnapshot(.assistant) }
             applyAssistantSnapshot(assistant)
+            assistantSnapshot = assistant
             contextsFroze = contextsFroze || assistant.contextValidityChanged
             StartupTrace.mark("reload.assistantPublished")
             try? await Task.yield()
@@ -1255,7 +1259,8 @@ final class ControlCenter: ObservableObject {
                 try await store.recordingFollowupValidities(recordingFollowups,
                     catalogRows: coreSnapshotApplied ? records : nil,
                     claimRows: coreSnapshotApplied ? claims : nil,
-                    actionRows: coreSnapshotApplied ? actionRecords : nil)
+                    actionRows: coreSnapshotApplied ? actionRecords : nil,
+                    latest: coreSnapshotApplied && !contextsFroze ? latestClaimsBySource : nil)
             }
             StartupTrace.mark("reload.validityPublished")
             let knowledge = try await StartupTrace.measureAsync("reload.knowledgeSnapshot") { try await store.workspaceSnapshot(.knowledge) }
@@ -1273,7 +1278,7 @@ final class ControlCenter: ObservableObject {
         }
         catch { status = error.localizedDescription }
         await StartupTrace.measureAsync("reload.discussion") { await refreshDiscussion() }
-        resumeAssistantExecutions()
+        resumeAssistantExecutions(snapshot: contextsFroze ? nil : assistantSnapshot)
         queueTopicOrganization()
     }
     func setPanoramaVisible(_ visible: Bool) async {
@@ -4528,7 +4533,7 @@ extension ControlCenter {
             return opened
         } catch { assistantStatus = error.localizedDescription; return false }
     }
-    private func resumeAssistantExecutions() {
+    private func resumeAssistantExecutions(snapshot: WorkspaceSnapshot? = nil) {
         guard initialized, let store, let port = assistantModel, assistantWorker == nil, !dictationActive, !fullRecordingBusy else { return }
         assistantWorker = Task {
             assistantBusy = true
@@ -4536,14 +4541,20 @@ extension ControlCenter {
             do {
                 assistantStatus = "正在检查明确委托，并推进已保存的代办…"
                 // Deliver queued work first; discovering other tasks must not
-                // postpone an explicit delegation made in the foreground.
+                // postpone an explicit delegation made in the foreground. The
+                // reload snapshot skips revalidating an idle list and is reused
+                // only while no write happened after it was taken.
+                let idle = snapshot.map { !$0.assistantExecutions.contains { ["queued", "running"].contains($0.state) } } ?? false
+                let steadyHint = idle ? snapshot : nil
                 var changed = false
-                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh() }) {
+                var firstHint = snapshot
+                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh() }, snapshot: firstHint) {
                     changed = true
+                    firstHint = nil
                     try Task.checkCancellation()
                 }
-                if try await store.discoverAutomaticAssistantExecutions(using: port) { changed = true }
-                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh() }) {
+                if try await store.discoverAutomaticAssistantExecutions(using: port, snapshot: steadyHint) { changed = true }
+                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh() }, snapshot: steadyHint) {
                     changed = true
                     try Task.checkCancellation()
                 }
