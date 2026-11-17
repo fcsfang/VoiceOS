@@ -26,13 +26,15 @@ final class RecordingExpressionDetailsChecks: XCTestCase {
         try await store.recover()
         return store
     }
-    private func automaticSources(_ store: VoiceOSStore, _ texts: [String]) throws -> [String] {
-        try texts.enumerated().map { index, text in
-            let id = try store.recordUserExpression(text)
-            _ = try store.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
-            try store.registerAutomaticRecording(sourceID: id, inbox: "fixture", recordedAt: "2026-11-17T02:0\(index):00Z")
-            return id
+    private func automaticSources(_ store: VoiceOSStore, _ texts: [String]) async throws -> [String] {
+        var ids: [String] = []
+        for (index, text) in texts.enumerated() {
+            let id = try await store.recordUserExpression(text)
+            _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: 1, localOnly: false)
+            try await store.registerAutomaticRecording(sourceID: id, inbox: "fixture", recordedAt: "2026-11-17T02:0\(index):00Z")
+            ids.append(id)
         }
+        return ids
     }
     private func source(_ id: String, transcript: String? = "原话内容", localOnly: Bool = false,
                         presentation: RecordingPresentation? = nil) -> SourceRecord {
@@ -46,33 +48,40 @@ final class RecordingExpressionDetailsChecks: XCTestCase {
     }
 
     func testGroupTitleIsSharedByEveryMemberAndSurvivesReload() async throws {
-        let store = try await openStore()
-        let ids = try automaticSources(store, ["第一段原话", "第二段原话"])
-        let groups = try await store.connectRecordingExpressions(using: SingleGroupExpressionPort())
-        XCTAssertEqual(groups.count, 1)
-        try store.renameRecording(sourceID: ids[0], title: "我的分组标题")
-        let catalog = Dictionary(uniqueKeysWithValues: try store.sources().map { ($0.id, $0) })
-        for id in ids {
-            let member = try XCTUnwrap(catalog[id])
-            XCTAssertEqual(member.presentation?.expression?.manualTitle, "我的分组标题")
-            XCTAssertNil(member.presentation?.manualTitle)
-            XCTAssertEqual(member.recordingExpression(in: catalog)?.displayTitle(in: catalog), "我的分组标题")
-        }
+        let ids: [String] = try await {
+            let store = try await openStore()
+            let ids = try await automaticSources(store, ["第一段原话", "第二段原话"])
+            let groups = try await store.connectRecordingExpressions(using: SingleGroupExpressionPort())
+            XCTAssertEqual(groups.count, 1)
+            try await store.renameRecording(sourceID: ids[0], title: "我的分组标题")
+            let sources = try await store.sources()
+            let catalog = Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0) })
+            for id in ids {
+                let member = try XCTUnwrap(catalog[id])
+                XCTAssertEqual(member.presentation?.expression?.manualTitle, "我的分组标题")
+                XCTAssertNil(member.presentation?.manualTitle)
+                XCTAssertEqual(member.recordingExpression(in: catalog)?.displayTitle(in: catalog), "我的分组标题")
+            }
+            return ids
+        }()
         let reopened = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
         try await reopened.recover()
-        let reopenedCatalog = Dictionary(uniqueKeysWithValues: try reopened.sources().map { ($0.id, $0) })
+        let reopenedSources = try await reopened.sources()
+        let reopenedCatalog = Dictionary(uniqueKeysWithValues: reopenedSources.map { ($0.id, $0) })
         XCTAssertEqual(reopenedCatalog[ids[1]]?.presentation?.expression?.manualTitle, "我的分组标题")
-        try store.renameRecording(sourceID: ids[1], title: nil)
-        let cleared = Dictionary(uniqueKeysWithValues: try store.sources().map { ($0.id, $0) })
+        try await reopened.renameRecording(sourceID: ids[1], title: nil)
+        let clearedSources = try await reopened.sources()
+        let cleared = Dictionary(uniqueKeysWithValues: clearedSources.map { ($0.id, $0) })
         XCTAssertNil(cleared[ids[0]]?.presentation?.expression?.manualTitle)
         XCTAssertEqual(cleared[ids[0]]?.recordingExpression(in: cleared)?.displayTitle(in: cleared), "自动分组标题")
     }
 
     func testSingleRecordingTitleStaysOnPresentation() async throws {
         let store = try await openStore()
-        let id = try store.recordUserExpression("单独的一段话")
-        try store.renameRecording(sourceID: id, title: "单段标题")
-        let member = try XCTUnwrap(try store.sources().first)
+        let id = try await store.recordUserExpression("单独的一段话")
+        try await store.renameRecording(sourceID: id, title: "单段标题")
+        let catalog = try await store.sources()
+        let member = try XCTUnwrap(catalog.first)
         XCTAssertNil(member.presentation?.expression)
         XCTAssertEqual(member.presentation?.manualTitle, "单段标题")
         XCTAssertEqual(member.displayTitle, "单段标题")
@@ -80,29 +89,32 @@ final class RecordingExpressionDetailsChecks: XCTestCase {
 
     func testSplitReturnsSegmentsToIndependentTitles() async throws {
         let store = try await openStore()
-        let ids = try automaticSources(store, ["第一段原话", "第二段原话"])
+        let ids = try await automaticSources(store, ["第一段原话", "第二段原话"])
         _ = try await store.connectRecordingExpressions(using: SingleGroupExpressionPort())
-        try store.renameRecording(sourceID: ids[0], title: "分组标题")
-        let changed = try store.detachRecordingsFromExpressions(sourceIDs: [ids[0]])
+        try await store.renameRecording(sourceID: ids[0], title: "分组标题")
+        let changed = try await store.detachRecordingsFromExpressions(sourceIDs: [ids[0]])
         XCTAssertEqual(changed, 2)
-        let sources = try store.sources()
+        let sources = try await store.sources()
         for id in ids {
             let member = try XCTUnwrap(sources.first { $0.id == id })
             XCTAssertNil(member.presentation?.expression)
             XCTAssertEqual(member.displayTitle, id == ids[0] ? "第一段原话" : "第二段原话")
         }
-        XCTAssertTrue(try store.recordingExpressions().isEmpty)
+        let remaining = try await store.recordingExpressions()
+        XCTAssertTrue(remaining.isEmpty)
     }
 
     func testSplitFromOneSegmentDetachesWholeGroup() async throws {
         let store = try await openStore()
-        let ids = try automaticSources(store, ["第一段原话", "第二段原话", "第三段原话"])
+        let ids = try await automaticSources(store, ["第一段原话", "第二段原话", "第三段原话"])
         _ = try await store.connectRecordingExpressions(using: SingleGroupExpressionPort())
-        let changed = try store.detachRecordingsFromExpressions(sourceIDs: [ids[1]])
+        let changed = try await store.detachRecordingsFromExpressions(sourceIDs: [ids[1]])
         XCTAssertEqual(changed, 3)
-        let catalog = Dictionary(uniqueKeysWithValues: try store.sources().map { ($0.id, $0) })
+        let sources = try await store.sources()
+        let catalog = Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0) })
         for id in ids { XCTAssertNil(catalog[id]?.presentation?.expression) }
-        XCTAssertTrue(try store.recordingExpressions().isEmpty)
+        let remaining = try await store.recordingExpressions()
+        XCTAssertTrue(remaining.isEmpty)
     }
 
     func testChangedMemberExplainsUnavailableExpression() throws {

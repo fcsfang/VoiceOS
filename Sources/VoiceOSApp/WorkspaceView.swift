@@ -63,7 +63,7 @@ extension ControlCenter {
     /// the existing grouping channel, so receipts and validation stay the same.
     func splitRecordingExpression(sourceIDs: Set<String>) async throws -> Int {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
-        let count = try store.detachRecordingsFromExpressions(sourceIDs: sourceIDs)
+        let count = try await store.detachRecordingsFromExpressions(sourceIDs: sourceIDs)
         await refresh()
         return count
     }
@@ -71,7 +71,7 @@ extension ControlCenter {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
         guard let port = recordingExpressionModel else { throw VoiceOSError("需要先配置文本模型，才能重新判断连续表达") }
         guard !fullRecordingBusy, understandingSource == nil else { throw VoiceOSError("当前录音仍在处理，完成后再重新判断") }
-        _ = try store.detachRecordingsFromExpressions(sourceIDs: sourceIDs)
+        _ = try await store.detachRecordingsFromExpressions(sourceIDs: sourceIDs)
         let groups = try await store.connectRecordingExpressions(using: port)
         await refresh()
         queueRecordingTitles()
@@ -1696,7 +1696,7 @@ struct WorkspaceView: View {
             do {
                 let count=try await model.splitRecordingExpression(sourceIDs:Set(ids))
                 toastMessage="已拆成 \(count) 段独立录音"
-            } catch { error=error.localizedDescription }
+            } catch { self.error=error.localizedDescription }
         }
     }
     private func rejudgeMaterialExpressions(_ ids:[String]) {
@@ -1704,7 +1704,7 @@ struct WorkspaceView: View {
             do {
                 let groups=try await model.rejudgeRecordingExpressions(sourceIDs:Set(ids))
                 toastMessage="已重新判断连续表达 · \(groups) 组"
-            } catch { error=error.localizedDescription }
+            } catch { self.error=error.localizedDescription }
         }
     }
     private func materialReadingStatus(_ id:String) -> (text:String,color:Color)? {
