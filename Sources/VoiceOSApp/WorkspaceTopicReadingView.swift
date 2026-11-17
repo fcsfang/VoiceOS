@@ -75,6 +75,7 @@ struct WorkspaceTopicReadingView: View {
 
     var body: some View {
         VStack(alignment:.leading,spacing:28) {
+            if topic.organizationStale == true { TopicStaleBanner() }
             if mode == "概览" { introduction }
             if mode != "行动与结果" {
                 if sections.isEmpty { preparingCards }
@@ -455,6 +456,18 @@ struct WorkspaceTopicReadingView: View {
     private func date(_ value:String) -> String { ConversationReflectionFocus.date(value)?.formatted(date:.abbreviated,time:.omitted) ?? value }
 }
 
+struct TopicStaleBanner: View {
+    @Environment(\.workspacePalette) private var palette
+    var body: some View {
+        Label("材料已更新，待重新整理",systemImage:"arrow.clockwise.circle")
+            .vosFont(WorkspaceText.meta.size, weight: .medium)
+            .foregroundStyle(palette.action)
+            .padding(.horizontal,14).padding(.vertical,10).frame(maxWidth:.infinity,alignment:.leading)
+            .background(palette.action.opacity(0.08),in:RoundedRectangle(cornerRadius:10))
+            .overlay { RoundedRectangle(cornerRadius:10).strokeBorder(palette.action.opacity(0.25),lineWidth:1) }
+    }
+}
+
 struct WorkspaceTopicTile: View {
     @Environment(\.workspacePalette) private var palette
     @State private var hovered = false
@@ -470,6 +483,7 @@ struct WorkspaceTopicTile: View {
                     Image(systemName:"arrow.up.right").font(.caption).foregroundStyle(.secondary)
                 }
                 Text(topic.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
+                if topic.organizationStale == true { TopicStaleBanner() }
                 if let summary=topic.organization?.summary, !summary.isEmpty {
                     Text(summary).vosFont(WorkspaceText.body).lineSpacing(4)
                         .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
