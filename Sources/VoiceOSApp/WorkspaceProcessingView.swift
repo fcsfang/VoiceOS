@@ -150,6 +150,7 @@ extension ControlCenter {
     }
     var workspaceNeedsAttention: Bool {
         !startupIssue.isEmpty || !workspacePausedTasks.isEmpty || records.contains { ["failed","blocked"].contains($0.jobState ?? "") || ["interrupted","quarantined"].contains($0.state) } ||
+        records.contains { $0.needsEmptyTranscriptionReview } ||
         workspaceUnfinishedIntents.contains { [.blocked,.unknown,.rejected].contains($0.state) } ||
         recordingRequests.contains { $0.state == "blocked" } || !workspaceFailedAssistantExecutions.isEmpty ||
         workspacePanoramaFailure != nil ||
@@ -258,7 +259,7 @@ struct WorkspaceProcessingView: View {
                 if !quarantinedSources.isEmpty {
                     Text("需要核对的原件见上方『需要重新核对的原件』").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
-                let failedSources=model.records.filter { !quarantinedIDs.contains($0.id) && (["failed","blocked"].contains($0.jobState ?? "") || $0.state == "interrupted") }
+                let failedSources=model.records.filter { !quarantinedIDs.contains($0.id) && !$0.isTrashed && !$0.needsEmptyTranscriptionReview && (["failed","blocked"].contains($0.jobState ?? "") || $0.state == "interrupted") }
                 if !failedSources.isEmpty {
                     let retryableSources=failedSources.filter { $0.state == "saved" }
                     let sourceErrors=failedSources.compactMap { source in source.error.map { (source.displayTitle,$0) } }
@@ -276,6 +277,20 @@ struct WorkspaceProcessingView: View {
                             Button("重试全部本地转写（\(retryableSources.count)）") { retryAllTranscriptions(retryableSources) }.disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil)
                         } else if let source=retryableSources.first {
                             Button("重试本地转写") { Task { await model.retry(source) } }.accessibilityLabel("重试本地转写：" + source.displayTitle).disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil)
+                        }
+                    }
+                }
+                let emptySources=model.records.filter { $0.needsEmptyTranscriptionReview }
+                if !emptySources.isEmpty {
+                    WorkspaceSection(title:"转写为空",subtitle:"录音与原件仍然保留，但这次没有转写出任何文字。可以重新转写，或移入回收站。",icon:"waveform.badge.mic",count:emptySources.count) {
+                        ForEach(emptySources) { source in
+                            VStack(alignment:.leading,spacing:6) {
+                                WorkspaceRow(title:source.displayTitle,subtitle:emptyTranscriptSubtitle(source),trailing:"查看材料") { openSource(source.id) }
+                                HStack(spacing:12) {
+                                    Button("重新转写") { Task { await model.retry(source) } }.accessibilityLabel("重新转写：" + source.displayTitle).disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil)
+                                    EmptyTranscriptTrashControl(model:model,source:source)
+                                }.padding(.leading,44).padding(.bottom,8)
+                            }
                         }
                     }
                 }
@@ -430,6 +445,14 @@ struct WorkspaceProcessingView: View {
     private func retryAllTranscriptReviews(_ sources:[SourceRecord]) {
         Task { for source in sources { await model.reviewTranscription(sourceID:source.id) } }
     }
+    private func emptyTranscriptSubtitle(_ source:SourceRecord) -> String {
+        let duration = source.duration.map { durationText($0) } ?? "时长未知"
+        return "转写为空 · 时长 " + duration + " · " + source.recordingDateLabel
+    }
+    private func durationText(_ seconds:Double) -> String {
+        let total = Int(seconds.rounded())
+        return String(format:"%02d:%02d",total / 60,total % 60)
+    }
     private func reason(_ text:String) -> some View {
         let display = WorkspaceProcessingErrorText.display(text)
         return DisclosureGroup("查看原因") { Text(display).vosFont(WorkspaceText.body).textSelection(.enabled) }.accessibilityHint(display).padding(.bottom,12)
@@ -445,6 +468,21 @@ struct WorkspaceProcessingView: View {
         case .cancelled: return "已停止后续处理，已有内容保留"
         case .completed: return "理解与关联已完成"
         }
+    }
+}
+
+struct EmptyTranscriptTrashControl: View {
+    @ObservedObject var model: ControlCenter
+    let source: SourceRecord
+    @State private var confirming = false
+    var body: some View {
+        Button("移入回收站") { confirming = true }.disabled(source.state != "saved")
+            .alert("把「\(source.displayTitle)」移入回收站？", isPresented: $confirming) {
+                Button("取消", role: .cancel) {}
+                Button("移入回收站", role: .destructive) { Task { await model.manageMaterial(source, disposition: .trashed) } }
+            } message: {
+                Text("原件与录音历史保留，可从回收站恢复；已连接的 Apple 提醒事项不会被修改。")
+            }
     }
 }
 
