@@ -34,6 +34,25 @@ public struct ReminderLink: Identifiable, Sendable {
     public let remoteMarkerValid: Bool?
     public let remoteDueDate: ReminderDueDate?
 }
+public struct ReminderSyncAnomaly: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let actionID: String
+    public let actionTitle: String
+    public let desiredTitle: String
+    public let marker: String
+    public let state: String
+    public init(id: String, actionID: String, actionTitle: String, desiredTitle: String, marker: String, state: String) {
+        self.id = id; self.actionID = actionID; self.actionTitle = actionTitle
+        self.desiredTitle = desiredTitle; self.marker = marker; self.state = state
+    }
+}
+public struct ReminderSyncAnomalySummary: Sendable, Equatable {
+    public let items: [ReminderSyncAnomaly]
+    public init(items: [ReminderSyncAnomaly] = []) { self.items = items }
+    public static let empty = ReminderSyncAnomalySummary()
+    public var total: Int { items.count }
+    public func count(_ state: String) -> Int { items.filter { $0.state == state }.count }
+}
 extension VoiceOSStore {
     public func reminderContext(actionID: String) throws -> String {
         guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
@@ -68,6 +87,18 @@ extension VoiceOSStore {
         try db.query("SELECT l.*,o.id AS observation_id,o.marker_valid,o.title AS remote_title,o.completed AS remote_completed,o.created_at AS observed_at FROM reminder_links l LEFT JOIN reminder_observations o ON o.id=(SELECT id FROM reminder_observations WHERE link_id=l.id ORDER BY sequence DESC LIMIT 1) ORDER BY l.created_at,l.id").map {
             ReminderLink(id: $0["id"]!, actionID: $0["action_id"]!, calendarID: $0["calendar_id"]!, state: $0["state"]!, externalID: $0["external_id"], remoteTitle: $0["remote_title"], remoteCompleted: $0["remote_completed"].map { $0 == "1" }, lastObservedAt: $0["observed_at"], lastCheckedAt: $0["last_checked_at"], lastObservationID: $0["observation_id"], remoteMarkerValid: $0["marker_valid"].map { $0 == "1" }, remoteDueDate: try storedReminderDue(observationID: $0["observation_id"]))
         }
+    }
+    /// Links whose last readback could not confirm a single Apple reminder.
+    public func reminderSyncAnomalies() throws -> ReminderSyncAnomalySummary {
+        let items = try db.query("""
+            SELECT l.id,l.action_id,l.desired_title,l.marker,l.state,a.title FROM reminder_links l
+            JOIN actions a ON a.id=l.action_id WHERE l.state IN ('missing','conflict','unknown')
+            ORDER BY CASE l.state WHEN 'missing' THEN 0 WHEN 'conflict' THEN 1 ELSE 2 END, a.title, l.id
+            """).map {
+                ReminderSyncAnomaly(id: $0["id"]!, actionID: $0["action_id"]!, actionTitle: $0["title"]!,
+                                    desiredTitle: $0["desired_title"]!, marker: $0["marker"]!, state: $0["state"]!)
+            }
+        return ReminderSyncAnomalySummary(items: items)
     }
     /// One create attempt per action identity. Every subsequent invocation only reads.
     public func sendTaskToReminders(actionID: String, expectedVersion: Int, calendarID: String, using port: any RemindersPort, expectedAccessVersion: Int? = nil) async throws {
