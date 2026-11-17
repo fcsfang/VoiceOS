@@ -104,8 +104,11 @@ extension VoiceOSStore {
         FROM ranked
         LEFT JOIN sources src ON ranked.kind='material' AND src.id=ranked.ref_id
         LEFT JOIN claims cl ON ranked.kind='claim' AND cl.id=ranked.ref_id
+        LEFT JOIN claim_reviews cr ON ranked.kind='claim' AND cr.claim_id=ranked.ref_id AND cr.version=cl.review_version
         LEFT JOIN actions ac ON ranked.kind='action' AND ac.id=ranked.ref_id
         LEFT JOIN reflection_questions rq ON ranked.kind='topic' AND rq.id=ranked.ref_id
+        WHERE (ranked.kind!='claim' OR (cl.validity='current' AND COALESCE(cr.decision,'pending')!='rejected'))
+          AND (ranked.kind!='action' OR (ac.state='open' AND ac.validity='current'))
         ORDER BY CASE WHEN julianday(COALESCE(src.created_at, cl.created_at, ac.created_at, rq.updated_at)) >= julianday('now', '-30 days') THEN ranked.score * 1.05 ELSE ranked.score END,
                  ranked.ref_id
         """, [tokens.matchExpression] + tokens.filterBinds).map(decodeSearchRow)
@@ -122,9 +125,12 @@ extension VoiceOSStore {
         FROM search_index s
         LEFT JOIN sources src ON s.kind='material' AND src.id=s.ref_id
         LEFT JOIN claims cl ON s.kind='claim' AND cl.id=s.ref_id
+        LEFT JOIN claim_reviews cr ON s.kind='claim' AND cr.claim_id=s.ref_id AND cr.version=cl.review_version
         LEFT JOIN actions ac ON s.kind='action' AND ac.id=s.ref_id
         LEFT JOIN reflection_questions rq ON s.kind='topic' AND rq.id=s.ref_id
         WHERE \(tokens.filterClause(qualifyingWith: "s."))
+          AND (s.kind!='claim' OR (cl.validity='current' AND COALESCE(cr.decision,'pending')!='rejected'))
+          AND (s.kind!='action' OR (ac.state='open' AND ac.validity='current'))
         ORDER BY CASE WHEN instr(s.title, ?) > 0 THEN 0 ELSE 1 END,
                  julianday(COALESCE(src.created_at, cl.created_at, ac.created_at, rq.updated_at)) DESC,
                  s.ref_id
