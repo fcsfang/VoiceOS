@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...66).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...67).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1299,6 +1299,25 @@ final class Database {
                     """)
                 }
                 try execute("PRAGMA user_version=66")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "66" {
+            try transaction {
+                let columns = try query("PRAGMA table_info(sources)").compactMap { $0["name"] }
+                if !columns.contains("followup_receipt_digest") {
+                    try execute("ALTER TABLE sources ADD COLUMN followup_receipt_digest TEXT")
+                }
+                // One-time decode of every stored archive. Corrupt rows stay
+                // without a digest and keep failing on read exactly as before.
+                for row in try query("SELECT id,followup_digest,followup_json FROM sources WHERE followup_json IS NOT NULL AND followup_receipt_digest IS NULL ORDER BY created_at") {
+                    guard let id = row["id"], let json = row["followup_json"],
+                          let receipts = try? decodeWithPath([RecordingFollowupReceipt].self, from: Data(json.utf8), label: "跟进回执"),
+                          let digest = try? VoiceOSStore.followupDigestJSON(receipts) else { continue }
+                    let bodyDigest = row["followup_digest"] ?? VoiceOSStore.relevanceHash(Data(json.utf8))
+                    try execute("UPDATE sources SET followup_digest=?,followup_receipt_digest=? WHERE id=?", [bodyDigest, digest, id])
+                }
+                try execute("PRAGMA user_version=67")
             }
         }
 
