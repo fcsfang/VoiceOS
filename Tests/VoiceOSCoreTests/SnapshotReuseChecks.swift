@@ -5,12 +5,20 @@ import VoiceOSPlatform
 private actor SnapshotTopicPort: TopicOrganizationPort {
     private var calls = 0
     func count() -> Int { calls }
-    func organize(_ input: TopicOrganizationInput) async throws -> TopicOrganizationResult {
+    func organizeSkeleton(_ input: TopicSkeletonInput) async throws -> TopicSkeletonResult {
         calls += 1
-        let sourceIDs = input.context.sources.map(\.sourceID)
-        return .init(briefing: "合成简报", highlightSourceIDs: sourceIDs,
-                     topics: [.init(topicID: "", title: "合成主题", summary: "合成摘要", questions: [], sourceIDs: sourceIDs)],
-                     responseID: "snapshot-topic-\(calls)")
+        return .init(briefing: "合成简报", highlightSourceIDs: input.viewpoints.map(\.sourceID),
+                     topics: [.init(topicID: "", title: "合成主题", summary: "合成摘要",
+                                    questions: [], viewpointIDs: input.viewpoints.map(\.id))],
+                     responseID: "snapshot-skeleton-\(calls)")
+    }
+    func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult {
+        .init(topics: input.topics.map { topic in
+            .init(topicID: topic.topicID, questions: [],
+                  sections: [.init(id: "synthetic", title: "合成小节", summary: "合成正文",
+                                   claimIDs: topic.viewpoints.map(\.id), actionIDs: topic.tasks.map(\.id),
+                                   evidence: topic.quotes.prefix(1).map { .init(sourceID: $0.sourceID, quote: $0.quote) })])
+        }, responseID: "snapshot-body-\(calls)")
     }
 }
 
@@ -59,6 +67,12 @@ final class SnapshotReuseChecks: XCTestCase {
         let store = try await openStore()
         let sourceID = try await store.recordUserExpression("检索质量决定回答质量。")
         try await allowCloud(store, sourceID)
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [sourceID])
+        let item = try XCTUnwrap(context.sources.first)
+        _ = try await store.importOrganizedClaims(context: context, proposals: [
+            .init(statement: item.text, ownership: .userTentative,
+                  references: [.init(sourceID: sourceID, transcriptVersionID: item.transcriptVersionID, spanID: item.spans[0].id)])
+        ], commandID: "snapshot-topic-claims-" + sourceID)
         let port = SnapshotTopicPort()
         let organized = try await store.organizeTopics(using: port)
         XCTAssertTrue(organized)
