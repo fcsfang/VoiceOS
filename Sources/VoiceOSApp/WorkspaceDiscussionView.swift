@@ -10,6 +10,7 @@ struct WorkspaceDiscussionView: View {
     let openSource: (String) -> Void
     @FocusState private var editorFocused: Bool
     @State private var confirmingEnd = false
+    @State private var showingHistory = false
     private var busy: Bool { model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive }
     private var canSend: Bool {
         model.discussionWritable && model.modelConfigured && !busy && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.discussionCanSend || model.discussionRecordingID != nil)
@@ -28,6 +29,9 @@ struct WorkspaceDiscussionView: View {
                     Text(contextTitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer()
+                Button("历史讨论", systemImage: "clock.arrow.circlepath") { showingHistory = true }
+                    .vosFont(WorkspaceText.meta)
+                    .disabled(busy)
                 WorkspaceIconButton(systemImage: "xmark", label: "收起讨论，保留阅读位置") { close() }
             }.padding(18)
             Divider()
@@ -150,6 +154,9 @@ struct WorkspaceDiscussionView: View {
                 }
             } message: {
                 Text("将调用一次模型把讨论整理为记录，会产生用量。")
+            }
+            .sheet(isPresented: $showingHistory) {
+                DiscussionHistoryView(model: model, close: { showingHistory = false })
             }
             .task {
                 // A focus write before the field attaches to its window is dropped.
