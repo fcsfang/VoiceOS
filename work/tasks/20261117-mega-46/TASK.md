@@ -36,3 +36,9 @@
 - 用户随时可能回来：重启进空闲窗口。
 
 ## 结果（完成后填）
+
+## 结果（2026-11-17 晚）
+
+- X1：调用层硬截止（ModelDeadlineExceeded + withModelDeadline 竞速，主题整理默认 600 秒，到期取消并立即抛错）；VoiceOSApp 组织循环 defer 全路径复位 organizingTopics/worker，失败文案含原因；尝试记录复用 model_attempts（reserved → completed/rejected/unknown，带 WHERE state='reserved' 守卫）；失败冷却 30 分钟（UserDefaults voiceos.topics.lastFailure，自动触发受冷却，retry/force 绕过），文案「主题整理上次失败（原因），30 分钟后自动重试或可手动重试」；5 条测试（悬挂 transport 超时、成功落 completed、拒绝落 rejected、未知落 unknown 且下次立即成功、冷却 29/30 分钟边界与成功清除）。
+- 集成修正：恢复校验原假设「completed 尝试皆为观点提取」，被主题尝试行打破（result_digest 语义不同）——按 prompt_version 'topic-reading-v2' 排除，测试恢复全绿。
+- 验证（真实退出码）：swift build 0（Build complete! 80.08s）；swift test 0，503 项 0 失败（497 基础上新增 5，集成修正后净 +6）。
