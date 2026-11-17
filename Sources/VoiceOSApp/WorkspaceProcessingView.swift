@@ -415,6 +415,23 @@ struct WorkspaceProcessingView: View {
                         Button("重新识别") { Task { await model.retryAssistantAssessment(issue) } }.accessibilityLabel("重新识别：" + issue.title).disabled(!model.modelConfigured || model.assistantBusy)
                     }
                 }
+                let reminderAnomalies = model.reminderSyncAnomalies
+                if reminderAnomalies.total > 0 {
+                    WorkspaceSection(title:"提醒事项需要核对",subtitle:"有 \(reminderAnomalies.total) 条关联的提醒事项未完成回读。可能已在提醒事项中被删除，任务保留为本地任务；重新回读只查询，不会重建。",icon:"exclamationmark.circle",count:reminderAnomalies.total) {
+                        Text(reminderAnomalyCounts(reminderAnomalies)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.vertical,8)
+                        ForEach(reminderAnomalies.items) { item in
+                            VStack(alignment:.leading,spacing:6) {
+                                WorkspaceRow(title:item.actionTitle,subtitle:reminderAnomalySubtitle(item),trailing:"查看任务") { model.showTask(item.actionID) }
+                                if let link=model.reminderLinks.first(where: { $0.id == item.id }) {
+                                    Button("重新回读") { Task { await model.readReminder(link) } }
+                                        .accessibilityLabel("重新回读：" + item.actionTitle)
+                                        .disabled(model.remindersBusy || model.reminderFieldsPending || model.reminderAccess?.enabled != true)
+                                        .padding(.leading,54).padding(.bottom,8)
+                                }
+                            }
+                        }
+                    }
+                }
                 if !inbox.folders.isEmpty || !inbox.pendingItems.isEmpty || !inbox.folderErrors.isEmpty {
                     WorkspaceSection(title:"录音自动入口",icon:"tray.and.arrow.down") {
                         Text(inbox.status).vosFont(WorkspaceText.meta).padding(.vertical,12)
@@ -423,7 +440,7 @@ struct WorkspaceProcessingView: View {
                 }
                 if model.initialized { WorkspaceSection(title:"模型与提醒事项",icon:"checklist") {
                     Text(model.modelConfigured ? model.modelSummary : "尚未配置模型；完整原文仍可先在本机保存。").vosFont(WorkspaceText.meta).padding(.vertical,12)
-                    Text(model.reminderAccess?.enabled == true ? model.reminderSyncStatus : "尚未连接提醒事项；任务可以先在 VoiceOS 内保存。").vosFont(WorkspaceText.meta)
+                    Text(model.reminderAccess?.enabled == true ? reminderSyncStatusText : "尚未连接提醒事项；任务可以先在 VoiceOS 内保存。").vosFont(WorkspaceText.meta)
                     if let error=model.reminderFieldIssue {
                         reason(error)
                         Button("重试提醒同步") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderFieldsPending)
@@ -439,6 +456,18 @@ struct WorkspaceProcessingView: View {
         }
     }
     private func name(_ id:String) -> String { model.records.first(where: { $0.id == id })?.displayTitle ?? "已保存的材料" }
+    private var reminderSyncStatusText: String {
+        let summary = model.reminderSyncAnomalies
+        guard summary.total > 0 else { return model.reminderSyncStatus }
+        return model.reminderSyncStatus + " · 待核对 \(summary.total) 条（" + reminderAnomalyCounts(summary) + "）"
+    }
+    private func reminderAnomalyCounts(_ summary: ReminderSyncAnomalySummary) -> String {
+        "找不到 \(summary.count("missing")) · 身份不一致 \(summary.count("conflict")) · 未确认 \(summary.count("unknown"))"
+    }
+    private func reminderAnomalySubtitle(_ item: ReminderSyncAnomaly) -> String {
+        let state = item.state == "missing" ? "提醒事项中找不到" : item.state == "conflict" ? "匹配到多条或身份已变化" : "上次回读结果未确认"
+        return "提醒事项「\(item.desiredTitle)」 · \(item.marker) · " + state
+    }
     @ViewBuilder private func reasons(_ entries:[(String,String)]) -> some View {
         if !entries.isEmpty {
             DisclosureGroup("查看原因") {
