@@ -529,6 +529,42 @@ extension CoreFlowTests {
         XCTAssertEqual(failedCalls,2)
         print("Panorama compact synthesis expanded refs locally, scoped its identity, and retried invalid references once")
     }
+    func testPanoramaFailureTextNamesMaterialsAndAdvice() {
+        let failure=PanoramaUnitFailures(unitIDs: ["unit-a","unit-b"], unitTitles: ["材料甲","材料乙"], verifiedCount: 2, totalCount: 4,
+            firstReason: "全景网络请求失败（错误码 -1009）；材料保留，请明确重试")
+        let text=failure.errorDescription ?? ""
+        XCTAssertTrue(text.contains("材料甲、材料乙"))
+        XCTAssertFalse(text.contains("unit-a"))
+        XCTAssertTrue(text.contains("已核对 2/4 个"))
+        XCTAssertTrue(text.contains("网络"))
+    }
+    func testPanoramaFailureAdviceCoversFiveKinds() {
+        let reasons=["全景请求未完成或结果格式无效；材料保留，请明确重试",
+                     "全景没有通过全部问题、联系与覆盖的独立语义核对",
+                     "全景依据、授权或完整整理状态已变化，旧结果未发布",
+                     "全景网络请求失败（错误码 -1009）；材料保留，请明确重试",
+                     "全景生成已停止，可明确重试"]
+        let advices=reasons.map { PanoramaFailureAdvice.text(for: $0) }
+        XCTAssertTrue(advices.allSatisfy { !$0.isEmpty })
+        XCTAssertEqual(Set(advices).count, reasons.count)
+    }
+    func testPanoramaProgressExposesRunningSlice() async throws {
+        let directory=root.appendingPathComponent("progress")
+        let store=try await panoramaFixtureStore(directory,count: 1)
+        let input=try await store.panoramaInput()
+        let unit=try XCTUnwrap(input.units.first)
+        let database=try Database(directory.appendingPathComponent("voiceos.sqlite"))
+        try database.execute("INSERT INTO panorama_attempts(id,digest,state,input_json,created_at) VALUES(?,?,'running','{}','fixture')",
+            ["progress-attempt",input.manifest.digest])
+        let stepJSON="{\"policy\":\"panorama-unit-slices-v1\",\"planDigest\":\"plan\",\"unitID\":\"\(unit.id)\",\"ordinal\":2,\"count\":3,\"evidence\":\"e\"}"
+        try database.execute("INSERT INTO panorama_steps(id,attempt_id,stage,scope_id,input_digest,state,input_json,created_at) VALUES(?,?,'unit.focus.generate',?,?,'running',?,'fixture')",
+            [UUID().uuidString,"progress-attempt","\(unit.id)#slice-2","digest",stepJSON])
+        let state=try await store.panoramaState()
+        XCTAssertEqual(state.progress?.activeStage,"unit.focus.generate")
+        XCTAssertEqual(state.progress?.activeScope,"\(unit.id)#slice-2")
+        XCTAssertEqual(state.progress?.activeOrdinal,2)
+        XCTAssertEqual(state.progress?.activeSliceCount,3)
+    }
 }
 
 private actor PanoramaOneShot {

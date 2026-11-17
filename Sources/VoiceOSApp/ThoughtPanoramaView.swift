@@ -230,30 +230,50 @@ struct ThoughtPanoramaView: View {
         } else if !modelConfigured {
             Button { chooseTextModel() } label: { Label("连接文本模型", systemImage: "link") }
         } else if let state, ["failed", "unknown"].contains(state.status) {
-            let canDraft = state.snapshot?.isPartial == true && state.snapshot?.proposal.relations.isEmpty == true
-            if canDraft { Button { draft() } label: { Label("生成草稿", systemImage: "doc.badge.plus") } }
+            if draftAvailable { Button { draft() } label: { Label("生成带候选联系的综合草稿", systemImage: "doc.badge.plus") } }
             Button { retry() } label: { Label("继续核对", systemImage: "arrow.clockwise") }
         }
     }
 
-    // Core reports unit failures as "N 个完整单元未能核对" plus raw unit IDs.
-    // Keep the count in the toolbar and leave the full IDs in the tooltip.
+    private var draftAvailable: Bool {
+        guard let state, ["failed", "unknown"].contains(state.status),
+              let snapshot = state.snapshot, snapshot.isPartial else { return false }
+        return (snapshot.workflow?.verifiedUnitIDs.count ?? 0) > 0
+    }
+
     private var unverifiedUnitIDs: [String] {
         guard let state else { return [] }
         let verified = Set(state.snapshot?.workflow?.verifiedUnitIDs ?? [])
         return state.input.units.map(\.id).filter { !verified.contains($0) }
     }
 
+    private var unverifiedUnitTitles: [String] {
+        guard let state else { return [] }
+        let verified = Set(state.snapshot?.workflow?.verifiedUnitIDs ?? [])
+        var seen = Set<String>()
+        return state.input.units.filter { !verified.contains($0.id) }.compactMap { unit in
+            guard let title = unit.sourceIDs.compactMap({ id in state.input.sources.first(where: { $0.id == id })?.title }).first else { return nil }
+            return seen.insert(title).inserted ? title : nil
+        }
+    }
+
     private var showsUnitFailure: Bool {
-        !unverifiedUnitIDs.isEmpty && message.contains("个完整单元未能核对")
+        guard !unverifiedUnitIDs.isEmpty else { return false }
+        return ["failed", "unknown"].contains(state?.status ?? "") || message.contains("个完整单元未能核对")
     }
 
     private var toolbarMessage: String {
-        showsUnitFailure ? "\(unverifiedUnitIDs.count) 个单元尚未核对" : message
+        if showsUnitFailure, !message.contains("个单元通过核对") { return "\(unverifiedUnitIDs.count) 个单元尚未核对" }
+        return message
     }
 
     private var toolbarMessageHelp: String {
-        showsUnitFailure ? "尚未核对的完整单元：\n" + unverifiedUnitIDs.joined(separator: "\n") : message
+        if showsUnitFailure {
+            let names = unverifiedUnitTitles
+            let list = names.isEmpty ? "材料内容或授权有更新" : names.joined(separator: "、")
+            return "尚未通过核对的材料：" + list + "\n" + PanoramaFailureAdvice.text(for: state?.error)
+        }
+        return message
     }
 
     private func readErrorBanner(_ text: String) -> some View {
@@ -393,20 +413,23 @@ struct ThoughtPanoramaView: View {
                 Button("连接文本模型", action: chooseTextModel)
             }
         } else if let state, ["failed", "unknown"].contains(state.status) {
-            let canDraft=state.snapshot?.isPartial == true && state.snapshot?.proposal.relations.isEmpty == true
             if iconOnly {
-                if canDraft {
+                if draftAvailable {
                     Button { draft() } label: { Image(systemName: "doc.badge.plus").frame(width: 22, height: 22) }
                         .buttonStyle(.borderless)
-                        .help("先生成综合草稿")
-                        .accessibilityLabel("先生成综合草稿")
+                        .help("生成带候选联系的综合草稿")
+                        .accessibilityLabel("生成带候选联系的综合草稿")
                 }
                 Button { retry() } label: { Image(systemName: "arrow.clockwise").frame(width: 22, height: 22) }
                     .buttonStyle(.borderless)
                     .help("继续核对")
                     .accessibilityLabel("继续核对")
             } else {
-                if canDraft { Button("生成草稿", action: draft).help("用已核对单元先生成带联系的综合草稿，全局核对尚未完成") }
+                if draftAvailable {
+                    Button("生成带候选联系的综合草稿", action: draft)
+                        .buttonStyle(.borderedProminent)
+                        .help("用已核对单元先生成带候选联系的综合草稿，全局核对尚未完成")
+                }
                 Button("继续核对", action: retry)
             }
         }

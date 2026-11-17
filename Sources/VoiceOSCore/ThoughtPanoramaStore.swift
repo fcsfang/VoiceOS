@@ -2,11 +2,32 @@ import Foundation
 
 public struct PanoramaUnitFailures: Error, Sendable, LocalizedError {
     public let unitIDs: [String]
+    public let unitTitles: [String]
     public let verifiedCount: Int
     public let totalCount: Int
     public let firstReason: String
     public var errorDescription: String? {
-        "\(unitIDs.count) 个完整单元未能核对：\(unitIDs.joined(separator: "、"))；已核对 \(verifiedCount)/\(totalCount) 个，可继续核对。原因：\(firstReason)"
+        let names=unitTitles.isEmpty ? ["一份材料"] : unitTitles
+        return "\(names.count) 份材料未能通过核对：\(names.joined(separator: "、"))；已核对 \(verifiedCount)/\(totalCount) 个，可继续核对。原因：\(firstReason)。\(PanoramaFailureAdvice.text(for: firstReason))"
+    }
+}
+
+public enum PanoramaFailureAdvice {
+    public static func text(for reason: String?) -> String {
+        let reason=reason ?? ""
+        if reason.contains("依据") || reason.contains("已变化") {
+            return "建议先在材料页确认改动，再继续核对。"
+        }
+        if reason.contains("语义核对") {
+            return "建议继续核对；若材料表述有变动，可先生成带候选联系的综合草稿。"
+        }
+        if reason.contains("网络") || reason.contains("超时") || reason.contains("600 秒") || reason.contains("403") || reason.contains("401") || reason.contains("许可") || reason.contains("认证") {
+            return "建议检查网络与模型许可后继续核对；已通过核对的单元会保留。"
+        }
+        if reason.contains("停止") || reason.contains("中断") || reason.contains("退出") || reason.contains("取消") {
+            return "建议继续核对，或先生成带候选联系的综合草稿。"
+        }
+        return "建议继续核对；已通过核对的单元会保留。"
     }
 }
 
@@ -82,10 +103,19 @@ extension VoiceOSStore {
         let snapshot=try row?["snapshot_json"].map { try JSONDecoder().decode(PanoramaSnapshot.self, from: Data($0.utf8)) }
         var progress: PanoramaProgress?
         if let id=row?["id"] {
-            let steps=try db.query("SELECT stage,scope_id,state FROM panorama_steps WHERE attempt_id=? ORDER BY rowid", [id])
+            let steps=try db.query("SELECT stage,scope_id,state,input_json FROM panorama_steps WHERE attempt_id=? ORDER BY rowid", [id])
             let verified=Set(snapshot?.workflow?.verifiedUnitIDs ?? [])
+            let running=steps.last(where: { $0["state"] == "running" })
+            var activeOrdinal: Int?, activeSliceCount: Int?
+            if let scope=running?["scope_id"], scope.contains("#slice-"),
+               let json=running?["input_json"], let data=json.data(using: .utf8),
+               let object=try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                activeOrdinal=object["ordinal"] as? Int
+                activeSliceCount=object["count"] as? Int
+            }
             progress = .init(phase: snapshot?.workflow?.phase ?? .units, verifiedUnitCount: verified.count,
-                             totalUnitCount: input.units.count, activeStage: steps.last(where: { $0["state"] == "running" })?["stage"])
+                             totalUnitCount: input.units.count, activeStage: running?["stage"],
+                             activeScope: running?["scope_id"], activeOrdinal: activeOrdinal, activeSliceCount: activeSliceCount)
         }
         return .init(input: input, snapshot: snapshot, status: row?["state"] ?? (input.units.isEmpty ? "empty" : "pending"), error: row?["error"],
                      progress: progress, themeHistory: try panoramaThemeHistory())
@@ -142,7 +172,12 @@ extension VoiceOSStore {
                 }
             }
             if !failures.isEmpty {
-                throw PanoramaUnitFailures(unitIDs: failures.map { $0.unitID }, verifiedCount: verified.count, totalCount: input.units.count, firstReason: failures[0].reason)
+                let titles=failures.map { failure -> String in
+                    guard let unit=input.units.first(where: { $0.id == failure.unitID }) else { return "一份材料" }
+                    return unit.sourceIDs.compactMap { id in input.sources.first(where: { $0.id == id })?.title }.first ?? "一份材料"
+                }
+                throw PanoramaUnitFailures(unitIDs: failures.map { $0.unitID }, unitTitles: titles, verifiedCount: verified.count,
+                                           totalCount: input.units.count, firstReason: failures[0].reason)
             }
             try await finishPanorama(verified, input: input, attemptID: id, port: port)
         } catch {
