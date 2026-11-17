@@ -51,12 +51,39 @@ struct WorkspaceDiscussionView: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("我").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                 Text(turn.text).textSelection(.enabled).padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                                Button("整理为观点与行动") { model.understandDiscussionTurn(turn) }
+                                    .vosFont(WorkspaceText.meta)
+                                    .disabled(!model.canUnderstandDiscussionTurn(turn))
+                                Text("整理会发送本轮个人原话，提取待核对观点与明确行动；行动遵循已保存的提醒清单授权。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                 ForEach(model.discussionReplies.filter { $0.replyToTurnID == turn.id }) { reply in
                                     Text(reply.validity == "current" ? "VoiceOS" : "VoiceOS · 历史依据").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                                    if reply.parts.isEmpty { Text(reply.state == "reserved" ? "正在思考…" : "这次回复未完成，原因见下方。").foregroundStyle(.secondary) }
-                                    ForEach(Array(reply.parts.enumerated()), id: \.offset) { _, part in
+                                    if reply.parts.isEmpty {
+                                        if reply.state == "reserved" {
+                                            Text("正在思考…").foregroundStyle(.secondary)
+                                        } else {
+                                            Text("这次回复未完成：" + (reply.error ?? "原因未登记")).foregroundStyle(palette.danger).textSelection(.enabled)
+                                            if model.discussionWritable {
+                                                Button("重新提问") { editorFocused = true }.vosFont(WorkspaceText.meta)
+                                                Text("失败记录已保留在本轮；写下新的提问会作为下一轮发送。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                    ForEach(Array(reply.parts.enumerated()), id: \.offset) { index, part in
                                         VStack(alignment: .leading, spacing: 8) {
+                                            Text(part.kind == .quotation ? "原文引用" : "AI 分析与建议").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                             Text(.init(part.text)).textSelection(.enabled).lineSpacing(4)
+                                            if part.kind == .aiSuggestion {
+                                                let kept = model.discussionDerivations.first { $0.discussionAttemptID == reply.id && $0.partIndex == index }
+                                                if let claimID = kept?.claimID, let claim = model.claims.first(where: { $0.id == claimID }), let sourceID = claim.references.first?.sourceID {
+                                                    Button("已保留 · 打开候选") { openSource(sourceID) }.vosFont(WorkspaceText.meta)
+                                                } else {
+                                                    Button("保留为待核对候选") {
+                                                        Task { if await model.retainDiscussionCandidate(reply, index: index) { await model.refreshDiscussion() } }
+                                                    }.vosFont(WorkspaceText.meta)
+                                                        .disabled(reply.validity != "current" || model.discussionSession?.validity != "current" || busy)
+                                                }
+                                                Text("待核对、未验证；保留不表示认可，也不创建行动。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                            }
                                             if !part.references.isEmpty {
                                                 DisclosureGroup("原文依据") {
                                                     ForEach(Array(part.references.enumerated()), id: \.offset) { _, ref in
@@ -73,7 +100,14 @@ struct WorkspaceDiscussionView: View {
                         if !model.discussionOutcomes.isEmpty {
                             DisclosureGroup("已保留的讨论成果") {
                                 ForEach(model.discussionOutcomes) { outcome in
-                                    ForEach(Array(outcome.proposals.enumerated()), id: \.offset) { _, proposal in Text(proposal.statement).textSelection(.enabled).padding(.vertical, 5) }
+                                    ForEach(Array(outcome.proposals.enumerated()), id: \.offset) { index, proposal in
+                                        VStack(alignment: .leading, spacing: 5) {
+                                            Text(proposal.statement).textSelection(.enabled)
+                                            let sourceID = outcome.claimIDs.indices.contains(index) ? model.claims.first(where: { $0.id == outcome.claimIDs[index] })?.references.first?.sourceID : nil
+                                            Button("打开候选") { if let sourceID { openSource(sourceID) } }
+                                                .disabled(sourceID == nil)
+                                        }.padding(.vertical, 5)
+                                    }
                                 }
                             }.vosFont(WorkspaceText.meta)
                         }
@@ -95,15 +129,17 @@ struct WorkspaceDiscussionView: View {
                             if model.dictationActive { model.stopDictation() } else { Task { await model.startDiscussionDictation() } }
                         }.disabled(model.discussionSending || model.discussionSaving || model.dictationBusy)
                         Spacer()
-                        Button(model.discussionSending ? "思考中…" : "发送") { Task { await send() } }.buttonStyle(.borderedProminent).disabled(!canSend)
+                        Button(model.discussionSending ? "思考中…" : "发送") { Task { await send() } }.buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command).disabled(!canSend)
                     }
                     Text("发送即允许本轮文字用于 AI 讨论，音频保留本机。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 } else {
-                    Text(model.discussionSession?.state == "ended" ? "这段讨论已结束，历史仍可回看。" : "依据已变化，请从当前内容重新进入讨论。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text(model.discussionSession?.state == "ended" ? "这段讨论已结束，历史仍可回看。" : "这段讨论的依据已变化，只能回看；结束它不会改变历史。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
                 if !model.discussionStatus.isEmpty { Text(model.discussionStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(4) }
                 if model.discussionWritable {
                     Button("结束并整理讨论") { confirmingEnd = true }.vosFont(WorkspaceText.meta).buttonStyle(.plain).foregroundStyle(.secondary).disabled(busy)
+                } else if model.discussionSession?.state == "active" {
+                    Button("结束这段讨论") { Task { await model.endDiscussion() } }.vosFont(WorkspaceText.meta).buttonStyle(.plain).foregroundStyle(.secondary).disabled(busy)
                 } else if model.discussionCanExtract { Button("整理讨论成果") { model.extractDiscussionOutcome() }.vosFont(WorkspaceText.meta) }
             }.padding(16)
         }.background(palette.sidebar)
@@ -124,6 +160,7 @@ struct WorkspaceDiscussionView: View {
                       !(NSApp.keyWindow?.firstResponder is NSText) else { return }
                 editorFocused = true
             }
+            .onExitCommand { close() }
             .onDisappear { editorFocused = false }
     }
     private func send() async {
