@@ -291,7 +291,9 @@ extension VoiceOSStore {
     @discardableResult
     public func enqueueAssistantExecution(actionID: String, expectedVersion: Int, instruction: String = "", questionID: String? = nil, allowInstructionCloud: Bool = false, mode: AssistantMode = .execution, fresh: Bool = false) throws -> AssistantExecutionRecord {
         _ = try assistantExecutions()
-        let instruction = mode == .analysis ? "" : instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An analysis may carry a follow-up instruction; an empty one keeps the
+        // original first-answer behavior.
+        let instruction = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
         if let existing = try assistantExecutions(actionID: actionID).first(where: { $0.actionVersion == expectedVersion && $0.mode == mode && $0.validity == "current" && $0.instruction == instruction && (["queued","running"].contains($0.state) || (!fresh && $0.state == "completed")) }) { return existing }
         _ = try assistantInput(actionID: actionID, expectedVersion: expectedVersion, instruction: "", mode: mode)
         if let questionID { guard try reflectionQuestions().contains(where: { $0.id == questionID }) else { throw VoiceOSError("主题不存在") } }
