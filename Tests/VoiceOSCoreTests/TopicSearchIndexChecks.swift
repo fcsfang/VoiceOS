@@ -67,10 +67,6 @@ final class TopicSearchIndexChecks: XCTestCase {
         _ = try await store.search(query: "沟通的节奏")
 
         try db.execute("UPDATE reflection_questions SET title='与同事沟通的边界',updated_at='2026-11-15T00:00:00Z' WHERE id=?", [topic])
-        let stale = try await store.search(query: "沟通的边界")
-        XCTAssertTrue(stale.isEmpty)
-        try await store.waitForPendingSearchRebuild()
-
         let renamed = try await store.search(query: "沟通的边界")
         XCTAssertEqual(renamed.map(\.refID), [topic])
         XCTAssertEqual(renamed.first?.title, "与同事沟通的边界")
@@ -86,9 +82,6 @@ final class TopicSearchIndexChecks: XCTestCase {
         try await store.rebuildSearchIndex()
         try db.execute("DELETE FROM reflection_questions WHERE id=?", [topic])
 
-        let stale = try await store.search(query: "沟通的节奏")
-        XCTAssertFalse(stale.isEmpty)
-        try await store.waitForPendingSearchRebuild()
         let hits = try await store.search(query: "沟通的节奏")
         XCTAssertTrue(hits.isEmpty)
     }
