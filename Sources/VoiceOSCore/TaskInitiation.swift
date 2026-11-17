@@ -79,6 +79,10 @@ public struct TaskInitiationProposal: Codable, Sendable {
               verification: verification, clarifyQuestion: clarifyQuestion, reason: reason)
     }
 }
+public struct TaskInitiationPresentation: Codable, Sendable, Equatable {
+    public var archivedAt: String?
+    public init(archivedAt: String? = nil) { self.archivedAt = archivedAt }
+}
 public struct TaskInitiationInput: Codable, Sendable {
     public let sourceID: String
     public let transcriptVersionID: String
@@ -88,10 +92,13 @@ public struct TaskInitiationInput: Codable, Sendable {
     public let preferredRoute: TaskInitiationRoute?
     public let recordedAt: String
     public let timeZone: String
+    public var presentation: TaskInitiationPresentation?
     public init(sourceID: String, transcriptVersionID: String, text: String, answer: String,
-                mode: TaskInitiationMode, preferredRoute: TaskInitiationRoute?, recordedAt: String, timeZone: String) {
+                mode: TaskInitiationMode, preferredRoute: TaskInitiationRoute?, recordedAt: String, timeZone: String,
+                presentation: TaskInitiationPresentation? = nil) {
         self.sourceID = sourceID; self.transcriptVersionID = transcriptVersionID; self.text = text; self.answer = answer
         self.mode = mode; self.preferredRoute = preferredRoute; self.recordedAt = recordedAt; self.timeZone = timeZone
+        self.presentation = presentation
     }
 }
 public struct TaskInitiationRecord: Identifiable, Sendable {
@@ -112,6 +119,10 @@ public struct TaskInitiationRecord: Identifiable, Sendable {
     public var artifact: String { editedArtifact ?? TaskInitiationComposer.render(proposal) }
     public var isConfirmed: Bool { state == "confirmed" }
     public var isClarifying: Bool { state == "clarify" }
+    public var isArchived: Bool { input.presentation?.archivedAt != nil }
+}
+public struct TaskInitiationStep: Identifiable, Sendable, Equatable {
+    public let id, title, createdAt: String
 }
 public protocol TaskInitiationModelPort: Sendable {
     var configuration: ModelConfiguration { get }
@@ -299,7 +310,7 @@ extension VoiceOSStore {
         let nextInput = TaskInitiationInput(sourceID: input.sourceID, transcriptVersionID: input.transcriptVersionID,
                                             text: input.text, answer: cleanAnswer, mode: input.mode,
                                             preferredRoute: input.preferredRoute, recordedAt: input.recordedAt,
-                                            timeZone: input.timeZone)
+                                            timeZone: input.timeZone, presentation: input.presentation)
         try db.execute("""
         UPDATE task_initiations SET input_json=?,proposal_json=?,state='draft',route=?,edited_artifact=NULL,copied_at=NULL,updated_at=?
         WHERE id=?
@@ -325,7 +336,7 @@ extension VoiceOSStore {
         let nextInput = TaskInitiationInput(sourceID: input.sourceID, transcriptVersionID: input.transcriptVersionID,
                                             text: input.text, answer: input.answer, mode: input.mode,
                                             preferredRoute: preferredRoute, recordedAt: input.recordedAt,
-                                            timeZone: input.timeZone)
+                                            timeZone: input.timeZone, presentation: input.presentation)
         try db.execute("""
         UPDATE task_initiations SET input_json=?,proposal_json=?,route=?,edited_artifact=NULL,copied_at=NULL,updated_at=?
         WHERE id=?
@@ -400,12 +411,54 @@ extension VoiceOSStore {
         try db.execute("DELETE FROM task_initiations WHERE id=?", [id])
     }
 
-    public func taskInitiations(limit: Int = 200) throws -> [TaskInitiationRecord] {
+    @discardableResult
+    public func archiveTaskInitiation(id: String) throws -> TaskInitiationRecord {
+        guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
+        guard let row = try db.query("SELECT state,input_json FROM task_initiations WHERE id=?", [id]).first else {
+            throw VoiceOSError("启动包不存在")
+        }
+        guard row["state"] == "confirmed" else { throw VoiceOSError("只有已确认的启动记录可以归档") }
+        var input = try JSONDecoder().decode(TaskInitiationInput.self, from: Data((row["input_json"] ?? "").utf8))
+        guard input.presentation?.archivedAt == nil else { return try taskInitiationRecord(id: id) }
+        input.presentation = TaskInitiationPresentation(archivedAt: Self.now())
+        try db.execute("UPDATE task_initiations SET input_json=? WHERE id=?", [try Self.relevanceJSON(input), id])
+        return try taskInitiationRecord(id: id)
+    }
+
+    public func taskInitiationSteps() throws -> [String: [TaskInitiationStep]] {
+        guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
+        let prefix = "initiation-step:"
+        var steps: [String: [TaskInitiationStep]] = [:]
+        for row in try db.query("""
+        SELECT id,command_id,name,presentation_json,created_at FROM sources
+        WHERE command_id LIKE 'initiation-step:%' ORDER BY created_at,rowid
+        """) {
+            guard let commandID = row["command_id"], commandID.hasPrefix(prefix),
+                  let sourceID = row["id"], let createdAt = row["created_at"] else { continue }
+            let parts = commandID.dropFirst(prefix.count).split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { continue }
+            let presented = row["presentation_json"].flatMap {
+                try? JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8))
+            }
+            let manualTitle = presented?.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = manualTitle.flatMap { $0.isEmpty ? nil : $0 } ?? row["name"] ?? ""
+            steps[String(parts[0]), default: []].append(.init(id: sourceID, title: title, createdAt: createdAt))
+        }
+        return steps
+    }
+
+    public func taskInitiations(includeArchived: Bool = false, limit: Int = 200) throws -> [TaskInitiationRecord] {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
         guard limit > 0 else { return [] }
         let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
-        return try db.query("SELECT * FROM task_initiations ORDER BY created_at DESC, id DESC LIMIT ?", [String(limit)])
-            .map { try Self.decodeTaskInitiation($0, sources: catalog) }
+        var records: [TaskInitiationRecord] = []
+        for row in try db.query("SELECT * FROM task_initiations ORDER BY created_at DESC, id DESC") {
+            let record = try Self.decodeTaskInitiation(row, sources: catalog)
+            if record.isArchived, !includeArchived { continue }
+            records.append(record)
+            if records.count == limit { break }
+        }
+        return records
     }
 
     private func taskInitiationRecord(id: String) throws -> TaskInitiationRecord {
@@ -484,6 +537,9 @@ extension VoiceOSStore {
                   proposal.route == route,
                   route != .clarify || !proposal.clarifyQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw VoiceOSError("启动包记录与输入或路线不一致")
+            }
+            if input.presentation?.archivedAt != nil, state != "confirmed" {
+                throw VoiceOSError("未确认的启动包不能归档")
             }
             let hasArtifact = route == .agentHandoff || route == .guidedStart
             if !hasArtifact, row["edited_artifact"] != nil {

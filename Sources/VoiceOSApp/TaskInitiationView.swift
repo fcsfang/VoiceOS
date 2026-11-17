@@ -26,11 +26,16 @@ struct TaskInitiationView: View {
     @State private var stepStatus = ""
     @State private var stepSaving = false
     @State private var stepCommandID = UUID().uuidString
+    @State private var stepsByRecord: [String: [TaskInitiationStep]] = [:]
+    @State private var archivedRecords: [TaskInitiationRecord] = []
+    @State private var showArchived = false
+    @State private var didAutoSelect = false
 
     private var records: [TaskInitiationRecord] { model.taskInitiations }
+    private var visibleRecords: [TaskInitiationRecord] { showArchived ? archivedRecords : records }
     private var selected: TaskInitiationRecord? {
         guard let selectedID else { return nil }
-        return records.first(where: { $0.id == selectedID })
+        return (records + archivedRecords).first(where: { $0.id == selectedID })
     }
     private var syncKey: String { (selected?.id ?? "") + "/" + (selected?.updatedAt ?? "") }
     private var materialSources: [SourceRecord] {
@@ -61,7 +66,18 @@ struct TaskInitiationView: View {
                 DispatchQueue.main.async { withAnimation { reader.scrollTo(packageAnchor, anchor: .top) } }
             }
         }
-        .onAppear { artifactDraft = selected?.artifact ?? "" }
+        .onAppear {
+            artifactDraft = selected?.artifact ?? ""
+            autoSelectLatestDraft()
+            reloadSteps()
+        }
+        .onChange(of: records.map(\.id)) { _, _ in
+            autoSelectLatestDraft()
+            reloadSteps()
+        }
+        .onChange(of: showArchived) { _, shown in
+            if shown { reloadArchived() }
+        }
         .onChange(of: syncKey) { _, _ in
             artifactDraft = selected?.artifact ?? ""
             answer = ""
@@ -152,6 +168,7 @@ struct TaskInitiationView: View {
                 if record.isClarifying { clarify(record) }
                 else if record.route == .captureOnly { captureOnly(record) }
                 else { artifactEditor(record) }
+                if let steps = stepsByRecord[record.id], !steps.isEmpty { stepsList(steps) }
             }
         }
     }
@@ -234,6 +251,13 @@ struct TaskInitiationView: View {
                 .accessibilityIdentifier("initiation.confirm")
                 if record.isConfirmed {
                     Text("已确认 · 尚未执行").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    if record.isArchived {
+                        statusChip("已归档")
+                    } else {
+                        Button("归档这条记录") { archive(record) }
+                            .disabled(model.initiationBusy)
+                            .accessibilityIdentifier("initiation.archive")
+                    }
                 } else {
                     discardButton(record)
                 }
@@ -295,6 +319,7 @@ struct TaskInitiationView: View {
             stepStatus = cloud && model.canUnderstandCapturedText
                 ? "已存为你的原话；观点与待办会在后台整理。"
                 : "已存为你的原话；仅保存在本机，可在资料页继续整理。"
+            reloadSteps()
         }
     }
 
@@ -302,6 +327,64 @@ struct TaskInitiationView: View {
         let title = record.proposal.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let raw = title.isEmpty ? "启动后这一步" : "启动后：" + title
         return String(raw.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ").prefix(100))
+    }
+
+    private func stepsList(_ steps: [TaskInitiationStep]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            Text("记下的步骤").vosFont(WorkspaceText.rowTitle)
+            ForEach(steps) { step in
+                Button {
+                    openSource(step.id)
+                } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(step.title).vosFont(WorkspaceText.body).lineLimit(2)
+                            Text(dateLabel(step.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "arrow.up.forward.square").foregroundStyle(palette.accent).accessibilityHidden(true)
+                    }
+                    .padding(.vertical, 8).padding(.horizontal, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("initiation.step.item")
+                .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
+            }
+        }
+    }
+
+    private func autoSelectLatestDraft() {
+        guard !didAutoSelect, selectedID == nil else { return }
+        guard let latest = records.first(where: { $0.state == "draft" && $0.copiedAt == nil }) else { return }
+        didAutoSelect = true
+        selectedID = latest.id
+    }
+
+    private func reloadSteps() {
+        guard let store = model.store else { stepsByRecord = [:]; return }
+        Task { stepsByRecord = (try? await store.taskInitiationSteps()) ?? [:] }
+    }
+
+    private func reloadArchived() {
+        guard let store = model.store else { archivedRecords = []; return }
+        Task { archivedRecords = ((try? await store.taskInitiations(includeArchived: true)) ?? []).filter(\.isArchived) }
+    }
+
+    private func archive(_ record: TaskInitiationRecord) {
+        guard let store = model.store else { return }
+        Task {
+            do {
+                _ = try await store.archiveTaskInitiation(id: record.id)
+                selectedID = nil
+                await model.refresh()
+                if showArchived { reloadArchived() }
+                model.initiationStatus = "已归档；可在启动记录里打开「查看归档」。"
+            } catch {
+                model.initiationStatus = error.localizedDescription
+            }
+        }
     }
 
     private func discardButton(_ record: TaskInitiationRecord) -> some View {
@@ -323,12 +406,17 @@ struct TaskInitiationView: View {
     }
 
     private var history: some View {
-        WorkspaceSection(title: "启动记录", subtitle: "生成过的材料都在这里；复制只代表已带走，不代表已经执行。", icon: "clock", count: records.count) {
-            if records.isEmpty {
-                Text("还没有启动记录。生成过的交接提示词、教程或澄清问题会出现在这里。")
+        WorkspaceSection(title: "启动记录", subtitle: "生成过的材料都在这里；复制只代表已带走，不代表已经执行。", icon: "clock", count: visibleRecords.count) {
+            Toggle("查看归档", isOn: $showArchived)
+                .toggleStyle(.switch)
+                .padding(.vertical, 8)
+                .accessibilityIdentifier("initiation.history.archived")
+            if visibleRecords.isEmpty {
+                Text(showArchived ? "还没有归档的记录。已确认的启动记录可以在结果包里归档。"
+                     : "还没有启动记录。生成过的交接提示词、教程或澄清问题会出现在这里。")
                     .vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 14)
             } else {
-                ForEach(records) { record in
+                ForEach(visibleRecords) { record in
                     Button { selectedID = record.id } label: {
                         HStack(alignment: .top, spacing: 14) {
                             VStack(alignment: .leading, spacing: 6) {
@@ -350,7 +438,7 @@ struct TaskInitiationView: View {
                     .accessibilityValue(record.id == selected?.id ? "当前选中" : "未选中")
                     .accessibilityIdentifier("initiation.history.item")
                     .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
-                    if record.id != records.last?.id { Divider() }
+                    if record.id != visibleRecords.last?.id { Divider() }
                 }
             }
         }
@@ -365,6 +453,8 @@ struct TaskInitiationView: View {
     private func historySubtitle(_ record: TaskInitiationRecord) -> String {
         var parts = [taskInitiationRouteLabel(record.route), stateLabel(record)]
         if record.copiedAt != nil { parts.append("已复制") }
+        if record.isArchived { parts.append("已归档") }
+        if let count = stepsByRecord[record.id]?.count, count > 0 { parts.append("记下 \(count) 步") }
         parts.append(dateLabel(record.createdAt))
         return parts.joined(separator: " · ")
     }
