@@ -125,6 +125,29 @@ public struct RecentContentDay: Identifiable, Equatable, Sendable {
     public init(id: String, date: Date, items: [RecentContentItem]) { self.id = id; self.date = date; self.items = items }
 }
 
+/// One thought in the cross-material home aggregate, carrying the material it
+/// came from so the row can name its source and open the original words.
+public struct RecentThoughtEntry: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let statement: String
+    public let sourceItemID: String
+    public let sourceTitle: String
+    public let date: Date
+    public init(id: String, statement: String, sourceItemID: String, sourceTitle: String, date: Date) {
+        self.id = id; self.statement = statement; self.sourceItemID = sourceItemID
+        self.sourceTitle = sourceTitle; self.date = date
+    }
+}
+
+public struct RecentThoughtDay: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let date: Date
+    public let entries: [RecentThoughtEntry]
+    public init(id: String, date: Date, entries: [RecentThoughtEntry]) {
+        self.id = id; self.date = date; self.entries = entries
+    }
+}
+
 public enum RecentContentIndex {
     public static func build(sources: [SourceRecord], claims: [CandidateClaim], calendar: Calendar = .current) -> [RecentContentDay] {
         let usable = sources.filter { ["saved", "reference_only"].contains($0.state) && $0.origin == "user" && $0.speaker == "user" }
@@ -178,6 +201,33 @@ public enum RecentContentIndex {
     public static func dedupe(_ thoughts: [RecentContentThought]) -> [RecentContentThought] {
         var seen: Set<String> = []
         return thoughts.filter { seen.insert($0.statement).inserted }
+    }
+
+    /// Thoughts from the last `windowDays` days grouped by day, in the input's
+    /// newest-first order. Each claim appears once; feedback groups carry none.
+    public static func recentThoughts(days: [RecentContentDay], now: Date = Date(), windowDays: Int = 14,
+                                      calendar: Calendar = .current) -> [RecentThoughtDay] {
+        let start = calendar.date(byAdding: .day, value: 1 - max(windowDays, 1), to: calendar.startOfDay(for: now)) ?? now
+        var order: [String] = []
+        var grouped: [String: [RecentThoughtEntry]] = [:]
+        var dayStart: [String: Date] = [:]
+        var seen: Set<String> = []
+        for item in days.flatMap(\.items) where item.kind == .material && item.date >= start {
+            let key = dayKey(item.date, calendar: calendar)
+            for thought in item.thoughts where seen.insert(thought.claimID).inserted {
+                if grouped[key] == nil {
+                    order.append(key)
+                    dayStart[key] = calendar.startOfDay(for: item.date)
+                }
+                grouped[key, default: []].append(RecentThoughtEntry(
+                    id: thought.claimID, statement: thought.statement, sourceItemID: item.id,
+                    sourceTitle: item.title, date: item.date))
+            }
+        }
+        return order.compactMap { key in
+            guard let date = dayStart[key], let entries = grouped[key] else { return nil }
+            return RecentThoughtDay(id: key, date: date, entries: entries)
+        }
     }
 
     private static func thoughts(of source: SourceRecord, in thoughtsBySource: [String: [CandidateClaim]]) -> [RecentContentThought] {
