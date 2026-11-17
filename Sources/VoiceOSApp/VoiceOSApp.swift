@@ -242,6 +242,27 @@ final class ControlCenter: ObservableObject {
     @Published var pendingWorkspaceRoute: WorkspaceRoute?
     @Published var pendingWorkspacePageRequest: WorkspacePageRequest?
     @Published var pendingWorkspaceTaskID: String?
+    // 消息监测：页面与处理页共用同一份报告、来源与推送状态。
+    @Published var monitorSources: [MonitorSource] = []
+    @Published var monitorReports: [MonitorReport] = []
+    @Published var monitorItemsByReport: [String: [MonitorItem]] = [:]
+    @Published var monitorEvidence: [String: [MonitorItemEvidence]] = [:]
+    @Published var monitorSourceStats: [String: MonitorSourceStat] = [:]
+    @Published var monitorSettings = MonitorSettingsStore.load()
+    @Published var monitorChecking = false
+    @Published var monitorPhase = ""
+    @Published var monitorStatus = ""
+    @Published var monitorQQConversations: [QQMonitorConversation] = []
+    @Published var monitorQQConversationStatus = ""
+    @Published var monitorQQDiagnostics: [QQMonitorDiagnosisItem] = []
+    @Published var monitorQQDiagnosisStatus = ""
+    @Published var monitorPushStatus = ""
+    @Published var monitorTestPushStatus = ""
+    @Published var monitorAttentionRevision = 0
+    var monitorWorker: Task<Void, Never>?
+    var monitorObservers: [NSObjectProtocol] = []
+    var monitorTimer: Timer?
+    var monitorAnalysisModel: ResponsesNotificationAnalysisPort?
     @Published var recentCompletions: [WorkspaceCompletionRecord] = []
     @Published var noticeAuthorization: LocalNoticeAuthorization = .notRequested
     /// Bumped when a failed processing item is dismissed, so the sidebar dot
@@ -1183,6 +1204,7 @@ final class ControlCenter: ObservableObject {
             }
             scheduleProcessing()
             installReminderRefresh()
+            installMonitorSchedule()
             dictationObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.willSleepNotification,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.flushTextCaptureDraft(); self?.stopDictation(interrupted:true) } })
             dictationObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didWakeNotification,object:nil,queue:.main) { [weak self] _ in Task { @MainActor in self?.stopDictation(interrupted:true) } })
             dictationObservers.append(NotificationCenter.default.addObserver(forName:NSApplication.willTerminateNotification,object:nil,queue:.main) { [weak self] _ in MainActor.assumeIsolated { self?.flushTextCaptureDraft(); self?.stopDictation(interrupted:true) } })
@@ -1226,6 +1248,7 @@ final class ControlCenter: ObservableObject {
         refreshWorker = work
         await work.value
         StartupTrace.mark("refresh.reloaded")
+        await reloadMonitorState()
         writeMarkdownMirror()
         updateSpotlightIndex()
         StartupTrace.mark("refresh.backgroundQueued")
@@ -1653,6 +1676,7 @@ final class ControlCenter: ObservableObject {
             knowledgeReviewModel=suite.knowledgeReview
             relevance.cancel();relevanceModel=suite.relevance
             segmentExtractionModel=suite.segmentExtraction;segmentAggregationModel=suite.segmentAggregation
+            monitorAnalysisModel=suite.notificationAnalysis
             textModel = port; modelConfigured = true
             UserDefaults.standard.set(file.path, forKey: "voiceos.textModelConfigPath.v1")
             UserDefaults.standard.set(false, forKey: "voiceos.textModelConfigurationCleared.v1")
@@ -1698,6 +1722,7 @@ final class ControlCenter: ObservableObject {
         relevance.cancel(); relevanceModel = nil
         segmentExtractionModel = nil
         segmentAggregationModel = nil
+        monitorAnalysisModel = nil
         textModel = nil
         textConfigurationFile = nil
         modelConfigured = false

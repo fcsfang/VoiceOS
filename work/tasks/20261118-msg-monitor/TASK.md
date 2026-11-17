@@ -79,3 +79,66 @@
 - 分析分批预算为 40000 字符常量；图片、文件、合并转发仅以「待查看」占位参与分析，真实内容需用户打开查看。
 - payload_json、delivery_*、Keychain 与 webhook 属单元 B；本单元不写 UI、不调度、不推送。
 - 官网解析按通用规则保守处理，未对真实 cs.nuaa.edu.cn / graduate.nuaa.edu.cn 页面联网验证。
+
+## 单元 B 结果
+
+**改动**
+
+- `Sources/VoiceOSCore/MonitorSchedule.swift`（新）：自动检查日判纯函数。输入触发类型（启动、变为活跃、唤醒、定时）、当前时间、配置时间与最近报告日期，输出是否运行及中文原因。启动时若最近报告早于今天直接补跑；活跃、唤醒、定时只在已到配置时间且今天没有报告时运行。只读时钟与报告日期，不读 QQ、不调模型。
+- `Sources/VoiceOSCore/MonitorSourceConfig.swift`（新）：QQ 与官网来源的配置 JSON 解析与生成，新增 `start_at` 起始标记（QQ 用 ISO8601，官网用日期）；校验 `group:` 前缀与 http/https 栏目地址；起始时间解析支持日期与完整时间戳。
+- `Sources/VoiceOSCore/MonitorPush.swift`（新）：两种报文体（企业微信群机器人 markdown `msgtype:markdown`，Server酱式 form `title`+`desp`），超长按字节截断并附「请在 VoiceOS 中查看完整报告」。可注入 `MonitorPushTransport`；发送前把 payload 写入报告，成功后记 `delivered_at`/`delivered`，失败记 `failed`+中文原因并保留 payload 待重试；企业微信 errcode 与服务端 code 非零判失败；测试推送用固定样例。
+- `Sources/VoiceOSCore/MessageMonitor.swift`：只追加存储接口，不改语义：`monitorReport(id:)`、`setMonitorReportPayload`、`markMonitorReportDelivered`、`markMonitorReportDeliveryFailed`、`monitorMessageCount`、`monitorLatestMessageSentAt`、`monitorMessages(sourceID:externalIDs:)`。schema 保持 74，无新迁移。
+- `Sources/VoiceOSPlatform/QQMonitorHelper.swift`：新增 `conversations(settings:)` 与 `decodeConversations`，只保留群会话、去重、按最新消息倒序、上限 100；新增 `diagnoseItems(settings:)` 逐项诊断（解释器、脚本、密钥可读、qqnt-export-macos 导入、账号数据目录），全部中文可操作建议；`collect` 契约未变。
+- `scripts/qqmonitor/qq_read_range.py`：新增 `action` 分发（`read` 与 `conversations`），列群只读、只返回群、按最新排序、上限 100；保留原有区间读取与结构化错误契约，未知 action 返回 `invalid_input`。
+- `Sources/VoiceOSPlatform/LocalTextModel.swift`（清单外，必要接线）：`Suite` 增加 `notificationAnalysis`，由既有模型配置构造 `ResponsesNotificationAnalysisPort`。没有它，配置好的模型无法接入每日分析；只读同一凭据文件，不新增凭据来源。
+- `Sources/VoiceOSApp/MonitorCredentialStore.swift`（新）：webhook 地址只存登录钥匙串（service `local.voiceos.app.monitor`，account `push.webhook`），保存前校验 http/https；界面只展示尾 4 位；不进 UserDefaults、数据库、日志或模型上下文。
+- `Sources/VoiceOSApp/MonitorCenter.swift`（新）：ControlCenter 的监测状态与行为。报告、事项、证据、来源统计按需加载；内置两条官网栏目首次自动添加（记录已添加标记，不重复添加，被删可从页面恢复）；来源启停、官网起始日期、QQ 起始时间（向前调会同步回退游标）、群候选、诊断、webhook 保存、测试推送、立即推送、手动检查、每日调度安装与轻量 tick、注意力签名与已读。
+- `Sources/VoiceOSApp/WorkspaceMonitorView.swift`（新）：侧栏「消息监测」页面。今日报告（日期、状态、标题、摘要、失败来源原因、按适用与待核对分组的事项、截止缺失显示待核对、原文引文与来源证据可展开、完成与不适用与重新打开、关联已有事项提示）；历史报告列表可展开同结构；来源状态（最近成功、最近错误、已采集条数、QQ 本地库最新消息时间）；立即检查与阶段显示；每日时间、云端授权、推送、QQ 设置与诊断小节。
+- `Sources/VoiceOSApp/WorkspaceView.swift`：`WorkspacePage` 增加 `.monitor` 顶层页、侧栏入口「消息监测」、`section` 命中文案、页面路由；处理页调用点补 `openMonitor`。
+- `Sources/VoiceOSApp/WorkspaceProcessingView.swift`：注意力计数与未完成判定纳入监测；新增「消息监测」小节（原因、去查看、重试推送或重新检查）；原因改用 `WorkspaceNoticeText` 直接展示。
+- `Sources/VoiceOSApp/VoiceOSApp.swift`：新增监测 `@Published` 状态与四个模块内属性；`configureTextModel` 安装 `monitorAnalysisModel`，`clearTextModel` 清空；启动末尾 `installMonitorSchedule()`；每次刷新尾部 `reloadMonitorState()` 让侧栏与页面同源。既有逻辑未删改。
+- `scripts/app/build.py`（清单外，必要部署）：把 `scripts/qqmonitor/qq_read_range.py` 复制到 `Contents/Resources/qqmonitor/qq_read_range.py` 并清除 `__pycache__`。应用包内取脚本路径优先，仓库运行回退到仓库 `scripts/`。不打进包，正式应用每次检查都找不到读取脚本。
+- 测试：`Tests/VoiceOSCoreTests/MonitorScheduleChecks.swift` 6 项、`MonitorPushChecks.swift` 5 项、`QQConversationsChecks.swift` 4 项，共 15 项新用例。
+
+**设置与调度语义**
+
+- 自动检查时间默认 09:00，存 `voiceos.monitor.settings.v1`，可在监测页修改；每天最多一次。
+- 触发在应用运行中生效：启动、变为活跃、唤醒、每 600 秒一次轻量检查。轻量检查只比对时间与今日报告，不读 QQ、不调模型。
+- 启动时若上次报告日期早于今天（或没有报告）直接补跑；活跃、唤醒、定时只在「现在 ≥ 配置时间且今天没有报告」时运行。今天已有任何状态（完整、不完整、失败）的报告后自动检查不再运行。
+- 「立即检查」始终可用，更新今日同一报告，不新建重复任务；运行中禁用重复触发并显示阶段（采集与分析、推送）。
+- 云端分析授权默认关，存同一设置键。关闭时检查在采集完成后、分析前停止，写一条 `failed` 报告并附中文说明，不发送原文；开启后使用已配置文本模型。模型密钥与整个数据库不发送。
+
+**推送通道与凭据存储**
+
+- 通道选择企业微信群机器人或 Server酱式，存设置键；webhook 地址只存钥匙串，界面显示尾 4 位。
+- 报告状态非失败且今日报告尚未投递时，检查结束自动推送一次；失败保留 payload 与 `failed` 状态，监测页与处理页均可重试。
+- 测试推送只发固定样例，不发送今日报告内容。
+
+**验证**
+
+- 全局锁内 `swift build -j 2` exit 0，`swift test -j 2` exit 0，Executed 577 tests, with 0 failures（基线 562，新增 15）。日志 `/tmp/m58-build.log`、`/tmp/m58-test.log`（2026-11-18）。
+- `scripts/qqmonitor/qq_read_range.py` 通过 `python3 -I` 静态编译；手工运行 `conversations` 在缺少依赖时返回 `import_failed` 结构化中文错误，未知 action 返回 `invalid_input`，均未触达真实 QQ。
+- 新增用例只断言用户可观察行为：调度日判六场景、两种报文体字段与分组、投递成功与失败与重试的状态落盘、企业微信 errcode 非零失败、群候选过滤私聊与去重排序、来源配置起始标记与非法输入。临时库隔离，不联网、不调真实模型。
+
+**需用户在本机完成**
+
+1. 首次绑定 QQ 来源：监测页「QQ 群读取」选择装有 qqnt-export-macos（0.4.0 或更新）的 Python、密钥文件路径与账号，点「检查 QQ 依赖」，再点「列出群」，选中目标群并确认「从这里开始读取」时间后添加。密钥内容不会被复制或打印。
+2. 企业微信群机器人：在目标微信群添加群机器人，复制 webhook 到「微信推送」保存，选择通道后点「发送测试」，收到样例即通道可用。
+3. 真实群自然消息验收：应用运行期间群里出现新消息后点「立即检查」，确认今日报告包含该消息与来源；也可以先用设备互传标记验证采集链路。不要向真实群发测试消息。
+4. 如需首次构建使包内自带脚本，运行 `python3 scripts/app/build.py`（本单元未动 dist、未重启应用）。
+
+**未验收项**
+
+- 真实 QQ 群读取与群候选列表未连真实密钥，只以 fixture 与错误契约验证。
+- 两个官网真实页面抓取未联网验证，文章链接解析沿用单元 A 的保守规则。
+- 真实模型分析输出质量、微信实收、界面实机走查、跨天调度实机均未验收；调度只由单测覆盖日判。
+- 处理页与监测页的联动手动走查未做。
+
+**遗留风险**
+
+- 应用退出后不运行，重启补跑一次；这是产品约束，界面已如实说明。
+- 自动推送发生在检查结束后，未送达需手动重试；没有后台重试队列。
+- 单元 A 遗留：`retryAnalysis` 依赖游标中的 last_run_message_ids，同日再次采集覆盖游标后只能等下一次每日检查。
+- 官网起始日期只过滤列表页可解析发布时间的条目，无日期条目仍会采集，可能带入启用前文章。
+- 群候选来自近 365 天活跃会话，长期沉寂的群可能不在列表；脚本与 Swift 双层过滤私聊。
+- 推送地址失效只能从投递状态发现，没有主动连通性巡检。

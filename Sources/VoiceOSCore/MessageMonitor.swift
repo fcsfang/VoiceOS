@@ -327,6 +327,51 @@ extension VoiceOSStore {
         try db.execute("UPDATE monitor_items SET status=?,updated_at=? WHERE id=?", [status.rawValue, Self.now(), id])
     }
 
+    public func monitorReport(id: String) throws -> MonitorReport? {
+        guard let row = try db.query("SELECT * FROM monitor_reports WHERE id=?", [id]).first else { return nil }
+        return try Self.monitorReport(row)
+    }
+
+    /// The payload is written before the network call so a failed send keeps
+    /// exactly what was attempted and can be retried without rebuilding it.
+    public func setMonitorReportPayload(id: String, payloadJSON: String) throws {
+        try db.execute("UPDATE monitor_reports SET payload_json=? WHERE id=?", [payloadJSON, id])
+    }
+
+    public func markMonitorReportDelivered(id: String, at deliveredAt: String) throws {
+        try db.execute("UPDATE monitor_reports SET delivery_state='delivered',delivery_error=NULL,delivered_at=? WHERE id=?",
+                       [deliveredAt, id])
+    }
+
+    public func markMonitorReportDeliveryFailed(id: String, error: String) throws {
+        try db.execute("UPDATE monitor_reports SET delivery_state='failed',delivery_error=? WHERE id=?", [error, id])
+    }
+
+    public func monitorMessageCount(sourceID: String) throws -> Int {
+        Int(try db.query("SELECT COUNT(*) AS n FROM monitor_messages WHERE source_id=?", [sourceID]).first?["n"] ?? "0") ?? 0
+    }
+
+    public func monitorLatestMessageSentAt(sourceID: String) throws -> String? {
+        try db.query("SELECT MAX(sent_at) AS latest FROM monitor_messages WHERE source_id=?", [sourceID]).first?["latest"]
+    }
+
+    public func monitorMessages(sourceID: String, externalIDs: [String]) throws -> [MonitorMessage] {
+        let ids = Array(Set(externalIDs)).sorted()
+        guard !ids.isEmpty else { return [] }
+        var messages: [MonitorMessage] = []
+        var start = 0
+        while start < ids.count {
+            let chunk = Array(ids[start..<min(start + 500, ids.count)])
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            let arguments: [String?] = [sourceID] + chunk.map(Optional.some)
+            for row in try db.query("SELECT * FROM monitor_messages WHERE source_id=? AND external_id IN (\(placeholders)) ORDER BY sent_at, external_id", arguments) {
+                messages.append(Self.monitorMessage(row))
+            }
+            start += 500
+        }
+        return messages
+    }
+
     private static func validateMonitorConfigJSON(_ configJSON: String) throws {
         guard let data = configJSON.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], !object.isEmpty else {
