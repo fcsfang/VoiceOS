@@ -38,3 +38,10 @@
 - 60 秒定时器与激活事件保留全量（VoiceOSApp 约 2995 行）。
 
 ## 结果（完成后填）
+
+## 结果（2026-11-17 下午）
+
+- S1 合并：核心新增 `WorkspaceSnapshotScope.coreSecondary`；应用层 `RefreshScope`（默认 `.interactive`、`.full`、`.assistant`、`.knowledge`）；敏感站点显式作用域约 30 处（助理 16、知识 5、讨论 4，保存讨论走 `.interactive` 后接专门 `refreshDiscussion()`）；面板补刷三处（助理面板 `.assistant`、任务详情与澄清队列默认）。
+- swift build -j 2 通过；swift test -j 2 454 项 0 失败（453 基础上新增作用域语义 1 项）。
+- 隔离副本实测：待核对「跳过」交互触发的刷新快照读取 306.2ms、发布完成约 0.5 秒，trace 交互段无 assistant / validity / knowledge 标记；对照启动全量 7.18 秒。60 秒定时器、激活事件、启动保持 `.full`。
+- 已知边界：followupValidity 与知识核查在两轮全量之间最多陈旧 60 秒；`.assistant` 产生冻结标志时本轮不重发核心，下一轮全量纠正（与波 30 语义一致）。
