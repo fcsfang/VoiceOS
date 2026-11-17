@@ -91,8 +91,64 @@ public struct WorkspaceBriefing: Codable, Sendable {
     public let result: TopicOrganizationResult
     public let createdAt: String
 }
+public struct TopicOrganizationAttemptIdentity: Sendable {
+    public let provider: String
+    public let model: String
+    public let promptVersion: String
+    public let schemaVersion: String
+    public init(provider: String, model: String, promptVersion: String, schemaVersion: String) {
+        self.provider=provider;self.model=model;self.promptVersion=promptVersion;self.schemaVersion=schemaVersion
+    }
+}
 public protocol TopicOrganizationPort: Sendable {
     func organize(_ input: TopicOrganizationInput) async throws -> TopicOrganizationResult
+    var attemptIdentity: TopicOrganizationAttemptIdentity { get }
+}
+public extension TopicOrganizationPort {
+    var attemptIdentity: TopicOrganizationAttemptIdentity {
+        .init(provider:"topic_organization",model:"unspecified",promptVersion:"topic-reading-v2",schemaVersion:"topics-v1")
+    }
+}
+
+public struct TopicOrganizationFailure: Codable, Equatable, Sendable {
+    public let reason: String
+    public let failedAt: TimeInterval
+    public init(reason: String, failedAt: TimeInterval) { self.reason=reason;self.failedAt=failedAt }
+}
+
+/// A failed run suppresses automatic retries for a while, so a launch or
+/// refresh right after a failure does not buy the same failure again.
+public struct TopicOrganizationCooldown {
+    public static let window: TimeInterval = 30*60
+    private let defaults: UserDefaults
+    private let key: String
+    private let clock: @Sendable () -> Date
+    public init(defaults: UserDefaults = .standard, key: String = "voiceos.topics.lastFailure", clock: @escaping @Sendable () -> Date = { Date() }) {
+        self.defaults=defaults;self.key=key;self.clock=clock
+    }
+    public func recordFailure(reason: String, at date: Date? = nil) {
+        let failure=TopicOrganizationFailure(reason:reason,failedAt:(date ?? clock()).timeIntervalSince1970)
+        if let data=try? JSONEncoder().encode(failure) { defaults.set(data,forKey:key) }
+    }
+    public func recordSuccess() { defaults.removeObject(forKey:key) }
+    public func lastFailure() -> TopicOrganizationFailure? {
+        guard let data=defaults.data(forKey:key) else { return nil }
+        return try? JSONDecoder().decode(TopicOrganizationFailure.self,from:data)
+    }
+    public func remainingSeconds(now: Date? = nil) -> TimeInterval? {
+        guard let failure=lastFailure() else { return nil }
+        let elapsed=(now ?? clock()).timeIntervalSince1970-failure.failedAt
+        guard elapsed<Self.window else { return nil }
+        return max(0,Self.window-elapsed)
+    }
+    public func waitingMessage(now: Date? = nil) -> String? {
+        guard let failure=lastFailure(),remainingSeconds(now:now) != nil else { return nil }
+        return Self.failureMessage(reason:failure.reason)
+    }
+    public static func failureMessage(reason: String) -> String {
+        let text=reason.trimmingCharacters(in:.whitespacesAndNewlines)
+        return "主题整理上次失败（"+(text.isEmpty ? "原因未知" : text)+"），30 分钟后自动重试或可手动重试"
+    }
 }
 
 extension VoiceOSStore {
@@ -233,47 +289,65 @@ extension VoiceOSStore {
         guard let input=try prepareTopicOrganization() else { return false }
         if !force, try topicOrganizationsAreCurrent(input: input) { return false }
         let contextID=try persistLocalContext(input.context, destination: .cloud)
-        let result=try await model.organize(input)
-        guard try prepareTopicOrganization()?.digest == input.digest else { throw VoiceOSError("资料或任务已变化，将基于当前内容重新归组") }
-        try validateLocalTranscriptContext(input.context)
-        try Self.validateTopicOrganization(result,input:input)
-        let byID=Dictionary(uniqueKeysWithValues: input.context.sources.map { ($0.sourceID,$0) })
-        try db.transaction {
-            for proposal in result.topics {
-                let id=proposal.topicID.isEmpty ? UUID().uuidString : proposal.topicID
-                var summary=TopicOrganizationSummary(summary:proposal.summary,questions:proposal.questions,
-                    sourceVersions:Dictionary(uniqueKeysWithValues:proposal.sourceIDs.map { ($0,byID[$0]!.transcriptVersionID) }),
-                    policyVersions:Dictionary(uniqueKeysWithValues:proposal.sourceIDs.map { ($0,input.policyVersions[$0]!) }),responseID:result.responseID)
-                let members=Set(proposal.sourceIDs)
-                summary.sections=proposal.sections
-                let assignedTasks=proposal.sections.map { Set($0.flatMap(\.actionIDs)) }
-                summary.taskStates=Dictionary(uniqueKeysWithValues:input.tasks.filter { assignedTasks?.contains($0.id) ?? !members.isDisjoint(with:$0.sourceIDs) }.map { ($0.id,String($0.version)+":"+$0.state) })
-                if let sections=proposal.sections {
-                    let ids=Set(sections.flatMap(\.claimIDs))
-                    summary.claimVersions=Dictionary(uniqueKeysWithValues:input.knowledge.filter { ids.contains($0.id) }.map { ($0.id,$0.reviewVersion) })
-                }
-                summary.discussionContextIDs=input.discussionReplies.filter { !members.isDisjoint(with:$0.sourceIDs) }.map(\.contextID)
-                let json=try Self.relevanceJSON(summary)
-                if proposal.topicID.isEmpty {
-                    // The title is AI metadata anchored to real material, never a fabricated user expression.
-                    try db.execute("INSERT INTO reflection_questions(id,title,title_source_id,organization_json,ai_named,created_at,updated_at) VALUES(?,?,?,?,1,?,?)",[id,proposal.title,proposal.sourceIDs[0],json,Self.now(),Self.now()])
-                } else {
-                    // Metadata refresh does not change the user's title or note
-                    // versions, and must not invalidate an in-flight discussion.
-                    try db.execute("UPDATE reflection_questions SET organization_json=?,updated_at=? WHERE id=?",[json,Self.now(),id])
-                }
-                for sourceID in proposal.sourceIDs {
-                    try db.execute("INSERT OR IGNORE INTO reflection_question_sources(id,question_id,source_id) VALUES(?,?,?)",[UUID().uuidString,id,sourceID])
-                    try db.execute("UPDATE assistant_executions SET question_id=? WHERE result_source_id=? AND question_id IS NULL AND validity='current'",[id,sourceID])
+        let identity=model.attemptIdentity, attemptID=UUID().uuidString
+        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)", [attemptID,contextID,identity.provider,identity.model,identity.promptVersion,identity.schemaVersion,Self.now(),try db.nextModelProducerSequence()])
+        try checkpoint(.modelReserved)
+        let result: TopicOrganizationResult
+        do { result=try await model.organize(input) }
+        catch ModelPortFailure.rejected(let reason, _, _) {
+            try db.execute("UPDATE model_attempts SET state='rejected',error=? WHERE id=? AND state='reserved'", [reason,attemptID])
+            throw ModelPortFailure.rejected(reason)
+        }
+        catch {
+            try db.execute("UPDATE model_attempts SET state='unknown',error=? WHERE id=? AND state='reserved'", [error is ModelDeadlineExceeded ? "主题整理超时未返回；服务端结果未知，不自动重发" : "主题整理未返回结果；服务端结果未知，不自动重发",attemptID])
+            throw error
+        }
+        do {
+            guard try prepareTopicOrganization()?.digest == input.digest else { throw VoiceOSError("资料或任务已变化，将基于当前内容重新归组") }
+            try validateLocalTranscriptContext(input.context)
+            try Self.validateTopicOrganization(result,input:input)
+            let byID=Dictionary(uniqueKeysWithValues: input.context.sources.map { ($0.sourceID,$0) })
+            try db.transaction {
+                for proposal in result.topics {
+                    let id=proposal.topicID.isEmpty ? UUID().uuidString : proposal.topicID
+                    var summary=TopicOrganizationSummary(summary:proposal.summary,questions:proposal.questions,
+                        sourceVersions:Dictionary(uniqueKeysWithValues:proposal.sourceIDs.map { ($0,byID[$0]!.transcriptVersionID) }),
+                        policyVersions:Dictionary(uniqueKeysWithValues:proposal.sourceIDs.map { ($0,input.policyVersions[$0]!) }),responseID:result.responseID)
+                    let members=Set(proposal.sourceIDs)
+                    summary.sections=proposal.sections
+                    let assignedTasks=proposal.sections.map { Set($0.flatMap(\.actionIDs)) }
+                    summary.taskStates=Dictionary(uniqueKeysWithValues:input.tasks.filter { assignedTasks?.contains($0.id) ?? !members.isDisjoint(with:$0.sourceIDs) }.map { ($0.id,String($0.version)+":"+$0.state) })
+                    if let sections=proposal.sections {
+                        let ids=Set(sections.flatMap(\.claimIDs))
+                        summary.claimVersions=Dictionary(uniqueKeysWithValues:input.knowledge.filter { ids.contains($0.id) }.map { ($0.id,$0.reviewVersion) })
+                    }
+                    summary.discussionContextIDs=input.discussionReplies.filter { !members.isDisjoint(with:$0.sourceIDs) }.map(\.contextID)
+                    let json=try Self.relevanceJSON(summary)
+                    if proposal.topicID.isEmpty {
+                        // The title is AI metadata anchored to real material, never a fabricated user expression.
+                        try db.execute("INSERT INTO reflection_questions(id,title,title_source_id,organization_json,ai_named,created_at,updated_at) VALUES(?,?,?,?,1,?,?)",[id,proposal.title,proposal.sourceIDs[0],json,Self.now(),Self.now()])
+                    } else {
+                        // Metadata refresh does not change the user's title or note
+                        // versions, and must not invalidate an in-flight discussion.
+                        try db.execute("UPDATE reflection_questions SET organization_json=?,updated_at=? WHERE id=?",[json,Self.now(),id])
+                    }
+                    for sourceID in proposal.sourceIDs {
+                        try db.execute("INSERT OR IGNORE INTO reflection_question_sources(id,question_id,source_id) VALUES(?,?,?)",[UUID().uuidString,id,sourceID])
+                        try db.execute("UPDATE assistant_executions SET question_id=? WHERE result_source_id=? AND question_id IS NULL AND validity='current'",[id,sourceID])
+                    }
                 }
             }
+            // Include links just created by this result so they do not trigger
+            // a second request; later manual changes still invalidate it. Read
+            // after the write transaction because source validation may freeze history.
+            let savedDigest=try prepareTopicOrganization()?.digest ?? input.digest
+            let briefing=WorkspaceBriefing(digest:savedDigest,result:result,createdAt:Self.now())
+            try db.execute("INSERT OR REPLACE INTO workspace_briefing(id,context_id,result_json) VALUES('00000000-0000-4000-8000-000000000001',?,?)",[contextID,try Self.relevanceJSON(briefing)])
+            try db.execute("UPDATE model_attempts SET state='completed',result_digest=? WHERE id=? AND state='reserved'", [Self.relevanceHash(Data(("topic-organization-v1|"+result.responseID).utf8)),attemptID])
+        } catch {
+            try db.execute("UPDATE model_attempts SET state='rejected',error='结果未接纳；不自动重发' WHERE id=? AND state='reserved'", [attemptID])
+            throw error
         }
-        // Include links just created by this result so they do not trigger
-        // a second request; later manual changes still invalidate it. Read
-        // after the write transaction because source validation may freeze history.
-        let savedDigest=try prepareTopicOrganization()?.digest ?? input.digest
-        let briefing=WorkspaceBriefing(digest:savedDigest,result:result,createdAt:Self.now())
-        try db.execute("INSERT OR REPLACE INTO workspace_briefing(id,context_id,result_json) VALUES('00000000-0000-4000-8000-000000000001',?,?)",[contextID,try Self.relevanceJSON(briefing)])
         return true
     }
 

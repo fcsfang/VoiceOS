@@ -5,9 +5,14 @@ public struct ResponsesTopicOrganizationPort: TopicOrganizationPort {
     private let apiKey: String
     private let model: String
     private let transport: any ModelHTTPTransport
-    public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectStreamingModelHTTPTransport()) throws {
+    private let deadline: TimeInterval
+    public init(baseURL: URL, apiKey: String, model: String, transport: any ModelHTTPTransport = DirectStreamingModelHTTPTransport(), deadline: TimeInterval = 600) throws {
         _ = try ResponsesModelPort(baseURL:baseURL,apiKey:apiKey,model:model)
-        endpoint=baseURL.appendingPathComponent("responses");self.apiKey=apiKey;self.model=model;self.transport=transport
+        guard deadline.isFinite, deadline > 0 else { throw VoiceOSError("主题整理时限无效") }
+        endpoint=baseURL.appendingPathComponent("responses");self.apiKey=apiKey;self.model=model;self.transport=transport;self.deadline=deadline
+    }
+    public var attemptIdentity: TopicOrganizationAttemptIdentity {
+        .init(provider:"responses:"+(endpoint.host ?? "unknown"),model:model,promptVersion:"topic-reading-v2",schemaVersion:"topics-v1")
     }
     public func organize(_ input: TopicOrganizationInput) async throws -> TopicOrganizationResult {
         guard input.context.sources.allSatisfy({ !$0.localOnly }) else { throw VoiceOSError("仅本地资料不能发送给主题整理模型") }
@@ -32,7 +37,8 @@ public struct ResponsesTopicOrganizationPort: TopicOrganizationPort {
             "input":[["role":"user","content":try VoiceOSStore.relevanceJSON(input)]],"text":["format":["type":"json_schema","name":"voiceos_topics","strict":true,"schema":schema]]]
         var request=URLRequest(url:endpoint,timeoutInterval:600);request.httpMethod="POST";request.httpBody=try JSONSerialization.data(withJSONObject:payload)
         request.setValue("Bearer "+apiKey,forHTTPHeaderField:"Authorization");request.setValue("application/json",forHTTPHeaderField:"Content-Type")
-        let response=try await transport.send(request)
+        let transport=self.transport, sendRequest=request
+        let response=try await withModelDeadline(seconds:deadline,operation:"主题整理") { try await transport.send(sendRequest) }
         guard response.status == 200 else { throw VoiceOSError("主题整理 HTTP \(response.status)，可重试；原资料保留") }
         let envelope=try ResponsesEnvelope.parse(response.body)
         guard envelope.status == .completed,let text=envelope.text,let body=try JSONSerialization.jsonObject(with:response.body) as? [String:Any],let id=body["id"] as? String,!id.isEmpty else { throw VoiceOSError("主题整理没有完整返回，未保存部分归组") }

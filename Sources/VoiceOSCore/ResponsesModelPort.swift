@@ -115,6 +115,87 @@ public struct DirectStreamingModelHTTPTransport: ModelHTTPTransport {
     }
 }
 
+public struct ModelDeadlineExceeded: Error, Sendable, LocalizedError, Equatable {
+    public let operation: String
+    public let seconds: TimeInterval
+    public init(operation: String, seconds: TimeInterval) { self.operation=operation;self.seconds=seconds }
+    public var errorDescription: String? { "\(operation)超过 \(Int(seconds.rounded())) 秒仍未完成，已停止等待；服务端结果未知，可重试" }
+}
+
+/// Bounds total wall-clock time for one model call. URLSession timeouts measure
+/// inactivity, so a stream that keeps delivering bytes never trips them.
+func withModelDeadline<T: Sendable>(seconds: TimeInterval, operation: String, _ body: @escaping @Sendable () async throws -> T) async throws -> T {
+    guard seconds.isFinite, seconds > 0 else { throw VoiceOSError("模型请求时限无效，未发送") }
+    let race = ModelDeadlineRace<T>()
+    return try await withTaskCancellationHandler(operation: {
+        try await withCheckedThrowingContinuation { continuation in
+            race.begin(continuation: continuation, seconds: seconds, operation: operation, body: body)
+        }
+    }, onCancel: {
+        race.cancelCaller()
+    })
+}
+
+private final class ModelDeadlineRace<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Error>?
+    private var work: Task<Void, Never>?
+    private var timer: Task<Void, Never>?
+    private var settled = false
+    private var callerCancelled = false
+
+    func begin(continuation: CheckedContinuation<T, Error>, seconds: TimeInterval, operation: String, body: @escaping @Sendable () async throws -> T) {
+        lock.lock()
+        guard !callerCancelled, !settled else {
+            lock.unlock()
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        self.continuation = continuation
+        let work = Task { [weak self] in
+            let outcome: Result<T, Error>
+            do { outcome = .success(try await body()) }
+            catch { outcome = .failure(error) }
+            self?.settle(outcome)
+        }
+        let timer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            self?.settle(.failure(ModelDeadlineExceeded(operation: operation, seconds: seconds)), cancelWork: true)
+        }
+        self.work = work
+        self.timer = timer
+        lock.unlock()
+    }
+
+    private func settle(_ result: Result<T, Error>, cancelWork: Bool = false) {
+        lock.lock()
+        guard !settled else { lock.unlock(); return }
+        settled = true
+        let continuation = self.continuation
+        self.continuation = nil
+        let work = self.work, timer = self.timer
+        lock.unlock()
+        timer?.cancel()
+        if cancelWork { work?.cancel() }
+        continuation?.resume(with: result)
+    }
+
+    func cancelCaller() {
+        lock.lock()
+        callerCancelled = true
+        guard !settled else { lock.unlock(); return }
+        settled = true
+        let continuation = self.continuation
+        self.continuation = nil
+        let work = self.work, timer = self.timer
+        lock.unlock()
+        timer?.cancel()
+        work?.cancel()
+        continuation?.resume(throwing: CancellationError())
+    }
+}
+
 /// Text-only Responses-compatible driver. One POST, no fallback, polling, tools or retry.
 public struct ResponsesModelPort: ModelPort {
     public let configuration: ModelConfiguration
