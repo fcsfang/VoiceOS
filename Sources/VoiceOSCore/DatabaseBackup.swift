@@ -2,28 +2,28 @@ import Foundation
 import Darwin
 import CSQLite
 
+public struct LibraryStorageUsage: Sendable, Equatable {
+    public let databaseBytes: Int64
+    public let assetsBytes: Int64
+    public let backupBytes: Int64
+    public let localSpeechBytes: Int64
+    public let mirrorBytes: Int64
+    public let backupCount: Int
+    public var totalBytes: Int64 { databaseBytes + assetsBytes + backupBytes + localSpeechBytes + mirrorBytes }
+    public init(databaseBytes: Int64, assetsBytes: Int64, backupBytes: Int64, localSpeechBytes: Int64, mirrorBytes: Int64, backupCount: Int) {
+        self.databaseBytes = databaseBytes
+        self.assetsBytes = assetsBytes
+        self.backupBytes = backupBytes
+        self.localSpeechBytes = localSpeechBytes
+        self.mirrorBytes = mirrorBytes
+        self.backupCount = backupCount
+    }
+}
+
 public enum DatabaseBackup {
     public struct Summary: Sendable, Equatable {
         public let date: Date
         public let count: Int
-    }
-
-    public struct LibraryStorageUsage: Sendable, Equatable {
-        public let databaseBytes: Int64
-        public let assetsBytes: Int64
-        public let backupBytes: Int64
-        public let localSpeechBytes: Int64
-        public let mirrorBytes: Int64
-        public let backupCount: Int
-        public var totalBytes: Int64 { databaseBytes + assetsBytes + backupBytes + localSpeechBytes + mirrorBytes }
-        public init(databaseBytes: Int64, assetsBytes: Int64, backupBytes: Int64, localSpeechBytes: Int64, mirrorBytes: Int64, backupCount: Int) {
-            self.databaseBytes = databaseBytes
-            self.assetsBytes = assetsBytes
-            self.backupBytes = backupBytes
-            self.localSpeechBytes = localSpeechBytes
-            self.mirrorBytes = mirrorBytes
-            self.backupCount = backupCount
-        }
     }
 
     private static let metaFileName = ".backup-meta"
