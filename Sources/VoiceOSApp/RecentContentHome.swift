@@ -267,20 +267,42 @@ struct RecentContentHome: View {
         }
     }
 
-    private func progressRow(_ row: RecentContentProgressRow, style: WorkspaceTextStyle) -> some View {
-        Button { openTask(row.actionID) } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(row.text).vosFont(style).lineSpacing(style.size > 20 ? 4 : 5).textSelection(.enabled)
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(row.taskTitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+    @ViewBuilder private func progressRow(_ row: RecentContentProgressRow, style: WorkspaceTextStyle) -> some View {
+        if row.isTaskAvailable {
+            Button { openTask(row.actionID) } label: {
+                progressRowContent(row, style: style)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            HStack(alignment: .top, spacing: 10) {
+                progressRowContent(row, style: style)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(taskUnavailableReason(row)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    if model.records.contains(where: { $0.id == row.id }) {
+                        Button("查看材料") { openSource(row.id) }
+                            .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .disabled(!row.isTaskAvailable)
+    }
+
+    private func progressRowContent(_ row: RecentContentProgressRow, style: WorkspaceTextStyle) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(row.text).vosFont(style).lineSpacing(style.size > 20 ? 4 : 5).textSelection(.enabled)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(row.taskTitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+            }
+        }
+    }
+
+    private func taskUnavailableReason(_ row: RecentContentProgressRow) -> String {
+        guard let action = model.actionRecords.first(where: { $0.id == row.actionID }) else { return "任务已结束" }
+        return model.workspaceTaskRequiresReview(action) ? "任务已暂停" : "任务已结束"
     }
 
     private func materialReader(_ item: RecentContentItem) -> some View {
