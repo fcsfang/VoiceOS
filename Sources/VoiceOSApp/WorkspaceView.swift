@@ -370,7 +370,8 @@ struct WorkspaceView: View {
             .dynamicTypeSize(model.textSize.dynamicType)
             .frame(minWidth:980,minHeight:700)
             .onExitCommand {
-                if selectingActions { exitActionSelection() }
+                if discussionIsPresented { showingDiscussion = false }
+                else if selectingActions { exitActionSelection() }
                 else if page == .search, !query.isEmpty { query="";searchFocused=true;searchKeyboardFocus.id=nil }
                 else if !path.isEmpty { back() }
             }
@@ -667,8 +668,8 @@ struct WorkspaceView: View {
             }.buttonStyle(.plain).onHover { searchHovered=$0 }
                 .accessibilityLabel("搜索").help("搜索全部内容（⌘F）")
             WorkspaceIconButton(systemImage:"sidebar.right",label:"讨论") { Task { await toggleDiscussion() } }
-                .disabled(model.discussionSaving || model.discussionSending || !homeCanDiscuss)
-                .help(homeCanDiscuss ? "讨论" : "先选择一条材料或全景中的问题")
+                .disabled(model.discussionSaving || model.discussionSending || !discussionEntryAvailable)
+                .help(discussionEntryHint)
                 .accessibilityIdentifier("workspace.discussion")
             Button { go(.capture) } label: {
                 HStack(spacing:6) {
@@ -2497,9 +2498,40 @@ struct WorkspaceView: View {
             day.items.contains { $0.kind == .material && !$0.sourceIDs.isEmpty }
         }
     }
+    private var discussionEntry: DiscussionEntryToken? {
+        switch page {
+        case .materials: materialKeyboardFocus.id.map { DiscussionEntryToken(kind: .material, id: $0) }
+        case .actions: actionKeyboardHighlightID.map { DiscussionEntryToken(kind: .action, id: $0) }
+        case .search: searchKeyboardFocus.id.flatMap { DiscussionEntryToken(raw: $0) }
+        default: nil
+        }
+    }
+    private var discussionEntryAvailable: Bool {
+        switch page {
+        case .home: homeCanDiscuss
+        case .source, .task, .delivery: true
+        case .themes: topic != nil
+        case .materials: discussionEntry != nil
+        case .actions: !selectingActions && discussionEntry != nil
+        case .search: discussionEntry != nil
+        default: false
+        }
+    }
+    private var discussionEntryHint: String {
+        switch page {
+        case .home: homeCanDiscuss ? "讨论" : "先选择一条材料或全景中的问题"
+        case .themes: topic == nil ? "先在主题列表中选择一个主题，再开始讨论" : "讨论"
+        case .materials: discussionEntry == nil ? "先选中一条材料，再开始讨论" : "讨论"
+        case .actions: selectingActions ? "批量选择中不能开始讨论；先结束选择" : (discussionEntry == nil ? "先选中一条行动，再开始讨论" : "讨论")
+        case .search: discussionEntry == nil ? "先选中一条搜索结果，再开始讨论" : "讨论"
+        case .source, .task, .delivery: "讨论"
+        default: "这个页面没有可讨论的选中项；请从材料、行动或搜索结果进入"
+        }
+    }
     private func toggleDiscussion(force:Bool=false,prompt:String="") async {
         let key = discussionKey
         if discussionIsPresented && !force { showingDiscussion=false;return }
+        guard discussionEntryAvailable else { error=discussionEntryHint;return }
         if discussionContext == discussionKey, discussionDraftSessionID == model.discussionSession?.id, model.discussionSession?.validity == "current", model.discussionSession?.state == "active" {
             if !prompt.isEmpty && prompt != discussionDraft { discussionDraft = discussionDraft.isEmpty ? prompt : discussionDraft + "\n\n" + prompt }
             showingDiscussion=true;return
@@ -2529,12 +2561,34 @@ struct WorkspaceView: View {
                 guard key == discussionKey else { return }
                 topicFocus=focus;opened=await model.beginReflectionDiscussion(focus)
             } catch { if key == discussionKey { self.error=error.localizedDescription };return }
+        case .materials:
+            guard let entry=discussionEntry, let record=model.records.first(where: { $0.id == entry.id }) else { error="先选中一条材料，再开始讨论。"; return }
+            opened = await model.beginDiscussion(record)
+        case .actions:
+            guard let entry=discussionEntry, let action=model.actionRecords.first(where: { $0.id == entry.id }) else { error="先选中一条行动，再开始讨论。"; return }
+            opened = await model.beginActionDiscussion(action)
+        case .search:
+            guard let entry=discussionEntry else { error="先选中一条搜索结果，再开始讨论。"; return }
+            switch entry.kind {
+            case .material:
+                guard let record=model.records.first(where: { $0.id == entry.id }) else { error="这份材料已不在当前资料库。"; return }
+                opened = await model.beginDiscussion(record)
+            case .action:
+                guard let action=model.actionRecords.first(where: { $0.id == entry.id }) else { error="这条行动已不在当前资料库。"; return }
+                opened = await model.beginActionDiscussion(action)
+            case .claim:
+                guard let claim=model.claims.first(where: { $0.id == entry.id }) else { error="这条观点已不在当前资料库。"; return }
+                discussClaim(claim)
+                return
+            case .topic:
+                guard model.workspaceTopics.contains(where: { $0.id == entry.id }) else { error="这个主题已不在当前资料库。"; return }
+                selectTopic(entry.id)
+                await toggleDiscussion(force:true,prompt:prompt)
+                return
+            }
         default:
-            do {
-                let focus=try await model.loadReflection(.init(start:.distantPast,end:.distantFuture))
-                guard key == discussionKey else { return }
-                opened = await model.beginReflectionDiscussion(focus)
-            } catch { if key == discussionKey { self.error=error.localizedDescription };return }
+            error="这个页面没有可讨论的选中项；全时段回顾请从主题的回顾页进入。"
+            return
         }
         if opened { presentDiscussion(for:key,prompt:prompt) }
         else if key == discussionKey { error=model.status }
