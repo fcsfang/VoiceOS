@@ -57,3 +57,10 @@
   5. 「最近想法」「看原话」查不到声明时用既有 `showClueFailure` 提示（审计 5，RecentContentHome.swift:458-462）。
   6. 「还有 N 条」等剩余计数改为跳转按钮（审计 6，WeeklyReviewView.swift:651 等），若需要新路由且成本高，记录并跳过。
 - 与其它单元无文件重叠；不改 VoiceOSApp.swift（CL 独占）与主题组织核心（TS 独占）。
+
+## 结果（2026-11-17）
+
+- TS（b0c3343、c51cc99）：主题组织两段式——骨架输入只含观点、正文按主题分批（≤5 主题、>36KB 自动减量），阶段表按 (digest, stage, scope) 幂等续跑；单批失败隔离并抛 TopicOrganizationIncomplete；冷却 6 小时、显式 retry/topUp 放行；schema 69；提示词 v3（骨架/正文分 identity）；既有伪端口全部迁移。
+- UC（de15fb9）：周回顾 0 计数假按钮、加载失败重试、讨论页未配置模型说明与入口、认知地图假空态、查不到原话提示；另接两处「到行动页移出」跳转。
+- 协调者补线：处理页「主题整理未完成」区块（待补齐横幅、继续补齐/立即重试，立即重试走 retry 绕过冷却），`workspaceAttentionCount` 与 `workspaceProcessingOutstanding` 纳入主题整理未完成；首页注意力经同一计数生效。
+- 待做：合并后单次构建与全量测试，结果补此文件。
