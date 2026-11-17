@@ -38,28 +38,33 @@ struct TaskInitiationView: View {
             .sorted { $0.createdAt > $1.createdAt }
     }
     private var overLimit: Bool { model.initiationText.unicodeScalars.count > 4000 }
+    private let packageAnchor = "initiation.package"
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                WorkspaceHeading(eyebrow: "", title: "启动")
-                composer
-                history
-                if let record = selected { package(record) }
+        ScrollViewReader { reader in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    WorkspaceHeading(eyebrow: "", title: "启动")
+                    composer
+                    if let record = selected { package(record).id(packageAnchor) }
+                    history
+                }
+                .frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading)
+                .padding(WorkspaceMetrics.pagePadding)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading)
-            .padding(WorkspaceMetrics.pagePadding)
-            .frame(maxWidth: .infinity, alignment: .top)
+            .onChange(of: selectedID) { _, _ in
+                stepDraft = ""
+                stepStatus = ""
+                stepCommandID = UUID().uuidString
+                guard selectedID != nil else { return }
+                DispatchQueue.main.async { withAnimation { reader.scrollTo(packageAnchor, anchor: .top) } }
+            }
         }
         .onAppear { artifactDraft = selected?.artifact ?? "" }
         .onChange(of: syncKey) { _, _ in
             artifactDraft = selected?.artifact ?? ""
             answer = ""
-        }
-        .onChange(of: selectedID) { _, _ in
-            stepDraft = ""
-            stepStatus = ""
-            stepCommandID = UUID().uuidString
         }
         .onChange(of: stepDraft) { _, _ in stepCommandID = UUID().uuidString }
         .alert("这份材料可能包含密码、密钥或令牌", isPresented: Binding(
@@ -243,8 +248,9 @@ struct TaskInitiationView: View {
         let known = Set(records.map(\.id))
         Task {
             guard await model.generateTaskInitiation(text: model.initiationText, sourceID: model.initiationSourceID, mode: mode, allowCloud: allowCloud),
-                  let record = model.taskInitiations.first(where: { !known.contains($0.id) }),
-                  record.state == "draft",
+                  let record = model.taskInitiations.first(where: { !known.contains($0.id) }) else { return }
+            selectedID = record.id
+            guard record.state == "draft",
                   record.route == .agentHandoff || record.route == .guidedStart,
                   record.proposal.preference != preference else { return }
             let status = model.initiationStatus
