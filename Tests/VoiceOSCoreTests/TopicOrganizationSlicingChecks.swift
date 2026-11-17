@@ -215,12 +215,12 @@ final class TopicOrganizationSlicingChecks: XCTestCase {
         }
         do {
             let migrated = try Database(url)
-            XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], "69")
+            XCTAssertEqual(try migrated.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
             XCTAssertEqual(try migrated.query("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='topic_organization_stages'").first?["n"], "1")
             try migrated.execute("PRAGMA user_version=68")
         }
         let retried = try Database(url)
-        XCTAssertEqual(try retried.query("PRAGMA user_version").first?["user_version"], "69")
+        XCTAssertEqual(try retried.query("PRAGMA user_version").first?["user_version"], TestSchema.currentVersion)
         XCTAssertEqual(try retried.query("SELECT count(*) AS n FROM sqlite_master WHERE type='table' AND name='topic_organization_stages'").first?["n"], "1")
     }
 }
