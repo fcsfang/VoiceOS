@@ -38,3 +38,12 @@
 - 实时库：完成近 7 天 21/待补 20、停滞 62、待确认 13；主题 28、观点 current 732。
 
 ## 结果（完成后填）
+
+## 结果（2026-11-17）
+
+- WA（d7c78b4、0531a50）：周回顾页头认知地图 sheet（embeddedTopicID nil、周期切换、一起回顾、Esc 关闭）、首屏四段汇总（本周完成/待补结果/停滞目标/待确认，可点击滚动定位）、加载失败可见化、首页「每周回顾」按钮与待填徽标可点、CommandMenu ⌘⇧E、菜单栏「另有 N 条未排期任务」+「查看全部行动…」。
+- WB（fd67a1d、f2a7c4d）：Spotlight 观点条目深链到首个引用、主题以 voiceos://topic/<id> 入索引并路由选中、搜索前缀建议（≥2 字，取已发布内存数组前 5，类型图标与中文标签，回车直开首条建议）、最近搜索单条删除。
+- 集成：work/mega-48 合并两单元无冲突（VoiceOSApp.swift 仅 WB 两行 topics 参数）。
+- 构建：`swift build -j 2` build_exit=0（156s）。
+- 测试：`swift test -j 2` test_exit=0，Executed 508 tests, 0 failures（58s）。
+- 部署：等闸门（全景用户运行已结束：35/36，失败单元另立案波 49）。
