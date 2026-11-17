@@ -50,6 +50,33 @@ private struct SourceFold<Content: View>: View {
             .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border.opacity(0.8),lineWidth:1) }
     }
 }
+private struct UnresolvedIssuesBlock: View {
+    @Environment(\.workspacePalette) private var palette
+    let issues:[TranscriptionReview.Issue]
+    let playbackAvailable:Bool
+    let playbackLabel:(TranscriptionReview.Issue)->String
+    let play:(TranscriptionReview.Issue)->Void
+    let jump:(String)->Void
+    var body: some View {
+        VStack(alignment:.leading,spacing:13) {
+            Label("疑点 \(issues.count) · 核对未完成",systemImage:"exclamationmark.triangle")
+                .vosFont(WorkspaceText.meta.size, weight:.semibold)
+                .foregroundStyle(palette.warning)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(Array(issues.enumerated()),id:\.offset) { _,issue in
+                VStack(alignment:.leading,spacing:7) {
+                    Text(issue.reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                    HStack(spacing:14) {
+                        Button(playbackLabel(issue),systemImage:"play.circle") { play(issue) }
+                            .disabled(!playbackAvailable)
+                            .help(playbackAvailable ? "播放这条核对项对应的原话" : "这份材料当前没有可播放的录音")
+                        Button("跳到原文",systemImage:"text.magnifyingglass") { jump(issue.span_id) }
+                    }.vosFont(WorkspaceText.meta)
+                }.padding(.vertical,4)
+            }
+        }
+    }
+}
 struct WorkspaceSourceView: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var textScale
@@ -419,6 +446,11 @@ struct WorkspaceSourceView: View {
                         Spacer(minLength:0)
                     }
                 }
+                if let issues=source.transcriptionReview?.unresolved_issues,!issues.isEmpty {
+                    UnresolvedIssuesBlock(issues:issues,playbackAvailable:playbackAvailable,playbackLabel:{ unresolvedIssuePlaybackLabel($0) },play:{ playUnresolvedIssue($0) },jump:{ jumpToOriginal(spanID:$0) })
+                        .padding(16).frame(maxWidth:.infinity,alignment:.leading)
+                        .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
+                }
                 if let issue=source.recordingExpressionIssue(in:catalog) {
                     HStack(alignment:.firstTextBaseline,spacing:12) {
                         Label("连续表达分组暂不可用 · \(issue)。",systemImage:"exclamationmark.triangle")
@@ -635,16 +667,8 @@ struct WorkspaceSourceView: View {
                         VStack(alignment:.leading,spacing:13) {
                             if let review=source.transcriptionReview {
                                 Text("转写校正已保存，原始版本可追溯。").vosFont(WorkspaceText.meta)
-                                ForEach(Array((review.unresolved_issues ?? []).enumerated()),id:\.offset) { _,issue in
-                                    VStack(alignment:.leading,spacing:7) {
-                                        Text(issue.reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                                        HStack(spacing:14) {
-                                            Button(unresolvedIssuePlaybackLabel(issue),systemImage:"play.circle") { playUnresolvedIssue(issue) }
-                                                .disabled(!playbackAvailable)
-                                                .help(playbackAvailable ? "播放这条核对项对应的原话" : "这份材料当前没有可播放的录音")
-                                            Button("跳到原文",systemImage:"text.magnifyingglass") { jumpToOriginal(spanID:issue.span_id) }
-                                        }.vosFont(WorkspaceText.meta)
-                                    }.padding(.vertical,4)
+                                if let issues=review.unresolved_issues,!issues.isEmpty {
+                                    UnresolvedIssuesBlock(issues:issues,playbackAvailable:playbackAvailable,playbackLabel:{ unresolvedIssuePlaybackLabel($0) },play:{ playUnresolvedIssue($0) },jump:{ jumpToOriginal(spanID:$0) })
                                 }
                             }
                             Button("查看全部原文版本", action:loadHistory)
