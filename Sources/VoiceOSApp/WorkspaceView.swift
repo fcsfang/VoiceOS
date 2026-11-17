@@ -309,6 +309,9 @@ struct WorkspaceView: View {
     private var topic: ReflectionQuestion? { model.workspaceTopics.first { $0.id == topicID } }
     private var sourceIDs: Set<String> { Set(topicID.flatMap { model.workspaceTopicSources[$0] } ?? []) }
     private var topicSources: [SourceRecord] { model.records.filter { sourceIDs.contains($0.id) } }
+    private var panoramaTopicLinks: [PanoramaTopicLink] {
+        model.workspaceTopics.map { PanoramaTopicLink(id: $0.id, title: $0.title, sourceIDs: Set(model.workspaceTopicSources[$0.id] ?? [])) }
+    }
     private var topicClaims: [CandidateClaim] {
         let ids=Set(topic?.organization?.sections?.flatMap(\.claimIDs) ?? [])
         return model.claims.filter { ids.contains($0.id) && $0.validity == "current" && $0.reviewState != "rejected" }
@@ -713,7 +716,7 @@ struct WorkspaceView: View {
                             panoramaClaimEditor = model.claims.first { $0.id == id }
                         }, discuss: { snapshot, selection in
                             Task { await openPanoramaDiscussion(snapshotID: snapshot, selection: selection) }
-                        }, themeReply: { briefing in
+                        }, topicLinks: panoramaTopicLinks, openTopic: { selectTopic($0) }, themeReply: { briefing in
                             try await model.themeReply(briefing)
                         })
                 } else {
