@@ -347,4 +347,60 @@ final class SearchIndexChecks: XCTestCase {
         do { _ = try await store.search(query: "索引表缺失") } catch { thrown = error }
         XCTAssertNotNil(thrown as? VoiceOSError)
     }
+
+    func testSearchAllFiltersFrozenClaimsAndClosedActionsBeforeCounting() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let currentClaim = try insertClaim(db, statement: "复盘 当前结论")
+        let frozenClaim = try insertClaim(db, statement: "复盘 冻结结论")
+        try db.execute("UPDATE claims SET validity='frozen' WHERE id=?", [frozenClaim])
+        let rejectedClaim = try insertClaim(db, statement: "复盘 已拒绝结论")
+        try db.execute("UPDATE claims SET review_version=1 WHERE id=?", [rejectedClaim])
+        try db.execute("""
+        INSERT INTO claim_reviews(id,claim_id,version,from_version,decision,statement,ownership,reason,note,actor,command_id,input_fingerprint,created_at)
+        VALUES(?,?,1,0,'rejected','复盘 已拒绝结论','external','explicit_rejection','','user',?,?,'2026-11-14T00:00:00Z')
+        """, [UUID().uuidString, rejectedClaim, "review:" + rejectedClaim, rejectedClaim])
+        let openAction = try insertAction(db, claimID: currentClaim, title: "复盘 待办", note: "复盘")
+        let completedAction = try insertAction(db, claimID: currentClaim, title: "复盘 已完成", note: "复盘")
+        try db.execute("UPDATE actions SET state='completed' WHERE id=?", [completedAction])
+        let frozenAction = try insertAction(db, claimID: currentClaim, title: "复盘 已失效", note: "复盘")
+        try db.execute("UPDATE actions SET validity='frozen' WHERE id=?", [frozenAction])
+        try await store.rebuildSearchIndex()
+
+        let result = try await store.searchAll(query: "复盘", perKindLimit: 20)
+        XCTAssertEqual(result.hits(for: .claim).map(\.refID), [currentClaim])
+        XCTAssertEqual(result.total(for: .claim), 1)
+        XCTAssertEqual(result.hits(for: .action).map(\.refID), [openAction])
+        XCTAssertEqual(result.total(for: .action), 1)
+    }
+
+    func testPerKindLimitAppliesAfterFiltering() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        var visible: [String] = []
+        for index in 0..<3 { visible.append(try insertClaim(db, statement: "复盘 当前 \(index)")) }
+        for index in 0..<5 {
+            let frozen = try insertClaim(db, statement: "复盘 冻结 \(index)")
+            try db.execute("UPDATE claims SET validity='frozen' WHERE id=?", [frozen])
+        }
+        try await store.rebuildSearchIndex()
+
+        let result = try await store.searchAll(query: "复盘", perKindLimit: 2)
+        XCTAssertEqual(result.total(for: .claim), 3)
+        XCTAssertEqual(result.hits(for: .claim).count, 2)
+        XCTAssertTrue(result.hits(for: .claim).allSatisfy { visible.contains($0.refID) })
+    }
+
+    func testSubstringFallbackFiltersFrozenClaims() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let current = try insertClaim(db, statement: "会")
+        let frozen = try insertClaim(db, statement: "会")
+        try db.execute("UPDATE claims SET validity='frozen' WHERE id=?", [frozen])
+        try await store.rebuildSearchIndex()
+
+        let result = try await store.searchAll(query: "会", perKindLimit: 20)
+        XCTAssertEqual(result.hits(for: .claim).map(\.refID), [current])
+        XCTAssertEqual(result.total(for: .claim), 1)
+    }
 }

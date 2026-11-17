@@ -276,6 +276,7 @@ struct WorkspaceView: View {
     @FocusState private var searchListFocused: Bool
     @State private var searchHits: [SearchHit] = []
     @State private var searchTotals: [SearchHit.Kind: Int] = [:]
+    @State private var searchExpandedKinds: Set<SearchHit.Kind> = []
     @State private var searchFailed = false
     @State private var searchBusy = false
     @State private var searchHovered = false
@@ -1413,7 +1414,7 @@ struct WorkspaceView: View {
             }
         }
         .task(id: term) { await loadSearchHits(term) }
-        .onChange(of:term) { _, _ in searchKeyboardFocus.id=nil }
+        .onChange(of:term) { _, _ in searchKeyboardFocus.id=nil;searchExpandedKinds=[] }
     }
     @ViewBuilder private var searchResults: some View {
         if searchBusy && searchHits.isEmpty { ProgressView("正在检索…").controlSize(.small) }
@@ -1422,7 +1423,8 @@ struct WorkspaceView: View {
         if !sections.isEmpty {
             VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
                 ForEach(sections) { section in
-                    WorkspaceSection(title:section.title,icon:section.icon,count:section.count) {
+                    let expand: (() -> Void)? = section.hasMore ? { expandSearchKind(section.kind) } : nil
+                    WorkspaceSection(title:section.title,icon:section.icon,count:section.count,actionTitle:section.hasMore ? "显示全部" : "",action:expand) {
                         ForEach(section.rows) { row in
                             SearchResultRow(title:row.title,subtitle:row.subtitle,icon:row.icon) { row.open() }
                                 .background(searchKeyboardFocus.id == row.id ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
@@ -1461,7 +1463,10 @@ struct WorkspaceView: View {
             hit.kind == .claim && model.claims.contains { $0.id == hit.refID && $0.validity == "current" && $0.reviewState != "rejected" }
         }.map { hit in
             row("claim:" + hit.refID,hit.title,hit.snippet,"lightbulb") {
-                if let sourceID=model.claims.first(where: { $0.id == hit.refID })?.references.first?.sourceID { go(.source(sourceID)) }
+                guard let reference=model.claims.first(where: { $0.id == hit.refID })?.references.first else { return }
+                let spanExists=model.records.first(where: { $0.id == reference.sourceID })?.spans.contains(where: { $0.id == reference.spanID }) == true
+                if spanExists { sourceScrollPositions[reference.sourceID]=ScrollPosition(id:"source-span-"+reference.spanID) }
+                go(.source(reference.sourceID))
             }
         }
         let topics = searchHits.filter { hit in
@@ -1472,26 +1477,45 @@ struct WorkspaceView: View {
         let actions = searchHits.filter { $0.kind == .action }.map { hit in
             row("action:" + hit.refID,hit.title,hit.snippet,"checkmark.circle") { go(.task(hit.refID)) }
         }
+        let materialTotal=searchTotals[.material] ?? materials.count
+        let topicTotal=searchTotals[.topic] ?? topics.count
+        let claimTotal=searchTotals[.claim] ?? claims.count
+        let actionTotal=searchTotals[.action] ?? actions.count
         var sections:[WorkspaceSearchSection]=[]
-        if !materials.isEmpty { sections.append(WorkspaceSearchSection(id:"materials",title:"材料",icon:"books.vertical",count:searchTotals[.material] ?? materials.count,rows:materials)) }
-        if !topics.isEmpty { sections.append(WorkspaceSearchSection(id:"topics",title:"主题",icon:"circle.hexagongrid",count:searchTotals[.topic] ?? topics.count,rows:topics)) }
-        if !claims.isEmpty { sections.append(WorkspaceSearchSection(id:"claims",title:"观点",icon:"lightbulb",count:searchTotals[.claim] ?? claims.count,rows:claims)) }
-        if !actions.isEmpty { sections.append(WorkspaceSearchSection(id:"actions",title:"行动",icon:"checkmark.circle",count:searchTotals[.action] ?? actions.count,rows:actions)) }
+        if !materials.isEmpty { sections.append(WorkspaceSearchSection(id:"materials",title:"材料",icon:"books.vertical",count:materialTotal,rows:materials,kind:.material,hasMore:materialTotal>materials.count && !searchExpandedKinds.contains(.material))) }
+        if !topics.isEmpty { sections.append(WorkspaceSearchSection(id:"topics",title:"主题",icon:"circle.hexagongrid",count:topicTotal,rows:topics,kind:.topic,hasMore:topicTotal>topics.count && !searchExpandedKinds.contains(.topic))) }
+        if !claims.isEmpty { sections.append(WorkspaceSearchSection(id:"claims",title:"观点",icon:"lightbulb",count:claimTotal,rows:claims,kind:.claim,hasMore:claimTotal>claims.count && !searchExpandedKinds.contains(.claim))) }
+        if !actions.isEmpty { sections.append(WorkspaceSearchSection(id:"actions",title:"行动",icon:"checkmark.circle",count:actionTotal,rows:actions,kind:.action,hasMore:actionTotal>actions.count && !searchExpandedKinds.contains(.action))) }
         return sections
     }
     private func loadSearchHits(_ term:String) async {
         guard !term.isEmpty else {
-            searchHits=[];searchTotals=[:];searchFailed=false;searchBusy=false;searchKeyboardFocus.id=nil
+            searchHits=[];searchTotals=[:];searchFailed=false;searchBusy=false;searchKeyboardFocus.id=nil;searchExpandedKinds=[]
             return
         }
         searchBusy=true
         defer { searchBusy=false }
         do { try await Task.sleep(for:.milliseconds(180)) } catch { return }
         guard !Task.isCancelled else { return }
-        if let results=await model.searchAll(term) {
-            searchHits=results.hits;searchTotals=results.totals;searchFailed=false
+        let results=await model.searchAll(term, perKindLimit: searchExpandedKinds.isEmpty ? 20 : 200)
+        guard term == query.trimmingCharacters(in:.whitespacesAndNewlines) else { return }
+        if let results {
+            searchHits=cappedSearchHits(results.hits);searchTotals=results.totals;searchFailed=false
         } else {
             searchHits=[];searchTotals=[:];searchFailed=true
+        }
+    }
+    private func expandSearchKind(_ kind: SearchHit.Kind) {
+        searchExpandedKinds.insert(kind)
+        Task { await loadSearchHits(query.trimmingCharacters(in:.whitespacesAndNewlines)) }
+    }
+    private func cappedSearchHits(_ hits: [SearchHit]) -> [SearchHit] {
+        guard !searchExpandedKinds.isEmpty else { return hits }
+        var counts: [SearchHit.Kind: Int] = [:]
+        return hits.filter { hit in
+            if searchExpandedKinds.contains(hit.kind) { return true }
+            counts[hit.kind, default: 0] += 1
+            return counts[hit.kind, default: 0] <= 20
         }
     }
     private var recentSearchChips: some View {
@@ -2488,6 +2512,8 @@ private struct WorkspaceSearchSection: Identifiable {
     let icon: String
     let count: Int
     let rows: [WorkspaceSearchRow]
+    let kind: SearchHit.Kind
+    let hasMore: Bool
 }
 
 private struct SearchResultRow: View {
