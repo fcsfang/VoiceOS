@@ -60,7 +60,7 @@ extension VoiceOSStore {
     public func search(query: String, limit: Int = 50) throws -> [SearchHit] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, limit > 0 else { return [] }
-        try scheduleSearchIndexRebuildIfNeeded()
+        try prepareSearchIndexForQuery()
         let tokens = searchTokens(from: trimmed)
         return try rankedSearchRows(tokens).prefix(limit).map(\.hit)
     }
@@ -68,7 +68,7 @@ extension VoiceOSStore {
     public func searchAll(query: String, perKindLimit: Int) throws -> SearchAllResult {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, perKindLimit > 0 else { return .empty }
-        try scheduleSearchIndexRebuildIfNeeded()
+        try prepareSearchIndexForQuery()
         let rows = try rankedSearchRows(searchTokens(from: trimmed))
         var hits: [SearchHit.Kind: [SearchHit]] = [:]
         var totals: [SearchHit.Kind: Int] = [:]
@@ -204,6 +204,15 @@ extension VoiceOSStore {
         return stored != (try searchFingerprint())
     }
 
+    private func prepareSearchIndexForQuery() throws {
+        guard try searchIndexNeedsRebuild() else { return }
+        do { try rebuildSearchIndex() }
+        catch {
+            try? scheduleSearchIndexRebuildIfNeeded()
+            throw error
+        }
+    }
+
     private func scheduleSearchIndexRebuildIfNeeded() throws {
         guard try searchIndexNeedsRebuild() else { return }
         if try db.query("SELECT value FROM search_index_meta WHERE key='rebuild_pending'").first?["value"] == "1" { return }
@@ -218,7 +227,8 @@ extension VoiceOSStore {
 
     private func finishScheduledSearchRebuild() {
         defer { try? db.execute("DELETE FROM search_index_meta WHERE key='rebuild_pending'") }
-        try? rebuildSearchIndexIfNeeded()
+        do { try rebuildSearchIndexIfNeeded() }
+        catch { NSLog("VoiceOS 搜索索引重建失败：\(error.localizedDescription)") }
     }
 
     func waitForPendingSearchRebuild(timeout: TimeInterval = 5) async throws {

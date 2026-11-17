@@ -15,6 +15,9 @@ public struct WorkspaceSnapshot: Sendable {
     public var actionClarifications: [String: String] = [:]
     public var assistantExecutions: [AssistantExecutionRecord] = []
     public var assistantAssessmentIssues: [AssistantAssessmentIssue] = []
+    /// The validation read behind `assistantExecutions`; resume steps reuse it
+    /// only while nothing froze after this snapshot was taken.
+    var assistantValidation: AssistantValidationContext? = nil
     public var taskInitiations: [TaskInitiationRecord] = []
     public var knowledgeReviews: [KnowledgeReviewRecord] = []
     public var recentOutcomes: [ActionFeedbackRecord] = []
@@ -142,6 +145,7 @@ extension VoiceOSStore {
             StartupTrace.end(executionsToken)
             result.assistantAssessmentIssues = try StartupTrace.measure("snapshot.assistantAssessmentIssues") { try assistantAssessmentIssues(context: validation) }
             result.contextValidityChanged = result.contextValidityChanged || frozenContextCount != freezesBefore
+            result.assistantValidation = result.contextValidityChanged ? nil : validation
         }
         if wantsKnowledge {
             result.knowledgeReviews = try StartupTrace.measure("snapshot.knowledgeReviews") { try knowledgeReviews() }
@@ -155,7 +159,8 @@ extension VoiceOSStore {
                 try recordingFollowupValidities(result.recordingFollowups,
                     catalogRows: reusable ? result.sources : nil,
                     claimRows: reusable ? result.claims : nil,
-                    actionRows: reusable ? result.actions : nil)
+                    actionRows: reusable ? result.actions : nil,
+                    latest: reusable ? result.currentClaimsBySource : nil)
             }
         }
         return result

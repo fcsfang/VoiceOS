@@ -164,6 +164,9 @@ extension ControlCenter {
             return WorkspaceTranscriptReviewPoint(source: source, count: count)
         }.sorted { $0.count != $1.count ? $0.count > $1.count : $0.source.displayTitle < $1.source.displayTitle }
     }
+    var workspaceAttentionCount: Int {
+        workspaceTranscriptReviewPoints.reduce(0) { $0 + $1.count } + workspaceFailedFollowups.count + workspaceFailedKnowledgeReviews.count + (workspaceNeedsAttention ? 1 : 0)
+    }
     var workspaceProcessingOutstanding: Bool {
         workspaceNeedsAttention || !workspaceTranscriptReviewPoints.isEmpty ||
         !workspaceFailedFollowups.isEmpty || !workspaceFailedKnowledgeReviews.isEmpty ||

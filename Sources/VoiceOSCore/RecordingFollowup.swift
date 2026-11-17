@@ -418,10 +418,11 @@ extension VoiceOSStore {
     public func recordingFollowupValidities(_ receipts: [RecordingFollowupReceipt]) throws -> [String: RecordingFollowupValidity] {
         try recordingFollowupValidities(receipts, catalogRows: nil, claimRows: nil, actionRows: nil)
     }
-    /// Snapshot callers pass arrays they already read. Within one call every
-    /// distinct source transcript and continuous-expression context is validated
-    /// once, instead of once per receipt.
-    public func recordingFollowupValidities(_ receipts: [RecordingFollowupReceipt], catalogRows preloadedCatalog: [SourceRecord]? = nil, claimRows preloadedClaims: [CandidateClaim]? = nil, actionRows preloadedActions: [ActionRecord]? = nil) throws -> [String: RecordingFollowupValidity] {
+    /// Snapshot callers pass arrays they already read, and may pass the
+    /// snapshot's latest-claim map too. Within one call every distinct source
+    /// transcript and continuous-expression context is validated once, instead
+    /// of once per receipt.
+    public func recordingFollowupValidities(_ receipts: [RecordingFollowupReceipt], catalogRows preloadedCatalog: [SourceRecord]? = nil, claimRows preloadedClaims: [CandidateClaim]? = nil, actionRows preloadedActions: [ActionRecord]? = nil, latest preloadedLatest: [String: [CandidateClaim]]? = nil) throws -> [String: RecordingFollowupValidity] {
         let completed = receipts.filter { $0.state == "completed" && $0.result != nil }
         guard !completed.isEmpty else { return [:] }
         let catalogRows: [SourceRecord]
@@ -435,7 +436,15 @@ extension VoiceOSStore {
         else { actionRows = try StartupTrace.measure("validity.actions") { try self.actions(includeHistory: true) } }
         let catalog: [String: SourceRecord] = Dictionary(uniqueKeysWithValues: catalogRows.map { ($0.id, $0) })
         let claims: [String: CandidateClaim] = Dictionary(uniqueKeysWithValues: claimRows.map { ($0.id, $0) })
-        let latest: [String: Set<String>] = try StartupTrace.measure("validity.latest") { try latestCandidateClaimsBySource() }.mapValues { Set($0.map(\.id)) }
+        let latest: [String: Set<String>]
+        if let preloadedLatest {
+            // Freezing a context cascades to its claims, so filtering the
+            // snapshot map on claim validity matches the read below.
+            latest = preloadedLatest.mapValues { Set($0.filter { $0.validity == "current" && $0.reviewState != "rejected" }.map(\.id)) }
+            StartupTrace.mark("validity.latest.reused")
+        } else {
+            latest = try StartupTrace.measure("validity.latest") { try latestCandidateClaimsBySource() }.mapValues { Set($0.map(\.id)) }
+        }
         let actions: [String: ActionRecord] = Dictionary(uniqueKeysWithValues: actionRows.map { ($0.id, $0) })
         let policies = Dictionary(uniqueKeysWithValues: catalogRows.map { ($0.id, $0.policyVersion) })
         let feedback = try StartupTrace.measure("validity.feedback") { try followupFeedback(actions: actionRows, claims: claims, catalog: catalog) }

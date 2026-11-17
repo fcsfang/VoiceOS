@@ -60,6 +60,10 @@ final class SearchIndexChecks: XCTestCase {
         try db.execute("DELETE FROM search_index_meta WHERE key='dirty'")
     }
 
+    private func writeCount(_ db: Database) throws -> String? {
+        try db.query("SELECT total_changes() AS changes").first?["changes"]
+    }
+
     func testMigrationCreatesSearchIndex() async throws {
         let store = try await openStore()
         let db = await store.db
@@ -131,22 +135,18 @@ final class SearchIndexChecks: XCTestCase {
         XCTAssertTrue(hits.isEmpty)
     }
 
-    func testFingerprintChangeRebuildsIndexOffTheQueryStack() async throws {
+    func testFingerprintChangeRebuildsIndexOnFirstQuery() async throws {
         let store = try await openStore()
         let db = await store.db
         let first = try insertClaim(db, statement: "第一阶段实验记录")
         try await store.rebuildSearchIndex()
         let added = try insertClaim(db, statement: "量子纠缠实验记录")
 
-        let stale = try await store.search(query: "量子纠缠")
-        XCTAssertTrue(stale.isEmpty)
-        XCTAssertEqual(try db.query("SELECT value FROM search_index_meta WHERE key='rebuild_pending'").first?["value"], "1")
-
-        try await store.waitForPendingSearchRebuild()
         let addedHits = try await store.search(query: "量子纠缠")
         XCTAssertEqual(addedHits.map(\.refID), [added])
         let firstHits = try await store.search(query: "第一阶段")
         XCTAssertEqual(firstHits.map(\.refID), [first])
+        XCTAssertNil(try db.query("SELECT value FROM search_index_meta WHERE key='rebuild_pending'").first?["value"])
     }
 
     func testTwoCharacterChineseQueryKeepsRelevanceOrder() async throws {
@@ -204,7 +204,7 @@ final class SearchIndexChecks: XCTestCase {
         XCTAssertEqual(limitedCount, 2)
     }
 
-    func testInPlaceActionEditReturnsStaleThenRebuilds() async throws {
+    func testInPlaceActionEditShowsUpOnNextQuery() async throws {
         let store = try await openStore()
         let db = await store.db
         let claim = try insertClaim(db, statement: "整理材料")
@@ -212,11 +212,7 @@ final class SearchIndexChecks: XCTestCase {
         try await store.rebuildSearchIndex()
 
         try db.execute("UPDATE actions SET note='新的驻留词汇' WHERE id=?", [action])
-        let stale = try await store.search(query: "驻留词汇")
-        XCTAssertTrue(stale.isEmpty)
         XCTAssertTrue(try dirtyFlag(db))
-
-        try await store.waitForPendingSearchRebuild()
         let fresh = try await store.search(query: "驻留词汇")
         XCTAssertEqual(fresh.map(\.refID), [action])
         XCTAssertFalse(try dirtyFlag(db))
@@ -231,9 +227,6 @@ final class SearchIndexChecks: XCTestCase {
         XCTAssertFalse(before.isEmpty)
 
         try db.execute("UPDATE sources SET state='trashed' WHERE id=?", [material])
-        let stale = try await store.search(query: "独特回收站词汇")
-        XCTAssertFalse(stale.isEmpty)
-        try await store.waitForPendingSearchRebuild()
         let after = try await store.search(query: "独特回收站词汇")
         XCTAssertTrue(after.isEmpty)
     }
@@ -288,5 +281,70 @@ final class SearchIndexChecks: XCTestCase {
         try await store.rebuildSearchIndex()
         let hits = try await store.search(query: "\"复盘 ")
         XCTAssertTrue(hits.isEmpty)
+    }
+
+    func testDirtyEmptyIndexRebuildsOnFirstSearch() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let claim = try insertClaim(db, statement: "首次查询即命中的结论")
+        try db.execute("INSERT OR REPLACE INTO search_index_meta(key, value) VALUES('dirty', '1')")
+        XCTAssertEqual(try db.query("SELECT COUNT(*) AS count FROM search_index").first?["count"], "0")
+
+        let hits = try await store.search(query: "即命中")
+        XCTAssertEqual(hits.map(\.refID), [claim])
+        XCTAssertFalse(try dirtyFlag(db))
+    }
+
+    func testDirtyEmptyIndexRebuildsOnFirstSearchAll() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let claim = try insertClaim(db, statement: "汇报要点整理")
+        let action = try insertAction(db, claimID: claim, title: "整理汇报要点", note: "汇报")
+        try db.execute("INSERT OR REPLACE INTO search_index_meta(key, value) VALUES('dirty', '1')")
+
+        let result = try await store.searchAll(query: "汇报", perKindLimit: 10)
+        XCTAssertEqual(result.hits(for: .claim).map(\.refID), [claim])
+        XCTAssertEqual(result.hits(for: .action).map(\.refID), [action])
+        XCTAssertFalse(try dirtyFlag(db))
+    }
+
+    func testSecondQueryDoesNotRebuildAgain() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let claim = try insertClaim(db, statement: "重复查询不重建索引")
+        try db.execute("INSERT OR REPLACE INTO search_index_meta(key, value) VALUES('dirty', '1')")
+
+        let first = try await store.search(query: "不重建")
+        XCTAssertEqual(first.map(\.refID), [claim])
+        let writes = try writeCount(db)
+        let second = try await store.search(query: "不重建")
+        XCTAssertEqual(second.map(\.refID), first.map(\.refID))
+        XCTAssertEqual(try writeCount(db), writes)
+        XCTAssertNil(try db.query("SELECT value FROM search_index_meta WHERE key='rebuild_pending'").first?["value"])
+    }
+
+    func testCleanIndexQueryWritesNothing() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let claim = try insertClaim(db, statement: "正常索引查询")
+        try await store.rebuildSearchIndex()
+        let writes = try writeCount(db)
+
+        let hits = try await store.search(query: "正常索引")
+        XCTAssertEqual(hits.map(\.refID), [claim])
+        XCTAssertEqual(try writeCount(db), writes)
+        XCTAssertFalse(try dirtyFlag(db))
+        XCTAssertNil(try db.query("SELECT value FROM search_index_meta WHERE key='rebuild_pending'").first?["value"])
+    }
+
+    func testRebuildFailureSurfacesToCaller() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        _ = try insertClaim(db, statement: "索引表缺失时查询报错")
+        try db.execute("DROP TABLE search_index")
+
+        var thrown: Error?
+        do { _ = try await store.search(query: "索引表缺失") } catch { thrown = error }
+        XCTAssertNotNil(thrown as? VoiceOSError)
     }
 }
