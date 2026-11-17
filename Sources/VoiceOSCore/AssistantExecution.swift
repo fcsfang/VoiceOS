@@ -145,7 +145,7 @@ public enum AssistantFailureMessage {
 /// One coherent read shared by every assistant validation in a call. Validation
 /// freezes rows by writing, so a caller drops this after a freeze instead of
 /// trusting reads taken before it.
-struct AssistantValidationContext {
+struct AssistantValidationContext: @unchecked Sendable {
     let actions: [String: ActionRecord]
     let claims: [String: CandidateClaim]
     let sources: [String: SourceRecord]
@@ -155,7 +155,7 @@ struct AssistantValidationContext {
 
 /// Review ledgers are needed only for continuous-expression inputs; build them
 /// on first use so the common single-expression path never pays for them.
-final class AssistantLedgerBox {
+final class AssistantLedgerBox: @unchecked Sendable {
     private var cached: [String: ActionReviewLedger]?
     func value(_ build: () throws -> [String: ActionReviewLedger]) rethrows -> [String: ActionReviewLedger] {
         if let cached { return cached }
@@ -306,11 +306,15 @@ extension VoiceOSStore {
         return try assistantExecutions(actionID: actionID).first(where: { $0.id == id })!
     }
     @discardableResult
-    public func discoverAutomaticAssistantExecutions(using port: any AssistantModelPort) async throws -> Bool {
+    public func discoverAutomaticAssistantExecutions(using port: any AssistantModelPort, snapshot: WorkspaceSnapshot? = nil) async throws -> Bool {
         guard !assistantDiscoveryActive else { return false }; assistantDiscoveryActive = true
         defer { assistantDiscoveryActive = false }
+        // An idle published list means this reload has no queued or running
+        // work; the periodic and activation paths pass no snapshot and still
+        // discover new tasks.
+        if let snapshot, !snapshot.assistantExecutions.contains(where: Self.assistantWorkPending) { return false }
         var changed = false
-        var context: AssistantValidationContext?
+        var context = snapshot?.assistantValidation
         _ = try assistantExecutions(context: &context)
         for action in try actions() where action.kind == "task" && action.intentActor == "user" && action.state == "open" && action.validity == "current" {
             try Task.checkCancellation()
@@ -361,6 +365,7 @@ extension VoiceOSStore {
         }
         return changed
     }
+    private static func assistantWorkPending(_ execution: AssistantExecutionRecord) -> Bool { execution.state == "queued" || execution.state == "running" }
     private static func queuedMode(for assessment: AssistantAssessment) -> AssistantMode? {
         guard assessment.supported else { return nil }
         switch assessment.intent {
@@ -429,9 +434,13 @@ extension VoiceOSStore {
         defer { activeAssistantRequests[input.executionID] = nil }
         return try await withTaskCancellationHandler(operation: { try await request.value }, onCancel: { request.cancel() })
     }
-    public func processNextAssistantExecution(using port: any AssistantModelPort, onProgress: (@Sendable () async -> Void)? = nil) async throws -> Bool {
+    public func processNextAssistantExecution(using port: any AssistantModelPort, onProgress: (@Sendable () async -> Void)? = nil, snapshot: WorkspaceSnapshot? = nil) async throws -> Bool {
         guard !assistantExecutionActive else { return false }
-        _ = try assistantExecutions()
+        // The published list was validated by the snapshot just read; with no
+        // queued or running work there is nothing to deliver or revalidate.
+        if let snapshot, !snapshot.assistantExecutions.contains(where: Self.assistantWorkPending) { return false }
+        var context = snapshot?.assistantValidation
+        _ = try assistantExecutions(context: &context)
         guard let row = try db.query("SELECT * FROM assistant_executions WHERE state='queued' AND validity='current' ORDER BY sequence,id LIMIT 1").first else { return false }
         assistantExecutionActive = true; defer { assistantExecutionActive = false }
         let id = row["id"]!, input = try JSONDecoder().decode(AssistantTaskInput.self, from: Data(row["input_json"]!.utf8))

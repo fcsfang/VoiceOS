@@ -68,11 +68,70 @@ extension VoiceOSStore {
     }
     public func conversations(limit:Int = 100) throws -> [ConversationRecord] {
         guard ready,(1...500).contains(limit) else { throw VoiceOSError("讨论历史范围无效") }
-        return try db.query("SELECT id FROM conversations ORDER BY created_at DESC,id DESC LIMIT ?",[String(limit)]).map { try conversation(id:$0["id"]!) }
+        let rows = try db.query("""
+            SELECT c.id,c.version,c.state,c.validity,c.entry_context_id,t.context_id AS turn_context_id
+            FROM (SELECT id FROM conversations ORDER BY created_at DESC,id DESC LIMIT ?) q
+            JOIN conversations c ON c.id=q.id
+            LEFT JOIN conversation_user_turns t ON t.conversation_id=c.id
+            ORDER BY c.created_at DESC,c.id DESC,t.ordinal
+            """,[String(limit)])
+        return try conversationRecords(rows)
     }
     public func conversationsForSource(sourceID:String) throws -> [ConversationRecord] {
         guard ready else { throw VoiceOSError("资料库尚未恢复") }
-        return try db.query("SELECT DISTINCT c.id,c.created_at FROM conversations c LEFT JOIN conversation_user_turns t ON t.conversation_id=c.id LEFT JOIN context_inputs i ON i.context_id=c.entry_context_id WHERE t.source_id=? OR i.source_id=? ORDER BY c.created_at DESC,c.id DESC LIMIT 100",[sourceID,sourceID]).map { try conversation(id:$0["id"]!) }
+        let rows = try db.query("""
+            SELECT c.id,c.version,c.state,c.validity,c.entry_context_id,t.context_id AS turn_context_id
+            FROM (SELECT DISTINCT c.id,c.created_at FROM conversations c
+                  LEFT JOIN conversation_user_turns t ON t.conversation_id=c.id
+                  LEFT JOIN context_inputs i ON i.context_id=c.entry_context_id
+                  WHERE t.source_id=? OR i.source_id=?
+                  ORDER BY c.created_at DESC,c.id DESC LIMIT 100) q
+            JOIN conversations c ON c.id=q.id
+            LEFT JOIN conversation_user_turns t ON t.conversation_id=c.id
+            ORDER BY q.created_at DESC,q.id DESC,t.ordinal
+            """,[sourceID,sourceID])
+        return try conversationRecords(rows)
+    }
+    /// The list reads run one JOIN for every row, then keep the single-row
+    /// validation per conversation; only a freeze changes the stored row, so
+    /// the final states come back in one re-read instead of one per session.
+    private func conversationRecords(_ rows: [[String: String]]) throws -> [ConversationRecord] {
+        var ids: [String] = []
+        var headers: [String: [String: String]] = [:]
+        var turnContexts: [String: [String]] = [:]
+        for row in rows {
+            let id = row["id"]!
+            if headers[id] == nil { ids.append(id); headers[id] = row; turnContexts[id] = [] }
+            if let turn = row["turn_context_id"] { turnContexts[id]?.append(turn) }
+        }
+        guard !ids.isEmpty else { return [] }
+        for id in ids { try validateConversationContexts(row: headers[id]!, turnContextIDs: turnContexts[id] ?? []) }
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        let finalRows = try db.query("SELECT id,version,state,validity,entry_context_id FROM conversations WHERE id IN (\(placeholders))", ids)
+        let byID = Dictionary(uniqueKeysWithValues: finalRows.map { ($0["id"]!, $0) })
+        return try ids.map { id in
+            guard let row = byID[id] else { throw VoiceOSError("讨论不存在") }
+            return Self.conversationRecord(row)
+        }
+    }
+    private func validateConversationContexts(row: [String: String], turnContextIDs: [String]) throws {
+        guard row["validity"] == "current" else { return }
+        let entryContextID = row["entry_context_id"]!
+        let contextIDs = [entryContextID] + turnContextIDs
+        for contextID in contextIDs {
+            do {
+                let context = try localContext(id:contextID)
+                guard try completeConversationSourceIDs(context.sources.map(\.sourceID)) == context.sources.map(\.sourceID) else { throw VoiceOSError("完整表达的成员已变化") }
+            }
+            catch { try db.transaction { try freezeContext(contextID) }; break }
+        }
+        if let focus = try storedConversationContext(entryContextID).reflectionFocus {
+            do { try validateReflectionFocus(focus) }
+            catch { try db.transaction { try freezeContext(entryContextID) } }
+        }
+    }
+    private static func conversationRecord(_ row: [String: String]) -> ConversationRecord {
+        ConversationRecord(id: row["id"]!, version: Int(row["version"]!)!, state: row["state"]!, validity: row["validity"]!, entryContextID: row["entry_context_id"]!)
     }
     /// Immutable entry text for historical display; never grants processing permission.
     public func conversationHistorySources(conversationID:String) throws -> [ContextTranscript] {
@@ -207,22 +266,10 @@ extension VoiceOSStore {
     public func conversation(id: String) throws -> ConversationRecord {
         guard ready, let row = try db.query("SELECT * FROM conversations WHERE id=?",[id]).first else { throw VoiceOSError("讨论不存在") }
         // Reading a historical session can invalidate it, but cannot reactivate or process it.
-        if row["validity"] == "current" {
-            let contextIDs = [row["entry_context_id"]!] + (try db.query("SELECT context_id FROM conversation_user_turns WHERE conversation_id=? ORDER BY ordinal",[id])).compactMap { $0["context_id"] }
-            for contextID in contextIDs {
-                do {
-                    let context = try localContext(id:contextID)
-                    guard try completeConversationSourceIDs(context.sources.map(\.sourceID)) == context.sources.map(\.sourceID) else { throw VoiceOSError("完整表达的成员已变化") }
-                }
-                catch { try db.transaction { try freezeContext(contextID) }; break }
-            }
-            if let focus = try storedConversationContext(row["entry_context_id"]!).reflectionFocus {
-                do { try validateReflectionFocus(focus) }
-                catch { try db.transaction { try freezeContext(row["entry_context_id"]!) } }
-            }
-        }
+        let turnContexts = row["validity"] == "current" ? try db.query("SELECT context_id FROM conversation_user_turns WHERE conversation_id=? ORDER BY ordinal",[id]).compactMap { $0["context_id"] } : []
+        try validateConversationContexts(row: row, turnContextIDs: turnContexts)
         let current = try db.query("SELECT * FROM conversations WHERE id=?",[id]).first!
-        return ConversationRecord(id:id,version:Int(current["version"]!)!,state:current["state"]!,validity:current["validity"]!,entryContextID:current["entry_context_id"]!)
+        return Self.conversationRecord(current)
     }
     /// A saved personal text/recording is attached with its exact current transcript version.
     /// Imported external or unknown-speaker media cannot become a user turn.
