@@ -1398,9 +1398,9 @@ final class ControlCenter: ObservableObject {
             repeat {
                 guard let self else { return }
                 self.spotlightPending = false
-                let indexer = self.spotlightIndexer, sources = self.records, claims = self.claims, actions = self.actionRecords
+                let indexer = self.spotlightIndexer, sources = self.records, claims = self.claims, actions = self.actionRecords, topics = self.workspaceTopics
                 await Task.detached(priority: .utility) {
-                    await indexer.index(sources: sources, claims: claims, actions: actions)
+                    await indexer.index(sources: sources, claims: claims, actions: actions, topics: topics)
                 }.value
             } while (self?.spotlightPending ?? false) && !Task.isCancelled
         }
