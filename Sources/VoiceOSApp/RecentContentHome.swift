@@ -517,9 +517,13 @@ struct RecentContentHome: View {
                         Button { openClaim(entry.id) } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(entry.statement).vosFont(WorkspaceText.meta)
-                                    .foregroundStyle(palette.text).lineLimit(1)
+                                    .foregroundStyle(palette.text).lineLimit(3)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .multilineTextAlignment(.leading)
                                 Text(entry.sourceTitle).vosFont(WorkspaceText.caption)
-                                    .foregroundStyle(palette.secondaryText).lineLimit(1)
+                                    .foregroundStyle(palette.secondaryText).lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .multilineTextAlignment(.leading)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 10).padding(.vertical, 4)
