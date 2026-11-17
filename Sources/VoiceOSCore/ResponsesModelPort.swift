@@ -66,10 +66,13 @@ public struct DirectModelHTTPTransport: ModelHTTPTransport {
 /// explicit candidate transport; callers must opt in and pin a new model
 /// configuration identity.
 public struct DirectStreamingModelHTTPTransport: ModelHTTPTransport {
-    public init() {}
+    private let deadlineCap: TimeInterval
+    /// The cap is per instance: the topic skeleton and merge stream may run up
+    /// to 1800 seconds, while every other port keeps the 600-second default.
+    public init(deadlineCap: TimeInterval = 600) { self.deadlineCap = deadlineCap }
     public func send(_ request: URLRequest) async throws -> ModelHTTPReply {
         let deadline = request.timeoutInterval
-        guard deadline.isFinite, (1...600).contains(deadline) else { throw VoiceOSError("模型请求时限无效，未发送") }
+        guard deadline.isFinite, deadline >= 1, deadline <= deadlineCap else { throw VoiceOSError("模型请求时限无效，未发送") }
         guard var body = request.httpBody,
               var payload = try JSONSerialization.jsonObject(with: body) as? [String: Any] else {
             throw VoiceOSError("流式模型请求格式无效，未发送")

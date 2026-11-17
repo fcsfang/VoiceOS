@@ -131,6 +131,9 @@ private actor FlowTopics: TopicOrganizationPort {
             .init(topicID:existing,title:"生活整理",summary:"记录了整理书架的待办。",questions:[],viewpointIDs:life)
         ],responseID:"fixture-topics-\(calls)")
     }
+    func organizeSkeletonMerge(_ input:TopicSkeletonMergeInput) async throws -> TopicSkeletonMergeResult {
+        mergedSkeletonMerge(input, responseID: "fixture-merge-\(calls)")
+    }
     func organizeBody(_ input:TopicBodyInput) async throws -> TopicBodyResult {
         .init(topics: input.topics.map { topic in
             let evidence=topic.quotes.prefix(1).map { TopicReadingEvidence(sourceID:$0.sourceID,quote:$0.quote) }

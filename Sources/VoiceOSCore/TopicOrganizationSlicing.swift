@@ -1,8 +1,9 @@
 import Foundation
 
-/// The two model-facing stages of topic organization. The skeleton sees
-/// viewpoints only; each body batch sees the statements and short verbatim
-/// quotes of the topics assigned to it. Full transcripts stay local.
+/// The model-facing stages of topic organization. Skeleton batches see
+/// viewpoints only, the merge sees candidate titles and viewpoint ids only, and
+/// each body batch sees the statements and short verbatim quotes of the topics
+/// assigned to it. Full transcripts stay local.
 public struct TopicSkeletonTopicSeed: Codable, Sendable, Equatable {
     public let id: String
     public let title: String
@@ -51,6 +52,42 @@ public struct TopicSkeletonResult: Codable, Sendable {
     }
 }
 
+/// A merge candidate carries ids only: the merge request sees titles, summaries
+/// and the viewpoints they cover, never statements or transcripts.
+public struct TopicSkeletonMergeCandidate: Codable, Sendable {
+    public let topicID: String
+    public let title: String
+    public let summary: String
+    public let viewpointIDs: [String]
+    public init(topicID: String, title: String, summary: String, viewpointIDs: [String]) {
+        self.topicID = topicID; self.title = title; self.summary = summary; self.viewpointIDs = viewpointIDs
+    }
+}
+
+public struct TopicSkeletonMergeBatch: Codable, Sendable {
+    /// Every viewpoint id of the batch; the merged topics must draw from these.
+    public let viewpointIDs: [String]
+    public let topics: [TopicSkeletonMergeCandidate]
+    public init(viewpointIDs: [String], topics: [TopicSkeletonMergeCandidate]) {
+        self.viewpointIDs = viewpointIDs; self.topics = topics
+    }
+}
+
+public struct TopicSkeletonMergeInput: Codable, Sendable {
+    public let digest: String
+    public let batches: [TopicSkeletonMergeBatch]
+    public init(digest: String, batches: [TopicSkeletonMergeBatch]) { self.digest = digest; self.batches = batches }
+}
+
+public struct TopicSkeletonMergeResult: Codable, Sendable {
+    public let briefing: String
+    public let topics: [TopicSkeletonTopic]
+    public let responseID: String
+    public init(briefing: String, topics: [TopicSkeletonTopic], responseID: String) {
+        self.briefing = briefing; self.topics = topics; self.responseID = responseID
+    }
+}
+
 public struct TopicBodyQuote: Codable, Sendable, Equatable {
     public let sourceID: String
     public let quote: String
@@ -95,16 +132,47 @@ public struct TopicBodyResult: Codable, Sendable {
     }
 }
 
-/// Some batches may finish while others fail. The completed topics stay
-/// readable; the caller reports how many still need a top-up.
+/// Some stages may finish while others fail. Completed stages stay readable and
+/// resumable; the caller reports how many still need a top-up.
 public struct TopicOrganizationIncomplete: Error, Sendable, LocalizedError, Equatable {
-    public let topicCount: Int
+    public enum Kind: String, Sendable, Equatable {
+        case topics
+        case skeletonBatches
+    }
+    public let kind: Kind
+    public let count: Int
     public let firstReason: String
-    public init(topicCount: Int, firstReason: String) { self.topicCount = topicCount; self.firstReason = firstReason }
+    public init(topicCount: Int, firstReason: String) {
+        kind = .topics; count = topicCount; self.firstReason = firstReason
+    }
+    public init(skeletonBatchCount: Int, firstReason: String) {
+        kind = .skeletonBatches; count = skeletonBatchCount; self.firstReason = firstReason
+    }
+    /// Body failures count topics; skeleton failures count batches.
+    public var topicCount: Int { count }
     public var errorDescription: String? {
         let suffix = firstReason.isEmpty ? "" : "。最近原因：" + firstReason
-        return "\(topicCount) 个主题待补齐；已完成的主题会保留，可稍后补齐" + suffix
+        switch kind {
+        case .topics: return "\(count) 个主题待补齐；已完成的主题会保留，可稍后补齐" + suffix
+        case .skeletonBatches: return "\(count) 批观点待重新归组；已完成的批次会保留，可稍后补齐" + suffix
+        }
     }
+}
+
+/// A skeleton batch whose output was cut off by the response limit. A longer
+/// transport deadline cannot help; the batch itself must shrink.
+public struct TopicSkeletonTruncated: Error, Sendable, LocalizedError, Equatable {
+    public let viewpointCount: Int
+    public init(viewpointCount: Int) { self.viewpointCount = viewpointCount }
+    public var errorDescription: String? {
+        "单批观点过多，需要更小批次（本批 \(viewpointCount) 个观点）；本次输出被截断，未保存部分归组"
+    }
+}
+
+/// Knowledge or tasks changed between stages; the run must restart on the new
+/// input instead of filing a batch failure.
+struct TopicOrganizationInputChanged: Error, Sendable, LocalizedError {
+    var errorDescription: String? { "资料或任务已变化，将基于当前内容重新归组" }
 }
 
 struct TopicBodyPlan: Sendable {
@@ -113,10 +181,80 @@ struct TopicBodyPlan: Sendable {
     var digest: String { input.digest }
 }
 
+struct TopicSkeletonBatchPlan: Sendable {
+    let input: TopicSkeletonInput
+    let scope: String
+    var digest: String { input.digest }
+}
+
+struct TopicSkeletonBatchOutcome: Sendable {
+    let plan: TopicSkeletonBatchPlan
+    let result: TopicSkeletonResult
+}
+
+/// One skeleton request per viewpoint batch; the merge over their candidates is
+/// the only request that sees every group at once. Both stage kinds are
+/// replayable by digest, and a merge that drops viewpoints is repaired by one
+/// more skeleton request per affected batch.
+enum TopicSkeletonBatching {
+    static func plans(viewpoints: [TopicSkeletonViewpoint], seeds: [TopicSkeletonTopicSeed],
+                      manualTopics: [TopicSkeletonTopicSeed]) throws -> [TopicSkeletonBatchPlan] {
+        let sorted = viewpoints.sorted { $0.id < $1.id }
+        var plans: [TopicSkeletonBatchPlan] = []
+        var start = 0
+        while start < sorted.count {
+            let end = min(start + TopicOrganizationSlicePolicy.skeletonBatchViewpointLimit, sorted.count)
+            let batch = Array(sorted[start..<end])
+            let digest = VoiceOSStore.relevanceHash(Data(try VoiceOSStore.relevanceJSON(
+                TopicSkeletonDigestInput(version: "topic-skeleton-v1", viewpoints: batch, manualTopics: manualTopics)).utf8))
+            plans.append(.init(input: .init(digest: digest, topics: seeds, viewpoints: batch),
+                               scope: batch.map(\.id).joined(separator: ",")))
+            start = end
+        }
+        return plans
+    }
+
+    static func mergeInput(_ outcomes: [TopicSkeletonBatchOutcome]) throws -> TopicSkeletonMergeInput {
+        let batches = outcomes.map { outcome in
+            TopicSkeletonMergeBatch(
+                viewpointIDs: outcome.plan.input.viewpoints.map(\.id),
+                topics: outcome.result.topics.map {
+                    TopicSkeletonMergeCandidate(topicID: $0.topicID, title: $0.title, summary: $0.summary,
+                                                viewpointIDs: $0.viewpointIDs)
+                })
+        }
+        let base = TopicSkeletonMergeInput(digest: "", batches: batches)
+        let digest = VoiceOSStore.relevanceHash(Data(try VoiceOSStore.relevanceJSON(
+            TopicSkeletonMergeDigestInput(version: "topic-skeleton-merge-v1", input: base)).utf8))
+        return .init(digest: digest, batches: batches)
+    }
+
+    static func missingViewpoints(_ result: TopicSkeletonMergeResult, outcomes: [TopicSkeletonBatchOutcome]) -> Set<String> {
+        let all = Set(outcomes.flatMap { $0.plan.input.viewpoints.map(\.id) })
+        let covered = Set(result.topics.flatMap(\.viewpointIDs))
+        return all.subtracting(covered)
+    }
+
+    static func assembledSkeleton(_ merge: TopicSkeletonMergeResult, outcomes: [TopicSkeletonBatchOutcome]) -> TopicSkeletonResult {
+        var highlights: [String] = [], seen = Set<String>()
+        for outcome in outcomes {
+            for sourceID in outcome.result.highlightSourceIDs where seen.insert(sourceID).inserted {
+                highlights.append(sourceID)
+            }
+        }
+        return .init(briefing: merge.briefing, highlightSourceIDs: highlights, topics: merge.topics, responseID: merge.responseID)
+    }
+}
+
 struct TopicSkeletonDigestInput: Encodable {
     let version: String
     let viewpoints: [TopicSkeletonViewpoint]
     let manualTopics: [TopicSkeletonTopicSeed]
+}
+
+struct TopicSkeletonMergeDigestInput: Encodable {
+    let version: String
+    let input: TopicSkeletonMergeInput
 }
 
 struct TopicBodyDigestInput: Encodable {
@@ -126,6 +264,7 @@ struct TopicBodyDigestInput: Encodable {
 
 enum TopicOrganizationSlicePolicy {
     static let skeletonByteLimit = 120 * 1024
+    static let skeletonBatchViewpointLimit = 150
     static let bodyByteLimit = 40 * 1024
     static let bodyPackingTarget = 36 * 1024
     static let bodyBatchTopicLimit = 5
@@ -165,6 +304,28 @@ enum TopicOrganizationSlicingValidation {
             assigned.formUnion(topic.viewpointIDs)
         }
         guard assigned == viewpointIDs else { throw VoiceOSError("主题骨架遗漏了观点，未保存不完整归组") }
+    }
+
+    /// The merge keeps every final topic inside the ids its batches sent. Full
+    /// coverage is the store's check, because only it can refill a gap by
+    /// re-requesting the batch that owns the missing viewpoints.
+    static func skeletonMerge(_ result: TopicSkeletonMergeResult, input: TopicSkeletonMergeInput) throws {
+        let viewpointIDs = Set(input.batches.flatMap(\.viewpointIDs))
+        let seedIDs = Set(input.batches.flatMap { $0.topics.map(\.topicID) }.filter { !$0.isEmpty })
+        var usedTopicIDs = Set<String>()
+        guard !result.responseID.isEmpty, !result.topics.isEmpty,
+              !result.briefing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw VoiceOSError("主题骨架合流缺少有效内容")
+        }
+        for topic in result.topics {
+            guard !topic.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, topic.title.count <= 200,
+                  !topic.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  !topic.viewpointIDs.isEmpty, Set(topic.viewpointIDs).count == topic.viewpointIDs.count,
+                  topic.viewpointIDs.allSatisfy({ viewpointIDs.contains($0) }),
+                  topic.topicID.isEmpty || (seedIDs.contains(topic.topicID) && usedTopicIDs.insert(topic.topicID).inserted) else {
+                throw VoiceOSError("主题骨架合流包含无效观点或重复主题")
+            }
+        }
     }
 
     static func body(_ result: TopicBodyResult, input: TopicBodyInput) throws {

@@ -357,7 +357,7 @@ extension VoiceOSStore {
             }
         }
         // 主题整理尝试也写 model_attempts，但其 result_digest 不是观点提案的摘要。
-        for attempt in try db.query("SELECT * FROM model_attempts WHERE state='completed' AND provider NOT LIKE 'english_feedback:%' AND prompt_version NOT IN ('topic-reading-v2','topic-skeleton-v1','topic-body-v1')") {
+        for attempt in try db.query("SELECT * FROM model_attempts WHERE state='completed' AND provider NOT LIKE 'english_feedback:%' AND prompt_version NOT IN ('topic-reading-v2','topic-skeleton-v1','topic-body-v1','topic-skeleton-merge-v1')") {
             var proposals: [ClaimProposal] = []
             for (index, claim) in try db.query("SELECT * FROM claims WHERE attempt_id=? ORDER BY ordinal", [attempt["id"]]).enumerated() {
                 guard claim["ordinal"] == String(index), let owner = CandidateOwnership(rawValue: claim["ownership"]!) else { throw VoiceOSError("迁移候选顺序不一致") }

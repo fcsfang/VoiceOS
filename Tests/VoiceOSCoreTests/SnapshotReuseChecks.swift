@@ -12,6 +12,9 @@ private actor SnapshotTopicPort: TopicOrganizationPort {
                                     questions: [], viewpointIDs: input.viewpoints.map(\.id))],
                      responseID: "snapshot-skeleton-\(calls)")
     }
+    func organizeSkeletonMerge(_ input: TopicSkeletonMergeInput) async throws -> TopicSkeletonMergeResult {
+        mergedSkeletonMerge(input, responseID: "snapshot-merge-\(calls)")
+    }
     func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult {
         .init(topics: input.topics.map { topic in
             .init(topicID: topic.topicID, questions: [],
