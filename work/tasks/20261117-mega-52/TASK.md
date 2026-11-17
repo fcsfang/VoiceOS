@@ -29,3 +29,10 @@
 
 - 单单元 TS2：`Sources/VoiceOSCore/ResponsesTopicOrganizationPort.swift`、`Sources/VoiceOSCore/TopicOrganization.swift`、`Sources/VoiceOSCore/TopicOrganizationSlicing.swift`、`Sources/VoiceOSCore/ResponsesModelPort.swift`（仅传输时限参数化）、对应测试。
 - 不碰 `WorkspaceProcessingView.swift`、`WorkspaceSourceView.swift`、`RecentContentHome.swift`。
+
+## 结果（2026-11-17）
+
+- TS2（7b8d2d6、adddd87、90c8c9d）：骨架按观点 id 切 ≤150 条/批，逐批请求并落阶段表（stage='skeleton'，scope=批 id 列表），`max_output_tokens` 65536；全部批后一次小请求合流去重（stage='skeleton-merge'，输入不含观点全文）；遗漏观点按批追加；截断（status=incomplete 或输出触顶）抛 `TopicSkeletonTruncated` 并带批内观点数；`DirectStreamingModelHTTPTransport(deadlineCap:)` 参数化（默认 600），主题端口 1800 秒；schema 71（阶段表 CHECK 接受 skeleton-merge，迁移保旧行）。
+- 集成修复：`CognitiveStore.swift:360` 恢复摘要排除清单补 `topic-skeleton-merge-v1`；批失败保留 `ModelPortFailure.rejected` 原因与 `TopicSkeletonTruncated` 文案，不再退化为泛化 localizedDescription。
+- 构建 build_exit=0（82s）；测试 test_exit=0，534 项 0 失败（32s）。
+- 部署：与波 51 一起等闸门（用户在用机器，键鼠空闲未达 120 秒）。

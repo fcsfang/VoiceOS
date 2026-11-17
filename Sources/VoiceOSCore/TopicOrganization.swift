@@ -400,7 +400,13 @@ extension VoiceOSStore {
             } catch is TopicOrganizationInputChanged {
                 throw TopicOrganizationInputChanged()
             } catch {
-                failedBatches.append((plan.scope, error.localizedDescription))
+                // Keep the port's rejection text: a batched failure aborts the
+                // run, and the user-facing reason must name what the model said.
+                let reason: String
+                if case ModelPortFailure.rejected(let text, _, _) = error { reason = text }
+                else if let truncated = error as? TopicSkeletonTruncated { reason = truncated.localizedDescription }
+                else { reason = error.localizedDescription }
+                failedBatches.append((plan.scope, reason))
             }
         }
         if !failedBatches.isEmpty {
