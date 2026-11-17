@@ -264,7 +264,12 @@ struct WorkspaceProcessingView: View {
                     let sourceErrors=failedSources.compactMap { source in source.error.map { (source.displayTitle,$0) } }
                     WorkspaceSection(title:"录音与转写需要查看",subtitle:"录音被中断时已保存的片段仍保留；本地转写失败时原件仍保留。",icon:"waveform",count:failedSources.count) {
                         ForEach(failedSources) { source in
-                            WorkspaceRow(title:source.displayTitle,subtitle:source.state == "interrupted" ? "录音被中断" : "本地转写未完成",trailing:"查看材料") { openSource(source.id) }
+                            VStack(alignment:.leading,spacing:6) {
+                                WorkspaceRow(title:source.displayTitle,subtitle:source.state == "interrupted" ? "录音被中断" : "本地转写未完成",trailing:"查看材料") { openSource(source.id) }
+                                if source.dictationRecoveryPending {
+                                    DictationRecoveryControls(model:model,source:source).padding(.leading,44).padding(.bottom,8)
+                                }
+                            }
                         }
                         reasons(sourceErrors)
                         if retryableSources.count > 1 {
