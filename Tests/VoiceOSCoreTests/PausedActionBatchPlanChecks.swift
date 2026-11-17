@@ -82,6 +82,7 @@ final class PausedActionBatchPlanChecks: XCTestCase {
                                                 sourceID: sourceID, snapshot: intentSnapshot, state: state,
                                                 phase: .queued, cognitionAttemptID: nil, associationAttemptID: nil,
                                                 error: nil, cancelReason: nil,
+                                                ignoredAt: nil, ignoreReason: nil, supersededBy: nil,
                                                 createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z")
     }
 

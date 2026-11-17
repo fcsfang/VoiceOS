@@ -35,19 +35,23 @@ extension VoiceOSStore {
     }
     func existingExpressionAssociation(_ snapshot: ExpressionAssociationSnapshot) throws -> ExpressionAssociationAttempt? {
         let source = snapshot.current.sources[0]
-        return try expressionAssociationAttempts().first {
+        // Explicit retries may add later attempts for the same scope; the newest is current.
+        return try expressionAssociationAttempts().last {
             $0.currentSourceID == source.sourceID && $0.snapshot.policyVersion == snapshot.policyVersion &&
             $0.snapshot.current.sources[0].transcriptVersionID == source.transcriptVersionID &&
             $0.snapshot.current.sources[0].sourceVersionID == source.sourceVersionID
         }
     }
-    public func reserveExpressionAssociation(_ snapshot: ExpressionAssociationSnapshot, configuration: ModelConfiguration) throws -> String {
+    public func reserveExpressionAssociation(_ snapshot: ExpressionAssociationSnapshot, configuration: ModelConfiguration, retryKey: String? = nil) throws -> String {
         try validateExpressionAssociation(snapshot)
         guard configuration.destination == snapshot.destination, !configuration.provider.isEmpty,
               !configuration.model.isEmpty, !configuration.promptVersion.isEmpty, !configuration.schemaVersion.isEmpty,
               !snapshot.candidates.isEmpty else { throw VoiceOSError("关联没有候选或端口身份/目的地不符；无需发送") }
-        let key = try Self.expressionAssociationKey(snapshot, configuration)
-        if let existing = try existingExpressionAssociation(snapshot) { return existing.id }
+        let canonicalKey = try Self.expressionAssociationKey(snapshot, configuration)
+        if retryKey == nil, let existing = try existingExpressionAssociation(snapshot) { return existing.id }
+        // A retry keeps the canonical key as its prefix so stored validation still
+        // binds it to the same expression, policy epoch and model identity.
+        let key = retryKey.map { canonicalKey + ":" + $0 } ?? canonicalKey
         let snapshotJSON = try Self.relevanceJSON(snapshot)
         guard snapshotJSON.utf8.count <= 160000 else { throw VoiceOSError("关联快照超过字节预算；不发送") }
         let contextID = try persistLocalContext(snapshot.current, commandID: "expression-association:" + key, destination: snapshot.destination)
@@ -59,14 +63,14 @@ extension VoiceOSStore {
         try checkpoint(.associationReserved)
         return id
     }
-    public func performExpressionAssociation(_ snapshot: ExpressionAssociationSnapshot, using port: any ExpressionAssociationPort) async throws -> ExpressionAssociationAttempt {
+    public func performExpressionAssociation(_ snapshot: ExpressionAssociationSnapshot, using port: any ExpressionAssociationPort, retryKey: String? = nil) async throws -> ExpressionAssociationAttempt {
         try Task.checkCancellation()
         try validateExpressionAssociation(snapshot)
-        if let existing = try existingExpressionAssociation(snapshot) {
+        if retryKey == nil, let existing = try existingExpressionAssociation(snapshot) {
             guard existing.state != "reserved" else { throw VoiceOSError("关联请求已有预留；不重复发送") }
             return existing
         }
-        let id = try reserveExpressionAssociation(snapshot, configuration: port.configuration)
+        let id = try reserveExpressionAssociation(snapshot, configuration: port.configuration, retryKey: retryKey)
         let response: ExpressionAssociationResponse
         do {
             try Task.checkCancellation()
@@ -128,10 +132,11 @@ extension VoiceOSStore {
             let snapshot = try JSONDecoder().decode(ExpressionAssociationSnapshot.self, from: Data(json.utf8))
             try validateExpressionAssociationProposals([], snapshot: snapshot)
             let config = ModelConfiguration(provider: row["provider"]!, model: row["model"]!, promptVersion: row["prompt_version"]!, schemaVersion: row["schema_version"]!, destination: snapshot.destination)
+            let canonicalKey = try expressionAssociationKey(snapshot, config)
             guard UUID(uuidString: row["id"]!) != nil, !snapshot.candidates.isEmpty, !config.provider.isEmpty, !config.model.isEmpty, !config.promptVersion.isEmpty, !config.schemaVersion.isEmpty,
                   row["destination"] == snapshot.destination.rawValue, row["snapshot_digest"] == snapshot.contentDigest,
                   row["current_source_id"] == snapshot.current.sources[0].sourceID,
-                  row["request_key"] == (try expressionAssociationKey(snapshot, config)),
+                  row["request_key"] == canonicalKey || (row["request_key"] ?? "").hasPrefix(canonicalKey + ":"),
                   let context = try db.query("SELECT * FROM contexts WHERE id=?", [row["context_id"]]).first,
                   context["destination"] == snapshot.destination.rawValue, context["digest"] == snapshot.current.contentDigest,
                   context["snapshot_json"] == (try relevanceJSON(snapshot.current)),

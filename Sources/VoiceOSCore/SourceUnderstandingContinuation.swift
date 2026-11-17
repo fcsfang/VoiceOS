@@ -30,7 +30,7 @@ extension VoiceOSStore {
 
     /// Explicit continuation only. A completed understanding can proceed to independent
     /// association without regenerating cognition; unknown/rejected/in-flight work is terminal here.
-    public func continueSourceUnderstanding(sourceID: String, using port: any ModelPort) async throws -> SourceUnderstandingContinuation {
+    public func continueSourceUnderstanding(sourceID: String, using port: any ModelPort, retryKey: String? = nil) async throws -> SourceUnderstandingContinuation {
         try Task.checkCancellation()
         try requireReviewedTranscriptions(sourceIDs:[sourceID],destination:port.configuration.destination)
         let source = try sources().first { $0.id == sourceID }
@@ -46,8 +46,12 @@ extension VoiceOSStore {
             ORDER BY a.producer_sequence LIMIT 1
             """, [sourceID, context.sources[0].transcriptVersionID, String(policy.version), context.contentDigest]).first {
             let state = attempt["context_state"] == "current" ? attempt["state"]! : "frozen"
-            let ids = try db.query("SELECT id FROM claims WHERE attempt_id=? ORDER BY ordinal", [attempt["id"]]).map { $0["id"]! }
-            return .init(state: state, claimIDs: ids, reused: true, attemptID: attempt["id"])
+            // A deliberate retry may replace only a rejected or unknown receipt.
+            // Completed understanding stays reused so claims and actions never duplicate.
+            if retryKey == nil || ["completed", "discussion_completed"].contains(state) {
+                let ids = try db.query("SELECT id FROM claims WHERE attempt_id=? ORDER BY ordinal", [attempt["id"]]).map { $0["id"]! }
+                return .init(state: state, claimIDs: ids, reused: true, attemptID: attempt["id"])
+            }
         }
         // Shared discussion outcomes keep their own provenance and once-only extraction barrier.
         // Do not silently reinterpret one turn, or invent successful understanding on an unknown outcome.
@@ -60,10 +64,10 @@ extension VoiceOSStore {
             """, [sourceID, context.sources[0].transcriptVersionID]).first {
             return .init(state: attempt["context_state"] == "current" ? "discussion_" + attempt["state"]! : "frozen", claimIDs: [], reused: true, attemptID: attempt["id"])
         }
-        let ids = try await understandSource(sourceID: sourceID, using: port)
+        let ids = try await understandSource(sourceID: sourceID, using: port, retryKey: retryKey)
         let attempt = try processingCognitionReceipt(sourceID: sourceID, sourceVersionID: context.sources[0].sourceVersionID,
                                                     transcriptVersionID: context.sources[0].transcriptVersionID, policyVersion: policy.version,
-                                                    contentDigest: context.contentDigest)
+                                                    contentDigest: context.contentDigest, latest: retryKey != nil)
         return .init(state: "completed", claimIDs: ids, reused: false, attemptID: attempt?["id"])
     }
 }
