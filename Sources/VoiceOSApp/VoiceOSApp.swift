@@ -5263,6 +5263,13 @@ extension ControlCenter {
         }
         await refresh(.knowledge); resumeKnowledgeReviews()
     }
+    func setKnowledgeReviewIssueState(_ state: KnowledgeReviewIssueState, reviewID: String, issueID: String) async {
+        guard let store else { return }
+        do {
+            try await store.setKnowledgeReviewIssueState(reviewID: reviewID, issueID: issueID, state: state)
+            await refresh(.knowledge)
+        } catch { knowledgeReviewStatus = error.localizedDescription }
+    }
     private func resumeKnowledgeReviews() {
         guard initialized, let store, let port = knowledgeReviewModel, knowledgeReviewWorker == nil,
               !fullRecordingBusy, !dictationActive else { return }
