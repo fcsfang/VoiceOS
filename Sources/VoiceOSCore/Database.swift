@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...72).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...73).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1423,6 +1423,26 @@ final class Database {
                 try execute("ALTER TABLE task_initiations_next RENAME TO task_initiations")
                 try execute("CREATE INDEX IF NOT EXISTS task_initiation_created ON task_initiations(created_at, id)")
                 try execute("PRAGMA user_version=72")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "72" {
+            try transaction {
+                // Explicit exits from terminal intent states. Ignoring keeps the row
+                // queryable; superseding points at the replacement understanding.
+                // A retried migration can find the columns already added; the version
+                // bump stays the single completion marker.
+                let columns = try query("PRAGMA table_info(processing_intents)").compactMap { $0["name"] }
+                if !columns.contains("ignored_at") {
+                    try execute("ALTER TABLE processing_intents ADD COLUMN ignored_at TEXT")
+                }
+                if !columns.contains("ignore_reason") {
+                    try execute("ALTER TABLE processing_intents ADD COLUMN ignore_reason TEXT")
+                }
+                if !columns.contains("superseded_by") {
+                    try execute("ALTER TABLE processing_intents ADD COLUMN superseded_by TEXT")
+                }
+                try execute("PRAGMA user_version=73")
             }
         }
 

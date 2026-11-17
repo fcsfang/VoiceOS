@@ -826,17 +826,8 @@ final class ControlCenter: ObservableObject {
     /// A completion or reopen that could not reach Apple Reminders. It follows
     /// the reminder compensation lifecycle: persist the intent first, write
     /// only after an authorized readback, and drop it once readback agrees.
-    struct PendingReminderSync: Codable, Equatable, Identifiable {
-        let actionID: String
-        let linkID: String
-        let calendarID: String
-        let externalID: String
-        let marker: String
-        let title: String
-        let desiredState: String
-        let createdAt: String
-        var id: String { actionID }
-    }
+    /// The value lives in VoiceOSCore so its persistence and failure transition
+    /// are covered by the check suite.
     @Published private(set) var pendingReminderSyncs: [String: PendingReminderSync] = [:]
     @Published var deliveryReadAt: [String: String] = [:]
     static func loadPendingReminderSyncs() -> [String: PendingReminderSync] {
@@ -885,6 +876,12 @@ final class ControlCenter: ObservableObject {
     }
     func removePendingReminderSync(actionID: String) {
         guard pendingReminderSyncs.removeValue(forKey: actionID) != nil else { return }
+        savePendingReminderSyncs()
+    }
+    func recordPendingReminderSyncFailure(actionID: String, reason: String) {
+        guard var entry = pendingReminderSyncs[actionID] else { return }
+        entry.recordFailure(reason, at: ISO8601DateFormatter().string(from: Date()))
+        pendingReminderSyncs[actionID] = entry
         savePendingReminderSyncs()
     }
     func recordingActionRequiresReview(_ action:ActionRecord) -> Bool {
@@ -3133,11 +3130,45 @@ final class ControlCenter: ObservableObject {
         do { let cancelled = try await store.cancelRecordingProcessingRequest(id: request.id); status = cancelled ? "已取消文字处理 · 录音和本地转写保留" : "处理已结束或冻结，保留原回执"; await refresh() }
         catch { status = error.localizedDescription }
     }
+    func retryRecordingRequest(_ request: RecordingProcessingRequest) async {
+        guard let store, let cognition = textModel, let association = associationModel else {
+            status = "请先配置理解与关联模型，再重新核对录音处理"; return
+        }
+        do {
+            try await store.retryRecordingProcessingRequest(id: request.id)
+            try await store.reconcileRecordingProcessingRequests(cognition: cognition.configuration, association: association.configuration,
+                segmentExtraction: segmentExtractionModel?.configuration, segmentAggregation: segmentAggregationModel?.configuration)
+            if let latest = try await store.recordingProcessingRequests().first(where: { $0.id == request.id }), latest.state == "blocked" {
+                status = "重新核对后仍受当前条件限制" + (latest.error.map { "：" + $0 } ?? "")
+            } else { status = "已按当前条件重新核对录音处理请求" }
+            await refresh()
+            scheduleProcessing()
+        } catch { status = error.localizedDescription; await refresh() }
+    }
     func cancelProcessingIntent(_ intent: ExpressionProcessingIntentRecord) async {
         guard let store, [.queued, .running].contains(intent.state) else { return }
         do {
             _ = try await store.cancelExpressionProcessingIntent(id: intent.id, reason: "用户从处理记录取消")
             status = "已取消表达处理 · 已发出的模型请求保留历史，不自动重发"
+            await refresh()
+        } catch { status = error.localizedDescription; await refresh() }
+    }
+    func reprocessProcessingIntent(_ intent: ExpressionProcessingIntentRecord) async {
+        guard let store else { return }
+        guard let cognition = textModel else { status = "请先配置文字模型，再重新理解"; return }
+        do {
+            let created = try await store.reprocessExpressionProcessingIntent(id: intent.id, cognition: cognition.configuration,
+                association: associationModel?.configuration)
+            status = created.state == .queued ? "已用新的处理命令重新理解 · 旧结果保留为历史" : "已重新排队理解"
+            await refresh()
+            scheduleProcessing()
+        } catch { status = error.localizedDescription; await refresh() }
+    }
+    func ignoreProcessingIntent(_ intent: ExpressionProcessingIntentRecord) async {
+        guard let store else { return }
+        do {
+            _ = try await store.ignoreExpressionProcessingIntent(id: intent.id, reason: "用户选择不再处理这次失败")
+            status = "已忽略这次理解失败 · 原文与处理记录保留"
             await refresh()
         } catch { status = error.localizedDescription; await refresh() }
     }
@@ -3401,7 +3432,10 @@ final class ControlCenter: ObservableObject {
                 try await store.readReminder(linkID: entry.linkID, calendarID: entry.calendarID, using: reminders, expectedAccessVersion: access.version)
                 removePendingReminderSync(actionID: entry.actionID)
                 written += 1
-            } catch { continue }
+            } catch {
+                // Keep the latest reason with the queued write; a later success removes it.
+                recordPendingReminderSyncFailure(actionID: entry.actionID, reason: error.localizedDescription)
+            }
         }
         return written
     }
@@ -3416,9 +3450,13 @@ final class ControlCenter: ObservableObject {
         if pendingReminderSyncs.isEmpty {
             status = "本地变更已写入提醒事项并回读"; reminderSyncStatus = status
         } else if written > 0 {
-            status = "已写入 \(written) 项，其余仍需核对"; reminderSyncStatus = status
+            let reasons = pendingReminderSyncList.compactMap(\.lastFailureReason).map(WorkspaceProcessingErrorText.display)
+            status = "已写入 \(written) 项，其余仍需核对" + (reasons.isEmpty ? "" : " · 最近原因：" + reasons.prefix(2).joined(separator:"；"))
+            reminderSyncStatus = status
         } else {
-            status = "尚未写入提醒事项，连接恢复后再试"
+            let reasons = pendingReminderSyncList.compactMap(\.lastFailureReason).map(WorkspaceProcessingErrorText.display)
+            status = reasons.isEmpty ? "尚未写入提醒事项，连接恢复后再试" : "尚未写入提醒事项 · 最近原因：" + reasons.prefix(2).joined(separator:"；")
+            reminderSyncStatus = status
         }
         await refresh()
     }

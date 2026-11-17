@@ -172,7 +172,7 @@ extension VoiceOSStore {
 // A source version/configuration has one explicit understanding attempt, including failures.
 // New source text or policy permits new work; reopening a window never resends old work.
 extension VoiceOSStore {
-    public func understandSource(sourceID: String, using port: any ModelPort) async throws -> [String] {
+    public func understandSource(sourceID: String, using port: any ModelPort, retryKey: String? = nil) async throws -> [String] {
         let source = try sources().first { $0.id == sourceID }
         let budget = source?.kind == "external_text" ? max(1, source?.transcript?.unicodeScalars.count ?? 0) : 4000
         let context = try prepareLocalTranscriptContext(sourceIDs: [sourceID], scalarBudget: budget)
@@ -183,18 +183,22 @@ extension VoiceOSStore {
         """,[sourceID,context.sources[0].transcriptVersionID]).isEmpty else { throw VoiceOSError("这轮原话已有讨论成果理解记录；请查看原成果，不会跨入口重复发送。独立重整与共享身份待后续接入") }
         let policy = try sourcePolicy(sourceID: sourceID)
         // A contract/model upgrade is not permission to replay an existing expression attempt.
-        guard try db.query("""
-        SELECT a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id JOIN contexts x ON x.id=a.context_id
-        WHERE i.source_id=? AND i.transcript_version_id=? AND COALESCE(i.policy_version,1)=CAST(? AS INTEGER)
-          AND x.digest=?
-          AND a.execution_kind='model_request' LIMIT 1
-        """, [sourceID, context.sources[0].transcriptVersionID, String(policy.version), context.contentDigest]).isEmpty else {
-            throw VoiceOSError("当前原话与授权已有理解尝试；模型或Schema更新不会重发，请查看原记录")
+        // Only the explicit reprocess command may add a new attempt for the same scope.
+        if retryKey == nil {
+            guard try db.query("""
+            SELECT a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id JOIN contexts x ON x.id=a.context_id
+            WHERE i.source_id=? AND i.transcript_version_id=? AND COALESCE(i.policy_version,1)=CAST(? AS INTEGER)
+              AND x.digest=?
+              AND a.execution_kind='model_request' LIMIT 1
+            """, [sourceID, context.sources[0].transcriptVersionID, String(policy.version), context.contentDigest]).isEmpty else {
+                throw VoiceOSError("当前原话与授权已有理解尝试；模型或Schema更新不会重发，请查看原记录")
+            }
         }
         let config = port.configuration
         let identity = ["understand-v1", sourceID, context.contentDigest, String(policy.version), config.provider, config.model, config.promptVersion, config.schemaVersion, config.destination.rawValue]
         let digest = SHA256.hash(data: try JSONSerialization.data(withJSONObject: identity)).map { String(format: "%02x", $0) }.joined()
-        let contextID = try persistLocalContext(context, commandID: "understand:" + digest, destination: config.destination)
+        let commandID = retryKey.map { "understand-retry:" + $0 + ":" + digest } ?? "understand:" + digest
+        let contextID = try persistLocalContext(context, commandID: commandID, destination: config.destination)
         guard try db.query("SELECT id FROM model_attempts WHERE context_id=?", [contextID]).isEmpty else {
             throw VoiceOSError("这份文字与授权版本已有理解记录；请查看结果，不会重复发送")
         }

@@ -118,7 +118,7 @@ extension ControlCenter {
     var workspaceProcessingSourceID: String? { pausedActionBatch?.currentSourceID ?? transcriptReviewSourceID ?? processingActivity?.sourceID ?? understandingSource ?? fullRecordingSourceID }
     var workspaceUnfinishedIntents: [ExpressionProcessingIntentRecord] {
         processingIntents.filter { intent in
-            guard ![.completed,.cancelled,.frozen].contains(intent.state), let input = intent.snapshot.context.sources.first else { return false }
+            guard !intent.isDismissed, ![.completed,.cancelled,.frozen].contains(intent.state), let input = intent.snapshot.context.sources.first else { return false }
             return records.contains { $0.id == input.sourceID && $0.transcriptVersionID == input.transcriptVersionID && $0.policyVersion == intent.snapshot.policyVersion }
         }
     }
@@ -178,7 +178,7 @@ extension ControlCenter {
     var workspaceNeedsAttention: Bool {
         !startupIssue.isEmpty || !workspacePausedTasks.isEmpty || records.contains { ["failed","blocked"].contains($0.jobState ?? "") || ["interrupted","quarantined"].contains($0.state) } ||
         records.contains { $0.needsEmptyTranscriptionReview } ||
-        workspaceUnfinishedIntents.contains { [.blocked,.unknown,.rejected].contains($0.state) } ||
+        workspaceUnfinishedIntents.contains { $0.needsAttention } ||
         recordingRequests.contains { $0.state == "blocked" } || !workspaceFailedAssistantExecutions.isEmpty ||
         workspacePanoramaFailure != nil || !workspaceSegmentedBatchFailures.isEmpty ||
         records.contains { transcriptReviewIssue(for:$0) != nil } ||
@@ -288,6 +288,15 @@ struct WorkspaceProcessingView: View {
                                 if intent.state == .queued || intent.state == .running {
                                     Button("停止处理") { Task { await model.cancelProcessingIntent(intent) } }.accessibilityLabel("停止处理：" + name(intent.sourceID))
                                 }
+                                if intent.canReprocess {
+                                    Button("重新理解") { Task { await model.reprocessProcessingIntent(intent) } }
+                                        .disabled(!model.modelConfigured)
+                                        .accessibilityLabel("重新理解：" + name(intent.sourceID))
+                                }
+                                if intent.canIgnore {
+                                    Button("忽略这次") { Task { await model.ignoreProcessingIntent(intent) } }
+                                        .accessibilityLabel("忽略这次理解失败：" + name(intent.sourceID))
+                                }
                             }
                         }
                     }
@@ -338,7 +347,14 @@ struct WorkspaceProcessingView: View {
                         ForEach(waiting) { request in
                             VStack(alignment:.leading,spacing:6) {
                                 WorkspaceRow(title:name(request.sourceID),subtitle:request.state == "blocked" ? "处理条件已变化，需要重新核对" : "等待完整转写与原文核对，随后继续理解",trailing:"查看材料") { openSource(request.sourceID) }
-                                Button("停止处理") { Task { await model.cancelRecordingRequest(request) } }.accessibilityLabel("停止处理录音处理请求：" + name(request.sourceID)).padding(.bottom,8)
+                                HStack(spacing:16) {
+                                    if request.state == "blocked" {
+                                        Button("重新核对并继续") { Task { await model.retryRecordingRequest(request) } }
+                                            .disabled(!model.modelConfigured)
+                                            .accessibilityLabel("重新核对并继续录音处理：" + name(request.sourceID))
+                                    }
+                                    Button("停止处理") { Task { await model.cancelRecordingRequest(request) } }.accessibilityLabel("停止处理录音处理请求：" + name(request.sourceID))
+                                }.padding(.bottom,8)
                             }
                         }
                         reasons(waiting.compactMap { request in request.error.map { (name(request.sourceID),$0) } })
@@ -482,6 +498,22 @@ struct WorkspaceProcessingView: View {
                                 }
                             }
                         }
+                    }
+                }
+                let pendingReminderSyncs = model.pendingReminderSyncList
+                if !pendingReminderSyncs.isEmpty {
+                    WorkspaceSection(title:"本地变更待同步提醒事项",subtitle:"这些变更只保存在 VoiceOS；恢复连接并授权后会自动写入 Apple 提醒事项并回读。",icon:"clock.arrow.circlepath",count:pendingReminderSyncs.count) {
+                        ForEach(pendingReminderSyncs) { entry in
+                            VStack(alignment:.leading,spacing:6) {
+                                WorkspaceRow(title:entry.title,subtitle:entry.desiredState == LocalActionState.completed.rawValue ? "已在 VoiceOS 完成" : "已在 VoiceOS 撤销完成",trailing:"查看任务") { model.showTask(entry.actionID) }
+                                if let failure = entry.lastFailureReason {
+                                    Text("上次同步未完成：" + WorkspaceProcessingErrorText.display(failure)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled).padding(.leading,44).padding(.bottom,8)
+                                }
+                            }
+                        }
+                        Button("现在核对") { Task { await model.retryPendingReminderSyncs() } }
+                            .disabled(model.remindersBusy || model.pendingReminderSyncs.isEmpty)
+                            .accessibilityLabel("现在核对 \(pendingReminderSyncs.count) 项待同步提醒")
                     }
                 }
                 if !inbox.folders.isEmpty || !inbox.pendingItems.isEmpty || !inbox.folderErrors.isEmpty {

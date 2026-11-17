@@ -4,7 +4,7 @@ extension VoiceOSStore {
     // Scope identity is independent of the currently configured model. The earliest
     // existing receipt owns once-only cognition; config changes cannot replay it.
     func processingCognitionReceipt(sourceID: String, sourceVersionID: String, transcriptVersionID: String, policyVersion: Int,
-                                    contentDigest: String? = nil) throws -> [String: String]? {
+                                    contentDigest: String? = nil, latest: Bool = false) throws -> [String: String]? {
         // A transcription review changes the context digest without changing the
         // transcript version, so version and policy alone can select a stale receipt.
         let digestClause = contentDigest == nil ? "" : " AND c.digest=?"
@@ -16,11 +16,11 @@ extension VoiceOSStore {
             JOIN transcript_versions v ON v.id=i.transcript_version_id JOIN transcripts t ON t.id=v.transcript_id
             WHERE i.source_id=? AND t.input_version_id=? AND i.transcript_version_id=? AND i.policy_version=?
               AND a.execution_kind='model_request'\(digestClause)
-            ORDER BY a.producer_sequence LIMIT 1
+            ORDER BY a.producer_sequence \(latest ? "DESC" : "ASC") LIMIT 1
             """, arguments).first
     }
 
-    func processingAssociationReceipt(_ snapshot: ExpressionProcessingIntentSnapshot) throws -> [String: String]? {
+    func processingAssociationReceipt(_ snapshot: ExpressionProcessingIntentSnapshot, latest: Bool = false) throws -> [String: String]? {
         let source = snapshot.context.sources[0]
         return try db.query("""
             SELECT a.*,c.state AS context_state FROM expression_association_attempts a
@@ -28,7 +28,7 @@ extension VoiceOSStore {
             JOIN transcript_versions v ON v.id=i.transcript_version_id JOIN transcripts t ON t.id=v.transcript_id
             WHERE a.current_source_id=? AND i.source_id=? AND t.input_version_id=? AND i.transcript_version_id=? AND i.policy_version=?
               AND c.digest=?
-            ORDER BY a.created_at,a.id LIMIT 1
+            ORDER BY a.created_at\(latest ? " DESC,a.id DESC" : ",a.id") LIMIT 1
             """, [source.sourceID, source.sourceID, source.sourceVersionID, source.transcriptVersionID, String(snapshot.policyVersion), snapshot.context.contentDigest]).first
     }
 

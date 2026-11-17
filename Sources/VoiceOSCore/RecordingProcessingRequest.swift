@@ -90,10 +90,18 @@ extension VoiceOSStore {
             return true
         }
     }
+    /// Explicit "check again" from a blocked row. It rewinds only to the ordinary
+    /// waiting path; reconciliation decides again under today's conditions.
+    public func retryRecordingProcessingRequest(id: String) throws {
+        guard let row = try db.query("SELECT state FROM recording_processing_requests WHERE id=?", [id]).first else { throw VoiceOSError("录音处理请求不存在") }
+        guard row["state"] == "blocked" else { return }
+        try db.execute("UPDATE recording_processing_requests SET state='waiting',error=NULL,updated_at=? WHERE id=? AND state='blocked'",
+                       [Self.processingNow(), id])
+    }
     /// No await or model dispatch here. A failed local transcript remains waiting for
     /// explicit transcription retry; interrupted recordings require explicit sealing.
     public func reconcileRecordingProcessingRequests(cognition: ModelConfiguration, association: ModelConfiguration, segmentExtraction: ModelConfiguration? = nil, segmentAggregation: ModelConfiguration? = nil) throws {
-        for row in try db.query("SELECT * FROM recording_processing_requests WHERE state='waiting' ORDER BY created_at,id") {
+        for row in try db.query("SELECT * FROM recording_processing_requests WHERE state IN ('waiting','blocked') ORDER BY created_at,id") {
             let id = row["id"]!, source = row["source_id"]!
             if let queue = try db.query("SELECT * FROM processing_intents WHERE command_id=?", ["record-process:"+id]).first {
                 guard queue["source_id"] == source, queue["policy_version"] == row["policy_version"],
