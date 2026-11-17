@@ -8,6 +8,7 @@ func taskInitiationRouteLabel(_ route: TaskInitiationRoute) -> String {
     case .guidedStart: "自己动手"
     case .clarify: "先问一个关键问题"
     case .captureOnly: "仅记录"
+    case .answer: "直接回答"
     }
 }
 
@@ -21,6 +22,7 @@ struct TaskInitiationView: View {
     @AppStorage("voiceos.initiation.allowCloud") private var allowCloud = true
     @AppStorage("voiceos.initiation.preference") private var preference = TaskInitiationPreference.quickDelivery
     @State private var answer = ""
+    @State private var directAnswers: [String: String] = [:]
     @State private var pendingSecretCopy: TaskInitiationRecord?
     @State private var stepDraft = ""
     @State private var stepStatus = ""
@@ -89,20 +91,20 @@ struct TaskInitiationView: View {
         ), presenting: pendingSecretCopy) { record in
             Button("取消", role: .cancel) { pendingSecretCopy = nil }
             Button("仍然复制", role: .destructive) { pendingSecretCopy = nil; copy(record) }
-        } message: { _ in
-            Text(TaskInitiationComposer.secretWarning(in: artifactDraft) ?? "")
+        } message: { record in
+            Text(TaskInitiationComposer.secretWarning(in: record.route == .answer ? record.proposal.answer : artifactDraft) ?? "")
         }
     }
 
     private var composer: some View {
-        WorkspaceSection(title: "先说清楚要开始什么", icon: "square.and.pencil") {
+        WorkspaceSection(title: "问一个问题，或说清楚要开始什么", icon: "square.and.pencil") {
             VStack(alignment: .leading, spacing: 14) {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $model.initiationText).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 120)
                         .workspaceEditorSurface().accessibilityLabel("要启动的原话")
                         .accessibilityIdentifier("initiation.input")
                     if model.initiationText.isEmpty {
-                        Text("例如：老师让我做一份 PPT，我不会，也不知道怎么开始。").vosFont(WorkspaceText.body)
+                        Text("例如：什么是 Git Hook？或者：老师让我做一份 PPT，我不会，也不知道怎么开始。").vosFont(WorkspaceText.body)
                             .foregroundStyle(.tertiary).padding(.horizontal, 15).padding(.vertical, 16).allowsHitTesting(false)
                     }
                 }
@@ -131,7 +133,7 @@ struct TaskInitiationView: View {
                     Text("尚未配置文本模型；请先在设置中连接模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                 }
                 HStack(spacing: 12) {
-                    Button(model.initiationBusy ? "正在生成…" : "生成启动材料") { generate() }
+                    Button(model.initiationBusy ? "正在处理…" : "看看该怎么处理") { generate() }
                     .buttonStyle(.borderedProminent).tint(palette.accent)
                     .disabled(model.initiationBusy || !model.modelConfigured || !allowCloud)
                     .accessibilityIdentifier("initiation.generate")
@@ -146,7 +148,7 @@ struct TaskInitiationView: View {
     }
 
     private func package(_ record: TaskInitiationRecord) -> some View {
-        WorkspaceSection(title: "这次要启动的事", icon: "arrow.up.forward") {
+        WorkspaceSection(title: record.route == .answer ? "这次的问题" : "这次要启动的事", icon: "arrow.up.forward") {
             VStack(alignment: .leading, spacing: 16) {
                 sourceLine(record)
                 HStack(alignment: .top, spacing: 12) {
@@ -158,16 +160,20 @@ struct TaskInitiationView: View {
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 6) {
                         statusChip(stateLabel(record))
-                        if record.copiedAt != nil { statusChip("已复制 · 复制不代表已执行") }
+                        if record.copiedAt != nil {
+                            statusChip(record.route == .answer ? "已复制回答" : "已复制 · 复制不代表已执行")
+                        }
                     }
                 }
                 if record.basisChanged {
                     WorkspaceNoticeText(message: "原话已更正，材料仍保留但依据已变化。", severity: .warning)
                 }
-                if record.state == "draft" { routePicker(record) }
+                if record.state == "draft", record.route != .answer { routePicker(record) }
                 if record.isClarifying { clarify(record) }
                 else if record.route == .captureOnly { captureOnly(record) }
+                else if record.route == .answer { answerCard(record) }
                 else { artifactEditor(record) }
+                directAnswerSection(record)
                 if let steps = stepsByRecord[record.id], !steps.isEmpty { stepsList(steps) }
             }
         }
@@ -219,6 +225,79 @@ struct TaskInitiationView: View {
             }
             statusText
         }
+    }
+
+    private func answerCard(_ record: TaskInitiationRecord) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(record.proposal.answer).vosFont(WorkspaceText.body).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+                .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+            HStack(spacing: 12) {
+                Button("复制回答") { requestCopy(record) }
+                    .buttonStyle(.borderedProminent).tint(palette.accent)
+                    .disabled(model.initiationBusy || record.proposal.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("initiation.answer.copy")
+                if record.isConfirmed {
+                    Text("已保存 · 仅作为回答记录").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    if record.isArchived { statusChip("已归档") }
+                } else {
+                    Button("归档保存") { saveAnswer(record) }
+                        .disabled(model.initiationBusy)
+                        .accessibilityIdentifier("initiation.answer.archive")
+                    discardButton(record)
+                }
+                Spacer()
+            }
+            statusText
+        }
+    }
+
+    private func saveAnswer(_ record: TaskInitiationRecord) {
+        Task {
+            if await model.confirmTaskInitiation(record, artifact: record.proposal.answer) {
+                selectedID = nil
+                if showArchived { reloadArchived() }
+            }
+        }
+    }
+
+    private func directAnswerSection(_ record: TaskInitiationRecord) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            HStack(spacing: 12) {
+                Button(model.initiationBusy ? "正在回答…" : "直接回答") { askDirect(record) }
+                    .disabled(model.initiationBusy || !model.modelConfigured || !allowCloud)
+                    .accessibilityIdentifier("initiation.answer")
+                Text("对这段原话直接要一份回答，不会创建任务或提醒。")
+                    .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Spacer()
+            }
+            if let reply = directAnswers[record.id] {
+                Text(reply).vosFont(WorkspaceText.body).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                HStack {
+                    Button("复制这段回答") { copyText(reply) }
+                    Spacer()
+                }
+            }
+        }
+    }
+
+    private func askDirect(_ record: TaskInitiationRecord) {
+        Task {
+            if let reply = await model.directAnswerTaskInitiation(record, allowCloud: allowCloud) {
+                directAnswers[record.id] = reply
+            }
+        }
+    }
+
+    private func copyText(_ text: String) {
+        let board = NSPasteboard.general
+        board.clearContents()
+        board.setString(text, forType: .string)
     }
 
     private func artifactEditor(_ record: TaskInitiationRecord) -> some View {
@@ -412,8 +491,8 @@ struct TaskInitiationView: View {
                 .padding(.vertical, 8)
                 .accessibilityIdentifier("initiation.history.archived")
             if visibleRecords.isEmpty {
-                Text(showArchived ? "还没有归档的记录。已确认的启动记录可以在结果包里归档。"
-                     : "还没有启动记录。生成过的交接提示词、教程或澄清问题会出现在这里。")
+                Text(showArchived ? "还没有归档的记录。已确认的启动记录和归档保存的回答会出现在这里。"
+                     : "还没有启动记录。生成过的交接提示词、教程、直接回答或澄清问题会出现在这里。")
                     .vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 14)
             } else {
                 ForEach(visibleRecords) { record in
@@ -446,7 +525,8 @@ struct TaskInitiationView: View {
 
     private func stateLabel(_ record: TaskInitiationRecord) -> String {
         if record.isClarifying { return "待澄清" }
-        if record.isConfirmed { return "已确认" }
+        if record.isConfirmed { return record.route == .answer ? "已保存" : "已确认" }
+        if record.route == .answer { return "待保存" }
         return record.route == .captureOnly ? "已记录" : "草稿"
     }
 
@@ -464,14 +544,16 @@ struct TaskInitiationView: View {
     }
 
     private func requestCopy(_ record: TaskInitiationRecord) {
-        if TaskInitiationComposer.secretWarning(in: artifactDraft) != nil { pendingSecretCopy = record }
+        let text = record.route == .answer ? record.proposal.answer : artifactDraft
+        if TaskInitiationComposer.secretWarning(in: text) != nil { pendingSecretCopy = record }
         else { copy(record) }
     }
 
     private func copy(_ record: TaskInitiationRecord) {
+        let text = record.route == .answer ? record.proposal.answer : artifactDraft
         let board = NSPasteboard.general
         board.clearContents()
-        board.setString(artifactDraft, forType: .string)
-        Task { await model.markTaskInitiationCopied(record, artifact: artifactDraft) }
+        board.setString(text, forType: .string)
+        Task { await model.markTaskInitiationCopied(record, artifact: text) }
     }
 }

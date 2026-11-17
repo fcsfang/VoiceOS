@@ -1,7 +1,7 @@
 import Foundation
 
 public enum TaskInitiationRoute: String, Codable, CaseIterable, Sendable {
-    case agentHandoff = "agent_handoff", guidedStart = "guided_start", clarify, captureOnly = "capture_only"
+    case agentHandoff = "agent_handoff", guidedStart = "guided_start", clarify, captureOnly = "capture_only", answer
 }
 public enum TaskInitiationMode: String, Codable, Sendable { case direct, interactive }
 public enum TaskInitiationPreference: String, Codable, Sendable {
@@ -26,25 +26,27 @@ public struct TaskInitiationProposal: Codable, Sendable {
     public let verification: String
     public let clarifyQuestion: String
     public let reason: String
+    public let answer: String
     public init(isTaskInitiation: Bool, route: TaskInitiationRoute, title: String = "", objective: String = "",
                 knownFacts: [String] = [], assumptions: [String] = [], missingInformation: [String] = [],
                 constraints: [String] = [], acceptanceCriteria: [String] = [],
                 preference: TaskInitiationPreference = .quickDelivery, targetExecutor: String = "",
                 deliverables: [String] = [], guidePrerequisites: [String] = [], guideSteps: [String] = [],
-                firstAction: String = "", verification: String = "", clarifyQuestion: String = "", reason: String = "") {
+                firstAction: String = "", verification: String = "", clarifyQuestion: String = "", reason: String = "",
+                answer: String = "") {
         self.isTaskInitiation = isTaskInitiation; self.route = route; self.title = title; self.objective = objective
         self.knownFacts = knownFacts; self.assumptions = assumptions; self.missingInformation = missingInformation
         self.constraints = constraints; self.acceptanceCriteria = acceptanceCriteria; self.preference = preference
         self.targetExecutor = targetExecutor; self.deliverables = deliverables; self.guidePrerequisites = guidePrerequisites
         self.guideSteps = guideSteps; self.firstAction = firstAction; self.verification = verification
-        self.clarifyQuestion = clarifyQuestion; self.reason = reason
+        self.clarifyQuestion = clarifyQuestion; self.reason = reason; self.answer = answer
     }
     private enum CodingKeys: String, CodingKey {
         case isTaskInitiation = "is_task_initiation", route, title, objective
         case knownFacts = "known_facts", assumptions, missingInformation = "missing_information", constraints
         case acceptanceCriteria = "acceptance_criteria", preference = "execution_preference", targetExecutor = "target_executor"
         case deliverables, guidePrerequisites = "guide_prerequisites", guideSteps = "guide_steps"
-        case firstAction = "first_action", verification, clarifyQuestion = "clarify_question", reason
+        case firstAction = "first_action", verification, clarifyQuestion = "clarify_question", reason, answer
     }
     /// Model output is parsed at this boundary: only route and is_task_initiation
     /// decide the route, so their absence must fail instead of silently defaulting.
@@ -68,15 +70,18 @@ public struct TaskInitiationProposal: Codable, Sendable {
         verification = (try? container.decode(String.self, forKey: .verification)) ?? ""
         clarifyQuestion = (try? container.decode(String.self, forKey: .clarifyQuestion)) ?? ""
         reason = (try? container.decode(String.self, forKey: .reason)) ?? ""
+        answer = (try? container.decode(String.self, forKey: .answer)) ?? ""
     }
     func replacing(route: TaskInitiationRoute? = nil, title: String? = nil,
-                   preference: TaskInitiationPreference? = nil) -> TaskInitiationProposal {
+                   preference: TaskInitiationPreference? = nil,
+                   answer: String? = nil) -> TaskInitiationProposal {
         .init(isTaskInitiation: isTaskInitiation, route: route ?? self.route, title: title ?? self.title,
               objective: objective, knownFacts: knownFacts, assumptions: assumptions,
               missingInformation: missingInformation, constraints: constraints, acceptanceCriteria: acceptanceCriteria,
               preference: preference ?? self.preference, targetExecutor: targetExecutor, deliverables: deliverables,
               guidePrerequisites: guidePrerequisites, guideSteps: guideSteps, firstAction: firstAction,
-              verification: verification, clarifyQuestion: clarifyQuestion, reason: reason)
+              verification: verification, clarifyQuestion: clarifyQuestion, reason: reason,
+              answer: answer ?? self.answer)
     }
 }
 public struct TaskInitiationPresentation: Codable, Sendable, Equatable {
@@ -127,16 +132,24 @@ public struct TaskInitiationStep: Identifiable, Sendable, Equatable {
 public protocol TaskInitiationModelPort: Sendable {
     var configuration: ModelConfiguration { get }
     func initiate(_ input: TaskInitiationInput) async throws -> TaskInitiationProposal
+    func answer(_ input: TaskInitiationInput) async throws -> String
 }
 
 /// Semantic fields come from the model; the copyable handoff and tutorial are
 /// assembled here so structure, fact/assumption separation and the fixed
 /// environment check cannot vary between responses.
 public enum TaskInitiationComposer {
+    /// Keeps stored answer bodies bounded; the classification schema and the
+    /// manual fallback share this limit.
+    public static let answerLimit = 8000
+
     public static func validate(_ proposal: TaskInitiationProposal, mode: TaskInitiationMode,
                                 preferredRoute: TaskInitiationRoute?) throws -> TaskInitiationProposal {
         var result = proposal
-        if !result.isTaskInitiation {
+        // A direct answer is not a task initiation, so it keeps its route even
+        // when the model reports is_task_initiation=false; every other route
+        // still collapses to capture_only as before.
+        if !result.isTaskInitiation, result.route != .answer {
             result = result.replacing(route: .captureOnly)
         } else if let preferredRoute, result.route != preferredRoute {
             throw VoiceOSError("生成路线与所选路线不一致，请重新生成")
@@ -154,6 +167,17 @@ public enum TaskInitiationComposer {
             guard !result.clarifyQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw VoiceOSError("澄清路线必须给出一个关键问题")
             }
+        case .answer:
+            let cleanAnswer = trimmed(result.answer)
+            guard !cleanAnswer.isEmpty else {
+                throw VoiceOSError("直接回答缺少回答正文；请把问题说得更具体一些，或重新生成")
+            }
+            guard cleanAnswer.unicodeScalars.count <= answerLimit else {
+                throw VoiceOSError("回答超过 \(answerLimit) 字；请缩小问题范围后重新生成")
+            }
+            // A direct answer intentionally relaxes title/objective: only the
+            // answer body is required.
+            result = result.replacing(answer: cleanAnswer)
         case .agentHandoff:
             guard !result.objective.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   result.acceptanceCriteria.contains(where: nonEmpty) else {
@@ -174,8 +198,16 @@ public enum TaskInitiationComposer {
         case .clarify, .captureOnly: return ""
         case .agentHandoff: return handoff(proposal)
         case .guidedStart: return guide(proposal)
+        case .answer: return trimmed(proposal.answer)
         }
     }
+
+    /// The page asks for a clearer question instead of rendering an empty
+    /// answer card when the classifier chose the answer route without a body.
+    public static func needsClarifyFallback(_ proposal: TaskInitiationProposal) -> Bool {
+        proposal.route == .answer && !nonEmpty(proposal.answer)
+    }
+    public static let clarifyFallbackMessage = "需要先补充一点信息，才能继续；请把问题说得更具体一些，或重新生成一次。"
 
     public static func secretWarning(in text: String) -> String? {
         let range = NSRange(text.startIndex..., in: text)
@@ -370,15 +402,27 @@ extension VoiceOSStore {
         }
         guard row["state"] == "draft" else { throw VoiceOSError("只有草稿可以确认") }
         let proposal = try JSONDecoder().decode(TaskInitiationProposal.self, from: Data(row["proposal_json"]!.utf8))
-        guard proposal.route == .agentHandoff || proposal.route == .guidedStart else {
-            throw VoiceOSError("这次启动没有可确认的交接材料")
+        guard proposal.route == .agentHandoff || proposal.route == .guidedStart || proposal.route == .answer else {
+            throw VoiceOSError("这次启动没有可确认的材料")
         }
         guard !artifact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw VoiceOSError("启动材料不能为空")
         }
         let edited = artifact == TaskInitiationComposer.render(proposal) ? nil : artifact
-        try db.execute("UPDATE task_initiations SET state='confirmed',edited_artifact=?,updated_at=? WHERE id=?",
-                       [edited, Self.now(), id])
+        if proposal.route == .answer {
+            // Confirming an answer saves it as an archived record; there is no
+            // handoff or tutorial to execute later.
+            var input = try JSONDecoder().decode(TaskInitiationInput.self, from: Data((row["input_json"] ?? "").utf8))
+            if input.presentation?.archivedAt == nil {
+                input.presentation = TaskInitiationPresentation(archivedAt: Self.now())
+            }
+            try db.execute("""
+            UPDATE task_initiations SET state='confirmed',edited_artifact=?,input_json=?,updated_at=? WHERE id=?
+            """, [edited, try Self.relevanceJSON(input), Self.now(), id])
+        } else {
+            try db.execute("UPDATE task_initiations SET state='confirmed',edited_artifact=?,updated_at=? WHERE id=?",
+                           [edited, Self.now(), id])
+        }
         return try taskInitiationRecord(id: id)
     }
 
@@ -389,7 +433,7 @@ extension VoiceOSStore {
             throw VoiceOSError("启动包不存在")
         }
         let proposal = try JSONDecoder().decode(TaskInitiationProposal.self, from: Data(row["proposal_json"]!.utf8))
-        guard proposal.route == .agentHandoff || proposal.route == .guidedStart else {
+        guard proposal.route == .agentHandoff || proposal.route == .guidedStart || proposal.route == .answer else {
             throw VoiceOSError("这次启动没有可复制的材料")
         }
         guard !artifact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -538,10 +582,16 @@ extension VoiceOSStore {
                   route != .clarify || !proposal.clarifyQuestion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw VoiceOSError("启动包记录与输入或路线不一致")
             }
+            if route == .answer {
+                let body = proposal.answer.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !body.isEmpty, body.unicodeScalars.count <= TaskInitiationComposer.answerLimit else {
+                    throw VoiceOSError("直接回答记录缺少有效回答正文")
+                }
+            }
             if input.presentation?.archivedAt != nil, state != "confirmed" {
                 throw VoiceOSError("未确认的启动包不能归档")
             }
-            let hasArtifact = route == .agentHandoff || route == .guidedStart
+            let hasArtifact = route == .agentHandoff || route == .guidedStart || route == .answer
             if !hasArtifact, row["edited_artifact"] != nil {
                 throw VoiceOSError("仅记录或澄清的启动包不能携带交接材料")
             }
