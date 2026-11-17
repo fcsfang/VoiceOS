@@ -42,3 +42,11 @@
 
 - 分支 `work/m51-zc`、`work/m51-ud` 从波 50 合并后的 main 切出；协调者合并 `work/mega-51`，单次构建 + 全量测试。
 - 另候选（审计第 2-5 条，视波 50/51 成本取舍）：个人表达意图 rejected/unknown/blocked 的重试与忽略、录制处理请求 blocked 重评、提醒同步逐条捕获与原因落盘、待同步提醒失败原因显示。
+
+## UD 结果（2026-11-17）
+
+- adfeb26（核心）：`allowsExplicitRetry` 只在 `.rejected` 为真；片段/聚合校验失败原因写入「第 N 段 + 校验类别」；`retryRejectedSegmentedBatch` 用 `segmented-retry:<旧批次ID>:<序号>` 新命令号重建批次，旧批次保留；删除死代码 `revalidateRejectedSegmentAggregation`（同一不可变回执重查必然再失败，接入即假动作）。
+- d4c3264（VoiceOSApp.swift）：`retrySegmentedBatch` 单函数新增，未改既有行。
+- 8e3c9f7（处理页）：`workspaceSegmentedBatchFailures` 按来源取最新批次，并入 `workspaceNeedsAttention`，区块显示原因与「整批重试」，unknown 不可重试。
+- 测试：SegmentedRetryChecks 三用例（rejected 可见与原因、新命令号重试成功且旧批次保留、超时 unknown 不重发）。
+- 集成构建/测试结果补下方。
