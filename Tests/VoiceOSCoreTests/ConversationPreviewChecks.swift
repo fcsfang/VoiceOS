@@ -97,6 +97,7 @@ final class ConversationPreviewChecks: XCTestCase {
 
     func testPreviewsAreEmptyWithoutConversations() async throws {
         let store = try await openStore()
-        XCTAssertTrue(try await store.conversationPreviews().isEmpty)
+        let previews = try await store.conversationPreviews()
+        XCTAssertTrue(previews.isEmpty)
     }
 }
