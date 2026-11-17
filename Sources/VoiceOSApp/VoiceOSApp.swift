@@ -913,9 +913,7 @@ final class ControlCenter: ObservableObject {
                 topicForcePending = false
                 do {
                     guard let store, let port = topicModel, let input = try await store.prepareTopicOrganization() else { return }
-                    if !force {
-                        guard input.digest != topicAttemptDigest, try await store.workspaceBriefing()?.digest != input.digest else { return }
-                    }
+                    if !force, try await !store.needsTopicOrganizationRefresh() { return }
                     topicAttemptDigest = input.digest
                     organizingTopics = true; topicOrganizationStatus = "AI 正在连接跨时间的材料与任务…"
                     _ = try await store.organizeTopics(using: port, force: force)
