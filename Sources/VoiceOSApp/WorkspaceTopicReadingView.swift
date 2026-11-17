@@ -22,6 +22,8 @@ struct WorkspaceTopicReadingView: View {
     @State private var hoveredSectionID: String?
     @State private var hoveredQuestion: String?
     @State private var localFilter = ""
+    @State private var keyboardSectionID: String?
+    @FocusState private var structureFocused: Bool
 
     private var sections: [TopicReadingSection] { topic.organization?.sections ?? [] }
     private var claimIDs: Set<String> { Set(sections.flatMap(\.claimIDs)) }
@@ -42,6 +44,9 @@ struct WorkspaceTopicReadingView: View {
     private var displayedSections: [TopicReadingSection] {
         if let selectedSection { return filteredSections.filter { $0.id == selectedSection } }
         return filteredSections
+    }
+    private var listedSections: [TopicReadingSection] {
+        showingAllSections ? filteredSections : Array(filteredSections.prefix(6))
     }
     private func sectionMatches(_ section:TopicReadingSection,term:String) -> Bool {
         if section.title.localizedStandardContains(term) || section.summary.localizedStandardContains(term) { return true }
@@ -140,7 +145,7 @@ struct WorkspaceTopicReadingView: View {
         VStack(alignment:.leading,spacing:16) {
             HStack {
                 VStack(alignment:.leading,spacing:5) {
-                    Text("内容结构").vosFont(WorkspaceText.sectionTitle)
+                    Text("内容结构").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 }
                 Spacer()
                 if selectedSection != nil { Button("查看全部") { selectedSection=nil } }
@@ -153,17 +158,18 @@ struct WorkspaceTopicReadingView: View {
                 }.buttonStyle(.plain)
                 Rectangle().fill(palette.border).frame(width:1,height:18)
                 LazyVGrid(columns:[GridItem(.adaptive(minimum:210),spacing:12)],alignment:.leading,spacing:12) {
-                    ForEach(Array((showingAllSections ? filteredSections : Array(filteredSections.prefix(6))).enumerated()),id:\.element.id) { index,section in
+                    ForEach(Array(listedSections.enumerated()),id:\.element.id) { index,section in
                         Button { selectedSection = selectedSection == section.id ? nil : section.id } label: {
                             HStack(alignment:.top,spacing:10) {
                                 Text(String(format:"%02d",index+1)).vosFont(WorkspaceText.caption.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
                                 Text(section.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
                                 Spacer(minLength:0)
                             }.padding(13).frame(maxWidth:.infinity,minHeight:60,alignment:.topLeading)
-                                .background(selectedSection == section.id ? palette.selection : hoveredSectionID == section.id ? palette.selection.opacity(0.5) : palette.canvas,in:RoundedRectangle(cornerRadius:9))
-                                .overlay { RoundedRectangle(cornerRadius:9).strokeBorder(selectedSection == section.id ? palette.accent : palette.border,lineWidth:1) }
+                                .background(selectedSection == section.id ? palette.selection : hoveredSectionID == section.id || keyboardSectionID == section.id ? palette.selection.opacity(0.5) : palette.canvas,in:RoundedRectangle(cornerRadius:9))
+                                .overlay { RoundedRectangle(cornerRadius:9).strokeBorder(selectedSection == section.id ? palette.accent : keyboardSectionID == section.id ? palette.focusRing : palette.border,lineWidth:1) }
                                 .contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityValue(selectedSection == section.id ? "已选择" : "")
+                            .accessibilityLabel("小主题：\(section.title)，\(sectionClaimCount(section)) 条认识")
                             .onHover { inside in hoveredSectionID = inside ? section.id : (hoveredSectionID == section.id ? nil : hoveredSectionID) }
                     }
                 }
@@ -174,6 +180,12 @@ struct WorkspaceTopicReadingView: View {
         }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
             .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
             .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border.opacity(0.8),lineWidth:1) }
+            .focusable()
+            .focused($structureFocused)
+            .focusEffectDisabled()
+            .onKeyPress { handleStructureKey($0) }
+            .onChange(of: selectedSection) { _, _ in structureFocused=true }
+            .onAppear { requestStructureFocus() }
     }
 
     @ViewBuilder private var readingCards: some View {
@@ -206,7 +218,7 @@ struct WorkspaceTopicReadingView: View {
                 Spacer()
                 Text(String(format:"%02d",(sections.firstIndex { $0.id == section.id } ?? 0)+1)).vosFont(WorkspaceText.caption.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
             }
-            Text(section.title).vosFont(WorkspaceText.sectionTitle).fixedSize(horizontal:false,vertical:true)
+            Text(section.title).vosFont(WorkspaceText.sectionTitle).fixedSize(horizontal:false,vertical:true).accessibilityAddTraits(.isHeader)
             WorkspaceExpandableText(text:section.summary,label:"小节内容",lines:5,size:WorkspaceText.body.size)
             if !sectionClaims.isEmpty {
                 DisclosureGroup("相关观点（\(sectionClaims.count)）") {
@@ -406,6 +418,36 @@ struct WorkspaceTopicReadingView: View {
 
     private func deliveryButton(_ result:AssistantExecutionRecord) -> some View {
         WorkspaceRow(title:result.title,subtitle:"AI 交付 · 实践效果见实际记录",icon:"doc.text",trailing:"阅读") { openDelivery(result.id) }
+    }
+    private func sectionClaimCount(_ section:TopicReadingSection) -> Int {
+        claims.filter { section.claimIDs.contains($0.id) }.count
+    }
+    private func requestStructureFocus() {
+        Task {
+            try? await Task.sleep(for:.milliseconds(100))
+            structureFocused=true
+        }
+    }
+    private func handleStructureKey(_ press:KeyPress) -> KeyPress.Result {
+        guard structureFocused, press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let ids=listedSections.map(\.id)
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard !ids.isEmpty else { return .ignored }
+            let current=keyboardSectionID.flatMap { id in ids.firstIndex(of: id) }
+            let next: Int
+            if press.key == .upArrow { next=current.map { max(0,$0 - 1) } ?? ids.count - 1 }
+            else { next=current.map { min(ids.count - 1,$0 + 1) } ?? 0 }
+            keyboardSectionID=ids[next]
+            return .handled
+        case .return:
+            guard let id=keyboardSectionID, ids.contains(id) else { return .ignored }
+            selectedSection = selectedSection == id ? nil : id
+            return .handled
+        default:
+            return .ignored
+        }
     }
     private func ownership(_ claim:CandidateClaim) -> String {
         switch claim.ownership { case "user_tentative": "我的表达中提取"; case "external": "资料中的观点"; case "ai_candidate": "AI 分析与建议"; default: "内容归属待核对" }

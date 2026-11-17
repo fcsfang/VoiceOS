@@ -24,6 +24,7 @@ struct RecentContentHome: View {
     @SceneStorage("recentHome.timelineAnchor") private var storedTimelineAnchor = ""
     @State private var timelineRestored = false
     @State private var readingStates: [String: SourceReadingState] = [:]
+    @FocusState private var timelineFocused: Bool
     private let topAnchor = "home.top"
     private let timelineSpace = "home.timeline"
 
@@ -72,7 +73,7 @@ struct RecentContentHome: View {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     ForEach(days) { day in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(dayLabel(day.date)).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.secondaryText).padding(.horizontal, 10)
+                            Text(dayLabel(day.date)).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader).padding(.horizontal, 10)
                             ForEach(day.items) { item in
                                 Button { selectedID = item.id } label: { row(item) }
                                     .buttonStyle(.plain)
@@ -92,6 +93,19 @@ struct RecentContentHome: View {
             .onPreferenceChange(TimelineAnchorKey.self) { updateTimelineAnchor($0) }
             .onAppear { restoreTimeline(proxy) }
             .onChange(of: items.count) { _, _ in restoreTimeline(proxy) }
+            .onChange(of: selectedID) { _, id in
+                guard let id else { return }
+                timelineFocused = true
+                Task { @MainActor in
+                    await Task.yield()
+                    proxy.scrollTo(id, anchor: .center)
+                }
+            }
+            .focusable()
+            .focused($timelineFocused)
+            .focusEffectDisabled()
+            .onKeyPress { handleTimelineKey($0) }
+            .onAppear { requestTimelineFocus() }
         }
     }
 
@@ -109,6 +123,35 @@ struct RecentContentHome: View {
         Task { @MainActor in
             await Task.yield()
             proxy.scrollTo(storedTimelineAnchor, anchor: .top)
+        }
+    }
+
+    private func requestTimelineFocus() {
+        Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            timelineFocused = true
+        }
+    }
+
+    private func handleTimelineKey(_ press: KeyPress) -> KeyPress.Result {
+        guard timelineFocused, press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let ids = items.map(\.id)
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard !ids.isEmpty else { return .ignored }
+            let current = selected.flatMap { item in ids.firstIndex(of: item.id) }
+            let next: Int
+            if press.key == .upArrow { next = current.map { max(0, $0 - 1) } ?? ids.count - 1 }
+            else { next = current.map { min(ids.count - 1, $0 + 1) } ?? 0 }
+            selectedID = ids[next]
+            return .handled
+        case .return:
+            guard let item = selected, item.kind == .material, let sourceID = item.sourceIDs.first else { return .ignored }
+            openSource(sourceID)
+            return .handled
+        default:
+            return .ignored
         }
     }
 
@@ -258,7 +301,7 @@ struct RecentContentHome: View {
                 }
             }
             Text(item.title).vosFont(WorkspaceText.pageTitle).lineSpacing(4)
-                .padding(.top, 16).textSelection(.enabled)
+                .padding(.top, 16).textSelection(.enabled).accessibilityAddTraits(.isHeader)
             if !item.summary.isEmpty {
                 Text(item.summary).vosFont(WorkspaceText.body).lineSpacing(5)
                     .textSelection(.enabled)
@@ -285,7 +328,7 @@ struct RecentContentHome: View {
         return VStack(alignment: .leading, spacing: 0) {
             Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 18)
             HStack(alignment: .firstTextBaseline, spacing: 14) {
-                Text(thread.title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText)
+                Text(thread.title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
             }
             if !notes.isEmpty {
