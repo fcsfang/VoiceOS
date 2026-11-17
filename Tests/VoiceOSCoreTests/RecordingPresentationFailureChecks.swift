@@ -24,20 +24,22 @@ final class RecordingPresentationFailureChecks: XCTestCase {
     }
 
     func testFailureSurvivesRestartAndClearsAfterSuccess() async throws {
-        let first = try await openStore()
-        let (id, key, _) = try await sourceWithVersion(first)
-        try await first.recordTranscriptionReviewFailure(sourceID: id, reason: "网络中断，可重试")
+        let (id, key): (String, String) = try await {
+            let first = try await openStore()
+            let source = try await sourceWithVersion(first)
+            try await first.recordTranscriptionReviewFailure(sourceID: source.id, reason: "网络中断，可重试")
+            return (source.id, source.key)
+        }()
         let reopened = try await openStore()
         let stored = try await reopened.sources().first { $0.id == id }
         XCTAssertEqual(stored?.transcriptionReviewFailure?.reason, "网络中断，可重试")
         let storedMap = try await reopened.storedTranscriptionReviewFailures()
         XCTAssertEqual(storedMap[key], "网络中断，可重试")
         try await reopened.clearTranscriptionReviewFailure(sourceID: id)
-        let cleared = try await openStore()
-        let reread = try await cleared.sources().first { $0.id == id }
-        XCTAssertNil(reread?.transcriptionReviewFailure)
-        let remaining = try await cleared.storedTranscriptionReviewFailures()
+        let remaining = try await reopened.storedTranscriptionReviewFailures()
         XCTAssertTrue(remaining.isEmpty)
+        let reread = try await reopened.sources().first { $0.id == id }
+        XCTAssertNil(reread?.transcriptionReviewFailure)
     }
 
     func testFailureRetiresWhenTranscriptVersionChanges() async throws {

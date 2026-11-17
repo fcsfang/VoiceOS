@@ -3479,7 +3479,7 @@ enum LocalNotice {
                 _ = try? await center.requestAuthorization(options: [.alert, .sound])
                 settings = await center.notificationSettings()
             }
-            guard [.authorized, .provisional, .ephemeral].contains(settings.authorizationStatus) else { return }
+            guard [.authorized, .provisional].contains(settings.authorizationStatus) else { return }
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
