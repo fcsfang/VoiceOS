@@ -1337,6 +1337,26 @@ final class Database {
             }
         }
 
+        if try query("PRAGMA user_version").first?["user_version"] == "68" {
+            try transaction {
+                // Stage records make the skeleton and each body batch replayable
+                // by digest; the primary key is the single idempotency marker.
+                try execute("""
+                CREATE TABLE IF NOT EXISTS topic_organization_stages(
+                  digest TEXT NOT NULL,
+                  stage TEXT NOT NULL CHECK(stage IN ('skeleton','body')),
+                  scope TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('running','completed','failed')),
+                  result_json TEXT,
+                  error TEXT,
+                  attempt_id TEXT,
+                  updated_at TEXT NOT NULL,
+                  PRIMARY KEY(digest,stage,scope))
+                """)
+                try execute("PRAGMA user_version=69")
+            }
+        }
+
         try ensureSearchTriggers()
     }
 
