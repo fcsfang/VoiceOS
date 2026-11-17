@@ -45,6 +45,19 @@ public struct DiscussionAttemptRecord: Identifiable, Sendable {
     public let parts: [DiscussionPart]
     public let usage: [String:Int]?
     public let billingState: String
+    public let error: String?
+}
+public struct DiscussionEntryToken: Equatable, Sendable {
+    public enum Kind: String, Sendable { case material, action, claim, topic }
+    public let kind: Kind
+    public let id: String
+    public init(kind: Kind, id: String) { self.kind = kind; self.id = id }
+    public init?(raw: String) {
+        guard let separator = raw.firstIndex(of: ":") else { return nil }
+        let kindText = String(raw[..<separator]), id = String(raw[raw.index(after: separator)...])
+        guard let kind = Kind(rawValue: kindText), !id.isEmpty else { return nil }
+        self.init(kind: kind, id: id)
+    }
 }
 
 extension VoiceOSStore {
@@ -104,7 +117,7 @@ extension VoiceOSStore {
         return try db.query("SELECT a.* FROM discussion_attempts a JOIN conversation_user_turns t ON t.id=a.reply_to_turn_id WHERE a.conversation_id=? ORDER BY t.ordinal",[conversationID]).map { row in
             let parts = try Self.discussionParts(row)
             return DiscussionAttemptRecord(id:row["id"]!,replyToTurnID:row["reply_to_turn_id"]!,state:row["state"]!,validity:row["validity"]!,parts:parts,
-                                           usage:try row["usage_json"].map { try JSONDecoder().decode([String:Int].self,from:Data($0.utf8)) },billingState:"unknown")
+                                           usage:try row["usage_json"].map { try JSONDecoder().decode([String:Int].self,from:Data($0.utf8)) },billingState:"unknown",error:row["error"])
         }
     }
     private func recordDiscussionUsage(_ id:String,inputTokens:Int?,outputTokens:Int?) throws {
