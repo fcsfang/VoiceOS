@@ -781,6 +781,7 @@ final class ControlCenter: ObservableObject {
     @Published var activeActionTitle = ""
     @Published var savingFeedback = false
     @Published var reminderLinks: [ReminderLink] = []
+    @Published var reminderSyncAnomalies = ReminderSyncAnomalySummary.empty
     @Published var reminderCalendars: [ReminderCalendar] = []
     @Published var reminderCalendarID = ""
     @Published var proposedReminderCalendarID = ""
@@ -1397,7 +1398,7 @@ final class ControlCenter: ObservableObject {
     private func publishHomeSnapshot() {
         homeSnapshot = RecentContentHomeSnapshot.build(sources: records, claims: claims, actions: actionRecords, overrides: recentClueOverrides)
     }
-    private func applyCoreSnapshot(_ snapshot: WorkspaceSnapshot) {
+    private func applyCoreSnapshot(_ snapshot: WorkspaceSnapshot, reminderAnomalies: ReminderSyncAnomalySummary = .empty) {
         records = snapshot.sources
         claims = snapshot.claims
         currentClaimsBySource = snapshot.currentClaimsBySource
@@ -1416,6 +1417,7 @@ final class ControlCenter: ObservableObject {
         compensationGrants = snapshot.compensationGrants
         compensationOperations = snapshot.compensationOperations
         reminderLinks = snapshot.reminderLinks
+        reminderSyncAnomalies = reminderAnomalies
         reminderAccess = snapshot.reminderAccess
         reminderCalendarID = reminderAccess?.enabled == true ? reminderAccess!.calendarID : ""
         if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
@@ -1465,7 +1467,7 @@ final class ControlCenter: ObservableObject {
             let snapshot = try await StartupTrace.measureAsync("reload.workspaceSnapshot") { try await store.workspaceSnapshot(.core) }
             latestClaimsBySource = snapshot.currentClaimsBySource
             // Publish the core lists together, without awaits between related data sets.
-            applyCoreSnapshot(snapshot)
+            applyCoreSnapshot(snapshot, reminderAnomalies: try await store.reminderSyncAnomalies())
             coreSnapshotApplied = true
             StartupTrace.mark("reload.published")
             await validateCoreSelection(store: store)
@@ -1502,7 +1504,7 @@ final class ControlCenter: ObservableObject {
             await StartupTrace.measureAsync("reload.quietFeedback") { await refreshQuietFeedback() }
             await StartupTrace.measureAsync("reload.sourceDiscussions") { await refreshSourceDiscussions() }
             if contextsFroze {
-                applyCoreSnapshot(try await store.workspaceSnapshot(.core))
+                applyCoreSnapshot(try await store.workspaceSnapshot(.core), reminderAnomalies: try await store.reminderSyncAnomalies())
                 StartupTrace.mark("reload.coreRepublished")
             }
         }
@@ -1517,7 +1519,7 @@ final class ControlCenter: ObservableObject {
         if plan.coreSecondary {
             do {
                 let snapshot = try await StartupTrace.measureAsync("reload.coreSecondarySnapshot") { try await store.workspaceSnapshot(.coreSecondary) }
-                applyCoreSnapshot(snapshot)
+                applyCoreSnapshot(snapshot, reminderAnomalies: try await store.reminderSyncAnomalies())
                 workspaceLoaded = true
                 StartupTrace.mark("reload.firstScreen")
                 await validateCoreSelection(store: store)
