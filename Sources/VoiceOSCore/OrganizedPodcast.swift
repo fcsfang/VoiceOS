@@ -260,6 +260,9 @@ public func ingestOrganizedPodcast(at directory: URL, allowReminderWrites: Bool 
         linkPairings.append(pairing)
     }
     let ids = try importOrganizedClaims(context: context, proposals: proposals, commandID: command)
+    // The organizer result is final for every personal folder now; decide which
+    // materials it left without a single attributable viewpoint.
+    try evaluateSourceExtractionFlags(sourceIDs: Set(sourceIDs.values))
     guard let claimID = ids.first else {
         try finishTranscriptImport(folders: tasks.source_folders)
         return 0
