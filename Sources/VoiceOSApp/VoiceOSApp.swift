@@ -929,7 +929,7 @@ final class ControlCenter: ObservableObject {
                     await refresh()
                 } catch let incomplete as TopicOrganizationIncomplete {
                     topicCooldown.recordFailure(reason: incomplete.localizedDescription)
-                    topicOrganizationStatus = "\(incomplete.topicCount) 个主题待补齐；已完成的主题会保留，可稍后补齐"
+                    topicOrganizationStatus = incomplete.localizedDescription
                     await refresh()
                 } catch {
                     if Task.isCancelled || error is CancellationError {

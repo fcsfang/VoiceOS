@@ -111,17 +111,23 @@ public struct TopicOrganizationAttemptIdentity: Sendable {
         self.provider=provider;self.model=model;self.promptVersion=promptVersion;self.schemaVersion=schemaVersion
     }
 }
-/// Two stages with separate identities: a cheap skeleton over viewpoints, then
-/// small body batches per topic. Attempt rows record which stage produced them.
+/// Three stages with separate identities: skeleton batches over viewpoints, a
+/// merge over their candidates, then small body batches per topic. Attempt rows
+/// record which stage produced them.
 public protocol TopicOrganizationPort: Sendable {
     func organizeSkeleton(_ input: TopicSkeletonInput) async throws -> TopicSkeletonResult
+    func organizeSkeletonMerge(_ input: TopicSkeletonMergeInput) async throws -> TopicSkeletonMergeResult
     func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult
     var skeletonIdentity: TopicOrganizationAttemptIdentity { get }
+    var mergeIdentity: TopicOrganizationAttemptIdentity { get }
     var bodyIdentity: TopicOrganizationAttemptIdentity { get }
 }
 public extension TopicOrganizationPort {
     var skeletonIdentity: TopicOrganizationAttemptIdentity {
         .init(provider:"topic_skeleton",model:"unspecified",promptVersion:"topic-skeleton-v1",schemaVersion:"topics-v1")
+    }
+    var mergeIdentity: TopicOrganizationAttemptIdentity {
+        .init(provider:"topic_skeleton_merge",model:"unspecified",promptVersion:"topic-skeleton-merge-v1",schemaVersion:"topics-v1")
     }
     var bodyIdentity: TopicOrganizationAttemptIdentity {
         .init(provider:"topic_body",model:"unspecified",promptVersion:"topic-body-v1",schemaVersion:"topics-v1")
@@ -232,20 +238,38 @@ extension VoiceOSStore {
     }
 
     func topicSkeletonInput(_ input: TopicOrganizationInput) -> TopicSkeletonInput {
-        let seeds = input.topics.map { TopicSkeletonTopicSeed(id: $0.id, title: $0.title) }.sorted { $0.id < $1.id }
-        let viewpoints = input.knowledge.map { item -> TopicSkeletonViewpoint in
+        let seeds = topicSkeletonSeeds(input), viewpoints = topicSkeletonViewpoints(input)
+        // The stage key follows the viewpoints plus user-named topics. Topic
+        // seeds the skeleton itself created must not invalidate a resume.
+        let encoded = (try? Self.relevanceJSON(TopicSkeletonDigestInput(version: "topic-skeleton-v1", viewpoints: viewpoints, manualTopics: topicSkeletonManualSeeds(input)))) ?? ""
+        return .init(digest: Self.relevanceHash(Data(encoded.utf8)), topics: seeds, viewpoints: viewpoints)
+    }
+
+    func topicSkeletonSeeds(_ input: TopicOrganizationInput) -> [TopicSkeletonTopicSeed] {
+        input.topics.map { TopicSkeletonTopicSeed(id: $0.id, title: $0.title) }.sorted { $0.id < $1.id }
+    }
+
+    func topicSkeletonManualSeeds(_ input: TopicOrganizationInput) -> [TopicSkeletonTopicSeed] {
+        input.topics.filter { !$0.isAIOrganized }
+            .map { TopicSkeletonTopicSeed(id: $0.id, title: $0.title) }.sorted { $0.id < $1.id }
+    }
+
+    func topicSkeletonViewpoints(_ input: TopicOrganizationInput) -> [TopicSkeletonViewpoint] {
+        input.knowledge.map { item -> TopicSkeletonViewpoint in
             let sourceID = item.sourceIDs.first ?? ""
             return .init(id: item.id,
                          statement: TopicOrganizationSlicePolicy.shortened(item.statement, scalars: TopicOrganizationSlicePolicy.statementScalarLimit),
                          sourceID: sourceID,
                          occurredAt: input.sourceDates[sourceID] ?? "")
         }.sorted { $0.id < $1.id }
-        // The stage key follows the viewpoints plus user-named topics. Topic
-        // seeds the skeleton itself created must not invalidate a resume.
-        let manualSeeds = input.topics.filter { !$0.isAIOrganized }
-            .map { TopicSkeletonTopicSeed(id: $0.id, title: $0.title) }.sorted { $0.id < $1.id }
-        let encoded = (try? Self.relevanceJSON(TopicSkeletonDigestInput(version: "topic-skeleton-v1", viewpoints: viewpoints, manualTopics: manualSeeds))) ?? ""
-        return .init(digest: Self.relevanceHash(Data(encoded.utf8)), topics: seeds, viewpoints: viewpoints)
+    }
+
+    /// One skeleton request per ≤150 viewpoints. A batch digest covers only
+    /// that batch, so an unchanged batch resumes on its own.
+    func topicSkeletonBatches(_ input: TopicOrganizationInput) throws -> [TopicSkeletonBatchPlan] {
+        try TopicSkeletonBatching.plans(viewpoints: topicSkeletonViewpoints(input),
+                                        seeds: topicSkeletonSeeds(input),
+                                        manualTopics: topicSkeletonManualSeeds(input))
     }
 
     private func buildTopicOrganizationInput() throws -> TopicOrganizationInput? {
@@ -346,28 +370,53 @@ extension VoiceOSStore {
         return saved
     }
 
-    /// Skeleton first, then small body batches. Each finished stage is written
-    /// before the next request, completed stages are reused by digest, and a
-    /// failed batch leaves the rest of the run untouched.
+    /// Skeleton batches first, one merge over their candidates, then small body
+    /// batches. Each finished stage is written before the next request, so a
+    /// resume replays only the stages that never completed, and a failed batch
+    /// leaves the rest of the run untouched.
     @discardableResult public func organizeTopics(using model: any TopicOrganizationPort, force: Bool = false, topUp: Bool = false) async throws -> Bool {
         guard let input = try prepareTopicOrganization(), !input.knowledge.isEmpty else { return false }
         if !force && !topUp, try topicOrganizationsAreCurrent(input: input) { return false }
         let reuseCompleted = !force
         let contextID = try persistLocalContext(input.context, destination: .cloud)
-        let skeletonInput = topicSkeletonInput(input)
-        let skeleton: TopicSkeletonResult
-        if reuseCompleted, let saved = try completedStage(digest: skeletonInput.digest, stage: "skeleton") {
-            skeleton = try JSONDecoder().decode(TopicSkeletonResult.self, from: Data(saved.utf8))
-        } else {
-            skeleton = try await requestSkeleton(model, input: input, skeletonInput: skeletonInput, contextID: contextID)
+        let batchPlans = try topicSkeletonBatches(input)
+        var outcomes: [TopicSkeletonBatchOutcome] = []
+        var failedBatches: [(scope: String, reason: String)] = []
+        for plan in batchPlans {
+            try Task.checkCancellation()
+            guard try prepareTopicOrganization()?.digest == input.digest else {
+                throw TopicOrganizationInputChanged()
+            }
+            if reuseCompleted, let saved = try completedStage(digest: plan.digest, stage: "skeleton"),
+               let result = try? JSONDecoder().decode(TopicSkeletonResult.self, from: Data(saved.utf8)) {
+                outcomes.append(.init(plan: plan, result: result))
+                continue
+            }
+            do {
+                let result = try await requestSkeletonBatch(model, input: input, plan: plan, contextID: contextID)
+                outcomes.append(.init(plan: plan, result: result))
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch is TopicOrganizationInputChanged {
+                throw TopicOrganizationInputChanged()
+            } catch {
+                failedBatches.append((plan.scope, error.localizedDescription))
+            }
         }
+        if !failedBatches.isEmpty {
+            throw TopicOrganizationIncomplete(skeletonBatchCount: failedBatches.count,
+                                              firstReason: failedBatches.first?.reason ?? "")
+        }
+        let merged = try await resolveSkeletonMerge(model, input: input, outcomes: outcomes,
+                                                    contextID: contextID, reuseCompleted: reuseCompleted)
+        let skeleton = merged.skeleton
         let applied = try db.transaction {
             let applied = try applyTopicSkeleton(skeleton, input: input)
             // Persist the topics' real IDs so a resumed run reuses them instead
             // of minting duplicates for proposals that started empty.
             let resolved = resolvedSkeleton(skeleton, applied: applied)
-            try db.execute("UPDATE topic_organization_stages SET result_json=? WHERE digest=? AND stage='skeleton'",
-                           [try Self.relevanceJSON(resolved), skeletonInput.digest])
+            try db.execute("UPDATE topic_organization_stages SET result_json=? WHERE digest=? AND stage='skeleton-merge'",
+                           [try Self.relevanceJSON(resolved), merged.digest])
             return applied
         }
         // Skeleton links can extend an existing user topic, which changes the
@@ -381,7 +430,7 @@ extension VoiceOSStore {
         for plan in plans {
             try Task.checkCancellation()
             guard try prepareTopicOrganization()?.digest == runDigest else {
-                throw VoiceOSError("资料或任务已变化，将基于当前内容重新归组")
+                throw TopicOrganizationInputChanged()
             }
             if reuseCompleted, let saved = try completedStage(digest: plan.digest, stage: "body"),
                let result = try? JSONDecoder().decode(TopicBodyResult.self, from: Data(saved.utf8)),
@@ -402,7 +451,7 @@ extension VoiceOSStore {
             }
             guard try prepareTopicOrganization()?.digest == runDigest else {
                 try db.execute("UPDATE model_attempts SET state='rejected',error='资料或任务已变化；未接纳' WHERE id=? AND state='reserved'", [call.attemptID])
-                throw VoiceOSError("资料或任务已变化，将基于当前内容重新归组")
+                throw TopicOrganizationInputChanged()
             }
             do {
                 try Self.validateTopicBody(call.result, input: plan.input, sources: runInput.context.sources)
@@ -431,46 +480,147 @@ extension VoiceOSStore {
 
     // MARK: stage requests
 
-    private func requestSkeleton(_ model: any TopicOrganizationPort, input: TopicOrganizationInput,
-                                 skeletonInput: TopicSkeletonInput, contextID: String) async throws -> TopicSkeletonResult {
+    private func requestSkeletonBatch(_ model: any TopicOrganizationPort, input: TopicOrganizationInput,
+                                      plan: TopicSkeletonBatchPlan, contextID: String) async throws -> TopicSkeletonResult {
         let identity = model.skeletonIdentity, attemptID = UUID().uuidString
         try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)",
                        [attemptID, contextID, identity.provider, identity.model, identity.promptVersion, identity.schemaVersion, Self.now(), try db.nextModelProducerSequence()])
         try checkpoint(.modelReserved)
         let result: TopicSkeletonResult
-        do { result = try await model.organizeSkeleton(skeletonInput) }
+        do { result = try await model.organizeSkeleton(plan.input) }
+        catch let truncated as TopicSkeletonTruncated {
+            // The server answered; the batch itself is too large. Never file
+            // this as an unknown or time-out result.
+            let reason = truncated.localizedDescription
+            try db.execute("UPDATE model_attempts SET state='rejected',error=? WHERE id=? AND state='reserved'", [reason, attemptID])
+            try saveStage(digest: plan.digest, stage: "skeleton", scope: plan.scope, state: "failed", resultJSON: nil, error: reason, attemptID: attemptID)
+            throw truncated
+        }
         catch ModelPortFailure.rejected(let reason, _, _) {
             try db.execute("UPDATE model_attempts SET state='rejected',error=? WHERE id=? AND state='reserved'", [reason, attemptID])
-            try saveStage(digest: skeletonInput.digest, stage: "skeleton", scope: "all", state: "failed", resultJSON: nil, error: reason, attemptID: attemptID)
+            try saveStage(digest: plan.digest, stage: "skeleton", scope: plan.scope, state: "failed", resultJSON: nil, error: reason, attemptID: attemptID)
             throw ModelPortFailure.rejected(reason)
         }
         catch {
             let reason = error is ModelDeadlineExceeded
-                ? "主题骨架整理超时未返回；服务端结果未知，不自动重发"
-                : Task.isCancelled ? "主题骨架整理已取消" : "主题骨架未返回结果；服务端结果未知，不自动重发"
+                ? "主题骨架批整理超时未返回；服务端结果未知，不自动重发"
+                : Task.isCancelled ? "主题骨架批整理已取消" : "主题骨架批未返回结果；服务端结果未知，不自动重发"
             try db.execute("UPDATE model_attempts SET state='unknown',error=? WHERE id=? AND state='reserved'", [reason, attemptID])
-            try saveStage(digest: skeletonInput.digest, stage: "skeleton", scope: "all", state: "failed", resultJSON: nil, error: reason, attemptID: attemptID)
+            try saveStage(digest: plan.digest, stage: "skeleton", scope: plan.scope, state: "failed", resultJSON: nil, error: reason, attemptID: attemptID)
             throw error
         }
         do {
-            try TopicOrganizationSlicingValidation.skeleton(result, input: skeletonInput,
+            try TopicOrganizationSlicingValidation.skeleton(result, input: plan.input,
                                                             allowedSources: Set(input.context.sources.map(\.sourceID)))
             guard try prepareTopicOrganization()?.digest == input.digest else {
-                throw VoiceOSError("资料或任务已变化，将基于当前内容重新归组")
+                throw TopicOrganizationInputChanged()
             }
             try db.transaction {
-                try saveStage(digest: skeletonInput.digest, stage: "skeleton", scope: "all", state: "completed",
+                try saveStage(digest: plan.digest, stage: "skeleton", scope: plan.scope, state: "completed",
                               resultJSON: try Self.relevanceJSON(result), error: nil, attemptID: attemptID)
                 try db.execute("UPDATE model_attempts SET state='completed',result_digest=? WHERE id=? AND state='reserved'",
                                [Self.relevanceHash(Data(("topic-skeleton-v1|"+result.responseID).utf8)), attemptID])
             }
         } catch {
             try db.execute("UPDATE model_attempts SET state='rejected',error='结果未接纳；不自动重发' WHERE id=? AND state='reserved'", [attemptID])
-            try saveStage(digest: skeletonInput.digest, stage: "skeleton", scope: "all", state: "failed",
+            try saveStage(digest: plan.digest, stage: "skeleton", scope: plan.scope, state: "failed",
                           resultJSON: nil, error: error.localizedDescription, attemptID: attemptID)
             throw error
         }
         return result
+    }
+
+    /// One merge over every batch's candidates, then the local backstop: a
+    /// merged list that dropped viewpoints gets one more skeleton request for
+    /// each affected batch and one final merge; no viewpoint is ever silently
+    /// lost. The completed stage stores the resolved final skeleton so a resume
+    /// applies it without replaying any request.
+    private func resolveSkeletonMerge(_ model: any TopicOrganizationPort, input: TopicOrganizationInput,
+                                      outcomes: [TopicSkeletonBatchOutcome], contextID: String,
+                                      reuseCompleted: Bool) async throws -> (skeleton: TopicSkeletonResult, digest: String) {
+        var current = outcomes
+        var mergeInput = try TopicSkeletonBatching.mergeInput(current)
+        if reuseCompleted, let saved = try completedStage(digest: mergeInput.digest, stage: "skeleton-merge"),
+           let assembled = try? JSONDecoder().decode(TopicSkeletonResult.self, from: Data(saved.utf8)) {
+            return (assembled, mergeInput.digest)
+        }
+        var call = try await requestSkeletonMerge(model, mergeInput: mergeInput, contextID: contextID)
+        var missing = TopicSkeletonBatching.missingViewpoints(call.result, outcomes: current)
+        if !missing.isEmpty {
+            try db.execute("UPDATE model_attempts SET state='rejected',error=? WHERE id=? AND state='reserved'",
+                           ["合流遗漏 \(missing.count) 个观点，未接纳；按批补齐", call.attemptID])
+            try saveStage(digest: mergeInput.digest, stage: "skeleton-merge", scope: "all", state: "failed",
+                          resultJSON: nil, error: "合流遗漏 \(missing.count) 个观点", attemptID: call.attemptID)
+            var retryFailures: [(scope: String, reason: String)] = []
+            for index in current.indices where !Set(current[index].plan.input.viewpoints.map(\.id)).isDisjoint(with: missing) {
+                try Task.checkCancellation()
+                do {
+                    let result = try await requestSkeletonBatch(model, input: input, plan: current[index].plan, contextID: contextID)
+                    current[index] = .init(plan: current[index].plan, result: result)
+                } catch is CancellationError {
+                    throw CancellationError()
+                } catch is TopicOrganizationInputChanged {
+                    throw TopicOrganizationInputChanged()
+                } catch {
+                    retryFailures.append((current[index].plan.scope, error.localizedDescription))
+                }
+            }
+            if !retryFailures.isEmpty {
+                throw TopicOrganizationIncomplete(skeletonBatchCount: retryFailures.count,
+                                                  firstReason: retryFailures.first?.reason ?? "")
+            }
+            mergeInput = try TopicSkeletonBatching.mergeInput(current)
+            call = try await requestSkeletonMerge(model, mergeInput: mergeInput, contextID: contextID)
+            missing = TopicSkeletonBatching.missingViewpoints(call.result, outcomes: current)
+            guard missing.isEmpty else {
+                try db.execute("UPDATE model_attempts SET state='rejected',error=? WHERE id=? AND state='reserved'",
+                               ["合流后仍有 \(missing.count) 个观点未归组；不自动重发", call.attemptID])
+                try saveStage(digest: mergeInput.digest, stage: "skeleton-merge", scope: "all", state: "failed",
+                              resultJSON: nil, error: "合流后仍有 \(missing.count) 个观点未归组", attemptID: call.attemptID)
+                throw VoiceOSError("合流后仍有 \(missing.count) 个观点未归组，未保存不完整归组")
+            }
+        }
+        let assembled = TopicSkeletonBatching.assembledSkeleton(call.result, outcomes: current)
+        try TopicOrganizationSlicingValidation.skeleton(assembled, input: topicSkeletonInput(input),
+                                                        allowedSources: Set(input.context.sources.map(\.sourceID)))
+        try db.transaction {
+            try saveStage(digest: mergeInput.digest, stage: "skeleton-merge", scope: "all", state: "completed",
+                          resultJSON: try Self.relevanceJSON(assembled), error: nil, attemptID: call.attemptID)
+            try db.execute("UPDATE model_attempts SET state='completed',result_digest=? WHERE id=? AND state='reserved'",
+                           [Self.relevanceHash(Data(("topic-skeleton-merge-v1|" + call.result.responseID).utf8)), call.attemptID])
+        }
+        return (assembled, mergeInput.digest)
+    }
+
+    private func requestSkeletonMerge(_ model: any TopicOrganizationPort, mergeInput: TopicSkeletonMergeInput,
+                                      contextID: String) async throws -> (result: TopicSkeletonMergeResult, attemptID: String) {
+        let identity = model.mergeIdentity, attemptID = UUID().uuidString
+        try db.execute("INSERT INTO model_attempts(id,context_id,provider,model,prompt_version,schema_version,state,created_at,producer_sequence) VALUES(?,?,?,?,?,?,'reserved',?,?)",
+                       [attemptID, contextID, identity.provider, identity.model, identity.promptVersion, identity.schemaVersion, Self.now(), try db.nextModelProducerSequence()])
+        try checkpoint(.modelReserved)
+        let result: TopicSkeletonMergeResult
+        do { result = try await model.organizeSkeletonMerge(mergeInput) }
+        catch ModelPortFailure.rejected(let reason, _, _) {
+            try db.execute("UPDATE model_attempts SET state='rejected',error=? WHERE id=? AND state='reserved'", [reason, attemptID])
+            try saveStage(digest: mergeInput.digest, stage: "skeleton-merge", scope: "all", state: "failed", resultJSON: nil, error: reason, attemptID: attemptID)
+            throw ModelPortFailure.rejected(reason)
+        }
+        catch {
+            let reason = error is ModelDeadlineExceeded
+                ? "主题骨架合流超时未返回；服务端结果未知，不自动重发"
+                : Task.isCancelled ? "主题骨架合流已取消" : "主题骨架合流未返回结果；服务端结果未知，不自动重发"
+            try db.execute("UPDATE model_attempts SET state='unknown',error=? WHERE id=? AND state='reserved'", [reason, attemptID])
+            try saveStage(digest: mergeInput.digest, stage: "skeleton-merge", scope: "all", state: "failed", resultJSON: nil, error: reason, attemptID: attemptID)
+            throw error
+        }
+        do { try TopicOrganizationSlicingValidation.skeletonMerge(result, input: mergeInput) }
+        catch {
+            try db.execute("UPDATE model_attempts SET state='rejected',error='结果未接纳；不自动重发' WHERE id=? AND state='reserved'", [attemptID])
+            try saveStage(digest: mergeInput.digest, stage: "skeleton-merge", scope: "all", state: "failed",
+                          resultJSON: nil, error: error.localizedDescription, attemptID: attemptID)
+            throw error
+        }
+        return (result, attemptID)
     }
 
     private func requestTopicBody(_ model: any TopicOrganizationPort, plan: TopicBodyPlan,
@@ -686,6 +836,10 @@ extension VoiceOSStore {
 
     public static func validateTopicSkeleton(_ result: TopicSkeletonResult, input: TopicSkeletonInput, allowedSources: Set<String>) throws {
         try TopicOrganizationSlicingValidation.skeleton(result, input: input, allowedSources: allowedSources)
+    }
+
+    public static func validateTopicSkeletonMerge(_ result: TopicSkeletonMergeResult, input: TopicSkeletonMergeInput) throws {
+        try TopicOrganizationSlicingValidation.skeletonMerge(result, input: input)
     }
 
     public static func validateTopicBodyStructure(_ result: TopicBodyResult, input: TopicBodyInput) throws {

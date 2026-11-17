@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...70).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...71).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1369,6 +1369,30 @@ final class Database {
                   updated_at TEXT NOT NULL)
                 """)
                 try execute("PRAGMA user_version=70")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "70" {
+            try transaction {
+                // The batched skeleton adds a merge stage. SQLite cannot widen a
+                // CHECK constraint in place, so rebuild the stage table; the
+                // table and the version bump commit together.
+                try execute("""
+                CREATE TABLE IF NOT EXISTS topic_organization_stages_next(
+                  digest TEXT NOT NULL,
+                  stage TEXT NOT NULL CHECK(stage IN ('skeleton','skeleton-merge','body')),
+                  scope TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('running','completed','failed')),
+                  result_json TEXT,
+                  error TEXT,
+                  attempt_id TEXT,
+                  updated_at TEXT NOT NULL,
+                  PRIMARY KEY(digest,stage,scope))
+                """)
+                try execute("INSERT OR IGNORE INTO topic_organization_stages_next SELECT * FROM topic_organization_stages")
+                try execute("DROP TABLE topic_organization_stages")
+                try execute("ALTER TABLE topic_organization_stages_next RENAME TO topic_organization_stages")
+                try execute("PRAGMA user_version=71")
             }
         }
 

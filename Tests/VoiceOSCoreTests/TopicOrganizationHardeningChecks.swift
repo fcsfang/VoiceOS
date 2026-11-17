@@ -10,13 +10,17 @@ private struct HangingTopicTransport: ModelHTTPTransport {
 }
 
 private actor RecordingTopicPort: TopicOrganizationPort {
-    private(set) var skeletonCalls = 0, bodyCalls = 0
+    private(set) var skeletonCalls = 0, mergeCalls = 0, bodyCalls = 0
     func organizeSkeleton(_ input: TopicSkeletonInput) async throws -> TopicSkeletonResult {
         skeletonCalls += 1
         return .init(briefing: "合成简报", highlightSourceIDs: input.viewpoints.map(\.sourceID),
                      topics: [.init(topicID: "", title: "合成主题", summary: "合成摘要",
                                     questions: ["接下来验证什么？"], viewpointIDs: input.viewpoints.map(\.id))],
                      responseID: "hardened-skeleton-\(skeletonCalls)")
+    }
+    func organizeSkeletonMerge(_ input: TopicSkeletonMergeInput) async throws -> TopicSkeletonMergeResult {
+        mergeCalls += 1
+        return mergedSkeletonMerge(input, responseID: "hardened-merge-\(mergeCalls)")
     }
     func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult {
         bodyCalls += 1
@@ -33,6 +37,9 @@ private actor RejectingTopicPort: TopicOrganizationPort {
     func organizeSkeleton(_ input: TopicSkeletonInput) async throws -> TopicSkeletonResult {
         throw ModelPortFailure.rejected("合成拒绝")
     }
+    func organizeSkeletonMerge(_ input: TopicSkeletonMergeInput) async throws -> TopicSkeletonMergeResult {
+        throw ModelPortFailure.rejected("合成拒绝")
+    }
     func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult {
         throw ModelPortFailure.rejected("合成拒绝")
     }
@@ -40,6 +47,9 @@ private actor RejectingTopicPort: TopicOrganizationPort {
 
 private actor FailingTopicPort: TopicOrganizationPort {
     func organizeSkeleton(_ input: TopicSkeletonInput) async throws -> TopicSkeletonResult {
+        throw VoiceOSError("合成失败：模型不可用")
+    }
+    func organizeSkeletonMerge(_ input: TopicSkeletonMergeInput) async throws -> TopicSkeletonMergeResult {
         throw VoiceOSError("合成失败：模型不可用")
     }
     func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult {
@@ -122,9 +132,13 @@ final class TopicOrganizationHardeningChecks: XCTestCase {
         do {
             _ = try await store.organizeTopics(using: RejectingTopicPort())
             XCTFail("被拒绝的结果不能当作成功")
-        } catch let error as ModelPortFailure {
-            guard case .rejected(let reason, _, _) = error else { XCTFail("应保留拒绝原因"); return }
-            XCTAssertEqual(reason, "合成拒绝")
+        } catch let incomplete as TopicOrganizationIncomplete {
+            // A rejected skeleton batch is isolated like any other batch; the
+            // run reports how many batches still need regrouping.
+            XCTAssertEqual(incomplete.kind, .skeletonBatches)
+            XCTAssertEqual(incomplete.count, 1)
+            XCTAssertTrue(incomplete.firstReason.contains("合成拒绝"), incomplete.localizedDescription)
+            XCTAssertTrue(incomplete.localizedDescription.contains("批观点待重新归组"), incomplete.localizedDescription)
         }
         let attempt = try await latestTopicAttempt(store)
         XCTAssertEqual(attempt["state"], "rejected")
@@ -137,8 +151,9 @@ final class TopicOrganizationHardeningChecks: XCTestCase {
         do {
             _ = try await store.organizeTopics(using: FailingTopicPort())
             XCTFail("失败端口不能返回成功")
-        } catch let error as VoiceOSError {
-            XCTAssertEqual(error.message, "合成失败：模型不可用")
+        } catch let incomplete as TopicOrganizationIncomplete {
+            XCTAssertEqual(incomplete.kind, .skeletonBatches)
+            XCTAssertTrue(incomplete.firstReason.contains("合成失败：模型不可用"), incomplete.localizedDescription)
         }
         let failed = try await latestTopicAttempt(store)
         XCTAssertEqual(failed["state"], "unknown")
