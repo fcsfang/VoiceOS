@@ -180,6 +180,7 @@ struct WorkspaceProcessingBar: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let open: () -> Void
+    @State private var confirmingDiscard = false
     var body: some View {
         let status = model.workspaceProcessingStatus
         HStack(spacing:12) {
@@ -193,11 +194,21 @@ struct WorkspaceProcessingBar: View {
                 Label("等待自动重试",systemImage:"clock.arrow.circlepath").foregroundStyle(.secondary).lineLimit(1)
             } else { Text(status.title).foregroundStyle(.secondary).lineLimit(1) }
             Spacer(minLength:8)
-            if model.dictationActive { Button("停止并整理") { model.stopDictation() } }
+            if model.dictationActive {
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    Text(model.dictationElapsedText).monospacedDigit().foregroundStyle(.secondary)
+                }
+                Button("取消并丢弃…") { confirmingDiscard = true }
+                Button("停止并整理") { model.stopDictation() }
+            }
             else if model.pausedActionBatch?.isRunning == true { Button("停止后续处理") { model.stopPausedActionBatch() } }
             else if model.fullRecordingBusy { Button("停止后续处理") { model.cancelFullRecording() } }
             Button("查看处理",action:open).accessibilityIdentifier("workspace.processing")
         }.vosFont(WorkspaceText.meta).padding(.horizontal,20).padding(.vertical,12).background(palette.surface)
+            .alert("取消并丢弃这段录音？", isPresented: $confirmingDiscard) {
+                Button("继续录音", role: .cancel) {}
+                Button("取消并丢弃", role: .destructive) { model.cancelAndDiscardDictation() }
+            } message: { Text("这段录音不会保存，也不会进入转写与整理。") }
     }
 }
 
