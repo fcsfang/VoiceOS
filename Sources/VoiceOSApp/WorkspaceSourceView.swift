@@ -535,13 +535,18 @@ struct WorkspaceSourceView: View {
                 }
                 if source.transcript == nil {
                     Text(source.error ?? "转写尚未完成，理解与待办识别还未开始。").foregroundStyle(.secondary).textSelection(.enabled)
-                    if ["failed","blocked"].contains(source.jobState ?? "") {
+                    if source.dictationRecoveryPending {
+                        Text("这段录音在结束前被中断，还没有完整原件。可以先封存可解码片段并进入正常整理，也可以直接移入回收站。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        DictationRecoveryControls(model:model,source:source)
+                    } else if ["failed","blocked"].contains(source.jobState ?? "") {
                         Button("重试本地转写") { Task { await model.retry(source) } }.buttonStyle(.borderedProminent)
                     }
                 }
-                VStack(alignment:.leading,spacing:10) {
-                    MaterialManagementControls(model:model,source:source)
-                    Text(source.isArchived ? "已归档：从日常材料列表收起，仍可作为历史依据使用。" : "归档只收起材料；移入回收站会暂停相关理解，原件和历史仍可恢复。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                if !source.dictationRecoveryPending {
+                    VStack(alignment:.leading,spacing:10) {
+                        MaterialManagementControls(model:model,source:source)
+                        Text(source.isArchived ? "已归档：从日常材料列表收起，仍可作为历史依据使用。" : "归档只收起材料；移入回收站会暂停相关理解，原件和历史仍可恢复。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                    }
                 }
                 if !pausedThoughts.isEmpty {
                     VStack(alignment:.leading,spacing:12) {
