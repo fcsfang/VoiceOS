@@ -3,11 +3,19 @@ import XCTest
 import VoiceOSPlatform
 
 private actor RenameTopicPort: TopicOrganizationPort {
-    func organize(_ input: TopicOrganizationInput) async throws -> TopicOrganizationResult {
-        let sourceIDs = input.context.sources.map(\.sourceID)
-        return .init(briefing: "合成简报", highlightSourceIDs: sourceIDs,
-                     topics: [.init(topicID: "", title: "合成主题", summary: "合成摘要", questions: ["合成问题"], sourceIDs: sourceIDs)],
-                     responseID: "rename-topic")
+    func organizeSkeleton(_ input: TopicSkeletonInput) async throws -> TopicSkeletonResult {
+        .init(briefing: "合成简报", highlightSourceIDs: input.viewpoints.map(\.sourceID),
+              topics: [.init(topicID: "", title: "合成主题", summary: "合成摘要",
+                             questions: ["合成问题"], viewpointIDs: input.viewpoints.map(\.id))],
+              responseID: "rename-skeleton")
+    }
+    func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult {
+        .init(topics: input.topics.map { topic in
+            .init(topicID: topic.topicID, questions: ["合成问题"],
+                  sections: [.init(id: "synthetic", title: "合成小节", summary: "合成正文",
+                                   claimIDs: topic.viewpoints.map(\.id), actionIDs: topic.tasks.map(\.id),
+                                   evidence: topic.quotes.prefix(1).map { .init(sourceID: $0.sourceID, quote: $0.quote) })])
+        }, responseID: "rename-body")
     }
 }
 
@@ -30,6 +38,12 @@ final class ReflectionRenameChecks: XCTestCase {
         let store = try await openStore()
         let sourceID = try await store.recordUserExpression("重命名主题时，AI 整理出的摘要与阅读卡片应当保留。")
         _ = try await store.setSourceLocalOnly(sourceID: sourceID, expectedVersion: 1, localOnly: false)
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [sourceID])
+        let item = try XCTUnwrap(context.sources.first)
+        _ = try await store.importOrganizedClaims(context: context, proposals: [
+            .init(statement: item.text, ownership: .userTentative,
+                  references: [.init(sourceID: sourceID, transcriptVersionID: item.transcriptVersionID, spanID: item.spans[0].id)])
+        ], commandID: "rename-claims-" + sourceID)
         let organized = try await store.organizeTopics(using: RenameTopicPort())
         XCTAssertTrue(organized)
         let questions = try await store.reflectionQuestions()

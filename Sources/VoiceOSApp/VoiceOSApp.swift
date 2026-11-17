@@ -904,37 +904,58 @@ final class ControlCenter: ObservableObject {
     private var topicAttemptDigest: String?
     private var topicPending = false
     private var topicForcePending = false
-    func queueTopicOrganization(retry: Bool = false) {
+    private var topicTopUpPending = false
+    func queueTopicOrganization(retry: Bool = false, topUp: Bool = false) {
         guard initialized, topicModel != nil else { return }
         topicForcePending = topicForcePending || retry
+        topicTopUpPending = topicTopUpPending || topUp
         if topicWorker != nil { topicPending = true; return }
-        if retry { topicAttemptDigest = nil }
+        if retry || topUp { topicAttemptDigest = nil }
         topicWorker = Task {
             defer { topicWorker = nil; organizingTopics = false }
             repeat {
                 topicPending = false
-                let force = topicForcePending
-                topicForcePending = false
+                let force = topicForcePending, top = !force && topicTopUpPending
+                topicForcePending = false; topicTopUpPending = false
                 do {
                     guard let store, let port = topicModel, let input = try await store.prepareTopicOrganization() else { return }
-                    if !force, try await !store.needsTopicOrganizationRefresh() { return }
-                    if !force, let waiting = topicCooldown.waitingMessage() { topicOrganizationStatus = waiting; return }
+                    if !force && !top, try await !store.needsTopicOrganizationRefresh() { return }
+                    if !force && !top, let waiting = topicCooldown.waitingMessage() { topicOrganizationStatus = waiting; return }
                     topicAttemptDigest = input.digest
-                    organizingTopics = true; topicOrganizationStatus = "AI 正在连接跨时间的材料与任务…"
-                    _ = try await store.organizeTopics(using: port, force: force)
+                    organizingTopics = true; topicOrganizationStatus = "AI 正在先整理主题骨架，再分批写正文…"
+                    _ = try await store.organizeTopics(using: port, force: force, topUp: top)
                     topicCooldown.recordSuccess()
                     topicOrganizationStatus = "主题与首页简报已更新"
                     await refresh()
+                } catch let incomplete as TopicOrganizationIncomplete {
+                    topicCooldown.recordFailure(reason: incomplete.localizedDescription)
+                    topicOrganizationStatus = "\(incomplete.topicCount) 个主题待补齐；已完成的主题会保留，可稍后补齐"
+                    await refresh()
                 } catch {
                     if Task.isCancelled || error is CancellationError {
-                        topicOrganizationStatus = "主题整理已取消"
+                        topicOrganizationStatus = "主题整理已取消；已完成的主题会保留"
                     } else {
                         topicCooldown.recordFailure(reason: error.localizedDescription)
                         topicOrganizationStatus = TopicOrganizationCooldown.failureMessage(reason: error.localizedDescription)
+                        await refresh()
                     }
                 }
             } while topicPending && !Task.isCancelled
         }
+    }
+    /// Views read this instead of the topic page's corner text. A pending body
+    /// or an active cooldown both belong in the processing/home attention list.
+    var topicOrganizationPendingTopicCount: Int {
+        workspaceTopics.filter { $0.organization?.bodyPending == true }.count
+    }
+    var topicOrganizationNeedsAttention: Bool {
+        topicOrganizationPendingTopicCount > 0 || topicCooldown.remainingSeconds() != nil
+    }
+    var topicOrganizationAttentionText: String? {
+        let pending = topicOrganizationPendingTopicCount
+        if pending > 0 { return "主题整理未完成 · \(pending) 个主题待补齐" }
+        guard let waiting = topicCooldown.waitingMessage() else { return nil }
+        return waiting
     }
 
     @Published var dictationBusy = false

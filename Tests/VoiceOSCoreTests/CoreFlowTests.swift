@@ -121,22 +121,22 @@ private actor FlowTopics: TopicOrganizationPort {
     let sharedSourceID: String?
     var calls = 0
     init(questionID:String,unrelatedID:String,sharedSourceID:String? = nil) { self.questionID=questionID;self.unrelatedID=unrelatedID;self.sharedSourceID=sharedSourceID }
-    func organize(_ input:TopicOrganizationInput) async throws -> TopicOrganizationResult {
+    func organizeSkeleton(_ input:TopicSkeletonInput) async throws -> TopicSkeletonResult {
         calls += 1
-        let all=input.context.sources.map(\.sourceID)
         let existing=input.topics.first { $0.title == "生活整理" }?.id ?? ""
-        func section(_ id:String,_ title:String,personal:Bool) -> TopicReadingSection {
-            let ids=personal ? all.filter { $0 != unrelatedID } : [unrelatedID]
-            let source=input.context.sources.first { ids.contains($0.sourceID) }!
-            return .init(id:id,title:title,summary:personal ? "先区分判断、尝试与实际证据，再继续验证。" : "保留整理书架的安排与实际记录。",
-                claimIDs:input.knowledge.filter { personal ? !$0.sourceIDs.contains(unrelatedID) : $0.sourceIDs.contains(unrelatedID) }.map(\.id),
-                actionIDs:input.tasks.filter { personal ? !$0.sourceIDs.contains(unrelatedID) : $0.sourceIDs.contains(unrelatedID) }.map(\.id),
-                evidence:[.init(sourceID:source.sourceID,quote:source.text)])
-        }
+        let personal=input.viewpoints.filter { $0.sourceID != unrelatedID }.map(\.id)
+        let life=input.viewpoints.filter { $0.sourceID == unrelatedID }.map(\.id)
         return .init(briefing:"Agent 主题连接了早期判断、尝试和 AI 报告；一次尝试仍不足以证明原因。",highlightSourceIDs:[unrelatedID],topics:[
-            .init(topicID:questionID,title:"怎样让 Agent 稳定完成真实任务？",summary:"已保存判断、尝试与报告，仍需用实际任务检验。",questions:["任务边界怎样影响完成质量？"],sourceIDs:all.filter { $0 != unrelatedID },sections:[section("agent-practice","用真实任务检验完成标准",personal:true)]),
-            .init(topicID:existing,title:"生活整理",summary:"记录了整理书架的待办。",questions:[],sourceIDs:[unrelatedID] + (sharedSourceID.map { [$0] } ?? []),sections:[section("life-plan","整理书架的安排",personal:false)])
+            .init(topicID:questionID,title:"怎样让 Agent 稳定完成真实任务？",summary:"已保存判断、尝试与报告，仍需用实际任务检验。",questions:["任务边界怎样影响完成质量？"],viewpointIDs:personal),
+            .init(topicID:existing,title:"生活整理",summary:"记录了整理书架的待办。",questions:[],viewpointIDs:life)
         ],responseID:"fixture-topics-\(calls)")
+    }
+    func organizeBody(_ input:TopicBodyInput) async throws -> TopicBodyResult {
+        .init(topics: input.topics.map { topic in
+            let evidence=topic.quotes.prefix(1).map { TopicReadingEvidence(sourceID:$0.sourceID,quote:$0.quote) }
+            return .init(topicID:topic.topicID,questions:[],sections:[.init(id:"section-" + topic.topicID,title:topic.title,summary:topic.summary,
+                claimIDs:topic.viewpoints.map(\.id),actionIDs:topic.tasks.map(\.id),evidence:evidence)])
+        },responseID:"fixture-body-\(calls)")
     }
 }
 private struct FlowDiscussion: DiscussionModelPort {
@@ -1950,7 +1950,9 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(aiTopic.isAIOrganized,true)
         XCTAssertNotNil(aiTopic.organization)
         let groupedFocus=try await store.reflectionForTopic(questionID:aiTopic.id,timeZoneID:zone)
-        XCTAssertEqual(Set(groupedFocus.sourceIDs),Set([unrelated,relevant]))
+        // Material follows viewpoint assignment in the two-stage flow; the
+        // unrelated recording carries no viewpoint assigned to this topic.
+        XCTAssertEqual(Set(groupedFocus.sourceIDs),Set([unrelated]))
         let assigned=Set(aiTopic.organization?.sections?.flatMap(\.actionIDs) ?? [])
         XCTAssertTrue(groupingInput.tasks.contains { $0.state == "completed" },"主题整理必须带入已完成行动")
         XCTAssertFalse(groupingInput.tasks.filter { $0.sourceIDs.contains(relevant) }.contains { assigned.contains($0.id) },"共享材料不能把另一个主题的任务一起带入")
@@ -1973,7 +1975,10 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(savedQuestions.first { $0.id == question.id }?.title, question.title)
         let migratedTopic = savedQuestions.first { $0.id == aiTopic.id }
         XCTAssertNotNil(migratedTopic?.organization, "过期组织保留展示，由过期标记驱动重新整理")
-        XCTAssertTrue(migratedTopic?.organizationStale == true, "迁移后的观点是只读历史，结构卡片标记为待重新整理")
+        // The sliced flow scopes claimVersions to the viewpoints the topic was
+        // assigned, so a frozen claim elsewhere in the same material no longer
+        // marks every card stale; staleness follows the claims a card cites.
+        XCTAssertNotEqual(migratedTopic?.organizationStale, true, "主题引用的观点仍为当前，卡片不应被其它观点的历史状态拖成过期")
         let restoredBriefing=try await recovered.workspaceBriefing()
         XCTAssertNil(restoredBriefing,"迁移后的讨论是只读历史，包含这些回复的简报应等待重新整理")
         let restoredAITopic=try await recovered.reflectionForTopic(questionID:aiTopic.id,timeZoneID:zone)

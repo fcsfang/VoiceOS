@@ -135,6 +135,12 @@ struct WorkspaceDiscussionView: View {
                         Spacer()
                         Button(model.discussionSending ? "思考中…" : "发送") { Task { await send() } }.buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command).disabled(!canSend)
                     }
+                    if !model.modelConfigured {
+                        HStack(spacing: 8) {
+                            Text("发送需要先配置文本模型。").vosFont(WorkspaceText.caption).foregroundStyle(palette.warning)
+                            Button("配置文本模型…") { model.chooseTextModel() }.vosFont(WorkspaceText.caption)
+                        }
+                    }
                     Text("发送即允许本轮文字用于 AI 讨论，音频保留本机。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 } else {
                     Text(model.discussionSession?.state == "ended" ? "这段讨论已结束，历史仍可回看。" : "这段讨论的依据已变化，只能回看；结束它不会改变历史。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)

@@ -27,6 +27,7 @@ struct WorkspaceTopicReadingView: View {
     @FocusState private var structureFocused: Bool
 
     private var sections: [TopicReadingSection] { topic.organization?.sections ?? [] }
+    private var bodyPending: Bool { topic.organization?.bodyPending == true }
     private var claimIDs: Set<String> { Set(sections.flatMap(\.claimIDs)) }
     private var actionIDs: Set<String> { Set(sections.flatMap(\.actionIDs)) }
     private var claims: [CandidateClaim] { model.claims.filter { claimIDs.contains($0.id) && $0.validity == "current" && $0.reviewState != "rejected" } }
@@ -103,6 +104,7 @@ struct WorkspaceTopicReadingView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:28) {
             if topic.organizationStale == true { TopicStaleBanner() }
+            if model.topicOrganizationPendingTopicCount > 0 { topicPendingBanner }
             if mode == "概览" { introduction }
             if mode != "行动与结果" {
                 if sections.isEmpty { preparingCards }
@@ -150,11 +152,32 @@ struct WorkspaceTopicReadingView: View {
             .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
     }
 
+    private var topicPendingBanner: some View {
+        HStack(spacing:12) {
+            Label("主题整理未完成 · \(model.topicOrganizationPendingTopicCount) 个主题待补齐",systemImage:"hourglass")
+                .vosFont(WorkspaceText.meta.size, weight: .medium)
+            Spacer(minLength:0)
+            if model.organizingTopics { ProgressView().controlSize(.small) }
+            else { Button("补齐正文") { model.queueTopicOrganization(topUp:true) }.disabled(!model.modelConfigured) }
+        }.padding(.horizontal,14).padding(.vertical,10).frame(maxWidth:.infinity,alignment:.leading)
+            .background(palette.action.opacity(0.08),in:RoundedRectangle(cornerRadius:10))
+            .overlay { RoundedRectangle(cornerRadius:10).strokeBorder(palette.action.opacity(0.25),lineWidth:1) }
+    }
+
     private var preparingCards: some View {
         VStack(alignment:.leading,spacing:12) {
-            Label(model.organizingTopics ? "正在整理小主题与阅读卡片" : "这份主题尚未生成结构卡片",systemImage:"rectangle.3.group").vosFont(WorkspaceText.meta.size, weight: .semibold)
-            Text("完整材料已保留；整理后会显示要点、原话与行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Label(model.organizingTopics ? "正在整理小主题与阅读卡片" : bodyPending ? "正文整理中" : "这份主题尚未生成结构卡片",systemImage:"rectangle.3.group").vosFont(WorkspaceText.meta.size, weight: .semibold)
+            Text(bodyPending ? "主题骨架已完成；正文按主题分批生成，已完成的会逐批出现并保留。" : "完整材料已保留；整理后会显示要点、原话与行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if model.organizingTopics { ProgressView().controlSize(.small) }
+            else if bodyPending {
+                Button("补齐正文") { model.queueTopicOrganization(topUp:true) }.disabled(!model.modelConfigured)
+                if !model.modelConfigured {
+                    HStack(spacing:8) {
+                        Text("整理需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Button("配置文本模型…") { model.chooseTextModel() }.vosFont(WorkspaceText.meta)
+                    }
+                }
+            }
             else {
                 Button("整理主题卡片") { model.queueTopicOrganization(retry:true) }.disabled(!model.modelConfigured)
                 if !model.modelConfigured {
@@ -512,6 +535,9 @@ struct WorkspaceTopicTile: View {
                 }
                 Text(topic.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
                 if topic.organizationStale == true { TopicStaleBanner() }
+                if topic.organization?.bodyPending == true {
+                    Label("正文整理中",systemImage:"hourglass").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                }
                 if let summary=topic.organization?.summary, !summary.isEmpty {
                     Text(summary).vosFont(WorkspaceText.body).lineSpacing(4)
                         .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)

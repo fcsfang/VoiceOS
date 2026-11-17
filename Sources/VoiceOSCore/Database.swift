@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...68).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...69).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1337,6 +1337,26 @@ final class Database {
             }
         }
 
+        if try query("PRAGMA user_version").first?["user_version"] == "68" {
+            try transaction {
+                // Stage records make the skeleton and each body batch replayable
+                // by digest; the primary key is the single idempotency marker.
+                try execute("""
+                CREATE TABLE IF NOT EXISTS topic_organization_stages(
+                  digest TEXT NOT NULL,
+                  stage TEXT NOT NULL CHECK(stage IN ('skeleton','body')),
+                  scope TEXT NOT NULL,
+                  state TEXT NOT NULL CHECK(state IN ('running','completed','failed')),
+                  result_json TEXT,
+                  error TEXT,
+                  attempt_id TEXT,
+                  updated_at TEXT NOT NULL,
+                  PRIMARY KEY(digest,stage,scope))
+                """)
+                try execute("PRAGMA user_version=69")
+            }
+        }
+
         try ensureSearchTriggers()
     }
 
@@ -1377,7 +1397,7 @@ final class Database {
     func execute(_ sql: String, _ arguments: [String?] = []) throws { _ = try query(sql, arguments) }
     func query(_ sql: String, _ arguments: [String?] = []) throws -> [[String: String]] {
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { throw error() }
+        guard sqlite3_prepare_v2(handle, sql, -1, &stmt, nil) == SQLITE_OK else { throw error(sql) }
         defer { sqlite3_finalize(stmt) }
         let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
         for (i, value) in arguments.enumerated() {
@@ -1394,7 +1414,7 @@ final class Database {
         while true {
             let result = sqlite3_step(stmt)
             if result == SQLITE_DONE { return rows }
-            guard result == SQLITE_ROW else { throw error() }
+            guard result == SQLITE_ROW else { throw error(sql) }
             var row: [String: String] = [:]
             for i in 0..<sqlite3_column_count(stmt) where sqlite3_column_type(stmt, i) != SQLITE_NULL {
                 let key = String(cString: sqlite3_column_name(stmt, i))
@@ -1417,5 +1437,10 @@ final class Database {
             try execute("UPDATE transcripts SET current_version_id=? WHERE id=?", [versionID,row["id"]])
         }
     }
-    private func error() -> VoiceOSError { VoiceOSError("资料库错误：\(String(cString: sqlite3_errmsg(handle)))") }
+    private func error(_ sql: String? = nil) -> VoiceOSError {
+        let message=String(cString: sqlite3_errmsg(handle))
+        guard let sql else { return VoiceOSError("资料库错误：\(message)") }
+        let statement=sql.split(whereSeparator: \.isWhitespace).prefix(14).joined(separator: " ")
+        return VoiceOSError("资料库错误：\(message)｜\(statement)")
+    }
 }

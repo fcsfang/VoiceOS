@@ -26,6 +26,7 @@ struct RecentContentHome: View {
     @State private var readingStates: [String: SourceReadingState] = [:]
     @State private var clueRename: ClueRenameRequest?
     @State private var clueFailureText = ""
+    @State private var clueFailureTitle = "操作未完成"
     @State private var showingClueFailure = false
     @State private var organizeAttemptSourceID: String?
     @FocusState private var timelineFocused: Bool
@@ -62,7 +63,7 @@ struct RecentContentHome: View {
         .sheet(item: $clueRename) { request in
             RecentClueRenameSheet(model: model, clue: request.clue, title: request.title, resettable: request.resettable) { clueRename = nil }
         }
-        .alert("操作未完成", isPresented: $showingClueFailure) {
+        .alert(clueFailureTitle, isPresented: $showingClueFailure) {
             Button("好", role: .cancel) {}
         } message: { Text(clueFailureText) }
     }
@@ -446,8 +447,9 @@ struct RecentContentHome: View {
         Task { if !(await model.setRecentClueHidden(clue, hidden: hidden)) { showClueFailure() } }
     }
 
-    private func showClueFailure() {
-        clueFailureText = model.status.isEmpty ? "操作未完成，请稍后重试。" : model.status
+    private func showClueFailure(title: String = "操作未完成", message: String? = nil) {
+        clueFailureTitle = title
+        clueFailureText = message ?? (model.status.isEmpty ? "操作未完成，请稍后重试。" : model.status)
         showingClueFailure = true
     }
 
@@ -457,7 +459,10 @@ struct RecentContentHome: View {
 
     private func openClaim(_ claimID: String) {
         guard let claim = model.claims.first(where: { $0.id == claimID }),
-              let reference = claim.references.first else { return }
+              let reference = claim.references.first else {
+            showClueFailure(title: "无法打开原话", message: "这条想法的原话已不可用，可能已随整理更新或来源被删除。")
+            return
+        }
         openSpan(reference.sourceID, reference.spanID)
     }
 

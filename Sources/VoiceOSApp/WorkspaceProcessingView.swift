@@ -181,10 +181,10 @@ extension ControlCenter {
         }.sorted { $0.count != $1.count ? $0.count > $1.count : $0.source.displayTitle < $1.source.displayTitle }
     }
     var workspaceAttentionCount: Int {
-        workspaceTranscriptReviewPoints.reduce(0) { $0 + $1.count } + workspaceFailedFollowups.count + workspaceFailedKnowledgeReviews.count + (workspaceNeedsAttention ? 1 : 0)
+        workspaceTranscriptReviewPoints.reduce(0) { $0 + $1.count } + workspaceFailedFollowups.count + workspaceFailedKnowledgeReviews.count + (topicOrganizationNeedsAttention ? 1 : 0) + (workspaceNeedsAttention ? 1 : 0)
     }
     var workspaceProcessingOutstanding: Bool {
-        workspaceNeedsAttention || !workspaceTranscriptReviewPoints.isEmpty ||
+        workspaceNeedsAttention || topicOrganizationNeedsAttention || !workspaceTranscriptReviewPoints.isEmpty ||
         !workspaceFailedFollowups.isEmpty || !workspaceFailedKnowledgeReviews.isEmpty ||
         recordingRequests.contains { $0.state == "waiting" } ||
         workspaceUnfinishedIntents.contains { $0.state == .queued || $0.state == .running }
@@ -412,6 +412,14 @@ struct WorkspaceProcessingView: View {
                         } else if let review=failedKnowledgeReviews.first {
                             Button("重试知识核查") { Task { await model.reviewKnowledge(sourceID:review.sourceID,retry:true) } }.accessibilityLabel("重试知识核查：" + name(review.sourceID)).disabled(!model.modelConfigured || model.knowledgeReviewBusy)
                         }
+                    }
+                }
+                if model.topicOrganizationNeedsAttention {
+                    let pending=model.topicOrganizationPendingTopicCount
+                    WorkspaceSection(title:"主题整理未完成",subtitle:"已完成的主题会保留；补齐只处理还没整理完的部分。",icon:"square.stack.3d.up",count:pending) {
+                        if let text=model.topicOrganizationAttentionText { reason(text) }
+                        Button(pending > 0 ? "继续补齐正文（\(pending)）" : "立即重试") { model.queueTopicOrganization(retry:pending == 0, topUp:pending > 0) }
+                            .accessibilityLabel(pending > 0 ? "继续补齐主题正文（\(pending)）" : "立即重试主题整理")
                     }
                 }
                 ForEach(model.workspaceFailedAssistantExecutions) { execution in
