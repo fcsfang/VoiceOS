@@ -57,6 +57,28 @@ extension ControlCenter {
         actionRecords.filter { $0.nature == nature.rawValue && $0.kind == "opportunity" && $0.state == "open" && $0.validity == "current" }
     }
 }
+
+extension ControlCenter {
+    /// Splitting and re-judging share the detach step. Re-judging then reuses
+    /// the existing grouping channel, so receipts and validation stay the same.
+    func splitRecordingExpression(sourceIDs: Set<String>) async throws -> Int {
+        guard let store else { throw VoiceOSError("资料库尚未打开") }
+        let count = try store.detachRecordingsFromExpressions(sourceIDs: sourceIDs)
+        await refresh()
+        return count
+    }
+    func rejudgeRecordingExpressions(sourceIDs: Set<String>) async throws -> Int {
+        guard let store else { throw VoiceOSError("资料库尚未打开") }
+        guard let port = recordingExpressionModel else { throw VoiceOSError("需要先配置文本模型，才能重新判断连续表达") }
+        guard !fullRecordingBusy, understandingSource == nil else { throw VoiceOSError("当前录音仍在处理，完成后再重新判断") }
+        _ = try store.detachRecordingsFromExpressions(sourceIDs: sourceIDs)
+        let groups = try await store.connectRecordingExpressions(using: port)
+        await refresh()
+        queueRecordingTitles()
+        queueTopicOrganization()
+        return groups.count
+    }
+}
 struct WorkspaceHeading: View {
     let eyebrow: String
     let title: String
@@ -938,6 +960,16 @@ struct WorkspaceView: View {
             if let topic {
                 HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil };creatingTopic=false;newTopicTitle="";editingTopicID=nil };Spacer(); Menu("调整主题") { Button("修改主题名称") { newTopicTitle=topic.title;editingTopicID=topic.id;creatingTopic=true };Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) } } }
                 WorkspaceHeading(eyebrow:"",title:topic.title,subtitle:"\(topicSources.count) 份材料")
+                if let titleSource=model.records.first(where: { $0.id == topic.sourceID }) {
+                    Button { go(.source(titleSource.id)) } label: {
+                        HStack(spacing:5) {
+                            Text("标题取自《" + displayTitle(titleSource.displayTitle) + "》").vosFont(WorkspaceText.meta)
+                            Image(systemName:"arrow.up.forward.square").vosFont(WorkspaceText.caption.size, weight:.semibold)
+                        }.foregroundStyle(palette.secondaryText).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                        .help("打开主题标题的来源材料")
+                        .accessibilityLabel("标题取自《" + displayTitle(titleSource.displayTitle) + "》，打开来源材料")
+                }
                 WorkspaceTabs(selection:$topicTab,titles:["概览","认识与问题","行动与结果","材料"])
                 topicContent(topic)
             } else {
@@ -955,7 +987,24 @@ struct WorkspaceView: View {
                 let linked=Set(model.workspaceTopicSources.values.flatMap { $0 })
                 let unlinked=activeMaterials.filter { !linked.contains($0.id) }
                 if !unlinked.isEmpty {
-                    DisclosureGroup("尚未归入主题的材料（\(unlinked.count)）") { ForEach(distinctExpressions(unlinked)) { sourceRow($0,catalog:catalog) } }
+                    VStack(alignment:.leading,spacing:8) {
+                        DisclosureGroup {
+                            ForEach(distinctExpressions(unlinked)) { source in
+                                sourceRow(source,catalog:catalog,reason:source.topicAssignmentReason(in:catalog))
+                            }
+                        } label: {
+                            HStack(spacing:10) {
+                                Text("尚未归入主题的材料（\(unlinked.count)）").vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
+                                Spacer(minLength:8)
+                                Button(model.organizingTopics ? "AI 正在归组…" : "交给 AI 归组") { model.queueTopicOrganization() }
+                                    .vosFont(WorkspaceText.meta)
+                                    .disabled(model.organizingTopics || !model.modelConfigured)
+                                    .help(model.modelConfigured ? "让 AI 把这些材料连接到已有或新的主题" : "先配置文本模型，才能交给 AI 归组")
+                            }.contentShape(Rectangle())
+                        }
+                        Text(unassignedTopicReasonSummary(unlinked,catalog:catalog)).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                        if !model.topicOrganizationStatus.isEmpty { Text(model.topicOrganizationStatus).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText) }
+                    }
                 }
             }
             if creatingTopic {
@@ -1591,8 +1640,9 @@ struct WorkspaceView: View {
     private func sectionTitle(_ title:String) -> some View { Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader) }
     private func sourceNavigationTitle(_ id:String) -> String {
         guard let source=model.records.first(where: { $0.id == id }) else { return "材料" }
-        if let expression=source.recordingExpression(in:Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })),expression.sourceIDs.count > 1,
-           let index=expression.sourceIDs.firstIndex(of:id) { return expression.title+" / 第 \(index+1) 段原文" }
+        let catalog=Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })
+        if let expression=source.recordingExpression(in:catalog),expression.sourceIDs.count > 1,
+           let index=expression.sourceIDs.firstIndex(of:id) { return expression.displayTitle(in:catalog)+" / 第 \(index+1) 段原文" }
         return displayTitle(source.displayTitle)
     }
     private var todayReading: [TodayReadingItem] {
@@ -1613,21 +1663,49 @@ struct WorkspaceView: View {
         readingPlans=(try? await store.incrementalPlans()) ?? []
     }
     private var recordCatalog: [String:SourceRecord] { Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) }) }
-    private func sourceRow(_ source:SourceRecord,catalog:[String:SourceRecord],highlighted:Bool = false,trailingGutter:CGFloat = 0) -> some View {
+    private func sourceRow(_ source:SourceRecord,catalog:[String:SourceRecord],highlighted:Bool = false,trailingGutter:CGFloat = 0,reason:String? = nil) -> some View {
         let expression=source.recordingExpression(in:catalog)
         let combined=(expression?.sourceIDs.count ?? 0) > 1
         let first=combined ? expression!.sourceIDs.first.flatMap { catalog[$0] } ?? source : source
         let origin=source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料"
         let issues=source.unresolvedTranscriptionIssueCount
         let reading:(text:String,color:Color)? = issues > 0 ? ("疑点 \(issues)",palette.warning) : materialReadingStatus(source.id)
-        return WorkspaceRow(title:displayTitle(combined ? expression!.title : source.displayTitle),subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:"",trailingStyle:reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary,statusAccessibility:reading?.text ?? "",trailingGutter:trailingGutter) { go(.source(source.id)) }
+        let groupNote=reason ?? (source.recordingExpressionIssue(in:catalog) != nil ? "分组待重新判断" : nil)
+        return WorkspaceRow(title:displayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : "") + (groupNote.map { " · " + $0 } ?? ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:"",trailingStyle:reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary,statusAccessibility:reading?.text ?? "",trailingGutter:trailingGutter) { go(.source(source.id)) }
             .background(highlighted ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             .overlay { if highlighted { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
                 Button("标为在读") { setMaterialReading(source.id,.reading) }
                 Button("标为已读") { setMaterialReading(source.id,.read) }
+                if let saved=source.presentation?.expression, saved.sourceIDs.count > 1 {
+                    Divider()
+                    Button("拆为独立录音") { splitMaterialExpression(saved.sourceIDs) }
+                    Button("重新判断连续表达") { rejudgeMaterialExpressions(saved.sourceIDs) }
+                        .disabled(model.fullRecordingBusy || model.understandingSource != nil)
+                }
             }
+    }
+    private func unassignedTopicReasonSummary(_ sources:[SourceRecord],catalog:[String:SourceRecord]) -> String {
+        var counts:[String:Int]=[:]
+        for source in distinctExpressions(sources) { counts[source.topicAssignmentReason(in:catalog),default:0] += 1 }
+        return counts.sorted { $0.value > $1.value }.prefix(3).map { "\($0.value) 份 · \($0.key)" }.joined(separator:"；")
+    }
+    private func splitMaterialExpression(_ ids:[String]) {
+        Task {
+            do {
+                let count=try await model.splitRecordingExpression(sourceIDs:Set(ids))
+                toastMessage="已拆成 \(count) 段独立录音"
+            } catch { error=error.localizedDescription }
+        }
+    }
+    private func rejudgeMaterialExpressions(_ ids:[String]) {
+        Task {
+            do {
+                let groups=try await model.rejudgeRecordingExpressions(sourceIDs:Set(ids))
+                toastMessage="已重新判断连续表达 · \(groups) 组"
+            } catch { error=error.localizedDescription }
+        }
     }
     private func materialReadingStatus(_ id:String) -> (text:String,color:Color)? {
         switch readingStates[id] ?? .unread {
