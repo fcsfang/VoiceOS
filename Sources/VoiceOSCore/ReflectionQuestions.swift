@@ -9,6 +9,7 @@ public struct ReflectionQuestion: Identifiable, Codable, Sendable {
     public let updatedAt: String
     public var isAIOrganized: Bool? = nil
     public var organization: TopicOrganizationSummary? = nil
+    public var organizationStale: Bool? = nil
 }
 
 public enum ReflectionQuestionEntryKind: String, CaseIterable, Codable, Sendable {
@@ -99,8 +100,10 @@ extension VoiceOSStore {
     private func reflectionQuestionRecord(_ row: [String: String], catalog: [String: SourceRecord], linkedSourceIDs: [String]) -> ReflectionQuestion {
         var question = ReflectionQuestion(id: row["id"]!, title: row["title"]!, sourceID: row["title_source_id"]!, createdAt: row["created_at"]!, updatedAt: row["updated_at"]!)
         question.isAIOrganized = row["ai_named"] == "1"
-        if !catalog.isEmpty, let json = row["organization_json"], let summary = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(json.utf8)),
-           (try? topicSummaryIsCurrent(summary, catalog: catalog, linked: Set(linkedSourceIDs))) == true { question.organization = summary }
+        if !catalog.isEmpty, let json = row["organization_json"], let summary = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(json.utf8)) {
+            question.organization = summary
+            question.organizationStale = (try? topicSummaryIsCurrent(summary, catalog: catalog, linked: Set(linkedSourceIDs))) != true
+        }
         return question
     }
 
