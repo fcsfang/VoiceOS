@@ -110,20 +110,23 @@ struct WorkspaceListGroupHeader: View {
 }
 
 /// A list-class section: header on the canvas, hairline rule, no card shell.
-/// Collapsible sections start folded so secondary blocks stay out of the way.
+/// Collapsible sections start folded unless `initiallyExpanded` says otherwise.
 struct WorkspaceListSection<Content: View>: View {
     @Environment(\.workspacePalette) private var palette
     let title: String
     var subtitle: String = ""
     var count: Int? = nil
+    var badge: String? = nil
     var collapsible = false
+    var initiallyExpanded = false
     @ViewBuilder let content: () -> Content
-    @State private var expanded = false
+    @State private var userExpanded: Bool?
+    private var expanded: Bool { userExpanded ?? initiallyExpanded }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if collapsible {
-                Button { withAnimation(.easeOut(duration: 0.16)) { expanded.toggle() } } label: { header }
+                Button { withAnimation(.easeOut(duration: 0.16)) { userExpanded = !expanded } } label: { header }
                     .buttonStyle(.plain)
                     .accessibilityValue(expanded ? "已展开" : "已收起")
             } else {
@@ -150,7 +153,12 @@ struct WorkspaceListSection<Content: View>: View {
                 Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
             }
             Spacer(minLength: 8)
-            if let count {
+            if let badge {
+                Text(badge).vosFont(WorkspaceText.caption.size, weight: .semibold)
+                    .foregroundStyle(palette.warning)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(palette.warning.opacity(0.14), in: Capsule())
+            } else if let count {
                 Text(String(count)).vosFont(WorkspaceText.caption.size, monospacedDigit: true)
                     .foregroundStyle(palette.tertiaryText)
             }
