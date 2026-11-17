@@ -107,7 +107,12 @@ struct WeeklyReviewView: View {
                         Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
                     }
                     summaryRow(proxy)
-                    if !loadError.isEmpty { WorkspaceNoticeText(message: loadError, severity: .danger) }
+                    if !loadError.isEmpty {
+                        HStack(alignment: .top, spacing: 10) {
+                            WorkspaceNoticeText(message: loadError, severity: .danger)
+                            Button("重试") { Task { await load() } }.controlSize(.small)
+                        }
+                    }
                     undoHint
                     dailyCloseSection
                     if isEmpty {
@@ -126,14 +131,7 @@ struct WeeklyReviewView: View {
             .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 560)
             .overlay(alignment: .bottom) { undoBar }
             .animation(.easeOut(duration: 0.2), value: undoEntry?.id)
-            .task {
-                loadError = ""
-                let previousStatus = model.status
-                focusedIDs = await model.focusedActionIDs()
-                somedayRows = await model.somedayReviewCandidates()
-                focusLoaded = true
-                if model.status != previousStatus { loadError = model.status }
-            }
+            .task { await load() }
             .task(id: undoEntry?.id) {
                 guard let id = undoEntry?.id else { return }
                 do { try await Task.sleep(for: .seconds(8)) } catch { return }
@@ -155,26 +153,44 @@ struct WeeklyReviewView: View {
     }
 
     private func summaryRow(_ proxy: ScrollViewProxy) -> some View {
-        HStack(spacing: 10) {
-            summaryButton("本周完成 \(weekCompleted.count)", target: "review.completed", proxy: proxy)
+        let links = WeeklyReviewSummaryLinks(weekCompleted: weekCompleted.count,
+                                             pendingOutcomes: model.visibleOutcomeFollowups.count,
+                                             stalledGoals: stalledGoals.count,
+                                             unclarifiedTasks: unclarifiedTasks.count)
+        return HStack(spacing: 10) {
+            summaryStat("本周完成 \(weekCompleted.count)", target: "review.completed", isLink: links.completed, proxy: proxy)
             Text("·").foregroundStyle(palette.tertiaryText)
-            summaryButton("待补结果 \(model.visibleOutcomeFollowups.count)", target: pendingOutcomeAnchor, proxy: proxy)
+            summaryStat("待补结果 \(model.visibleOutcomeFollowups.count)", target: pendingOutcomeAnchor, isLink: links.pendingOutcome, proxy: proxy)
             Text("·").foregroundStyle(palette.tertiaryText)
-            summaryButton("停滞目标 \(stalledGoals.count)", target: "review.stalled", proxy: proxy)
+            summaryStat("停滞目标 \(stalledGoals.count)", target: "review.stalled", isLink: links.stalled, proxy: proxy)
             Text("·").foregroundStyle(palette.tertiaryText)
-            summaryButton("待确认 \(unclarifiedTasks.count)", target: "review.unclarified", proxy: proxy)
+            summaryStat("待确认 \(unclarifiedTasks.count)", target: "review.unclarified", isLink: links.unclarified, proxy: proxy)
             Spacer(minLength: 0)
         }
     }
 
-    private func summaryButton(_ label: String, target: String, proxy: ScrollViewProxy) -> some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(target, anchor: .top) }
-        } label: {
-            Text(label).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.accent)
+    @ViewBuilder
+    private func summaryStat(_ label: String, target: String, isLink: Bool, proxy: ScrollViewProxy) -> some View {
+        if isLink {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(target, anchor: .top) }
+            } label: {
+                Text(label).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.accent)
+            }
+            .buttonStyle(.plain)
+            .help("跳到「" + label + "」所在区块")
+        } else {
+            Text(label).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.tertiaryText)
         }
-        .buttonStyle(.plain)
-        .help("跳到「" + label + "」所在区块")
+    }
+
+    private func load() async {
+        loadError = ""
+        let previousStatus = model.status
+        focusedIDs = await model.focusedActionIDs()
+        somedayRows = await model.somedayReviewCandidates()
+        focusLoaded = true
+        if model.status != previousStatus { loadError = model.status }
     }
 
     private var reflectionMapSheet: some View {
@@ -394,7 +410,11 @@ struct WeeklyReviewView: View {
         let rows = Array(candidates.prefix(5))
         return WorkspaceSection(title: "下周先做", subtitle: "从即将与随时里挑最多 3 条，确认后加入专注。", icon: "calendar.badge.plus", count: nextWeekEntries.count) {
             if focusSlots == 0 {
-                Text("已有 3 条专注，先到行动页移出。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning).padding(.top, 8)
+                HStack(spacing: 8) {
+                    Text("已有 3 条专注，先到行动页移出。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                    Button("到行动页移出 →") { jump(.todo) }
+                        .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                }.padding(.top, 8)
             }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, entry in
                 if index > 0 { Divider() }
@@ -410,7 +430,13 @@ struct WeeklyReviewView: View {
                     .disabled(selectedFocusIDs.isEmpty || focusSaving)
             }.padding(.top, 10)
             if !focusError.isEmpty {
-                Text(focusError).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning).padding(.top, 10)
+                HStack(spacing: 8) {
+                    Text(focusError).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                    if focusSlots == 0 {
+                        Button("到行动页移出 →") { jump(.todo) }
+                            .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                    }
+                }.padding(.top, 10)
             }
         }
     }
