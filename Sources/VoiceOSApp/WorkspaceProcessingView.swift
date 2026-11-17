@@ -6,6 +6,21 @@ struct WorkspaceProcessingActivity {
     let label: String
 }
 
+struct WorkspaceCompletionRecord: Identifiable {
+    let id = UUID()
+    let category: String
+    let title: String
+    let sourceID: String
+    let date: Date
+}
+
+extension ControlCenter {
+    func recordCompletion(category: String, title: String, sourceID: String) {
+        recentCompletions.insert(.init(category: category, title: title, sourceID: sourceID, date: Date()), at: 0)
+        if recentCompletions.count > 5 { recentCompletions.removeSubrange(5...) }
+    }
+}
+
 /// Failed processing items the user chose not to chase. The
 /// cognitive_feedback_ignores table is bound to relevance receipts, so these
 /// view-level dismissals persist in UserDefaults under stable record IDs.
@@ -447,10 +462,18 @@ struct WorkspaceProcessingView: View {
                     }
                     Button("检查连接与配置",action:openSettings).padding(.top,12)
                 } }
+                if !model.recentCompletions.isEmpty { WorkspaceSection(title:"最近完成",subtitle:"只保留本次运行最近 5 条；点开可查看对应材料。",icon:"clock.arrow.circlepath",count:model.recentCompletions.count) {
+                    ForEach(model.recentCompletions) { item in
+                        WorkspaceRow(title:item.title,subtitle:item.category + " · " + item.date.formatted(date:.abbreviated,time:.shortened),trailing:"查看材料") { openSource(item.sourceID) }
+                    }
+                } }
                 if model.initialized, !model.workspaceProcessingOutstanding, !model.workspaceProcessingBarVisible,
                    inbox.pendingItems.isEmpty, inbox.folderErrors.isEmpty {
-                    Label("已全部处理",systemImage:"checkmark.circle").foregroundStyle(.secondary)
-                        .accessibilityLabel("已全部处理，没有需要查看的处理结果")
+                    VStack(alignment:.leading,spacing:8) {
+                        Label("已全部处理",systemImage:"checkmark.circle").foregroundStyle(.secondary)
+                            .accessibilityLabel("已全部处理，没有需要查看的处理结果")
+                        Text(model.recentCompletions.isEmpty ? "本次运行还没有完成记录；长任务完成后会保留最近 5 条，错过通知也能在这里找回。" : "以上是最近完成的记录，可点开查看材料。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    }
                 }
             }.frame(maxWidth:860,alignment:.leading).padding(30).frame(maxWidth:.infinity,alignment:.top)
         }
