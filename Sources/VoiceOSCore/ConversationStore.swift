@@ -9,6 +9,15 @@ public struct ConversationRecord: Identifiable, Sendable {
     public let validity: String
     public let entryContextID: String
 }
+public struct ConversationPreview: Identifiable, Sendable {
+    public let id: String
+    public let createdAt: String
+    public let updatedAt: String
+    public let state: String
+    public let validity: String
+    public let turnCount: Int
+    public let firstTurnExcerpt: String
+}
 public struct ConversationUserTurn: Identifiable, Sendable {
     public let id: String
     public let ordinal: Int
@@ -92,6 +101,47 @@ extension VoiceOSStore {
             """,[sourceID,sourceID])
         return try conversationRecords(rows)
     }
+    /// One row per session for the history list: the first user turn stands in
+    /// for the topic, and activity means creation, a later turn or the close.
+    public func conversationPreviews(limit: Int = 100) throws -> [ConversationPreview] {
+        guard ready, (1...500).contains(limit) else { throw VoiceOSError("讨论历史范围无效") }
+        let rows = try db.query("""
+            SELECT c.id,c.version,c.state,c.validity,c.entry_context_id,c.created_at,c.ended_at,
+                   (SELECT COUNT(*) FROM conversation_user_turns t WHERE t.conversation_id=c.id) AS turn_count,
+                   (SELECT t.context_id FROM conversation_user_turns t WHERE t.conversation_id=c.id ORDER BY t.ordinal LIMIT 1) AS first_turn_context,
+                   (SELECT t.source_id FROM conversation_user_turns t WHERE t.conversation_id=c.id ORDER BY t.ordinal LIMIT 1) AS first_turn_source,
+                   max(c.created_at,
+                       coalesce((SELECT MAX(u.created_at) FROM conversation_user_turns u WHERE u.conversation_id=c.id), c.created_at),
+                       coalesce(c.ended_at, c.created_at)) AS updated_at
+            FROM conversations c
+            ORDER BY updated_at DESC,c.id DESC LIMIT ?
+            """,[String(limit)])
+        guard !rows.isEmpty else { return [] }
+        let ids = rows.map { $0["id"]! }
+        var turnContexts: [String: [String]] = [:]
+        let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        for row in try db.query("SELECT conversation_id,context_id FROM conversation_user_turns WHERE conversation_id IN (\(placeholders)) ORDER BY conversation_id,ordinal", ids) {
+            turnContexts[row["conversation_id"]!, default: []].append(row["context_id"]!)
+        }
+        for row in rows { try validateConversationContexts(row: row, turnContextIDs: turnContexts[row["id"]!] ?? []) }
+        let finalRows = try db.query("SELECT id,state,validity FROM conversations WHERE id IN (\(placeholders))", ids)
+        let final = Dictionary(uniqueKeysWithValues: finalRows.map { ($0["id"]!, $0) })
+        return try rows.map { row in
+            let id = row["id"]!
+            let firstTurnExcerpt: String
+            if let contextID = row["first_turn_context"], let sourceID = row["first_turn_source"] {
+                let snapshot = try storedConversationContext(contextID)
+                guard let source = snapshot.sources.first(where: { $0.sourceID == sourceID }),
+                      !source.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw VoiceOSError("讨论发言出处不一致") }
+                firstTurnExcerpt = Self.conversationExcerpt(source.text)
+            } else {
+                firstTurnExcerpt = "尚未开始"
+            }
+            return ConversationPreview(id: id, createdAt: row["created_at"]!, updatedAt: row["updated_at"]!,
+                                       state: final[id]!["state"]!, validity: final[id]!["validity"]!,
+                                       turnCount: Int(row["turn_count"]!)!, firstTurnExcerpt: firstTurnExcerpt)
+        }
+    }
     /// The list reads run one JOIN for every row, then keep the single-row
     /// validation per conversation; only a freeze changes the stored row, so
     /// the final states come back in one re-read instead of one per session.
@@ -132,6 +182,11 @@ extension VoiceOSStore {
     }
     private static func conversationRecord(_ row: [String: String]) -> ConversationRecord {
         ConversationRecord(id: row["id"]!, version: Int(row["version"]!)!, state: row["state"]!, validity: row["validity"]!, entryContextID: row["entry_context_id"]!)
+    }
+    private static func conversationExcerpt(_ text: String) -> String {
+        let line = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let scalars = Array(line.unicodeScalars)
+        return scalars.count <= 80 ? line : String(String.UnicodeScalarView(scalars[..<80])) + "…"
     }
     /// Immutable entry text for historical display; never grants processing permission.
     public func conversationHistorySources(conversationID:String) throws -> [ContextTranscript] {
