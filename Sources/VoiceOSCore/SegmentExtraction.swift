@@ -95,7 +95,7 @@ extension VoiceOSStore {
                         try failSegmentExtraction(id:prior.id,batchID:batchID,state:.unknown,reason:"未登记片段结果，不自动重发",usage:[:])
                         return try segmentExtractionAttempts(batchID:batchID).first(where: { $0.id == prior.id })
                     }
-                    try segmentTerminalParent(batchID,state:prior.state == .rejected ? .rejected : .unknown,error:"片段结果不可续发，未自动重试")
+                    try segmentTerminalParent(batchID,state:prior.state == .rejected ? .rejected : .unknown,error:"第 \(segment.ordinal) 段结果不可续发，未自动重试")
                     return prior
                 }
             } else { selected = segment; break }
@@ -115,7 +115,7 @@ extension VoiceOSStore {
             do {
                 guard response.status == .completed, (response.inputTokens ?? 0) >= 0, (response.outputTokens ?? 0) >= 0 else { throw VoiceOSError("片段响应未完成、被拒绝或用量无效") }
                 _ = try Self.validatedSegmentEvidence(scope:batch.scope,segment:segment,proposals:response.proposals)
-            } catch { state = .rejected; reason = error.localizedDescription }
+            } catch { state = .rejected; reason = "第 \(segment.ordinal) 段未通过本地校验：" + error.localizedDescription }
             let current = try segmentedProcessingBatch(id:batchID)
             if current.state != .queued { validity = "frozen" }
             else {
@@ -134,7 +134,7 @@ extension VoiceOSStore {
             }
             try checkpoint(.segmentExtractionCommitted)
         } catch ModelPortFailure.rejected(let reason,let input,let output) {
-            try failSegmentExtraction(id:id,batchID:batchID,state:.rejected,reason:reason,usage:Self.segmentUsage(input:input,output:output))
+            try failSegmentExtraction(id:id,batchID:batchID,state:.rejected,reason:"第 \(segment.ordinal) 段模型响应被拒绝：" + reason,usage:Self.segmentUsage(input:input,output:output))
         } catch {
             try failSegmentExtraction(id:id,batchID:batchID,state:.unknown,reason:unknownModelResultReason(error,phase:"片段"),usage:receivedUsage)
         }

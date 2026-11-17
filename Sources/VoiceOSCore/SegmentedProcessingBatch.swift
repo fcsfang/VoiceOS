@@ -4,6 +4,12 @@ import Foundation
 public enum SegmentedProcessingBatchState: String, Codable, Sendable {
     case queued, blocked, cancelled, frozen, unknown, rejected
 }
+extension SegmentedProcessingBatchState {
+    /// A rejected batch failed a deterministic output check, so an explicit
+    /// user command may start a fresh batch; this record itself stays terminal.
+    /// Unknown results stay closed to every automatic and explicit retry.
+    public var allowsExplicitRetry: Bool { self == .rejected }
+}
 public struct SegmentedProcessingBatch: Identifiable, Sendable {
     public let id: String
     public let commandID: String
@@ -64,6 +70,26 @@ extension VoiceOSStore {
         }
         try checkpoint(.segmentedBatchCommitted)
         return try segmentedProcessingBatch(id:id)
+    }
+    /// Explicit retry for a batch whose model output failed local validation.
+    /// The rejected record stays untouched as history; the retry is a fresh
+    /// batch built from the current source and the same segment budget. A
+    /// queued retry is the click already in flight and is returned as is; any
+    /// finished or failed retry is history, so the next click gets a new one.
+    @discardableResult
+    public func retryRejectedSegmentedBatch(id: String, extraction: ModelConfiguration,
+        aggregation: ModelConfiguration) throws -> SegmentedProcessingBatch {
+        guard ready else { throw VoiceOSError("资料库尚未准备好") }
+        let rejected = try segmentedProcessingBatch(id:id)
+        guard rejected.state.allowsExplicitRetry else { throw VoiceOSError("当前分段批次不是可显式重试的输出校验失败") }
+        let prefix = "segmented-retry:" + rejected.id + ":"
+        let prior = try db.query("SELECT id,state FROM segmented_processing_batches WHERE command_id LIKE ? ORDER BY created_at,id",[prefix + "%"])
+        if let last = prior.last, last["state"] == SegmentedProcessingBatchState.queued.rawValue,
+           let lastID = last["id"] { return try segmentedProcessingBatch(id:lastID) }
+        let commandID = prefix + String(prior.count + 1)
+        let scope = try prepareSegmentedExpressionProcessingScope(sourceID:rejected.scope.plan.source.sourceID,
+            extraction:extraction,aggregation:aggregation,segmentScalarBudget:rejected.scope.plan.scalarBudget)
+        return try enqueueSegmentedProcessingBatch(scope,commandID:commandID,extraction:extraction,aggregation:aggregation)
     }
     @discardableResult
     public func cancelSegmentedProcessingBatch(id: String) throws -> SegmentedProcessingBatch {
