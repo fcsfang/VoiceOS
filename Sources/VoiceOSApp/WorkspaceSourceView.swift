@@ -62,9 +62,9 @@ struct WorkspaceSourceView: View {
     var openInitiation:(String)->Void = { _ in }
     var openFollowups:()->Void = {}
     var scroll: Binding<ScrollPosition>? = nil
+    private var catalog:[String:SourceRecord] { Dictionary(uniqueKeysWithValues: model.records.map { ($0.id,$0) }) }
     private var expression:RecordingExpression? {
-        let catalog=Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })
-        return source.recordingExpression(in:catalog)
+        source.recordingExpression(in:catalog)
     }
     private var expressionIDs:Set<String> { Set(expression?.sourceIDs ?? [source.id]) }
     @State private var loadedContextLinks:[RecordingContextLink]=[]
@@ -348,7 +348,8 @@ struct WorkspaceSourceView: View {
         if let scroll { readingScrollView.scrollPosition(scroll) } else { readingScrollView }
     }
     private var readingTitle: String {
-        MarkdownDocument.plainTitle((expression?.sourceIDs.count ?? 0) > 1 ? expression!.title : source.displayTitle)
+        if let expression, expression.sourceIDs.count > 1 { return MarkdownDocument.plainTitle(expression.displayTitle(in:catalog)) }
+        return MarkdownDocument.plainTitle(source.displayTitle)
     }
     private var sourceActions: some View {
         HStack(spacing:10) {
@@ -362,9 +363,17 @@ struct WorkspaceSourceView: View {
                     .help(source.transcript == nil ? "转写完成后才能按天读" : "按天分段阅读这份文字")
             }
             Menu {
-                Button("修改标题") { naming=source }
+                Button(expression.map { $0.sourceIDs.count > 1 } == true ? "修改分组标题" : "修改标题") { naming=source }
                 Button("更正文字") { editing=source }.disabled(source.transcript == nil)
                     .help(source.transcript == nil ? "转写完成后才能更正文字" : "更正这段原文")
+                if let saved=source.presentation?.expression, saved.sourceIDs.count > 1 {
+                    Divider()
+                    Button("拆为独立录音") { splitExpression(saved.sourceIDs) }
+                        .disabled(model.fullRecordingBusy || model.understandingSource != nil)
+                    Button("重新判断连续表达") { rejudgeExpression(saved.sourceIDs) }
+                        .disabled(model.fullRecordingBusy || model.understandingSource != nil)
+                        .help("重新让 AI 判断这些分段是否属于同一段连续表达")
+                }
                 Divider()
                 Button("按天读") { showingIncrementalReading=true }.disabled(source.transcript == nil)
                     .help(source.transcript == nil ? "转写完成后才能按天读" : "按天分段阅读这份文字")
@@ -409,6 +418,18 @@ struct WorkspaceSourceView: View {
                         }
                         Spacer(minLength:0)
                     }
+                }
+                if let issue=source.recordingExpressionIssue(in:catalog) {
+                    HStack(alignment:.firstTextBaseline,spacing:12) {
+                        Label("连续表达分组暂不可用 · \(issue)。",systemImage:"exclamationmark.triangle")
+                            .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                        Spacer(minLength:8)
+                        Button("重新判断连续表达") { rejudgeExpression(source.presentation?.expression?.sourceIDs ?? [source.id]) }
+                            .disabled(model.fullRecordingBusy || model.understandingSource != nil)
+                        Button("拆为独立录音") { splitExpression(source.presentation?.expression?.sourceIDs ?? [source.id]) }
+                            .disabled(model.fullRecordingBusy || model.understandingSource != nil)
+                    }.padding(16).frame(maxWidth:.infinity,alignment:.leading)
+                        .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
                 }
                 if correctionJustSaved,!model.correctionImpacts.isEmpty {
                     HStack(alignment:.firstTextBaseline,spacing:12) {
@@ -689,7 +710,13 @@ struct WorkspaceSourceView: View {
         .sheet(isPresented:$showingCorrectionImpacts) {
             CorrectionImpactView(model:model,dismiss:{ showingCorrectionImpacts=false;if let id=model.selected,id != source.id { openSource(id) } })
         }
-        .sheet(item:$naming) { source in RecordingTitleEditor(record:source,model:model) { naming=nil } }
+        .sheet(item:$naming) { target in
+            if let expression=target.recordingExpression(in:catalog), expression.sourceIDs.count > 1 {
+                RecordingExpressionTitleEditor(record:target,expression:expression,model:model) { naming=nil }
+            } else {
+                RecordingTitleEditor(record:target,model:model) { naming=nil }
+            }
+        }
         .sheet(item:$claimEditor) { claim in ClaimCorrectionView(claim:claim,model:model,onSaved:{ toast="理解已更新" }) { claimEditor=nil } }
         .sheet(item:$actionClaim) { claim in ActionCreationView(claim:claim,model:model) { actionClaim=nil } }
         .sheet(isPresented:$showingSegmentation) { TranscriptSegmentationView(model:model) { showingSegmentation=false } }
@@ -1028,6 +1055,24 @@ struct WorkspaceSourceView: View {
         selectedText=""
         selectedRange=NSRange(location:0,length:0)
     }
+    private func splitExpression(_ ids:[String]) {
+        guard !ids.isEmpty else { return }
+        Task { @MainActor in
+            do {
+                let count=try await model.splitRecordingExpression(sourceIDs:Set(ids))
+                toast="已拆成 \(count) 段独立录音"
+            } catch { self.error=error.localizedDescription }
+        }
+    }
+    private func rejudgeExpression(_ ids:[String]) {
+        guard !ids.isEmpty else { return }
+        Task { @MainActor in
+            do {
+                let groups=try await model.rejudgeRecordingExpressions(sourceIDs:Set(ids))
+                toast="已重新判断连续表达 · \(groups) 组"
+            } catch { self.error=error.localizedDescription }
+        }
+    }
     private func quote(_ span:TranscriptSpan,text:String) -> String { SourceText.quote(span,in:text) }
     private func truncatedQuote(_ text:String,limit:Int=60)->String {
         text.count <= limit ? text : String(text.prefix(limit)) + "…"
@@ -1165,6 +1210,42 @@ struct ClaimCorrectionView:View {
             let updated=await model.review(claim,action:.correct,statement:text,ownership:CandidateOwnership(rawValue:ownership),note:note)
             saving=false
             if updated { onSaved();dismiss() } else { failure="更新失败，请重试。" }
+        }
+    }
+}
+
+struct RecordingExpressionTitleEditor:View {
+    let record:SourceRecord
+    let expression:RecordingExpression
+    @ObservedObject var model:ControlCenter
+    let dismiss:()->Void
+    @State private var title:String
+    @State private var saving=false
+    init(record:SourceRecord,expression:RecordingExpression,model:ControlCenter,dismiss:@escaping()->Void) {
+        self.record=record;self.expression=expression;self.model=model;self.dismiss=dismiss
+        _title=State(initialValue:expression.manualTitle ?? expression.title)
+    }
+    var body:some View {
+        VStack(alignment:.leading,spacing:16) {
+            Text("修改分组标题").vosFont(WorkspaceText.sectionTitle)
+            TextField("分组标题",text:$title)
+            Text("这 \(expression.sourceIDs.count) 段录音属于同一段连续表达，标题用于整个分组。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            if !model.recordingTitleStatus.isEmpty { Text(model.recordingTitleStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            HStack {
+                if expression.manualTitle != nil { Button("恢复自动标题") { save(nil) }.disabled(saving) }
+                Spacer()
+                Button("取消",action:dismiss).keyboardShortcut(.cancelAction)
+                Button("保存") { save(title) }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                    .disabled(saving || title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || title.count > 100)
+            }
+        }.padding(24).frame(width:600)
+    }
+    private func save(_ value:String?) {
+        guard !saving else { return }
+        saving=true
+        Task { @MainActor in
+            if await model.renameRecording(record,title:value) { dismiss() }
+            saving=false
         }
     }
 }

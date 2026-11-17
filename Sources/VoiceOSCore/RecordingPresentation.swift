@@ -155,9 +155,23 @@ extension VoiceOSStore {
         try savePresentation(saved, sourceID: sourceID)
     }
     public func renameRecording(sourceID: String, title: String?) throws {
-        guard let source = try sources().first(where: { $0.id == sourceID }) else { throw VoiceOSError("录音不存在") }
+        let catalog = try sources()
+        guard let source = catalog.first(where: { $0.id == sourceID }) else { throw VoiceOSError("录音不存在") }
         let clean = title?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard clean == nil || (!clean!.isEmpty && clean!.count <= 100 && !clean!.contains(where: \.isNewline)) else { throw VoiceOSError("请输入一行、不超过100字的标题") }
+        if let expression = source.recordingExpression, expression.sourceIDs.count > 1 {
+            var updated = expression
+            updated.manualTitle = clean
+            try db.transaction {
+                for id in expression.sourceIDs {
+                    guard let member = catalog.first(where: { $0.id == id }), var presentation = member.presentation,
+                          presentation.expression?.id == expression.id else { throw VoiceOSError("分组里的录音已变化，标题未保存") }
+                    presentation.expression = updated
+                    try saveExpressionPresentation(presentation, sourceID: id)
+                }
+            }
+            return
+        }
         var saved = source.presentation ?? RecordingPresentation()
         saved.manualTitle = clean
         try savePresentation(saved, sourceID: sourceID)
@@ -198,5 +212,85 @@ extension VoiceOSStore {
             }
         }
         return proposals.count
+    }
+}
+
+public extension RecordingExpression {
+    /// A saved manual group title outranks the automatic title and member titles.
+    func displayTitle(in catalog: [String: SourceRecord]) -> String {
+        if let manual = manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !manual.isEmpty { return manual }
+        let automatic = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !automatic.isEmpty { return automatic }
+        for id in sourceIDs {
+            guard let member = catalog[id] else { continue }
+            let memberTitle = member.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !memberTitle.isEmpty { return memberTitle }
+        }
+        return title
+    }
+}
+
+public extension SourceRecord {
+    /// Explains why a saved multi-segment expression is currently unusable.
+    func recordingExpressionIssue(in catalog: [String: SourceRecord]) -> String? {
+        guard let saved = presentation?.expression, saved.sourceIDs.count > 1,
+              recordingExpression(in: catalog) == nil else { return nil }
+        guard recordingExpression != nil else { return "这段原文或文字授权已变化" }
+        for id in saved.sourceIDs {
+            guard let member = catalog[id] else { return "分组里有一段录音已不在资料库" }
+            guard member.recordingExpression?.digest == saved.digest else { return "分组里有一段的原文或文字授权已变化" }
+            if let pair = member.presentation?.recordingContext {
+                guard saved.externalVersions?[pair.externalSourceID] == pair.externalVersionID,
+                      saved.externalPolicies?[pair.externalSourceID] == pair.externalPolicyVersion else {
+                    return "节目背景或原文授权已变化"
+                }
+            }
+        }
+        if let externals = saved.externalVersions {
+            for (id, version) in externals {
+                guard let external = catalog[id], external.transcriptVersionID == version,
+                      external.policyVersion == saved.externalPolicies?[id],
+                      !external.localOnly, !external.needsTranscriptionReview else {
+                    return "节目原文或文字授权已变化"
+                }
+            }
+        }
+        return "分组内容已变化"
+    }
+
+    /// Short reason shown on a material that has no topic link yet.
+    func topicAssignmentReason(in catalog: [String: SourceRecord]) -> String {
+        let members = (presentation?.expression?.sourceIDs ?? [id]).compactMap { catalog[$0] }
+        if members.contains(where: { $0.localOnly }) { return "部分文字仅本机保存，未交给 AI" }
+        if members.contains(where: { $0.needsTranscriptionReview }) { return "转写仍在核对，暂未归组" }
+        if members.contains(where: { ($0.transcript ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) { return "还没有可读原文，暂未归组" }
+        if presentation?.expression != nil, recordingExpression == nil { return "分组内容已变化，等待重新判断" }
+        if presentation?.automaticInput != nil, recordingExpression?.state != "completed" { return "连续表达仍在整理，完成后自动归组" }
+        return "AI 尚未连接到主题"
+    }
+}
+
+extension VoiceOSStore {
+    /// Selecting any segment splits its whole expression, so every segment
+    /// returns to its own title instead of leaving a truncated group behind.
+    @discardableResult
+    public func detachRecordingsFromExpressions(sourceIDs: Set<String>) throws -> Int {
+        guard !sourceIDs.isEmpty else { return 0 }
+        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let expressionIDs = Set(sourceIDs.compactMap { catalog[$0]?.presentation?.expression?.id })
+        guard !expressionIDs.isEmpty else { return 0 }
+        let detached = catalog.values.filter { source in
+            guard let id = source.presentation?.expression?.id else { return false }
+            return expressionIDs.contains(id)
+        }.map(\.id)
+        guard !detached.isEmpty else { return 0 }
+        try db.transaction {
+            for id in detached {
+                guard let source = catalog[id], var presentation = source.presentation else { continue }
+                presentation.expression = nil
+                try saveExpressionPresentation(presentation, sourceID: id)
+            }
+        }
+        return detached.count
     }
 }

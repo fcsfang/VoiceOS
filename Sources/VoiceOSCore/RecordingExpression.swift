@@ -22,6 +22,7 @@ public struct RecordingExpression: Codable, Sendable, Identifiable {
     public var taskReviewPending: Bool? = nil
     public var externalVersions: [String:String]? = nil
     public var externalPolicies: [String:Int]? = nil
+    public var manualTitle: String? = nil
     public func requiresActionReview(actionID:String) -> Bool {
         guard state == "completed" else { return true }
         guard let decisions=actionReviewDecisions else { return taskReviewPending == true }
