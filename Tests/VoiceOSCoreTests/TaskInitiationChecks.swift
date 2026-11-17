@@ -265,7 +265,7 @@ final class TaskInitiationChecks: XCTestCase {
         XCTAssertEqual(answered.first?.text, record.input.text)
 
         let wire = TaskInitiationWireTransport(reply: "沉没成本是已经发生且无法收回的成本。\n\n所以决策时应忽略它。")
-        let port = try ResponsesTaskInitiationPort(baseURL: URL(string: "https://example.com/v1")!,
+        let port = try ResponsesTaskInitiationPort(baseURL: URL(string: "https://api.chiyi.cc/v1")!,
                                                    apiKey: "fixture", model: "fixture-model", transport: wire)
         XCTAssertEqual(port.configuration.promptVersion, "task-initiation-v2")
         let input = TaskInitiationInput(sourceID: "source", transcriptVersionID: "version", text: "什么是沉没成本？",
@@ -276,8 +276,9 @@ final class TaskInitiationChecks: XCTestCase {
         let inputs = await wire.inputs
         XCTAssertTrue(inputs.first?.contains("什么是沉没成本？") == true)
         XCTAssertTrue(inputs.first?.contains("一句话解释即可") == true)
-        let instructions = await wire.instructions
-        XCTAssertTrue(instructions.first?.contains("直接回答") == true)
+        // The answer request carries its prompt in the user content, not in a
+        // separate instructions field.
+        XCTAssertTrue(inputs.first?.contains("直接回答") == true)
         let structured = await wire.hasResponseFormat
         XCTAssertEqual(structured, [false])
     }
@@ -285,7 +286,7 @@ final class TaskInitiationChecks: XCTestCase {
     func testClassificationWireAcceptsAnswerRouteWithBody() async throws {
         let body = #"{"is_task_initiation":false,"route":"answer","title":"Git Hook 是什么","objective":"","known_facts":[],"assumptions":[],"missing_information":[],"constraints":[],"acceptance_criteria":[],"execution_preference":"quick_delivery","target_executor":"","deliverables":[],"guide_prerequisites":[],"guide_steps":[],"first_action":"","verification":"","clarify_question":"","reason":"用户在提问","answer":"Git Hook 是自动运行的脚本。"}"#
         let wire = TaskInitiationWireTransport(reply: body)
-        let port = try ResponsesTaskInitiationPort(baseURL: URL(string: "https://example.com/v1")!,
+        let port = try ResponsesTaskInitiationPort(baseURL: URL(string: "https://api.chiyi.cc/v1")!,
                                                    apiKey: "fixture", model: "fixture-model", transport: wire)
         let input = TaskInitiationInput(sourceID: "source", transcriptVersionID: "version", text: "Git Hook 是什么？",
                                         answer: "", mode: .direct, preferredRoute: nil,
