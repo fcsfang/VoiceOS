@@ -48,3 +48,11 @@ G 的核心结论（留给波 42 的大改）：停止录音后 `finishDictation
 
 - 文件（独占）：`Sources/VoiceOSApp/WorkspaceProcessingView.swift`、`Sources/VoiceOSApp/WorkspaceSourceView.swift`，允许新增 `Sources/VoiceOSApp/DictationRecoveryControls.swift`。不改 VoiceOSApp.swift（SA 独占）。
 - 判据 7：中断录音（interrupted / 无 job 的 failed）在处理页与材料页有「保存可解码片段」入口，调用既有 `recoverDictation`（VoiceOSApp.swift:988-993，已有实现无调用者），并给「移入回收站」退出路径；处理中禁用与状态提示齐全；恢复成功后材料进入正常整理链路。
+
+## 结果（2026-11-17 傍晚）
+
+- SA：存储与清理段（五类体积 + 合计 + 在访达中显示）、本地语音模型删除（二次确认、转录中禁用、删除后刷新）、备份保留 3/7/14（默认 7，创建备份时生效）、立即清理旧备份、prune 同步删侧车、每次启动与手动清理时清扫孤儿侧车、登录自启（SMAppService，状态回显四态）、菜单栏补「设置…」「每周回顾…」。核心新增 LibraryStorageUsage 与 directoryBytes；5 条测试。
+- GA：中断录音恢复——处理页与材料页「保存可解码片段」（调用既有却无人调用的 recoverDictation，成功后进入正常整理链路）与「移入回收站」（先封存再回收，避免核心拒绝 interrupted 状态）；处理中禁用、失败显示原因；控件复用单一 dictationRecoveryPending 谓词。
+- 集成期修正两处：LibraryStorageUsage 嵌在 DatabaseBackup 内导致 app 模块不可见，提为顶层类型；directoryBytes 使用 Foundation enumerator 时，对指向目录的符号链接 skipDescendants 会连带跳过后续兄弟目录的子项（已用独立最小实验复现），改手写递归，零对称链接跟随。
+- 验证（真实退出码）：swift build 0（Build complete! 67.34s）；swift test 0，481 项 0 失败（476 基础上新增 5）。
+- 说明：SMAppService 仅在 .app 包内有效，开发态显示 notFound 属预期；保留份数在下次备份或手动清理时生效（界面已注明）。
