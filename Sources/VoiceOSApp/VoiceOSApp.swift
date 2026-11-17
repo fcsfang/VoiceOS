@@ -895,6 +895,7 @@ final class ControlCenter: ObservableObject {
     @Published var workspaceBriefing: WorkspaceBriefing?
     @Published var organizingTopics = false
     @Published var topicOrganizationStatus = ""
+    private let topicCooldown = TopicOrganizationCooldown()
     private var topicModel: ResponsesTopicOrganizationPort?
     var recordingExpressionModel: ResponsesRecordingExpressionPort?
     private var topicWorker: Task<Void, Never>?
@@ -915,12 +916,21 @@ final class ControlCenter: ObservableObject {
                 do {
                     guard let store, let port = topicModel, let input = try await store.prepareTopicOrganization() else { return }
                     if !force, try await !store.needsTopicOrganizationRefresh() { return }
+                    if !force, let waiting = topicCooldown.waitingMessage() { topicOrganizationStatus = waiting; return }
                     topicAttemptDigest = input.digest
                     organizingTopics = true; topicOrganizationStatus = "AI 正在连接跨时间的材料与任务…"
                     _ = try await store.organizeTopics(using: port, force: force)
+                    topicCooldown.recordSuccess()
                     topicOrganizationStatus = "主题与首页简报已更新"
                     await refresh()
-                } catch { topicOrganizationStatus = "主题整理未完成：" + error.localizedDescription }
+                } catch {
+                    if Task.isCancelled || error is CancellationError {
+                        topicOrganizationStatus = "主题整理已取消"
+                    } else {
+                        topicCooldown.recordFailure(reason: error.localizedDescription)
+                        topicOrganizationStatus = TopicOrganizationCooldown.failureMessage(reason: error.localizedDescription)
+                    }
+                }
             } while topicPending && !Task.isCancelled
         }
     }
