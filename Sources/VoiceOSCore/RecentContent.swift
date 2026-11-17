@@ -55,6 +55,21 @@ public struct RecentContentTask: Identifiable, Equatable, Sendable {
     public init(id: String, title: String) { self.id = id; self.title = title }
 }
 
+/// A user override for one of the static home clues. The clue is a rule id
+/// (`work`, `family`, ...), and an override may arrive before that clue has
+/// any thought to group.
+public struct RecentClueOverride: Equatable, Sendable {
+    public var clue: String
+    public var displayTitle: String?
+    public var mergeInto: String?
+    public var hidden: Bool
+    public var updatedAt: String
+    public init(clue: String, displayTitle: String? = nil, mergeInto: String? = nil, hidden: Bool = false, updatedAt: String) {
+        self.clue = clue; self.displayTitle = displayTitle; self.mergeInto = mergeInto
+        self.hidden = hidden; self.updatedAt = updatedAt
+    }
+}
+
 public struct RecentContentDigest: Equatable, Sendable {
     public let threads: [RecentContentThread]
     public let tasks: [RecentContentTask]
@@ -87,13 +102,38 @@ public struct RecentContentDigest: Equatable, Sendable {
 
     private static let timeMarkers = ["今天", "明天", "后天", "下周", "周一", "周二", "周三", "周四", "周五", "周末", "今晚"]
 
-    public static func build(thoughts: [RecentContentThought], duration: TimeInterval, tasks: [RecentContentTask] = []) -> RecentContentDigest {
+    public static func build(thoughts: [RecentContentThought], duration: TimeInterval, tasks: [RecentContentTask] = [],
+                             overrides: [RecentClueOverride] = []) -> RecentContentDigest {
+        let overridesByClue = Dictionary(overrides.map { ($0.clue, $0) }, uniquingKeysWith: { first, _ in first })
         let grouped = Dictionary(grouping: thoughts) { threadID(for: $0.statement) }
-        let threads = rules.sorted { $0.displayOrder < $1.displayOrder }.compactMap { rule -> RecentContentThread? in
-            guard let own = grouped[rule.id], !own.isEmpty else { return nil }
-            return RecentContentThread(id: rule.id, title: rule.title, thoughts: own)
+        let orderedRules = rules.sorted { $0.displayOrder < $1.displayOrder }
+        // One hop only: following a second merge would make the visible section
+        // depend on insertion order rather than on what the user chose.
+        var mergedInto: [String: [RecentContentThought]] = [:]
+        for rule in orderedRules {
+            guard let override = overridesByClue[rule.id], !override.hidden,
+                  let target = override.mergeInto, target != rule.id else { continue }
+            mergedInto[target, default: []].append(contentsOf: grouped[rule.id] ?? [])
         }
-        return RecentContentDigest(threads: threads, tasks: orderedTasks(tasks), duration: duration, thoughtCount: thoughts.count)
+        let mergesAway = { (id: String) -> Bool in
+            overridesByClue[id]?.mergeInto.map { $0 != id } ?? false
+        }
+        var threads: [RecentContentThread] = []
+        for rule in orderedRules {
+            let override = overridesByClue[rule.id]
+            guard override?.hidden != true, !mergesAway(rule.id) else { continue }
+            let own = (grouped[rule.id] ?? []) + (mergedInto[rule.id] ?? [])
+            guard !own.isEmpty else { continue }
+            threads.append(RecentContentThread(id: rule.id, title: override?.displayTitle ?? rule.title, thoughts: own))
+        }
+        // A merge target can be a clue the user named before it produced thoughts.
+        for target in mergedInto.keys.sorted() where !rules.contains(where: { $0.id == target }) {
+            let override = overridesByClue[target]
+            guard override?.hidden != true, let own = mergedInto[target], !own.isEmpty else { continue }
+            threads.append(RecentContentThread(id: target, title: override?.displayTitle ?? threadTitle(target), thoughts: own))
+        }
+        return RecentContentDigest(threads: threads, tasks: orderedTasks(tasks), duration: duration,
+                                   thoughtCount: threads.reduce(0) { $0 + $1.thoughts.count })
     }
 
     public static func threadID(for statement: String) -> String {
@@ -312,15 +352,25 @@ public struct RecentContentHomeSnapshot: Equatable, Sendable {
     }
 
     public static func build(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord],
-                             calendar: Calendar = .current) -> RecentContentHomeSnapshot {
+                             calendar: Calendar = .current, overrides: [RecentClueOverride] = []) -> RecentContentHomeSnapshot {
         let days = RecentContentIndex.build(sources: sources, claims: claims, calendar: calendar)
+        let overridesByClue = Dictionary(overrides.map { ($0.clue, $0) }, uniquingKeysWith: { first, _ in first })
+        // A section hidden even indirectly through its merge target takes its
+        // tasks with it; the digest has no visible row to carry them.
+        let hidesThought = { (statement: String) -> Bool in
+            let id = RecentContentDigest.threadID(for: statement)
+            if overridesByClue[id]?.hidden == true { return true }
+            guard let target = overridesByClue[id]?.mergeInto, target != id else { return false }
+            return overridesByClue[target]?.hidden == true
+        }
         var digests: [String: RecentContentDigest] = [:]
         for item in days.flatMap(\.items) where item.kind == .material {
-            let claimIDs = Set(item.thoughts.map(\.claimID))
+            let claimIDs = Set(item.thoughts.filter { !hidesThought($0.statement) }.map(\.claimID))
             let tasks = actions
                 .filter { $0.state == "open" && $0.validity == "current" && $0.kind == "task" && claimIDs.contains($0.claimID) }
                 .map { RecentContentTask(id: $0.id, title: StatementTagParser.split($0.title).text) }
-            digests[item.id] = RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration, tasks: tasks)
+            digests[item.id] = RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration,
+                                                         tasks: tasks, overrides: overrides)
         }
         var progressRows: [String: [RecentContentProgressRow]] = [:]
         let sourcesByID = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -339,5 +389,57 @@ public struct RecentContentHomeSnapshot: Equatable, Sendable {
             }
         }
         return RecentContentHomeSnapshot(days: days, digests: digests, progressRows: progressRows)
+    }
+}
+
+extension VoiceOSStore {
+    public func recentClueOverrides() throws -> [RecentClueOverride] {
+        try db.query("SELECT clue,display_title,merge_into,hidden,updated_at FROM recent_clue_overrides ORDER BY clue").map { row in
+            RecentClueOverride(clue: row["clue"]!, displayTitle: row["display_title"], mergeInto: row["merge_into"],
+                               hidden: row["hidden"] == "1", updatedAt: row["updated_at"]!)
+        }
+    }
+
+    public func setRecentClueTitle(clue: String, title: String?, commandID: String) throws {
+        let normalized = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = normalized?.isEmpty == false ? normalized : nil
+        try writeRecentClueOverride(clue: clue, commandID: commandID, column: "display_title", value: value) {
+            $0["display_title"] == value
+        }
+    }
+
+    public func mergeRecentClue(_ clue: String, into target: String, commandID: String) throws {
+        let source = clue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let destination = target.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty, !destination.isEmpty else { throw VoiceOSError("线索名称不能为空") }
+        guard source != destination else { throw VoiceOSError("线索不能合并到自己") }
+        try writeRecentClueOverride(clue: source, commandID: commandID, column: "merge_into", value: destination) {
+            $0["merge_into"] == destination
+        }
+    }
+
+    public func setRecentClueHidden(clue: String, hidden: Bool, commandID: String) throws {
+        let value = hidden ? "1" : "0"
+        try writeRecentClueOverride(clue: clue, commandID: commandID, column: "hidden", value: value) {
+            $0["hidden"] == value
+        }
+    }
+
+    private func writeRecentClueOverride(clue: String, commandID: String, column: String, value: String?,
+                                         matchesReceipt: ([String: String]) -> Bool) throws {
+        let normalized = clue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, !commandID.isEmpty else { throw VoiceOSError("线索操作命令不能为空") }
+        if let receipt = try db.query("SELECT * FROM recent_clue_overrides WHERE command_id=?", [commandID]).first {
+            guard receipt["clue"] == normalized, matchesReceipt(receipt) else {
+                throw VoiceOSError("同一次线索操作不能更换内容")
+            }
+            return
+        }
+        try db.transaction {
+            try db.execute("""
+            INSERT INTO recent_clue_overrides(clue,\(column),updated_at,command_id) VALUES(?,?,?,?)
+            ON CONFLICT(clue) DO UPDATE SET \(column)=excluded.\(column),updated_at=excluded.updated_at,command_id=excluded.command_id
+            """, [normalized, value, VoiceOSStore.now(), commandID])
+        }
     }
 }

@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...65).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...66).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1278,6 +1278,27 @@ final class Database {
                     }
                 }
                 try execute("PRAGMA user_version=65")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "65" {
+            try transaction {
+                // A retried migration can find the table already created; the
+                // version bump stays the single completion marker.
+                let tables = try query("SELECT name FROM sqlite_master WHERE type='table' AND name='recent_clue_overrides'")
+                if tables.isEmpty {
+                    try execute("""
+                    CREATE TABLE recent_clue_overrides (
+                      clue TEXT PRIMARY KEY,
+                      display_title TEXT,
+                      merge_into TEXT,
+                      hidden INTEGER NOT NULL DEFAULT 0 CHECK(hidden IN (0,1)),
+                      updated_at TEXT NOT NULL,
+                      command_id TEXT NOT NULL UNIQUE
+                    )
+                    """)
+                }
+                try execute("PRAGMA user_version=66")
             }
         }
 
