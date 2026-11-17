@@ -190,7 +190,7 @@ struct ReflectionTimelineView: View {
                 Spacer()
                 Picker("回顾方式", selection: $timeline) { Text("图谱").tag(false); Text("时间线").tag(true) }
                     .labelsHidden().pickerStyle(.segmented).frame(width: 138)
-                Button { Task { await reload() } } label: { Image(systemName: "arrow.clockwise") }.help(periodic ? "刷新这个周期" : "刷新这个主题").accessibilityLabel(periodic ? "刷新这个周期" : "刷新这个主题").disabled(loading)
+                Button { Task { await refresh() } } label: { Image(systemName: "arrow.clockwise") }.help(periodic ? "刷新这个周期" : "刷新这个主题").accessibilityLabel(periodic ? "刷新这个周期" : "刷新这个主题").disabled(loading)
                 Button {
                     if let focus { Task { if !(await reflect(focus, draft)) { error = model.status } } }
                 } label: { Label(periodic ? "一起回顾" : "一起探索", systemImage: "sparkles") }
@@ -211,6 +211,13 @@ struct ReflectionTimelineView: View {
             topics = try await model.loadReflectionQuestions()
             if !topics.contains(where: { $0.id == selectedTopicID }) { selectedTopicID = topics.first?.id }
         } catch { self.error = error.localizedDescription }
+    }
+    private func refresh() async {
+        if topics.isEmpty || error != nil { await loadTopics() }
+        // reload() clears the error first; without a topic it would turn a
+        // failed topic load into the empty "start a topic" state.
+        if topics.isEmpty && !periodic { return }
+        await reload()
     }
     private func reload() async {
         let requestedKey = reflectionKey, requestedPeriod = period, requestedInterval = interval
