@@ -281,6 +281,7 @@ struct WorkspaceView: View {
     @State private var searchBusy = false
     @State private var searchHovered = false
     @State private var recentSearches: [String] = UserDefaults.standard.stringArray(forKey: recentSearchDefaultsKey) ?? []
+    @State private var searchArrowMonitor: Any?
     @State private var taskFeedbackDrafts: [String: TaskFeedbackDraft] = [:]
     @State private var creatingTopic = false
     @State private var savingTopic = false
@@ -806,6 +807,8 @@ struct WorkspaceView: View {
                     .focusEffectDisabled()
                     .onKeyPress { handleSearchListKey($0) }
                     .onChange(of:searchKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
+                    .onAppear { installSearchArrowMonitor() }
+                    .onDisappear { removeSearchArrowMonitor() }
             }
         case .tool(let name): tool(name)
         }
@@ -1393,7 +1396,7 @@ struct WorkspaceView: View {
         let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspaceHeading(eyebrow:"",title:"搜索")
-            WorkspaceSearchField(text:$query,placeholder:"搜索标题、原话、理解、主题或行动",focus:$searchFocused,submit:{ rememberSearch(term); if !searchSections.isEmpty { searchListFocused=true } })
+            WorkspaceSearchField(text:$query,placeholder:"搜索标题、原话、理解、主题或行动",focus:$searchFocused,submit:{ openSearchSelection() })
                 .task {
                     // Wait until the lazy field is attached to its native window.
                     do { try await Task.sleep(for:.milliseconds(100)); searchFocused = true } catch {}
@@ -2174,12 +2177,38 @@ struct WorkspaceView: View {
             guard searchKeyboardFocus.step(up: press.key == .upArrow, over: rows.map(\.id)) else { return .ignored }
             return .handled
         case .return:
-            guard let id=searchKeyboardFocus.id, let row=rows.first(where: { $0.id == id }) else { return .ignored }
-            row.open()
+            guard !rows.isEmpty else { return .ignored }
+            openSearchSelection()
             return .handled
         default:
             return .ignored
         }
+    }
+    private func openSearchSelection() {
+        let rows=searchSections.flatMap(\.rows)
+        guard let row=rows.first(where: { $0.id == searchKeyboardFocus.id }) ?? rows.first else { return }
+        row.open()
+    }
+    private func installSearchArrowMonitor() {
+        guard searchArrowMonitor == nil else { return }
+        searchArrowMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            let handled = MainActor.assumeIsolated { moveSearchSelection(with: event) }
+            return handled ? nil : event
+        }
+    }
+    private func removeSearchArrowMonitor() {
+        guard let monitor = searchArrowMonitor else { return }
+        NSEvent.removeMonitor(monitor)
+        searchArrowMonitor = nil
+    }
+    private func moveSearchSelection(with event: NSEvent) -> Bool {
+        guard page == .search, searchFocused, !searchListFocused,
+              event.window?.isKeyWindow == true, event.window?.sheetParent == nil,
+              event.specialKey == NSEvent.SpecialKey.upArrow || event.specialKey == NSEvent.SpecialKey.downArrow,
+              event.modifierFlags.intersection([.command,.option,.control,.shift]).isEmpty else { return false }
+        if let editor = event.window?.firstResponder as? NSTextView, editor.hasMarkedText() { return false }
+        let ids=searchSections.flatMap(\.rows).map(\.id)
+        return searchKeyboardFocus.step(up: event.specialKey == NSEvent.SpecialKey.upArrow, over: ids)
     }
     private func batchActions(for state:LocalActionState) -> [ActionRecord] {
         let ids=selectedActionIDs
