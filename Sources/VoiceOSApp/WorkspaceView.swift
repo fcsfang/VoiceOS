@@ -1233,7 +1233,7 @@ struct WorkspaceView: View {
                     }
                 }
             }
-            let pendingOutcomes = model.outcomeFollowups.count
+            let pendingOutcomes = model.visibleOutcomeFollowups.count
             if pendingOutcomes > 0 {
                 WorkspaceListSection(title:"完成后的结果",count:pendingOutcomes,badge:"\(pendingOutcomes) 项待填结果",collapsible:true,initiallyExpanded:true) {
                     HStack(spacing:12) {
