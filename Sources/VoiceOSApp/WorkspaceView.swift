@@ -225,6 +225,7 @@ private struct WorkspaceAttentionDot: View {
 struct WorkspaceView: View {
     @ObservedObject var model: ControlCenter
     @AppStorage("voiceos.workspaceTheme") private var theme = WorkspaceTheme.graphite
+    @AppStorage("voiceos.backupRetention") private var backupRetention = 7
     @Environment(\.colorScheme) private var colorScheme
     private var palette: WorkspacePalette { WorkspacePalette(theme: theme) }
     private var brandImage: NSImage? { AppBrand.image(for: colorScheme) }
@@ -296,6 +297,7 @@ struct WorkspaceView: View {
     @State private var localCompletionOffer: ActionRecord?
     @State private var showingPendingReminderSyncs = false
     @State private var showingBackupRestore = false
+    @State private var confirmingLocalSpeechDelete = false
     @State private var nextActionOutcome: ActionRecord?
     @State private var completingOutcome: ActionRecord?
     @State private var toastMessage: String?
@@ -1606,6 +1608,9 @@ struct WorkspaceView: View {
             WorkspaceRow(title:"Apple 提醒事项",subtitle:model.remindersPermissionDenied ? "系统权限已拒绝，需要在系统设置中允许后重试" : model.reminderCalendarTitle,icon:"checklist") { Task { await model.connectReminders() } }
             if model.remindersPermissionDenied { Button("打开系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!) } }
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
+            Toggle("登录时启动", isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLogin($0) }))
+                .toggleStyle(.switch).frame(maxWidth: 360, alignment: .leading)
+            Text(model.launchAtLoginStatus).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             sectionTitle("资料与历史")
             HStack(spacing:12) {
                 Button("导出结构化资料") { model.export(includeMedia:false) }
@@ -1618,6 +1623,18 @@ struct WorkspaceView: View {
                 Button("在访达中显示") { model.revealBackups() }.vosFont(WorkspaceText.meta)
             }
             HStack(spacing:12) {
+                Text("保留份数").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Picker("保留份数", selection: $backupRetention) {
+                    Text("3 份").tag(3); Text("7 份").tag(7); Text("14 份").tag(14)
+                }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
+                Button(model.backupPruning ? "正在清理…" : "立即清理旧备份") { model.cleanupOldBackups(retain: backupRetention) }
+                    .vosFont(WorkspaceText.meta).disabled(model.backupPruning || model.libraryRoot == nil)
+            }
+            Text("保留份数在下次备份或立即清理时生效。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+            if !model.backupCleanupStatus.isEmpty {
+                Text(model.backupCleanupStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            }
+            HStack(spacing:12) {
                 Button(model.checkingLibraryHealth ? "正在检查资料库…" : "检查资料库") { model.checkLibraryHealth() }.vosFont(WorkspaceText.meta).disabled(model.checkingLibraryHealth || model.libraryRoot == nil)
                 Button("从最近备份新建资料库") { showingBackupRestore = true }.vosFont(WorkspaceText.meta).disabled(model.lastBackupAt == nil || model.libraryRoot == nil)
             }
@@ -1627,6 +1644,26 @@ struct WorkspaceView: View {
                     .textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
             }
             HStack { Button("打开已有资料库") { chooseLibrary() };Button("从迁移包恢复") { go(.tool("恢复资料")) } }
+            sectionTitle("存储与清理")
+            VStack(alignment:.leading,spacing:7) {
+                storageLine("资料库（含 WAL）", model.storageUsage?.databaseBytes)
+                storageLine("原件", model.storageUsage?.assetsBytes)
+                storageLine("备份", model.storageUsage?.backupBytes, detail: model.storageUsage.map { "\($0.backupCount) 份" })
+                storageLine("本地语音模型", model.storageUsage?.localSpeechBytes)
+                storageLine("镜像", model.storageUsage?.mirrorBytes)
+                Divider().frame(maxWidth:420)
+                storageLine("合计", model.storageUsage?.totalBytes, emphasized:true)
+            }
+            if model.storageScanBusy { ProgressView().controlSize(.small) }
+            HStack(spacing:12) {
+                Button("在访达中显示资料库") { model.revealLibraryRoot() }
+                Button(model.localSpeechDeleting ? "正在删除…" : "删除本地语音模型") { confirmingLocalSpeechDelete = true }
+                    .disabled(model.localSpeechDeleting || model.speechModelBusy || (model.storageUsage?.localSpeechBytes ?? 0) == 0)
+                    .help(model.speechModelBusy ? "转录或录音进行中，结束后再删除" : "删除 LocalSpeech 中的本地 Qwen 模型文件")
+            }
+            if !model.localSpeechDeleteStatus.isEmpty {
+                Text(model.localSpeechDeleteStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            }
             sectionTitle("回顾与查找")
             WorkspaceRow(title:"静默回顾",subtitle:"看到相关原文",icon:"text.bubble") { go(.tool("静默回顾")) }
             WorkspaceRow(title:"查找历史文字",subtitle:"按关键词查找",icon:"text.magnifyingglass") { go(.tool("查找历史文字")) }
@@ -1640,6 +1677,16 @@ struct WorkspaceView: View {
                     Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                 }.padding(.top,15)
             }
+        }
+        .onAppear {
+            model.refreshStorageUsage()
+            model.refreshLaunchAtLogin()
+        }
+        .alert("删除本地语音模型？", isPresented:$confirmingLocalSpeechDelete) {
+            Button("取消", role:.cancel) {}
+            Button("删除", role:.destructive) { model.deleteLocalSpeechModel() }
+        } message: {
+            Text("将删除 LocalSpeech 目录中的本地 Qwen 模型文件（当前 " + (model.storageUsage.map { sizeText($0.localSpeechBytes) } ?? "统计中") + "）。删除后本地 Qwen 语音停用，需要重新下载模型才能继续转写；已有录音、原件与逐字稿不受影响。")
         }
     }
     @ViewBuilder private var processingIssues: some View {
@@ -1671,6 +1718,16 @@ struct WorkspaceView: View {
         }
     }
     private func sectionTitle(_ title:String) -> some View { Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader) }
+    private func sizeText(_ bytes:Int64) -> String { ByteCountFormatter.string(fromByteCount:bytes,countStyle:.file) }
+    private func storageLine(_ label:String,_ bytes:Int64?,detail:String? = nil,emphasized:Bool = false) -> some View {
+        HStack(spacing:8) {
+            Text(label + (detail.map { " · " + $0 } ?? ""))
+                .vosFont(emphasized ? WorkspaceText.rowTitle : WorkspaceText.body)
+                .foregroundStyle(emphasized ? palette.text : palette.secondaryText)
+            Spacer(minLength:12)
+            Text(bytes.map(sizeText) ?? "统计中…").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+        }.frame(maxWidth:420,alignment:.leading)
+    }
     private func sourceNavigationTitle(_ id:String) -> String {
         guard let source=model.records.first(where: { $0.id == id }) else { return "材料" }
         let catalog=Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })

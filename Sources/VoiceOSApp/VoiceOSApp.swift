@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import Combine
+import ServiceManagement
 import AVKit
 import UniformTypeIdentifiers
 import UserNotifications
@@ -405,6 +406,14 @@ final class ControlCenter: ObservableObject {
     @Published var checkingLibraryHealth = false
     @Published var libraryHealthText = ""
     @Published private(set) var libraryHealthProblem = false
+    @Published var storageUsage: LibraryStorageUsage?
+    @Published var storageScanBusy = false
+    @Published var backupCleanupStatus = ""
+    @Published var backupPruning = false
+    @Published var localSpeechDeleteStatus = ""
+    @Published var localSpeechDeleting = false
+    @Published var launchAtLoginEnabled = false
+    @Published var launchAtLoginStatus = "未开启"
     @Published var workspaceLastError: String?
     @Published var workspaceLastErrorRetry: WorkspaceErrorRetry?
     @Published var exporting = false
@@ -441,6 +450,7 @@ final class ControlCenter: ObservableObject {
         if Bundle.main.url(forResource: "organize_podcast", withExtension: "py") == nil { return "应用缺少完整整理脚本，请更新应用。" }
         return nil
     }
+    var speechModelBusy: Bool { dictationActive || dictationBusy || fullRecordingBusy || importing || understandingSource != nil || worker != nil }
     private let speechPreferenceKey="voiceos.localSpeechSelection.v1"
     private func installSpeechSelection(_ selection: LocalSpeechSelection, persist: Bool) throws {
         let port=try selection.port()
@@ -1108,12 +1118,116 @@ final class ControlCenter: ObservableObject {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         NSWorkspace.shared.activateFileViewerSelecting([directory])
     }
+    func revealLibraryRoot() {
+        guard let root = libraryRoot else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([root])
+    }
+    private var backupRetentionPreference: Int {
+        let stored = UserDefaults.standard.object(forKey: "voiceos.backupRetention") as? Int ?? 7
+        return [3, 7, 14].contains(stored) ? stored : 7
+    }
+    func refreshStorageUsage() {
+        guard let root = libraryRoot else { return }
+        storageScanBusy = true
+        Task {
+            let usage = await Task.detached(priority: .utility) { DatabaseBackup.storageUsage(root: root) }.value
+            storageUsage = usage
+            storageScanBusy = false
+        }
+    }
+    func cleanupOldBackups(retain: Int) {
+        guard let root = libraryRoot, !backupPruning else { return }
+        let directory = root.appendingPathComponent("Backups", isDirectory: true)
+        backupPruning = true
+        backupCleanupStatus = "正在清理旧备份…"
+        Task {
+            do {
+                let result = try await Task.detached(priority: .utility) { () -> (backups: Int, orphans: Int) in
+                    let backups = try DatabaseBackup.prune(directory: directory, retain: retain)
+                    let orphans = DatabaseBackup.removeOrphanSidecars(directory: directory)
+                    return (backups, orphans)
+                }.value
+                recordBackupSummary(DatabaseBackup.summary(directory: directory))
+                if result.backups == 0 && result.orphans == 0 {
+                    backupCleanupStatus = "没有需要清理的旧备份"
+                } else {
+                    backupCleanupStatus = "已清理 \(result.backups) 份旧备份" + (result.orphans > 0 ? "与 \(result.orphans) 个孤儿侧车文件" : "")
+                }
+                refreshStorageUsage()
+            } catch {
+                backupCleanupStatus = "清理失败：" + error.localizedDescription
+            }
+            backupPruning = false
+        }
+    }
+    func deleteLocalSpeechModel() {
+        guard let root = libraryRoot, !localSpeechDeleting else { return }
+        guard !speechModelBusy else { localSpeechDeleteStatus = "转录或录音进行中，结束后再删除"; return }
+        let directory = root.appendingPathComponent("LocalSpeech", isDirectory: true)
+        localSpeechDeleting = true
+        localSpeechDeleteStatus = "正在删除本地语音模型…"
+        Task {
+            let result: Result<Int, Error> = await Task.detached(priority: .utility) { () -> Result<Int, Error> in
+                let fileManager = FileManager.default
+                guard fileManager.fileExists(atPath: directory.path) else { return .success(0) }
+                do {
+                    let contents = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                    for item in contents { try fileManager.removeItem(at: item) }
+                    return .success(contents.count)
+                } catch {
+                    return .failure(error)
+                }
+            }.value
+            switch result {
+            case .success(let count):
+                speechPort = nil
+                speechSummary = "Qwen 本地转写 · 模型已删除，需重新下载"
+                localSpeechDeleteStatus = count > 0 ? "本地语音模型已删除；重新下载后可再次启用" : "没有可删除的本地语音模型"
+                refreshStorageUsage()
+            case .failure(let error):
+                localSpeechDeleteStatus = "删除失败：" + error.localizedDescription
+            }
+            localSpeechDeleting = false
+        }
+    }
+    func refreshLaunchAtLogin() {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            launchAtLoginEnabled = true
+            launchAtLoginStatus = "已开启，登录后自动启动"
+        case .notRegistered:
+            launchAtLoginEnabled = false
+            launchAtLoginStatus = "未开启"
+        case .requiresApproval:
+            launchAtLoginEnabled = false
+            launchAtLoginStatus = "已注册，需在系统设置 › 通用 › 登录项中允许"
+        case .notFound:
+            launchAtLoginEnabled = false
+            launchAtLoginStatus = "系统尚未登记此应用，无法设置登录启动"
+        @unknown default:
+            launchAtLoginEnabled = false
+            launchAtLoginStatus = "登录启动状态未知"
+        }
+    }
+    func setLaunchAtLogin(_ enabled: Bool) {
+        UserDefaults.standard.set(enabled, forKey: "voiceos.launchAtLogin")
+        do {
+            if enabled { try SMAppService.mainApp.register() }
+            else { try SMAppService.mainApp.unregister() }
+            refreshLaunchAtLogin()
+        } catch {
+            launchAtLoginStatus = "设置失败：" + error.localizedDescription
+            launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+        }
+    }
     private func backupLibrary(at root: URL) {
         let database = root.appendingPathComponent("voiceos.sqlite")
         let directory = root.appendingPathComponent("Backups", isDirectory: true)
+        let retain = backupRetentionPreference
         Task.detached(priority: .utility) { [weak self] in
             do {
-                _ = try DatabaseBackup.createDailyIfNeeded(database: database, directory: directory)
+                _ = try DatabaseBackup.createDailyIfNeeded(database: database, directory: directory, retain: retain)
+                DatabaseBackup.removeOrphanSidecars(directory: directory)
                 let summary = DatabaseBackup.summary(directory: directory)
                 await MainActor.run { self?.recordBackupSummary(summary) }
             } catch {
@@ -3679,6 +3793,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         stopWatch.target = self
         stopWatchMenuItem = stopWatch
         menu.addItem(.separator())
+        let settings = menu.addItem(withTitle: "设置…", action: #selector(menuOpenSettings(_:)), keyEquivalent: "")
+        settings.target = self
+        let weekly = menu.addItem(withTitle: "每周回顾…", action: #selector(menuOpenWeeklyReview(_:)), keyEquivalent: "")
+        weekly.target = self
+        menu.addItem(.separator())
         let open = menu.addItem(withTitle: "打开 VoiceOS", action: #selector(openMainWindow), keyEquivalent: "")
         open.target = self
         let quit = menu.addItem(withTitle: "退出 VoiceOS", action: #selector(quitApplication), keyEquivalent: "")
@@ -3815,6 +3934,9 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         opener.arguments = ["-a", Bundle.main.bundleURL.path]
         try? opener.run()
     }
+
+    @objc private func menuOpenSettings(_ sender: Any?) { openSettings() }
+    @objc private func menuOpenWeeklyReview(_ sender: Any?) { openWeeklyReview() }
 
     func openSettings() {
         openMainWindow()
