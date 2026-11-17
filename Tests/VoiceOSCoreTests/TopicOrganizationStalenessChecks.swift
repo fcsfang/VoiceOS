@@ -12,6 +12,9 @@ private actor StalenessTopicPort: TopicOrganizationPort {
                                     questions: ["这份材料接下来要验证什么？"], viewpointIDs: input.viewpoints.map(\.id))],
                      responseID: "stale-skeleton-\(calls)")
     }
+    func organizeSkeletonMerge(_ input: TopicSkeletonMergeInput) async throws -> TopicSkeletonMergeResult {
+        mergedSkeletonMerge(input, responseID: "stale-merge-\(calls)")
+    }
     func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult {
         .init(topics: input.topics.map { topic in
             .init(topicID: topic.topicID, questions: ["这份材料接下来要验证什么？"],

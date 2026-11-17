@@ -9,6 +9,9 @@ private actor RenameTopicPort: TopicOrganizationPort {
                              questions: ["合成问题"], viewpointIDs: input.viewpoints.map(\.id))],
               responseID: "rename-skeleton")
     }
+    func organizeSkeletonMerge(_ input: TopicSkeletonMergeInput) async throws -> TopicSkeletonMergeResult {
+        mergedSkeletonMerge(input, responseID: "rename-merge")
+    }
     func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult {
         .init(topics: input.topics.map { topic in
             .init(topicID: topic.topicID, questions: ["合成问题"],

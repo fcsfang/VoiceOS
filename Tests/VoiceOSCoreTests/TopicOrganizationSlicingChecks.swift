@@ -6,6 +6,7 @@ private actor SlicingTopicPort: TopicOrganizationPort {
     private let failMarker: String?
     private var failOnce: Bool
     private(set) var skeletonCalls = 0
+    private(set) var mergeCalls = 0
     private(set) var bodyBatches: [[String]] = []
     private(set) var skeletonInputs: [TopicSkeletonInput] = []
     init(failMarker: String? = nil) { self.failMarker = failMarker; self.failOnce = failMarker != nil }
@@ -19,6 +20,10 @@ private actor SlicingTopicPort: TopicOrganizationPort {
         return .init(briefing: "已按观点建立主题骨架，正文随后分批补齐。",
                      highlightSourceIDs: input.viewpoints.first.map { [$0.sourceID] } ?? [],
                      topics: topics, responseID: "slicing-skeleton-\(skeletonCalls)")
+    }
+    func organizeSkeletonMerge(_ input: TopicSkeletonMergeInput) async throws -> TopicSkeletonMergeResult {
+        mergeCalls += 1
+        return mergedSkeletonMerge(input, responseID: "slicing-merge-\(mergeCalls)")
     }
     func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult {
         bodyBatches.append(input.topics.map(\.topicID))
@@ -37,18 +42,22 @@ private actor SlicingTopicPort: TopicOrganizationPort {
 
 private final class TopicRequestRecorder: @unchecked Sendable {
     private let lock = NSLock()
-    private var skeleton: [Int] = [], body: [Int] = [], count = 0
+    private var skeleton: [Int] = [], merge: [Int] = [], body: [Int] = [], count = 0
     func recordSkeleton(_ bytes: Int) -> String {
         lock.lock(); defer { lock.unlock() }
         skeleton.append(bytes); count += 1; return "recording-skeleton-\(count)"
+    }
+    func recordMerge(_ bytes: Int) -> String {
+        lock.lock(); defer { lock.unlock() }
+        merge.append(bytes); count += 1; return "recording-merge-\(count)"
     }
     func recordBody(_ bytes: Int) -> String {
         lock.lock(); defer { lock.unlock() }
         body.append(bytes); count += 1; return "recording-body-\(count)"
     }
-    func sizes() -> (skeleton: [Int], body: [Int]) {
+    func sizes() -> (skeleton: [Int], merge: [Int], body: [Int]) {
         lock.lock(); defer { lock.unlock() }
-        return (skeleton, body)
+        return (skeleton, merge, body)
     }
 }
 
@@ -64,7 +73,30 @@ private struct RecordingTopicTransport: ModelHTTPTransport {
             return ModelHTTPReply(status: 400, body: Data())
         }
         let text: String, id: String
-        if let viewpoints = object["viewpoints"] as? [[String: Any]] {
+        if let batches = object["batches"] as? [[String: Any]] {
+            id = recorder.recordMerge(request.httpBody?.count ?? 0)
+            var topics: [[String: Any]] = []
+            var index: [String: Int] = [:]
+            for batch in batches {
+                for candidate in batch["topics"] as? [[String: Any]] ?? [] {
+                    let title = candidate["title"] as? String ?? "主题"
+                    let summary = candidate["summary"] as? String ?? "摘要"
+                    let key = title + "\u{0}" + summary
+                    let ids = candidate["viewpointIDs"] as? [String] ?? []
+                    if let existing = index[key] {
+                        var union = topics[existing]["viewpointIDs"] as? [String] ?? []
+                        union += ids
+                        topics[existing]["viewpointIDs"] = union
+                    } else {
+                        index[key] = topics.count
+                        topics.append(["topicID": candidate["topicID"] as? String ?? "", "title": title,
+                                       "summary": summary, "questions": [String](), "viewpointIDs": ids])
+                    }
+                }
+            }
+            let result: [String: Any] = ["briefing": "已合并分批骨架，正文随后补齐。", "topics": topics]
+            text = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
+        } else if let viewpoints = object["viewpoints"] as? [[String: Any]] {
             id = recorder.recordSkeleton(request.httpBody?.count ?? 0)
             let topics: [[String: Any]] = viewpoints.enumerated().map { index, viewpoint in
                 ["topicID": "", "title": "主题 \(index)", "summary": "这份材料提出了一个待接续的观点。",
@@ -190,11 +222,16 @@ final class TopicOrganizationSlicingChecks: XCTestCase {
         _ = try await store.organizeTopics(using: port)
         let sizes = recorder.sizes()
         print("topic-skeleton request bytes: \(sizes.skeleton)")
+        print("topic-skeleton-merge request bytes: \(sizes.merge)")
         print("topic-body request bytes: \(sizes.body)")
-        XCTAssertEqual(sizes.skeleton.count, 1)
+        XCTAssertEqual(sizes.skeleton.count, 1, "15 条观点落在同一骨架批")
+        XCTAssertEqual(sizes.merge.count, 1, "骨架批之后必须走一次合流")
         XCTAssertEqual(sizes.body.count, 3, "15 个主题按 5 个一批分成 3 批")
         for skeleton in sizes.skeleton {
             XCTAssertLessThan(skeleton, TopicOrganizationSlicePolicy.skeletonByteLimit, "骨架请求体实测 \(skeleton) 字节")
+        }
+        for merge in sizes.merge {
+            XCTAssertLessThan(merge, TopicOrganizationSlicePolicy.bodyByteLimit, "骨架合流请求体实测 \(merge) 字节")
         }
         for body in sizes.body {
             XCTAssertLessThan(body, TopicOrganizationSlicePolicy.bodyByteLimit, "正文请求体实测 \(body) 字节")
