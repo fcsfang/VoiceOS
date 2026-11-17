@@ -60,6 +60,18 @@ public extension KnowledgeReviewPort {
         return result
     }
 }
+public enum KnowledgeReviewIssueState: String, Sendable, CaseIterable {
+    case seen, accepted, rejected
+}
+public struct KnowledgeReviewIssueCounts: Equatable, Sendable {
+    public let pending: Int
+    public let seen: Int
+    public let accepted: Int
+    public let rejected: Int
+    public init(pending: Int, seen: Int, accepted: Int, rejected: Int) {
+        self.pending = pending; self.seen = seen; self.accepted = accepted; self.rejected = rejected
+    }
+}
 public struct KnowledgeReviewRecord: Identifiable, Sendable {
     public let id: String
     public let sourceID: String
@@ -67,9 +79,34 @@ public struct KnowledgeReviewRecord: Identifiable, Sendable {
     public let state: String
     public var validity: String { state == "frozen" ? "frozen" : "current" }
     public let issues: [KnowledgeReviewIssue]
+    public let issueStates: [String: KnowledgeReviewIssueState]
     public let responseIDs: [String]
     public let error: String?
     public let createdAt: String
+}
+public extension KnowledgeReviewRecord {
+    func issueState(_ issueID: String) -> KnowledgeReviewIssueState? { issueStates[issueID] }
+    /// Accepted and rejected issues already have a verdict; seen issues still want attention.
+    func openIssues(from issues: [KnowledgeReviewIssue]) -> [KnowledgeReviewIssue] { issues.filter { !isSettled($0.id) } }
+    func settledIssues(from issues: [KnowledgeReviewIssue]) -> [KnowledgeReviewIssue] { issues.filter { isSettled($0.id) } }
+    func issueCounts(of issues: [KnowledgeReviewIssue]) -> KnowledgeReviewIssueCounts {
+        var pending = 0, seen = 0, accepted = 0, rejected = 0
+        for issue in issues {
+            switch issueState(issue.id) {
+            case .seen: seen += 1
+            case .accepted: accepted += 1
+            case .rejected: rejected += 1
+            case nil: pending += 1
+            }
+        }
+        return .init(pending: pending, seen: seen, accepted: accepted, rejected: rejected)
+    }
+    private func isSettled(_ issueID: String) -> Bool {
+        switch issueState(issueID) {
+        case .accepted?, .rejected?: return true
+        default: return false
+        }
+    }
 }
 private struct KnowledgeReviewProgress: Codable {
     var selection: KnowledgeReviewSelection?
@@ -400,6 +437,7 @@ extension VoiceOSStore {
     }
     public func knowledgeReviews(sourceID: String? = nil) throws -> [KnowledgeReviewRecord] {
         let rows = try db.query("SELECT * FROM knowledge_reviews \(sourceID == nil ? "" : "WHERE source_id=?") ORDER BY created_at DESC,id",sourceID.map { [$0] } ?? [])
+        let statesByReview = try knowledgeReviewIssueStates()
         var signatures: [String: KnowledgeReviewSourceSignature] = [:]
         return try rows.map { row in
             var state = row["state"]!
@@ -421,12 +459,33 @@ extension VoiceOSStore {
             }
             let progress = try row["result_json"].map { try decodeWithPath(KnowledgeReviewProgress.self,from:Data($0.utf8),label:"知识核查进度") }
             let ids = try decodeWithPath([String].self,from:Data((row["response_ids_json"] ?? "[]").utf8),label:"知识核查回执")
-            return .init(id:row["id"]!,sourceID:row["source_id"]!,inputDigest:row["input_digest"]!,state:state,issues:progress?.issues ?? [],responseIDs:ids,error:state == "frozen" ? "原话、理解或授权已变化；保留历史核查" : row["error"],createdAt:row["created_at"]!)
+            return .init(id:row["id"]!,sourceID:row["source_id"]!,inputDigest:row["input_digest"]!,state:state,issues:progress?.issues ?? [],issueStates:statesByReview[row["id"]!] ?? [:],responseIDs:ids,error:state == "frozen" ? "原话、理解或授权已变化；保留历史核查" : row["error"],createdAt:row["created_at"]!)
         }
     }
     public func pendingKnowledgeReviews() throws -> [KnowledgeReviewRecord] { try knowledgeReviews().filter { $0.state == "queued" } }
     public func recoverKnowledgeReviews() throws {
         try db.execute("UPDATE knowledge_reviews SET state='failed',error='核查因应用退出中断；可手动重试，已登记结果保留' WHERE state='running'")
+    }
+    public func setKnowledgeReviewIssueState(reviewID: String, issueID: String, state: KnowledgeReviewIssueState) throws {
+        guard let row = try db.query("SELECT result_json FROM knowledge_reviews WHERE id=?",[reviewID]).first else { throw VoiceOSError("这条知识核查不存在") }
+        var issueIDs: Set<String> = []
+        if let raw = row["result_json"] {
+            issueIDs = Set(try decodeWithPath(KnowledgeReviewProgress.self,from:Data(raw.utf8),label:"知识核查进度").issues.map(\.id))
+        }
+        guard issueIDs.contains(issueID) else { throw VoiceOSError("知识核查问题不属于这次核查") }
+        try db.execute("""
+        INSERT INTO knowledge_review_states(review_id,issue_id,state,updated_at) VALUES(?,?,?,?)
+        ON CONFLICT(review_id,issue_id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at
+        """,[reviewID,issueID,state.rawValue,Self.now()])
+    }
+    private func knowledgeReviewIssueStates() throws -> [String:[String:KnowledgeReviewIssueState]] {
+        var result: [String:[String:KnowledgeReviewIssueState]] = [:]
+        for row in try db.query("SELECT review_id,issue_id,state FROM knowledge_review_states") {
+            guard let reviewID = row["review_id"],let issueID = row["issue_id"],
+                  let state = row["state"].flatMap({ KnowledgeReviewIssueState(rawValue:$0) }) else { continue }
+            result[reviewID,default:[:]][issueID] = state
+        }
+        return result
     }
     @discardableResult
     public func processKnowledgeReview(sourceID: String, using port: any KnowledgeReviewPort, retry: Bool = false) async throws -> KnowledgeReviewRecord {
@@ -501,6 +560,7 @@ extension VoiceOSStore {
         }
     }
     static func validateStoredKnowledgeReviews(_ database:Database) throws {
+        var issueIDsByReview: [String:Set<String>] = [:]
         for row in try database.query("SELECT * FROM knowledge_reviews") {
             let input=try JSONDecoder().decode(KnowledgeReviewInput.self,from:Data((row["input_json"] ?? "").utf8))
             guard row["source_id"] == input.sourceID,row["input_digest"] == input.inputDigest,input.context.sources.count == 1,
@@ -526,6 +586,7 @@ extension VoiceOSStore {
             let responseIDs=try JSONDecoder().decode([String].self,from:Data((row["response_ids_json"] ?? "").utf8))
             if let raw=row["result_json"] {
                 let progress=try JSONDecoder().decode(KnowledgeReviewProgress.self,from:Data(raw.utf8))
+                issueIDsByReview[row["id"]!]=Set(progress.issues.map(\.id))
                 guard let selection=progress.selection else { throw VoiceOSError("知识核查缺少候选识别回执") }
                 let normalized = try validateKnowledgeSelection(selection,input:input)
                 guard normalized.candidates.map(\.id) == selection.candidates.map(\.id),
@@ -537,6 +598,11 @@ extension VoiceOSStore {
                     try validateKnowledgeCheck(.init(issue:issue,responseIDs:responseIDs),candidate:candidate,input:input)
                 }
             } else if row["state"] == "completed" { throw VoiceOSError("知识核查完成记录缺少结果") }
+        }
+        for row in try database.query("SELECT review_id,issue_id,state FROM knowledge_review_states") {
+            guard let reviewID = row["review_id"],let issueID = row["issue_id"],let state = row["state"],
+                  KnowledgeReviewIssueState(rawValue:state) != nil,
+                  issueIDsByReview[reviewID]?.contains(issueID) == true else { throw VoiceOSError("知识核查状态与原问题不一致") }
         }
     }
 }

@@ -35,3 +35,10 @@
 
 - 分支 `work/m49-pa`、`work/m49-kb`，均从 main（波 48 合并后）切出；协调者合并到 `work/mega-49`，单次构建 + 全量测试，记录到本文件「结果」。
 - 全程不写实时库；不重启应用（等全部波次与闸门）。
+
+## 结果（2026-11-17）
+
+- PA（d6c778b）：`PanoramaProposalInvalid` 携带问题/联系 id、证据序号与观点 id；`validatePanorama` 全部抛出点换型并拆分顺序诊断；`panoramaStep` 重试分类纳入该类型（limit 1）；attempt 文案带具体定位。新增 PanoramaValidationRetryChecks 三个流程层场景（首次失败二次通过、两次失败、全局综合阶段）。
+- KB（247726e）：schema 67→68，`knowledge_review_states(review_id, issue_id, status, updated_at)`；知识核查区计数行、显示全部切换、每条三操作（已读/认可/驳回），资料页问题区同样带操作；启动校验拦截孤儿状态。KnowledgeReviewStateChecks 六项覆盖写入/读取/覆盖/计数/过滤/重启与迁移幂等。
+- 集成：mega-49 合并无冲突。构建 build_exit=0（71s）；测试 test_exit=0，514 项 0 失败（28s）。
+- 部署：与波 48 同机安装需下一次闸门重启（schema 68 随包迁移）。

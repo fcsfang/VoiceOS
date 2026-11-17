@@ -641,9 +641,17 @@ struct WorkspaceSourceView: View {
                         }
                     }
                 }
-                if let review,!review.issues.isEmpty {
-                    WorkspaceSection(title:"理解有需要补充的地方",icon:"lightbulb",count:review.issues.count) {
-                        ForEach(review.issues) { issue in WorkspaceExpandableText(text:issue.betterUnderstanding,label:"完整建议",size:WorkspaceText.body.size).padding(.vertical,14) }
+                if let review {
+                    let open = review.openIssues(from: review.issues)
+                    if !open.isEmpty {
+                        WorkspaceSection(title:"理解有需要补充的地方",icon:"lightbulb",count:open.count) {
+                            ForEach(open) { issue in
+                                VStack(alignment:.leading,spacing:8) {
+                                    WorkspaceExpandableText(text:issue.betterUnderstanding,label:"完整建议",size:WorkspaceText.body.size)
+                                    KnowledgeReviewIssueStatusControls(model:model,record:review,issue:issue)
+                                }.padding(.vertical,14)
+                            }
+                        }
                     }
                 }
                 let currentActions = actions.filter { $0.validity == "current" }

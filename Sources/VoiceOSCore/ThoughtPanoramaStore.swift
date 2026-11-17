@@ -377,8 +377,8 @@ extension VoiceOSStore {
                 let elapsed=Date().timeIntervalSince(started)
                 let retryable: Bool
                 if let network=error as? URLError { retryable=[.networkConnectionLost,.timedOut,.notConnectedToInternet].contains(network.code) }
-                else { retryable=error is PanoramaTransientFailure || error is PanoramaQuoteLocationFailure || error is PanoramaFocusViolation || error is PanoramaSynthesisReferenceFailure }
-                let limit = (error is PanoramaQuoteLocationFailure || error is PanoramaFocusViolation || error is PanoramaSynthesisReferenceFailure) ? 1 : 2
+                else { retryable=error is PanoramaTransientFailure || error is PanoramaQuoteLocationFailure || error is PanoramaFocusViolation || error is PanoramaSynthesisReferenceFailure || error is PanoramaProposalInvalid }
+                let limit = (error is PanoramaQuoteLocationFailure || error is PanoramaFocusViolation || error is PanoramaSynthesisReferenceFailure || error is PanoramaProposalInvalid) ? 1 : 2
                 guard retries < limit, retryable, elapsed < 590 else { throw error }
                 retries += 1
                 try await panoramaRetryDelay(.seconds(retries))
@@ -663,6 +663,7 @@ extension VoiceOSStore {
     }
     private static func panoramaFailure(_ error: Error) -> String {
         if let error=error as? VoiceOSError { return error.message }
+        if let invalid=error as? PanoramaProposalInvalid, let message=invalid.errorDescription { return message }
         if let violation=error as? PanoramaFocusViolation { return violation.reason }
         if let failure=error as? PanoramaSynthesisReferenceFailure { return "全景综合引用无效：" + failure.reason + "；已核对单元保留，可明确重试" }
         if let issue=error as? PanoramaSemanticIssue { return "全景独立语义核对未通过：" + issue.rejection.review.reason + "；已核对区域保留，可明确重试" }

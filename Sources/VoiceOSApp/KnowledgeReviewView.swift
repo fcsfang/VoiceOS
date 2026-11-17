@@ -9,6 +9,7 @@ struct KnowledgeReviewSection: View {
     let sourceIDs: [String]
     var quoteFilter: String? = nil
     var matchingQuotesBySource: [String: [String]]? = nil
+    @State private var showsSettled = false
     private var sources: [SourceRecord] { model.records.filter { sourceIDs.contains($0.id) && $0.origin == "user" && $0.speaker == "user" } }
 
     var body: some View {
@@ -19,7 +20,7 @@ struct KnowledgeReviewSection: View {
                 Spacer()
                 if model.knowledgeReviewBusy { ProgressView().controlSize(.small) }
             }
-            Text("对照原话检查事实、推断与适用条件。以下是有依据的 AI 核查建议，是否采纳由你决定。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text("对照原话检查事实、推断与适用条件。以下是有依据的 AI 核查建议，是否采纳由你决定；可标为已读、认可或驳回，已认可与已驳回的建议默认折叠。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             ForEach(sources) { source in
                 sourceReview(source)
             }
@@ -63,7 +64,7 @@ struct KnowledgeReviewSection: View {
                     let issues = record.issues.filter { matches($0, source: source) }
                     if !issues.isEmpty {
                         DisclosureGroup("查看历史核查建议") {
-                            ForEach(issues) { issue in issueCard(issue) }
+                            issueList(record, issues: issues)
                         }
                     }
                     Button("核查当前原文") { Task { await model.reviewKnowledge(sourceID: source.id) } }.disabled(!canReview(source))
@@ -76,7 +77,7 @@ struct KnowledgeReviewSection: View {
                         Text("本条思考暂无可按连续原话定位的核查建议。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                         Text("来源中其他判断的核查可在资料详情查看，未关联到这里。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     } else {
-                        ForEach(issues) { issue in issueCard(issue) }
+                        issueList(record, issues: issues)
                     }
                 default:
                     Text("核查状态：" + record.state).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
@@ -99,7 +100,22 @@ struct KnowledgeReviewSection: View {
         ["saved", "reference_only"].contains(source.state) && !(source.transcript ?? "").isEmpty &&
         !(model.currentClaimsBySource[source.id] ?? []).isEmpty
     }
-    private func issueCard(_ issue: KnowledgeReviewIssue) -> some View {
+    @ViewBuilder private func issueList(_ record: KnowledgeReviewRecord, issues: [KnowledgeReviewIssue]) -> some View {
+        let counts = record.issueCounts(of: issues)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("待核查 \(counts.pending) · 已读 \(counts.seen) · 已认可 \(counts.accepted) · 已驳回 \(counts.rejected)")
+                .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                .accessibilityLabel("待核查 \(counts.pending) 条，已读 \(counts.seen) 条，已认可 \(counts.accepted) 条，已驳回 \(counts.rejected) 条")
+            ForEach(record.openIssues(from: issues)) { issue in issueCard(issue, record: record) }
+            let settled = record.settledIssues(from: issues)
+            if !settled.isEmpty {
+                Button(showsSettled ? "仅看待核查" : "显示全部（含已处理 \(settled.count) 条）") { showsSettled.toggle() }
+                    .vosFont(WorkspaceText.meta.size, weight: .medium).buttonStyle(.borderless)
+                if showsSettled { ForEach(settled) { issue in issueCard(issue, record: record) } }
+            }
+        }
+    }
+    private func issueCard(_ issue: KnowledgeReviewIssue, record: KnowledgeReviewRecord) -> some View {
         VStack(alignment: .leading, spacing: 11) {
             Text(kindLabel(issue.kind.rawValue)).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.accent)
             VStack(alignment: .leading, spacing: 5) {
@@ -122,6 +138,7 @@ struct KnowledgeReviewSection: View {
                     }
                 }
             }
+            KnowledgeReviewIssueStatusControls(model: model, record: record, issue: issue)
         }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }
@@ -141,6 +158,44 @@ struct KnowledgeReviewSection: View {
         case "disputed": return "存在争议"
         case "transcriptionUncertain": return "转写含义待核对"
         default: return value
+        }
+    }
+}
+
+/// Shared by the full issue card and the source summary, so both lists offer
+/// the same reading record without duplicating the state rules.
+struct KnowledgeReviewIssueStatusControls: View {
+    @ObservedObject var model: ControlCenter
+    let record: KnowledgeReviewRecord
+    let issue: KnowledgeReviewIssue
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("状态：" + stateLabel(record.issueState(issue.id))).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            ForEach(KnowledgeReviewIssueState.allCases, id: \.self) { state in
+                Button(actionLabel(state)) {
+                    Task { await model.setKnowledgeReviewIssueState(state, reviewID: record.id, issueID: issue.id) }
+                }
+                .vosFont(WorkspaceText.meta).buttonStyle(.bordered).controlSize(.small)
+                .disabled(record.issueState(issue.id) == state)
+                .accessibilityLabel(actionLabel(state) + "：" + issue.quote)
+            }
+        }
+    }
+    private func stateLabel(_ state: KnowledgeReviewIssueState?) -> String {
+        switch state {
+        case .seen: return "已读"
+        case .accepted: return "已认可"
+        case .rejected: return "已驳回"
+        case nil: return "待核查"
+        }
+    }
+    private func actionLabel(_ state: KnowledgeReviewIssueState) -> String {
+        switch state {
+        case .seen: return "标为已读"
+        case .accepted: return "认可"
+        case .rejected: return "驳回"
         }
     }
 }
