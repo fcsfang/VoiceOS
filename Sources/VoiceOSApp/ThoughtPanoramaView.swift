@@ -19,6 +19,8 @@ struct ThoughtPanoramaView: View {
     let correctSource: (String) -> Void
     let correctClaim: (String) -> Void
     let discuss: (String, PanoramaSelection) -> Void
+    let topicLinks: [PanoramaTopicLink]
+    let openTopic: (String) -> Void
     let themeReply: (PanoramaThemeBriefing) async throws -> String
     @State private var query = ""
     @State private var searchMatches = ConstellationSearchMatches()
@@ -82,7 +84,9 @@ struct ThoughtPanoramaView: View {
             openSource: openSource,
             correctSource: correctSource,
             correctClaim: correctClaim,
-            discuss: discuss
+            discuss: discuss,
+            topicLinks: topicLinks,
+            openTopic: openTopic
         )
         if let selection {
             switch selection {
@@ -712,6 +716,27 @@ private struct ReaderActions {
     let correctSource: (String) -> Void
     let correctClaim: (String) -> Void
     let discuss: (String, PanoramaSelection) -> Void
+    let topicLinks: [PanoramaTopicLink]
+    let openTopic: (String) -> Void
+}
+
+struct PanoramaTopicLink: Identifiable {
+    let id: String
+    let title: String
+    let sourceIDs: Set<String>
+
+    static func bestMatch(for sourceIDs: Set<String>, in links: [PanoramaTopicLink]) -> PanoramaTopicLink? {
+        var match: PanoramaTopicLink?
+        var overlap = 0
+        for link in links {
+            let count = link.sourceIDs.intersection(sourceIDs).count
+            if count > overlap {
+                match = link
+                overlap = count
+            }
+        }
+        return match
+    }
 }
 
 private struct RegionInspectorPanel: View {
@@ -733,6 +758,8 @@ private struct RegionInspectorPanel: View {
     var body: some View {
         let model = ConstellationModel(snapshot: snapshot, now: .now)
         let questions = (model.regionByID[region.id]?.questionIDs ?? []).compactMap { model.questionByID[$0] }
+        let regionSourceIDs = Set(questions.flatMap { $0.evidence.map(\.sourceID) })
+        let topicMatch = PanoramaTopicLink.bestMatch(for: regionSourceIDs, in: actions.topicLinks)
         let incident = snapshot.proposal.relations.filter { relation in
             guard let from = model.questionByID[relation.from], let to = model.questionByID[relation.to] else { return false }
             return from.regionID == region.id || to.regionID == region.id
@@ -758,6 +785,24 @@ private struct RegionInspectorPanel: View {
                 Text(themeMetaLine(briefing, questions: questions, relations: incident.count))
                     .vosFont(WorkspaceText.meta)
                     .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    Button {
+                        if let topicMatch { actions.perform { actions.openTopic(topicMatch.id) } }
+                    } label: {
+                        HStack {
+                            Text("在主题中查看")
+                            Spacer(minLength: 0)
+                            Image(systemName: "arrow.right")
+                        }
+                        .padding(8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(topicMatch == nil)
+                    Text(topicMatch.map { "将打开主题「" + $0.title + "」" }
+                         ?? (regionSourceIDs.isEmpty ? "该区域还没有原话证据" : "该区域的材料还没有挂主题"))
+                        .vosFont(WorkspaceText.caption)
+                        .foregroundStyle(.secondary)
+                }
                 if !briefing.quotes.isEmpty {
                     ReaderSectionLabel("你的话")
                     ForEach(briefing.quotes) { quote in
@@ -1330,8 +1375,10 @@ struct PanoramaHome: View {
     let correctSource: (String) -> Void
     let correctClaim: (String) -> Void
     let discuss: (String, PanoramaSelection) -> Void
+    let topicLinks: [PanoramaTopicLink]
+    let openTopic: (String) -> Void
     let themeReply: (PanoramaThemeBriefing) async throws -> String
     var body: some View {
-        ThoughtPanoramaView(state: screen.state, message: screen.message, isGenerating: screen.isGenerating, modelConfigured: screen.modelConfigured, readError: screen.readError, selection: $screen.selection, retry: retry, draft: draft, retryRefresh: { screen.retryRefresh() }, dismissReadError: { screen.dismissReadError() }, chooseTextModel: chooseTextModel, openMaterials: openMaterials, openSource: openSource, correctSource: correctSource, correctClaim: correctClaim, discuss: discuss, themeReply: themeReply)
+        ThoughtPanoramaView(state: screen.state, message: screen.message, isGenerating: screen.isGenerating, modelConfigured: screen.modelConfigured, readError: screen.readError, selection: $screen.selection, retry: retry, draft: draft, retryRefresh: { screen.retryRefresh() }, dismissReadError: { screen.dismissReadError() }, chooseTextModel: chooseTextModel, openMaterials: openMaterials, openSource: openSource, correctSource: correctSource, correctClaim: correctClaim, discuss: discuss, topicLinks: topicLinks, openTopic: openTopic, themeReply: themeReply)
     }
 }
