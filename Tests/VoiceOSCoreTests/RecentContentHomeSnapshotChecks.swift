@@ -130,4 +130,64 @@ final class RecentContentHomeSnapshotChecks: XCTestCase {
         XCTAssertEqual(older?.text, "第一天的反馈")
         XCTAssertEqual(older?.isTaskAvailable, true)
     }
+
+    private func utcCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        return calendar
+    }
+
+    private func instant(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 12) -> Date {
+        utcCalendar().date(from: DateComponents(year: year, month: month, day: day, hour: hour))!
+    }
+
+    private func day(_ date: Date, items: [RecentContentItem]) -> RecentContentDay {
+        RecentContentDay(id: "day", date: utcCalendar().startOfDay(for: date), items: items)
+    }
+
+    private func thoughtItem(_ id: String, title: String, date: Date, statements: [String]) -> RecentContentItem {
+        RecentContentItem(id: id, sourceIDs: [id], date: date, title: title, summary: "",
+                          thoughts: statements.enumerated().map {
+                              RecentContentThought(claimID: "\(id)-c\($0.offset)", statement: $0.element)
+                          },
+                          excerpts: [], kind: .material)
+    }
+
+    func testRecentThoughtsGroupByDayWithCountsAndSourceTitles() {
+        let calendar = utcCalendar()
+        let may2 = instant(2024, 5, 2, 10)
+        let may1 = instant(2024, 5, 1, 9)
+        let days = [
+            day(may2, items: [thoughtItem("m1", title: "材料一", date: may2,
+                                          statements: ["完成比完美更重要", "与父母长谈"])]),
+            day(may1, items: [thoughtItem("m2", title: "材料二", date: may1, statements: ["整理桌面"])]),
+        ]
+
+        let groups = RecentContentIndex.recentThoughts(days: days, now: instant(2024, 5, 3), calendar: calendar)
+
+        XCTAssertEqual(groups.map(\.id), ["2024-05-02", "2024-05-01"])
+        XCTAssertEqual(groups.map { $0.entries.count }, [2, 1])
+        XCTAssertEqual(groups[0].entries.map(\.statement), ["完成比完美更重要", "与父母长谈"])
+        XCTAssertEqual(groups[0].entries.map(\.sourceTitle), ["材料一", "材料一"])
+        XCTAssertEqual(groups[1].entries.map(\.sourceItemID), ["m2"])
+    }
+
+    func testRecentThoughtsKeepOnlyTheLastFourteenDays() {
+        let calendar = utcCalendar()
+        let inside = instant(2024, 5, 1, 8)
+        let outside = instant(2024, 4, 30, 23)
+        let days = [
+            day(inside, items: [thoughtItem("m1", title: "窗口内", date: inside, statements: ["保留这条"])]),
+            day(outside, items: [thoughtItem("m2", title: "窗口外", date: outside, statements: ["丢弃这条"])]),
+        ]
+
+        let groups = RecentContentIndex.recentThoughts(days: days, now: instant(2024, 5, 14), calendar: calendar)
+
+        XCTAssertEqual(groups.map(\.id), ["2024-05-01"])
+        XCTAssertEqual(groups.first?.entries.map(\.statement), ["保留这条"])
+    }
+
+    func testRecentThoughtsHideWhenNoData() {
+        XCTAssertEqual(RecentContentIndex.recentThoughts(days: []), [])
+    }
 }

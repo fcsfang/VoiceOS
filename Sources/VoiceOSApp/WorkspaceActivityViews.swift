@@ -86,7 +86,8 @@ struct WorkspaceDeliveryView: View {
                 }
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
-        }.task(id: execution.id) { topicID = execution.questionID ?? "" }
+        }.task { await model.refresh(.assistant) }
+        .task(id: execution.id) { topicID = execution.questionID ?? "" }
     }
     private func export(_ report: String) {
         let panel = NSSavePanel()
@@ -108,6 +109,27 @@ struct TaskFeedbackDraft {
     var kind = ActionFeedbackKind.outcome
     var commandID = UUID().uuidString
     var expanded = false
+}
+
+struct TaskFeedbackEditor: View {
+    @ObservedObject var model: ControlCenter
+    @Binding var draft: TaskFeedbackDraft
+    var onDictate: (() -> Void)? = nil
+    let onSave: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Picker("记录类型", selection: $draft.kind) { Text("实际结果 / 进展").tag(ActionFeedbackKind.outcome); Text("我的反思").tag(ActionFeedbackKind.reflection) }.pickerStyle(.menu).disabled(model.savingFeedback)
+            TextEditor(text: $draft.text).frame(minHeight: 100).workspaceEditorSurface()
+                .accessibilityLabel("实际进展与收获草稿").disabled(model.savingFeedback)
+            Text("本窗口内切页保留草稿；正式保存后才接回任务，关闭窗口前请保存。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            HStack {
+                if let onDictate { Button("口述进展或结果", action: onDictate) }
+                Spacer()
+                Button("保存并接回原任务", action: onSave).buttonStyle(.borderedProminent).disabled(model.savingFeedback || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
 }
 
 struct ActionOriginalQuotes: View {
@@ -613,6 +635,7 @@ struct WorkspaceTaskView: View {
         }
         .task(id: action.id + String(action.version)) { await loadRevisions() }
         .task(id: goalProgressKey) { await loadGoalProgress() }
+        .task { await model.refresh() }
         .sheet(isPresented: $confirming) { ConfirmTaskView(action: action, model: model) { confirming = false } }
         .sheet(isPresented: $showingSettings) { if let settings { ReminderSettingsView(action: action, snapshot: settings, model: model) { showingSettings = false } } }
         .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
@@ -750,17 +773,7 @@ struct WorkspaceTaskView: View {
         }
     }
     @ViewBuilder private var feedbackDraftEditor: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Picker("记录类型", selection: $draft.kind) { Text("实际结果 / 进展").tag(ActionFeedbackKind.outcome); Text("我的反思").tag(ActionFeedbackKind.reflection) }.pickerStyle(.menu).disabled(model.savingFeedback)
-            TextEditor(text: $draft.text).frame(minHeight: 100).workspaceEditorSurface()
-                .accessibilityLabel("实际进展与收获草稿").disabled(model.savingFeedback)
-            Text("本窗口内切页保留草稿；正式保存后才接回任务，关闭窗口前请保存。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            HStack {
-                Button("口述进展或结果") { showingFeedback = true }
-                Spacer()
-                Button("保存并接回原任务") { saveFeedback() }.buttonStyle(.borderedProminent).disabled(model.savingFeedback || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
+        TaskFeedbackEditor(model: model, draft: $draft, onDictate: { showingFeedback = true }, onSave: saveFeedback)
     }
     private func completeOutcome() {
         Task {

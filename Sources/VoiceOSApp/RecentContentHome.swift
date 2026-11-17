@@ -27,6 +27,7 @@ struct RecentContentHome: View {
     @State private var clueRename: ClueRenameRequest?
     @State private var clueFailureText = ""
     @State private var showingClueFailure = false
+    @State private var organizeAttemptSourceID: String?
     @FocusState private var timelineFocused: Bool
     private let topAnchor = "home.top"
     private let timelineSpace = "home.timeline"
@@ -80,6 +81,7 @@ struct RecentContentHome: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
+                    if !recentThoughts.isEmpty { recentThoughtsSection(recentThoughts) }
                     ForEach(days) { day in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(dayLabel(day.date)).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader).padding(.horizontal, 10)
@@ -200,7 +202,8 @@ struct RecentContentHome: View {
 
     /// Slot 3 holds only a non-default state, one at a time.
     private func statusSlot(_ item: RecentContentItem) -> (text: String, color: Color)? {
-        guard item.kind == .material, let source = materialSource(item) else { return nil }
+        if item.kind == .feedback { return outcomeBadge.map { ($0, palette.warning) } }
+        guard let source = materialSource(item) else { return nil }
         if source.localOnly { return ("仅本地", palette.secondaryText) }
         if ["queued", "running", "reserved"].contains(source.jobState ?? "") { return ("整理中", palette.accent) }
         if source.needsTranscriptionReview { return ("待核对", palette.warning) }
@@ -253,9 +256,15 @@ struct RecentContentHome: View {
         return VStack(alignment: .leading, spacing: 16) {
             Text([dateLabel(item.date), timeLabel(item.date)].joined(separator: " · "))
                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-            Text("\(item.title) · \(count) 条")
-                .vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText)
-                .accessibilityAddTraits(.isHeader)
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("\(item.title) · \(count) 条")
+                    .vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText)
+                    .accessibilityAddTraits(.isHeader)
+                if let badge = outcomeBadge {
+                    Text(badge).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                }
+                Spacer(minLength: 0)
+            }
             if rows.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(item.excerpts.enumerated()), id: \.offset) { index, excerpt in
@@ -276,20 +285,42 @@ struct RecentContentHome: View {
         }
     }
 
-    private func progressRow(_ row: RecentContentProgressRow, style: WorkspaceTextStyle) -> some View {
-        Button { openTask(row.actionID) } label: {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(row.text).vosFont(style).lineSpacing(style.size > 20 ? 4 : 5).textSelection(.enabled)
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(row.taskTitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+    @ViewBuilder private func progressRow(_ row: RecentContentProgressRow, style: WorkspaceTextStyle) -> some View {
+        if row.isTaskAvailable {
+            Button { openTask(row.actionID) } label: {
+                progressRowContent(row, style: style)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        } else {
+            HStack(alignment: .top, spacing: 10) {
+                progressRowContent(row, style: style)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(taskUnavailableReason(row)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    if model.records.contains(where: { $0.id == row.id }) {
+                        Button("查看材料") { openSource(row.id) }
+                            .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .disabled(!row.isTaskAvailable)
+    }
+
+    private func progressRowContent(_ row: RecentContentProgressRow, style: WorkspaceTextStyle) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(row.text).vosFont(style).lineSpacing(style.size > 20 ? 4 : 5).textSelection(.enabled)
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(row.taskTitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+            }
+        }
+    }
+
+    private func taskUnavailableReason(_ row: RecentContentProgressRow) -> String {
+        guard let action = model.actionRecords.first(where: { $0.id == row.actionID }) else { return "任务已结束" }
+        return model.workspaceTaskRequiresReview(action) ? "任务已暂停" : "任务已结束"
     }
 
     private func materialReader(_ item: RecentContentItem) -> some View {
@@ -316,10 +347,15 @@ struct RecentContentHome: View {
                     .textSelection(.enabled)
                     .padding(.top, 24)
             }
-            ForEach(digest.threads) { thread in
-                threadSection(thread, siblings: digest.threads.filter { $0.id != thread.id })
-                    .padding(.top, 44)
-                    .id("home.thread.\(thread.id)")
+            if item.thoughts.isEmpty {
+                organizePrompt(item).padding(.top, 44)
+            } else {
+                ForEach(digest.threads) { thread in
+                    threadSection(thread, siblings: digest.threads.filter { $0.id != thread.id })
+                        .padding(.top, 44)
+                        .id("home.thread.\(thread.id)")
+                }
+            }
             }
             tasksSummary(digest.tasks)
         }
@@ -393,7 +429,11 @@ struct RecentContentHome: View {
     }
 
     private func openOriginal(_ thought: RecentContentThought) {
-        guard let claim = model.claims.first(where: { $0.id == thought.claimID }),
+        openClaim(thought.claimID)
+    }
+
+    private func openClaim(_ claimID: String) {
+        guard let claim = model.claims.first(where: { $0.id == claimID }),
               let reference = claim.references.first else { return }
         openSpan(reference.sourceID, reference.spanID)
     }
@@ -423,6 +463,81 @@ struct RecentContentHome: View {
                 }.padding(.top, 8)
             }.padding(.top, 54)
             .accessibilityIdentifier("home.tasks.list")
+        }
+    }
+
+    private var recentThoughts: [RecentThoughtDay] {
+        RecentContentIndex.recentThoughts(days: days)
+    }
+
+    private var outcomeBadge: String? {
+        let pending = model.visibleOutcomeFollowups.count
+        return pending > 0 ? "\(pending) 项结果待填" : nil
+    }
+
+    private func recentThoughtsSection(_ groups: [RecentThoughtDay]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("最近想法").vosFont(WorkspaceText.meta.size, weight: .semibold)
+                .foregroundStyle(palette.secondaryText).padding(.horizontal, 10)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(groups) { group in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(dayLabel(group.date)) · \(group.entries.count) 条")
+                        .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                        .padding(.horizontal, 10)
+                    ForEach(group.entries) { entry in
+                        Button { openClaim(entry.id) } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.statement).vosFont(WorkspaceText.meta)
+                                    .foregroundStyle(palette.text).lineLimit(1)
+                                Text(entry.sourceTitle).vosFont(WorkspaceText.caption)
+                                    .foregroundStyle(palette.secondaryText).lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10).padding(.vertical, 4)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("打开这条想法的原话")
+                        .accessibilityIdentifier("recent.thought")
+                    }
+                }
+            }
+            Rectangle().fill(palette.border).frame(height: 1).padding(.top, 4)
+        }
+        .accessibilityIdentifier("home.recentThoughts")
+    }
+
+    @ViewBuilder private func organizePrompt(_ item: RecentContentItem) -> some View {
+        if let source = materialSource(item) {
+            let organizing = model.understandingSource == source.id
+            VStack(alignment: .leading, spacing: 12) {
+                Text("这份材料还没有整理出想法").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                HStack(spacing: 10) {
+                    Button(organizing ? "正在整理…" : "整理这份材料") {
+                        organizeAttemptSourceID = source.id
+                        model.reidentify(source)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(organizing || model.fullRecordingBusy || !model.modelConfigured || source.localOnly)
+                    if organizing { ProgressView().controlSize(.small) }
+                }
+                if source.localOnly {
+                    Text("这份材料仅本机保存，允许云端后才能整理。")
+                        .vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                } else if !model.modelConfigured {
+                    HStack(spacing: 8) {
+                        Text("整理需要先配置文本模型。").vosFont(WorkspaceText.caption).foregroundStyle(palette.warning)
+                        Button("配置文本模型…") { model.chooseTextModel() }.vosFont(WorkspaceText.caption)
+                    }
+                } else if organizeAttemptSourceID == source.id, !organizing, !model.status.isEmpty {
+                    Text(model.status).vosFont(WorkspaceText.caption)
+                        .foregroundStyle(palette.secondaryText).textSelection(.enabled)
+                }
+            }
+            .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+            .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
+            .accessibilityIdentifier("home.organizePrompt")
         }
     }
 

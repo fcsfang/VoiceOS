@@ -1233,8 +1233,9 @@ struct WorkspaceView: View {
                     }
                 }
             }
-            if !model.visibleOutcomeFollowups.isEmpty {
-                WorkspaceListSection(title:"完成后的结果",count:model.visibleOutcomeFollowups.count,collapsible:true) {
+            let pendingOutcomes = model.visibleOutcomeFollowups.count
+            if pendingOutcomes > 0 {
+                WorkspaceListSection(title:"完成后的结果",count:pendingOutcomes,badge:"\(pendingOutcomes) 项待填结果",collapsible:true,initiallyExpanded:true) {
                     HStack(spacing:12) {
                         Button("记录结果…") { showingOutcome=true }.buttonStyle(.bordered)
                         Button("显示已跳过") { model.showSkippedOutcomes() }

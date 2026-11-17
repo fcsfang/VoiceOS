@@ -19,6 +19,9 @@ struct WeeklyReviewView: View {
     @State private var showingClarifyQueue = false
     @State private var nextStepGoal: ActionRecord?
     @State private var nextStepNotice = ""
+    @State private var outcomeDrafts: [String: TaskFeedbackDraft] = [:]
+    @State private var expandedOutcomeID: String?
+    @State private var outcomeError = ""
 
     private enum ReviewFilter: String {
         case todo = "我的待办", review = "待核对", completed = "已完成"
@@ -417,14 +420,46 @@ struct WeeklyReviewView: View {
         return WorkspaceSection(title: "本周结果", subtitle: "最近 7 天记录的结果与进展。", icon: "checkmark.seal", count: weekProgress.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 if index > 0 { Divider() }
-                reviewRow(title: row.taskTitle, subtitle: row.relationLabel, detail: row.text,
-                          trailing: dayLabel(row.date), enabled: row.isTaskAvailable) { openTask(row.actionID) }
+                if row.isTaskAvailable {
+                    reviewRow(title: row.taskTitle, subtitle: row.relationLabel, detail: row.text,
+                              trailing: dayLabel(row.date)) { openTask(row.actionID) }
+                } else {
+                    unavailableProgressRow(row)
+                }
             }
             if weekProgress.count > rows.count {
                 Text("还有 \(weekProgress.count - rows.count) 条结果，到对应任务详情查看。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
             }
         }
     }
+    private func unavailableProgressRow(_ row: RecentContentProgressRow) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "circle").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                .frame(width: 34, height: 34)
+                .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(StatementTagParser.split(row.taskTitle).text).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
+                Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                Text(row.text).vosFont(WorkspaceText.body).lineSpacing(3).lineLimit(3).multilineTextAlignment(.leading)
+            }
+            Spacer(minLength: 8)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(progressUnavailableReason(row)).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
+                if model.records.contains(where: { $0.id == row.id }) {
+                    Button("查看材料") { model.requestWorkspaceSource(row.id); dismiss() }
+                        .buttonStyle(.bordered).controlSize(.small)
+                }
+            }
+        }
+        .padding(.vertical, 14).padding(.horizontal, 10)
+    }
+
+    private func progressUnavailableReason(_ row: RecentContentProgressRow) -> String {
+        guard let action = model.actionRecords.first(where: { $0.id == row.actionID }) else { return "任务已结束" }
+        return model.workspaceTaskRequiresReview(action) ? "任务已暂停" : "任务已结束"
+    }
+
     private var weekCompletedSection: some View {
         WorkspaceSection(title: "本周完成", subtitle: "最近 7 天登记完成的行动，按完成时间倒序；没有记录结果的仍留在列表里。", icon: "checkmark.circle", count: weekCompleted.count) {
             ForEach(Array(weekCompleted.enumerated()), id: \.element.id) { index, action in
@@ -442,8 +477,67 @@ struct WeeklyReviewView: View {
     private func weekCompletedRow(_ action: ActionRecord) -> some View {
         let subtitle = completedDate(action).map { "完成于 " + dayLabel($0) } ?? "完成时间未知"
         let pending = model.visibleOutcomeFollowups.contains { $0.id == action.id }
-        return reviewRow(title: action.title, subtitle: subtitle + " · " + actionSourceLabel(action),
-                         trailing: pending ? "待补结果" : "", icon: "checkmark.circle") { openTask(action.id) }
+        let expanded = expandedOutcomeID == action.id
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Button { openTask(action.id) } label: {
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: "checkmark.circle").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                            .frame(width: 34, height: 34)
+                            .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(StatementTagParser.split(action.title).text).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
+                            Text(subtitle + " · " + actionSourceLabel(action)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                        }
+                        Spacer(minLength: 8)
+                        if pending {
+                            Text("待补结果").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
+                        }
+                        Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .accessibilityElement(children: .combine)
+                }.buttonStyle(.plain)
+                if pending {
+                    Button(expanded ? "收起" : "记录结果") {
+                        outcomeError = ""
+                        withAnimation { expandedOutcomeID = expanded ? nil : action.id }
+                    }
+                    .buttonStyle(.bordered).controlSize(.small).disabled(model.savingFeedback)
+                    .accessibilityLabel("记录结果：" + action.title)
+                }
+            }
+            if pending && expanded {
+                TaskFeedbackEditor(model: model, draft: outcomeDraft(action.id), onSave: { saveOutcome(action) })
+                    .padding(18)
+                    .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+            }
+            if expanded, !outcomeError.isEmpty {
+                WorkspaceNoticeText(message: outcomeError, severity: .danger)
+            }
+        }
+        .padding(.vertical, 10).padding(.horizontal, 10)
+        .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
+    }
+
+    private func outcomeDraft(_ id: String) -> Binding<TaskFeedbackDraft> {
+        Binding(get: { outcomeDrafts[id] ?? TaskFeedbackDraft() },
+                set: { outcomeDrafts[id] = $0 })
+    }
+
+    private func saveOutcome(_ action: ActionRecord) {
+        let input = outcomeDrafts[action.id] ?? TaskFeedbackDraft()
+        Task {
+            if await model.saveFeedback(action, kind: input.kind, text: input.text, commandID: input.commandID) {
+                outcomeDrafts[action.id] = TaskFeedbackDraft()
+                outcomeError = ""
+                withAnimation { expandedOutcomeID = nil }
+            } else {
+                outcomeError = model.status.isEmpty ? "结果未能保存，请稍后重试" : model.status
+            }
+        }
     }
 
     private func linkButton(_ label: String, _ filter: ReviewFilter) -> some View {
@@ -571,7 +665,7 @@ struct WeeklyReviewView: View {
         }
     }
     private func reviewRow(title: String, subtitle: String, detail: String = "", trailing: String = "",
-                           icon: String = "circle", enabled: Bool = true, accessibilityLabel: String? = nil,
+                           icon: String = "circle", accessibilityLabel: String? = nil,
                            open: @escaping () -> Void) -> some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 14) {
@@ -597,7 +691,7 @@ struct WeeklyReviewView: View {
             .padding(.vertical, 14).padding(.horizontal, 10)
             .contentShape(Rectangle())
             .accessibilityElement(children: .combine)
-        }.buttonStyle(.plain).disabled(!enabled)
+        }.buttonStyle(.plain)
             .accessibilityLabelIfPresent(accessibilityLabel)
             .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
     }
