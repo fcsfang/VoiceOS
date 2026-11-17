@@ -12,6 +12,32 @@ struct PanoramaSynthesisReferenceFailure: Error, Sendable, LocalizedError {
     let reason: String
     var errorDescription: String? { reason }
 }
+/// A proposal rejected by `validatePanorama`: a region, evidence entry or
+/// coverage list contradicts the input. Retryable once, because the same input
+/// can produce a valid proposal on the next model response, and the failure
+/// names the question or relation and the evidence entry that broke so the
+/// attempt error is diagnosable.
+public struct PanoramaProposalInvalid: Error, Sendable, LocalizedError {
+    public let reason: String
+    public let questionID: String?
+    public let relationID: String?
+    /// 1-based position of the failing evidence entry inside its question or relation.
+    public let evidenceIndex: Int?
+    public let claimIDs: [String]
+    public init(reason: String, questionID: String? = nil, relationID: String? = nil, evidenceIndex: Int? = nil, claimIDs: [String] = []) {
+        self.reason=reason; self.questionID=questionID; self.relationID=relationID; self.evidenceIndex=evidenceIndex; self.claimIDs=claimIDs
+    }
+    public var errorDescription: String? {
+        var text: String
+        if let questionID, !questionID.isEmpty { text="全景问题 "+questionID }
+        else if let relationID, !relationID.isEmpty { text="全景联系 "+relationID }
+        else { text="全景核对未通过" }
+        if let evidenceIndex { text += " 第 \(evidenceIndex) 条证据" }
+        text += "："+reason
+        if !claimIDs.isEmpty { text += "；涉及观点 "+claimIDs.joined(separator: "、") }
+        return text
+    }
+}
 public struct PanoramaSource: Codable, Sendable, Identifiable {
     public var id: String { transcript.sourceID }
     public let transcript: ContextTranscript
@@ -353,31 +379,54 @@ extension VoiceOSStore {
         guard regions.count == proposal.regions.count, questions.count == proposal.questions.count,
               Set(proposal.relations.map(\.id)).count == proposal.relations.count,
               proposal.regions.allSatisfy({ nonempty($0.id) && nonempty($0.title) && nonempty($0.summary) }),
-              proposal.regions.allSatisfy({ region in proposal.questions.contains { $0.regionID == region.id } }) else { throw VoiceOSError("全景区域或问题身份无效") }
-        func validate(_ evidence: [PanoramaEvidence]) throws {
-            guard !evidence.isEmpty else { throw VoiceOSError("全景问题或联系缺少真实原话") }
-            for item in evidence {
+              proposal.regions.allSatisfy({ region in proposal.questions.contains { $0.regionID == region.id } }) else { throw PanoramaProposalInvalid(reason: "区域或问题身份无效") }
+        func validate(_ evidence: [PanoramaEvidence], questionID: String? = nil, relationID: String? = nil) throws {
+            guard !evidence.isEmpty else { throw PanoramaProposalInvalid(reason: "问题或联系缺少真实原话", questionID: questionID, relationID: relationID) }
+            for (index,item) in evidence.enumerated() {
                 guard let source=sources[item.sourceID], source.transcriptVersionID == item.transcriptVersionID,
-                      item.start >= 0, item.end > item.start, item.end <= source.text.unicodeScalars.count else { throw VoiceOSError("全景引用版本或范围不符") }
+                      item.start >= 0, item.end > item.start, item.end <= source.text.unicodeScalars.count else {
+                    throw PanoramaProposalInvalid(reason: "引用的原文版本或范围不符", questionID: questionID, relationID: relationID, evidenceIndex: index+1)
+                }
                 let text=Array(source.text.unicodeScalars)
-                guard String(String.UnicodeScalarView(text[item.start..<item.end])) == item.quote,
-                      Set(item.claimIDs).count == item.claimIDs.count,
-                      item.claimIDs.allSatisfy({ id in claims[id]?.references.contains { ref in
-                          ref.sourceID == item.sourceID && ref.transcriptVersionID == item.transcriptVersionID &&
-                          source.spans.contains { $0.id == ref.spanID && $0.textEnd > item.start && $0.textStart < item.end }
-                      } == true }) else { throw VoiceOSError("全景引用不能逐字定位或观点归属不符") }
+                guard String(String.UnicodeScalarView(text[item.start..<item.end])) == item.quote else {
+                    throw PanoramaProposalInvalid(reason: "引文不能逐字定位", questionID: questionID, relationID: relationID, evidenceIndex: index+1)
+                }
+                let duplicated=Dictionary(grouping: item.claimIDs, by: { $0 }).filter { $0.value.count > 1 }.keys.sorted()
+                guard duplicated.isEmpty else {
+                    throw PanoramaProposalInvalid(reason: "观点归属重复列出同一观点", questionID: questionID, relationID: relationID, evidenceIndex: index+1, claimIDs: duplicated)
+                }
+                let unknown=item.claimIDs.filter { claims[$0] == nil }
+                guard unknown.isEmpty else {
+                    throw PanoramaProposalInvalid(reason: "所引观点不在本单元观点清单（观点归属不明）", questionID: questionID, relationID: relationID, evidenceIndex: index+1, claimIDs: unknown)
+                }
+                let misplaced=item.claimIDs.filter { id in
+                    guard let claim=claims[id] else { return true }
+                    return !claim.references.contains { ref in
+                        ref.sourceID == item.sourceID && ref.transcriptVersionID == item.transcriptVersionID &&
+                        source.spans.contains { $0.id == ref.spanID && $0.textEnd > item.start && $0.textStart < item.end }
+                    }
+                }
+                guard misplaced.isEmpty else {
+                    throw PanoramaProposalInvalid(reason: "所引观点不在该原文范围（观点归属不符）", questionID: questionID, relationID: relationID, evidenceIndex: index+1, claimIDs: misplaced)
+                }
             }
         }
         for question in proposal.questions {
-            guard nonempty(question.id), regions.contains(question.regionID), nonempty(question.title), nonempty(question.summary) else { throw VoiceOSError("全景问题缺少名称或区域") }
-            try validate(question.evidence)
+            guard nonempty(question.id), regions.contains(question.regionID), nonempty(question.title), nonempty(question.summary) else {
+                throw PanoramaProposalInvalid(reason: "问题缺少名称或区域", questionID: question.id.isEmpty ? nil : question.id)
+            }
+            try validate(question.evidence, questionID: question.id)
         }
         for relation in proposal.relations {
             guard nonempty(relation.id), relation.from != relation.to, let from=questions[relation.from]?.first,
-                  let to=questions[relation.to]?.first, nonempty(relation.label), nonempty(relation.explanation) else { throw VoiceOSError("全景联系缺少真实端点或语义名称") }
-            try validate(relation.fromEvidence); try validate(relation.toEvidence)
+                  let to=questions[relation.to]?.first, nonempty(relation.label), nonempty(relation.explanation) else {
+                throw PanoramaProposalInvalid(reason: "联系缺少真实端点或语义名称", relationID: relation.id.isEmpty ? nil : relation.id)
+            }
+            try validate(relation.fromEvidence, relationID: relation.id); try validate(relation.toEvidence, relationID: relation.id)
             for (endpoint,evidence) in [(from,relation.fromEvidence),(to,relation.toEvidence)] {
-                guard evidence.allSatisfy({ item in endpoint.evidence.contains { $0.sourceID == item.sourceID && $0.transcriptVersionID == item.transcriptVersionID } }) else { throw VoiceOSError("全景联系引文不属于其问题端点") }
+                guard evidence.allSatisfy({ item in endpoint.evidence.contains { $0.sourceID == item.sourceID && $0.transcriptVersionID == item.transcriptVersionID } }) else {
+                    throw PanoramaProposalInvalid(reason: "联系引文不属于其问题端点", relationID: relation.id)
+                }
             }
         }
         let evidence=proposal.questions.flatMap(\.evidence) + proposal.relations.flatMap { $0.fromEvidence + $0.toEvidence }
@@ -385,7 +434,7 @@ extension VoiceOSStore {
         func coverage(_ pending: [PanoramaUnrepresented], submitted: Set<String>, represented: Set<String>) throws {
             let ids=Set(pending.map(\.id))
             guard ids.count == pending.count, pending.allSatisfy({ nonempty($0.reason) }), represented.isSubset(of: submitted),
-                  ids.isDisjoint(with: represented), ids.union(represented) == submitted else { throw VoiceOSError("全景覆盖清单遗漏或重复了材料、观点") }
+                  ids.isDisjoint(with: represented), ids.union(represented) == submitted else { throw PanoramaProposalInvalid(reason: "覆盖清单遗漏或重复了材料、观点") }
         }
         try coverage(proposal.unrepresentedSources, submitted: Set(input.manifest.sourceIDs), represented: representedSources)
         try coverage(proposal.unrepresentedClaims, submitted: Set(input.manifest.claimIDs), represented: representedClaims)
@@ -400,11 +449,11 @@ extension VoiceOSStore {
                   !area.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   !area.regionIDs.isEmpty,
                   Set(area.regionIDs).count == area.regionIDs.count,
-                  area.regionIDs.allSatisfy({ regionIDs.contains($0) }) else { throw VoiceOSError("全景大区的身份或区域归属无效") }
+                  area.regionIDs.allSatisfy({ regionIDs.contains($0) }) else { throw PanoramaProposalInvalid(reason: "大区的身份或区域归属无效") }
             covered.append(contentsOf: area.regionIDs)
         }
         guard Set(areas.map(\.id)).count == areas.count,
-              Set(covered) == regionIDs, covered.count == regionIDs.count else { throw VoiceOSError("全景大区没有恰好覆盖每个区域一次") }
+              Set(covered) == regionIDs, covered.count == regionIDs.count else { throw PanoramaProposalInvalid(reason: "大区没有恰好覆盖每个区域一次") }
     }
     static func validatePanoramaReview(_ review: PanoramaReview, proposal: PanoramaProposal, generation: PanoramaReceipt, verification: PanoramaReceipt) throws {
         guard !generation.responseID.isEmpty, !verification.responseID.isEmpty, generation.responseID != verification.responseID,
