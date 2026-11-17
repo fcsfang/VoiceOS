@@ -9,7 +9,7 @@ public struct ExpressionAssociationProcessing: Sendable {
 }
 extension VoiceOSStore {
     /// Called by an application-owned processing task. No backfill, retries, notifications or actions.
-    public func processExpressionAssociation(sourceID: String, retrieval: any LocalRetrievalPort, semantic: Bool = false, model: (any ExpressionAssociationPort)?) async throws -> ExpressionAssociationProcessing {
+    public func processExpressionAssociation(sourceID: String, retrieval: any LocalRetrievalPort, semantic: Bool = false, model: (any ExpressionAssociationPort)?, retryKey: String? = nil) async throws -> ExpressionAssociationProcessing {
         try Task.checkCancellation()
         guard ready else { throw VoiceOSError("资料库尚未就绪") }
         if try cognitiveFeedbackPreference().mode == .paused { return .init(state: .paused, attempt: nil) }
@@ -25,12 +25,12 @@ extension VoiceOSStore {
         let key = try Self.expressionAssociationKey(baseline, model.configuration)
         // Configuration upgrades are not authorization to regenerate a previous judgment.
         // Preserve the old request key for portable validation, but reuse by expression/policy epoch.
-        if let prior = try existingExpressionAssociation(baseline) {
+        if retryKey == nil, let prior = try existingExpressionAssociation(baseline) {
             if prior.validity != "current" { return .init(state: .frozen, attempt: prior) }
             if prior.state == "reserved" { return .init(state: .inFlight, attempt: nil) }
             return .init(state: prior.state == "completed" ? .completed : .unknown, attempt: prior)
         }
-        if let row = try db.query("SELECT id,state FROM expression_association_attempts WHERE request_key=?", [key]).first {
+        if retryKey == nil, let row = try db.query("SELECT id,state FROM expression_association_attempts WHERE request_key=?", [key]).first {
             guard let record = try expressionAssociationAttempts().first(where: { $0.id == row["id"] }) else { throw VoiceOSError("关联历史缺失") }
             if record.validity != "current" { return .init(state: .frozen, attempt: record) }
             if record.state == "reserved" { return .init(state: .inFlight, attempt: nil) }
@@ -71,13 +71,12 @@ extension VoiceOSStore {
         guard !selected.isEmpty else { return .init(state: hits.isEmpty ? .noCandidates : .budgetExceeded, attempt: nil) }
         let snapshot = try prepareExpressionAssociation(currentSourceID: sourceID, candidates: selected, destination: model.configuration.destination)
         do {
-            let record = try await performExpressionAssociation(snapshot, using: model)
+            let record = try await performExpressionAssociation(snapshot, using: model, retryKey: retryKey)
             // 刚完成的调用，即使 validity 变成 frozen（取消后的迟到结果），处理状态仍然是 unknown（表示任务被取消）
             return .init(state: record.state == "completed" ? .completed : .unknown, attempt: record)
         } catch {
             // Only a terminal durable receipt may turn a transport failure into an unknown status.
-            if let row = try db.query("SELECT id FROM expression_association_attempts WHERE request_key=? AND state='unknown'", [key]).first,
-               let record = try expressionAssociationAttempts().first(where: { $0.id == row["id"] }) {
+            if let record = try existingExpressionAssociation(baseline), record.state == "unknown" {
                 return .init(state: .unknown, attempt: record)
             }
             throw error

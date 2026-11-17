@@ -1426,10 +1426,29 @@ final class Database {
             }
         }
 
-        // Schema 73 (processing-page failure exits) may already exist in the
-        // integration branch. Accepting 72 as well keeps this branch's own
-        // databases consistent; at merge time the 72→73 block must run first.
-        if let version = try query("PRAGMA user_version").first?["user_version"], ["72", "73"].contains(version) {
+        if try query("PRAGMA user_version").first?["user_version"] == "72" {
+            try transaction {
+                // Explicit exits from terminal intent states. Ignoring keeps the row
+                // queryable; superseding points at the replacement understanding.
+                // A retried migration can find the columns already added; the version
+                // bump stays the single completion marker.
+                let columns = try query("PRAGMA table_info(processing_intents)").compactMap { $0["name"] }
+                if !columns.contains("ignored_at") {
+                    try execute("ALTER TABLE processing_intents ADD COLUMN ignored_at TEXT")
+                }
+                if !columns.contains("ignore_reason") {
+                    try execute("ALTER TABLE processing_intents ADD COLUMN ignore_reason TEXT")
+                }
+                if !columns.contains("superseded_by") {
+                    try execute("ALTER TABLE processing_intents ADD COLUMN superseded_by TEXT")
+                }
+                try execute("PRAGMA user_version=73")
+            }
+        }
+
+        // Monitoring tables land after the failure-exit migration so a fresh
+        // database and an upgraded one both pass through 73 before 74.
+        if try query("PRAGMA user_version").first?["user_version"] == "73" {
             try transaction {
                 // Daily message monitoring is its own domain: sources, collected
                 // messages, per-source cursors, daily reports and follow-up items.
