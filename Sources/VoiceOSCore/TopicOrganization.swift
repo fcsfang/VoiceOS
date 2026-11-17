@@ -203,6 +203,23 @@ extension VoiceOSStore {
         }
     }
 
+    func topicOrganizationsAreCurrent(input: TopicOrganizationInput) throws -> Bool {
+        guard try workspaceBriefing()?.digest == input.digest else { return false }
+        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) })
+        let links = try reflectionQuestionSources()
+        for row in try db.query("SELECT id,organization_json FROM reflection_questions WHERE organization_json IS NOT NULL") {
+            guard let id = row["id"], let json = row["organization_json"],
+                  let summary = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(json.utf8)),
+                  (try? topicSummaryIsCurrent(summary, catalog: catalog, linked: Set(links[id] ?? []))) == true else { return false }
+        }
+        return true
+    }
+
+    public func needsTopicOrganizationRefresh() throws -> Bool {
+        guard let input = try prepareTopicOrganization() else { return false }
+        return try !topicOrganizationsAreCurrent(input: input)
+    }
+
     public func workspaceBriefing() throws -> WorkspaceBriefing? {
         guard let row=try db.query("SELECT * FROM workspace_briefing WHERE id='00000000-0000-4000-8000-000000000001'").first,
               let json=row["result_json"], let contextID=row["context_id"] else { return nil }
@@ -214,7 +231,7 @@ extension VoiceOSStore {
 
     @discardableResult public func organizeTopics(using model: any TopicOrganizationPort, force: Bool = false) async throws -> Bool {
         guard let input=try prepareTopicOrganization() else { return false }
-        if !force, try workspaceBriefing()?.digest == input.digest { return false }
+        if !force, try topicOrganizationsAreCurrent(input: input) { return false }
         let contextID=try persistLocalContext(input.context, destination: .cloud)
         let result=try await model.organize(input)
         guard try prepareTopicOrganization()?.digest == input.digest else { throw VoiceOSError("资料或任务已变化，将基于当前内容重新归组") }
