@@ -2,6 +2,24 @@ import Foundation
 import Darwin
 import CSQLite
 
+public struct LibraryStorageUsage: Sendable, Equatable {
+    public let databaseBytes: Int64
+    public let assetsBytes: Int64
+    public let backupBytes: Int64
+    public let localSpeechBytes: Int64
+    public let mirrorBytes: Int64
+    public let backupCount: Int
+    public var totalBytes: Int64 { databaseBytes + assetsBytes + backupBytes + localSpeechBytes + mirrorBytes }
+    public init(databaseBytes: Int64, assetsBytes: Int64, backupBytes: Int64, localSpeechBytes: Int64, mirrorBytes: Int64, backupCount: Int) {
+        self.databaseBytes = databaseBytes
+        self.assetsBytes = assetsBytes
+        self.backupBytes = backupBytes
+        self.localSpeechBytes = localSpeechBytes
+        self.mirrorBytes = mirrorBytes
+        self.backupCount = backupCount
+    }
+}
+
 public enum DatabaseBackup {
     public struct Summary: Sendable, Equatable {
         public let date: Date
@@ -33,6 +51,43 @@ public enum DatabaseBackup {
 
     public static func backupCount(directory: URL) -> Int {
         summary(directory: directory)?.count ?? 0
+    }
+
+    public static func storageUsage(root: URL, fileManager: FileManager = .default) -> LibraryStorageUsage {
+        let database = root.appendingPathComponent("voiceos.sqlite")
+        let databaseBytes = ["", "-wal", "-shm"].reduce(Int64(0)) { total, suffix in
+            let attributes = try? fileManager.attributesOfItem(atPath: database.path + suffix)
+            return total + ((attributes?[.size] as? NSNumber)?.int64Value ?? 0)
+        }
+        let backups = root.appendingPathComponent("Backups", isDirectory: true)
+        return LibraryStorageUsage(
+            databaseBytes: databaseBytes,
+            assetsBytes: directoryBytes(at: root.appendingPathComponent("assets", isDirectory: true), fileManager: fileManager),
+            backupBytes: directoryBytes(at: backups, fileManager: fileManager),
+            localSpeechBytes: directoryBytes(at: root.appendingPathComponent("LocalSpeech", isDirectory: true), fileManager: fileManager),
+            mirrorBytes: directoryBytes(at: root.appendingPathComponent("Mirror", isDirectory: true), fileManager: fileManager),
+            backupCount: backupFiles(directory: backups).count)
+    }
+
+    public static func directoryBytes(at url: URL, fileManager: FileManager = .default) -> Int64 {
+        // Foundation 的 enumerator 在遇到指向目录的符号链接并 skipDescendants 时
+        // 会连带跳过后续兄弟目录的子项，这里改用手写递归。
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey],
+            options: []
+        ) else { return 0 }
+        var total: Int64 = 0
+        for entry in entries {
+            guard let values = try? entry.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey]) else { continue }
+            if values.isSymbolicLink == true { continue }
+            if values.isRegularFile == true {
+                total += Int64(values.fileSize ?? 0)
+            } else if values.isDirectory == true {
+                total += directoryBytes(at: entry, fileManager: fileManager)
+            }
+        }
+        return total
     }
 
     /// Creates at most one backup per local day. The day marker lives next to
@@ -303,13 +358,44 @@ public enum DatabaseBackup {
         }
     }
 
-    private static func prune(directory: URL, retain: Int) throws {
+    @discardableResult
+    public static func prune(directory: URL, retain: Int) throws -> Int {
+        guard retain >= 1 else { throw VoiceOSError("备份保留数量至少为 1") }
         let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.hasPrefix("voiceos-") && $0.pathExtension == "sqlite" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        guard files.count > retain else { return }
-        for file in files.prefix(files.count - retain) {
+        guard files.count > retain else { return 0 }
+        let expired = files.prefix(files.count - retain)
+        for file in expired {
             try FileManager.default.removeItem(at: file)
+            for suffix in ["-wal", "-shm"] {
+                try? FileManager.default.removeItem(atPath: file.path + suffix)
+            }
         }
+        return expired.count
+    }
+
+    @discardableResult
+    public static func removeOrphanSidecars(directory: URL) -> Int {
+        guard let entries = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else { return 0 }
+        let names = Set(entries.map(\.lastPathComponent))
+        var removed = 0
+        for entry in entries {
+            let name = entry.lastPathComponent
+            let base: String
+            if name.hasSuffix(".sqlite-wal") {
+                base = String(name.dropLast(".sqlite-wal".count)) + ".sqlite"
+            } else if name.hasSuffix(".sqlite-shm") {
+                base = String(name.dropLast(".sqlite-shm".count)) + ".sqlite"
+            } else {
+                continue
+            }
+            guard name.hasPrefix("voiceos-"), !names.contains(base) else { continue }
+            do {
+                try FileManager.default.removeItem(at: entry)
+                removed += 1
+            } catch {}
+        }
+        return removed
     }
 }
