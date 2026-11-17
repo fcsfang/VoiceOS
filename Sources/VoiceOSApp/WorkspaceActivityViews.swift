@@ -86,7 +86,8 @@ struct WorkspaceDeliveryView: View {
                 }
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
-        }.task(id: execution.id) { topicID = execution.questionID ?? "" }
+        }.task { await model.refresh(.assistant) }
+        .task(id: execution.id) { topicID = execution.questionID ?? "" }
     }
     private func export(_ report: String) {
         let panel = NSSavePanel()
@@ -613,6 +614,7 @@ struct WorkspaceTaskView: View {
         }
         .task(id: action.id + String(action.version)) { await loadRevisions() }
         .task(id: goalProgressKey) { await loadGoalProgress() }
+        .task { await model.refresh() }
         .sheet(isPresented: $confirming) { ConfirmTaskView(action: action, model: model) { confirming = false } }
         .sheet(isPresented: $showingSettings) { if let settings { ReminderSettingsView(action: action, snapshot: settings, model: model) { showingSettings = false } } }
         .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }

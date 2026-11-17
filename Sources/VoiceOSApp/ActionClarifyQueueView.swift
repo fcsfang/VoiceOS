@@ -100,6 +100,7 @@ struct ActionClarifyQueueView: View {
         }
         .padding(WorkspaceMetrics.pagePadding)
         .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 420, alignment: .topLeading)
+        .task { await model.refresh() }
     }
 
     private func questionExits(_ action: ActionRecord) -> some View {

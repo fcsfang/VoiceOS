@@ -50,15 +50,17 @@ public struct WorkspaceSnapshot: Sendable {
 
 /// Startup reads the core snapshot first so the library list can paint, then the
 /// secondary pieces. The full scope keeps the original single-read contract.
+/// `coreSecondary` is the interactive read: both fast list segments in one pass,
+/// without the assistant, knowledge, validity, or discussion segments.
 public enum WorkspaceSnapshotScope: Sendable {
-    case full, core, secondary, assistant, knowledge
+    case full, core, secondary, coreSecondary, assistant, knowledge
 }
 
 extension VoiceOSStore {
     public func workspaceSnapshot(_ scope: WorkspaceSnapshotScope = .full) throws -> WorkspaceSnapshot {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
-        let wantsCore = scope == .full || scope == .core
-        let wantsSecondary = scope == .full || scope == .secondary
+        let wantsCore = scope == .full || scope == .core || scope == .coreSecondary
+        let wantsSecondary = scope == .full || scope == .secondary || scope == .coreSecondary
         let wantsAssistant = scope == .full || scope == .assistant
         let wantsKnowledge = scope == .full || scope == .knowledge
         var result = WorkspaceSnapshot()
@@ -105,7 +107,7 @@ extension VoiceOSStore {
             }
         }
         if wantsCore {
-            if scope == .core {
+            if scope == .core || scope == .coreSecondary {
                 // The first paint lists what is stored. Context revalidation freezes
                 // stale rows and can hash media; the secondary read does that work.
                 try withoutContextValidation { try readCore() }
@@ -131,7 +133,7 @@ extension VoiceOSStore {
             result.contextValidityChanged = frozenContextCount != freezesBefore
         }
         if wantsSecondary {
-            if scope == .secondary {
+            if scope == .secondary || scope == .coreSecondary {
                 try withoutContextValidation { try readSecondary() }
             } else {
                 try readSecondary()
