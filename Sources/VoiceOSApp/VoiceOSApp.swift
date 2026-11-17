@@ -304,6 +304,9 @@ final class ControlCenter: ObservableObject {
     @Published var status = "正在检查资料库…"
     @Published var backupStatusText = ""
     @Published var lastBackupAt: Date?
+    @Published var checkingLibraryHealth = false
+    @Published var libraryHealthText = ""
+    @Published private(set) var libraryHealthProblem = false
     @Published var workspaceLastError: String?
     @Published var workspaceLastErrorRetry: WorkspaceErrorRetry?
     @Published var exporting = false
@@ -330,6 +333,8 @@ final class ControlCenter: ObservableObject {
     private var speechPort: (any SpeechPort)?
     var speechConfigured: Bool { speechPort is LocalQwenSpeechPort }
     var textModelConfigured: Bool { modelConfigured && textConfigurationFile != nil }
+    var modelConfigurationName: String? { textConfigurationFile?.lastPathComponent }
+    var modelConfigurationPath: String? { textConfigurationFile?.path }
     var recordingModelIssue: String? {
         if !speechConfigured { return "尚未配置本地 Qwen 转写模型。" }
         if !textModelConfigured { return "尚未配置文本模型。" }
@@ -912,6 +917,9 @@ final class ControlCenter: ObservableObject {
             restoreSpeechSelection()
             if let path = ProcessInfo.processInfo.environment["VOICEOS_MODEL_CONFIG_FILE"] {
                 configureTextModel(URL(fileURLWithPath: path), resume: false)
+            } else if UserDefaults.standard.bool(forKey: "voiceos.textModelConfigurationCleared.v1") {
+                // The user cleared the configuration in settings; do not fall
+                // back to the bundle's development .env on the next launch.
             } else if let path = UserDefaults.standard.string(forKey: "voiceos.textModelConfigPath.v1") ?? Bundle.main.object(forInfoDictionaryKey: "VoiceOSModelConfigurationPath") as? String {
                 configureTextModel(URL(fileURLWithPath: path), resume: false)
             }
@@ -1007,6 +1015,55 @@ final class ControlCenter: ObservableObject {
         guard let summary else { lastBackupAt = nil; backupStatusText = ""; return }
         lastBackupAt = summary.date
         backupStatusText = DatabaseBackup.successText(at: summary.date, count: summary.count)
+    }
+    /// One-shot library check: live integrity and references, originals on disk,
+    /// and a quick_check of the newest backup. Re-runnable from the same button.
+    func checkLibraryHealth() {
+        guard !checkingLibraryHealth else { return }
+        guard let root = libraryRoot, let store else {
+            libraryHealthProblem = true
+            libraryHealthText = "资料库尚未打开，无法检查"
+            return
+        }
+        checkingLibraryHealth = true
+        libraryHealthProblem = false
+        libraryHealthText = "正在检查资料库…"
+        let database = root.appendingPathComponent("voiceos.sqlite")
+        let backupDirectory = root.appendingPathComponent("Backups", isDirectory: true)
+        Task {
+            defer { checkingLibraryHealth = false }
+            do {
+                let integrity = try await store.integrityCheck()
+                let scan = try await Task.detached(priority: .utility) {
+                    try DatabaseBackup.scanSourceAssets(database: database, root: root)
+                }.value
+                let backup = await Task.detached(priority: .utility) {
+                    DatabaseBackup.verifyLatestBackup(directory: backupDirectory)
+                }.value
+                var issues: [String] = []
+                if !integrity { issues.append("主库完整性或引用检查未通过") }
+                if !scan.missing.isEmpty {
+                    let sample = scan.missing.prefix(3).map { ($0 as NSString).lastPathComponent }.joined(separator: "、")
+                    issues.append("\(scan.missing.count) 份原件缺失（\(sample)\(scan.missing.count > 3 ? " 等" : "")）")
+                }
+                if backup.file == nil {
+                    issues.append("还没有备份")
+                } else if !backup.ok, let file = backup.file {
+                    issues.append("最新备份抽查未通过：" + file.lastPathComponent)
+                }
+                if issues.isEmpty {
+                    let when = backup.date?.formatted(date: .abbreviated, time: .shortened) ?? "时间未知"
+                    libraryHealthText = "资料库正常 · \(scan.sourceCount) 份原件 · 最近备份 \(when) 通过"
+                    libraryHealthProblem = false
+                } else {
+                    libraryHealthText = "\(issues.count) 项问题：" + issues.joined(separator: "；")
+                    libraryHealthProblem = true
+                }
+            } catch {
+                libraryHealthProblem = true
+                libraryHealthText = "检查失败：\(error.localizedDescription)（资料库：\(root.path)）"
+            }
+        }
     }
     private func writeMarkdownMirror() {
         guard markdownMirror != nil else { return }
@@ -1201,8 +1258,9 @@ final class ControlCenter: ObservableObject {
             segmentExtractionModel=suite.segmentExtraction;segmentAggregationModel=suite.segmentAggregation
             textModel = port; modelConfigured = true
             UserDefaults.standard.set(file.path, forKey: "voiceos.textModelConfigPath.v1")
+            UserDefaults.standard.set(false, forKey: "voiceos.textModelConfigurationCleared.v1")
             textConfigurationFile = file
-            modelSummary = "gpt-6.1-sol · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
+            modelSummary = file.lastPathComponent + " · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
             status = "文本模型已就绪 · 只处理你选择并授权的文字"
             // A queued intent may have been restored before the user selected a
             // configuration. Wake the durable worker exactly once after the
@@ -1222,6 +1280,35 @@ final class ControlCenter: ObservableObject {
             status = error.localizedDescription
             reportWorkspaceError(error.localizedDescription,retry:.textModel)
         }
+    }
+    /// Clears every model port so AI entries read as unconfigured, and remembers
+    /// the choice so the bundle's development .env is not reloaded on launch.
+    func clearTextModel() {
+        panoramaModel = nil
+        discussionModel = nil
+        outcomeModel = nil
+        themeReplyModel = nil
+        recordingTitleModel = nil
+        topicModel = nil; topicAttemptDigest = nil
+        recordingExpressionModel = nil
+        assistantModel = nil
+        initiationModel = nil
+        followupModel = nil
+        englishModel = nil
+        associationModel = nil
+        reminderFieldModel = nil
+        knowledgeReviewModel = nil
+        relevance.cancel(); relevanceModel = nil
+        segmentExtractionModel = nil
+        segmentAggregationModel = nil
+        textModel = nil
+        textConfigurationFile = nil
+        modelConfigured = false
+        modelSummary = "尚未配置文本模型"
+        UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
+        UserDefaults.standard.set(true, forKey: "voiceos.textModelConfigurationCleared.v1")
+        status = "已清除文本模型配置；AI 功能暂停，直到重新选择配置"
+        Task { await panorama.refresh(store: store, port: nil) }
     }
     func chooseFullRecording() {
         guard !fullRecordingBusy else { return }
@@ -3797,6 +3884,77 @@ struct PackageRestoreView: View {
                             restoring = false
                         }
                     }.keyboardShortcut(.defaultAction).disabled(restoring || package == nil || destination == nil)
+                }
+            }
+        }.padding(24).frame(width:640)
+    }
+}
+
+struct BackupLibraryRestoreView: View {
+    let currentRoot: URL?
+    let dismiss: () -> Void
+    @Environment(\.openWindow) private var openWindow
+    @State private var parent: URL?
+    @State private var folderName: String
+    @State private var restoring = false
+    @State private var errorText = ""
+    @State private var restored: URL?
+    init(currentRoot: URL?, dismiss: @escaping () -> Void) {
+        self.currentRoot = currentRoot
+        self.dismiss = dismiss
+        let stamp = String(ISO8601DateFormatter().string(from: Date()).prefix(10))
+        _parent = State(initialValue: currentRoot?.deletingLastPathComponent())
+        _folderName = State(initialValue: "VoiceOS-备份恢复-" + stamp)
+    }
+    private var backupDirectory: URL? { currentRoot?.appendingPathComponent("Backups", isDirectory: true) }
+    private var backupSummary: DatabaseBackup.Summary? { backupDirectory.flatMap { DatabaseBackup.summary(directory: $0) } }
+    private var destination: URL? {
+        guard let parent, !folderName.isEmpty, folderName != ".", folderName != "..", !folderName.contains("/"), !folderName.contains("\0") else { return nil }
+        let target = parent.appendingPathComponent(folderName, isDirectory: true)
+        if let currentRoot, target.standardizedFileURL.path == currentRoot.standardizedFileURL.path { return nil }
+        return target
+    }
+    private func chooseParent() {
+        let panel = NSOpenPanel(); panel.title = "选择新资料库的上级文件夹"; panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.allowsMultipleSelection = false
+        panel.begin { response in if response == .OK { parent = panel.url; errorText = "" } }
+    }
+    var body: some View {
+        VStack(alignment:.leading,spacing:16) {
+            Text("从最近备份新建资料库").vosFont(WorkspaceText.sectionTitle)
+            Text("取最近一份备份的数据库，加上当前资料库的原件副本，建立一个独立的新资料库；当前资料库不会被改动。完成后可在新窗口打开。").foregroundStyle(.secondary)
+            if let summary = backupSummary {
+                Text(DatabaseBackup.successText(at: summary.date, count: summary.count)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            } else {
+                WorkspaceNoticeText(message: "还没有可用于恢复的备份。先完成一次备份再试（\(backupDirectory?.path ?? "备份目录不可用")）。", severity: .warning)
+            }
+            Button("选择保存位置…", action: chooseParent).disabled(restoring || restored != nil)
+            TextField("新资料库文件夹名称", text: $folderName).disabled(restoring || restored != nil)
+            if let destination { Text(destination.path).vosFont(WorkspaceText.meta).textSelection(.enabled) }
+            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
+            if let restored {
+                Text("已从最近备份建立新资料库 · 当前库未改动").foregroundStyle(.green)
+                Text(restored.path).vosFont(WorkspaceText.meta).textSelection(.enabled)
+                HStack {
+                    Button("打开新资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() }
+                    Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([restored]) }
+                }
+            }
+            HStack {
+                Button(restored == nil ? "取消" : "完成", action: dismiss).disabled(restoring)
+                Spacer()
+                if restored == nil {
+                    Button(restoring ? "正在建立新资料库…" : "新建资料库") {
+                        guard let currentRoot, let destination else { return }
+                        restoring = true; errorText = ""
+                        Task {
+                            do {
+                                restored = try await Task.detached(priority: .userInitiated) {
+                                    try DatabaseBackup.createLibraryFromLatestBackup(currentRoot: currentRoot, destination: destination)
+                                }.value
+                            } catch { errorText = error.localizedDescription }
+                            restoring = false
+                        }
+                    }.keyboardShortcut(.defaultAction).disabled(restoring || currentRoot == nil || destination == nil || backupSummary == nil)
                 }
             }
         }.padding(24).frame(width:640)

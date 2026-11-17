@@ -204,6 +204,8 @@ struct WorkspaceTaskView: View {
     @State private var recurrence: RecurrencePeriod?
     @State private var recurrenceBusy = false
     @State private var locationLabel: String?
+    @State private var goalProgress: GoalProgress?
+    @FocusState private var pageFocused: Bool
     private var correctedClaim: CandidateClaim? {
         model.claims.first { $0.id == action.claimID && $0.validity == "current" && $0.reviewState != "rejected" && $0.reviewVersion > action.claimReviewVersion }
     }
@@ -285,9 +287,32 @@ struct WorkspaceTaskView: View {
         })
     }
     var body: some View {
+        Group {
+            if action.kind == "task" {
+                pageContent
+                    .focusable()
+                    .focused($pageFocused)
+                    .focusEffectDisabled()
+                    .onKeyPress { handleDetailKey($0) }
+                    .onAppear {
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(100))
+                            // Never steal focus from a field the user already started typing in.
+                            guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+                            pageFocused = true
+                        }
+                    }
+            } else { pageContent }
+        }
+    }
+    private var pageContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 WorkspaceHeading(eyebrow: eyebrow, title: StatementTagParser.split(action.title).text)
+                if action.kind == "opportunity", action.nature == "goal", let progress = goalProgress {
+                    Text(goalProgressText(progress)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        .accessibilityLabel("目标进展：" + goalProgressText(progress))
+                }
                 if isQuestion { QuestionAnswerSection(model: model, action: action, openDelivery: openDelivery, openSource: openSource) }
                 if let recurrence {
                     HStack(spacing: 12) {
@@ -429,6 +454,11 @@ struct WorkspaceTaskView: View {
                     Button("取消", role: .cancel) {}
                 } message: {
                     Text(isQuestion ? "会移到历史记录，之后仍可找回；VoiceOS 的回答和讨论都会保留。" : (action.kind == "task" ? "会移入历史记录，之后仍可找回。Apple 提醒事项中的提醒需单独处理。" : "会移到历史记录，之后仍可找回；已经添加的下一步仍会保留。"))
+                }
+                if action.kind == "task", current {
+                    Text("键盘：x 或空格完成 · s 改期 · f 记结果；在输入框里打字时不生效。")
+                        .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                        .accessibilityLabel("快捷键：x 或空格完成，s 改期，f 记结果。")
                 }
                 if action.kind == "task", current, draft.expanded {
                     feedbackDraftEditor.padding(18).background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
@@ -581,6 +611,7 @@ struct WorkspaceTaskView: View {
             locationLabel = await model.actionLocationLabel(action.id)
         }
         .task(id: action.id + String(action.version)) { await loadRevisions() }
+        .task(id: goalProgressKey) { await loadGoalProgress() }
         .sheet(isPresented: $confirming) { ConfirmTaskView(action: action, model: model) { confirming = false } }
         .sheet(isPresented: $showingSettings) { if let settings { ReminderSettingsView(action: action, snapshot: settings, model: model) { showingSettings = false } } }
         .sheet(item: $scheduleAction) { action in ActionScheduleEditor(action: action, model: model) { scheduleAction = nil } }
@@ -762,6 +793,51 @@ struct WorkspaceTaskView: View {
                 error=""
             } catch { self.error=error.localizedDescription }
         }
+    }
+    private var goalProgressKey: String {
+        action.id + String(action.version) + nextActions.map { $0.id + $0.state + String($0.version) }.joined(separator: ",")
+    }
+    private func goalProgressText(_ progress: GoalProgress) -> String {
+        guard progress.nextSteps > 0 else { return "还没有下一步" }
+        var parts = ["下一步 " + String(progress.nextSteps), "已完成 " + String(progress.completedSteps)]
+        if let value = progress.lastActivityAt {
+            parts.append("最近推进于 " + (ConversationReflectionFocus.date(value)?.formatted(date: .abbreviated, time: .shortened) ?? value))
+        }
+        return parts.joined(separator: " · ")
+    }
+    private func loadGoalProgress() async {
+        guard action.kind == "opportunity", action.nature == "goal", let store = model.store else { return }
+        goalProgress = try? await store.goalProgress(actionID: action.id)
+    }
+    /// Page-level keys fire only while the page itself holds focus; a focused
+    /// text field receives the keystroke instead.
+    private func handleDetailKey(_ press: KeyPress) -> KeyPress.Result {
+        guard action.kind == "task", current,
+              press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
+        if press.phase == .repeat { return .ignored }
+        switch press.key {
+        case .space:
+            return completeFromKeyboard()
+        default:
+            switch press.characters.lowercased() {
+            case "x": return completeFromKeyboard()
+            case "s": return openScheduleFromKeyboard()
+            case "f":
+                showingFeedback = true
+                return .handled
+            default: return .ignored
+            }
+        }
+    }
+    private func completeFromKeyboard() -> KeyPress.Result {
+        guard action.state == "open", !model.savingAction, !model.remindersBusy else { return .ignored }
+        changeState()
+        return .handled
+    }
+    private func openScheduleFromKeyboard() -> KeyPress.Result {
+        guard action.state == "open", action.validity == "current", !model.savingAction, !model.remindersBusy else { return .ignored }
+        scheduleAction = action
+        return .handled
     }
     private func loadFeedback() async {
         if feedbackActionID != action.id { feedbackActionID = action.id; feedbackHistory = [] }
