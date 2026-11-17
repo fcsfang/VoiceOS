@@ -440,8 +440,8 @@ extension VoiceOSStore {
             }
             if reuseCompleted, let saved = try completedStage(digest: plan.digest, stage: "body"),
                let result = try? JSONDecoder().decode(TopicBodyResult.self, from: Data(saved.utf8)),
-               (try? Self.validateTopicBody(result, input: plan.input, sources: runInput.context.sources)) != nil {
-                try db.transaction { try applyTopicBody(result, plan: plan, input: runInput) }
+               let anchored = try? Self.validateTopicBody(result, input: plan.input, sources: runInput.context.sources) {
+                try db.transaction { try applyTopicBody(anchored, plan: plan, input: runInput) }
                 continue
             }
             let call: (result: TopicBodyResult, attemptID: String)
@@ -460,11 +460,11 @@ extension VoiceOSStore {
                 throw TopicOrganizationInputChanged()
             }
             do {
-                try Self.validateTopicBody(call.result, input: plan.input, sources: runInput.context.sources)
+                let anchored = try Self.validateTopicBody(call.result, input: plan.input, sources: runInput.context.sources)
                 try db.transaction {
-                    try applyTopicBody(call.result, plan: plan, input: runInput)
+                    try applyTopicBody(anchored, plan: plan, input: runInput)
                     try saveStage(digest: plan.digest, stage: "body", scope: plan.scope, state: "completed",
-                                  resultJSON: try Self.relevanceJSON(call.result), error: nil, attemptID: call.attemptID)
+                                  resultJSON: try Self.relevanceJSON(anchored), error: nil, attemptID: call.attemptID)
                     try db.execute("UPDATE model_attempts SET state='completed',result_digest=? WHERE id=? AND state='reserved'",
                                    [Self.relevanceHash(Data(("topic-body-v1|"+call.result.responseID).utf8)), call.attemptID])
                 }
@@ -853,19 +853,49 @@ extension VoiceOSStore {
     }
 
     /// Body evidence must be a verbatim slice of the current full transcript,
-    /// which only the store can see.
-    static func validateTopicBody(_ result: TopicBodyResult, input: TopicBodyInput, sources: [ContextTranscript]) throws {
+    /// which only the store can see. A model that reflows whitespace still
+    /// passes; the returned result carries the transcript slice as its quote.
+    static func validateTopicBody(_ result: TopicBodyResult, input: TopicBodyInput, sources: [ContextTranscript]) throws -> TopicBodyResult {
         try TopicOrganizationSlicingValidation.body(result, input: input)
         let byID = Dictionary(uniqueKeysWithValues: sources.map { ($0.sourceID, $0) })
+        var topics: [TopicBodyTopicResult] = []
         for topic in result.topics {
+            var sections: [TopicReadingSection] = []
             for section in topic.sections {
-                for evidence in section.evidence {
-                    guard let source = byID[evidence.sourceID],
-                          source.text.contains(evidence.quote) else {
-                        throw VoiceOSError("主题正文的引用无法定位到当前完整原文")
+                var evidence: [TopicReadingEvidence] = []
+                for item in section.evidence {
+                    guard let source = byID[item.sourceID],
+                          let quote = Self.anchoredQuote(item.quote, in: source.text) else {
+                        throw VoiceOSError("主题正文的引用无法定位到当前完整原文（来源 \(item.sourceID)，引文开头「\(String(item.quote.prefix(12)))」）")
                     }
+                    evidence.append(TopicReadingEvidence(sourceID: item.sourceID, quote: quote))
                 }
+                sections.append(TopicReadingSection(id: section.id, title: section.title, summary: section.summary,
+                                                    claimIDs: section.claimIDs, actionIDs: section.actionIDs, evidence: evidence))
             }
+            topics.append(TopicBodyTopicResult(topicID: topic.topicID, questions: topic.questions, sections: sections))
         }
+        return TopicBodyResult(topics: topics, responseID: result.responseID)
+    }
+
+    /// The exact quote wins first. Otherwise strip all whitespace from both
+    /// sides, find the hit in the normalized transcript, and slice the original
+    /// text between the mapped character boundaries.
+    private static func anchoredQuote(_ quote: String, in text: String) -> String? {
+        if text.contains(quote) { return quote }
+        var normalized = String(), starts: [String.Index] = [], ends: [String.Index] = []
+        var index = text.startIndex
+        while index < text.endIndex {
+            let next = text.index(after: index)
+            if !text[index].isWhitespace {
+                normalized.append(text[index]); starts.append(index); ends.append(next)
+            }
+            index = next
+        }
+        let wanted = String(quote.filter { !$0.isWhitespace })
+        guard !wanted.isEmpty, let range = normalized.range(of: wanted) else { return nil }
+        let lower = normalized.distance(from: normalized.startIndex, to: range.lowerBound)
+        let upper = normalized.distance(from: normalized.startIndex, to: range.upperBound)
+        return String(text[starts[lower]..<ends[upper - 1]])
     }
 }
