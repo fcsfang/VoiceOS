@@ -38,3 +38,10 @@
 - 用户可能随时回来用机器：重启进空闲窗口。
 
 ## 结果（完成后填）
+
+## 结果（2026-11-17 晚）
+
+- DA：停止口述只封存并入队转写，AI 校正与观点整理移入独立串行后台队列（organizingSourceID + 单 worker，开跑前排空其它 worker，整理期间 scheduleProcessing 与手动整理入口让路）；录音可用性不再被 fullRecordingBusy 锁，忙态文案只描述封存；录音态优先不被后台刷新覆盖；整理完成/失败发本地通知（成功带材料名与「打开材料」，失败带原因，沿用既有授权闸门）。+119/-36。
+- PB：全景区域检查器「在主题中查看」——区域证据 sourceIDs 与主题材料集求交取最大者，复用 openTopic/selectTopic 通道；无匹配时按钮禁用并显示原因（无证据 / 材料未挂主题）。PanoramaHome 增 topicLinks/openTopic 两参数（全仓唯一构造点）。
+- 验证（真实退出码）：swift build 0（Build complete! 45.64s）；swift test 0，481 项 0 失败（本轮纯应用层编排与视图，无新增核心测试）。
+- 已知边界（DA 报告）：后台整理不跨重启续跑（转写 job 持久可恢复，材料页可重新整理）；录音中发生的后台失败只走通知与 fullRecordingStatus。
