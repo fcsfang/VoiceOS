@@ -19,6 +19,33 @@ enum WorkspacePageRequest: Equatable {
     case home, themes, materials, actions, initiate, back
 }
 
+/// Which workspace segments one refresh publishes. Interactive keeps the fast
+/// core and secondary lists; full keeps the startup, activation, and timer path.
+enum RefreshScope: Sendable {
+    case interactive, full, assistant, knowledge
+}
+
+private struct RefreshPlan {
+    var coreSecondary = false
+    var full = false
+    var assistant = false
+    var knowledge = false
+    init(_ scope: RefreshScope) {
+        switch scope {
+        case .interactive: coreSecondary = true
+        case .full: full = true
+        case .assistant: assistant = true
+        case .knowledge: knowledge = true
+        }
+    }
+    mutating func merge(_ other: RefreshPlan) {
+        coreSecondary = coreSecondary || other.coreSecondary
+        full = full || other.full
+        assistant = assistant || other.assistant
+        knowledge = knowledge || other.knowledge
+    }
+}
+
 struct ImportFileResult: Identifiable {
     let id = UUID()
     let fileName: String
@@ -982,10 +1009,10 @@ final class ControlCenter: ObservableObject {
             } else if let path = UserDefaults.standard.string(forKey: "voiceos.textModelConfigPath.v1") ?? Bundle.main.object(forInfoDictionaryKey: "VoiceOSModelConfigurationPath") as? String {
                 configureTextModel(URL(fileURLWithPath: path), resume: false)
             }
-            await refresh()
+            await refresh(.full)
             StartupTrace.mark("start.refreshDone")
             await restoreTranscriptReviewFailures()
-            do { if try await store.recoverRecordingFollowups() { await refresh() } }
+            do { if try await store.recoverRecordingFollowups() { await refresh(.full) } }
             catch { status = error.localizedDescription }
             // Long panorama runs must be resumable without a visible window.
             // Only the explicit launch variable retries; a failed state alone
@@ -1027,18 +1054,20 @@ final class ControlCenter: ObservableObject {
         }
     }
     private var refreshWorker: Task<Void, Never>?
-    private var refreshPending = false
+    private var pendingRefreshPlan: RefreshPlan?
     private var panoramaLaunchRetryIssued = false
     private var panoramaDraftIssued = false
-    func refresh() async {
-        refreshPending = true
+    func refresh(_ scope: RefreshScope = .interactive) async {
+        let request = RefreshPlan(scope)
+        if var pending = pendingRefreshPlan { pending.merge(request); pendingRefreshPlan = pending }
+        else { pendingRefreshPlan = request }
         if let refreshWorker { await refreshWorker.value; return }
         let work = Task {
             defer { refreshWorker = nil }
-            repeat {
-                refreshPending = false
-                await reloadWorkspace()
-            } while refreshPending && !Task.isCancelled
+            while let plan = pendingRefreshPlan, !Task.isCancelled {
+                pendingRefreshPlan = nil
+                await reloadWorkspace(plan)
+            }
         }
         refreshWorker = work
         await work.value
@@ -1211,8 +1240,15 @@ final class ControlCenter: ObservableObject {
         assistantAssessmentIssues = snapshot.assistantAssessmentIssues
         StartupTrace.mark("secondary.assistant=\(assistantExecutions.count) issues=\(assistantAssessmentIssues.count)")
     }
-    private func reloadWorkspace() async {
+    private func reloadWorkspace(_ plan: RefreshPlan) async {
         guard let store else { return }
+        if plan.full {
+            await reloadFullWorkspace(store: store)
+            return
+        }
+        await reloadScopedWorkspace(plan, store: store)
+    }
+    private func reloadFullWorkspace(store: VoiceOSStore) async {
         StartupTrace.mark("reload.begin")
         await panoramaChanged()
         StartupTrace.mark("reload.panoramaChecked")
@@ -1227,18 +1263,7 @@ final class ControlCenter: ObservableObject {
             applyCoreSnapshot(snapshot)
             coreSnapshotApplied = true
             StartupTrace.mark("reload.published")
-            if let plan = segmentationPlan, !records.contains(where: { $0.id == plan.source.sourceID && $0.transcriptVersionID == plan.source.transcriptVersionID && $0.policyVersion == plan.policyVersion && ["saved","reference_only"].contains($0.state) }) {
-                segmentationPlan = nil; segmentationStatus = "原话或授权已变化，请重新查看分段"
-            }
-            if let result = retrievalResult {
-                let generation = retrievalGeneration
-                do { try await store.validateRetrievalResult(result) }
-                catch {
-                    if generation == retrievalGeneration {
-                        cancelHistorySearch(); retrievalStatus = "历史资料已变化，请重新查找"
-                    }
-                }
-            }
+            await validateCoreSelection(store: store)
         }
         catch { status = error.localizedDescription }
         workspaceLoaded = true
@@ -1280,6 +1305,53 @@ final class ControlCenter: ObservableObject {
         await StartupTrace.measureAsync("reload.discussion") { await refreshDiscussion() }
         resumeAssistantExecutions(snapshot: contextsFroze ? nil : assistantSnapshot)
         queueTopicOrganization()
+    }
+    private func reloadScopedWorkspace(_ plan: RefreshPlan, store: VoiceOSStore) async {
+        StartupTrace.mark("reload.begin")
+        var contextsFroze = false
+        if plan.coreSecondary {
+            do {
+                let snapshot = try await StartupTrace.measureAsync("reload.coreSecondarySnapshot") { try await store.workspaceSnapshot(.coreSecondary) }
+                applyCoreSnapshot(snapshot)
+                workspaceLoaded = true
+                StartupTrace.mark("reload.firstScreen")
+                await validateCoreSelection(store: store)
+                applySecondarySnapshot(snapshot)
+                contextsFroze = snapshot.contextValidityChanged
+                StartupTrace.mark("reload.coreSecondaryPublished")
+            } catch { status = error.localizedDescription }
+        }
+        if plan.assistant {
+            do {
+                let assistant = try await StartupTrace.measureAsync("reload.assistantSnapshot") { try await store.workspaceSnapshot(.assistant) }
+                applyAssistantSnapshot(assistant)
+                contextsFroze = contextsFroze || assistant.contextValidityChanged
+                StartupTrace.mark("reload.assistantPublished")
+                resumeAssistantExecutions(snapshot: contextsFroze ? nil : assistant)
+            } catch { status = error.localizedDescription }
+        }
+        if plan.knowledge {
+            do {
+                let knowledge = try await StartupTrace.measureAsync("reload.knowledgeSnapshot") { try await store.workspaceSnapshot(.knowledge) }
+                knowledgeReviews = knowledge.knowledgeReviews
+                StartupTrace.mark("reload.knowledgePublished")
+                resumeKnowledgeReviews()
+            } catch { status = error.localizedDescription }
+        }
+    }
+    private func validateCoreSelection(store: VoiceOSStore) async {
+        if let plan = segmentationPlan, !records.contains(where: { $0.id == plan.source.sourceID && $0.transcriptVersionID == plan.source.transcriptVersionID && $0.policyVersion == plan.policyVersion && ["saved","reference_only"].contains($0.state) }) {
+            segmentationPlan = nil; segmentationStatus = "原话或授权已变化，请重新查看分段"
+        }
+        if let result = retrievalResult {
+            let generation = retrievalGeneration
+            do { try await store.validateRetrievalResult(result) }
+            catch {
+                if generation == retrievalGeneration {
+                    cancelHistorySearch(); retrievalStatus = "历史资料已变化，请重新查找"
+                }
+            }
+        }
     }
     func setPanoramaVisible(_ visible: Bool) async {
         guard panoramaPolicy.setVisible(visible) else { return }
@@ -1883,7 +1955,7 @@ final class ControlCenter: ObservableObject {
     }
     func refreshFollowup(_ sourceID: String) {
         Task {
-            do { _ = try await store?.enqueueRecordingFollowup(sourceID: sourceID, retry: true); await refresh(); resumeRecordingFollowups() }
+            do { _ = try await store?.enqueueRecordingFollowup(sourceID: sourceID, retry: true); await refresh(.interactive); resumeRecordingFollowups() }
             catch { followupStatus = error.localizedDescription }
         }
     }
@@ -1893,7 +1965,7 @@ final class ControlCenter: ObservableObject {
                 do { _ = try await store?.enqueueRecordingFollowup(sourceID: receipt.sourceID, retry: true) }
                 catch { followupStatus = error.localizedDescription }
             }
-            await refresh(); resumeRecordingFollowups()
+            await refresh(.interactive); resumeRecordingFollowups()
         }
     }
     func prepareEnglishPractice(current: SourceRecord, priorIDs: [String]) async {
@@ -2994,10 +3066,10 @@ final class ControlCenter: ObservableObject {
     private func installReminderRefresh() {
         guard reminderObservers.isEmpty else { return }
         reminderObservers.append(reminders.observeChanges { [weak self] in self?.requestReminderRefresh() })
-        reminderObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh(); self?.resumeRecordingFollowups(); self?.resumeKnowledgeReviews() } })
+        reminderObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in await self?.refresh(.full); self?.requestReminderRefresh(); self?.resumeRecordingFollowups(); self?.resumeKnowledgeReviews() } })
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh(); self?.resumeRecordingFollowups(); self?.resumeKnowledgeReviews() } }
         reminderTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh() } }
-        followupTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in self?.resumeRecordingFollowups(); self?.resumeAssistantExecutions(); self?.resumeKnowledgeReviews() } }
+        followupTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in await self?.refresh(.full); self?.resumeRecordingFollowups(); self?.resumeAssistantExecutions(); self?.resumeKnowledgeReviews() } }
     }
     private func requestReminderRefresh() {
         guard reminderAccess?.enabled == true else { return }
@@ -4449,16 +4521,16 @@ extension ControlCenter {
             }
             _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, instruction: instruction, questionID: questionID, allowInstructionCloud: true)
             assistantStatus = "委托已保存，AI 助理正在准备交付"
-            await refresh(); resumeAssistantExecutions(); return true
-        } catch { assistantStatus = error.localizedDescription; await refresh(); return false }
+            await refresh(.assistant); resumeAssistantExecutions(); return true
+        } catch { assistantStatus = error.localizedDescription; await refresh(.assistant); return false }
     }
     func analyzeThought(_ action: ActionRecord, fresh: Bool = false) async -> Bool {
         guard let store, assistantModel != nil else { assistantStatus = "请先配置文本模型"; return false }
         do {
             _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: .analysis, fresh: fresh)
             assistantStatus = "已开始分析；结果会保存在这条内容下"
-            await refresh(); resumeAssistantExecutions(); return true
-        } catch { assistantStatus = error.localizedDescription; await refresh(); return false }
+            await refresh(.assistant); resumeAssistantExecutions(); return true
+        } catch { assistantStatus = error.localizedDescription; await refresh(.assistant); return false }
     }
     /// A follow-up is its own analysis execution anchored to the same action.
     func askFollowup(_ action: ActionRecord, instruction: String) async -> Bool {
@@ -4468,8 +4540,8 @@ extension ControlCenter {
         do {
             _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, instruction: text, mode: .analysis, fresh: true)
             assistantStatus = "追问已排队；结果会保存在这条问题下"
-            await refresh(); resumeAssistantExecutions(); return true
-        } catch { assistantStatus = error.localizedDescription; await refresh(); return false }
+            await refresh(.assistant); resumeAssistantExecutions(); return true
+        } catch { assistantStatus = error.localizedDescription; await refresh(.assistant); return false }
     }
     /// Queues a question's first answer and returns without waiting for it, so
     /// the clarify queue can advance to the next item right away.
@@ -4479,12 +4551,12 @@ extension ControlCenter {
         do {
             _ = try await store.enqueueAssistantExecution(actionID: action.id, expectedVersion: action.version, mode: .analysis, fresh: true)
             assistantStatus = "已让 VoiceOS 先回答这条问题；结果会保存在问题下"
-            Task { await refresh(); resumeAssistantExecutions() }
+            Task { await refresh(.assistant); resumeAssistantExecutions() }
             return true
         } catch { assistantStatus = error.localizedDescription; return false }
     }
     func retryAssistant(_ execution: AssistantExecutionRecord) async {
-        do { try await store?.retryAssistantExecution(id: execution.id); assistantStatus = "已重新排队"; await refresh(); resumeAssistantExecutions() }
+        do { try await store?.retryAssistantExecution(id: execution.id); assistantStatus = "已重新排队"; await refresh(.assistant); resumeAssistantExecutions() }
         catch { assistantStatus = error.localizedDescription }
     }
     func retryAssistantAssessment(_ issue: AssistantAssessmentIssue) async {
@@ -4494,12 +4566,12 @@ extension ControlCenter {
         do {
             try await store.retryAssistantAssessment(actionID: issue.actionID, expectedVersion: issue.actionVersion, using: port)
             assistantStatus = "意图已重新识别；明确委托才会执行"
-            await refresh()
+            await refresh(.assistant)
             resumeAssistantExecutions()
-        } catch { assistantStatus = error.localizedDescription; await refresh() }
+        } catch { assistantStatus = error.localizedDescription; await refresh(.assistant) }
     }
     func cancelAssistant(_ execution: AssistantExecutionRecord) async {
-        do { try await store?.cancelAssistantExecution(id: execution.id); assistantStatus = "已取消这份代办，保留委托记录"; await refresh() }
+        do { try await store?.cancelAssistantExecution(id: execution.id); assistantStatus = "已取消这份代办，保留委托记录"; await refresh(.assistant) }
         catch { assistantStatus = error.localizedDescription }
     }
     func attachAssistantResult(_ execution: AssistantExecutionRecord, questionID: String) async -> Bool {
@@ -4507,7 +4579,7 @@ extension ControlCenter {
         do {
             try await store.attachAssistantExecution(id: execution.id, questionID: questionID)
             assistantStatus = "AI 成果已接回主题，可继续讨论和记录自己的判断"
-            await refresh(); return true
+            await refresh(.assistant); return true
         } catch { assistantStatus = error.localizedDescription; return false }
     }
     func beginAssistantDiscussion(_ execution: AssistantExecutionRecord) async -> Bool {
@@ -4548,19 +4620,19 @@ extension ControlCenter {
                 let steadyHint = idle ? snapshot : nil
                 var changed = false
                 var firstHint = snapshot
-                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh() }, snapshot: firstHint) {
+                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh(.assistant) }, snapshot: firstHint) {
                     changed = true
                     firstHint = nil
                     try Task.checkCancellation()
                 }
                 if try await store.discoverAutomaticAssistantExecutions(using: port, snapshot: steadyHint) { changed = true }
-                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh() }, snapshot: steadyHint) {
+                while try await store.processNextAssistantExecution(using: port, onProgress: { [weak self] in await self?.refresh(.assistant) }, snapshot: steadyHint) {
                     changed = true
                     try Task.checkCancellation()
                 }
                 assistantStatus = "AI 代办状态已更新；成果可在任务或工作台查看"
-                if changed { await refresh() }
-            } catch { assistantStatus = "AI 代办尚未完成：" + error.localizedDescription; await refresh() }
+                if changed { await refresh(.assistant) }
+            } catch { assistantStatus = "AI 代办尚未完成：" + error.localizedDescription; await refresh(.assistant) }
         }
     }
     func loadTopicReflection(_ id: String) async throws -> ConversationReflectionFocus {
@@ -4601,8 +4673,8 @@ extension ControlCenter {
             if allowCloud { _=try await store.setSourceLocalOnly(sourceID:source,expectedVersion:1,localOnly:false) }
             _=try await store.appendConversationUserSource(conversationID:session.id,sourceID:source,expectedVersion:session.version)
             discussionStatus="本轮个人原文已保存并关联；尚未调用模型。"
-            await refresh();return true
-        } catch { discussionStatus="关联未完成，已保存原文可在资料库核对："+error.localizedDescription;await refresh();return false }
+            await refresh(); await refreshDiscussion(); return true
+        } catch { discussionStatus="关联未完成，已保存原文可在资料库核对："+error.localizedDescription;await refresh(); await refreshDiscussion(); return false }
     }
     func startDiscussionDictation() async {
         guard discussionWritable,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return }
@@ -4618,8 +4690,8 @@ extension ControlCenter {
             if allowCloud { try await ensureTranscriptReviewed(sourceID:id) }
             _=try await store.appendConversationUserSource(conversationID:session.id,sourceID:id,expectedVersion:session.version)
             discussionRecordingID=nil;discussionStatus="口述原文已关联；尚未发送，音频保留本机。"
-            await refresh();return true
-        } catch { discussionStatus=error.localizedDescription;await refresh();return false }
+            await refresh(); await refreshDiscussion(); return true
+        } catch { discussionStatus=error.localizedDescription;await refresh(); await refreshDiscussion(); return false }
     }
     func sendDiscussion() async {
         guard let store,let session=discussionSession,let port=discussionModel,discussionCanSend,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return }
@@ -4754,7 +4826,7 @@ extension ControlCenter {
         do {
             try await ensureTranscriptReviewed(sourceID: sourceID)
             _ = try await store.enqueueKnowledgeReview(sourceID: sourceID, retry: retry)
-            await refresh(); resumeKnowledgeReviews()
+            await refresh(.knowledge); resumeKnowledgeReviews()
         } catch { knowledgeReviewStatus = error.localizedDescription }
     }
     func retryAllFailedKnowledgeReviews() async {
@@ -4765,7 +4837,7 @@ extension ControlCenter {
                 _ = try await store.enqueueKnowledgeReview(sourceID: review.sourceID, retry: true)
             } catch { knowledgeReviewStatus = error.localizedDescription }
         }
-        await refresh(); resumeKnowledgeReviews()
+        await refresh(.knowledge); resumeKnowledgeReviews()
     }
     private func resumeKnowledgeReviews() {
         guard initialized, let store, let port = knowledgeReviewModel, knowledgeReviewWorker == nil,
@@ -4778,16 +4850,16 @@ extension ControlCenter {
                 while let next = try await store.pendingKnowledgeReviews().first(where: { !attempted.contains($0.id) }) {
                     try Task.checkCancellation(); attempted.insert(next.id)
                     knowledgeReviewStatus = "正在查证知识判断，核对来源与适用条件…"
-                    await refresh()
+                    await refresh(.knowledge)
                     knowledgeReviewBusy = true
                     defer { knowledgeReviewBusy = false }
                     let result = try await store.processKnowledgeReview(sourceID: next.sourceID, using: port)
                     knowledgeReviewStatus = result.state == "completed"
                         ? (result.issues.isEmpty ? "本次未提出需要纠偏的知识判断。" : "已保存 \(result.issues.count) 条知识核查建议与依据。")
                         : (result.error ?? "知识核查尚未完成，可手动重试。")
-                    await refresh()
+                    await refresh(.knowledge)
                 }
-            } catch { knowledgeReviewStatus = error.localizedDescription; await refresh() }
+            } catch { knowledgeReviewStatus = error.localizedDescription; await refresh(.knowledge) }
         }
     }
 }
