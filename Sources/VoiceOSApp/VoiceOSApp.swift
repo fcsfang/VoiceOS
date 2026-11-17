@@ -3,6 +3,7 @@ import AppKit
 import Combine
 import AVKit
 import UniformTypeIdentifiers
+import UserNotifications
 import VoiceOSCore
 import VoiceOSPlatform
 
@@ -16,6 +17,54 @@ enum WorkspaceRoute: Equatable {
 
 enum WorkspacePageRequest: Equatable {
     case home, themes, materials, actions, initiate, back
+}
+
+struct ImportFileResult: Identifiable {
+    let id = UUID()
+    let fileName: String
+    let succeeded: Bool
+    let message: String
+}
+
+struct ImportBatchReport: Identifiable {
+    let id = UUID()
+    let results: [ImportFileResult]
+    var failureCount: Int { results.filter { !$0.succeeded }.count }
+}
+
+struct ImportBatchReportView: View {
+    let report: ImportBatchReport
+    let dismiss: () -> Void
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("导入结果").vosFont(WorkspaceText.sectionTitle)
+            Text(report.failureCount == 0
+                ? "\(report.results.count) 份都已保存。"
+                : "成功 \(report.results.count - report.failureCount) 份，失败 \(report.failureCount) 份。")
+                .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(report.results) { result in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: result.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundStyle(result.succeeded ? Color.green : Color.orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.fileName).vosFont(WorkspaceText.body)
+                                Text(result.message).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }.padding(.vertical, 2)
+            }.frame(maxHeight: 340)
+            HStack {
+                Spacer()
+                Button("完成", action: dismiss).keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 560)
+    }
 }
 
 @MainActor
@@ -311,6 +360,8 @@ final class ControlCenter: ObservableObject {
     @Published var workspaceLastErrorRetry: WorkspaceErrorRetry?
     @Published var exporting = false
     @Published var importing = false
+    @Published var importReport: ImportBatchReport?
+    private var recentFileImportResults: [ImportFileResult] = []
     @Published var fullRecordingInput: FullRecordingInput?
     @Published var fullRecordingBusy = false
     @Published var fullRecordingStatus = ""
@@ -409,6 +460,14 @@ final class ControlCenter: ObservableObject {
     func transcriptReviewIssue(for source: SourceRecord) -> String? {
         guard let version = source.transcriptVersionID else { return nil }
         return transcriptReviewFailures[source.id + ":" + version + ":" + String(source.policyVersion)]
+    }
+    /// Carries review failures from the previous session into the in-memory
+    /// dictionary so the processing page shows them after a restart.
+    private func restoreTranscriptReviewFailures() async {
+        guard let store, let stored = try? await store.storedTranscriptionReviewFailures() else { return }
+        for (key, reason) in stored where transcriptReviewFailures[key] == nil {
+            transcriptReviewFailures[key] = reason
+        }
     }
     private var transcriptReviewWorker: Task<Void, Error>?
     private var transcriptReviewFailures: [String: String] = [:]
@@ -925,6 +984,7 @@ final class ControlCenter: ObservableObject {
             }
             await refresh()
             StartupTrace.mark("start.refreshDone")
+            await restoreTranscriptReviewFailures()
             do { if try await store.recoverRecordingFollowups() { await refresh() } }
             catch { status = error.localizedDescription }
             // Long panorama runs must be resumable without a visible window.
@@ -1440,6 +1500,7 @@ final class ControlCenter: ObservableObject {
                             setFullRecordingStatus("正在校正完整转写，保留每段原音与时间…")
                             try await FullRecordingOrganizer.organize(folder:folder,script:script,python:speech.pythonExecutable,configuration:configuration,log:log,reviewTranscriptOnly:true)
                             _ = try await store.applyTranscriptQualityResult(sourceID:id,expectedVersionID:version,from:folder)
+                            try? await store.clearTranscriptionReviewFailure(sourceID: id)
                         }
                         try await prepareRecordingContext(input:entry.url,media:media,personalSourceID:id,personalTrack:track,staging:staging,speech:speech)
                     } catch {
@@ -1713,6 +1774,7 @@ final class ControlCenter: ObservableObject {
         try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, configuration: configuration, log: log, reviewTranscriptOnly: true)
         try Task.checkCancellation()
         _ = try await store.applyTranscriptQualityResult(sourceID: sourceID, expectedVersionID: version, from: folder)
+        try? await store.clearTranscriptionReviewFailure(sourceID: sourceID)
         await refresh()
         setFullRecordingStatus("全文校正已保存，正在整理观点、任务与已有任务的接续…")
         try await FullRecordingOrganizer.organize(folder: folder, script: script, python: speech.pythonExecutable, configuration: configuration, log: log)
@@ -2317,11 +2379,30 @@ final class ControlCenter: ObservableObject {
             else { unsupported.append(url.lastPathComponent) }
         }
         var succeeded = true
-        if !media.isEmpty, !(await importFiles(media)) { succeeded = false }
-        for url in textFiles { if !(await importCapturedTextFile(url)) { succeeded = false } }
-        for url in pdfs { if !(await acceptPDFCapture(url)) { succeeded = false } }
-        for url in images { if !(await acceptImageCapture(url)) { succeeded = false } }
-        if !unsupported.isEmpty { status = "暂不支持这些文件类型：" + unsupported.joined(separator: "、") }
+        recentFileImportResults = []
+        if !media.isEmpty, !(await importFiles(media, notify: false)) { succeeded = false }
+        var results = recentFileImportResults
+        for url in textFiles {
+            let saved = await importCapturedTextFile(url)
+            results.append(.init(fileName: url.lastPathComponent, succeeded: saved, message: saved ? "已保存文字" : status))
+            if !saved { succeeded = false }
+        }
+        for url in pdfs {
+            let saved = await acceptPDFCapture(url)
+            results.append(.init(fileName: url.lastPathComponent, succeeded: saved, message: saved ? "已读取 PDF 文字，仅本机保存" : status))
+            if !saved { succeeded = false }
+        }
+        for url in images {
+            let saved = await acceptImageCapture(url)
+            results.append(.init(fileName: url.lastPathComponent, succeeded: saved, message: saved ? "已识别图片文字，仅本机保存" : status))
+            if !saved { succeeded = false }
+        }
+        if !unsupported.isEmpty {
+            status = "暂不支持这些文件类型：" + unsupported.joined(separator: "、")
+            results.append(contentsOf: unsupported.map { .init(fileName: $0, succeeded: false, message: "暂不支持这种文件格式") })
+        }
+        if urls.count > 1 { importReport = ImportBatchReport(results: results) }
+        notifyImportFinished(results)
         return succeeded
     }
     private func importCapturedTextFile(_ url: URL) async -> Bool {
@@ -2460,23 +2541,45 @@ final class ControlCenter: ObservableObject {
         }
     }
     @discardableResult
-    func importFiles(_ urls: [URL], personalAudio: Bool = false) async -> Bool {
+    func importFiles(_ urls: [URL], personalAudio: Bool = false, notify: Bool = true) async -> Bool {
         guard let store, !importing else { return false }
         importing = true
         defer { importing = false }
-        var failures = 0
+        var results: [ImportFileResult] = []
         for url in urls {
             let access = url.startAccessingSecurityScopedResource()
             status = "正在保存：\(url.lastPathComponent)"
-            do { selected = personalAudio ? try await store.importPersonalAudio(url) : try await store.importFile(url) }
-            catch { failures += 1; status = error.localizedDescription }
+            do {
+                selected = personalAudio ? try await store.importPersonalAudio(url) : try await store.importFile(url)
+                results.append(.init(fileName: url.lastPathComponent, succeeded: true, message: "已保存原件，正在本地转写"))
+            } catch {
+                status = error.localizedDescription
+                results.append(.init(fileName: url.lastPathComponent, succeeded: false, message: error.localizedDescription))
+            }
             if access { url.stopAccessingSecurityScopedResource() }
             await refresh()
+        }
+        let failures = results.filter { !$0.succeeded }.count
+        recentFileImportResults = results
+        if urls.count > 1 {
+            importReport = ImportBatchReport(results: results)
+            if failures > 0 { status = "导入完成 · 成功 \(urls.count - failures) 份，失败 \(failures) 份 · 逐文件结果见导入结果" }
         }
         if failures == 0 { status = "已可靠保存 \(urls.count) 个原件 · 正在本地转写" }
         scheduleProcessing()
         if failures == 0 { status = "导入完成 · 可查看原件和转写状态" }
+        if notify { notifyImportFinished(results) }
         return failures == 0
+    }
+    private func notifyImportFinished(_ results: [ImportFileResult]) {
+        guard !results.isEmpty else { return }
+        let failures = results.filter { !$0.succeeded }
+        if failures.isEmpty {
+            LocalNotice.post(title: "导入完成", body: "已可靠保存 \(results.count) 份材料，正在本地转写。")
+        } else {
+            let detail = failures.prefix(3).map { $0.fileName + "：" + $0.message }.joined(separator: "；")
+            LocalNotice.post(title: "导入未全部完成", body: "成功 \(results.count - failures.count) 份，失败 \(failures.count) 份。" + detail + (failures.count > 3 ? "；等" : ""))
+        }
     }
     private func scheduleProcessing() {
         guard worker == nil, !fullRecordingBusy, !dictationActive,
@@ -3359,8 +3462,42 @@ final class ControlCenter: ObservableObject {
     }
 }
 
+/// Local completion notices for long work. The first notifiable event asks
+/// once; a refused request stays silent and the in-app processing page is the
+/// fallback surface.
+@MainActor
+enum LocalNotice {
+    private static var authorizationRequested = false
+    static func post(title: String, body: String) {
+        guard Bundle.main.bundleIdentifier != nil else { return }
+        Task {
+            let center = UNUserNotificationCenter.current()
+            var settings = await center.notificationSettings()
+            if settings.authorizationStatus == .notDetermined {
+                guard !authorizationRequested else { return }
+                authorizationRequested = true
+                _ = try? await center.requestAuthorization(options: [.alert, .sound])
+                settings = await center.notificationSettings()
+            }
+            guard [.authorized, .provisional].contains(settings.authorizationStatus) else { return }
+            let content = UNMutableNotificationContent()
+            content.title = title
+            content.body = body
+            content.sound = .default
+            try? await center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+        }
+    }
+}
+
+final class NoticeDelegate: NSObject, UNUserNotificationCenterDelegate {
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+}
+
 @MainActor
 final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    private var noticeDelegate: NoticeDelegate?
     private var dictationKeyMonitor: Any?
     private var appIconObservation: NSKeyValueObservation?
     private var dictationIconObservation: AnyCancellable?
@@ -3376,6 +3513,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppBrand.applyApplicationIcon()
+        if Bundle.main.bundleIdentifier != nil {
+            let notice = NoticeDelegate()
+            noticeDelegate = notice
+            UNUserNotificationCenter.current().delegate = notice
+        }
         installGlobalHotKeys()
         appIconObservation = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
             DispatchQueue.main.async { AppBrand.applyApplicationIcon() }
@@ -3687,6 +3829,9 @@ struct VoiceOSApp: App {
     var body: some Scene {
         Window("VoiceOS", id: "control-center") {
             WorkspaceView(model: model).onboarding(model: model)
+                .sheet(item: $model.importReport) { report in
+                    ImportBatchReportView(report: report) { model.importReport = nil }
+                }
                 .sheet(isPresented: $model.showingCaptureComposer) {
                     TextCaptureView(model: model, draft: $model.textCaptureDraft,
                                     onSaved: { _ in model.showingCaptureComposer = false },
@@ -4574,11 +4719,16 @@ extension ControlCenter {
         do {
             try await work.value
             transcriptReviewFailures[key] = nil
+            try? await store.clearTranscriptionReviewFailure(sourceID: sourceID)
             transcriptReviewStatus = "全文转写校正已完成；仍有疑点的地方保留待核对。"
+            LocalNotice.post(title: "完整转写核对完成", body: "「\(source.displayTitle)」已可继续云端理解。")
             await refresh()
         } catch {
-            transcriptReviewFailures[key] = error.localizedDescription
-            transcriptReviewStatus = "转写校正尚未完成：" + error.localizedDescription
+            let reason = error.localizedDescription
+            transcriptReviewFailures[key] = reason
+            try? await store.recordTranscriptionReviewFailure(sourceID: sourceID, reason: reason)
+            transcriptReviewStatus = "转写校正尚未完成：" + reason
+            LocalNotice.post(title: "完整转写核对未完成", body: "「\(source.displayTitle)」：" + reason)
             throw error
         }
     }

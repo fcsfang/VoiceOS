@@ -17,10 +17,15 @@ struct TaskInitiationView: View {
     let openSource: (String) -> Void
     @State private var selectedID: String?
     @State private var artifactDraft = ""
-    @State private var mode = TaskInitiationMode.direct
-    @State private var allowCloud = true
+    @AppStorage("voiceos.initiation.mode") private var mode = TaskInitiationMode.direct
+    @AppStorage("voiceos.initiation.allowCloud") private var allowCloud = true
+    @AppStorage("voiceos.initiation.preference") private var preference = TaskInitiationPreference.quickDelivery
     @State private var answer = ""
     @State private var pendingSecretCopy: TaskInitiationRecord?
+    @State private var stepDraft = ""
+    @State private var stepStatus = ""
+    @State private var stepSaving = false
+    @State private var stepCommandID = UUID().uuidString
 
     private var records: [TaskInitiationRecord] { model.taskInitiations }
     private var selected: TaskInitiationRecord? {
@@ -51,6 +56,12 @@ struct TaskInitiationView: View {
             artifactDraft = selected?.artifact ?? ""
             answer = ""
         }
+        .onChange(of: selectedID) { _, _ in
+            stepDraft = ""
+            stepStatus = ""
+            stepCommandID = UUID().uuidString
+        }
+        .onChange(of: stepDraft) { _, _ in stepCommandID = UUID().uuidString }
         .alert("这份材料可能包含密码、密钥或令牌", isPresented: Binding(
             get: { pendingSecretCopy != nil },
             set: { if !$0 { pendingSecretCopy = nil } }
@@ -99,9 +110,7 @@ struct TaskInitiationView: View {
                     Text("尚未配置文本模型；请先在设置中连接模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                 }
                 HStack(spacing: 12) {
-                    Button(model.initiationBusy ? "正在生成…" : "生成启动材料") {
-                        Task { await model.generateTaskInitiation(text: model.initiationText, sourceID: model.initiationSourceID, mode: mode, allowCloud: allowCloud) }
-                    }
+                    Button(model.initiationBusy ? "正在生成…" : "生成启动材料") { generate() }
                     .buttonStyle(.borderedProminent).tint(palette.accent)
                     .disabled(model.initiationBusy || !model.modelConfigured || !allowCloud)
                     .accessibilityIdentifier("initiation.generate")
@@ -192,8 +201,10 @@ struct TaskInitiationView: View {
 
     private func artifactEditor(_ record: TaskInitiationRecord) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Picker("执行偏好", selection: Binding(get: { record.proposal.preference }, set: { preference in
-                Task { await model.setTaskInitiationPreference(record, preference: preference) }
+            Picker("执行偏好", selection: Binding(get: { record.proposal.preference }, set: { value in
+                Task {
+                    if await model.setTaskInitiationPreference(record, preference: value) { self.preference = value }
+                }
             })) {
                 Text("快速交付").tag(TaskInitiationPreference.quickDelivery)
                 Text("边做边学").tag(TaskInitiationPreference.learnWhileDoing)
@@ -223,8 +234,68 @@ struct TaskInitiationView: View {
                 }
                 Spacer()
             }
+            if record.copiedAt != nil { stepNote(record) }
             statusText
         }
+    }
+
+    private func generate() {
+        let known = Set(records.map(\.id))
+        Task {
+            guard await model.generateTaskInitiation(text: model.initiationText, sourceID: model.initiationSourceID, mode: mode, allowCloud: allowCloud),
+                  let record = model.taskInitiations.first(where: { !known.contains($0.id) }),
+                  record.state == "draft",
+                  record.route == .agentHandoff || record.route == .guidedStart,
+                  record.proposal.preference != preference else { return }
+            let status = model.initiationStatus
+            if await model.setTaskInitiationPreference(record, preference: preference) { model.initiationStatus = status }
+        }
+    }
+
+    @ViewBuilder private func stepNote(_ record: TaskInitiationRecord) -> some View {
+        Divider()
+        VStack(alignment: .leading, spacing: 10) {
+            Text("记下这一步").vosFont(WorkspaceText.rowTitle)
+            Text("复制之后做了什么、卡在哪里，记一句。会存为你的原话；允许云端时继续整理成观点与待办。")
+                .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            TextEditor(text: $stepDraft).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 90)
+                .workspaceEditorSurface().accessibilityLabel("这一步的记录").disabled(stepSaving)
+            HStack(spacing: 12) {
+                Button(stepSaving ? "正在保存…" : "保存这一步") { saveStep(record) }
+                    .buttonStyle(.borderedProminent).tint(palette.accent)
+                    .disabled(stepSaving || stepDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("initiation.step.save")
+                Spacer()
+            }
+            if !stepStatus.isEmpty {
+                Text(stepStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+        }
+    }
+
+    private func saveStep(_ record: TaskInitiationRecord) {
+        let text = stepDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !stepSaving else { return }
+        stepSaving = true
+        let cloud = allowCloud
+        let commandID = "initiation-step:" + record.id + ":" + stepCommandID
+        let title = stepTitle(record)
+        Task {
+            let saved = await model.saveCapturedText(text, title: title, ownership: .personal, allowCloud: cloud, commandID: commandID)
+            stepSaving = false
+            guard saved != nil else { stepStatus = model.status; return }
+            stepDraft = ""
+            stepCommandID = UUID().uuidString
+            stepStatus = cloud && model.canUnderstandCapturedText
+                ? "已存为你的原话；观点与待办会在后台整理。"
+                : "已存为你的原话；仅保存在本机，可在资料页继续整理。"
+        }
+    }
+
+    private func stepTitle(_ record: TaskInitiationRecord) -> String {
+        let title = record.proposal.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = title.isEmpty ? "启动后这一步" : "启动后：" + title
+        return String(raw.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ").prefix(100))
     }
 
     private func discardButton(_ record: TaskInitiationRecord) -> some View {
