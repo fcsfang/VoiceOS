@@ -5,14 +5,20 @@ import VoiceOSPlatform
 private actor StalenessTopicPort: TopicOrganizationPort {
     private var calls = 0
     func count() -> Int { calls }
-    func organize(_ input: TopicOrganizationInput) async throws -> TopicOrganizationResult {
+    func organizeSkeleton(_ input: TopicSkeletonInput) async throws -> TopicSkeletonResult {
         calls += 1
-        let sourceIDs = input.context.sources.map(\.sourceID)
-        let existingID = input.topics.first?.id ?? ""
-        return .init(briefing: "合成简报", highlightSourceIDs: sourceIDs,
-                     topics: [.init(topicID: existingID, title: "合成主题", summary: "合成摘要第 \(calls) 版",
-                                    questions: ["这份材料接下来要验证什么？"], sourceIDs: sourceIDs)],
-                     responseID: "stale-topic-\(calls)")
+        return .init(briefing: "合成简报", highlightSourceIDs: input.viewpoints.map(\.sourceID),
+                     topics: [.init(topicID: input.topics.first?.id ?? "", title: "合成主题", summary: "合成摘要第 \(calls) 版",
+                                    questions: ["这份材料接下来要验证什么？"], viewpointIDs: input.viewpoints.map(\.id))],
+                     responseID: "stale-skeleton-\(calls)")
+    }
+    func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult {
+        .init(topics: input.topics.map { topic in
+            .init(topicID: topic.topicID, questions: ["这份材料接下来要验证什么？"],
+                  sections: [.init(id: "synthetic", title: "合成小节", summary: "合成正文",
+                                   claimIDs: topic.viewpoints.map(\.id), actionIDs: topic.tasks.map(\.id),
+                                   evidence: topic.quotes.prefix(1).map { .init(sourceID: $0.sourceID, quote: $0.quote) })])
+        }, responseID: "stale-body-\(calls)")
     }
 }
 
@@ -33,6 +39,12 @@ final class TopicOrganizationStalenessChecks: XCTestCase {
 
     private func allowCloud(_ store: VoiceOSStore, _ sourceID: String) async throws {
         _ = try await store.setSourceLocalOnly(sourceID: sourceID, expectedVersion: 1, localOnly: false)
+        let context = try await store.prepareLocalTranscriptContext(sourceIDs: [sourceID])
+        let item = try XCTUnwrap(context.sources.first)
+        _ = try await store.importOrganizedClaims(context: context, proposals: [
+            .init(statement: item.text, ownership: .userTentative,
+                  references: [.init(sourceID: sourceID, transcriptVersionID: item.transcriptVersionID, spanID: item.spans[0].id)])
+        ], commandID: "staleness-claims-" + sourceID)
     }
 
     func testStaleTopicKeepsOrganizationForReading() async throws {
@@ -95,15 +107,15 @@ final class TopicOrganizationStalenessChecks: XCTestCase {
         XCTAssertTrue(staleRefresh)
 
         let reorganized = try await store.organizeTopics(using: port)
-        XCTAssertTrue(reorganized, "摘要未变而过期主题必须放行重排")
+        XCTAssertTrue(reorganized, "摘要未变而过期主题必须放行修复")
         let calls = await port.count()
-        XCTAssertEqual(calls, 2)
+        XCTAssertEqual(calls, 1, "观点未变时复用骨架，只修复归属")
 
         let repairedQuestions = try await store.reflectionQuestions()
         let repaired = try XCTUnwrap(repairedQuestions.first { $0.id == topic.id })
         XCTAssertEqual(repaired.organizationStale, false)
         XCTAssertEqual(repaired.organization?.sourceVersions.count, 2)
-        XCTAssertEqual(repaired.organization?.summary, "合成摘要第 2 版")
+        XCTAssertEqual(repaired.organization?.summary, "合成摘要第 1 版")
         let repairedRefresh = try await store.needsTopicOrganizationRefresh()
         XCTAssertFalse(repairedRefresh)
     }
