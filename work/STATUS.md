@@ -418,3 +418,10 @@
 - 波 75：材料页 `sourceRow` 改为 `materialCard`（surface 底 + border 1 点 + controlRadius 圆角），五个筛选共用；行间 8、移除分隔线、组头后留 6；高亮仍 selection + focusRing。25 增 11 删。
 - 波 76：行动页九处 `actionRow` 分组改用 `ActionCardList` 并卡片化（复用 `materialCard`），移除行间分隔线；保留今日阅读、系统建议、AI 助理工作的分隔线列表。40 增 15 删。圆角从高亮层 12 改 8，与首页/材料页一致。
 - 验证：两波各自 615 项测试 0 失败；实机安装截图确认材料页与行动页每条记录独立卡片。深色主题仍待深色模式下复核。
+
+## 波 77 来源页主线程全量扫描修复（2026-11-18，已交付并安装）
+
+- 用户反馈：点进首页最近想法要很久才看到内容。实测：点击后主线程 100-205% CPU 持续约 16 秒。sample 归因：2098 个主线程样本中 1865 个在 `WorkspaceSourceView.body` 内反复重建 catalog、对全部材料逐个算 `recordingExpression(in:)` 与 digest、逐行动扫描全库。
+- 修复：`SourcePageIndex` 在 `applyCoreSnapshot` 每次快照时构建一次（recordsByID、已校验表达、行动关联、待核对），视图所有查询改字典读。fixture（400 材料/400 观点/120 行动，40 轮模拟读取）：直算 0.388s → 索引 0.0028s，约 136 倍。617 项测试 0 失败。
+- 实机复测（同口径）：点击 `recent.thought` 到来源页「返回」出现在 AX 树，0.88 秒（修复前同一路径 AX 轮询 38.5 秒、CPU 满载 16 秒）。
+- 遗留：点入约 18 秒后仍有一次延迟后台突发（实体索引刷新读整份转写，validateUTF8/pread 热点，PNG 解码），主线程空闲、界面可用；候选波 79 评估节流或惰性刷新。
