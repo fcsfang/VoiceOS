@@ -18,6 +18,8 @@ public enum ArticleExtractor {
         for tag in hiddenBlocks {
             body = body.replacingOccurrences(of: "<\(tag)\\b[^>]*>[\\s\\S]*?</\(tag)\\s*>", with: "\n", options: [.regularExpression, .caseInsensitive])
         }
+        body = body.replacingOccurrences(of: "<a\\b[^>]*>", with: "\u{01}", options: [.regularExpression, .caseInsensitive])
+        body = body.replacingOccurrences(of: "</a\\s*>", with: "\u{02}", options: [.regularExpression, .caseInsensitive])
         for tag in blockTags {
             body = body.replacingOccurrences(of: "</?\(tag)\\b[^>]*>", with: "\n", options: [.regularExpression, .caseInsensitive])
         }
@@ -25,10 +27,30 @@ public enum ArticleExtractor {
         body = decodeEntities(body)
         let lines = body.split(whereSeparator: \.isNewline)
             .map { $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
-            .filter { !$0.isEmpty }
+            .compactMap(dropLinkDominatedLine)
         let text = lines.joined(separator: "\n")
         guard text.count >= 80 else { return nil }
         return ExtractedArticle(title: title(from: html, baseURL: baseURL), text: text)
+    }
+
+    private static func dropLinkDominatedLine(_ line: String) -> String? {
+        var anchorCharacters = 0
+        var linkCount = 0
+        var insideAnchor = false
+        for scalar in line.unicodeScalars {
+            if scalar == "\u{01}" {
+                insideAnchor = true
+                linkCount += 1
+            } else if scalar == "\u{02}" {
+                insideAnchor = false
+            } else if insideAnchor {
+                anchorCharacters += 1
+            }
+        }
+        let visibleCharacters = line.unicodeScalars.count - linkCount * 2
+        guard visibleCharacters > 0 else { return nil }
+        if linkCount >= 2 && anchorCharacters * 5 > visibleCharacters * 3 { return nil }
+        return line.replacingOccurrences(of: "\u{01}", with: "").replacingOccurrences(of: "\u{02}", with: "")
     }
 
     private static func title(from html: String, baseURL: URL) -> String {
