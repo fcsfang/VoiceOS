@@ -8,8 +8,8 @@ import UserNotifications
 import VoiceOSCore
 import VoiceOSPlatform
 
-enum WorkspaceErrorRetry {
-    case localSpeech, textModel, export(includeMedia: Bool)
+enum WorkspaceErrorRetry: Equatable {
+    case localSpeech, textModel, export(includeMedia: Bool), reload
 }
 
 enum WorkspaceRoute: Equatable {
@@ -1560,6 +1560,7 @@ final class ControlCenter: ObservableObject {
         var assistantSnapshot: WorkspaceSnapshot?
         do {
             let snapshot = try await StartupTrace.measureAsync("reload.workspaceSnapshot") { try await store.workspaceSnapshot(.core) }
+            if workspaceLastErrorRetry == .reload { clearWorkspaceError() }
             latestClaimsBySource = snapshot.currentClaimsBySource
             // Publish the core lists together, without awaits between related data sets.
             applyCoreSnapshot(snapshot, reminderAnomalies: try await store.reminderSyncAnomalies())
@@ -1567,7 +1568,7 @@ final class ControlCenter: ObservableObject {
             StartupTrace.mark("reload.published")
             await validateCoreSelection(store: store)
         }
-        catch { status = error.localizedDescription }
+        catch { status = error.localizedDescription; reportWorkspaceError(error.localizedDescription, retry: .reload) }
         workspaceLoaded = true
         StartupTrace.mark("reload.firstScreen")
         do {
@@ -1623,7 +1624,7 @@ final class ControlCenter: ObservableObject {
                 applySecondarySnapshot(snapshot)
                 contextsFroze = snapshot.contextValidityChanged
                 StartupTrace.mark("reload.coreSecondaryPublished")
-            } catch { status = error.localizedDescription }
+            } catch { status = error.localizedDescription; reportWorkspaceError(error.localizedDescription, retry: .reload) }
         }
         if plan.assistant {
             do {
@@ -2994,6 +2995,7 @@ final class ControlCenter: ObservableObject {
         case .localSpeech: chooseLocalSpeech()
         case .textModel: chooseTextModel()
         case .export(let includeMedia): export(includeMedia: includeMedia)
+        case .reload: Task { await refresh(.full) }
         case nil: break
         }
     }
