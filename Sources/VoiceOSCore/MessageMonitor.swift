@@ -104,6 +104,30 @@ public struct MonitorReport: Identifiable, Sendable, Equatable {
     }
 }
 
+/// Attention for the daily monitor report. A report is resolved only when the
+/// check completed and delivery did not fail; until then the badge stays, no
+/// matter how often the monitor page was opened. The page may write a seen
+/// signature only after the report resolves.
+public enum MonitorAttention {
+    public static let seenKey = "voiceos.monitor.attentionSeen.v1"
+    public static func isResolved(_ report: MonitorReport) -> Bool {
+        report.state == .complete && report.deliveryState != "failed"
+    }
+    public static func signature(for report: MonitorReport) -> String {
+        report.reportDate + "|" + report.state.rawValue + "|" + report.deliveryState
+    }
+    public static func needsAttention(_ report: MonitorReport?) -> Bool {
+        guard let report else { return false }
+        return !isResolved(report)
+    }
+    /// The signature to persist when the monitor page opens, or nil when the
+    /// latest report is not resolved and the badge must stay.
+    public static func seenSignatureWhenOpened(for report: MonitorReport?) -> String? {
+        guard let report, isResolved(report) else { return nil }
+        return signature(for: report)
+    }
+}
+
 public enum MonitorItemCategory: String, Codable, Sendable, Equatable {
     case applicable
     case needsCheck = "needs_check"

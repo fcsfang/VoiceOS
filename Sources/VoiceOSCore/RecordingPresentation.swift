@@ -313,6 +313,18 @@ public extension SourceRecord {
               failure.policyVersion == policyVersion else { return nil }
         return failure
     }
+    /// Unresolved doubts from the current completed review, one per span.
+    /// A review can repeat the same span; the first occurrence keeps its reason.
+    var unresolvedTranscriptionIssues: [TranscriptionReview.Issue] {
+        guard let review = transcriptionReview, review.completed, let issues = review.unresolved_issues else { return [] }
+        var seen = Set<String>()
+        return issues.filter { issue in
+            let span = issue.span_id.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !span.isEmpty else { return true }
+            return seen.insert(span).inserted
+        }
+    }
+    var unresolvedTranscriptionIssueCount: Int { unresolvedTranscriptionIssues.count }
 }
 
 extension VoiceOSStore {
