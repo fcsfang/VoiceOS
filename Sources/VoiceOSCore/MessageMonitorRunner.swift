@@ -132,10 +132,16 @@ public struct MessageMonitorRunner: Sendable {
                         throw VoiceOSError("官网抓取器未配置，无法检查「\(source.displayName)」")
                     }
                     let config = try Self.websiteConfiguration(source.configJSON)
-                    let entries = try await websiteCollector.collect(columnURL: config.columnURL)
+                    let start = MonitorSourceConfigParser.parseStart(config.startAt)
+                    let collected = try await websiteCollector.collect(columnURL: config.columnURL)
+                    let entries = collected.filter { entry in
+                        guard let start, let published = entry.publishedAt else { return true }
+                        return published >= start
+                    }
                     drafts = entries.map { entry in
                         var meta: [String: Any] = ["url": entry.url, "title": entry.title]
                         if let note = entry.note { meta["error"] = note }
+                        if entry.publishedAt == nil { meta["date_missing"] = true }
                         let metaJSON = (try? JSONSerialization.data(withJSONObject: meta, options: [.sortedKeys]))
                             .map { String(decoding: $0, as: UTF8.self) }
                         return MonitorMessageDraft(sourceID: source.id, externalID: entry.url, kind: .article,
@@ -264,7 +270,11 @@ public struct MessageMonitorRunner: Sendable {
 
     private struct WebsiteSourceConfiguration: Decodable {
         let columnURL: URL
-        enum CodingKeys: String, CodingKey { case columnURL = "column_url" }
+        let startAt: String?
+        enum CodingKeys: String, CodingKey {
+            case columnURL = "column_url"
+            case startAt = "start_at"
+        }
     }
 
     private static func qqConfiguration(_ json: String) throws -> QQSourceConfiguration {
