@@ -412,3 +412,9 @@
 - 用户反馈：首页最近想法与时间线每条记录全是文字、无边界、行距 3-4 点，分不清不同想法。
 - 修复（RecentContentHome.swift 单文件 63+/34-）：文件内私有 `homeCard(isSelected:)` 修饰符——未选中 `palette.surface` 底 + `palette.border` 1 点描边 + 圆角 8 + 内边距 12/10；选中态沿用 selection + focusRing，不叠加双层描边。时间线组头加 2×12 accent 竖条，组头到首行 6、行间 8；最近想法 entry 间距 8、组内两行间距 4。identifier、键盘导航、滚动锚点、reader 区零改动。
 - 验证：615 项测试 0 失败；实机安装截图确认浅色下条目边界清晰。深色跟随系统外观，待在深色模式下复核。
+
+## 波 75-76 材料页与行动页卡片化（2026-11-18，已交付并安装）
+
+- 波 75：材料页 `sourceRow` 改为 `materialCard`（surface 底 + border 1 点 + controlRadius 圆角），五个筛选共用；行间 8、移除分隔线、组头后留 6；高亮仍 selection + focusRing。25 增 11 删。
+- 波 76：行动页九处 `actionRow` 分组改用 `ActionCardList` 并卡片化（复用 `materialCard`），移除行间分隔线；保留今日阅读、系统建议、AI 助理工作的分隔线列表。40 增 15 删。圆角从高亮层 12 改 8，与首页/材料页一致。
+- 验证：两波各自 615 项测试 0 失败；实机安装截图确认材料页与行动页每条记录独立卡片。深色主题仍待深色模式下复核。
