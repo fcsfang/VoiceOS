@@ -26,7 +26,12 @@ else:
     signing_identity = candidates[0]
 env = dict(os.environ)
 env.pop('SDKROOT', None)
-subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration, '-j', '4', '--product', 'VoiceOS'], cwd=ROOT, env=env, check=True)
+# Release WMO compiles the whole app module in one frontend; peak RSS hit 30GB+
+# on a 16GB machine. Per-file optimization stays within ~2GB and builds faster.
+flags = ['-j', '4']
+if args.configuration == 'release':
+    flags += ['-Xswiftc', '-no-whole-module-optimization']
+subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration, *flags, '--product', 'VoiceOS'], cwd=ROOT, env=env, check=True)
 bin_path = Path(subprocess.check_output(['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration, '--show-bin-path'], cwd=ROOT, env=env, text=True).strip())
 app = ROOT / 'dist' / 'VoiceOS.app'
 mac = app / 'Contents' / 'MacOS'
