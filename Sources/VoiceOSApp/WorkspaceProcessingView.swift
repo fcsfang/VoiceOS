@@ -193,11 +193,12 @@ extension ControlCenter {
         }.sorted { $0.count != $1.count ? $0.count > $1.count : $0.source.displayTitle < $1.source.displayTitle }
     }
     var workspaceAttentionCount: Int {
-        workspaceTranscriptReviewPoints.reduce(0) { $0 + $1.count } + workspaceFailedFollowups.count + workspaceFailedKnowledgeReviews.count + (topicOrganizationNeedsAttention ? 1 : 0) + (workspaceNeedsAttention ? 1 : 0)
+        workspaceTranscriptReviewPoints.reduce(0) { $0 + $1.count } + workspaceFailedFollowups.count + workspaceFailedKnowledgeReviews.count + (topicOrganizationNeedsAttention ? 1 : 0) + (workspaceNeedsAttention ? 1 : 0) + (monitorNeedsAttention ? 1 : 0)
     }
     var workspaceProcessingOutstanding: Bool {
         workspaceNeedsAttention || topicOrganizationNeedsAttention || !workspaceTranscriptReviewPoints.isEmpty ||
         !workspaceFailedFollowups.isEmpty || !workspaceFailedKnowledgeReviews.isEmpty ||
+        monitorNeedsAttention ||
         recordingRequests.contains { $0.state == "waiting" } ||
         workspaceUnfinishedIntents.contains { $0.state == .queued || $0.state == .running }
     }
@@ -245,11 +246,31 @@ struct WorkspaceProcessingView: View {
     let openSource: (String) -> Void
     let openSettings: () -> Void
     let openInbox: () -> Void
+    let openMonitor: () -> Void
     var body: some View {
         ScrollView {
             LazyVStack(alignment:.leading,spacing:24) {
                 WorkspaceHeading(eyebrow:"后台处理",title:"进度与需要查看的事项",subtitle:"保持应用运行即可继续处理；可以先阅读其他内容。原文、处理结果与历史分别保留。")
                 ReverifyControls(model:model)
+                if model.monitorNeedsAttention {
+                    WorkspaceSection(title:"消息监测",subtitle:"每日检查未完成或推送失败；已采集原文保留，不会重复发送。",icon:"bell.badge",count:1) {
+                        if let text = model.monitorAttentionText {
+                            WorkspaceNoticeText(message: text, severity: .warning)
+                        }
+                        HStack(spacing:16) {
+                            Button("去查看") { openMonitor() }.accessibilityLabel("打开消息监测")
+                            if model.monitorReports.first?.deliveryState == "failed" {
+                                Button("重试推送") { Task { await model.pushLatestMonitorReport() } }
+                                    .disabled(model.monitorChecking)
+                                    .accessibilityLabel("重试推送今日监测报告")
+                            } else {
+                                Button("重新检查") { Task { await model.runMonitorCheck() } }
+                                    .disabled(model.monitorChecking)
+                                    .accessibilityLabel("重新检查消息监测")
+                            }
+                        }.padding(.top,8)
+                    }
+                }
                 if !model.startupIssue.isEmpty {
                     WorkspaceSection(title:"资料库尚未打开",subtitle:"已有资料没有被重建或清空。处理原因后可以重新打开。",icon:"exclamationmark.triangle") {
                         reason(model.startupIssue).padding(.top,12)

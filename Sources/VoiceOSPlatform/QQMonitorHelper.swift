@@ -1,6 +1,32 @@
 import Foundation
 import VoiceOSCore
 
+public struct QQMonitorConversation: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let name: String
+    public let latestAt: Date?
+    public let messageCount: Int
+    public init(id: String, name: String, latestAt: Date?, messageCount: Int) {
+        self.id = id
+        self.name = name
+        self.latestAt = latestAt
+        self.messageCount = messageCount
+    }
+}
+
+public struct QQMonitorDiagnosisItem: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let title: String
+    public let ok: Bool
+    public let detail: String
+    public init(id: String, title: String, ok: Bool, detail: String) {
+        self.id = id
+        self.title = title
+        self.ok = ok
+        self.detail = detail
+    }
+}
+
 public enum QQMonitorDiagnosis: Sendable, Equatable {
     case ready(String)
     case pythonMissing(String)
@@ -84,6 +110,131 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
         } catch {
             return .failed(error.localizedDescription)
         }
+    }
+
+    public func conversations(settings: QQMonitorSettings) async throws -> [QQMonitorConversation] {
+        guard FileManager.default.isExecutableFile(atPath: settings.pythonPath) else {
+            throw VoiceOSError("Python 解释器不可用：\(settings.pythonPath)；请在消息监测设置中指定已安装 qqnt-export-macos 的解释器")
+        }
+        guard FileManager.default.fileExists(atPath: settings.scriptPath) else {
+            throw VoiceOSError("QQ 读取脚本缺失：\(settings.scriptPath)；请重新安装应用")
+        }
+        let request: [String: Any] = [
+            "version": 1,
+            "action": "conversations",
+            "key_path": settings.keyPath,
+            "cache_dir": settings.cacheDir,
+            "account": settings.account ?? NSNull(),
+            "minutes": 365 * 24 * 60,
+            "limit": 100,
+        ]
+        let input = try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
+        let result = try await Self.run(pythonPath: settings.pythonPath, arguments: [settings.scriptPath],
+                                        stdin: input, timeout: settings.timeout, operation: "QQ 群列表读取")
+        guard result.exitCode == 0 else { throw Self.contractError(stderr: result.stderr) }
+        return try Self.decodeConversations(result.stdout)
+    }
+
+    /// Only group conversations are returned, newest first, capped at 100.
+    /// Private chats never surface in the source picker.
+    static func decodeConversations(_ data: Data) throws -> [QQMonitorConversation] {
+        guard data.count <= 8_000_000 else { throw VoiceOSError("QQ 群列表超过 8 MB 预算") }
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw VoiceOSError("QQ 群列表不是有效 JSON；请更新 qqmonitor 脚本")
+        }
+        guard (root["version"] as? Int) == 1 else { throw VoiceOSError("QQ 群列表版本不受支持") }
+        guard let raw = root["conversations"] as? [[String: Any]] else {
+            throw VoiceOSError("QQ 群列表缺少 conversations")
+        }
+        var seen = Set<String>()
+        var rows: [QQMonitorConversation] = []
+        for item in raw {
+            guard let id = item["conversation_id"] as? String, id.hasPrefix("group:") else { continue }
+            guard seen.insert(id).inserted else { continue }
+            let name = (item["conversation_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallback = "群 " + id.replacingOccurrences(of: "group:", with: "")
+            let millis = (item["latest_timestamp"] as? NSNumber)?.int64Value ?? 0
+            let latest = millis > 0 ? Date(timeIntervalSince1970: TimeInterval(millis) / 1000) : nil
+            let count = (item["message_count"] as? NSNumber)?.intValue ?? 0
+            rows.append(QQMonitorConversation(id: id, name: (name?.isEmpty == false ? name! : fallback),
+                                              latestAt: latest, messageCount: count))
+        }
+        rows.sort { lhs, rhs in
+            switch (lhs.latestAt, rhs.latestAt) {
+            case let (left?, right?) where left != right: return left > right
+            case (nil, .some): return false
+            case (.some, nil): return true
+            default: return lhs.name < rhs.name
+            }
+        }
+        return Array(rows.prefix(100))
+    }
+
+    /// Itemized dependency checks for the settings page. Nothing is modified;
+    /// every failure carries a Chinese next step.
+    public func diagnoseItems(settings: QQMonitorSettings) async -> [QQMonitorDiagnosisItem] {
+        let fileManager = FileManager.default
+        var items: [QQMonitorDiagnosisItem] = []
+        let pythonOK = fileManager.isExecutableFile(atPath: settings.pythonPath)
+        items.append(.init(id: "python", title: "Python 解释器", ok: pythonOK,
+                           detail: pythonOK ? settings.pythonPath
+                           : "找不到可执行的 Python：\(settings.pythonPath)；请在设置中选择已安装 qqnt-export-macos 的解释器"))
+        let scriptOK = fileManager.fileExists(atPath: settings.scriptPath)
+        items.append(.init(id: "script", title: "读取脚本", ok: scriptOK,
+                           detail: scriptOK ? settings.scriptPath : "脚本缺失：\(settings.scriptPath)；请重新构建或重新安装应用"))
+        let keyReadable = Self.keyIsReadable(settings.keyPath)
+        items.append(.init(id: "key", title: "密钥文件", ok: keyReadable,
+                           detail: keyReadable ? "可读取：\(settings.keyPath)"
+                           : "密钥缺失、为空或不可读：\(settings.keyPath)；请按已验证方式重新导出密钥，应用不会修改 QQ 或安全设置"))
+        guard pythonOK else {
+            items.append(.init(id: "package", title: "qqnt-export-macos 导入", ok: false,
+                               detail: "Python 不可用，无法检查依赖"))
+            items.append(.init(id: "qqdata", title: "QQ 账号数据目录", ok: false,
+                               detail: "Python 不可用，无法检查数据目录"))
+            return items
+        }
+        do {
+            let probe = "import qqnt_export_macos as m; print(getattr(m, '__version__', 'unknown'))"
+            let result = try await Self.run(pythonPath: settings.pythonPath, arguments: ["-c", probe],
+                                            stdin: nil, timeout: 30, operation: "QQ 依赖检查")
+            if result.exitCode == 0 {
+                let version = String(decoding: result.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                items.append(.init(id: "package", title: "qqnt-export-macos 导入", ok: true,
+                                   detail: "可导入，版本 " + (version.isEmpty ? "未知" : version)))
+            } else {
+                let stderr = String(decoding: result.stderr, as: UTF8.self)
+                let missing = stderr.contains("ModuleNotFoundError") || stderr.contains("No module named")
+                let detail = missing
+                    ? "该 Python 无法导入 qqnt-export-macos；请安装 0.4.0 或更新版本，应用不会自动下载或修改 QQ"
+                    : "导入失败：" + (stderr.split(whereSeparator: \.isNewline).last.map(String.init) ?? "原因未知")
+                items.append(.init(id: "package", title: "qqnt-export-macos 导入", ok: false, detail: detail))
+            }
+        } catch {
+            items.append(.init(id: "package", title: "qqnt-export-macos 导入", ok: false, detail: error.localizedDescription))
+        }
+        do {
+            let probe = """
+            import sys
+            from qqnt_export_macos.live import discover_active_nt_db
+            from qqnt_export_macos.snapshot import DEFAULT_QQ_ROOT
+            print(discover_active_nt_db(DEFAULT_QQ_ROOT, sys.argv[1] or None))
+            """
+            let result = try await Self.run(pythonPath: settings.pythonPath, arguments: ["-c", probe, settings.account ?? ""],
+                                            stdin: nil, timeout: 30, operation: "QQ 数据目录检查")
+            let path = String(decoding: result.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            let ok = result.exitCode == 0 && !path.isEmpty && fileManager.fileExists(atPath: path)
+            items.append(.init(id: "qqdata", title: "QQ 账号数据目录", ok: ok,
+                               detail: ok ? path : "未找到该账号的 QQ 数据目录；请确认 QQ 已安装并登录过该账号" + (settings.account.map { "（\($0)）" } ?? "")))
+        } catch {
+            items.append(.init(id: "qqdata", title: "QQ 账号数据目录", ok: false, detail: error.localizedDescription))
+        }
+        return items
+    }
+
+    private static func keyIsReadable(_ path: String) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return false }
+        defer { try? handle.close() }
+        return (try? handle.read(upToCount: 1))?.isEmpty == false
     }
 
     private struct RunOutput {
