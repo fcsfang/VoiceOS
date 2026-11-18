@@ -22,16 +22,27 @@ struct WorkspaceMonitorView: View {
     @State private var webhookDraft = ""
     @State private var pendingSourceRemoval: MonitorSource?
     @State private var formLoaded = false
+    @State private var showsSettings = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             WorkspaceHeading(eyebrow: "每日消息监测", title: "消息监测",
                              subtitle: "每天检查一次 QQ 班级群与学院官网；需要行动的事项在这里跟进，微信收到每日汇总。")
-            runBar
-            todayReportSection
-            historySection
-            sourceStatusSection
-            settingsSection
+            Picker("消息监测页面", selection: $showsSettings) {
+                Text("报告").tag(false)
+                Text("设置").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 172)
+            if showsSettings {
+                settingsSection
+            } else {
+                runBar
+                todayReportSection
+                historySection
+                sourceStatusSection
+            }
         }
         .onAppear {
             model.markMonitorAttentionSeen()
@@ -399,7 +410,7 @@ struct WorkspaceMonitorView: View {
     }
 
     private var settingsSection: some View {
-        WorkspaceSection(title: "设置", subtitle: "时间、授权、推送与 QQ 依赖", icon: "slider.horizontal.3") {
+        WorkspaceSection(title: "检查设置", subtitle: "时间、授权、推送与 QQ 依赖", icon: "slider.horizontal.3") {
             scheduleSettings
             Divider().padding(.vertical, 12)
             authorizationSettings
@@ -561,7 +572,7 @@ struct WorkspaceMonitorView: View {
             if !model.monitorQQConversations.isEmpty {
                 conversationPicker
             }
-            Text("已添加的群来源在上方「来源状态」中管理启停、起始时间与删除。")
+            Text("已添加的群来源在「报告」页的「来源状态」中管理启停、起始时间与删除。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
         }
     }
