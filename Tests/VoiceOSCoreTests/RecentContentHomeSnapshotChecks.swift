@@ -4,11 +4,12 @@ import XCTest
 final class RecentContentHomeSnapshotChecks: XCTestCase {
     private func source(_ id: String, createdAt: String, transcript: String = "原话内容",
                         feedbackKind: String? = nil, feedbackActionID: String? = nil,
-                        feedbackRelation: String? = nil) -> SourceRecord {
+                        feedbackRelation: String? = nil, localOnly: Bool = false,
+                        jobState: String = "completed") -> SourceRecord {
         SourceRecord(id: id, assetID: "asset-" + id, name: id, state: "saved", kind: "user_text", createdAt: createdAt,
-                     bytes: 1, duration: nil, jobState: "completed", transcript: transcript, error: nil,
+                     bytes: 1, duration: nil, jobState: jobState, transcript: transcript, error: nil,
                      relativePath: "assets/" + id, transcriptVersionID: "t-" + id, transcriptionBackend: nil,
-                     spans: [], localOnly: false, policyVersion: 1, origin: "user", speaker: "user",
+                     spans: [], localOnly: localOnly, policyVersion: 1, origin: "user", speaker: "user",
                      feedbackActionID: feedbackActionID, feedbackActionVersion: feedbackActionID == nil ? nil : 1,
                      feedbackKind: feedbackKind, feedbackRelation: feedbackRelation,
                      timeZone: "Asia/Shanghai", presentation: nil)
@@ -189,5 +190,69 @@ final class RecentContentHomeSnapshotChecks: XCTestCase {
 
     func testRecentThoughtsHideWhenNoData() {
         XCTAssertEqual(RecentContentIndex.recentThoughts(days: []), [])
+    }
+
+    func testSnapshotCarriesRecentThoughtsGroups() {
+        let calendar = utcCalendar()
+        let sources = [
+            source("s1", createdAt: "2024-05-02T10:00:00Z"),
+            source("s2", createdAt: "2024-05-02T11:00:00Z"),
+        ]
+        let claims = [
+            claim("c1", sourceIDs: ["s1"], statement: "【观点】完成比完美更重要"),
+            claim("c2", sourceIDs: ["s2"], statement: "【观点】与父母长谈"),
+        ]
+
+        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: claims, actions: [],
+                                                       calendar: calendar, now: instant(2024, 5, 3))
+
+        XCTAssertEqual(snapshot.recentThoughts,
+                       RecentContentIndex.recentThoughts(days: snapshot.days, now: instant(2024, 5, 3), calendar: calendar),
+                       "最近想法分组随快照一次算好，并与直算一致")
+        XCTAssertFalse(snapshot.recentThoughts.isEmpty, "窗口内应有一组最近想法")
+    }
+
+    func testSnapshotRowsCarryIconStatusAndCount() {
+        let sources = [
+            source("m1", createdAt: "2024-05-01T10:00:00Z", localOnly: true, jobState: "running"),
+            source("m2", createdAt: "2024-05-01T11:00:00Z", jobState: "running"),
+            source("f1", createdAt: "2024-05-01T12:00:00Z", transcript: "反馈原话",
+                   feedbackKind: "done", feedbackActionID: "a1", feedbackRelation: "progress"),
+        ]
+        let claims = [
+            claim("c1", sourceIDs: ["m1"], statement: "【观点】整理桌面"),
+            claim("c2", sourceIDs: ["m2"], statement: "【观点】打磨汇报"),
+        ]
+        let actions = [action("a1", claimID: "c1", title: "整理桌面")]
+
+        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: claims, actions: actions)
+
+        XCTAssertEqual(snapshot.rows["m1"]?.status, .some(.localOnly), "仅本机优先于整理中")
+        XCTAssertEqual(snapshot.rows["m2"]?.status, .some(.organizing), "运行中的材料显示整理中")
+        XCTAssertEqual(snapshot.rows["m2"]?.icon, "doc.text", "文字材料显示文档图标")
+        guard let feedback = snapshot.days.flatMap(\.items).first(where: { $0.kind == .feedback }) else {
+            return XCTFail("应有一组任务进展")
+        }
+        XCTAssertEqual(snapshot.rows[feedback.id]?.icon, "arrow.triangle.2.circlepath", "反馈行显示循环图标")
+        XCTAssertEqual(snapshot.rows[feedback.id]?.count, snapshot.progressRows[feedback.id]?.count, "反馈行计数来自快照")
+    }
+
+    func testDigestTasksKeepActionOrderAcrossClaims() {
+        let sources = [source("s1", createdAt: "2024-05-01T10:00:00Z")]
+        let claims = [
+            claim("c1", sourceIDs: ["s1"], statement: "【观点】第一件事"),
+            claim("c2", sourceIDs: ["s1"], statement: "【观点】第二件事"),
+        ]
+        let actions = [
+            action("a1", claimID: "c2", title: "第二组第一件"),
+            action("a2", claimID: "c1", title: "第一组第一件"),
+            action("a3", claimID: "c2", title: "第二组第二件"),
+            action("a4", claimID: "c1", title: "不是任务", kind: "note"),
+            action("a5", claimID: "c1", title: "已完成的事", state: "done"),
+        ]
+
+        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: claims, actions: actions)
+
+        XCTAssertEqual(snapshot.digests["s1"]?.tasks.map(\.id), ["a1", "a2", "a3"], "任务保持行动数组原顺序，且只含未完成的任务")
     }
 }
