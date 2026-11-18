@@ -34,3 +34,28 @@
 - 16GB：构建/测试共用 `/tmp/voiceos-swift-build.lock`；先 merge main。
 - 不写实时库；不启动真实进程读真实 QQ（用 fixture/假端口）。
 - 分支 `work/m67-qqfail`，提交回报；不 push、不合并。
+
+## 结果
+
+- 分支：`work/m67-qqfail`（从 `d2bc5f4` 创建，已合并 wave 66 `53e8c46`）
+- 提交：`7b9ef39` fix(消息监测): QQ 采集静默失败与误诊修复；`8aea5d0` 合并 origin/main；本结果随其后一次 docs 提交
+- 验证：`swift build -j 2` exit 0；`swift test -j 2` exit 0；604 项测试 0 失败（含本波 4 项新测试）
+- 文件清单：
+  - `scripts/qqmonitor/qq_read_range.py`
+  - `Sources/VoiceOSPlatform/QQMonitorHelper.swift`
+  - `Sources/VoiceOSApp/MonitorCenter.swift`
+  - `Sources/VoiceOSCore/MessageMonitor.swift`
+  - `Tests/VoiceOSCoreTests/QQMonitorChecks.swift`
+  - `Tests/VoiceOSCoreTests/MessageMonitorRunnerChecks.swift`
+  - `Tests/VoiceOSCoreTests/MessageMonitorStorageChecks.swift`
+- 判据落点：
+  1. 读数成功后 `ensure_group_present` 以 `reader.group_names()` 校验群号；群库不可读或返回空时跳过；新错误码 `group_missing`（中文「群不存在或已退出，请重新选择目标群」）。runner 沿用异常路径 `failMonitorCursor`：报告 incomplete、来源带错误、`last_success_at` 不推进。测试 `testGroupMissingFailsReportAndDoesNotAdvanceCursor`。
+  2. 脚本 `qq_root_listing_denied()` 对 FileNotFoundError 二次复核 `os.listdir(DEFAULT_QQ_ROOT)`，PermissionError 归为 `permission_denied`；诊断 `directoryProbeScript` 内做同样复核，`directoryProbeItem` 触发 `needsFullDiskAccess`。测试 `testPermissionRecheckClassifiesAsFullDiskAccessIssue`。
+  3. `read_failure` 将 "valid key candidate" 归为 `key_invalid`，中文「QQ 可能已升级导致密钥失效，请重新导出密钥」；「检查 QQ 依赖」新增 `mirrorProbeScript`（`QQRecentReader.status()` 真实开库）与 `mirrorProbeItem`，可分类密钥轮换、缺 SQLCipher、权限与数据目录缺失。测试 `testValidKeyCandidateFailureClassifiesAsKeyInvalid`。
+  4. `setMonitorQQStart` 统一调用 `alignMonitorCursorToStart`：改晚推进游标、改早回拨，去重吸收重叠；消息读取超时文案与 32 MB 预算文案指向「把起始时间调近后重试」。测试 `testLaterStartAdvancesMonitorCursor`。
+  5. `CHATLAB_KINDS` 补 26→forward、2→other；`message_text` 将 `[消息类型 N]`/空内容替换为 `[合并转发]`/`[语音]`；`testFixturePayloadDecodesIntoContract` fixture 增补语音行。
+- 遗留风险：
+  - 群校验以本地群库为准，QQ 群库可能滞后于真实入群/退群状态，可能短暂误报或漏报 `group_missing`。
+  - 诊断开库探测会刷新镜像（复制账号库），超大库耗时较长；60 秒超时归为一般失败。
+  - 脚本内 `os.listdir` 复核分支只经 py_compile 与静态逻辑探针验证，未在真实 TCC 拒绝下实机验证（本波约束不启动真实 QQ 读取）。
+  - 起始时间推进的 App 调用点（MonitorCenter）不在测试目标内；Core 语义由 `alignMonitorCursorToStart` 测试锁定。
