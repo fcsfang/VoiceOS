@@ -16,6 +16,10 @@ public struct SourceEntity: Identifiable, Sendable, Equatable {
 }
 
 extension VoiceOSStore {
+    private static let maxTaggedCandidates = 64
+    private static let maxTermCandidates = 20
+    private static let maxSentenceIDs = 3
+
     public func entities(sourceID: String) throws -> [SourceEntity] {
         try db.query("SELECT * FROM source_entities WHERE source_id=? ORDER BY mention_count DESC,name", [sourceID]).map { row in
             guard let name = row["name"], let kind = row["kind"].flatMap(SourceEntityKind.init(rawValue:)),
@@ -69,10 +73,15 @@ extension VoiceOSStore {
             return (span.id, String(String.UnicodeScalarView(scalars[start..<end])))
         }
         func sentenceIDs(_ name: String) -> [String] {
-            Array(spanTexts.filter { $0.1.contains(name) }.map { $0.0 }.prefix(3))
+            var ids: [String] = []
+            for (id, text) in spanTexts where text.contains(name) {
+                ids.append(id)
+                if ids.count == Self.maxSentenceIDs { break }
+            }
+            return ids
         }
         var entries: [String: SourceEntity] = [:]
-        for (name, kind) in taggedNames(transcript) where entries[name] == nil {
+        for (name, kind) in taggedNames(transcript).prefix(Self.maxTaggedCandidates) where entries[name] == nil {
             let count = occurrences(of: name, in: transcript)
             guard count > 0 else { continue }
             entries[name] = SourceEntity(sourceID: sourceID, name: name, kind: kind, sentenceIDs: sentenceIDs(name), mentionCount: count)
@@ -139,7 +148,7 @@ extension VoiceOSStore {
             return $0.order < $1.order
         }
         var selected: [(String, SourceEntityKind, Int)] = []
-        for candidate in ranked where selected.count < 20 {
+        for candidate in ranked where selected.count < Self.maxTermCandidates {
             guard !selected.contains(where: { $0.0.contains(candidate.name) }) else { continue }
             selected.append((candidate.name, candidate.kind, candidate.count))
         }

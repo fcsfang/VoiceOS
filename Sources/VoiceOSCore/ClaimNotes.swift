@@ -15,6 +15,17 @@ extension VoiceOSStore {
         return notes
     }
 
+    public func claimNotes(claimIDs: [String]) throws -> [String: ClaimNote] {
+        guard !claimIDs.isEmpty else { return [:] }
+        let placeholders = Array(repeating: "?", count: claimIDs.count).joined(separator: ",")
+        var notes: [String: ClaimNote] = [:]
+        for row in try db.query("SELECT claim_id,body,created_at,updated_at FROM claim_notes WHERE claim_id IN (\(placeholders))", claimIDs) {
+            guard let claimID = row["claim_id"], let body = row["body"], let createdAt = row["created_at"], let updatedAt = row["updated_at"] else { continue }
+            notes[claimID] = ClaimNote(claimID: claimID, body: body, createdAt: createdAt, updatedAt: updatedAt)
+        }
+        return notes
+    }
+
     @discardableResult
     public func saveClaimNote(claimID: String, body: String) throws -> ClaimNote {
         let body = body.trimmingCharacters(in: .whitespacesAndNewlines)
