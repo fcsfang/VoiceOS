@@ -956,15 +956,16 @@ struct WorkspaceView: View {
             } else {
                 LazyVStack(alignment:.leading,spacing:16) {
                     ForEach(materialDayGroups(rows)) { group in
-                        VStack(alignment:.leading,spacing:0) {
+                        VStack(alignment:.leading,spacing:6) {
                             WorkspaceListGroupHeader(title:group.label)
-                            ForEach(group.sources) { source in
-                                MaterialMenuRow(revealed: materialKeyboardFocus.id == source.id) {
-                                    MaterialManagementControls(model:model,source:source,style:.compact)
-                                } row: {
-                                    sourceRow(source,catalog:catalog,highlighted:materialKeyboardFocus.id == source.id,trailingGutter: source.isArchived || source.isTrashed ? WorkspaceRowChrome.materialWideGutter : WorkspaceRowChrome.materialGutter).frame(maxWidth:.infinity,alignment:.leading)
-                                }.id(source.id)
-                                if source.id != group.sources.last?.id { WorkspaceListDivider() }
+                            VStack(alignment:.leading,spacing:8) {
+                                ForEach(group.sources) { source in
+                                    MaterialMenuRow(revealed: materialKeyboardFocus.id == source.id) {
+                                        MaterialManagementControls(model:model,source:source,style:.compact)
+                                    } row: {
+                                        sourceRow(source,catalog:catalog,trailingGutter: source.isArchived || source.isTrashed ? WorkspaceRowChrome.materialWideGutter : WorkspaceRowChrome.materialGutter).frame(maxWidth:.infinity,alignment:.leading).materialCard(highlighted: materialKeyboardFocus.id == source.id)
+                                    }.id(source.id)
+                                }
                             }
                         }
                     }
@@ -1816,7 +1817,7 @@ struct WorkspaceView: View {
         readingPlans=(try? await store.incrementalPlans()) ?? []
     }
     private var recordCatalog: [String:SourceRecord] { Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) }) }
-    private func sourceRow(_ source:SourceRecord,catalog:[String:SourceRecord],highlighted:Bool = false,trailingGutter:CGFloat = 0,reason:String? = nil) -> some View {
+    private func sourceRow(_ source:SourceRecord,catalog:[String:SourceRecord],trailingGutter:CGFloat = 0,reason:String? = nil) -> some View {
         let expression=source.recordingExpression(in:catalog)
         let combined=(expression?.sourceIDs.count ?? 0) > 1
         let first=combined ? expression!.sourceIDs.first.flatMap { catalog[$0] } ?? source : source
@@ -1825,8 +1826,6 @@ struct WorkspaceView: View {
         let reading:(text:String,color:Color)? = issues > 0 ? ("疑点 \(issues)",palette.warning) : materialReadingStatus(source.id)
         let groupNote=reason ?? (source.recordingExpressionIssue(in:catalog) != nil ? "分组待重新判断" : nil)
         return WorkspaceRow(title:displayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : "") + (groupNote.map { " · " + $0 } ?? ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:"",trailingStyle:reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary,statusAccessibility:reading?.text ?? "",trailingGutter:trailingGutter) { go(.source(source.id)) }
-            .background(highlighted ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-            .overlay { if highlighted { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
                 Button("标为在读") { setMaterialReading(source.id,.reading) }
@@ -2789,6 +2788,21 @@ private struct SearchResultRow: View {
         }.buttonStyle(.plain).onHover { hovered=$0 }
             .accessibilityLabel(subtitleText.isEmpty ? titleText : titleText + " · " + subtitleText)
     }
+}
+
+private struct MaterialCard: ViewModifier {
+    @Environment(\.workspacePalette) private var palette
+    let highlighted: Bool
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius)
+        content
+            .background(highlighted ? palette.selection : palette.surface,in:shape)
+            .overlay { shape.strokeBorder(highlighted ? palette.focusRing : palette.border,lineWidth:1) }
+    }
+}
+
+private extension View {
+    func materialCard(highlighted: Bool) -> some View { modifier(MaterialCard(highlighted: highlighted)) }
 }
 
 private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
