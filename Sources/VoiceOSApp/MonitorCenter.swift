@@ -105,21 +105,6 @@ struct MonitorItemEvidence: Identifiable, Equatable {
     let title: String?
 }
 
-/// Website entries without a parseable date are kept; old dated articles are
-/// skipped so enabling a column does not import years of history.
-struct MonitorStartFilteredWebsiteCollector: WebsiteMonitorCollecting {
-    let base: any WebsiteMonitorCollecting
-    let startDates: [String: Date]
-    func collect(columnURL: URL) async throws -> [WebsiteMonitorEntry] {
-        let entries = try await base.collect(columnURL: columnURL)
-        guard let start = startDates[columnURL.absoluteString] else { return entries }
-        return entries.filter { entry in
-            guard let published = entry.publishedAt else { return true }
-            return published >= start
-        }
-    }
-}
-
 struct MonitorBuiltinWebsite: Identifiable, Equatable {
     let name: String
     let url: String
@@ -514,17 +499,11 @@ extension ControlCenter {
         defer { monitorChecking = false; monitorPhase = "" }
         await ensureBuiltinMonitorSources()
         let user = MonitorQQSettingsStore.load()
-        let startDates: [String: Date] = Dictionary(uniqueKeysWithValues: monitorSources.compactMap { source in
-            guard source.enabled, source.kind == .websiteColumn,
-                  let config = try? MonitorSourceConfigParser.website(source.configJSON),
-                  let start = MonitorSourceConfigParser.parseStart(config.startAt) else { return nil }
-            return (config.columnURL, start)
-        })
         let analysis: (any NotificationAnalysisPort)? = monitorSettings.cloudAnalysisAuthorized ? monitorAnalysisModel : nil
         let runner = MessageMonitorRunner(
             store: store, analysis: analysis,
             qqCollector: QQMonitorHelper(),
-            websiteCollector: MonitorStartFilteredWebsiteCollector(base: WebsiteMonitor(), startDates: startDates),
+            websiteCollector: WebsiteMonitor(),
             qqSettings: MonitorQQSettingsStore.qqSettings(user))
         let today = MonitorSourceConfigParser.dayString(Date())
         do {

@@ -183,4 +183,44 @@ final class MessageMonitorRunnerChecks: XCTestCase {
         let db = await store.db
         XCTAssertEqual(try db.query("SELECT COUNT(*) AS n FROM monitor_messages").first?["n"], "1")
     }
+
+    func testWebsiteStartDateSkipsOlderEntriesAndFlagsUndated() async throws {
+        let store = try await openStore()
+        let config = try MonitorSourceConfigParser.websiteJSON(columnURL: "https://cs.nuaa.edu.cn/10851/list.htm",
+                                                               startAt: "2026-11-18")
+        _ = try await store.addMonitorSource(kind: .websiteColumn, displayName: "计算机学院通知", configJSON: config)
+        let day = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9))!
+        let keepURL = "https://cs.nuaa.edu.cn/2026/1118/c10851a1/page.htm"
+        let oldURL = "https://cs.nuaa.edu.cn/2026/1101/c10851a2/page.htm"
+        let undatedURL = "https://cs.nuaa.edu.cn/2026/1110/c10851a3/page.htm"
+        let entries = [
+            WebsiteMonitorEntry(url: keepURL, title: "启用当天发布的通知",
+                                publishedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 18)),
+                                text: "启用当天发布的通知正文。", note: nil),
+            WebsiteMonitorEntry(url: oldURL, title: "起始日期之前的旧通知",
+                                publishedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 1)),
+                                text: "早于起始日期的通知正文。", note: nil),
+            WebsiteMonitorEntry(url: undatedURL, title: "没有发布日期的通知",
+                                publishedAt: nil, text: "列表页没有日期标记的通知正文。", note: nil),
+        ]
+        let run = try await runner(store: store, qq: StubQQCollector(messages: [], failure: nil),
+                                   website: StubWebsiteCollector(entries: entries, failure: nil),
+                                   analysis: EchoAnalysis(failure: nil), now: day).runDailyCheck(date: day)
+        XCTAssertEqual(run.newMessageCount, 2, "早于起始日期的条目不应进入采集，其余条目照常采集")
+        let db = await store.db
+        let rows = try db.query("SELECT external_id, sent_at, meta_json FROM monitor_messages ORDER BY external_id")
+        XCTAssertEqual(rows.count, 2, "无日期条目仍应采集，只有早于起始日期的条目被过滤")
+        XCTAssertFalse(rows.contains { $0["external_id"] == oldURL }, "早于起始日期的条目不应落库")
+        let undated = rows.first { $0["external_id"] == undatedURL }
+        XCTAssertNotNil(undated, "无日期条目不应被静默丢弃")
+        XCTAssertNil(undated?["sent_at"], "无日期条目的 sent_at 应为空")
+        XCTAssertTrue(undated?["meta_json"]?.contains("\"date_missing\":true") == true,
+                      "无日期条目应在 meta 标记 date_missing")
+        let dated = rows.first { $0["external_id"] == keepURL }
+        let datedComponents = dated?["sent_at"].flatMap { ISO8601DateFormatter().date(from: $0) }
+            .map { Calendar.current.dateComponents([.year, .month, .day], from: $0) }
+        XCTAssertEqual(datedComponents?.year, 2026, "可解析日期的条目应把发布日期写入 sent_at")
+        XCTAssertEqual(datedComponents?.month, 11)
+        XCTAssertEqual(datedComponents?.day, 18)
+    }
 }
