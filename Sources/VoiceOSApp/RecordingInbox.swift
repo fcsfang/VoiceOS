@@ -344,17 +344,17 @@ struct RecordingInboxView: View {
         VStack(alignment: .leading, spacing: 16) {
             WorkspaceHeading(eyebrow: "工具 · 收件箱", title: "自动接收录音",
                              subtitle: "将自己的录音放入收件箱，或连接已同步到 Mac 的语音备忘录。")
-            Text("VoiceOS 打开且 Mac 唤醒时，自动完成 Qwen 全长转写，由 AI 识别连续表达并合并理解，再整理观点、任务和提醒事项。")
+            Text("VoiceOS 打开且 Mac 唤醒时，自动完成 Qwen 全长转写，由 AI 识别连续表达并合并理解，再整理观点、任务和提醒事项。").vosFont(WorkspaceText.body)
             Text("只接收连接后新增或更新的素材；原文件保留。每 10 秒检查，文件连续两次检查不变后自动处理。同批录音先转写再判断分组；稍后到达的补录自动接续。音频在本机处理，文字使用已配置文本模型。")
-                .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-            Text(RecordingMediaInfo.personalRecordingLayout).vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+            Text(RecordingMediaInfo.personalRecordingLayout).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             HStack {
                 Button("启用 VoiceOS收件箱") { inbox.addDefaultInbox() }.buttonStyle(.borderedProminent)
                 Button("其他文件夹…") { inbox.chooseFolder(voiceMemos: false) }
                 Button("连接语音备忘录…") { inbox.chooseFolder(voiceMemos: true) }
             }
             if !inbox.folders.isEmpty && (!model.speechConfigured || !model.textModelConfigured) {
-                Text("已连接；配置模型后开始处理新录音").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("已连接；配置模型后开始处理新录音").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 HStack {
                     if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() } }
                     if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
@@ -369,7 +369,7 @@ struct RecordingInboxView: View {
                         Button("打开文件夹") { inbox.open(folder) }
                         Button("移除入口", role: .destructive) { folderPendingRemoval = folder }
                     }
-                    Text(folder.path).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(folder.path).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                     if let error = inbox.folderErrors[folder.id] { WorkspaceNoticeText(message: error) }
                 }
             }
@@ -387,13 +387,13 @@ struct RecordingInboxView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(URL(fileURLWithPath: item.path).lastPathComponent).vosFont(WorkspaceText.rowTitle).lineLimit(1)
                                 if item.state == .processing {
-                                    Text("正在整理 · 第 \(item.attempts) 次尝试").foregroundStyle(.secondary)
+                                    Text("正在整理 · 第 \(item.attempts) 次尝试").foregroundStyle(palette.secondaryText)
                                 } else if let next = item.nextAttempt {
-                                    Text("将在 \(next.formatted(date: .abbreviated, time: .standard)) 自动重试 · 已尝试 \(item.attempts) 次").foregroundStyle(.secondary)
+                                    Text("将在 \(next.formatted(date: .abbreviated, time: .standard)) 自动重试 · 已尝试 \(item.attempts) 次").foregroundStyle(palette.secondaryText)
                                 } else {
                                     Text("等待手动重试 · 已尝试 \(item.attempts) 次").foregroundStyle(palette.warning)
                                 }
-                                Text(item.explanation).foregroundStyle(.secondary).textSelection(.enabled)
+                                Text(item.explanation).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                                 if item.state != .processing {
                                     HStack(spacing: 8) {
                                         Button("重试这份素材") { inbox.retry(item.id) }
@@ -401,7 +401,7 @@ struct RecordingInboxView: View {
                                     }
                                 }
                                 if inbox.folders.first(where: { $0.id == item.folderID })?.enabled == false {
-                                    Text("入口已暂停，恢复前不会自动重试").foregroundStyle(.secondary)
+                                    Text("入口已暂停，恢复前不会自动重试").foregroundStyle(palette.secondaryText)
                                 }
                             }.vosFont(WorkspaceText.meta)
                         }
