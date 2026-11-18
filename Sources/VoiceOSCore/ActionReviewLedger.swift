@@ -52,33 +52,19 @@ public struct ActionReviewLedger: Sendable {
     let taskReviewPending: Bool?
     let decisions: [RecordingExpressionActionDecision]?
     let resolvedPairs: Set<String>
+    private let alwaysRequiresReview: Bool
+    private let reviewRequiredActionIDs: Set<String>
+    private let pairsByActionID: [String: [ActionReviewPair]]
 
     public func requiresReview(actionID: String) -> Bool {
         if isAcknowledged { return false }
         guard state == "completed" else { return true }
-        guard let decisions else { return taskReviewPending == true }
-        let uncertain = decisions.filter { $0.relation == "uncertain" }
-        guard uncertain.allSatisfy({ $0.possibleNewIDs != nil }) else { return true }
-        let unresolvedCandidateIDs = Set(uncertain.flatMap { decision in
-            (decision.possibleNewIDs ?? []).filter {
-                !resolvedPairs.contains(actionReviewPairKey(decision.oldID, $0))
-            }
-        })
-        let oldStillPaused = uncertain.contains { decision in
-            let candidates = decision.possibleNewIDs ?? []
-            return decision.oldID == actionID &&
-                (candidates.isEmpty || candidates.contains {
-                    !resolvedPairs.contains(actionReviewPairKey(decision.oldID, $0))
-                })
-        }
-        let sameWithPossible = decisions.contains {
-            $0.relation == "same" && $0.oldID == actionID && unresolvedCandidateIDs.contains($0.newID)
-        }
-        return oldStillPaused || unresolvedCandidateIDs.contains(actionID) || sameWithPossible
+        guard decisions != nil else { return taskReviewPending == true }
+        return alwaysRequiresReview || reviewRequiredActionIDs.contains(actionID)
     }
 
     public func unresolvedPairs(for actionID: String) -> [ActionReviewPair] {
-        unresolvedPairs.filter { $0.oldActionID == actionID || $0.newActionID == actionID }
+        pairsByActionID[actionID] ?? []
     }
 }
 
@@ -125,6 +111,39 @@ extension ActionReviewLedger {
         pairs.sort {
             $0.oldActionID == $1.oldActionID ? $0.newActionID < $1.newActionID : $0.oldActionID < $1.oldActionID
         }
+        var pairsByActionID: [String: [ActionReviewPair]] = [:]
+        for pair in pairs {
+            pairsByActionID[pair.oldActionID, default: []].append(pair)
+            if pair.newActionID != pair.oldActionID {
+                pairsByActionID[pair.newActionID, default: []].append(pair)
+            }
+        }
+        var alwaysRequiresReview = false
+        var reviewRequiredActionIDs = Set<String>()
+        if let decisions = expression.actionReviewDecisions {
+            let uncertain = decisions.filter { $0.relation == "uncertain" }
+            if !uncertain.allSatisfy({ $0.possibleNewIDs != nil }) {
+                alwaysRequiresReview = true
+            } else {
+                let unresolvedCandidateIDs = Set(uncertain.flatMap { decision in
+                    (decision.possibleNewIDs ?? []).filter {
+                        !resolvedPairs.contains(actionReviewPairKey(decision.oldID, $0))
+                    }
+                })
+                reviewRequiredActionIDs.formUnion(unresolvedCandidateIDs)
+                for decision in uncertain {
+                    let candidates = decision.possibleNewIDs ?? []
+                    if candidates.isEmpty || candidates.contains(where: {
+                        !resolvedPairs.contains(actionReviewPairKey(decision.oldID, $0))
+                    }) {
+                        reviewRequiredActionIDs.insert(decision.oldID)
+                    }
+                }
+                for decision in decisions where decision.relation == "same" && unresolvedCandidateIDs.contains(decision.newID) {
+                    reviewRequiredActionIDs.insert(decision.oldID)
+                }
+            }
+        }
         let hasNonPairPending: Bool
         if let decisions = expression.actionReviewDecisions {
             hasNonPairPending = decisions.contains {
@@ -138,7 +157,9 @@ extension ActionReviewLedger {
             unresolvedPairs: pairs,
             canAcknowledge: expression.state == "completed" && !acknowledged && pairs.isEmpty && hasNonPairPending,
             state: expression.state, taskReviewPending: expression.taskReviewPending,
-            decisions: expression.actionReviewDecisions, resolvedPairs: resolvedPairs)
+            decisions: expression.actionReviewDecisions, resolvedPairs: resolvedPairs,
+            alwaysRequiresReview: alwaysRequiresReview, reviewRequiredActionIDs: reviewRequiredActionIDs,
+            pairsByActionID: pairsByActionID)
     }
 
     private static func pair(expression: RecordingExpression, decision: RecordingExpressionActionDecision,

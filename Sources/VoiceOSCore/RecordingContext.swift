@@ -48,6 +48,54 @@ public extension SourceRecord {
     }
 }
 
+/// Finds the paragraph under one playback position without rescanning the
+/// transcript on every tick. Sorted, non-overlapping paragraphs use binary
+/// search; other layouts keep the original first-match scan.
+public struct SourceParagraphWindow: Sendable {
+    public struct Paragraph: Sendable, Hashable {
+        public let id: String
+        public let startMS: Int
+        public let endMS: Int
+        public init(id: String, startMS: Int, endMS: Int) {
+            self.id = id; self.startMS = startMS; self.endMS = endMS
+        }
+    }
+    private let paragraphs: [Paragraph]
+    private let starts: [Int]?
+
+    public init(paragraphs: [Paragraph]) {
+        self.paragraphs = paragraphs
+        var ordered = true
+        for index in 1..<max(paragraphs.count, 1) where index < paragraphs.count {
+            if paragraphs[index].startMS < paragraphs[index - 1].startMS ||
+                paragraphs[index].startMS < paragraphs[index - 1].endMS {
+                ordered = false
+                break
+            }
+        }
+        starts = ordered ? paragraphs.map(\.startMS) : nil
+    }
+
+    public func activeID(at milliseconds: Int?) -> String? {
+        guard let milliseconds else { return nil }
+        guard let starts else {
+            return paragraphs.first { milliseconds >= $0.startMS && milliseconds < $0.endMS }?.id
+        }
+        var low = 0, high = starts.count - 1, found: Int?
+        while low <= high {
+            let middle = (low + high) / 2
+            if starts[middle] <= milliseconds {
+                found = middle
+                low = middle + 1
+            } else {
+                high = middle - 1
+            }
+        }
+        guard let found, milliseconds < paragraphs[found].endMS else { return nil }
+        return paragraphs[found].id
+    }
+}
+
 /// Everything the source page reads, derived once per workspace snapshot.
 public struct SourcePageIndex: Sendable {
     public let recordsByID: [String: SourceRecord]
@@ -81,12 +129,10 @@ public struct SourcePageIndex: Sendable {
         expressionIssueBySourceID = issues
 
         var claimByID: [String: CandidateClaim] = [:]
-        var actionsByClaimID: [String: [ActionRecord]] = [:]
         for claim in claims { claimByID[claim.id] = claim }
         self.claimByID = claimByID
         var positions: [String: Int] = [:]
         for (offset, action) in actions.enumerated() {
-            actionsByClaimID[action.claimID, default: []].append(action)
             positions[action.id] = offset
         }
         var actionIDsBySourceID: [String: [String]] = [:]
@@ -105,19 +151,13 @@ public struct SourcePageIndex: Sendable {
         for action in actions where allActionByID[action.id] == nil { allActionByID[action.id] = action }
         self.allActionByID = allActionByID
 
-        // The pause gate only reads sources that carry an expression, and the
-        // other two arguments narrow to this action's own claim and actions.
-        let expressionSources = records.filter { $0.presentation?.expression != nil }
+        // Indexed once per snapshot; each action read is a dictionary lookup.
+        let gate = WorkspaceActionPause.Gate(sources: records, claims: claims,
+                                             currentClaimsBySource: currentClaimsBySource,
+                                             actions: actions, ledgers: ledgers)
         var reviewRequired: Set<String> = []
-        for action in actionByID.values {
-            let claim = claimByID[action.claimID]
-            if WorkspaceActionPause.reason(for: action, sources: expressionSources,
-                                           claims: claim.map { [$0] } ?? [],
-                                           currentClaimsBySource: currentClaimsBySource,
-                                           actions: actionsByClaimID[action.claimID] ?? [],
-                                           ledgers: ledgers) != nil {
-                reviewRequired.insert(action.id)
-            }
+        for action in actionByID.values where gate.reason(for: action) != nil {
+            reviewRequired.insert(action.id)
         }
         reviewRequiredActionIDs = reviewRequired
         var paused: [ActionRecord] = []
@@ -213,14 +253,32 @@ extension VoiceOSStore {
         return .init(pairing:pairing,context:context)
     }
     public func recordingContextLinks(sourceID: String) throws -> [RecordingContextLink] {
-        guard let pair=try recordingContext(sourceID:sourceID),let source=try sources().first(where: { $0.id == sourceID }) else { return [] }
-        let claims=Dictionary(uniqueKeysWithValues:try candidateClaims().map { ($0.id,$0) })
-        return try (source.presentation?.contextLinks ?? []).filter { link in
-            guard let personal=claims[link.personalClaimID],let external=claims[link.externalClaimID],
-                  personal.reviewVersion == link.personalReviewVersion,external.reviewVersion == link.externalReviewVersion,
-                  personal.ownership == "user_tentative",external.ownership == "external",
-                  personal.reviewState != "rejected",external.reviewState != "rejected" else { return false }
-            return try Self.relevanceJSON(link.pairing) == Self.relevanceJSON(pair)
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return try recordingContextLinks(sourceIDs: [sourceID], catalog: catalog)
+    }
+    /// One catalog and one claim read serve every source on the page.
+    public func recordingContextLinks(sourceIDs: [String], catalog: [String: SourceRecord]) throws -> [RecordingContextLink] {
+        let claims = Dictionary(try candidateClaims().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return try recordingContextLinks(sourceIDs: sourceIDs, catalog: catalog, claimsByID: claims)
+    }
+    func recordingContextLinks(sourceIDs: [String], catalog: [String: SourceRecord],
+                               claimsByID: [String: CandidateClaim]) throws -> [RecordingContextLink] {
+        var result: [RecordingContextLink] = []
+        for sourceID in sourceIDs {
+            guard let source = catalog[sourceID],
+                  let pair = try recordingContext(sourceID: sourceID, catalog: catalog) else { continue }
+            result += try Self.validContextLinks(source: source, claimsByID: claimsByID, pairing: pair)
+        }
+        return result
+    }
+    static func validContextLinks(source: SourceRecord, claimsByID: [String: CandidateClaim],
+                                  pairing: RecordingContext) throws -> [RecordingContextLink] {
+        try (source.presentation?.contextLinks ?? []).filter { link in
+            guard let personal = claimsByID[link.personalClaimID], let external = claimsByID[link.externalClaimID],
+                  personal.reviewVersion == link.personalReviewVersion, external.reviewVersion == link.externalReviewVersion,
+                  personal.ownership == "user_tentative", external.ownership == "external",
+                  personal.reviewState != "rejected", external.reviewState != "rejected" else { return false }
+            return try Self.relevanceJSON(link.pairing) == Self.relevanceJSON(pairing)
         }
     }
 }

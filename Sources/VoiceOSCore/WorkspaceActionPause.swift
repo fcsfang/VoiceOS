@@ -48,14 +48,14 @@ public enum WorkspaceActionPause {
                                 actions: [ActionRecord],
                                 ledgers: [String: ActionReviewLedger] = [:]) -> (resolved: [String], remaining: [String], reasons: [String: WorkspaceActionPauseReason]) {
         let actionsByID = Dictionary(uniqueKeysWithValues: actions.map { ($0.id, $0) })
+        let gate = Gate(sources: sources, claims: claims, currentClaimsBySource: currentClaimsBySource,
+                        actions: actions, ledgers: ledgers)
         var resolved: [String] = []
         var remaining: [String] = []
         var reasons: [String: WorkspaceActionPauseReason] = [:]
         for id in actionIDs {
             guard let action = actionsByID[id],
-                  let reason = reason(for: action, sources: sources, claims: claims,
-                                      currentClaimsBySource: currentClaimsBySource, actions: actions,
-                                      ledgers: ledgers) else {
+                  let reason = gate.reason(for: action) else {
                 resolved.append(id)
                 continue
             }
@@ -63,5 +63,75 @@ public enum WorkspaceActionPause {
             reasons[id] = reason
         }
         return (resolved, remaining, reasons)
+    }
+
+    /// Per-snapshot dictionary reads. `reason(for:)` above stays the reference
+    /// implementation; this gate makes repeated reads constant time.
+    struct Gate {
+        private let claimsByID: [String: CandidateClaim]
+        private let expressionsBySourceID: [String: [RecordingExpression]]
+        private let expressionsByPreviousActionID: [String: [RecordingExpression]]
+        private let latestCurrentReviewVersionByClaimID: [String: Int]
+        private let replacedClaimIDs: Set<String>
+        private let ledgers: [String: ActionReviewLedger]
+
+        init(sources: [SourceRecord], claims: [CandidateClaim],
+             currentClaimsBySource: [String: [CandidateClaim]],
+             actions: [ActionRecord], ledgers: [String: ActionReviewLedger]) {
+            var claimsByID: [String: CandidateClaim] = [:]
+            for claim in claims where claimsByID[claim.id] == nil { claimsByID[claim.id] = claim }
+            self.claimsByID = claimsByID
+            var bySource: [String: [RecordingExpression]] = [:]
+            var byPreviousAction: [String: [RecordingExpression]] = [:]
+            for source in sources {
+                guard let expression = source.presentation?.expression else { continue }
+                bySource[source.id, default: []].append(expression)
+                for actionID in expression.previousActionIDs {
+                    byPreviousAction[actionID, default: []].append(expression)
+                }
+            }
+            expressionsBySourceID = bySource
+            expressionsByPreviousActionID = byPreviousAction
+            var latest: [String: Int] = [:]
+            for action in actions where action.validity == "current" {
+                latest[action.claimID] = max(latest[action.claimID] ?? Int.min, action.claimReviewVersion)
+            }
+            latestCurrentReviewVersionByClaimID = latest
+            var replaced: Set<String> = []
+            for claim in claimsByID.values where !claim.references.isEmpty {
+                let gone = claim.references.allSatisfy { reference in
+                    let latestClaims = currentClaimsBySource[reference.sourceID] ?? []
+                    return !latestClaims.isEmpty && !latestClaims.contains { $0.id == claim.id }
+                }
+                if gone { replaced.insert(claim.id) }
+            }
+            replacedClaimIDs = replaced
+            self.ledgers = ledgers
+        }
+
+        func reason(for action: ActionRecord) -> WorkspaceActionPauseReason? {
+            if recordingReviewRequired(action) {
+                return action.state == "open" ? .recordingActionReview : nil
+            }
+            guard action.validity != "current", action.state == "open" else { return nil }
+            if let latest = latestCurrentReviewVersionByClaimID[action.claimID],
+               latest > action.claimReviewVersion { return nil }
+            return replacedClaimIDs.contains(action.claimID) ? nil : .extractionPaused
+        }
+
+        private func recordingReviewRequired(_ action: ActionRecord) -> Bool {
+            if let claim = claimsByID[action.claimID] {
+                for reference in claim.references {
+                    if expressionsBySourceID[reference.sourceID]?.contains(where: { requiresReview($0, action.id) }) == true {
+                        return true
+                    }
+                }
+            }
+            return expressionsByPreviousActionID[action.id]?.contains(where: { requiresReview($0, action.id) }) == true
+        }
+
+        private func requiresReview(_ expression: RecordingExpression, _ actionID: String) -> Bool {
+            ledgers[expression.id]?.requiresReview(actionID: actionID) ?? true
+        }
     }
 }
