@@ -178,6 +178,17 @@ public struct MonitorItemTally: Sendable, Equatable {
     }
 }
 
+/// What the items list can honestly show. A missing cache is unknown until
+/// the load succeeds, so the page renders loading instead of an empty list,
+/// and a failed load is an error, not an empty list.
+public enum MonitorItemsPresentation: Equatable, Sendable {
+    case loading, failed, empty, items
+    public static func resolve(items: [MonitorItem]?, loadFailed: Bool) -> Self {
+        guard let items else { return loadFailed ? .failed : .loading }
+        return items.isEmpty ? .empty : .items
+    }
+}
+
 extension VoiceOSStore {
     public func addMonitorSource(kind: MonitorSourceKind, displayName: String, configJSON: String, enabled: Bool = true) throws -> MonitorSource {
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
