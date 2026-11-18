@@ -717,9 +717,9 @@ struct WorkspaceView: View {
                 if homeShowsPanorama {
                     PanoramaHome(screen: model.panorama, retry: model.retryPanorama, draft: model.generateDraftPanorama, chooseTextModel: model.chooseTextModel,
                         openMaterials: { go(.materials) }, openSource: { go(.source($0)) }, correctSource: { id in
-                            panoramaSourceEditor = model.records.first { $0.id == id }
+                            panoramaSourceEditor = model.sourcePageIndex.recordsByID[id]
                         }, correctClaim: { id in
-                            panoramaClaimEditor = model.claims.first { $0.id == id }
+                            panoramaClaimEditor = model.sourcePageIndex.claim(for: id)
                         }, discuss: { snapshot, selection in
                             Task { await openPanoramaDiscussion(snapshotID: snapshot, selection: selection) }
                         }, topicLinks: panoramaTopicLinks, openTopic: { selectTopic($0) }, themeReply: { briefing in
@@ -775,12 +775,12 @@ struct WorkspaceView: View {
                     collapsedSourceRail
                 }
                 Group {
-                    if let source=model.records.first(where: { $0.id == id }) {
+                    if let source=model.sourcePageIndex.recordsByID[id] {
                         if source.isTrashed { TrashedMaterialView(model:model,source:source) }
                         else {
                             WorkspaceSourceView(model:model,source:source,openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },openDiscussion:{ id in Task { await openSavedDiscussion(id) } },openSource:{ go(.source($0)) },openInitiation:{ id in
                                 model.initiationSourceID = id
-                                model.initiationText = model.records.first(where: { $0.id == id })?.transcript ?? ""
+                                model.initiationText = model.sourcePageIndex.recordsByID[id]?.transcript ?? ""
                                 go(.initiate)
                             },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id))
                                 .id(id)
@@ -857,14 +857,15 @@ struct WorkspaceView: View {
     }
     private func unavailable(_ title:String,description:String) -> some View { ContentUnavailableView(title,systemImage:"leaf",description:Text(description)).frame(maxWidth:.infinity) }
     private func distinctExpressions(_ sources:[SourceRecord]) -> [SourceRecord] {
-        let catalog=Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })
+        let index=model.sourcePageIndex
+        let catalog=index.recordsByID
         let attachedContextIDs=Set(sources.compactMap { contextSourceID($0,catalog:catalog) })
         var seen=Set<String>()
         return sources.filter { source in
             // Keep a context recording independently reachable when its personal
             // recording is outside this list, rather than hiding it globally.
             guard !attachedContextIDs.contains(source.id) else { return false }
-            guard let expression=source.recordingExpression(in:catalog),expression.sourceIDs.count > 1 else { return true }
+            guard let expression=index.expression(for:source.id),expression.sourceIDs.count > 1 else { return true }
             return seen.insert(expression.id).inserted
         }
     }
@@ -883,7 +884,7 @@ struct WorkspaceView: View {
         let attachedContextIDs=Set(selected.compactMap { contextSourceID($0,catalog:catalog) }).intersection(selectedIDs)
         let entries=selected.compactMap { source -> (SourceRecord,String)? in
             guard !attachedContextIDs.contains(source.id) else { return nil }
-            guard let expression=source.recordingExpression(in:catalog),expression.sourceIDs.count > 1, Set(expression.sourceIDs).isSubset(of:selectedIDs) else { return (source,source.createdAt) }
+            guard let expression=model.sourcePageIndex.expression(for:source.id),expression.sourceIDs.count > 1, Set(expression.sourceIDs).isSubset(of:selectedIDs) else { return (source,source.createdAt) }
             guard expression.sourceIDs.first == source.id else { return nil }
             return (source,expression.sourceIDs.compactMap { catalog[$0]?.createdAt }.max() ?? source.createdAt)
         }
@@ -990,7 +991,7 @@ struct WorkspaceView: View {
             if let topic {
                 HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil };creatingTopic=false;newTopicTitle="";editingTopicID=nil };Spacer(); Menu("调整主题") { Button("修改主题名称") { newTopicTitle=topic.title;editingTopicID=topic.id;creatingTopic=true };Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) } } }
                 WorkspaceHeading(eyebrow:"",title:topic.title,subtitle:"\(topicSources.count) 份材料")
-                if let titleSource=model.records.first(where: { $0.id == topic.sourceID }) {
+                if let titleSource=model.sourcePageIndex.recordsByID[topic.sourceID] {
                     Button { go(.source(titleSource.id)) } label: {
                         HStack(spacing:5) {
                             Text("标题取自《" + displayTitle(titleSource.displayTitle) + "》").vosFont(WorkspaceText.meta)
@@ -1410,7 +1411,7 @@ struct WorkspaceView: View {
         model.actionRecords.map { $0.id + String($0.version) + $0.state + $0.validity }.joined(separator: "|")
     }
     private var myTodoActions: [ActionRecord] {
-        model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" && !model.workspaceTaskRequiresReview($0) }
+        model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" && !model.sourcePageIndex.requiresReview($0.id) }
     }
     private var visibleActions: [ActionRecord] {
         switch actionFilter {
@@ -1420,9 +1421,9 @@ struct WorkspaceView: View {
                 return leftDate == rightDate ? left.id > right.id : leftDate > rightDate
             }
         case "历史记录":
-            return model.actionRecords.filter { $0.state == "dismissed" || ($0.validity != "current" && !model.workspaceTaskRequiresReview($0)) }
+            return model.actionRecords.filter { $0.state == "dismissed" || ($0.validity != "current" && !model.sourcePageIndex.requiresReview($0.id)) }
         case "待核对":
-            return model.actionRecords.filter { model.workspaceTaskRequiresReview($0) || $0.validity == "current" && ($0.intent?.uncertain == true || $0.intent?.followupState == "needs_review") }
+            return model.actionRecords.filter { model.sourcePageIndex.requiresReview($0.id) || $0.validity == "current" && ($0.intent?.uncertain == true || $0.intent?.followupState == "needs_review") }
         case "问题":
             return model.actionRecords.filter { $0.kind == "opportunity" && $0.nature == ActionNature.question.rawValue && $0.state == "open" && $0.validity == "current" }
         case "目标":
@@ -1508,7 +1509,7 @@ struct WorkspaceView: View {
             hit.kind == .claim && model.claims.contains { $0.id == hit.refID && $0.validity == "current" && $0.reviewState != "rejected" }
         }.map { hit in
             row("claim:" + hit.refID,hit.title,hit.snippet,"lightbulb") {
-                guard let claim=model.claims.first(where: { $0.id == hit.refID }) else { return }
+                guard let claim=model.sourcePageIndex.claim(for: hit.refID) else { return }
                 openClaimSource(claim)
             }
         }
@@ -1607,7 +1608,7 @@ struct WorkspaceView: View {
     }
     private func openClaimSource(_ claim: CandidateClaim) {
         guard let reference=claim.references.first else { return }
-        let spanExists=model.records.first(where: { $0.id == reference.sourceID })?.spans.contains(where: { $0.id == reference.spanID }) == true
+        let spanExists=model.sourcePageIndex.recordsByID[reference.sourceID]?.spans.contains(where: { $0.id == reference.spanID }) == true
         if spanExists { sourceScrollPositions[reference.sourceID]=ScrollPosition(id:"source-span-"+reference.spanID) }
         go(.source(reference.sourceID))
     }
@@ -1786,7 +1787,7 @@ struct WorkspaceView: View {
             VStack(alignment:.leading,spacing:8) { Text(issue.title);Text(issue.error).vosFont(WorkspaceText.meta).foregroundStyle(.secondary);Button("重新识别 AI 委托") { Task { await model.retryAssistantAssessment(issue) } }.accessibilityLabel("重新识别 AI 委托：" + issue.title) }
         }
         ForEach(model.recordingFollowups.filter { $0.state == "failed" }) { receipt in
-            let title=displayTitle(model.records.first { $0.id == receipt.sourceID }?.displayTitle ?? "资料跟进")
+            let title=displayTitle(model.sourcePageIndex.recordsByID[receipt.sourceID]?.displayTitle ?? "资料跟进")
             VStack(alignment:.leading,spacing:8) { Text(title);Button("重试思想与下一步") { model.refreshFollowup(receipt.sourceID) }.accessibilityLabel("重试思想与下一步：" + title) }
         }
         ForEach(activeMaterials.filter { ["failed","blocked"].contains($0.jobState ?? "") }) { source in sourceRow(source,catalog:catalog) }
@@ -1820,9 +1821,10 @@ struct WorkspaceView: View {
         }.frame(maxWidth:420,alignment:.leading)
     }
     private func sourceNavigationTitle(_ id:String) -> String {
-        guard let source=model.records.first(where: { $0.id == id }) else { return "材料" }
-        let catalog=Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) })
-        if let expression=source.recordingExpression(in:catalog),expression.sourceIDs.count > 1,
+        let pageIndex=model.sourcePageIndex
+        let catalog=pageIndex.recordsByID
+        guard let source=catalog[id] else { return "材料" }
+        if let expression=pageIndex.expression(for:id),expression.sourceIDs.count > 1,
            let index=expression.sourceIDs.firstIndex(of:id) { return expression.displayTitle(in:catalog)+" / 第 \(index+1) 段原文" }
         return displayTitle(source.displayTitle)
     }
@@ -1843,9 +1845,9 @@ struct WorkspaceView: View {
         guard let store=model.store else { return }
         readingPlans=(try? await store.incrementalPlans()) ?? []
     }
-    private var recordCatalog: [String:SourceRecord] { Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) }) }
+    private var recordCatalog: [String:SourceRecord] { model.sourcePageIndex.recordsByID }
     private func sourceRow(_ source:SourceRecord,catalog:[String:SourceRecord],trailingGutter:CGFloat = 0,reason:String? = nil) -> some View {
-        let expression=source.recordingExpression(in:catalog)
+        let expression=model.sourcePageIndex.expression(for:source.id)
         let combined=(expression?.sourceIDs.count ?? 0) > 1
         let first=combined ? expression!.sourceIDs.first.flatMap { catalog[$0] } ?? source : source
         let origin=source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料"
@@ -1921,7 +1923,7 @@ struct WorkspaceView: View {
         facts.sourceTitle=actionSourceTitle(action)
         facts.nextStepCount=nextStepCount
         facts.completedAt=group == .completed ? action.completedAt.map { "完成于 " + dateLabel($0) } ?? "" : ""
-        facts.requiresReview=model.workspaceTaskRequiresReview(action)
+        facts.requiresReview=model.sourcePageIndex.requiresReview(action.id)
         facts.externalCompletion=model.workspaceExternalCompletionNote(action) != nil
         facts.withdrawn=action.intent?.followupState == "withdrawn"
         facts.localUnsynced=localUnsynced
@@ -1946,9 +1948,9 @@ struct WorkspaceView: View {
         }
     }
     private func actionSourceTitle(_ action:ActionRecord) -> String? {
-        guard let claim=model.claims.first(where: { $0.id == action.claimID }) else { return nil }
+        guard let claim=model.sourcePageIndex.claim(for: action.claimID) else { return nil }
         for reference in claim.references {
-            guard let source=model.records.first(where: { $0.id == reference.sourceID }) else { continue }
+            guard let source=model.sourcePageIndex.recordsByID[reference.sourceID] else { continue }
             let title=displayTitle(source.displayTitle).trimmingCharacters(in:.whitespacesAndNewlines)
             if !title.isEmpty { return title }
         }
@@ -2683,9 +2685,9 @@ struct WorkspaceView: View {
                 ?? items.first { !$0.thoughts.isEmpty } ?? items.first
             guard let picked, picked.kind == .material,
                   let sourceID = picked.sourceIDs.first,
-                  let record = model.records.first(where: { $0.id == sourceID }) else { return }
+                  let record = model.sourcePageIndex.recordsByID[sourceID] else { return }
             opened = await model.beginDiscussion(record)
-        case .source(let id): opened = if let source=model.records.first(where: { $0.id == id }) { await model.beginDiscussion(source) } else { false }
+        case .source(let id): opened = if let source=model.sourcePageIndex.recordsByID[id] { await model.beginDiscussion(source) } else { false }
         case .task(let id): opened = if let action=model.actionRecords.first(where: { $0.id == id }) { await model.beginActionDiscussion(action) } else { false }
         case .delivery(let id): opened = if let execution=model.assistantExecutions.first(where: { $0.id == id }) { await model.beginAssistantDiscussion(execution) } else { false }
         case .themes:
@@ -2696,7 +2698,7 @@ struct WorkspaceView: View {
                 topicFocus=focus;opened=await model.beginReflectionDiscussion(focus)
             } catch { if key == discussionKey { self.error=error.localizedDescription };return }
         case .materials:
-            guard let entry=discussionEntry, let record=model.records.first(where: { $0.id == entry.id }) else { error="先选中一条材料，再开始讨论。"; return }
+            guard let entry=discussionEntry, let record=model.sourcePageIndex.recordsByID[entry.id] else { error="先选中一条材料，再开始讨论。"; return }
             opened = await model.beginDiscussion(record)
         case .actions:
             guard let entry=discussionEntry, let action=model.actionRecords.first(where: { $0.id == entry.id }) else { error="先选中一条行动，再开始讨论。"; return }
@@ -2705,13 +2707,13 @@ struct WorkspaceView: View {
             guard let entry=discussionEntry else { error="先选中一条搜索结果，再开始讨论。"; return }
             switch entry.kind {
             case .material:
-                guard let record=model.records.first(where: { $0.id == entry.id }) else { error="这份材料已不在当前资料库。"; return }
+                guard let record=model.sourcePageIndex.recordsByID[entry.id] else { error="这份材料已不在当前资料库。"; return }
                 opened = await model.beginDiscussion(record)
             case .action:
                 guard let action=model.actionRecords.first(where: { $0.id == entry.id }) else { error="这条行动已不在当前资料库。"; return }
                 opened = await model.beginActionDiscussion(action)
             case .claim:
-                guard let claim=model.claims.first(where: { $0.id == entry.id }) else { error="这条观点已不在当前资料库。"; return }
+                guard let claim=model.sourcePageIndex.claim(for: entry.id) else { error="这条观点已不在当前资料库。"; return }
                 discussClaim(claim)
                 return
             case .topic:

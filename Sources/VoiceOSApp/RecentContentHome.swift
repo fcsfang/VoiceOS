@@ -226,7 +226,7 @@ struct RecentContentHome: View {
 
     private func materialSource(_ item: RecentContentItem) -> SourceRecord? {
         guard let id = item.sourceIDs.first else { return nil }
-        return model.records.first { $0.id == id }
+        return model.sourcePageIndex.recordsByID[id]
     }
 
     /// Slot 3 holds only a non-default state, one at a time.
@@ -332,7 +332,7 @@ struct RecentContentHome: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .trailing, spacing: 6) {
                     Text(taskUnavailableReason(row)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    if model.records.contains(where: { $0.id == row.id }) {
+                    if model.sourcePageIndex.recordsByID[row.id] != nil {
                         Button("查看材料") { openSource(row.id) }
                             .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                     }
@@ -352,8 +352,8 @@ struct RecentContentHome: View {
     }
 
     private func taskUnavailableReason(_ row: RecentContentProgressRow) -> String {
-        guard let action = model.actionRecords.first(where: { $0.id == row.actionID }) else { return "任务已结束" }
-        return model.workspaceTaskRequiresReview(action) ? "任务已暂停" : "任务已结束"
+        guard let action = model.sourcePageIndex.activeAction(for: row.actionID) else { return "任务已结束" }
+        return model.sourcePageIndex.requiresReview(action.id) ? "任务已暂停" : "任务已结束"
     }
 
     private func materialReader(_ item: RecentContentItem) -> some View {
@@ -466,7 +466,7 @@ struct RecentContentHome: View {
     }
 
     private func openClaim(_ claimID: String) {
-        guard let claim = model.claims.first(where: { $0.id == claimID }),
+        guard let claim = model.sourcePageIndex.claim(for: claimID),
               let reference = claim.references.first else {
             showClueFailure(title: "无法打开原话", message: "这条想法的原话已不可用，可能已随整理更新或来源被删除。")
             return
