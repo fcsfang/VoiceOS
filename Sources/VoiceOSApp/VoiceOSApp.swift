@@ -1540,7 +1540,7 @@ final class ControlCenter: ObservableObject {
         await reloadScopedWorkspace(plan, store: store)
     }
     private func reloadFullWorkspace(store: VoiceOSStore) async {
-        let generation = store.dataGeneration
+        let generation = await store.dataGeneration
         if workspaceLoaded, generation == lastFullReloadGeneration {
             StartupTrace.mark("reload.skipped")
             return
@@ -1601,7 +1601,7 @@ final class ControlCenter: ObservableObject {
         await StartupTrace.measureAsync("reload.discussion") { await refreshDiscussion() }
         resumeAssistantExecutions(snapshot: contextsFroze ? nil : assistantSnapshot)
         queueTopicOrganization()
-        lastFullReloadGeneration = store.dataGeneration
+        lastFullReloadGeneration = await store.dataGeneration
     }
     private func reloadScopedWorkspace(_ plan: RefreshPlan, store: VoiceOSStore) async {
         StartupTrace.mark("reload.begin")
