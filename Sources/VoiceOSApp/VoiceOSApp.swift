@@ -260,6 +260,9 @@ final class ControlCenter: ObservableObject {
     @Published var monitorTestPushStatus = ""
     @Published var monitorAttentionRevision = 0
     var monitorWorker: Task<Void, Never>?
+    var monitorReloadWorker: Task<Void, Never>?
+    var monitorReloadPending = false
+    var monitorReloadForceItems = false
     var monitorObservers: [NSObjectProtocol] = []
     var monitorTimer: Timer?
     var monitorAnalysisModel: ResponsesNotificationAnalysisPort?

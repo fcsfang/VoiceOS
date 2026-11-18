@@ -4,6 +4,7 @@ public struct MarkdownMirror: Sendable {
     public let directory: URL
     public let minimumInterval: TimeInterval
     private var lastWrite: Date?
+    private var writtenDocuments: [String: String] = [:]
 
     public init(directory: URL, minimumInterval: TimeInterval = 60) {
         self.directory = directory
@@ -26,9 +27,14 @@ public struct MarkdownMirror: Sendable {
         return true
     }
 
-    private func writeDocuments(_ documents: [(String, String)], to folder: URL) throws {
+    private mutating func writeDocuments(_ documents: [(String, String)], to folder: URL) throws {
         for (id, text) in documents {
-            try Data(text.utf8).write(to: folder.appendingPathComponent(id + ".md"), options: .atomic)
+            let url = folder.appendingPathComponent(id + ".md")
+            // An unchanged document is already on disk; the atomic rewrite only
+            // churns its mtime.
+            if writtenDocuments[url.path] == text, FileManager.default.fileExists(atPath: url.path) { continue }
+            try Data(text.utf8).write(to: url, options: .atomic)
+            writtenDocuments[url.path] = text
         }
     }
 

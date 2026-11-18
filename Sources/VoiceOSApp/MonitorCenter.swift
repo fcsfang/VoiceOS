@@ -138,7 +138,27 @@ extension ControlCenter {
 
     var monitorLatestReport: MonitorReport? { monitorReports.first }
 
+    /// Every refresh path shares one reload; overlapping calls run one more round
+    /// instead of each re-reading the store.
     func reloadMonitorState(forceItems: Bool = false) async {
+        monitorReloadPending = true
+        monitorReloadForceItems = monitorReloadForceItems || forceItems
+        if let monitorReloadWorker { await monitorReloadWorker.value; return }
+        let worker = Task { @MainActor [weak self] in
+            defer { self?.monitorReloadWorker = nil }
+            while self?.monitorReloadPending == true {
+                guard let self else { return }
+                self.monitorReloadPending = false
+                let force = self.monitorReloadForceItems
+                self.monitorReloadForceItems = false
+                await self.performMonitorReload(forceItems: force)
+            }
+        }
+        monitorReloadWorker = worker
+        await worker.value
+    }
+
+    private func performMonitorReload(forceItems: Bool) async {
         guard let store else { return }
         do {
             let sources = try await store.monitorSources()

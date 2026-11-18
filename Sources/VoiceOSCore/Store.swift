@@ -25,6 +25,19 @@ public actor VoiceOSStore {
     var activePanoramaDigests: Set<String> = []
     var contextValidationSuspended = false
     var frozenContextCount = 0
+    /// A context revalidates only after a row change; its digest, the database
+    /// write generation, and its originals' file fingerprints prove no input
+    /// changed since the last pass.
+    var contextValidationStamps: [String: ContextValidationStamp] = [:]
+    var contextSnapshotDecodeBytes = 0
+    var contextValidationPasses = 0
+    struct ContextValidationStamp: Equatable {
+        let digest: String
+        let generation: Int64
+        let files: [String: DurableFiles.Fingerprint]
+    }
+    /// Tests re-create the uncached path by dropping the stamps.
+    func resetContextValidationMemo() { contextValidationStamps.removeAll() }
     func withoutContextValidation<T>(_ body: () throws -> T) rethrows -> T {
         guard !contextValidationSuspended else { return try body() }
         contextValidationSuspended = true

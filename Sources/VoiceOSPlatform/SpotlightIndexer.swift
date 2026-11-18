@@ -15,7 +15,7 @@ public actor SpotlightIndexer {
 
     public static let domainIdentifier = "VoiceOS"
     private let minimumInterval: TimeInterval
-    private var lastIndexedAt: Date?
+    private var lastScanAt: Date?
     private var fingerprints: [String: String] = [:]
     private var purged = false
 
@@ -25,6 +25,10 @@ public actor SpotlightIndexer {
 
     public func index(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord], topics: [ReflectionQuestion] = []) async {
         guard CSSearchableIndex.isIndexingAvailable() else { return }
+        // Throttle before building entries: an idle index costs no per-item work.
+        let now = Date()
+        if let lastScanAt, now.timeIntervalSince(lastScanAt) < minimumInterval { return }
+        lastScanAt = now
         if !purged {
             purged = true
             do { try await purgeDomain() } catch { NSLog("VoiceOS Spotlight 清理旧索引失败：\(error.localizedDescription)") }
@@ -34,8 +38,6 @@ public actor SpotlightIndexer {
         let changed = entries.filter { fingerprints[$0.id] != $0.fingerprint }
         let removed = Set(fingerprints.keys).subtracting(current.keys)
         guard !changed.isEmpty || !removed.isEmpty else { return }
-        let now = Date()
-        if let lastIndexedAt, now.timeIntervalSince(lastIndexedAt) < minimumInterval { return }
         if !changed.isEmpty {
             let items = changed.map { entry -> CSSearchableItem in
                 let attributes = CSSearchableItemAttributeSet(contentType: .plainText)
@@ -59,7 +61,6 @@ public actor SpotlightIndexer {
             }
             for id in removed { fingerprints[id] = nil }
         }
-        lastIndexedAt = now
     }
 
     private func submit(_ items: [CSSearchableItem]) async throws {
