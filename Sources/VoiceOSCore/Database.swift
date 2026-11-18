@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...75).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...76).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1548,6 +1548,21 @@ final class Database {
                 )
                 """)
                 try execute("PRAGMA user_version=75")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "75" {
+            try transaction {
+                // NULL marks a message no stored analysis has consumed yet, so a
+                // failed or unauthorized run keeps its text retryable. A retried
+                // migration can find the column already added; the version bump
+                // stays the single completion marker.
+                let columns = try query("PRAGMA table_info(monitor_messages)").compactMap { $0["name"] }
+                if !columns.contains("analyzed_report_id") {
+                    try execute("ALTER TABLE monitor_messages ADD COLUMN analyzed_report_id TEXT")
+                }
+                try execute("CREATE INDEX IF NOT EXISTS monitor_message_pending ON monitor_messages(source_id, analyzed_report_id)")
+                try execute("PRAGMA user_version=76")
             }
         }
 

@@ -165,11 +165,9 @@ public struct MessageMonitorRunner: Sendable {
             }
         }
         let anyFailure = statuses.contains { !$0.ok }
-        let existing = try await store.monitorReport(date: key)
-        if newMessages.isEmpty {
-            if let existing, existing.state == .failed {
-                return try await retryAnalysis(reportDate: date)
-            }
+        let pending = try await store.unanalyzedMonitorMessages(sourceIDs: sources.map(\.id))
+        if pending.isEmpty {
+            let existing = try await store.monitorReport(date: key)
             if let existing, existing.state == .complete, !anyFailure {
                 return MonitorRunResult(reportDate: key, state: existing.state, headline: existing.headline,
                                         summary: existing.summary, itemCount: existing.itemCount,
@@ -189,20 +187,21 @@ public struct MessageMonitorRunner: Sendable {
                                     itemCount: 0, newMessageCount: 0, sourceStatus: statuses)
         }
         guard let analysis else { throw VoiceOSError("未配置分析模型端口，无法处理新增消息") }
-        let input = try await analysisInput(messages: newMessages, statuses: statuses)
+        let input = try await analysisInput(messages: pending, statuses: statuses)
         let state: MonitorReportState = anyFailure ? .incomplete : .complete
         do {
             let result = try await analysis.analyze(input)
             let reportID = try await store.upsertMonitorReport(date: key, state: state, headline: result.headline,
                                                                summary: result.summary, sourceStatus: statuses)
-            let itemCount = try await store.applyMonitorAnalysis(reportID: reportID, date: key, items: result.items)
+            let itemCount = try await store.applyMonitorAnalysis(reportID: reportID, date: key, items: result.items,
+                                                                 analyzedMessageIDs: pending.map(\.id))
             return MonitorRunResult(reportDate: key, state: state, headline: result.headline, summary: result.summary,
                                     itemCount: itemCount, newMessageCount: newMessages.count, sourceStatus: statuses)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             let headline = "分析未完成"
-            let summary = "已保存 \(newMessages.count) 条新增原文，但模型分析失败：" + error.localizedDescription
+            let summary = "已保存 \(pending.count) 条未分析原文，但模型分析失败：" + error.localizedDescription
                 + "。可稍后重试分析，不需要重新采集。"
             _ = try await store.upsertMonitorReport(date: key, state: .failed, headline: headline,
                                                     summary: summary, sourceStatus: statuses)
@@ -211,38 +210,39 @@ public struct MessageMonitorRunner: Sendable {
         }
     }
 
-    /// Retries only the model step for a failed day, using the messages the
-    /// last successful collection persisted.
+    /// Retries only the model step over every message no stored analysis has
+    /// consumed yet. The cursor's last_run_message_ids stays written for old
+    /// readers but no longer decides the input.
     public func retryAnalysis(reportDate: Date) async throws -> MonitorRunResult {
         let key = Self.dateKey(reportDate)
-        guard let report = try await store.monitorReport(date: key) else { throw VoiceOSError("没有 \(key) 的报告，无法只重分析") }
-        guard report.state == .failed else {
-            return MonitorRunResult(reportDate: key, state: report.state, headline: report.headline,
-                                    summary: report.summary, itemCount: report.itemCount,
-                                    newMessageCount: 0, sourceStatus: report.sourceStatus)
+        let report = try await store.monitorReport(date: key)
+        let sources = try await store.enabledMonitorSources()
+        let messages = try await store.unanalyzedMonitorMessages(sourceIDs: sources.map(\.id))
+        guard !messages.isEmpty else {
+            if let report, report.state != .failed {
+                return MonitorRunResult(reportDate: key, state: report.state, headline: report.headline,
+                                        summary: report.summary, itemCount: report.itemCount,
+                                        newMessageCount: 0, sourceStatus: report.sourceStatus)
+            }
+            let headline = "检查完成，无新增待办"
+            let summary = "检查完成，无新增待办。"
+            let statuses = report?.sourceStatus ?? []
+            _ = try await store.upsertMonitorReport(date: key, state: .complete, headline: headline,
+                                                    summary: summary, sourceStatus: statuses)
+            return MonitorRunResult(reportDate: key, state: .complete, headline: headline, summary: summary,
+                                    itemCount: 0, newMessageCount: 0, sourceStatus: statuses)
         }
         guard let analysis else { throw VoiceOSError("未配置分析模型端口，无法重试分析") }
-        var ids: [String] = []
-        for source in try await store.monitorSources() {
-            guard let cursor = try await store.monitorCursor(sourceID: source.id),
-                  let data = cursor.cursorJSON.data(using: .utf8),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let stored = object["last_run_message_ids"] as? [String] else { continue }
-            ids += stored
-        }
-        let messages = try await store.monitorMessages(ids: Array(Set(ids)).sorted())
-        guard !messages.isEmpty else {
-            throw VoiceOSError("上次检查的原文标识已被新的采集覆盖，无法只重分析；请等待下一次每日检查")
-        }
-        let statuses = report.sourceStatus
+        let statuses = report?.sourceStatus ?? []
+        let state: MonitorReportState = statuses.contains { !$0.ok } ? .incomplete : .complete
         let input = try await analysisInput(messages: messages, statuses: statuses)
         let result = try await analysis.analyze(input)
-        let state: MonitorReportState = statuses.contains { !$0.ok } ? .incomplete : .complete
         let reportID = try await store.upsertMonitorReport(date: key, state: state, headline: result.headline,
                                                            summary: result.summary, sourceStatus: statuses)
-        let itemCount = try await store.applyMonitorAnalysis(reportID: reportID, date: key, items: result.items)
+        let itemCount = try await store.applyMonitorAnalysis(reportID: reportID, date: key, items: result.items,
+                                                             analyzedMessageIDs: messages.map(\.id))
         return MonitorRunResult(reportDate: key, state: state, headline: result.headline, summary: result.summary,
-                                itemCount: itemCount, newMessageCount: messages.count, sourceStatus: statuses)
+                                itemCount: itemCount, newMessageCount: 0, sourceStatus: statuses)
     }
 
     private func analysisInput(messages: [MonitorMessage], statuses: [MonitorSourceStatus]) async throws -> NotificationAnalysisInput {
