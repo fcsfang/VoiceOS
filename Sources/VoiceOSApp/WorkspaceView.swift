@@ -1170,7 +1170,9 @@ struct WorkspaceView: View {
             let paused = model.workspacePausedTasks
             if ["全部","我的待办"].contains(actionFilter), !focusedActions.isEmpty {
                 WorkspaceListSection(title:"专注",count:focusedActions.count) {
-                    ForEach(focusedActions) { action in actionRow(action,nextStepCounts:nextStepCounts);if action.id != focusedActions.last?.id { WorkspaceListDivider() } }
+                    ActionCardList {
+                        ForEach(focusedActions) { action in actionRow(action,nextStepCounts:nextStepCounts) }
+                    }
                 }
             }
             if actionFilter == "我的待办", !visible.isEmpty {
@@ -1179,22 +1181,30 @@ struct WorkspaceView: View {
                 let dueToday = surface.today.filter { !$0.isOverdue }
                 if !overdue.isEmpty {
                     WorkspaceListSection(title:"逾期",subtitle:"已过期限。改天需要提醒事项链接。",count:overdue.count) {
-                        ForEach(overdue) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts);if entry.id != overdue.last?.id { WorkspaceListDivider() } }
+                        ActionCardList {
+                            ForEach(overdue) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts) }
+                        }
                     }
                 }
                 if !dueToday.isEmpty {
                     WorkspaceListSection(title:"今天",subtitle:"今天到期",count:dueToday.count) {
-                        ForEach(dueToday) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts);if entry.id != dueToday.last?.id { WorkspaceListDivider() } }
+                        ActionCardList {
+                            ForEach(dueToday) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts) }
+                        }
                     }
                 }
                 if !surface.soon.isEmpty {
                     WorkspaceListSection(title:"即将",subtitle:"7 天内",count:surface.soon.count) {
-                        ForEach(surface.soon) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts);if entry.id != surface.soon.last?.id { WorkspaceListDivider() } }
+                        ActionCardList {
+                            ForEach(surface.soon) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts) }
+                        }
                     }
                 }
                 if !surface.anytime.isEmpty {
                     WorkspaceListSection(title:"随时",subtitle:"没有日期或更远",count:surface.anytime.count) {
-                        ForEach(surface.anytime) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts);if entry.id != surface.anytime.last?.id { WorkspaceListDivider() } }
+                        ActionCardList {
+                            ForEach(surface.anytime) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts) }
+                        }
                     }
                 }
             } else if actionFilter == "AI 助理" {
@@ -1203,21 +1213,26 @@ struct WorkspaceView: View {
                 }
             } else if !listed.isEmpty {
                 WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "问题" ? "VoiceOS 先回答；想清楚了可以转成下一步。" : actionFilter == "目标" ? "你要长期达到的结果；转成待办后可提醒。" : "",count:listed.count) {
-                    ForEach(listed) { action in actionRow(action,group:listGroup,nature:listNature,nextStepCounts:nextStepCounts);if action.id != listed.last?.id { WorkspaceListDivider() } }
+                    ActionCardList {
+                        ForEach(listed) { action in actionRow(action,group:listGroup,nature:listNature,nextStepCounts:nextStepCounts) }
+                    }
                 }
             }
             if actionFilter == "全部", !paused.isEmpty {
                 WorkspaceListSection(title:"需要核对的待办",subtitle:"打开任务查看原因。",count:paused.count) {
-                    ForEach(paused) { action in actionRow(action,group:.needsReview,nextStepCounts:nextStepCounts);if action.id != paused.last?.id { WorkspaceListDivider() } }
+                    ActionCardList {
+                        ForEach(paused) { action in actionRow(action,group:.needsReview,nextStepCounts:nextStepCounts) }
+                    }
                     if model.pausedActionBatch == nil { PausedActionBatchControl(model:model) }
                 }
             }
             let overviewQuestions = actionFilter == "全部" ? model.openQuestions : []
             if !overviewQuestions.isEmpty {
                 WorkspaceListSection(title:"问题",subtitle:"VoiceOS 先回答；想清楚了可以转成下一步。",count:overviewQuestions.count) {
-                    ForEach(overviewQuestions.prefix(3)) { action in
-                        actionRow(action,nature:.question,nextStepCounts:nextStepCounts)
-                        if action.id != overviewQuestions.prefix(3).last?.id { WorkspaceListDivider() }
+                    ActionCardList {
+                        ForEach(overviewQuestions.prefix(3)) { action in
+                            actionRow(action,nature:.question,nextStepCounts:nextStepCounts)
+                        }
                     }
                     if overviewQuestions.count > 3 {
                         Button("查看全部 \(overviewQuestions.count)") { actionFilter = "问题" }
@@ -1228,9 +1243,10 @@ struct WorkspaceView: View {
             let overviewGoals = actionFilter == "全部" ? model.openGoals : []
             if !overviewGoals.isEmpty {
                 WorkspaceListSection(title:"目标",subtitle:"你要长期达到的结果；转成待办后可提醒。",count:overviewGoals.count) {
-                    ForEach(overviewGoals.prefix(3)) { action in
-                        actionRow(action,nature:.goal,nextStepCounts:nextStepCounts)
-                        if action.id != overviewGoals.prefix(3).last?.id { WorkspaceListDivider() }
+                    ActionCardList {
+                        ForEach(overviewGoals.prefix(3)) { action in
+                            actionRow(action,nature:.goal,nextStepCounts:nextStepCounts)
+                        }
                     }
                     if overviewGoals.count > 3 {
                         Button("查看全部 \(overviewGoals.count)") { actionFilter = "目标" }
@@ -2010,8 +2026,7 @@ struct WorkspaceView: View {
                     } else { go(.task(action.id)) }
                 }
             })
-            .background(keyboardHighlighted ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-            .overlay { if keyboardHighlighted { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+            .materialCard(highlighted: keyboardHighlighted)
             .contextMenu {
                 actionMenuItems(action,focused:focused,canChangeDay:canChangeDay,canTransition:actionable)
             }
@@ -2828,6 +2843,16 @@ private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
             }
             .onHover { hovered=$0 }
             .animation(.easeOut(duration:0.12),value:menuVisible)
+    }
+}
+
+private struct ActionCardList<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment:.leading,spacing:8) {
+            content()
+        }.padding(.top,8)
     }
 }
 
