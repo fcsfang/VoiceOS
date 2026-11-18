@@ -313,8 +313,9 @@ extension ControlCenter {
         }
     }
 
-    /// Rewinding the cursor is explicit: it re-reads from the chosen moment,
-    /// and dedupe absorbs the overlap.
+    /// The start control is the cursor itself: moving it later skips the
+    /// history the user chose to skip, and moving it earlier re-reads from
+    /// that moment; dedupe absorbs the overlap.
     func setMonitorQQStart(_ source: MonitorSource, date: Date) async {
         guard let store else { return }
         do {
@@ -323,11 +324,7 @@ extension ControlCenter {
             let json = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
             _ = try await store.updateMonitorSource(id: source.id, displayName: source.displayName,
                                                     configJSON: json, enabled: source.enabled)
-            if let cursor = try await store.monitorCursor(sourceID: source.id),
-               let last = cursor.lastSuccessAt.flatMap({ ISO8601DateFormatter().date(from: $0) }),
-               date < last {
-                try await store.advanceMonitorCursor(sourceID: source.id, lastSuccessEnd: date, newMessageIDs: [])
-            }
+            try await store.alignMonitorCursorToStart(sourceID: source.id, start: date)
             await reloadMonitorState()
         } catch {
             monitorStatus = error.localizedDescription

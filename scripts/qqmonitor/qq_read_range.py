@@ -13,7 +13,20 @@ CHATLAB_KINDS = {
     1: "image",
     4: "file",
     24: "article",
+    26: "forward",
+    2: "other",
 }
+
+# ChatLab types whose protobuf preview degrades to "[消息类型 N]" get a
+# readable stand-in so the message is not silently dropped from reading.
+UNREADABLE_PLACEHOLDERS = {26: "[合并转发]", 2: "[语音]"}
+
+
+def message_text(chatlab_type, raw):
+    text = str(raw or "")
+    if text and not text.startswith("[消息类型"):
+        return text
+    return UNREADABLE_PLACEHOLDERS.get(chatlab_type, text)
 
 
 def fail(code, zh, en):
@@ -69,13 +82,50 @@ FULL_DISK_ACCESS_ZH = (
 )
 
 
+def qq_root_listing_denied():
+    """discover_active_nt_db's glob swallows a TCC denial into an empty list,
+    so recheck the account root directly before blaming a missing directory."""
+    try:
+        from qqnt_export_macos.snapshot import DEFAULT_QQ_ROOT
+        os.listdir(os.path.expanduser(str(DEFAULT_QQ_ROOT)))
+    except PermissionError:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+KEY_INVALID_ZH = "QQ 可能已升级导致密钥失效，请重新导出密钥"
+GROUP_MISSING_ZH = "群不存在或已退出，请重新选择目标群"
+
+
 def read_failure(exc):
-    if isinstance(exc, FileNotFoundError):
-        fail("qq_data_missing", "未找到该账号的 QQ 数据目录", f"{type(exc).__name__}: {exc}")
     detail = f"{type(exc).__name__}: {exc}"
+    if isinstance(exc, FileNotFoundError):
+        if qq_root_listing_denied():
+            fail("permission_denied", FULL_DISK_ACCESS_ZH, detail)
+        fail("qq_data_missing", "未找到该账号的 QQ 数据目录", detail)
     if isinstance(exc, PermissionError) or "Operation not permitted" in detail:
         fail("permission_denied", FULL_DISK_ACCESS_ZH, detail)
+    if "valid key candidate" in detail:
+        fail("key_invalid", KEY_INVALID_ZH, detail)
     fail("read_failed", "QQ 数据读取失败", detail)
+
+
+def ensure_group_present(reader, conversation_id):
+    """A left or disbanded group returns zero rows instead of an error, so the
+    group list is the evidence the target is gone. Skip when the group database
+    is unavailable; a missing mirror must not be misreported as a missing group."""
+    if not conversation_id.startswith("group:"):
+        return
+    group_key = conversation_id.split(":", 1)[1]
+    try:
+        names = reader.group_names()
+    except Exception:
+        return
+    if names and group_key not in names:
+        fail("group_missing", GROUP_MISSING_ZH,
+             f"group {group_key} is not in the QQ group list; the account may have left it")
 
 
 def conversations(request, reader_cls):
@@ -152,6 +202,7 @@ def read_range(request):
         payload = export_chatlab_range(reader, range_start=start, range_end=end, conversation_id=conversation_id)
     except Exception as exc:
         read_failure(exc)
+    ensure_group_present(reader, conversation_id)
 
     messages = []
     for message in payload.get("messages", []):
@@ -168,7 +219,7 @@ def read_range(request):
             "sender_name": message.get("groupNickname") or message.get("accountName") or message.get("sender"),
             "sender_id": message.get("sender"),
             "type": CHATLAB_KINDS.get(chatlab_type, "other"),
-            "text": message.get("content") or "",
+            "text": message_text(chatlab_type, message.get("content")),
             "meta": meta,
         })
 

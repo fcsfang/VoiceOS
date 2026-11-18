@@ -59,6 +59,26 @@ final class MessageMonitorStorageChecks: XCTestCase {
         XCTAssertEqual(try db.query("SELECT COUNT(*) AS n FROM monitor_messages WHERE source_id=?", [source.id]).first?["n"], "2")
     }
 
+    func testLaterStartAdvancesMonitorCursor() async throws {
+        let store = try await openStore()
+        let source = try await store.addMonitorSource(kind: .qqGroup, displayName: "示例群",
+                                                      configJSON: "{\"conversation_id\":\"group:fixture\"}")
+        let calendar = Calendar(identifier: .gregorian)
+        let earlier = calendar.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9))!
+        let later = calendar.date(from: DateComponents(year: 2026, month: 11, day: 20, hour: 9))!
+        try await store.advanceMonitorCursor(sourceID: source.id, lastSuccessEnd: earlier, newMessageIDs: [])
+        try await store.failMonitorCursor(sourceID: source.id, error: "旧错误")
+        try await store.alignMonitorCursorToStart(sourceID: source.id, start: later)
+        let cursor = try await store.monitorCursor(sourceID: source.id)
+        XCTAssertEqual(cursor?.lastSuccessAt, ISO8601DateFormatter().string(from: later),
+                       "把起始时间改晚后游标应同步推进，界面显示与实际读取一致")
+        XCTAssertNil(cursor?.lastError, "重新选择起始时间应清除上次错误")
+        try await store.alignMonitorCursorToStart(sourceID: source.id, start: earlier)
+        let rewound = try await store.monitorCursor(sourceID: source.id)
+        XCTAssertEqual(rewound?.lastSuccessAt, ISO8601DateFormatter().string(from: earlier),
+                       "把起始时间改早后游标应回拨，去重吸收重叠")
+    }
+
     func testOpenItemMergeUpdatesInPlaceAndKeepsUserStatus() async throws {
         let store = try await openStore()
         let source = try await store.addMonitorSource(kind: .qqGroup, displayName: "示例群",
