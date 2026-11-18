@@ -21,6 +21,12 @@ private struct WorkspaceNavigationEntry: Hashable {
     let topicReadingMode: String
     var listFilter: String = ""
 }
+private struct TopicLoadKey: Hashable {
+    let topicID: String?
+    let updatedAt: String?
+    let recentOutcomeCount: Int
+    let actionKeys: [String]
+}
 private struct WorkspaceReminderSettingsTarget: Identifiable {
     let action: ActionRecord
     let snapshot: ReminderSnapshot
@@ -36,6 +42,20 @@ private struct MaterialDayGroup: Identifiable {
     let id: Date
     let label: String
     let sources: [SourceRecord]
+}
+private enum MaterialDayFormatting {
+    static let currentYear: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日"
+        return formatter
+    }()
+    static let otherYear: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年M月d日"
+        return formatter
+    }()
 }
 private enum WorkspaceRowChrome {
     /// Kept free at the trailing edge so the hover capsule never covers the status slot.
@@ -200,7 +220,10 @@ struct WorkspaceRow: View {
                 Image(systemName:"chevron.right").vosFont(WorkspaceText.caption.size, weight: .semibold)
             }.foregroundStyle(palette.accent).padding(.top,3)
         case .dot(let color):
-            Circle().fill(color).frame(width:6,height:6).padding(.top,7).accessibilityHidden(true)
+            HStack(spacing:5) {
+                Circle().fill(color).frame(width:6,height:6).accessibilityHidden(true)
+                if !trailing.isEmpty { Text(trailing).vosFont(WorkspaceText.meta).foregroundStyle(color) }
+            }.padding(.top,3).help(trailing)
         }
     }
 }
@@ -309,17 +332,8 @@ struct WorkspaceView: View {
     }
     private var topic: ReflectionQuestion? { model.workspaceTopics.first { $0.id == topicID } }
     private var sourceIDs: Set<String> { Set(topicID.flatMap { model.workspaceTopicSources[$0] } ?? []) }
-    private var topicSources: [SourceRecord] { model.records.filter { sourceIDs.contains($0.id) } }
     private var panoramaTopicLinks: [PanoramaTopicLink] {
         model.workspaceTopics.map { PanoramaTopicLink(id: $0.id, title: $0.title, sourceIDs: Set(model.workspaceTopicSources[$0.id] ?? [])) }
-    }
-    private var topicClaims: [CandidateClaim] {
-        let ids=Set(topic?.organization?.sections?.flatMap(\.claimIDs) ?? [])
-        return model.claims.filter { ids.contains($0.id) && $0.validity == "current" && $0.reviewState != "rejected" }
-    }
-    private var topicActions: [ActionRecord] {
-        let ids=Set(topic?.organization?.sections?.flatMap(\.actionIDs) ?? [])
-        return model.actionRecords.filter { ids.contains($0.id) && $0.validity == "current" && $0.state != "dismissed" }
     }
     private var deliveries: [AssistantExecutionRecord] { model.sortedAssistantDeliveries(model.assistantExecutions.filter { $0.validity == "current" && $0.state == "completed" }) }
     private var activeMaterials: [SourceRecord] { model.records.filter { !$0.isArchived && !$0.isTrashed } }
@@ -560,9 +574,14 @@ struct WorkspaceView: View {
             }.padding(.horizontal,20).padding(.vertical,10).background(palette.surface)
         }
     }
-    private var topicLoadKey: String {
-        guard page == .themes, let id = topicID else { return "" }
-        return id + (topic?.updatedAt ?? "") + String(model.recentOutcomes.count) + topicActions.map { $0.id+String($0.version) }.joined()
+    private var topicLoadKey: TopicLoadKey {
+        guard page == .themes, let id = topicID else {
+            return TopicLoadKey(topicID: nil, updatedAt: nil, recentOutcomeCount: 0, actionKeys: [])
+        }
+        let actionIDs = Set(topic?.organization?.sections?.flatMap(\.actionIDs) ?? [])
+        return TopicLoadKey(topicID: id, updatedAt: topic?.updatedAt,
+                            recentOutcomeCount: model.recentOutcomes.count,
+                            actionKeys: model.sourcePageIndex.currentActionKeys(for: actionIDs))
     }
     private var sidebar: some View {
         VStack(alignment:.leading,spacing:28) {
@@ -860,7 +879,7 @@ struct WorkspaceView: View {
     private func distinctExpressions(_ sources:[SourceRecord]) -> [SourceRecord] {
         let index=model.sourcePageIndex
         let catalog=index.recordsByID
-        let attachedContextIDs=Set(sources.compactMap { contextSourceID($0,catalog:catalog) })
+        let attachedContextIDs=Set(sources.compactMap { $0.pairedContextSourceID(in: catalog) })
         var seen=Set<String>()
         return sources.filter { source in
             // Keep a context recording independently reachable when its personal
@@ -870,32 +889,12 @@ struct WorkspaceView: View {
             return seen.insert(expression.id).inserted
         }
     }
-    private var readingMaterials: [SourceRecord] { materialRows(materialFilter, catalog: recordCatalog) }
-    private func materialRows(_ filter:String,catalog:[String:SourceRecord]) -> [SourceRecord] {
-        let selected=model.records.filter { source in
-            switch filter {
-            case "回收站": return source.isTrashed
-            case "已归档": return source.isArchived
-            case "未读": return !source.isArchived && !source.isTrashed && (readingStates[source.id] ?? .unread) == .unread
-            case "在读": return !source.isArchived && !source.isTrashed && readingStates[source.id] == .reading
-            default: return !source.isArchived && !source.isTrashed
-            }
-        }
-        let selectedIDs=Set(selected.map(\.id))
-        let attachedContextIDs=Set(selected.compactMap { contextSourceID($0,catalog:catalog) }).intersection(selectedIDs)
-        let entries=selected.compactMap { source -> (SourceRecord,String)? in
-            guard !attachedContextIDs.contains(source.id) else { return nil }
-            guard let expression=model.sourcePageIndex.expression(for:source.id),expression.sourceIDs.count > 1, Set(expression.sourceIDs).isSubset(of:selectedIDs) else { return (source,source.createdAt) }
-            guard expression.sourceIDs.first == source.id else { return nil }
-            return (source,expression.sourceIDs.compactMap { catalog[$0]?.createdAt }.max() ?? source.createdAt)
-        }
-        return entries.sorted { $0.1 > $1.1 }.map(\.0)
-    }
-    /// Counts ride on the filter labels; the page title carries no floating number.
-    private func materialTabs(catalog:[String:SourceRecord]) -> [(filter:String,label:String)] {
-        SavedViewPage.materials.filters.map { filter in
-            (filter: filter, label: filter + " " + String(materialRows(filter, catalog: catalog).count))
-        }
+    private var readingMaterials: [SourceRecord] { materialPage.rows }
+    private var materialPage: MaterialReadingPage {
+        MaterialReadingPage(records: model.records, filter: materialFilter,
+                            filters: SavedViewPage.materials.filters,
+                            readingStates: readingStates, catalog: recordCatalog,
+                            expressions: model.sourcePageIndex.expressionsBySourceID)
     }
     private func materialDayGroups(_ sources: [SourceRecord]) -> [MaterialDayGroup] {
         let calendar = Calendar.current
@@ -912,23 +911,17 @@ struct WorkspaceView: View {
         let calendar = Calendar.current
         if calendar.isDateInToday(date) { return "今天" }
         if calendar.isDateInYesterday(date) { return "昨天" }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = calendar.isDate(date, equalTo: Date(), toGranularity: .year) ? "M月d日" : "yyyy年M月d日"
+        let formatter = calendar.isDate(date, equalTo: Date(), toGranularity: .year) ? MaterialDayFormatting.currentYear : MaterialDayFormatting.otherYear
         return formatter.string(from: date)
-    }
-    private func contextSourceID(_ source:SourceRecord,catalog:[String:SourceRecord]) -> String? {
-        guard let pair=source.presentation?.recordingContext,pair.personalSourceID == source.id,
-              let external=catalog[pair.externalSourceID],!source.localOnly,!external.localOnly,
-              !source.needsTranscriptionReview,!external.needsTranscriptionReview,
-              source.transcriptVersionID == pair.personalVersionID,external.transcriptVersionID == pair.externalVersionID,
-              source.policyVersion == pair.personalPolicyVersion,external.policyVersion == pair.externalPolicyVersion else { return nil }
-        return external.id
     }
     private var materials: some View {
         let catalog = recordCatalog
-        let tabs = materialTabs(catalog: catalog)
-        let rows = materialRows(materialFilter, catalog: catalog)
+        let page = materialPage
+        // Counts ride on the filter labels; the page title carries no floating number.
+        let tabs = SavedViewPage.materials.filters.map { filter in
+            (filter: filter, label: filter + " " + String(page.counts[filter] ?? 0))
+        }
+        let rows = page.rows
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             HStack(alignment:.top,spacing:12) {
                 WorkspaceHeading(eyebrow:"",title:"材料")
@@ -988,10 +981,16 @@ struct WorkspaceView: View {
     }
     private var themes: some View {
         let catalog = recordCatalog
+        let topicSourceIDs = sourceIDs
+        let reading = topic.map {
+            TopicReadingData(topic: $0, sourceIDs: topicSourceIDs,
+                             records: model.records, claims: model.claims,
+                             actions: model.actionRecords)
+        }
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
-            if let topic {
+            if let topic, let reading {
                 HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil };creatingTopic=false;newTopicTitle="";editingTopicID=nil };Spacer(); Menu("调整主题") { Button("修改主题名称") { newTopicTitle=topic.title;editingTopicID=topic.id;creatingTopic=true };Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) } } }
-                WorkspaceHeading(eyebrow:"",title:topic.title,subtitle:"\(topicSources.count) 份材料")
+                WorkspaceHeading(eyebrow:"",title:topic.title,subtitle:"\(reading.sources.count) 份材料")
                 if let titleSource=model.sourcePageIndex.recordsByID[topic.sourceID] {
                     Button { go(.source(titleSource.id)) } label: {
                         HStack(spacing:5) {
@@ -1003,7 +1002,7 @@ struct WorkspaceView: View {
                         .accessibilityLabel("标题取自《" + displayTitle(titleSource.displayTitle) + "》，打开来源材料")
                 }
                 WorkspaceTabs(selection:$topicTab,titles:["概览","认识与问题","行动与结果","材料"])
-                topicContent(topic)
+                topicContent(topic, reading: reading)
             } else {
                 HStack { WorkspaceHeading(eyebrow:"",title:"主题")
                     Spacer();Button("新建主题") { newTopicTitle="";editingTopicID=nil;creatingTopic=true }
@@ -1050,16 +1049,16 @@ struct WorkspaceView: View {
             }
         }
     }
-    @ViewBuilder private func topicContent(_ topic:ReflectionQuestion) -> some View {
+    @ViewBuilder private func topicContent(_ topic:ReflectionQuestion, reading:TopicReadingData) -> some View {
         switch topicTab {
         case "材料":
             let catalog = recordCatalog
-            let expressions = distinctExpressions(topicSources)
-            WorkspaceSection(title:"主题材料",subtitle:"完整原话与资料，按时间延续",icon:"books.vertical",count:topicSources.count) {
+            let expressions = distinctExpressions(reading.sources)
+            WorkspaceSection(title:"主题材料",subtitle:"完整原话与资料，按时间延续",icon:"books.vertical",count:reading.sources.count) {
                 ForEach(expressions) { source in sourceRow(source,catalog:catalog);if source.id != expressions.last?.id { Divider() } }
             }
             DisclosureGroup("关联其他材料") {
-                ForEach(model.records.filter { !sourceIDs.contains($0.id) && !$0.isTrashed && !($0.transcript ?? "").isEmpty }) { source in
+                ForEach(reading.unlinkedSources) { source in
                     Button(displayTitle(source.displayTitle)) { Task { do { try await model.linkReflectionQuestionSource(questionID:topic.id,sourceID:source.id,linked:true);await model.refresh() } catch { self.error=error.localizedDescription } } }
                 }
             }
@@ -1067,22 +1066,22 @@ struct WorkspaceView: View {
             Picker("阅读方式",selection:$topicReadingMode) { Text("小主题卡片").tag("卡片");Text("材料图谱").tag("图谱");Text("周期回顾").tag("回顾") }.pickerStyle(.segmented)
             if topicReadingMode == "图谱" {
                 ReflectionTimelineView(model:model,embeddedTopicID:topic.id,openSource:{ go(.source($0)) },dismiss:{},discuss:{ claim in discussClaim(claim) },reflect:{ focus,prompt in await openReflection(focus,prompt:prompt) }).frame(minHeight:620)
-            } else if topicReadingMode == "回顾" { review(topic) }
+            } else if topicReadingMode == "回顾" { review(topic, reading: reading) }
             else {
-                topicReading(topic,mode:"认识与问题")
-                WorkspaceTopicEntry(model:model,topic:topic,sourceIDs:Array(sourceIDs))
+                topicReading(topic,mode:"认识与问题",reading:reading)
+                WorkspaceTopicEntry(model:model,topic:topic,sourceIDs:Array(reading.sourceIDs))
             }
-        default: topicReading(topic,mode:topicTab)
+        default: topicReading(topic,mode:topicTab,reading:reading)
         }
     }
-    private func topicReading(_ topic:ReflectionQuestion,mode:String) -> some View {
-        WorkspaceTopicReadingView(model:model,topic:topic,mode:mode,focus:topicFocus,
+    private func topicReading(_ topic:ReflectionQuestion,mode:String,reading:TopicReadingData) -> some View {
+        WorkspaceTopicReadingView(model:model,topic:topic,mode:mode,focus:topicFocus,reading:reading,
             openSource:{ go(.source($0)) },openTopic:{ selectTopic($0) },openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },
             discuss:{ prompt in Task { await toggleDiscussion(force:true,prompt:prompt) } },showActions:{ topicTab="行动与结果" },
             showUnderstanding:{ topicTab="认识与问题";topicReadingMode="卡片" })
             .id(topic.id + mode)
     }
-    private func review(_ topic:ReflectionQuestion) -> some View {
+    private func review(_ topic:ReflectionQuestion, reading:TopicReadingData) -> some View {
         VStack(alignment:.leading,spacing:20) {
             HStack {
                 Picker("回顾周期",selection:$reviewPeriod) { ForEach(ReflectionPeriod.allCases,id:\.self) { Text($0.label).tag($0) } }.pickerStyle(.segmented).frame(maxWidth:210)
@@ -1090,10 +1089,10 @@ struct WorkspaceView: View {
             }
             Text("放在完整主题的脉络里，看这段时间的变化。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             let interval=reviewPeriod.interval(containing:reviewAnchor)
-            let sources=topicSources.filter { interval.contains($0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt) ?? .distantPast) }
+            let sources=reading.sources.filter { interval.contains($0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt) ?? .distantPast) }
             let catalog=recordCatalog
             ForEach(distinctExpressions(sources)) { sourceRow($0,catalog:catalog);Divider() }
-            let actionIDs=Set(topicActions.map(\.id))
+            let actionIDs=reading.actionIDs
             let outcomes=(topicFocus?.outcomes ?? []).filter { actionIDs.contains($0.actionID) && ConversationReflectionFocus.date($0.createdAt).map { interval.contains($0) } == true }
             ForEach(outcomes) { outcome in WorkspaceRow(title:outcome.text,subtitle:"实际结果 · " + dateLabel(outcome.createdAt),icon:"leaf") { go(.task(outcome.actionID)) } }
             if sources.isEmpty && outcomes.isEmpty { Text("这段时间还没有新增材料或结果。这个主题的历史脉络仍保留在概览中。").foregroundStyle(.secondary) }
@@ -1103,9 +1102,14 @@ struct WorkspaceView: View {
     @State private var showingClarifyQueue = false
     @State private var clarifyScope: ClarifyQueueScope = .questions
     private var actions: some View {
-        let nextStepCounts=ActionRowLayout.nextStepCounts(model.actionRecords)
+        let nextStepCounts = model.sourcePageIndex.nextStepCounts
         let rowReads=ActionRowReads(reminderLinks:model.reminderLinks,executions:model.assistantExecutions)
         let listGroup:ActionRowGroup=actionFilter == "已完成" ? .completed : actionFilter == "历史记录" ? .history : actionFilter == "待核对" ? .needsReview : .active
+        let todoActions = myTodoActions
+        let timeSurface: ActionTimeSurface? = ["全部","我的待办"].contains(actionFilter)
+            ? ActionTimeSurface.build(actions: todoActions, schedules: model.scheduleIntents,
+                                      links: model.reminderLinks, now: Date(), calendar: .current)
+            : nil
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             HStack(alignment:.top,spacing:12) {
                 WorkspaceHeading(eyebrow:"",title:"行动")
@@ -1161,8 +1165,7 @@ struct WorkspaceView: View {
                     }.contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("本地完成待同步 \(model.pendingReminderSyncs.count) 项，打开核对")
             }
-            if actionFilter == "全部" {
-                let surface = ActionTimeSurface.build(actions: myTodoActions, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
+            if actionFilter == "全部", let surface = timeSurface {
                 let overdue = surface.today.filter(\.isOverdue).count
                 Button { actionFilter = "我的待办" } label: {
                     HStack(spacing: 6) {
@@ -1177,7 +1180,7 @@ struct WorkspaceView: View {
                     .help("切到我的待办")
             }
             if ["目标","全部"].contains(actionFilter), !model.stalledOutcomes.isEmpty { stalledBanner }
-            let visible = visibleActions
+            let visible = ["全部","我的待办"].contains(actionFilter) ? todoActions : visibleActions
             let focusedIDs = Set(focusedActions.map(\.id))
             let listed = actionFilter == "全部" ? visible.filter { !focusedIDs.contains($0.id) } : visible
             let executions = model.sortedAssistantDeliveries(model.assistantExecutions.filter { $0.state != "cancelled" })
@@ -1189,8 +1192,7 @@ struct WorkspaceView: View {
                     }
                 }
             }
-            if actionFilter == "我的待办", !visible.isEmpty {
-                let surface = ActionTimeSurface.build(actions: visible, schedules: model.scheduleIntents, links: model.reminderLinks, now: Date(), calendar: .current)
+            if actionFilter == "我的待办", !visible.isEmpty, let surface = timeSurface {
                 let overdue = surface.today.filter(\.isOverdue)
                 let dueToday = surface.today.filter { !$0.isOverdue }
                 if !overdue.isEmpty {
@@ -1404,9 +1406,7 @@ struct WorkspaceView: View {
     private var focusedActions: [ActionRecord] {
         Array(model.actionRecords.filter { focusedActionIDs.contains($0.id) && $0.state == "open" && $0.validity == "current" }.prefix(3))
     }
-    private var focusRefreshKey: String {
-        model.actionRecords.map { $0.id + String($0.version) + $0.state + $0.validity }.joined(separator: "|")
-    }
+    private var focusRefreshKey: String { model.sourcePageIndex.actionRevisionKey }
     private var myTodoActions: [ActionRecord] {
         model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" && !model.sourcePageIndex.requiresReview($0.id) }
     }
@@ -1851,7 +1851,7 @@ struct WorkspaceView: View {
         let issues=source.unresolvedTranscriptionIssueCount
         let reading:(text:String,color:Color)? = issues > 0 ? ("疑点 \(issues)",palette.warning) : materialReadingStatus(source.id)
         let groupNote=reason ?? (model.sourcePageIndex.expressionIssue(for: source.id) != nil ? "分组待重新判断" : nil)
-        return WorkspaceRow(title:displayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : "") + (groupNote.map { " · " + $0 } ?? ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:"",trailingStyle:reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary,statusAccessibility:reading?.text ?? "",trailingGutter:trailingGutter) { go(.source(source.id)) }
+        return WorkspaceRow(title:displayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : "") + (groupNote.map { " · " + $0 } ?? ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:reading?.text ?? "",trailingStyle:reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary,statusAccessibility:reading?.text ?? "",trailingGutter:trailingGutter) { go(.source(source.id)) }
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
                 Button("标为在读") { setMaterialReading(source.id,.reading) }
@@ -1980,19 +1980,10 @@ struct WorkspaceView: View {
         switch due {
         case .none: return false
         case let .dateOnly(localDate, _):
-            let formatter=DateFormatter()
-            formatter.locale=Locale(identifier:"en_US_POSIX")
-            formatter.calendar=Calendar(identifier:.gregorian)
-            formatter.timeZone = .current
-            formatter.dateFormat="yyyy-MM-dd"
-            return localDate < formatter.string(from:Date())
+            return localDate < ActionTimeFormatting.dayKey.string(from:Date())
         case let .instant(utc, _):
-            let formatter=ISO8601DateFormatter()
-            formatter.timeZone=TimeZone(secondsFromGMT:0)
-            formatter.formatOptions=[.withInternetDateTime,.withFractionalSeconds]
-            if let date=formatter.date(from:utc) { return date < Date() }
-            formatter.formatOptions=[.withInternetDateTime]
-            guard let date=formatter.date(from:utc) else { return false }
+            if let date=ActionTimeFormatting.isoFractional.date(from:utc) { return date < Date() }
+            guard let date=ActionTimeFormatting.iso.date(from:utc) else { return false }
             return date < Date()
         }
     }

@@ -1,5 +1,28 @@
 import Foundation
 
+/// Shared formatters for action rows and the time surface. Formatting happens
+/// per row and per due date, so the formatters are built once.
+public enum ActionTimeFormatting {
+    public static let isoFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    public static let iso: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+    public static let dayKey: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+}
+
 /// Which existing date record supplied a task's time-surface entry.
 public enum ActionTimeSource: String, Sendable { case localSchedule, reminderReadback, none }
 
@@ -80,11 +103,8 @@ extension ActionTimeSurface {
             guard parts.count == 3 else { return nil }
             return zoneCalendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
         case let .instant(utc, _):
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = formatter.date(from: utc) { return date }
-            formatter.formatOptions = [.withInternetDateTime]
-            return formatter.date(from: utc)
+            if let date = ActionTimeFormatting.isoFractional.date(from: utc) { return date }
+            return ActionTimeFormatting.iso.date(from: utc)
         }
     }
 

@@ -357,3 +357,184 @@ extension VoiceOSStore {
         })
     }
 }
+
+/// One material's unresolved transcription doubts, sorted for the processing
+/// page. `SourcePageIndex` derives this once per workspace snapshot.
+public struct WorkspaceTranscriptReviewPoint: Identifiable, Sendable {
+    public let source: SourceRecord
+    public let count: Int
+    public var id: String { source.id }
+    public init(source: SourceRecord, count: Int) {
+        self.source = source
+        self.count = count
+    }
+}
+
+public extension SourceRecord {
+    /// The external context member this personal recording is attached to,
+    /// when both sides still match the saved versions and permissions.
+    func pairedContextSourceID(in catalog: [String: SourceRecord]) -> String? {
+        guard let pair = presentation?.recordingContext, pair.personalSourceID == id,
+              let external = catalog[pair.externalSourceID], !localOnly, !external.localOnly,
+              !needsTranscriptionReview, !external.needsTranscriptionReview,
+              transcriptVersionID == pair.personalVersionID,
+              external.transcriptVersionID == pair.externalVersionID,
+              policyVersion == pair.personalPolicyVersion,
+              external.policyVersion == pair.externalPolicyVersion else { return nil }
+        return external.id
+    }
+}
+
+/// One materials-page body evaluation: rows for the selected filter and the
+/// tab counts for every filter. Grouping and expression dedupe run once per
+/// filter inside one construction, instead of once per tab plus once for rows.
+public struct MaterialReadingPage: Sendable {
+    public let rows: [SourceRecord]
+    public let counts: [String: Int]
+    public init(records: [SourceRecord], filter: String, filters: [String],
+                readingStates: [String: SourceReadingState] = [:],
+                catalog: [String: SourceRecord],
+                expressions: [String: RecordingExpression] = [:]) {
+        var byFilter: [String: [SourceRecord]] = [:]
+        for name in Set(filters + [filter]) {
+            byFilter[name] = Self.rows(records: records, filter: name, readingStates: readingStates,
+                                       catalog: catalog, expressions: expressions)
+        }
+        rows = byFilter[filter] ?? []
+        counts = byFilter.mapValues(\.count)
+    }
+    private static func rows(records: [SourceRecord], filter: String,
+                             readingStates: [String: SourceReadingState],
+                             catalog: [String: SourceRecord],
+                             expressions: [String: RecordingExpression]) -> [SourceRecord] {
+        let selected = records.filter { source in
+            switch filter {
+            case "回收站": return source.isTrashed
+            case "已归档": return source.isArchived
+            case "未读": return !source.isArchived && !source.isTrashed && (readingStates[source.id] ?? .unread) == .unread
+            case "在读": return !source.isArchived && !source.isTrashed && readingStates[source.id] == .reading
+            default: return !source.isArchived && !source.isTrashed
+            }
+        }
+        let selectedIDs = Set(selected.map(\.id))
+        let attachedContextIDs = Set(selected.compactMap { $0.pairedContextSourceID(in: catalog) })
+            .intersection(selectedIDs)
+        let entries = selected.compactMap { source -> (SourceRecord, String)? in
+            guard !attachedContextIDs.contains(source.id) else { return nil }
+            guard let expression = expressions[source.id], expression.sourceIDs.count > 1,
+                  Set(expression.sourceIDs).isSubset(of: selectedIDs) else { return (source, source.createdAt) }
+            guard expression.sourceIDs.first == source.id else { return nil }
+            return (source, expression.sourceIDs.compactMap { catalog[$0]?.createdAt }.max() ?? source.createdAt)
+        }
+        return entries.sorted { $0.1 > $1.1 }.map(\.0)
+    }
+}
+
+/// Everything one topic page reads: its materials, current claims and actions,
+/// the per-section slices the cards show, and the unlinked material list.
+public struct TopicReadingData: Sendable {
+    public let sourceIDs: Set<String>
+    public let sources: [SourceRecord]
+    public let claims: [CandidateClaim]
+    public let actions: [ActionRecord]
+    public let claimIDs: Set<String>
+    public let actionIDs: Set<String>
+    public let sectionClaims: [String: [CandidateClaim]]
+    public let sectionActions: [String: [ActionRecord]]
+    public let sectionPosition: [String: Int]
+    public let actionsByID: [String: ActionRecord]
+    public let actionVersionByID: [String: Int]
+    public let unlinkedSources: [SourceRecord]
+    public init(topic: ReflectionQuestion, sourceIDs: Set<String>, records: [SourceRecord],
+                claims: [CandidateClaim], actions: [ActionRecord]) {
+        let sections = topic.organization?.sections ?? []
+        let claimIDs = Set(sections.flatMap(\.claimIDs))
+        let actionIDs = Set(sections.flatMap(\.actionIDs))
+        let filteredClaims = claims.filter {
+            claimIDs.contains($0.id) && $0.validity == "current" && $0.reviewState != "rejected"
+        }
+        let filteredActions = actions.filter {
+            actionIDs.contains($0.id) && $0.validity == "current" && $0.state != "dismissed"
+        }
+        var claimSections: [String: [String]] = [:]
+        for section in sections {
+            for id in Set(section.claimIDs) { claimSections[id, default: []].append(section.id) }
+        }
+        var actionSections: [String: [String]] = [:]
+        for section in sections {
+            for id in Set(section.actionIDs) { actionSections[id, default: []].append(section.id) }
+        }
+        var claimsBySection: [String: [CandidateClaim]] = [:]
+        for claim in filteredClaims {
+            for sectionID in claimSections[claim.id] ?? [] {
+                claimsBySection[sectionID, default: []].append(claim)
+            }
+        }
+        var actionsBySection: [String: [ActionRecord]] = [:]
+        for action in filteredActions {
+            for sectionID in actionSections[action.id] ?? [] {
+                actionsBySection[sectionID, default: []].append(action)
+            }
+        }
+        var positions: [String: Int] = [:]
+        for (offset, section) in sections.enumerated() where positions[section.id] == nil {
+            positions[section.id] = offset
+        }
+        var byID: [String: ActionRecord] = [:]
+        var versions: [String: Int] = [:]
+        for action in filteredActions {
+            byID[action.id] = action
+            versions[action.id] = action.version
+        }
+        self.sourceIDs = sourceIDs
+        self.sources = records.filter { sourceIDs.contains($0.id) }
+        self.claims = filteredClaims
+        self.actions = filteredActions
+        self.claimIDs = claimIDs
+        self.actionIDs = actionIDs
+        sectionClaims = claimsBySection
+        sectionActions = actionsBySection
+        sectionPosition = positions
+        actionsByID = byID
+        actionVersionByID = versions
+        unlinkedSources = records.filter {
+            !sourceIDs.contains($0.id) && !$0.isTrashed && !($0.transcript ?? "").isEmpty
+        }
+    }
+}
+
+public enum TopicAdjacency {
+    /// Shared material counts for every other topic. One inverted index over
+    /// topic sources replaces one set intersection per topic.
+    public static func sharedCounts(selectedTopicID: String, selectedSourceIDs: Set<String>,
+                                    topics: [ReflectionQuestion],
+                                    topicSources: [String: [String]]) -> [String: Int] {
+        var topicIDsBySourceID: [String: [String]] = [:]
+        for (topicID, sourceIDs) in topicSources {
+            for sourceID in Set(sourceIDs) { topicIDsBySourceID[sourceID, default: []].append(topicID) }
+        }
+        var counts: [String: Int] = [:]
+        for sourceID in selectedSourceIDs {
+            for topicID in topicIDsBySourceID[sourceID] ?? [] where topicID != selectedTopicID {
+                counts[topicID, default: 0] += 1
+            }
+        }
+        let existing = Set(topics.map(\.id))
+        return counts.filter { existing.contains($0.key) }
+    }
+}
+
+public enum UnfinishedProcessingIntents {
+    /// Intents whose captured source still matches its current transcript and
+    /// policy versions. Dictionary lookups replace a per-intent library scan.
+    public static func filter(_ intents: [ExpressionProcessingIntentRecord],
+                              recordsByID: [String: SourceRecord]) -> [ExpressionProcessingIntentRecord] {
+        intents.filter { intent in
+            guard !intent.isDismissed, ![.completed, .cancelled, .frozen].contains(intent.state),
+                  let input = intent.snapshot.context.sources.first,
+                  let record = recordsByID[input.sourceID] else { return false }
+            return record.transcriptVersionID == input.transcriptVersionID
+                && record.policyVersion == intent.snapshot.policyVersion
+        }
+    }
+}

@@ -3,6 +3,10 @@ import Foundation
 import VoiceOSCore
 import VoiceOSPlatform
 
+private enum MonitorDateFormatting {
+    static let iso8601 = ISO8601DateFormatter()
+}
+
 struct MonitorSettings: Codable, Equatable {
     var hour: Int = 9
     var minute: Int = 0
@@ -570,12 +574,15 @@ extension ControlCenter {
     }
 
     func monitorTick(trigger: MonitorTrigger) async {
-        guard initialized, store != nil, !monitorChecking else { return }
-        await reloadMonitorState()
+        guard initialized, let store, !monitorChecking else { return }
+        // Decide from one report row; the full monitor reload runs only when
+        // the daily gate says this tick needs a check.
+        let latestReportDate = (try? await store.monitorReports(limit: 1))?.first?.reportDate
         let decision = MonitorSchedule.decide(trigger: trigger, now: Date(),
                                               settings: monitorSettings.scheduleSettings,
-                                              latestReportDate: monitorReports.first?.reportDate)
+                                              latestReportDate: latestReportDate)
         guard decision.shouldRun else { return }
+        await reloadMonitorState()
         await runMonitorCheck(automatic: true)
     }
 
@@ -635,7 +642,7 @@ extension ControlCenter {
     }
 
     static func monitorTimeText(_ iso: String?) -> String {
-        guard let iso, let date = ISO8601DateFormatter().date(from: iso) else { return iso ?? "时间未知" }
+        guard let iso, let date = MonitorDateFormatting.iso8601.date(from: iso) else { return iso ?? "时间未知" }
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 }
