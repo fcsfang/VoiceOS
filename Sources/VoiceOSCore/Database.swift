@@ -17,7 +17,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...74).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...75).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1530,6 +1530,24 @@ final class Database {
                 try execute("CREATE INDEX IF NOT EXISTS monitor_item_report ON monitor_items(report_id)")
                 try execute("CREATE INDEX IF NOT EXISTS monitor_item_status ON monitor_items(status)")
                 try execute("PRAGMA user_version=74")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "74" {
+            try transaction {
+                // Per-task reminder sync failures live here so one bad reminder
+                // never freezes the batch. A later success, a confirmed link, or
+                // an update no longer queued deletes the row (RemindersStore.swift).
+                try execute("""
+                CREATE TABLE IF NOT EXISTS reminder_sync_failures (
+                  action_id TEXT NOT NULL,
+                  stage TEXT NOT NULL,
+                  reason TEXT NOT NULL,
+                  failed_at TEXT NOT NULL,
+                  PRIMARY KEY(action_id, stage)
+                )
+                """)
+                try execute("PRAGMA user_version=75")
             }
         }
 

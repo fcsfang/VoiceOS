@@ -57,6 +57,7 @@ extension VoiceOSStore {
             // therefore excluded by kind before reaching this path.
             return claims[action.claimID]?.ownership == CandidateOwnership.userTentative.rawValue
         }
+        var failures = 0
         for action in pending {
             try Task.checkCancellation()
             try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
@@ -66,8 +67,19 @@ extension VoiceOSStore {
             // An earlier task's await may let a newer batch supersede the
             // remaining snapshot. Skip it without starving unrelated sources.
             guard try reminderCognitionIsLatest(action) else { continue }
-            try await sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
+            do {
+                try await sendTaskToReminders(actionID: action.id, expectedVersion: action.version, calendarID: access.calendarID, using: port, expectedAccessVersion: access.version)
+                try clearReminderSyncFailure(actionID: action.id, stage: .activation)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // One bad task must not block the tasks after it; its reason
+                // stays recorded until a later send or readback resolves it.
+                failures += 1
+                try recordReminderSyncFailure(actionID: action.id, stage: .activation, reason: error.localizedDescription)
+            }
         }
+        if failures > 0 { throw VoiceOSError("\(failures) 项新任务发送未完成；尝试已保留，稍后自动重试") }
     }
     /// Only reconciles already attempted links; never invokes create or selects another list.
     public func reconcileReminders(expectedAccessVersion: Int, using port: any RemindersPort) async throws {
@@ -88,14 +100,15 @@ extension VoiceOSStore {
     /// A failed new create must not prevent completion readback for existing
     /// links. Cancellation and revoked scope still stop before reconciliation.
     public func refreshAuthorizedReminders(expectedAccessVersion: Int, using port: any RemindersPort, requireReviewedFields: Bool = false) async throws {
-        var activationFailed=false
+        var activationFailure: String?
         do { try await activateExtractedTasks(expectedAccessVersion:expectedAccessVersion,using:port,requireReviewedFields:requireReviewedFields) }
         catch is CancellationError { throw CancellationError() }
-        catch { activationFailed=true }
+        catch { activationFailure=error.localizedDescription }
         try Task.checkCancellation()
         guard let access=try reminderAccess() else { throw VoiceOSError("尚未授权提醒事项清单") }
         try checkReminderAccess(calendarID:access.calendarID,expectedVersion:expectedAccessVersion)
+        try clearResolvedReminderSyncFailures()
         try await reconcileReminders(expectedAccessVersion:expectedAccessVersion,using:port)
-        if activationFailed { throw VoiceOSError("新任务发送未完成；已核对既有任务，保留尝试且不自动重建") }
+        if let activationFailure { throw VoiceOSError("新任务发送未完成；已核对既有任务，保留尝试且不自动重建（\(activationFailure)）") }
     }
 }
