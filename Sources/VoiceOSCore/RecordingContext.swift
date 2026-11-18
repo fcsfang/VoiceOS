@@ -57,6 +57,11 @@ public struct SourcePageIndex: Sendable {
     private let actionPositionByID: [String: Int]
     private let actionIDsBySourceID: [String: [String]]
     private let reviewRequiredActionIDs: Set<String>
+    private let allActionByID: [String: ActionRecord]
+    /// Task-kind actions that need review, in workspace order. The same set
+    /// `workspacePausedTasks` derives; dismissed actions never pause.
+    public let pausedTasks: [ActionRecord]
+    private let expressionIssueBySourceID: [String: String]
 
     public init(records: [SourceRecord] = [], claims: [CandidateClaim] = [], actions: [ActionRecord] = [],
                 currentClaimsBySource: [String: [CandidateClaim]] = [:],
@@ -68,6 +73,12 @@ public struct SourcePageIndex: Sendable {
             if let expression = record.recordingExpression(in: recordsByID) { expressions[record.id] = expression }
         }
         expressionBySourceID = expressions
+        var issues: [String: String] = [:]
+        for record in records where expressions[record.id] == nil {
+            if let saved = record.presentation?.expression, saved.sourceIDs.count > 1,
+               let issue = record.recordingExpressionIssue(in: recordsByID) { issues[record.id] = issue }
+        }
+        expressionIssueBySourceID = issues
 
         var claimByID: [String: CandidateClaim] = [:]
         var actionsByClaimID: [String: [ActionRecord]] = [:]
@@ -90,6 +101,9 @@ public struct SourcePageIndex: Sendable {
         self.actionByID = actionByID
         actionPositionByID = positions
         self.actionIDsBySourceID = actionIDsBySourceID
+        var allActionByID: [String: ActionRecord] = [:]
+        for action in actions where allActionByID[action.id] == nil { allActionByID[action.id] = action }
+        self.allActionByID = allActionByID
 
         // The pause gate only reads sources that carry an expression, and the
         // other two arguments narrow to this action's own claim and actions.
@@ -106,6 +120,9 @@ public struct SourcePageIndex: Sendable {
             }
         }
         reviewRequiredActionIDs = reviewRequired
+        var paused: [ActionRecord] = []
+        for action in actions where action.kind == "task" && reviewRequired.contains(action.id) { paused.append(action) }
+        pausedTasks = paused
     }
 
     /// The validated expression for a source, or nil when members or
@@ -120,6 +137,17 @@ public struct SourcePageIndex: Sendable {
 
     public func activeAction(for actionID: String) -> ActionRecord? {
         actionByID[actionID]
+    }
+
+    /// Every action including dismissed ones, for task pages and discussion
+    /// entry that must open dismissed history; `activeAction(for:)` stays live-only.
+    public func allAction(for actionID: String) -> ActionRecord? {
+        allActionByID[actionID]
+    }
+
+    /// The saved-expression issue for a source, decided once per snapshot.
+    public func expressionIssue(for sourceID: String) -> String? {
+        expressionIssueBySourceID[sourceID]
     }
 
     /// Actions whose claim cites any of these sources, in workspace order.
