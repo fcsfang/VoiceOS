@@ -505,18 +505,26 @@ struct WorkspaceProcessingView: View {
                     }
                 }
                 let reminderAnomalies = model.reminderSyncAnomalies
-                if reminderAnomalies.total > 0 {
-                    WorkspaceSection(title:"提醒事项需要核对",subtitle:"有 \(reminderAnomalies.total) 条关联的提醒事项未完成回读。可能已在提醒事项中被删除，任务保留为本地任务；重新回读只查询，不会重建。",icon:"exclamationmark.circle",count:reminderAnomalies.total) {
-                        Text(reminderAnomalyCounts(reminderAnomalies)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.vertical,8)
-                        ForEach(reminderAnomalies.items) { item in
-                            VStack(alignment:.leading,spacing:6) {
-                                WorkspaceRow(title:item.actionTitle,subtitle:reminderAnomalySubtitle(item),trailing:"查看任务") { model.showTask(item.actionID) }
-                                if let link=model.reminderLinks.first(where: { $0.id == item.id }) {
-                                    Button("重新回读") { Task { await model.readReminder(link) } }
-                                        .accessibilityLabel("重新回读：" + item.actionTitle)
-                                        .disabled(model.remindersBusy || model.reminderFieldsPending || model.reminderAccess?.enabled != true)
-                                        .padding(.leading,54).padding(.bottom,8)
+                if reminderAnomalies.total > 0 || reminderAnomalies.failureTotal > 0 {
+                    WorkspaceSection(title:"提醒事项需要核对",subtitle:"有 \(reminderAnomalies.total) 条关联的提醒事项未完成回读。可能已在提醒事项中被删除，任务保留为本地任务；重新回读只查询，不会重建。",icon:"exclamationmark.circle",count:reminderAnomalies.total + reminderAnomalies.failureTotal) {
+                        if reminderAnomalies.total > 0 {
+                            Text(reminderAnomalyCounts(reminderAnomalies)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.vertical,8)
+                            ForEach(reminderAnomalies.items) { item in
+                                VStack(alignment:.leading,spacing:6) {
+                                    WorkspaceRow(title:item.actionTitle,subtitle:reminderAnomalySubtitle(item),trailing:"查看任务") { model.showTask(item.actionID) }
+                                    if let link=model.reminderLinks.first(where: { $0.id == item.id }) {
+                                        Button("重新回读") { Task { await model.readReminder(link) } }
+                                            .accessibilityLabel("重新回读：" + item.actionTitle)
+                                            .disabled(model.remindersBusy || model.reminderFieldsPending || model.reminderAccess?.enabled != true)
+                                            .padding(.leading,54).padding(.bottom,8)
+                                    }
                                 }
+                            }
+                        }
+                        ForEach(reminderAnomalies.failures) { failure in
+                            VStack(alignment:.leading,spacing:6) {
+                                WorkspaceRow(title:failure.actionTitle,subtitle:reminderSyncFailureSubtitle(failure),trailing:"查看任务") { model.showTask(failure.actionID) }
+                                Text("原因：" + WorkspaceProcessingErrorText.display(failure.reason)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled).padding(.leading,54).padding(.bottom,8)
                             }
                         }
                     }
@@ -580,6 +588,11 @@ struct WorkspaceProcessingView: View {
     private func reminderAnomalySubtitle(_ item: ReminderSyncAnomaly) -> String {
         let state = item.state == "missing" ? "提醒事项中找不到" : item.state == "conflict" ? "匹配到多条或身份已变化" : "上次回读结果未确认"
         return "提醒事项「\(item.desiredTitle)」 · \(item.marker) · " + state
+    }
+    private func reminderSyncFailureSubtitle(_ failure: ReminderSyncFailure) -> String {
+        let stage = failure.stage == .expression ? "提醒补录" : "新任务发送"
+        let at = ISO8601DateFormatter().date(from: failure.failedAt).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? failure.failedAt
+        return stage + "失败 · " + at
     }
     @ViewBuilder private func reasons(_ entries:[(String,String)]) -> some View {
         if !entries.isEmpty {
