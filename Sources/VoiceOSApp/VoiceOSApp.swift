@@ -787,6 +787,7 @@ final class ControlCenter: ObservableObject {
     private var understandingWorker: Task<Void, Never>?
     @Published var initialized = false
     @Published var workspaceLoaded = false
+    private var lastFullReloadGeneration: Int64?
     @Published var textSize: AppTextSize = AppTextSize(rawValue: UserDefaults.standard.string(forKey: "voiceos.textSize.v1") ?? "") ?? .standard
     func setTextSize(_ value: AppTextSize) {
         textSize = value
@@ -1539,6 +1540,11 @@ final class ControlCenter: ObservableObject {
         await reloadScopedWorkspace(plan, store: store)
     }
     private func reloadFullWorkspace(store: VoiceOSStore) async {
+        let generation = store.dataGeneration
+        if workspaceLoaded, generation == lastFullReloadGeneration {
+            StartupTrace.mark("reload.skipped")
+            return
+        }
         StartupTrace.mark("reload.begin")
         await panoramaChanged()
         StartupTrace.mark("reload.panoramaChecked")
@@ -1595,6 +1601,7 @@ final class ControlCenter: ObservableObject {
         await StartupTrace.measureAsync("reload.discussion") { await refreshDiscussion() }
         resumeAssistantExecutions(snapshot: contextsFroze ? nil : assistantSnapshot)
         queueTopicOrganization()
+        lastFullReloadGeneration = store.dataGeneration
     }
     private func reloadScopedWorkspace(_ plan: RefreshPlan, store: VoiceOSStore) async {
         StartupTrace.mark("reload.begin")

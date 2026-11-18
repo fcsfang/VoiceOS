@@ -251,6 +251,9 @@ public actor VoiceOSStore {
         FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
         LEFT JOIN transcripts t ON t.job_id=j.id LEFT JOIN transcript_versions v ON v.id=t.current_version_id
         """
+    /// Row-change counter for this connection; stable means no writes happened,
+    /// so a periodic full reload can skip re-reading the whole library.
+    public var dataGeneration: Int64 { db.writeGeneration }
     public func sources() throws -> [SourceRecord] {
         try db.query(Self.sourceSelect + " ORDER BY s.created_at DESC,s.id").map(Self.sourceRecord)
     }
