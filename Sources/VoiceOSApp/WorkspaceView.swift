@@ -577,7 +577,7 @@ struct WorkspaceView: View {
                 nav("首页",icon:"house",target:.home)
                 nav("主题",icon:"circle.hexagongrid",target:.themes)
                 nav("材料",icon:"books.vertical",target:.materials)
-                nav("消息监测",icon:"bell.badge",target:.monitor)
+                nav("消息监测",icon:"bell.badge",target:.monitor,badge:model.monitorOpenItemCount,badgeAccessibility:"未处理事项 \(model.monitorOpenItemCount) 条")
                 nav("行动",icon:"checkmark.circle",target:.actions,badge:model.unreadDeliveryCount)
                 nav("启动",icon:"arrow.up.forward",target:.initiate)
             }
@@ -629,7 +629,7 @@ struct WorkspaceView: View {
             .onAppear { AppBrand.applyApplicationIcon() }
             .onChange(of: colorScheme) { _, _ in AppBrand.applyApplicationIcon() }
     }
-    private func nav(_ title:String,icon:String,target:WorkspacePage,badge:Int = 0) -> some View {
+    private func nav(_ title:String,icon:String,target:WorkspacePage,badge:Int = 0,badgeAccessibility:String? = nil) -> some View {
         Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
             HStack(spacing:8) {
                 Label(title,systemImage:icon).vosFont(WorkspaceText.body.size, weight: section == title ? .semibold : .regular)
@@ -645,7 +645,7 @@ struct WorkspaceView: View {
                 // Plain buttons otherwise only hit-test the icon and text, leaving the padded row inert.
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityIdentifier("workspace.nav."+title)
-            .accessibilityLabel(badge > 0 ? title + "，AI 交付 \(badge) 份待读" : title)
+            .accessibilityLabel(badge > 0 ? title + "，" + (badgeAccessibility ?? "AI 交付 \(badge) 份待读") : title)
             .accessibilityAddTraits(section == title ? .isSelected : [])
     }
     private var header: some View {
