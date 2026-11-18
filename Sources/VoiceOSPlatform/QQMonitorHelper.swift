@@ -24,6 +24,15 @@ public struct QQMonitorConversation: Identifiable, Sendable, Equatable {
     }
 }
 
+public struct QQMonitorConversationList: Sendable, Equatable {
+    public let conversations: [QQMonitorConversation]
+    public let account: String?
+    public init(conversations: [QQMonitorConversation], account: String?) {
+        self.conversations = conversations
+        self.account = account
+    }
+}
+
 public struct QQMonitorDiagnosisItem: Identifiable, Sendable, Equatable {
     public let id: String
     public let title: String
@@ -56,11 +65,46 @@ public enum QQMonitorDiagnosis: Sendable, Equatable {
     }
 }
 
+public enum QQMonitorPythonProbe: Sendable, Equatable {
+    case available
+    case missingPackage
+    case cannotRun
+
+    public var label: String {
+        switch self {
+        case .available: return "可用"
+        case .missingPackage: return "缺少 qqnt_export_macos"
+        case .cannotRun: return "无法执行"
+        }
+    }
+}
+
 /// Runs the repository's short-lived read-only QQ script with JSON over
 /// stdin/stdout. Paths, account and group ids come from the caller; nothing
 /// is hardcoded and no QQ state is modified.
 public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
     public init() {}
+
+    public func checkPython(_ pythonPath: String) async -> QQMonitorPythonProbe {
+        guard FileManager.default.isExecutableFile(atPath: pythonPath) else { return .cannotRun }
+        do {
+            let result = try await Self.run(pythonPath: pythonPath,
+                                            arguments: ["-c", "import qqnt_export_macos"],
+                                            stdin: nil, timeout: 10, operation: "QQ Python 自检")
+            return Self.classifyPythonProbe(exitCode: result.exitCode,
+                                            stderr: String(decoding: result.stderr, as: UTF8.self))
+        } catch {
+            return .cannotRun
+        }
+    }
+
+    public static func classifyPythonProbe(exitCode: Int32?, stderr: String) -> QQMonitorPythonProbe {
+        if exitCode == 0 { return .available }
+        if stderr.contains("ModuleNotFoundError") || stderr.contains("No module named") {
+            return .missingPackage
+        }
+        return .cannotRun
+    }
 
     public func collect(conversationID: String, start: Date, end: Date, settings: QQMonitorSettings) async throws -> QQMonitorReadResult {
         guard FileManager.default.isExecutableFile(atPath: settings.pythonPath) else {
@@ -128,6 +172,10 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
     }
 
     public func conversations(settings: QQMonitorSettings) async throws -> [QQMonitorConversation] {
+        try await conversationList(settings: settings).conversations
+    }
+
+    public func conversationList(settings: QQMonitorSettings) async throws -> QQMonitorConversationList {
         guard FileManager.default.isExecutableFile(atPath: settings.pythonPath) else {
             throw VoiceOSError("Python 解释器不可用：\(settings.pythonPath)；请在消息监测设置中指定已安装 qqnt-export-macos 的解释器")
         }
@@ -147,12 +195,13 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
         let result = try await Self.run(pythonPath: settings.pythonPath, arguments: [settings.scriptPath],
                                         stdin: input, timeout: settings.timeout, operation: "QQ 群列表读取")
         guard result.exitCode == 0 else { throw Self.contractError(stderr: result.stderr) }
-        return try Self.decodeConversations(result.stdout)
+        return try Self.decodeConversationList(result.stdout)
     }
 
     /// Only group conversations are returned, newest first, capped at 100.
-    /// Private chats never surface in the source picker.
-    static func decodeConversations(_ data: Data) throws -> [QQMonitorConversation] {
+    /// Private chats never surface in the source picker. The account is
+    /// carried only when the script reports one.
+    static func decodeConversationList(_ data: Data) throws -> QQMonitorConversationList {
         guard data.count <= 8_000_000 else { throw VoiceOSError("QQ 群列表超过 8 MB 预算") }
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw VoiceOSError("QQ 群列表不是有效 JSON；请更新 qqmonitor 脚本")
@@ -161,6 +210,7 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
         guard let raw = root["conversations"] as? [[String: Any]] else {
             throw VoiceOSError("QQ 群列表缺少 conversations")
         }
+        let account = (root["account"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         var seen = Set<String>()
         var rows: [QQMonitorConversation] = []
         for item in raw {
@@ -182,7 +232,12 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
             default: return lhs.name < rhs.name
             }
         }
-        return Array(rows.prefix(100))
+        return QQMonitorConversationList(conversations: Array(rows.prefix(100)),
+                                         account: (account?.isEmpty == false) ? account : nil)
+    }
+
+    static func decodeConversations(_ data: Data) throws -> [QQMonitorConversation] {
+        try decodeConversationList(data).conversations
     }
 
     /// Itemized dependency checks for the settings page. Nothing is modified;
@@ -252,7 +307,7 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
         return items
     }
 
-    private static func keyIsReadable(_ path: String) -> Bool {
+    public static func keyIsReadable(_ path: String) -> Bool {
         guard let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path)) else { return false }
         defer { try? handle.close() }
         return (try? handle.read(upToCount: 1))?.isEmpty == false
