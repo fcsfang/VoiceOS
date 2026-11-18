@@ -465,7 +465,8 @@ struct WorkspaceSourceView: View {
                     }.padding(16).frame(maxWidth:.infinity,alignment:.leading)
                         .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
                 }
-                if let issues=source.transcriptionReview?.unresolved_issues,!issues.isEmpty {
+                let issues=source.unresolvedTranscriptionIssues
+                if !issues.isEmpty {
                     UnresolvedIssuesBlock(issues:issues,playbackAvailable:playbackAvailable,playbackLabel:{ unresolvedIssuePlaybackLabel($0) },play:{ playUnresolvedIssue($0) },jump:{ jumpToOriginal(spanID:$0) })
                         .padding(16).frame(maxWidth:.infinity,alignment:.leading)
                         .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
@@ -697,9 +698,10 @@ struct WorkspaceSourceView: View {
                     Divider()
                     DisclosureGroup("文字校正、理解与修订历史") {
                         VStack(alignment:.leading,spacing:13) {
-                            if let review=source.transcriptionReview {
+                            if source.transcriptionReview != nil {
                                 Text("转写校正已保存，原始版本可追溯。").vosFont(WorkspaceText.meta)
-                                if let issues=review.unresolved_issues,!issues.isEmpty {
+                                let issues=source.unresolvedTranscriptionIssues
+                                if !issues.isEmpty {
                                     UnresolvedIssuesBlock(issues:issues,playbackAvailable:playbackAvailable,playbackLabel:{ unresolvedIssuePlaybackLabel($0) },play:{ playUnresolvedIssue($0) },jump:{ jumpToOriginal(spanID:$0) })
                                 }
                             }

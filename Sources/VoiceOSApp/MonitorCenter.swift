@@ -570,15 +570,8 @@ extension ControlCenter {
         await runMonitorCheck(automatic: true)
     }
 
-    var monitorAttentionSignature: String? {
-        guard let report = monitorReports.first else { return nil }
-        guard report.state != .complete || report.deliveryState == "failed" else { return nil }
-        return report.reportDate + "|" + report.state.rawValue + "|" + report.deliveryState
-    }
-
     var monitorNeedsAttention: Bool {
-        guard let signature = monitorAttentionSignature else { return false }
-        return UserDefaults.standard.string(forKey: "voiceos.monitor.attentionSeen.v1") != signature
+        MonitorAttention.needsAttention(monitorReports.first)
     }
 
     var monitorAttentionText: String? {
@@ -596,8 +589,8 @@ extension ControlCenter {
     }
 
     func markMonitorAttentionSeen() {
-        guard let signature = monitorAttentionSignature else { return }
-        UserDefaults.standard.set(signature, forKey: "voiceos.monitor.attentionSeen.v1")
+        guard let signature = MonitorAttention.seenSignatureWhenOpened(for: monitorReports.first) else { return }
+        UserDefaults.standard.set(signature, forKey: MonitorAttention.seenKey)
         monitorAttentionRevision += 1
     }
 

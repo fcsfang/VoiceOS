@@ -66,14 +66,6 @@ struct WorkspaceTranscriptReviewPoint: Identifiable {
     var id: String { source.id }
 }
 
-extension SourceRecord {
-    /// Unresolved transcription doubts left by a review of the current version.
-    var unresolvedTranscriptionIssueCount: Int {
-        guard let review = transcriptionReview, review.completed else { return 0 }
-        return review.unresolved_issues?.count ?? 0
-    }
-}
-
 extension ControlCenter {
     var workspaceProcessingStatus: WorkspaceProcessingStatus {
         .init(
