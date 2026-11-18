@@ -807,6 +807,7 @@ final class ControlCenter: ObservableObject {
     @Published var actionClarifications: [String: String] = [:]
     @Published var stalledOutcomes: [ActionRecord] = []
     @Published var homeSnapshot = RecentContentHomeSnapshot(days: [], digests: [:])
+    private(set) var sourcePageIndex = SourcePageIndex()
     @Published var actionReviewLedgers: [String: ActionReviewLedger] = [:]
     @Published var focusedTaskID: String?
     @Published var correctionImpacts: [CorrectionActionImpact] = []
@@ -1487,6 +1488,9 @@ final class ControlCenter: ObservableObject {
         recentClueOverrides = snapshot.recentClueOverrides
         publishHomeSnapshot()
         actionReviewLedgers = snapshot.actionReviewLedgers
+        // Pause review reads the ledgers, so the index builds after them.
+        sourcePageIndex = SourcePageIndex(records: records, claims: claims, actions: actionRecords,
+                                          currentClaimsBySource: currentClaimsBySource, ledgers: actionReviewLedgers)
         taskInitiations = snapshot.taskInitiations
         recentOutcomes = snapshot.recentOutcomes
         compensationPlans = snapshot.compensationPlans

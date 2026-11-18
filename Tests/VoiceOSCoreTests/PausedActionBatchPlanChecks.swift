@@ -230,4 +230,149 @@ final class PausedActionBatchPlanChecks: XCTestCase {
         XCTAssertEqual(plan.skips.first { $0.sourceID == "batch-busy" }?.reason, .busy)
         XCTAssertEqual(plan.skips.first { $0.sourceID == "request-busy" }?.reason, .busy)
     }
+
+    private func groupedPresentation(_ id: String, sourceIDs: [String],
+                                     previousActionIDs: [String]) -> RecordingPresentation {
+        var presentation = RecordingPresentation()
+        var expression = RecordingExpression(id: id, sourceIDs: sourceIDs, title: "分组",
+                                             summary: "摘要", reason: "依据", responseIDs: ["response"],
+                                             versions: Dictionary(uniqueKeysWithValues: sourceIDs.map { ($0, "t-" + $0) }),
+                                             policies: Dictionary(uniqueKeysWithValues: sourceIDs.map { ($0, 1) }),
+                                             state: "completed", previousActionIDs: previousActionIDs)
+        expression.taskReviewPending = true
+        presentation.expression = expression
+        return presentation
+    }
+
+    func testSourcePageIndexMatchesDirectReads() {
+        let shared = groupedPresentation("e1", sourceIDs: ["s1", "s2"], previousActionIDs: ["legacy"])
+        let broken = groupedPresentation("e2", sourceIDs: ["s4", "missing"], previousActionIDs: [])
+        let records = [source("s1", createdAt: "2026-03-01T00:00:00Z", presentation: shared),
+                       source("s2", createdAt: "2026-03-02T00:00:00Z", presentation: shared),
+                       source("s3", createdAt: "2026-03-03T00:00:00Z"),
+                       source("s4", createdAt: "2026-03-04T00:00:00Z", presentation: broken)]
+        let claims = [claim("c1", sourceIDs: ["s1"]),
+                      claim("c2", sourceIDs: ["s2"]),
+                      claim("c12", sourceIDs: ["s1", "s2"]),
+                      claim("c3", sourceIDs: ["s3"]),
+                      claim("c4", sourceIDs: ["s4"], validity: "frozen"),
+                      claim("cNone", sourceIDs: [])]
+        let actions = [action("a1", claimID: "c1", validity: "current"),
+                       action("a2", claimID: "c2"),
+                       action("a12", claimID: "c12", validity: "current"),
+                       action("a12-dismissed", claimID: "c12", state: "dismissed"),
+                       action("a3", claimID: "c3", validity: "current"),
+                       action("a4", claimID: "c4"),
+                       action("aNone", claimID: "cNone", validity: "current"),
+                       action("legacy", claimID: "c1")]
+        var current: [String: [CandidateClaim]] = [:]
+        for claim in claims {
+            for reference in claim.references { current[reference.sourceID, default: []].append(claim) }
+        }
+        let ledgers = ActionReviewLedger.buildMap(expressions: records.compactMap { $0.presentation?.expression },
+                                                  actions: actions, resolutions: [], acknowledgements: [],
+                                                  linkedActionIDs: [])
+        let index = SourcePageIndex(records: records, claims: claims, actions: actions,
+                                    currentClaimsBySource: current, ledgers: ledgers)
+        let catalog = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        for record in records {
+            let directExpression = record.recordingExpression(in: catalog)
+            let indexedExpression = index.expression(for: record.id)
+            XCTAssertEqual(indexedExpression?.id, directExpression?.id)
+            XCTAssertEqual(indexedExpression?.sourceIDs, directExpression?.sourceIDs)
+            XCTAssertEqual(indexedExpression?.state, directExpression?.state)
+            let ids = Set(directExpression?.sourceIDs ?? [record.id])
+            let claimIDs = Set(claims.filter { !$0.references.allSatisfy { !ids.contains($0.sourceID) } }.map(\.id))
+            let directActions = actions.filter { claimIDs.contains($0.claimID) && $0.state != "dismissed" }
+            XCTAssertEqual(index.actions(for: ids).map(\.id), directActions.map(\.id))
+            for action in actions {
+                let directReason = WorkspaceActionPause.reason(for: action, sources: records, claims: claims,
+                                                               currentClaimsBySource: current, actions: actions,
+                                                               ledgers: ledgers)
+                XCTAssertEqual(index.requiresReview(action.id), directReason != nil)
+            }
+        }
+    }
+
+    func testSourcePageIndexReadsDoNotRescanTheLibrary() {
+        let clock = ContinuousClock()
+        let librarySize = 400
+        var records = (0..<librarySize).map { source("src-\($0)", createdAt: "2026-04-01T00:00:00Z") }
+        let shared = groupedPresentation("e0", sourceIDs: ["src-0", "src-1"], previousActionIDs: ["action-0"])
+        records[0] = source("src-0", createdAt: "2026-04-01T00:00:00Z", presentation: shared)
+        records[1] = source("src-1", createdAt: "2026-04-01T00:00:00Z", presentation: shared)
+        let claims = (0..<librarySize).map { claim("claim-\($0)", sourceIDs: ["src-\($0)"]) }
+        let actions = (0..<120).map { offset in
+            action("action-\(offset)", claimID: "claim-\(offset)",
+                   validity: offset % 3 == 0 ? "frozen" : "current",
+                   state: offset % 17 == 0 ? "dismissed" : "open")
+        }
+        var current: [String: [CandidateClaim]] = [:]
+        for claim in claims {
+            for reference in claim.references { current[reference.sourceID, default: []].append(claim) }
+        }
+        let ledgers = ActionReviewLedger.buildMap(expressions: records.compactMap { $0.presentation?.expression },
+                                                  actions: actions, resolutions: [], acknowledgements: [],
+                                                  linkedActionIDs: [])
+        let pageRecords = [records[0], records[2], records[10]]
+        let passes = 40
+
+        // One pass mirrors the sample's body reads: expression 8 times, actions 3, paused actions 5.
+        func directPass(_ record: SourceRecord) -> Int {
+            var work = 0
+            for _ in 0..<8 {
+                let catalog = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                if record.recordingExpression(in: catalog) != nil { work += 1 }
+            }
+            let catalog = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let ids = Set(record.recordingExpression(in: catalog)?.sourceIDs ?? [record.id])
+            for _ in 0..<3 {
+                let claimIDs = Set(claims.filter { !$0.references.allSatisfy { !ids.contains($0.sourceID) } }.map(\.id))
+                work += actions.filter { claimIDs.contains($0.claimID) && $0.state != "dismissed" }.count
+            }
+            for _ in 0..<5 {
+                let claimIDs = Set(claims.filter { !$0.references.allSatisfy { !ids.contains($0.sourceID) } }.map(\.id))
+                let page = actions.filter { claimIDs.contains($0.claimID) && $0.state != "dismissed" }
+                work += page.filter {
+                    WorkspaceActionPause.reason(for: $0, sources: records, claims: claims,
+                                                currentClaimsBySource: current, actions: actions,
+                                                ledgers: ledgers) != nil
+                }.count
+            }
+            return work
+        }
+
+        var directWork = 0
+        let directDuration = clock.measure {
+            for _ in 0..<passes {
+                for record in pageRecords { directWork += directPass(record) }
+            }
+        }
+        var index: SourcePageIndex!
+        let buildDuration = clock.measure {
+            index = SourcePageIndex(records: records, claims: claims, actions: actions,
+                                    currentClaimsBySource: current, ledgers: ledgers)
+        }
+        var indexWork = 0
+        let readDuration = clock.measure {
+            for _ in 0..<passes {
+                for record in pageRecords {
+                    for _ in 0..<8 {
+                        if index.expression(for: record.id) != nil { indexWork += 1 }
+                    }
+                    let ids = Set(index.expression(for: record.id)?.sourceIDs ?? [record.id])
+                    for _ in 0..<3 { indexWork += index.actions(for: ids).count }
+                    for _ in 0..<5 { indexWork += index.actions(for: ids).filter { index.requiresReview($0.id) }.count }
+                }
+            }
+        }
+        XCTAssertEqual(directWork, indexWork)
+        let indexedDuration = buildDuration + readDuration
+        func seconds(_ duration: Duration) -> Double {
+            let components = duration.components
+            return Double(components.seconds) + Double(components.attoseconds) / 1e18
+        }
+        print("source-page body reads: direct=\(seconds(directDuration))s indexed=\(seconds(indexedDuration))s (build=\(seconds(buildDuration))s reads=\(seconds(readDuration))s)")
+        XCTAssertLessThan(indexedDuration, directDuration)
+    }
 }

@@ -89,9 +89,9 @@ struct WorkspaceSourceView: View {
     var openInitiation:(String)->Void = { _ in }
     var openFollowups:()->Void = {}
     var scroll: Binding<ScrollPosition>? = nil
-    private var catalog:[String:SourceRecord] { Dictionary(uniqueKeysWithValues: model.records.map { ($0.id,$0) }) }
+    private var catalog:[String:SourceRecord] { model.sourcePageIndex.recordsByID }
     private var expression:RecordingExpression? {
-        source.recordingExpression(in:catalog)
+        model.sourcePageIndex.expression(for:source.id)
     }
     private var expressionIDs:Set<String> { Set(expression?.sourceIDs ?? [source.id]) }
     @State private var loadedContextLinks:[RecordingContextLink]=[]
@@ -100,7 +100,7 @@ struct WorkspaceSourceView: View {
         model.records.filter { expressionIDs.contains($0.id) }.compactMap { $0.presentation?.recordingContext }
     }
     private func pairingIsCurrent(_ pair:RecordingContext)->Bool {
-        guard let personal=model.records.first(where: { $0.id == pair.personalSourceID }),let external=model.records.first(where: { $0.id == pair.externalSourceID }) else { return false }
+        guard let personal=catalog[pair.personalSourceID],let external=catalog[pair.externalSourceID] else { return false }
         return !personal.localOnly && !external.localOnly && !personal.needsTranscriptionReview && !external.needsTranscriptionReview && personal.transcriptVersionID == pair.personalVersionID && external.transcriptVersionID == pair.externalVersionID && personal.policyVersion == pair.personalPolicyVersion && external.policyVersion == pair.externalPolicyVersion
     }
     private var contextLinks:[RecordingContextLink] {
@@ -111,7 +111,7 @@ struct WorkspaceSourceView: View {
     }
     private var contextReadKey:String {
         let pairs = programPairs.map { pair -> String in
-            let external = model.records.first { $0.id == pair.externalSourceID }
+            let external = catalog[pair.externalSourceID]
             return pair.personalVersionID + pair.externalVersionID + String(pair.personalPolicyVersion) + String(pair.externalPolicyVersion)
                 + (external?.transcriptVersionID ?? "") + String(external?.policyVersion ?? 0)
         }.joined()
@@ -229,8 +229,7 @@ struct WorkspaceSourceView: View {
         return groups
     }
     private var actions:[ActionRecord] {
-        let ids=Set(model.claims.filter { !$0.references.allSatisfy { !expressionIDs.contains($0.sourceID) } }.map(\.id))
-        return model.actionRecords.filter { ids.contains($0.claimID) && $0.state != "dismissed" }
+        model.sourcePageIndex.actions(for:expressionIDs)
     }
     private var outlineSections:[SourceOutlineSection] {
         guard let transcript=source.transcript else { return [] }
@@ -264,7 +263,7 @@ struct WorkspaceSourceView: View {
     }
     private var automaticallyUpdating:Bool { pendingUnderstanding && model.fullRecordingBusy }
     private var pausedThoughts: [CandidateClaim] { (model.currentClaimsBySource[source.id] ?? []).filter { $0.validity != "current" } }
-    private var pausedActions: [ActionRecord] { actions.filter { model.workspaceTaskRequiresReview($0) } }
+    private var pausedActions: [ActionRecord] { actions.filter { model.sourcePageIndex.requiresReview($0.id) } }
     private var selectedSpan:TranscriptSpan? {
         guard !selectedText.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,let transcript=source.transcript,
               let offset=SelectableText.scalarOffset(ofUTF16Offset:selectedRange.location,in:transcript) else { return nil }
@@ -281,7 +280,7 @@ struct WorkspaceSourceView: View {
                 DisclosureGroup("本次表达的录音与合并依据") {
                     Text(expression.reason).vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical,10)
                     ForEach(Array(expression.sourceIDs.enumerated()),id:\.element) { index,id in
-                        if let member=model.records.first(where: { $0.id == id }) {
+                        if let member=catalog[id] {
                             Button("第 \(index+1) 段 · "+member.name+(id == source.id ? "（当前原文）" : "")) { openSource(id) }.padding(.vertical,5).disabled(id == source.id)
                         }
                     }
@@ -331,7 +330,7 @@ struct WorkspaceSourceView: View {
                             DisclosureGroup("原话依据与调整") {
                                 VStack(alignment:.leading,spacing:10) {
                                     ForEach(Array(thought.references.enumerated()),id:\.offset) { _,ref in
-                                        if let member=model.records.first(where: { $0.id == ref.sourceID }),expressionIDs.contains(member.id),ref.transcriptVersionID == member.transcriptVersionID,
+                                        if let member=catalog[ref.sourceID],expressionIDs.contains(member.id),ref.transcriptVersionID == member.transcriptVersionID,
                                            let span=member.spans.first(where: { $0.id == ref.spanID }),let text=member.transcript {
                                             if expressionIDs.count > 1 {
                                                 QuoteHoverPreview(sourceTitle:member.displayTitle,snippet:quote(span,text:text),open:{ openSource(member.id) }) {
@@ -527,7 +526,7 @@ struct WorkspaceSourceView: View {
                 if !programPairs.isEmpty {
                     WorkspaceSection(title:"节目与我的思考",icon:"waveform",count:contextLinks.count) {
                         ForEach(programPairs,id:\.externalSourceID) { pair in
-                            if let external=model.records.first(where: { $0.id == pair.externalSourceID }) {
+                            if let external=catalog[pair.externalSourceID] {
                                 WorkspaceRow(title:external.displayTitle,subtitle:pairingIsCurrent(pair) ? "同次录制的完整节目原文 · 可单独回听" : "节目原话或处理许可已变化，关联等待更新",icon:"headphones",trailing:"节目原文") { openSource(external.id) }
                             }
                         }
@@ -687,7 +686,7 @@ struct WorkspaceSourceView: View {
                         ForEach(currentGoals) { action in relatedActionRow(action, in: currentGoals) }
                     }
                 }
-                let historyActions = actions.filter { $0.validity != "current" && !model.workspaceTaskRequiresReview($0) }
+                let historyActions = actions.filter { $0.validity != "current" && !model.sourcePageIndex.requiresReview($0.id) }
                 if !historyActions.isEmpty {
                     DisclosureGroup("之前提取的任务与完成记录（\(historyActions.count)）") {
                         ForEach(historyActions) { action in WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看记录") { openTask(action.id) } }
@@ -769,7 +768,7 @@ struct WorkspaceSourceView: View {
             CorrectionImpactView(model:model,dismiss:{ showingCorrectionImpacts=false;if let id=model.selected,id != source.id { openSource(id) } })
         }
         .sheet(item:$naming) { target in
-            if let expression=target.recordingExpression(in:catalog), expression.sourceIDs.count > 1 {
+            if let expression=model.sourcePageIndex.expression(for:target.id), expression.sourceIDs.count > 1 {
                 RecordingExpressionTitleEditor(record:target,expression:expression,model:model) { naming=nil }
             } else {
                 RecordingTitleEditor(record:target,model:model) { naming=nil }
@@ -1008,7 +1007,7 @@ struct WorkspaceSourceView: View {
     private func contextPlaybackLabel(_ id:String,role:String) -> String {
         guard let claim=model.claims.first(where: { $0.id == id }) else { return "回听"+role+"原话" }
         let hasTime=claim.references.contains { ref in
-            model.records.first(where: { $0.id == ref.sourceID })?.spans.contains(where: { $0.id == ref.spanID && $0.startMS != nil && $0.endMS != nil }) == true
+            catalog[ref.sourceID]?.spans.contains(where: { $0.id == ref.spanID && $0.startMS != nil && $0.endMS != nil }) == true
         }
         return hasTime ? "回听"+role+"原话" : "回听"+role+"完整录音（更正稿未精确定位）"
     }
