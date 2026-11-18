@@ -290,7 +290,9 @@ extension VoiceOSStore {
     /// user's status (including done and dismissed); only an unknown link
     /// creates a new row. The report's item count always reflects every item
     /// currently carried in it.
-    public func applyMonitorAnalysis(reportID: String, date: String, items: [NotificationAnalysisItem]) throws -> Int {
+    /// The analyzed message ids are marked in the same transaction as the
+    /// items, so a crash after analysis never strands or double-consumes text.
+    public func applyMonitorAnalysis(reportID: String, date: String, items: [NotificationAnalysisItem], analyzedMessageIDs: [String] = []) throws -> Int {
         let now = Self.now()
         return try db.transaction {
             var touchedReports = Set<String>()
@@ -316,6 +318,15 @@ extension VoiceOSStore {
                     """, [UUID().uuidString, reportID, item.title, item.whyRelevant, item.suggestedAction, item.deadlineText,
                           item.deadlineDate, item.conditions, item.evidenceQuote, refsJSON, item.uncertainty,
                           item.category.rawValue, item.relatedExistingItemID, date, date, now, now])
+            }
+            var start = 0
+            while start < analyzedMessageIDs.count {
+                let chunk = analyzedMessageIDs[start..<min(start + 500, analyzedMessageIDs.count)]
+                let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+                let arguments: [String?] = [reportID] + chunk.map(Optional.some)
+                try db.execute("UPDATE monitor_messages SET analyzed_report_id=? WHERE id IN (\(placeholders)) AND analyzed_report_id IS NULL",
+                               arguments)
+                start += 500
             }
             for touched in touchedReports.union([reportID]) {
                 let count = Int(try db.query("SELECT COUNT(*) AS n FROM monitor_items WHERE report_id=?", [touched]).first?["n"] ?? "0") ?? 0
@@ -389,6 +400,28 @@ extension VoiceOSStore {
             let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
             let arguments: [String?] = [sourceID] + chunk.map(Optional.some)
             for row in try db.query("SELECT * FROM monitor_messages WHERE source_id=? AND external_id IN (\(placeholders)) ORDER BY sent_at, external_id", arguments) {
+                messages.append(Self.monitorMessage(row))
+            }
+            start += 500
+        }
+        return messages
+    }
+
+    /// Messages from the given sources that no stored analysis has consumed
+    /// yet. This is the analysis input, so a failed or unauthorized run never
+    /// strands collected text behind a cursor.
+    public func unanalyzedMonitorMessages(sourceIDs: [String]) throws -> [MonitorMessage] {
+        let ids = Array(Set(sourceIDs)).sorted()
+        guard !ids.isEmpty else { return [] }
+        var messages: [MonitorMessage] = []
+        var start = 0
+        while start < ids.count {
+            let chunk = Array(ids[start..<min(start + 500, ids.count)])
+            let placeholders = Array(repeating: "?", count: chunk.count).joined(separator: ",")
+            for row in try db.query("""
+                SELECT * FROM monitor_messages WHERE source_id IN (\(placeholders)) AND analyzed_report_id IS NULL
+                ORDER BY COALESCE(sent_at, collected_at), external_id
+                """, chunk.map(Optional.some)) {
                 messages.append(Self.monitorMessage(row))
             }
             start += 500

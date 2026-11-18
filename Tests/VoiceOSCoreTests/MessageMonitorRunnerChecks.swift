@@ -46,10 +46,12 @@ private struct EchoAnalysis: NotificationAnalysisPort {
 
 private actor FlakyAnalysis: NotificationAnalysisPort {
     var failuresLeft: Int
+    private(set) var inputs: [[String]] = []
     let identity = NotificationAnalysisIdentity(provider: "fixture", model: "fixture",
                                                 promptVersion: "message-monitor-daily-v1", schemaVersion: "v1")
     init(failuresLeft: Int) { self.failuresLeft = failuresLeft }
     func analyze(_ input: NotificationAnalysisInput) async throws -> NotificationAnalysisResult {
+        inputs.append(input.messages.map(\.externalID))
         if failuresLeft > 0 {
             failuresLeft -= 1
             throw VoiceOSError("fixture 模型暂时失败")
@@ -222,5 +224,87 @@ final class MessageMonitorRunnerChecks: XCTestCase {
         XCTAssertEqual(datedComponents?.year, 2026, "可解析日期的条目应把发布日期写入 sent_at")
         XCTAssertEqual(datedComponents?.month, 11)
         XCTAssertEqual(datedComponents?.day, 18)
+    }
+
+    func testAnalysisFailureKeepsMessagesPendingUntilRetryMarksThem() async throws {
+        let store = try await openStore()
+        _ = try await store.addMonitorSource(kind: .qqGroup, displayName: "示例班级群",
+                                             configJSON: "{\"conversation_id\":\"group:fixture\"}")
+        let day = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9))!
+        let analysis = FlakyAnalysis(failuresLeft: 1)
+        let failed = try await runner(store: store, qq: StubQQCollector(messages: [message("m1", text: "奖学金申请截止 11 月 20 日")], failure: nil),
+                                      analysis: analysis, now: day).runDailyCheck(date: day)
+        XCTAssertEqual(failed.state, .failed, "模型失败应把当天报告标为失败")
+        let db = await store.db
+        XCTAssertEqual(try db.query("SELECT COUNT(*) AS n FROM monitor_messages WHERE analyzed_report_id IS NULL").first?["n"], "1",
+                       "分析失败的消息必须保持未分析，等待补分析")
+        let retried = try await runner(store: store, qq: StubQQCollector(messages: [], failure: nil),
+                                       analysis: analysis, now: day).runDailyCheck(date: day)
+        XCTAssertEqual(retried.state, .complete, "再次检查应补分析同一批未分析原文并成功")
+        XCTAssertEqual(retried.itemCount, 1, "补分析应生成今日报告的事项")
+        let stored = try await store.monitorReport(date: "2026-11-18")
+        XCTAssertEqual(stored?.state, .complete, "补分析成功后今日报告应更新为完整")
+        XCTAssertEqual(try db.query("SELECT analyzed_report_id FROM monitor_messages WHERE external_id='m1'").first?["analyzed_report_id"],
+                       stored?.id, "分析成功后消息应标记为当前报告 id")
+    }
+
+    func testAnalyzedMessagesAreNotAnalyzedAgain() async throws {
+        let store = try await openStore()
+        _ = try await store.addMonitorSource(kind: .qqGroup, displayName: "示例班级群",
+                                             configJSON: "{\"conversation_id\":\"group:fixture\"}")
+        let day = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9))!
+        let analysis = FlakyAnalysis(failuresLeft: 0)
+        let first = try await runner(store: store, qq: StubQQCollector(messages: [message("m1", text: "奖学金通知全文")], failure: nil),
+                                     analysis: analysis, now: day).runDailyCheck(date: day)
+        XCTAssertEqual(first.state, .complete, "首次分析应成功")
+        let second = try await runner(store: store, qq: StubQQCollector(messages: [], failure: nil),
+                                      analysis: analysis, now: day).runDailyCheck(date: day)
+        XCTAssertEqual(second.state, .complete, "已全部分析且无新增时应报告检查完成")
+        XCTAssertEqual(second.itemCount, 1, "重复检查应保留今日报告的事项数")
+        let calls = await analysis.inputs
+        XCTAssertEqual(calls.count, 1, "已分析的消息不应再次发送给模型")
+    }
+
+    func testNewMessagesMergeWithPendingOnesInOneAnalysis() async throws {
+        let store = try await openStore()
+        _ = try await store.addMonitorSource(kind: .qqGroup, displayName: "示例班级群",
+                                             configJSON: "{\"conversation_id\":\"group:fixture\"}")
+        let day1 = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9))!
+        let day2 = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 19, hour: 9))!
+        let analysis = FlakyAnalysis(failuresLeft: 1)
+        _ = try await runner(store: store, qq: StubQQCollector(messages: [message("m1", text: "第一天的通知")], failure: nil),
+                             analysis: analysis, now: day1).runDailyCheck(date: day1)
+        let merged = try await runner(store: store,
+                                      qq: StubQQCollector(messages: [message("m1", text: "第一天的通知"),
+                                                                     message("m2", text: "第二天的通知")], failure: nil),
+                                      analysis: analysis, now: day2).runDailyCheck(date: day2)
+        XCTAssertEqual(merged.state, .complete, "合并补分析应成功")
+        XCTAssertEqual(merged.newMessageCount, 1, "只有真正新增的消息计入新增数")
+        XCTAssertEqual(merged.itemCount, 2, "新旧未分析消息应合并生成事项")
+        let calls = await analysis.inputs
+        XCTAssertEqual(calls.count, 2, "第二天应执行一次合并分析")
+        XCTAssertEqual(Set(calls.last ?? []), ["m1", "m2"], "前一天未分析与本次新采集的消息应合并送分析且不重复")
+        let db = await store.db
+        XCTAssertEqual(try db.query("SELECT COUNT(*) AS n FROM monitor_messages WHERE analyzed_report_id IS NULL").first?["n"], "0",
+                       "合并分析成功后全部消息应标记为已分析")
+    }
+
+    func testAllAnalyzedNoNewMessagesReportsNothingToDo() async throws {
+        let store = try await openStore()
+        _ = try await store.addMonitorSource(kind: .qqGroup, displayName: "示例班级群",
+                                             configJSON: "{\"conversation_id\":\"group:fixture\"}")
+        let day1 = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9))!
+        let day2 = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 19, hour: 9))!
+        let analysis = FlakyAnalysis(failuresLeft: 0)
+        _ = try await runner(store: store, qq: StubQQCollector(messages: [message("m1", text: "第一天的通知")], failure: nil),
+                             analysis: analysis, now: day1).runDailyCheck(date: day1)
+        let second = try await runner(store: store, qq: StubQQCollector(messages: [], failure: nil),
+                                      analysis: analysis, now: day2).runDailyCheck(date: day2)
+        XCTAssertEqual(second.state, .complete, "全部已分析且无新增时应为检查完成")
+        XCTAssertTrue(second.summary.contains("无新增待办"), "无待分析消息时摘要应为检查完成、无新增待办")
+        let calls = await analysis.inputs
+        XCTAssertEqual(calls.count, 1, "没有未分析消息时不应再调用模型")
+        let stored = try await store.monitorReport(date: "2026-11-19")
+        XCTAssertEqual(stored?.state, .complete, "次日报告应为完整")
     }
 }
