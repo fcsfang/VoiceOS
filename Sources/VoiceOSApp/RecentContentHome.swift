@@ -104,18 +104,20 @@ struct RecentContentHome: View {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if !recentThoughts.isEmpty { recentThoughtsSection(recentThoughts) }
                     ForEach(days) { day in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(dayLabel(day.date)).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader).padding(.horizontal, 10)
-                            ForEach(day.items) { item in
-                                Button { selectedID = item.id } label: { row(item) }
-                                    .buttonStyle(.plain)
-                                    .id(item.id)
-                                    .background {
-                                        GeometryReader { geometry in
-                                            Color.clear.preference(key: TimelineAnchorKey.self, value: [item.id: geometry.frame(in: .named(timelineSpace)).minY])
+                        VStack(alignment: .leading, spacing: 6) {
+                            dayHeader(day)
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(day.items) { item in
+                                    Button { selectedID = item.id } label: { row(item) }
+                                        .buttonStyle(.plain)
+                                        .id(item.id)
+                                        .background {
+                                            GeometryReader { geometry in
+                                                Color.clear.preference(key: TimelineAnchorKey.self, value: [item.id: geometry.frame(in: .named(timelineSpace)).minY])
+                                            }
                                         }
-                                    }
-                                    .accessibilityIdentifier("recent.item")
+                                        .accessibilityIdentifier("recent.item")
+                                }
                             }
                         }
                     }
@@ -139,6 +141,15 @@ struct RecentContentHome: View {
             .onKeyPress { handleTimelineKey($0) }
             .onAppear { requestTimelineFocus() }
         }
+    }
+
+    private func dayHeader(_ day: RecentContentDay) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 1).fill(palette.accent).frame(width: 2, height: 12)
+                .accessibilityHidden(true)
+            Text(dayLabel(day.date)).vosFont(WorkspaceText.meta.size, weight: .semibold)
+                .foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
+        }.padding(.horizontal, 10)
     }
 
     private func updateTimelineAnchor(_ positions: [String: CGFloat]) {
@@ -204,10 +215,7 @@ struct RecentContentHome: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10).padding(.vertical, 8)
-        .background(isSelected ? palette.selection : .clear, in: RoundedRectangle(cornerRadius: 9))
-        .overlay { if isSelected { RoundedRectangle(cornerRadius: 9).strokeBorder(palette.focusRing, lineWidth: 1) } }
-        .contentShape(RoundedRectangle(cornerRadius: 9))
+        .homeCard(isSelected: isSelected)
         .accessibilityAddTraits(isSelected ? .isSelected : AccessibilityTraits())
     }
 
@@ -509,33 +517,34 @@ struct RecentContentHome: View {
                 .foregroundStyle(palette.secondaryText).padding(.horizontal, 10)
                 .accessibilityAddTraits(.isHeader)
             ForEach(groups) { group in
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text("\(dayLabel(group.date)) · \(group.entries.count) 条")
                         .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
                         .padding(.horizontal, 10)
-                    ForEach(group.entries) { entry in
-                        Button { openClaim(entry.id) } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.statement).vosFont(WorkspaceText.meta)
-                                    .foregroundStyle(palette.text).lineLimit(3)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .multilineTextAlignment(.leading)
-                                Text(entry.sourceTitle).vosFont(WorkspaceText.caption)
-                                    .foregroundStyle(palette.secondaryText).lineLimit(2)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .multilineTextAlignment(.leading)
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(group.entries) { entry in
+                            Button { openClaim(entry.id) } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(entry.statement).vosFont(WorkspaceText.meta)
+                                        .foregroundStyle(palette.text).lineLimit(3)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .multilineTextAlignment(.leading)
+                                    Text(entry.sourceTitle).vosFont(WorkspaceText.caption)
+                                        .foregroundStyle(palette.secondaryText).lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .multilineTextAlignment(.leading)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .homeCard(isSelected: false)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 10).padding(.vertical, 4)
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            .help("打开这条想法的原话")
+                            .accessibilityIdentifier("recent.thought")
                         }
-                        .buttonStyle(.plain)
-                        .help("打开这条想法的原话")
-                        .accessibilityIdentifier("recent.thought")
                     }
                 }
             }
-            Rectangle().fill(palette.border).frame(height: 1).padding(.top, 4)
+            Rectangle().fill(palette.border).frame(height: 1).padding(.top, 8)
         }
     }
 
@@ -723,5 +732,25 @@ private struct ThoughtLine: View {
             .help("打开这条想法出自的材料")
             .accessibilityLabel("看原话")
         }
+    }
+}
+
+private struct HomeCard: ViewModifier {
+    @Environment(\.workspacePalette) private var palette
+    let isSelected: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius)
+        content
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .background(isSelected ? palette.selection : palette.surface, in: shape)
+            .overlay { shape.strokeBorder(isSelected ? palette.focusRing : palette.border, lineWidth: 1) }
+            .contentShape(shape)
+    }
+}
+
+private extension View {
+    func homeCard(isSelected: Bool) -> some View {
+        modifier(HomeCard(isSelected: isSelected))
     }
 }
