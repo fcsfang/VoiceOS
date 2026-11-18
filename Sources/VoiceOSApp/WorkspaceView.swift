@@ -6,10 +6,10 @@ import VoiceOSCore
 // One navigation state owns the workspace. Discussion is a sibling, so expanding
 // it never replaces the reading view or its disclosure/scroll state.
 enum WorkspacePage: Hashable {
-    case home, themes, materials, actions, initiate, source(String), delivery(String), task(String), settings, capture, search, tool(String)
+    case home, themes, materials, monitor, actions, initiate, source(String), delivery(String), task(String), settings, capture, search, tool(String)
     var isTopLevel: Bool {
         switch self {
-        case .home, .themes, .materials, .actions, .initiate, .settings: true
+        case .home, .themes, .materials, .monitor, .actions, .initiate, .settings: true
         default: false
         }
     }
@@ -326,6 +326,7 @@ struct WorkspaceView: View {
         switch page {
         case .themes: "主题"
         case .materials: "材料"
+        case .monitor: "消息监测"
         case .source: sourceOpenedFromTheme ? "主题" : "材料"
         case .actions,.task,.delivery: "行动"
         case .home: "首页"
@@ -576,6 +577,7 @@ struct WorkspaceView: View {
                 nav("首页",icon:"house",target:.home)
                 nav("主题",icon:"circle.hexagongrid",target:.themes)
                 nav("材料",icon:"books.vertical",target:.materials)
+                nav("消息监测",icon:"bell.badge",target:.monitor)
                 nav("行动",icon:"checkmark.circle",target:.actions,badge:model.unreadDeliveryCount)
                 nav("启动",icon:"arrow.up.forward",target:.initiate)
             }
@@ -786,6 +788,7 @@ struct WorkspaceView: View {
                 ),openSource:{ go(.source($0)) },openDelivery:{ go(.delivery($0)) },discuss:{ Task { await toggleDiscussion(force:true) } })
                     .id(id)
             } else { unavailable("任务暂时不可用",description:"可以回到行动查看当前事项。") }
+        case .monitor: scrolled { WorkspaceMonitorView(model:model) }
         case .settings: scrolled { settings }
         case .capture:
             VStack(alignment:.leading,spacing:0) {
@@ -1773,7 +1776,7 @@ struct WorkspaceView: View {
         case "查找历史文字": HistorySearchView(model:model,embedded:true,dismiss:openSelectedSource)
         case "英文表达反馈": EnglishPracticeView(model:model,embedded:true,dismiss:back,openCapture:{ go(.capture) })
         case "恢复资料": PackageRestoreView(dismiss:back).frame(maxWidth:.infinity,maxHeight:.infinity)
-        default: WorkspaceProcessingView(model:model,inbox:model.recordingInbox,openSource:{ go(.source($0)) },openSettings:{ go(.settings) },openInbox:{ go(.tool("自动入口")) })
+        default: WorkspaceProcessingView(model:model,inbox:model.recordingInbox,openSource:{ go(.source($0)) },openSettings:{ go(.settings) },openInbox:{ go(.tool("自动入口")) },openMonitor:{ go(.monitor) })
         }
     }
     private func sectionTitle(_ title:String) -> some View { Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader) }

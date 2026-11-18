@@ -37,6 +37,10 @@ organizer.parent.mkdir(parents=True, exist_ok=True)
 shutil.copy2(ROOT / 'scripts' / 'organize_podcast.py', organizer)
 shutil.copy2(ROOT / 'scripts' / 'organizer_quality.py', organizer.with_name('organizer_quality.py'))
 shutil.copy2(ROOT / 'scripts' / 'asr' / 'qwen-local.py', organizer.with_name('qwen-local.py'))
+qqmonitor = app / 'Contents' / 'Resources' / 'qqmonitor'
+qqmonitor.mkdir(parents=True, exist_ok=True)
+shutil.copy2(ROOT / 'scripts' / 'qqmonitor' / 'qq_read_range.py', qqmonitor / 'qq_read_range.py')
+if (qqmonitor / '__pycache__').exists(): shutil.rmtree(qqmonitor / '__pycache__')
 bytecode = organizer.parent / '__pycache__'
 if bytecode.exists(): shutil.rmtree(bytecode)  # Generated Python cache must not alter the signed app.
 resources = app / 'Contents' / 'Resources' / 'BGE'
