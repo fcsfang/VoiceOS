@@ -74,6 +74,31 @@ private struct SourceExtractionReadKey: Hashable {
     let thoughtsCount:Int
 }
 private func sourceTime(_ ms:Int)->String { String(format:"%02d:%02d",ms/60000,ms/1000%60) }
+struct SourceFoldState: Equatable {
+    static let collapsedTranscriptLimit = 2000
+    var original = true
+    var fullText = false
+    var thoughts = false
+    var overall = false
+    var digest = false
+    var outline = false
+    var chapters = false
+    var entities = false
+    static func initial(transcript:String?) -> SourceFoldState {
+        SourceFoldState(original: (transcript?.count ?? 0) <= collapsedTranscriptLimit)
+    }
+}
+private enum SourceLoadPhase: Equatable {
+    case idle, loading, failed(String)
+    var isLoading:Bool {
+        if case .loading=self { return true }
+        return false
+    }
+    var failure:String? {
+        if case .failed(let message)=self { return message }
+        return nil
+    }
+}
 private struct SourceFold<Content: View>: View {
     @Environment(\.workspacePalette) private var palette
     let title:String
@@ -95,7 +120,7 @@ private struct SourceFold<Content: View>: View {
                         }
                     }
                     Spacer(minLength:0)
-                    Image(systemName:isExpanded ? "chevron.up" : "chevron.down").vosFont(WorkspaceText.caption).foregroundStyle(.secondary).padding(.top,6)
+                    Image(systemName:isExpanded ? "chevron.up" : "chevron.down").vosFont(WorkspaceText.caption).foregroundStyle(.secondary).padding(.top,6).accessibilityHidden(true)
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).accessibilityValue(isExpanded ? "已展开" : "已收起")
             if isExpanded {
@@ -104,6 +129,22 @@ private struct SourceFold<Content: View>: View {
         }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
             .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
             .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border.opacity(0.8),lineWidth:1) }
+    }
+}
+private struct SourceLoadingRow: View {
+    let title:String
+    var body:some View {
+        HStack(spacing:10) {
+            ProgressView().controlSize(.small).accessibilityHidden(true)
+            Text(title).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+        }.accessibilityElement(children:.combine)
+    }
+}
+private struct SourceLoadFailureText: View {
+    @Environment(\.workspacePalette) private var palette
+    let text:String
+    var body:some View {
+        Text(text).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
     }
 }
 private struct UnresolvedIssuesBlock: View {
@@ -145,6 +186,7 @@ struct WorkspaceSourceView: View {
     var openInitiation:(String)->Void = { _ in }
     var openFollowups:()->Void = {}
     var scroll: Binding<ScrollPosition>? = nil
+    @Binding var folds:SourceFoldState
     private var catalog:[String:SourceRecord] { model.sourcePageIndex.recordsByID }
     private var expression:RecordingExpression? {
         model.sourcePageIndex.expression(for:source.id)
@@ -152,7 +194,10 @@ struct WorkspaceSourceView: View {
     private var expressionIDs:Set<String> { Set(expression?.sourceIDs ?? [source.id]) }
     @State private var programPairs:[RecordingContext]=[]
     @State private var contextLinks:[RecordingContextLink]=[]
-    @State private var contextIssue=""
+    @State private var contextPhase=SourceLoadPhase.idle
+    @State private var discussionsPhase=SourceLoadPhase.idle
+    @State private var entitiesPhase=SourceLoadPhase.idle
+    @State private var chaptersPhase=SourceLoadPhase.idle
     private func pairingIsCurrent(_ pair:RecordingContext)->Bool {
         guard let personal=catalog[pair.personalSourceID],let external=catalog[pair.externalSourceID] else { return false }
         return !personal.localOnly && !external.localOnly && !personal.needsTranscriptionReview && !external.needsTranscriptionReview && personal.transcriptVersionID == pair.personalVersionID && external.transcriptVersionID == pair.externalVersionID && personal.policyVersion == pair.personalPolicyVersion && external.policyVersion == pair.externalPolicyVersion
@@ -208,14 +253,9 @@ struct WorkspaceSourceView: View {
     @State private var autoScrolledSpanID:String?
     @State private var selectedText=""
     @State private var selectedRange=NSRange(location:0,length:0)
-    @State private var fullTextExpanded=false
-    @State private var originalExpanded=true
-    @State private var overallExpanded=false
-    @State private var digestExpanded=false
-    @State private var thoughtsExpanded=false
-    @State private var outlineExpanded=false
-    @State private var chaptersExpanded=false
-    @State private var entitiesExpanded=false
+    private func foldExpanded(_ keyPath:WritableKeyPath<SourceFoldState,Bool>) -> Binding<Bool> {
+        Binding(get: { folds[keyPath:keyPath] }, set: { folds[keyPath:keyPath]=$0 })
+    }
     @State private var toast: String? = nil
     @State private var extractionFlag: SourceExtractionFlag? = nil
     @State private var correctionsExpanded=false
@@ -302,10 +342,6 @@ struct WorkspaceSourceView: View {
         return nil
     }
     private var readingWidth: CGFloat { min(760, max(640, WorkspaceMetrics.readerWidth)) }
-    private static let collapsedTranscriptLimit = 2000
-    private func transcriptStartsExpanded(_ transcript: String?) -> Bool {
-        (transcript?.count ?? 0) <= Self.collapsedTranscriptLimit
-    }
     private var review:KnowledgeReviewRecord? { model.knowledgeReviews.filter { $0.sourceID == source.id && $0.validity == "current" }.sorted { $0.createdAt > $1.createdAt }.first }
     private var processing:Bool { model.fullRecordingBusy && model.fullRecordingSourceID.map { expressionIDs.contains($0) } == true || model.understandingSource == source.id || model.processingIntents.contains { $0.sourceID == source.id && [.queued,.running].contains($0.state) } }
     private var organizationStatusText:String {
@@ -329,7 +365,7 @@ struct WorkspaceSourceView: View {
     /// Reading order: conclusions first, the verbatim transcript on demand.
     @ViewBuilder private var digestSections: some View {
         if let expression,expression.sourceIDs.count > 1 {
-            SourceFold(title:"整体理解",icon:"waveform.path",count:expression.sourceIDs.count,isExpanded:$overallExpanded) {
+            SourceFold(title:"整体理解",icon:"waveform.path",count:expression.sourceIDs.count,isExpanded:foldExpanded(\.overall)) {
                 WorkspaceExpandableText(text:expression.summary,label:"整体摘要",size:WorkspaceText.body.size)
                 if let ledger = model.actionReviewLedgers[expression.id], ledger.canAcknowledge {
                     ActionReviewAcknowledgementControl(model:model,expressionID:expression.id)
@@ -345,12 +381,12 @@ struct WorkspaceSourceView: View {
             }
         }
         if (expression?.sourceIDs.count ?? 0) <= 1,let summary=source.contentSummary,!summary.isEmpty {
-            SourceFold(title:"内容摘要",icon:"text.alignleft",isExpanded:$digestExpanded) {
+            SourceFold(title:"内容摘要",icon:"text.alignleft",isExpanded:foldExpanded(\.digest)) {
                 WorkspaceExpandableText(text:summary,label:"完整摘要",size:WorkspaceText.body.size).padding(.top,10)
             }
         }
         if !thoughts.isEmpty {
-            SourceFold(title:"核心要点",icon:"lightbulb",count:thoughts.count,isExpanded:$thoughtsExpanded) {
+            SourceFold(title:"核心要点",icon:"lightbulb",count:thoughts.count,isExpanded:foldExpanded(\.thoughts)) {
                 let digest=readingDigest
                 if !digest.isEmpty {
                     DisclosureGroup("逐层读") {
@@ -551,7 +587,7 @@ struct WorkspaceSourceView: View {
                         .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
                 }
                 digestSections
-                SourceFold(title:"原文与回听",icon:"waveform",isExpanded:$originalExpanded) {
+                SourceFold(title:"原文与回听",icon:"waveform",isExpanded:foldExpanded(\.original)) {
                     VStack(alignment:.leading,spacing:16) {
                         transcriptBody
                         if source.state == "saved" { Button("打开保存的原件",systemImage:"play.circle") { Task { await model.play(source) } } }
@@ -561,7 +597,7 @@ struct WorkspaceSourceView: View {
                         Text("原文件：" + source.name).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                         if source.transcript != nil {
                             Divider()
-                            DisclosureGroup("全文选读",isExpanded:$fullTextExpanded) {
+                            DisclosureGroup("全文选读",isExpanded:foldExpanded(\.fullText)) {
                                 VStack(alignment:.leading,spacing:12) {
                                     SelectionActions(selection:selectedText,canPlay:selectedSpan != nil,onSave:saveSelectionAsQuestion,onCopy:copySelectedText,onPlay:playSelectedSpan)
                                     SelectableText(text:source.transcript!) { text, range in
@@ -573,6 +609,7 @@ struct WorkspaceSourceView: View {
                         }
                     }
                 }.id("source-original-fold")
+                if programPairs.isEmpty && contextPhase.isLoading { SourceLoadingRow(title:"正在读取节目关联…") }
                 if !programPairs.isEmpty {
                     WorkspaceSection(title:"节目与我的思考",icon:"waveform",count:contextLinks.count) {
                         ForEach(programPairs,id:\.externalSourceID) { pair in
@@ -599,9 +636,9 @@ struct WorkspaceSourceView: View {
                         } else {
                             Text(automaticallyUpdating ? "正在重新核对节目与我的表达。" : programPairs.allSatisfy(pairingIsCurrent) ? "已保留节目背景；还没有已核对的回应关系。" : "已保存的双方原文仍可回看。").vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.top,10)
                         }
-                        if !contextIssue.isEmpty { Text(contextIssue).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                     }
                 }
+                if let failure=contextPhase.failure { SourceLoadFailureText(text:"节目关联读取失败："+failure) }
                 if source.transcript == nil {
                     Text(source.error ?? "转写尚未完成，理解与待办识别还未开始。").foregroundStyle(.secondary).textSelection(.enabled)
                     if source.dictationRecoveryPending {
@@ -662,17 +699,21 @@ struct WorkspaceSourceView: View {
                     }
                 }
                 if !outlineSections.isEmpty {
-                    SourceFold(title:"逐字稿大纲",icon:"list.bullet",count:outlineSections.count,isExpanded:$outlineExpanded) {
+                    SourceFold(title:"逐字稿大纲",icon:"list.bullet",count:outlineSections.count,isExpanded:foldExpanded(\.outline)) {
                         SourceOutlinePlaybackList(sections:outlineSections,clock:playback) { playOutlineSection($0) }
                     }
                 }
+                if chapters.isEmpty && chaptersPhase.isLoading { SourceLoadingRow(title:"正在读取章节…") }
+                if let failure=chaptersPhase.failure, chapters.isEmpty { SourceLoadFailureText(text:"章节读取失败："+failure) }
                 if !chapters.isEmpty {
-                    SourceFold(title:"章节",icon:"list.number",count:chapters.count,isExpanded:$chaptersExpanded) {
+                    SourceFold(title:"章节",icon:"list.number",count:chapters.count,isExpanded:foldExpanded(\.chapters)) {
                         SourceChapterPlaybackList(chapters:chapters,clock:playback) { playChapter($0) }
                     }
                 }
+                if entities.isEmpty && entitiesPhase.isLoading { SourceLoadingRow(title:"正在读取人名与术语…") }
+                if let failure=entitiesPhase.failure, entities.isEmpty { SourceLoadFailureText(text:"人名与术语读取失败："+failure) }
                 if !entities.isEmpty {
-                    SourceFold(title:"人名与术语",icon:"person.2",count:entities.count,isExpanded:$entitiesExpanded) {
+                    SourceFold(title:"人名与术语",icon:"person.2",count:entities.count,isExpanded:foldExpanded(\.entities)) {
                         ForEach(entityGroups) { group in
                             Text(group.title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary).padding(.top,12)
                             ForEach(group.entities,id:\.name) { entity in
@@ -736,6 +777,8 @@ struct WorkspaceSourceView: View {
                             ForEach(model.attempts[source.id] ?? []) { attempt in
                                 Text((attempt.state == "completed" ? "理解已完成" : "理解：" + workspaceStateLabel(attempt.state)) + (attempt.contextState == "stale" ? " · 历史依据已变化" : "")).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             }
+                            if discussionsPhase.isLoading { SourceLoadingRow(title:"正在读取讨论…") }
+                            else if let failure=discussionsPhase.failure { SourceLoadFailureText(text:"讨论读取失败："+failure) }
                             ForEach(Array(loadedDiscussions.enumerated()),id:\.element.id) { index,session in Button("打开讨论 \(index+1)") { openDiscussion(session.id) } }
                         }.padding(.top,12)
                     }.padding(.vertical,16)
@@ -747,7 +790,7 @@ struct WorkspaceSourceView: View {
                                     VStack(alignment:.leading,spacing:6) {
                                         HStack(alignment:.firstTextBaseline,spacing:8) {
                                             Text(correction.before).strikethrough().foregroundStyle(palette.secondaryText)
-                                            Image(systemName:"arrow.right").vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                                            Image(systemName:"arrow.right").vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText).accessibilityHidden(true)
                                             Text(correction.after)
                                         }.vosFont(WorkspaceText.body).fixedSize(horizontal:false,vertical:true)
                                         if let context=correction.context_quote?.trimmingCharacters(in:.whitespacesAndNewlines),!context.isEmpty {
@@ -821,25 +864,33 @@ struct WorkspaceSourceView: View {
             catch { pauseExplanation = "暂时无法读取暂停原因：" + error.localizedDescription }
         }
         .task(id: discussionReadKey) {
-            guard let store = model.store else { return }
+            discussionsPhase = .loading
+            guard let store = model.store else { discussionsPhase = .idle; return }
             do {
                 let discussions = try await store.conversationsForSource(sourceID: source.id)
                 try Task.checkCancellation()
                 loadedDiscussions = discussions
-            } catch is CancellationError {}
-            catch { self.error = error.localizedDescription }
+                discussionsPhase = .idle
+            } catch is CancellationError { discussionsPhase = .idle }
+            catch {
+                self.error = error.localizedDescription
+                discussionsPhase = .failed(error.localizedDescription)
+            }
         }
         .task(id:contextReadKey) {
             programPairs=[]
-            contextLinks=[];contextIssue=""
-            guard let store=model.store else { return }
+            contextLinks=[]
+            contextPhase = .loading
+            guard let store=model.store else { contextPhase = .idle; return }
             let ids=expressionIDs
             programPairs=model.records.filter { ids.contains($0.id) }.compactMap { $0.presentation?.recordingContext }
             do {
                 let links=try await store.recordingContextLinks(sourceIDs:ids.sorted(),catalog:catalog)
                 try Task.checkCancellation()
                 contextLinks=links.filter { pairingIsCurrent($0.pairing) }
-            } catch is CancellationError {} catch { contextIssue=error.localizedDescription }
+                contextPhase = .idle
+            } catch is CancellationError { contextPhase = .idle }
+            catch { contextPhase = .failed(error.localizedDescription) }
         }
         .task(id: source.id) {
             attachmentURL=nil;attachmentMime=nil
@@ -852,28 +903,40 @@ struct WorkspaceSourceView: View {
         }
         .task(id: SourceTranscriptReadKey(sourceID:source.id,transcriptVersionID:source.transcriptVersionID)) {
             entities=[]
-            guard source.transcript != nil,let store=model.store else { return }
-            let loaded=(try? await store.entities(sourceID:source.id)) ?? []
-            entities=loaded
-            let spanIDs=Set(source.spans.map(\.id))
-            let stale = !loaded.isEmpty && loaded.allSatisfy { $0.sentenceIDs.allSatisfy { !spanIDs.contains($0) } }
-            guard loaded.isEmpty || stale else { return }
-            _=try? await store.refreshEntities(sourceID:source.id)
-            if Task.isCancelled { return }
-            entities=(try? await store.entities(sourceID:source.id)) ?? []
+            entitiesPhase = .loading
+            guard source.transcript != nil,let store=model.store else { entitiesPhase = .idle; return }
+            do {
+                let loaded=try await store.entities(sourceID:source.id)
+                entities=loaded
+                let spanIDs=Set(source.spans.map(\.id))
+                let stale = !loaded.isEmpty && loaded.allSatisfy { $0.sentenceIDs.allSatisfy { !spanIDs.contains($0) } }
+                if loaded.isEmpty || stale {
+                    _=try? await store.refreshEntities(sourceID:source.id)
+                    if !Task.isCancelled { entities=(try? await store.entities(sourceID:source.id)) ?? [] }
+                }
+                entitiesPhase = .idle
+            } catch {
+                entitiesPhase = .failed(error.localizedDescription)
+            }
         }
         .task(id: SourceChapterReadKey(sourceID:source.id,kind:source.kind)) {
             chapters=[]
-            guard ["audio","video"].contains(source.kind),let store=model.store else { return }
-            do { chapters=try await store.chapters(sourceID:source.id) }
-            catch { chapters=[] }
-            guard chapters.isEmpty,let url=try? await store.playableURL(sourceID:source.id) else { return }
-            let found=await MediaChapters.read(url)
-            guard !found.isEmpty else { return }
+            chaptersPhase = .loading
+            guard ["audio","video"].contains(source.kind),let store=model.store else { chaptersPhase = .idle; return }
             do {
-                try await store.replaceChapters(sourceID:source.id,entries:found.map { (title:$0.title,startMS:$0.startMS) })
                 chapters=try await store.chapters(sourceID:source.id)
-            } catch { chapters=[] }
+                if chapters.isEmpty,let url=try? await store.playableURL(sourceID:source.id) {
+                    let found=await MediaChapters.read(url)
+                    if !found.isEmpty {
+                        try await store.replaceChapters(sourceID:source.id,entries:found.map { (title:$0.title,startMS:$0.startMS) })
+                        chapters=try await store.chapters(sourceID:source.id)
+                    }
+                }
+                chaptersPhase = .idle
+            } catch {
+                chapters=[]
+                chaptersPhase = .failed(error.localizedDescription)
+            }
         }
         .task(id: source.id) {
             guard let store=model.store else { return }
@@ -889,10 +952,8 @@ struct WorkspaceSourceView: View {
             guard let store=model.store else { return }
             extractionFlag=try? await store.sourceExtractionFlag(sourceID:source.id)
         }
-        .onAppear { originalExpanded=transcriptStartsExpanded(source.transcript) }
-        .onChange(of:source.id) { _,_ in clearSelection();originalExpanded=transcriptStartsExpanded(source.transcript) }
-        .onChange(of:source.transcript) { _,_ in clearSelection();resetBilingual();originalExpanded=transcriptStartsExpanded(source.transcript) }
-        .onChange(of:fullTextExpanded) { _,_ in if !fullTextExpanded { clearSelection() } }
+        .onChange(of:folds.fullText) { _,_ in if !folds.fullText { clearSelection() } }
+        .onChange(of:source.transcript) { _,_ in clearSelection();resetBilingual();folds.original=SourceFoldState.initial(transcript:source.transcript).original }
         .onReceive(playback.$milliseconds) { followPlaybackHighlight($0) }
         .task {
             while !Task.isCancelled {
@@ -941,7 +1002,7 @@ struct WorkspaceSourceView: View {
     }
     private func followPlaybackHighlight(_ milliseconds:Int?) {
         guard let ms=milliseconds else { autoScrolledSpanID=nil;return }
-        guard originalExpanded,let scroll else { return }
+        guard folds.original,let scroll else { return }
         guard let paragraph=transcriptParagraphs.first(where: { paragraph in
             guard let start=paragraph.span.startMS,let end=paragraph.span.endMS else { return false }
             return ms>=start && ms<end
@@ -954,7 +1015,7 @@ struct WorkspaceSourceView: View {
         }
     }
     private func jumpToOriginal(spanID:String) {
-        if !originalExpanded { originalExpanded=true }
+        folds.original=true
         guard let scroll else { return }
         let anchor:String
         if transcriptParagraphs.contains(where: { $0.id == spanID }) { anchor="source-para-"+spanID }
@@ -1148,7 +1209,7 @@ struct WorkspaceSourceView: View {
     private func openEntity(_ entity:SourceEntity) {
         let timed=entity.sentenceIDs.compactMap { id in source.spans.first { $0.id == id && $0.startMS != nil && $0.endMS != nil } }.first
         if let span=timed {
-            if !originalExpanded { originalExpanded=true }
+            folds.original=true
             if ["audio","video"].contains(source.kind),let start=span.startMS { Task { _=await model.playSpan(source,milliseconds:start) } }
             let anchor="source-span-"+span.id
             Task { @MainActor in
@@ -1157,7 +1218,7 @@ struct WorkspaceSourceView: View {
             }
             return
         }
-        if !originalExpanded { originalExpanded=true }
+        folds.original=true
         if let scroll { scroll.wrappedValue.scrollTo(edge:.top) }
     }
     private func readingLayerRow(_ title:String,_ text:String) -> some View {
@@ -1195,7 +1256,7 @@ private struct SourcePlaybackBar: View {
                         if player.timeControlStatus == .playing { player.pause() } else { player.play() }
                     } else { Task { _=await model.playSpan(source,milliseconds:0) } }
                 } label: {
-                    Image(systemName:playing ? "pause.fill" : "play.fill").vosFont(WorkspaceText.rowTitle)
+                    Image(systemName:playing ? "pause.fill" : "play.fill").vosFont(WorkspaceText.rowTitle).accessibilityHidden(true)
                 }
                 .buttonStyle(.plain).frame(width:WorkspaceMetrics.iconButtonSize,height:WorkspaceMetrics.iconButtonSize)
                 .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
@@ -1257,6 +1318,8 @@ private struct TranscriptParagraphRow: View, Equatable {
             .padding(.horizontal,8).padding(.vertical,4)
             .background(active ? palette.selection : Color.clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
             .id("source-para-"+id)
+            .accessibilityElement(children:.ignore)
+            .accessibilityLabel(text)
     }
 }
 private struct SourceSpanPlaybackList: View {
@@ -1270,6 +1333,8 @@ private struct SourceSpanPlaybackList: View {
             Button { Task { _=await model.playSpan(source,milliseconds:span.startMS!,endMilliseconds:span.endMS!) } } label: {
                 SourceSpanPlaybackLabel(startMS:span.startMS!,endMS:span.endMS!,active:active).equatable()
             }.buttonStyle(.plain).id("source-span-"+span.id)
+                .accessibilityElement(children:.ignore)
+                .accessibilityLabel(sourceTime(span.startMS!) + "—" + sourceTime(span.endMS!) + "，回听这段")
         }
     }
     private func isPlaying(_ span:TranscriptSpan)->Bool {
@@ -1304,6 +1369,8 @@ private struct SourceOutlinePlaybackList: View {
                 Button { play(section) } label: {
                     SourceTimedPlaybackLabel(startMS:section.startMS,title:section.title,active:active).equatable()
                 }.buttonStyle(.plain)
+                    .accessibilityElement(children:.ignore)
+                    .accessibilityLabel(sourceTime(section.startMS) + "，" + section.title)
             }
         }
     }
@@ -1322,6 +1389,8 @@ private struct SourceChapterPlaybackList: View {
             Button { play(chapter) } label: {
                 SourceTimedPlaybackLabel(startMS:chapter.startMS,title:chapter.title,active:active).equatable()
             }.buttonStyle(.plain)
+                .accessibilityElement(children:.ignore)
+                .accessibilityLabel(sourceTime(chapter.startMS) + "，" + chapter.title)
         }
     }
     private func isPlaying(_ chapter:SourceChapter)->Bool {

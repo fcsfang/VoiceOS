@@ -258,6 +258,7 @@ struct WorkspaceView: View {
     @State private var path: [WorkspaceNavigationEntry] = []
     @State private var scrollPositions: [WorkspaceNavigationEntry: ScrollPosition] = [:]
     @State private var sourceScrollPositions: [String: ScrollPosition] = [:]
+    @State private var sourceFoldStates: [String: SourceFoldState] = [:]
     @State private var topicID: String?
     @State private var topicTab = "概览"
     @State private var topicReadingMode = "卡片"
@@ -802,7 +803,7 @@ struct WorkspaceView: View {
                                 model.initiationSourceID = id
                                 model.initiationText = model.sourcePageIndex.recordsByID[id]?.transcript ?? ""
                                 go(.initiate)
-                            },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id))
+                            },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id),folds:sourceFoldBinding(id,transcript:source.transcript))
                                 .id(id)
                         }
                     } else { unavailable("这份材料暂时不可用",description:"可以搜索其他材料，或回到主题。") }
@@ -874,6 +875,9 @@ struct WorkspaceView: View {
     }
     private func sourceScrollBinding(_ id:String) -> Binding<ScrollPosition> {
         Binding(get: { sourceScrollPositions[id] ?? ScrollPosition(edge: .top) }, set: { sourceScrollPositions[id] = $0 })
+    }
+    private func sourceFoldBinding(_ id:String,transcript:String?) -> Binding<SourceFoldState> {
+        Binding(get: { sourceFoldStates[id] ?? SourceFoldState.initial(transcript:transcript) }, set: { sourceFoldStates[id] = $0 })
     }
     private func unavailable(_ title:String,description:String) -> some View { ContentUnavailableView(title,systemImage:"leaf",description:Text(description)).frame(maxWidth:.infinity) }
     private func distinctExpressions(_ sources:[SourceRecord]) -> [SourceRecord] {
