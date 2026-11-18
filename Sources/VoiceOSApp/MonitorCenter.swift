@@ -360,16 +360,21 @@ extension ControlCenter {
         }
     }
 
-    func loadQQMonitorConversations() async {
+    @discardableResult
+    func loadQQMonitorConversations() async -> String? {
         monitorQQConversationStatus = "正在读取 QQ 群列表…"
         monitorQQConversations = []
         let settings = MonitorQQSettingsStore.qqSettings(MonitorQQSettingsStore.load())
         do {
-            let rows = try await QQMonitorHelper().conversations(settings: settings)
-            monitorQQConversations = rows
-            monitorQQConversationStatus = rows.isEmpty ? "没有读到群会话；请先确认 QQ 已登录并完成诊断" : "已读取 \(rows.count) 个群"
+            let list = try await QQMonitorHelper().conversationList(settings: settings)
+            monitorQQConversations = list.conversations
+            monitorQQConversationStatus = list.conversations.isEmpty
+                ? "没有读到群会话；请先确认 QQ 已登录并完成诊断"
+                : "已读取 \(list.conversations.count) 个群"
+            return list.account
         } catch {
             monitorQQConversationStatus = error.localizedDescription
+            return nil
         }
     }
 

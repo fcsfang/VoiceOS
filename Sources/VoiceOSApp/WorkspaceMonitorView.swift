@@ -14,6 +14,10 @@ struct WorkspaceMonitorView: View {
     @State private var qqAccount = ""
     @State private var qqScriptOverride = ""
     @State private var qqStart = Date()
+    @State private var qqPythonProbe: QQMonitorPythonProbe?
+    @State private var qqPythonChecking = false
+    @State private var qqKeyReadable: Bool?
+    @State private var qqListedAccount: String?
     @State private var selectedConversationID: String?
     @State private var webhookDraft = ""
     @State private var pendingSourceRemoval: MonitorSource?
@@ -488,12 +492,12 @@ struct WorkspaceMonitorView: View {
             Text("QQ 群读取").vosFont(WorkspaceText.rowTitle)
             Text("只保存路径、账号与群标识；密钥文件内容不会复制、不会进入日志或模型。应用不会修改 QQ 或系统安全设置。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
-            pathRow("Python 解释器", text: $qqPythonPath, choose: choosePython)
-            pathRow("密钥文件", text: $qqKeyPath, choose: chooseKeyFile)
+            pathRow("Python 解释器", text: $qqPythonPath, check: pythonCheck, choose: choosePython)
+            pathRow("密钥文件", text: $qqKeyPath, check: keyCheck, choose: chooseKeyFile)
             HStack(spacing: 10) {
                 Text("账号").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     .frame(width: 90, alignment: .leading)
-                TextField("可选；留空自动选择", text: $qqAccount)
+                TextField("可选；留空自动选择（多数情况留空即可）", text: $qqAccount)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 360)
             }
             DisclosureGroup("高级") {
@@ -511,7 +515,13 @@ struct WorkspaceMonitorView: View {
                 }.vosFont(WorkspaceText.meta)
                 Button("列出群") {
                     saveQQSettings()
-                    Task { await model.loadQQMonitorConversations() }
+                    Task {
+                        qqListedAccount = await model.loadQQMonitorConversations()
+                        if let account = qqListedAccount, let id = selectedConversationID,
+                           model.monitorQQConversations.contains(where: { $0.id == id }) {
+                            qqAccount = account
+                        }
+                    }
                 }.vosFont(WorkspaceText.meta)
                 if !model.monitorQQDiagnosisStatus.isEmpty {
                     Text(model.monitorQQDiagnosisStatus).vosFont(WorkspaceText.meta)
@@ -556,13 +566,33 @@ struct WorkspaceMonitorView: View {
         }
     }
 
-    private func pathRow(_ label: String, text: Binding<String>, choose: @escaping () -> Void) -> some View {
-        HStack(spacing: 10) {
-            Text(label).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                .frame(width: 90, alignment: .leading)
-            TextField(label, text: text)
-                .textFieldStyle(.roundedBorder).frame(maxWidth: 360)
-            Button("选择…", action: choose).vosFont(WorkspaceText.meta)
+    private var pythonCheck: (text: String, ok: Bool?)? {
+        if qqPythonChecking { return ("正在检查…", nil) }
+        guard let probe = qqPythonProbe else { return nil }
+        return (probe.label, probe == .available)
+    }
+
+    private var keyCheck: (text: String, ok: Bool?)? {
+        guard let readable = qqKeyReadable else { return nil }
+        return readable ? ("可用", true) : ("不可用：文件缺失、为空或不可读", false)
+    }
+
+    private func pathRow(_ label: String, text: Binding<String>,
+                         check: (text: String, ok: Bool?)? = nil,
+                         choose: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Text(label).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    .frame(width: 90, alignment: .leading)
+                TextField(label, text: text)
+                    .textFieldStyle(.roundedBorder).frame(maxWidth: 360)
+                Button("选择…", action: choose).vosFont(WorkspaceText.meta)
+            }
+            if let check {
+                Text(check.text).vosFont(WorkspaceText.caption)
+                    .foregroundStyle(check.ok == true ? palette.success
+                                     : check.ok == false ? palette.warning : palette.secondaryText)
+            }
         }
     }
 
@@ -573,6 +603,7 @@ struct WorkspaceMonitorView: View {
             ForEach(model.monitorQQConversations) { conversation in
                 Button {
                     selectedConversationID = conversation.id
+                    if let account = qqListedAccount { qqAccount = account }
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: selectedConversationID == conversation.id
@@ -626,8 +657,20 @@ struct WorkspaceMonitorView: View {
         panel.prompt = "使用"
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
+        let executableOnly = ExecutableOnlyPanelDelegate()
+        panel.delegate = executableOnly
         panel.begin { response in
-            if response == .OK, let url = panel.url { qqPythonPath = url.path }
+            withExtendedLifetime(executableOnly) {
+                guard response == .OK, let url = panel.url else { return }
+                qqPythonPath = url.path
+                qqPythonProbe = nil
+                qqPythonChecking = true
+                Task {
+                    let probe = await QQMonitorHelper().checkPython(url.path)
+                    qqPythonChecking = false
+                    qqPythonProbe = probe
+                }
+            }
         }
     }
 
@@ -638,8 +681,12 @@ struct WorkspaceMonitorView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.showsHiddenFiles = true
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
         panel.begin { response in
-            if response == .OK, let url = panel.url { qqKeyPath = url.path }
+            if response == .OK, let url = panel.url {
+                qqKeyPath = url.path
+                qqKeyReadable = QQMonitorHelper.keyIsReadable(url.path)
+            }
         }
     }
 
@@ -668,5 +715,13 @@ struct WorkspaceMonitorView: View {
         if !NSWorkspace.shared.open(url) {
             NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
         }
+    }
+}
+
+private final class ExecutableOnlyPanelDelegate: NSObject, NSOpenSavePanelDelegate {
+    func panel(_ sender: Any, shouldEnable url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return true }
+        return isDirectory.boolValue || FileManager.default.isExecutableFile(atPath: url.path)
     }
 }
