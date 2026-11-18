@@ -61,6 +61,11 @@ struct WorkspaceMonitorView: View {
 
     private var todayKey: String { MonitorSourceConfigParser.dayString(Date()) }
 
+    private var qqNeedsFullDiskAccess: Bool {
+        model.monitorQQDiagnostics.contains { !$0.ok && $0.needsFullDiskAccess }
+            || QQMonitorPermissionGuidance.matches(model.monitorQQConversationStatus)
+    }
+
     private var runBar: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
@@ -529,6 +534,16 @@ struct WorkspaceMonitorView: View {
                 .background(palette.selection.opacity(0.35),
                             in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
             }
+            if qqNeedsFullDiskAccess {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(QQMonitorPermissionGuidance.text).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.warning).fixedSize(horizontal: false, vertical: true)
+                    Button("打开系统设置") { openFullDiskAccessSettings() }.vosFont(WorkspaceText.meta)
+                }
+                .padding(10)
+                .background(palette.warning.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+            }
             if !model.monitorQQConversationStatus.isEmpty {
                 Text(model.monitorQQConversationStatus).vosFont(WorkspaceText.meta)
                     .foregroundStyle(palette.secondaryText).textSelection(.enabled)
@@ -646,5 +661,12 @@ struct WorkspaceMonitorView: View {
         settings.account = qqAccount
         settings.scriptPathOverride = qqScriptOverride
         model.saveMonitorQQSettings(settings)
+    }
+
+    private func openFullDiskAccessSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
+        if !NSWorkspace.shared.open(url) {
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/System Settings.app"))
+        }
     }
 }

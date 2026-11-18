@@ -33,6 +33,27 @@ final class QQMonitorChecks: XCTestCase {
         }
     }
 
+    func testPermissionFailureClassifiesAsFullDiskAccessIssue() {
+        let stderr = #"{"version":1,"error":{"code":"permission_denied","zh":"需要完全磁盘访问权限","en":"PermissionError: [Errno 1] Operation not permitted: /Users/example/Library/Containers/com.tencent.qq/nt_db/nt_msg.db"}}"#
+        let message = QQMonitorHelper.contractError(stderr: Data(stderr.utf8)).localizedDescription
+        XCTAssertTrue(message.contains("permission_denied"), "应归类为权限问题：\(message)")
+        XCTAssertTrue(message.contains("完全磁盘访问权限"), "应给出完全磁盘访问权限指引：\(message)")
+        XCTAssertTrue(message.contains("系统设置"), "应给出可操作步骤：\(message)")
+        XCTAssertFalse(message.contains("重新导出密钥"), "权限问题不应误导用户重新导出密钥：\(message)")
+
+        let legacy = #"{"version":1,"error":{"code":"key_invalid","zh":"密钥或 QQ 数据无法读取","en":"PermissionError: [Errno 1] Operation not permitted: /Users/example/nt_msg.db"}}"#
+        let legacyMessage = QQMonitorHelper.contractError(stderr: Data(legacy.utf8)).localizedDescription
+        XCTAssertTrue(legacyMessage.contains("完全磁盘访问权限"),
+                      "旧脚本把权限问题报成密钥错误时仍应归类为权限问题：\(legacyMessage)")
+    }
+
+    func testKeyFailureStaysKeyIssue() {
+        let stderr = #"{"version":1,"error":{"code":"key_invalid","zh":"密钥文件缺失或为空","en":"key file unavailable: /tmp/qq-key.bin"}}"#
+        let message = QQMonitorHelper.contractError(stderr: Data(stderr.utf8)).localizedDescription
+        XCTAssertTrue(message.contains("重新导出密钥"), "密钥问题应保留原有密钥指引：\(message)")
+        XCTAssertFalse(message.contains("完全磁盘访问权限"), "真正的密钥问题不应提示磁盘权限：\(message)")
+    }
+
     func testScriptPassesStaticCompileCheck() throws {
         let python = URL(fileURLWithPath: "/usr/bin/python3")
         try XCTSkipUnless(FileManager.default.isExecutableFile(atPath: python.path), "系统 Python 不可用，跳过脚本静态检查")
