@@ -320,7 +320,6 @@ struct WorkspaceMonitorView: View {
             RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius)
                 .strokeBorder(palette.border.opacity(0.7), lineWidth: 1)
         }
-        .accessibilityIdentifier("monitor.item." + item.id)
         .padding(.bottom, 6)
     }
 
