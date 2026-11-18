@@ -64,4 +64,48 @@ final class ArticleExtractorChecks: XCTestCase {
         let article = try XCTUnwrap(ArticleExtractor.extract(html: html, baseURL: base))
         XCTAssertEqual(article.title, "example.com")
     }
+
+    func testDropsNavigationAndBreadcrumbLinkLines() throws {
+        let html = """
+        <html><head><title>关于2026级研究生学业奖学金评审工作的通知</title></head>
+        <body>
+        <div class="top_nav"><a href="/">后台管理</a> <a href="/">首页</a> <a href="/jgsz/list.htm">机构设置</a> <a href="/yjyjj/list.htm">研院简介</a> <a href="/lsyg/list.htm">历史沿革</a> <a href="/xrzl/list.htm">现任领导和分工</a></div>
+        <div class="pc_nav"><a href="/yjyjg/list.htm">研院机构和职责</a> <a href="/lxfs/list.htm">联系方式</a> <a href="/yzxx/list.htm">院长信箱</a> <a href="/zsgz/list.htm">招生工作</a></div>
+        <div class="crumbs"><a href="/">首页</a> &gt; <a href="/2145/list.htm">通知公告</a></div>
+        <div class="pageR_article"><div class="infoA"><div class="con">
+        <p>各学院、各位研究生：根据学校奖学金评审工作安排，现就2026级硕士研究生学业奖学金评审有关事项通知如下。</p>
+        <p>请各学院于2026年11月25日前完成材料审核与结果公示，并将汇总表报送研究生院，逾期不再受理。</p>
+        </div></div></div>
+        <div class="article_attach"><a href="/attach/2026/baomingbiao.docx">附件：报名表.docx</a></div>
+        </body></html>
+        """
+        let article = try XCTUnwrap(ArticleExtractor.extract(html: html, baseURL: base))
+        XCTAssertFalse(article.text.contains("后台管理"), "站点导航行应整行丢弃")
+        XCTAssertFalse(article.text.contains("机构设置"), "站点导航行应整行丢弃")
+        XCTAssertFalse(article.text.contains("院长信箱"), "站点导航行应整行丢弃")
+        XCTAssertFalse(article.text.contains("通知公告"), "面包屑行应整行丢弃")
+        XCTAssertTrue(article.text.contains("各学院、各位研究生"), "正文段落应保留")
+        XCTAssertTrue(article.text.contains("2026年11月25日"), "正文段落应保留")
+        XCTAssertTrue(article.text.contains("附件：报名表.docx"), "单链接附件行应保留")
+    }
+
+    func testKeepsSingleLinkLine() throws {
+        let html = """
+        <p>请下载并填写以下材料，于2026年11月25日前交至研究生院培养办公室，联系人王老师，联系电话025-84892400，电子版发送至邮箱 yjsy@nuaa.edu.cn。</p>
+        <p><a href="/attach/2026/baomingbiao.docx">报名表.docx</a></p>
+        """
+        let article = try XCTUnwrap(ArticleExtractor.extract(html: html, baseURL: base))
+        XCTAssertTrue(article.text.contains("报名表.docx"), "单链接行即使锚文本占满整行也应保留")
+        XCTAssertTrue(article.text.contains("联系人王老师"), "正文段落应保留")
+    }
+
+    func testKeepsPlainTextLinesWithoutAnchors() throws {
+        let html = """
+        <p>本通知不包含任何链接，正文中的百分号 60% 与尖括号说明 &lt;示例&gt; 都应原样保留，不被链接主导行过滤误伤。</p>
+        <p>第二段继续补充说明，确保正文总长度稳定超过八十个字，覆盖无锚文本行经过哨兵清理后原样输出的路径。</p>
+        """
+        let article = try XCTUnwrap(ArticleExtractor.extract(html: html, baseURL: base))
+        XCTAssertTrue(article.text.contains("60%"), "无锚文本行的普通文字应保留")
+        XCTAssertTrue(article.text.contains("<示例>"), "实体解码后的尖括号应保留")
+    }
 }
