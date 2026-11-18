@@ -11,17 +11,20 @@ final class QQMonitorChecks: XCTestCase {
 
     func testFixturePayloadDecodesIntoContract() throws {
         let fixture = """
-        {"version":1,"conversation_id":"group:fixture","conversation_name":"示例班级群","range":{"start":"2026-11-17T09:00:00+08:00","end":"2026-11-18T09:00:00+08:00"},"message_count":3,"messages":[{"message_id":"9001","timestamp_ms":1763424000000,"sender_name":"示例同学","sender_id":"u_fixture","type":"text","text":"学院通知：奖学金申请截止 11 月 20 日","meta":{}},{"message_id":"9002","timestamp_ms":1763424060000,"sender_name":"示例同学","sender_id":"u_fixture","type":"image","text":"[图片：通知截图]","meta":{"chatlab_type":1}},{"message_id":"9003","timestamp_ms":1763424120000,"sender_name":"示例同学","sender_id":"u_fixture","type":"forward","text":"[合并转发：奖学金材料清单]","meta":{}}],"truncated":false}
+        {"version":1,"conversation_id":"group:fixture","conversation_name":"示例班级群","range":{"start":"2026-11-17T09:00:00+08:00","end":"2026-11-18T09:00:00+08:00"},"message_count":4,"messages":[{"message_id":"9001","timestamp_ms":1763424000000,"sender_name":"示例同学","sender_id":"u_fixture","type":"text","text":"学院通知：奖学金申请截止 11 月 20 日","meta":{}},{"message_id":"9002","timestamp_ms":1763424060000,"sender_name":"示例同学","sender_id":"u_fixture","type":"image","text":"[图片：通知截图]","meta":{"chatlab_type":1}},{"message_id":"9003","timestamp_ms":1763424120000,"sender_name":"示例同学","sender_id":"u_fixture","type":"forward","text":"[合并转发：奖学金材料清单]","meta":{"chatlab_type":26}},{"message_id":"9004","timestamp_ms":1763424180000,"sender_name":"示例同学","sender_id":"u_fixture","type":"other","text":"[语音 5 秒]","meta":{"chatlab_type":2}}],"truncated":false}
         """
         let result = try QQMonitorHelper.decodeResult(Data(fixture.utf8))
         XCTAssertEqual(result.conversationID, "group:fixture")
         XCTAssertEqual(result.conversationName, "示例班级群")
-        XCTAssertEqual(result.messages.count, 3)
-        XCTAssertEqual(result.messages.map(\.externalID), ["9001", "9002", "9003"])
+        XCTAssertEqual(result.messages.count, 4)
+        XCTAssertEqual(result.messages.map(\.externalID), ["9001", "9002", "9003", "9004"])
         XCTAssertEqual(result.messages[0].kind, .text)
         XCTAssertEqual(result.messages[1].kind, .image)
         XCTAssertEqual(result.messages[1].content, "[图片：通知截图]", "图片消息保留待查看占位")
         XCTAssertEqual(result.messages[2].kind, .forward, "合并转发消息保留待查看类型")
+        XCTAssertEqual(result.messages[2].content, "[合并转发：奖学金材料清单]", "合并转发消息占位应可读")
+        XCTAssertEqual(result.messages[3].kind, .other, "语音等未细化类型归入 other")
+        XCTAssertEqual(result.messages[3].content, "[语音 5 秒]", "语音消息占位应可读")
         XCTAssertNotNil(result.messages[0].sentAt)
         XCTAssertFalse(result.truncated)
     }
@@ -52,6 +55,34 @@ final class QQMonitorChecks: XCTestCase {
         let message = QQMonitorHelper.contractError(stderr: Data(stderr.utf8)).localizedDescription
         XCTAssertTrue(message.contains("重新导出密钥"), "密钥问题应保留原有密钥指引：\(message)")
         XCTAssertFalse(message.contains("完全磁盘访问权限"), "真正的密钥问题不应提示磁盘权限：\(message)")
+    }
+
+    func testPermissionRecheckClassifiesAsFullDiskAccessIssue() {
+        let denied = QQMonitorHelper.directoryProbeItem(
+            exitCode: 1, stdout: "",
+            stderr: "PermissionError: [Errno 1] Operation not permitted: '/Users/example/Library/Containers/com.tencent.qq'",
+            account: "10001")
+        XCTAssertFalse(denied.ok)
+        XCTAssertTrue(denied.needsFullDiskAccess, "目录枚举复核为权限问题时应提示完全磁盘访问权限")
+        XCTAssertTrue(denied.detail.contains("完全磁盘访问权限"), "应给出 m62 的权限指引：\(denied.detail)")
+        let missing = QQMonitorHelper.directoryProbeItem(
+            exitCode: 1, stdout: "",
+            stderr: "FileNotFoundError: no QQNT account message databases found", account: nil)
+        XCTAssertFalse(missing.ok)
+        XCTAssertFalse(missing.needsFullDiskAccess, "真正的数据目录缺失不应误报为权限问题")
+        XCTAssertTrue(missing.detail.contains("登录"), "数据目录缺失应提示确认登录：\(missing.detail)")
+    }
+
+    func testValidKeyCandidateFailureClassifiesAsKeyInvalid() {
+        let stderr = #"{"version":1,"error":{"code":"key_invalid","zh":"QQ 可能已升级导致密钥失效，请重新导出密钥","en":"RuntimeError: expected exactly one valid key candidate; found 0"}}"#
+        let message = QQMonitorHelper.contractError(stderr: Data(stderr.utf8)).localizedDescription
+        XCTAssertTrue(message.contains("QQ 可能已升级"), "密钥轮换应说明 QQ 升级原因：\(message)")
+        XCTAssertTrue(message.contains("重新导出密钥"), "应给出重新导出密钥的指引：\(message)")
+        XCTAssertFalse(message.contains("完全磁盘访问权限"), "密钥失效不应误导为权限问题：\(message)")
+        let probe = QQMonitorHelper.mirrorProbeItem(exitCode: 1,
+                                                    stderr: "RuntimeError: expected exactly one valid key candidate; found 0")
+        XCTAssertFalse(probe.ok, "检查 QQ 依赖不应把密钥轮换报告为全绿")
+        XCTAssertTrue(probe.detail.contains("重新导出密钥"), "镜像库探测应给出密钥修复指引：\(probe.detail)")
     }
 
     func testScriptPassesStaticCompileCheck() throws {

@@ -83,6 +83,8 @@ public enum QQMonitorPythonProbe: Sendable, Equatable {
 /// stdin/stdout. Paths, account and group ids come from the caller; nothing
 /// is hardcoded and no QQ state is modified.
 public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
+    static let messageReadOperation = "QQ 消息读取"
+
     public init() {}
 
     public func checkPython(_ pythonPath: String) async -> QQMonitorPythonProbe {
@@ -124,7 +126,7 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
         ]
         let input = try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
         let result = try await Self.run(pythonPath: settings.pythonPath, arguments: [settings.scriptPath],
-                                        stdin: input, timeout: settings.timeout, operation: "QQ 消息读取")
+                                        stdin: input, timeout: settings.timeout, operation: Self.messageReadOperation)
         guard result.exitCode == 0 else { throw Self.contractError(stderr: result.stderr) }
         return try Self.decodeResult(result.stdout)
     }
@@ -240,6 +242,96 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
         try decodeConversationList(data).conversations
     }
 
+    /// The library's account discovery turns a TCC denial into an empty glob,
+    /// so a failed discovery rechecks the root listing; a permission failure
+    /// there is reported as missing Full Disk Access instead of missing data.
+    static let directoryProbeScript = """
+    import os
+    import sys
+    from qqnt_export_macos.live import discover_active_nt_db
+    from qqnt_export_macos.snapshot import DEFAULT_QQ_ROOT
+    try:
+        print(discover_active_nt_db(DEFAULT_QQ_ROOT, sys.argv[1] or None))
+    except FileNotFoundError:
+        try:
+            os.listdir(os.path.expanduser(str(DEFAULT_QQ_ROOT)))
+        except PermissionError as exc:
+            sys.stderr.write("PermissionError: " + str(exc) + "\\n")
+            sys.exit(1)
+        raise
+    """
+
+    /// Opening the mirror runs mirror refresh, key selection and SQLCipher
+    /// decryption, so it surfaces key rotation and a missing SQLCipher that a
+    /// plain import check cannot see.
+    static let mirrorProbeScript = """
+    import json
+    import sys
+    from pathlib import Path
+    from qqnt_export_macos.recent import QQRecentReader
+    reader = QQRecentReader(Path(sys.argv[1]).expanduser(), account=sys.argv[2] or None,
+                            cache_dir=Path(sys.argv[3]).expanduser())
+    print(json.dumps(reader.status()))
+    """
+
+    static func directoryProbeItem(exitCode: Int32, stdout: String, stderr: String,
+                                   account: String?) -> QQMonitorDiagnosisItem {
+        let title = "QQ 账号数据目录"
+        let accountText = account.map { "（\($0)）" } ?? ""
+        if QQMonitorPermissionGuidance.matches(stderr) {
+            return .init(id: "qqdata", title: title, ok: false,
+                         detail: QQMonitorPermissionGuidance.text, needsFullDiskAccess: true)
+        }
+        if exitCode != 0 {
+            if stderr.contains("no QQNT account message databases found")
+                || stderr.contains("account database not found") || stderr.contains("FileNotFoundError") {
+                return .init(id: "qqdata", title: title, ok: false,
+                             detail: "未找到该账号的 QQ 数据目录；请确认 QQ 已安装并登录过该账号" + accountText)
+            }
+            if stderr.contains("ModuleNotFoundError") || stderr.contains("No module named") {
+                return .init(id: "qqdata", title: title, ok: false,
+                             detail: "该 Python 无法导入 qqnt-export-macos，无法检查数据目录；请先修复依赖")
+            }
+            let tail = stderr.split(whereSeparator: \.isNewline).last.map(String.init) ?? "原因未知"
+            return .init(id: "qqdata", title: title, ok: false,
+                         detail: "数据目录检查失败：" + String(tail.prefix(200)) + "；QQ 数据未被修改")
+        }
+        let path = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        let ok = !path.isEmpty && FileManager.default.fileExists(atPath: path)
+        return .init(id: "qqdata", title: title, ok: ok,
+                     detail: ok ? path : "未找到该账号的 QQ 数据目录；请确认 QQ 已安装并登录过该账号" + accountText)
+    }
+
+    static func mirrorProbeItem(exitCode: Int32, stderr: String) -> QQMonitorDiagnosisItem {
+        let title = "镜像库与密钥"
+        if exitCode == 0 {
+            return .init(id: "mirror", title: title, ok: true, detail: "可打开 QQ 镜像库并验证密钥")
+        }
+        if QQMonitorPermissionGuidance.matches(stderr) {
+            return .init(id: "mirror", title: title, ok: false,
+                         detail: QQMonitorPermissionGuidance.text, needsFullDiskAccess: true)
+        }
+        if stderr.contains("valid key candidate") {
+            return .init(id: "mirror", title: title, ok: false,
+                         detail: "QQ 可能已升级导致密钥失效，请重新导出密钥；应用不会修改 QQ")
+        }
+        if stderr.contains("SQLCipher support is missing") || stderr.contains("sqlcipher3") {
+            return .init(id: "mirror", title: title, ok: false,
+                         detail: "缺少 SQLCipher 支持：请在读取用的 Python 中安装 qqnt-export-macos[decrypt]；应用不会自动下载")
+        }
+        if stderr.contains("ModuleNotFoundError") || stderr.contains("No module named") {
+            return .init(id: "mirror", title: title, ok: false,
+                         detail: "该 Python 无法导入 qqnt-export-macos，无法验证密钥；请安装 0.4.0 或更新版本")
+        }
+        if stderr.contains("no QQNT account message databases found") || stderr.contains("account database not found") {
+            return .init(id: "mirror", title: title, ok: false,
+                         detail: "未找到该账号的 QQ 数据目录；请确认 QQ 已安装并登录过该账号")
+        }
+        let tail = stderr.split(whereSeparator: \.isNewline).last.map(String.init) ?? "原因未知"
+        return .init(id: "mirror", title: title, ok: false,
+                     detail: "镜像库读取失败：" + String(tail.prefix(200)) + "；QQ 数据未被修改")
+    }
+
     /// Itemized dependency checks for the settings page. Nothing is modified;
     /// every failure carries a Chinese next step.
     public func diagnoseItems(settings: QQMonitorSettings) async -> [QQMonitorDiagnosisItem] {
@@ -283,26 +375,25 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
             items.append(.init(id: "package", title: "qqnt-export-macos 导入", ok: false, detail: error.localizedDescription))
         }
         do {
-            let probe = """
-            import sys
-            from qqnt_export_macos.live import discover_active_nt_db
-            from qqnt_export_macos.snapshot import DEFAULT_QQ_ROOT
-            print(discover_active_nt_db(DEFAULT_QQ_ROOT, sys.argv[1] or None))
-            """
-            let result = try await Self.run(pythonPath: settings.pythonPath, arguments: ["-c", probe, settings.account ?? ""],
+            let result = try await Self.run(pythonPath: settings.pythonPath,
+                                            arguments: ["-c", Self.directoryProbeScript, settings.account ?? ""],
                                             stdin: nil, timeout: 30, operation: "QQ 数据目录检查")
-            let stderr = String(decoding: result.stderr, as: UTF8.self)
-            if QQMonitorPermissionGuidance.matches(stderr) {
-                items.append(.init(id: "qqdata", title: "QQ 账号数据目录", ok: false,
-                                   detail: QQMonitorPermissionGuidance.text, needsFullDiskAccess: true))
-            } else {
-                let path = String(decoding: result.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-                let ok = result.exitCode == 0 && !path.isEmpty && fileManager.fileExists(atPath: path)
-                items.append(.init(id: "qqdata", title: "QQ 账号数据目录", ok: ok,
-                                   detail: ok ? path : "未找到该账号的 QQ 数据目录；请确认 QQ 已安装并登录过该账号" + (settings.account.map { "（\($0)）" } ?? "")))
-            }
+            items.append(Self.directoryProbeItem(exitCode: result.exitCode,
+                                                 stdout: String(decoding: result.stdout, as: UTF8.self),
+                                                 stderr: String(decoding: result.stderr, as: UTF8.self),
+                                                 account: settings.account))
         } catch {
             items.append(.init(id: "qqdata", title: "QQ 账号数据目录", ok: false, detail: error.localizedDescription))
+        }
+        do {
+            let result = try await Self.run(pythonPath: settings.pythonPath,
+                                            arguments: ["-c", Self.mirrorProbeScript, settings.keyPath,
+                                                        settings.account ?? "", settings.cacheDir],
+                                            stdin: nil, timeout: 60, operation: "QQ 镜像库与密钥检查")
+            items.append(Self.mirrorProbeItem(exitCode: result.exitCode,
+                                              stderr: String(decoding: result.stderr, as: UTF8.self)))
+        } catch {
+            items.append(.init(id: "mirror", title: "镜像库与密钥", ok: false, detail: error.localizedDescription))
         }
         return items
     }
@@ -374,7 +465,9 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
         case "import_failed":
             hint = "请在该 Python 解释器中安装 qqnt-export-macos（pip install qqnt-export-macos），应用不会自动下载"
         case "key_invalid":
-            hint = "密钥缺失或无法读取；请按已验证方式重新导出密钥，应用不会修改 QQ 或安全设置"
+            hint = "密钥缺失、失效或无法读取；QQ 升级后请重新导出密钥，应用不会修改 QQ 或安全设置"
+        case "group_missing":
+            hint = "群不存在或已退出；请重新选择目标群，应用不会修改 QQ"
         case "qq_data_missing":
             hint = "未找到该账号的 QQ 数据目录；请确认 QQ 已安装并登录过该账号"
         case "invalid_input", "range_invalid":
@@ -386,7 +479,7 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
     }
 
     static func decodeResult(_ data: Data) throws -> QQMonitorReadResult {
-        guard data.count <= 32_000_000 else { throw VoiceOSError("QQ 读取结果超过 32 MB 预算") }
+        guard data.count <= 32_000_000 else { throw VoiceOSError("QQ 读取结果超过 32 MB 预算；请把起始时间调近后重试") }
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw VoiceOSError("QQ 读取结果不是有效 JSON；请更新 qqmonitor 脚本")
         }
@@ -484,8 +577,9 @@ private final class MonitorChildProcess: @unchecked Sendable {
         process = nil
         timer = nil
         lock.unlock()
+        let retry = operation == QQMonitorHelper.messageReadOperation ? "可把起始时间调近后重试" : "可稍后重试"
         child?.terminate()
-        continuation?.resume(throwing: VoiceOSError("\(operation)超过 \(Int(timeout.rounded())) 秒未完成，已停止；QQ 数据未被修改，可稍后重试"))
+        continuation?.resume(throwing: VoiceOSError("\(operation)超过 \(Int(timeout.rounded())) 秒未完成，已停止；QQ 数据未被修改，\(retry)"))
     }
 
     private func cancel() {

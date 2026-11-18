@@ -264,6 +264,14 @@ extension VoiceOSStore {
             """, [sourceID, cursor, iso, Self.now()])
     }
 
+    /// The source's start control is also its cursor: a later start skips the
+    /// history the user chose to skip, an earlier one re-reads from that moment
+    /// and dedupe absorbs the overlap. Both must move the read cursor so the
+    /// shown start and the next read window agree.
+    public func alignMonitorCursorToStart(sourceID: String, start: Date) throws {
+        try advanceMonitorCursor(sourceID: sourceID, lastSuccessEnd: start, newMessageIDs: [])
+    }
+
     public func failMonitorCursor(sourceID: String, error: String) throws {
         try db.execute("""
             INSERT INTO monitor_cursors(source_id,cursor_json,last_success_at,last_error,updated_at) VALUES(?,'{}',NULL,?,?)

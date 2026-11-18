@@ -1,6 +1,6 @@
 import XCTest
 @testable import VoiceOSCore
-import VoiceOSPlatform
+@testable import VoiceOSPlatform
 
 private struct StubQQCollector: QQMonitorCollecting {
     let messages: [QQMonitorReadMessage]
@@ -287,6 +287,27 @@ final class MessageMonitorRunnerChecks: XCTestCase {
         let db = await store.db
         XCTAssertEqual(try db.query("SELECT COUNT(*) AS n FROM monitor_messages WHERE analyzed_report_id IS NULL").first?["n"], "0",
                        "合并分析成功后全部消息应标记为已分析")
+    }
+
+    func testGroupMissingFailsReportAndDoesNotAdvanceCursor() async throws {
+        let store = try await openStore()
+        let source = try await store.addMonitorSource(kind: .qqGroup, displayName: "南航16院2025级硕士生",
+                                                      configJSON: "{\"conversation_id\":\"group:1028551617\"}")
+        let stderr = #"{"version":1,"error":{"code":"group_missing","zh":"群不存在或已退出，请重新选择目标群","en":"group 1028551617 is not in the QQ group list"}}"#
+        let failure = QQMonitorHelper.contractError(stderr: Data(stderr.utf8)).localizedDescription
+        XCTAssertTrue(failure.contains("群不存在或已退出"), "group_missing 应给出中文原因：\(failure)")
+        XCTAssertTrue(failure.contains("重新选择目标群"), "group_missing 应给出可操作指引：\(failure)")
+        XCTAssertFalse(failure.contains("可稍后重试"), "群不存在不是稍后重试能恢复的问题：\(failure)")
+
+        let day = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9))!
+        let run = try await runner(store: store, qq: StubQQCollector(messages: [], failure: failure),
+                                   analysis: nil, now: day).runDailyCheck(date: day)
+        XCTAssertEqual(run.state, .incomplete, "群不存在时报告必须标记不完整")
+        XCTAssertEqual(run.sourceStatus.first?.ok, false)
+        XCTAssertTrue(run.sourceStatus.first?.error?.contains("群不存在") == true, "失败原因应落到来源状态")
+        let cursor = try await store.monitorCursor(sourceID: source.id)
+        XCTAssertNil(cursor?.lastSuccessAt, "失败时游标不得推进，避免把缺失的群当作已采集")
+        XCTAssertTrue(cursor?.lastError?.contains("群不存在") == true, "失败原因应写入游标")
     }
 
     func testAllAnalyzedNoNewMessagesReportsNothingToDo() async throws {
