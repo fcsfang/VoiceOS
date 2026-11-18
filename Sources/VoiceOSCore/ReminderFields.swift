@@ -264,11 +264,10 @@ extension VoiceOSStore {
         metadata.reminderFields = .init(desired: fields, observed: metadata.reminderFields?.observed)
         try db.execute("UPDATE actions SET intent_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(metadata), as: UTF8.self), actionID])
     }
-    func observeReminderFields(actionID: String, fields: ReminderFields) throws {
-        guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }) else { return }
+    func observeReminderFields(action: ActionRecord, fields: ReminderFields) throws {
         var metadata = action.intent ?? .init(intentType: "task", followupState: "pending", uncertain: false)
         var receipt = metadata.reminderFields ?? .init(); receipt.observed = fields; metadata.reminderFields = receipt
-        try db.execute("UPDATE actions SET intent_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(metadata), as: UTF8.self), actionID])
+        try db.execute("UPDATE actions SET intent_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(metadata), as: UTF8.self), action.id])
     }
     public func updateReminderFields(actionID: String, expectedVersion: Int, expected: ReminderSnapshot, desired: ReminderFields,
                                      expectedAccessVersion: Int, using port: any RemindersFieldsPort) async throws {
