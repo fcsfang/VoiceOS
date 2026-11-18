@@ -29,6 +29,8 @@ struct RecentContentHome: View {
     @State private var clueFailureTitle = "操作未完成"
     @State private var showingClueFailure = false
     @State private var organizeAttemptSourceID: String?
+    @State private var organizeToast: String?
+    @State private var organizeToastSourceID: String?
     @FocusState private var timelineFocused: Bool
     private let topAnchor = "home.top"
     private let timelineSpace = "home.timeline"
@@ -57,9 +59,13 @@ struct RecentContentHome: View {
                 }
             }
         }
-        .onAppear { syncSelection() }
+        .onAppear {
+            syncSelection()
+            Task { await reloadReadingStates() }
+        }
         .onChange(of: selected?.id) { _, _ in syncSelection() }
-        .task(id: model.initialized) { if model.initialized { readingStates = await model.readingStates() } }
+        .task(id: model.homeSnapshot) { await reloadReadingStates() }
+        .onChange(of: model.understandingSource) { _, id in finishOrganizeAttempt(id) }
         .sheet(item: $clueRename) { request in
             RecentClueRenameSheet(model: model, clue: request.clue, title: request.title, resettable: request.resettable) { clueRename = nil }
         }
@@ -92,14 +98,25 @@ struct RecentContentHome: View {
 
     private var empty: some View {
         VStack(spacing: 14) {
-            Text("还没有可以回看的内容").vosFont(WorkspaceText.sectionTitle)
-            Text("录一段，或写几句。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-            Button("记录想法") { capture() }.buttonStyle(.borderedProminent)
+            if let message = model.workspaceLastError {
+                Text("资料库读取失败").vosFont(WorkspaceText.sectionTitle)
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .vosFont(WorkspaceText.body).foregroundStyle(palette.danger).textSelection(.enabled)
+                if model.workspaceLastErrorRetry != nil {
+                    Button("重试") { model.retryWorkspaceError() }.buttonStyle(.borderedProminent)
+                }
+            } else {
+                Text("还没有可以回看的内容").vosFont(WorkspaceText.sectionTitle)
+                Text("录一段，或写几句。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                Button("记录想法") { capture() }.buttonStyle(.borderedProminent)
+                Button("导入录音") { model.chooseFullRecording() }
+            }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var timeline: some View {
-        ScrollViewReader { proxy in
+        let pendingOutcomeBadge = outcomeBadge
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if !recentThoughts.isEmpty { recentThoughtsSection(recentThoughts) }
@@ -108,7 +125,7 @@ struct RecentContentHome: View {
                             dayHeader(day)
                             VStack(alignment: .leading, spacing: 8) {
                                 ForEach(day.items) { item in
-                                    Button { selectedID = item.id } label: { row(item) }
+                                    Button { selectedID = item.id } label: { row(item, outcomeBadge: pendingOutcomeBadge) }
                                         .buttonStyle(.plain)
                                         .id(item.id)
                                         .background {
@@ -198,7 +215,7 @@ struct RecentContentHome: View {
         }
     }
 
-    private func row(_ item: RecentContentItem) -> some View {
+    private func row(_ item: RecentContentItem, outcomeBadge: String?) -> some View {
         let isSelected = selected?.id == item.id
         return HStack(alignment: .top, spacing: 10) {
             Image(systemName: rowIcon(item)).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
@@ -210,7 +227,7 @@ struct RecentContentHome: View {
                 Text(rowMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             Spacer(minLength: 6)
-            if let status = statusSlot(item) {
+            if let status = statusSlot(item, outcomeBadge: outcomeBadge) {
                 Text(status.text).vosFont(WorkspaceText.meta).foregroundStyle(status.color).padding(.top, 2)
             }
         }
@@ -220,8 +237,8 @@ struct RecentContentHome: View {
     }
 
     private func rowIcon(_ item: RecentContentItem) -> String {
-        if item.kind == .feedback { return "arrow.triangle.2.circlepath" }
-        return materialSource(item)?.kind.contains("text") == true ? "doc.text" : "waveform"
+        model.homeSnapshot.rows[item.id]?.icon
+            ?? (item.kind == .feedback ? "arrow.triangle.2.circlepath" : "waveform")
     }
 
     private func materialSource(_ item: RecentContentItem) -> SourceRecord? {
@@ -229,15 +246,18 @@ struct RecentContentHome: View {
         return model.sourcePageIndex.recordsByID[id]
     }
 
-    /// Slot 3 holds only a non-default state, one at a time.
-    private func statusSlot(_ item: RecentContentItem) -> (text: String, color: Color)? {
+    /// Slot 3 holds only a non-default state, one at a time. The snapshot
+    /// carries every state but reading, which is re-read after it.
+    private func statusSlot(_ item: RecentContentItem, outcomeBadge: String?) -> (text: String, color: Color)? {
+        switch model.homeSnapshot.rows[item.id]?.status {
+        case .some(.localOnly): return ("仅本地", palette.secondaryText)
+        case .some(.organizing): return ("整理中", palette.accent)
+        case .some(.needsReview): return ("待核对", palette.warning)
+        case .some(.issues(let count)): return ("疑点 \(count)", palette.warning)
+        case nil: break
+        }
         if item.kind == .feedback { return outcomeBadge.map { ($0, palette.warning) } }
         guard let source = materialSource(item) else { return nil }
-        if source.localOnly { return ("仅本地", palette.secondaryText) }
-        if ["queued", "running", "reserved"].contains(source.jobState ?? "") { return ("整理中", palette.accent) }
-        if source.needsTranscriptionReview { return ("待核对", palette.warning) }
-        let issues = source.unresolvedTranscriptionIssueCount
-        if issues > 0 { return ("疑点 \(issues)", palette.warning) }
         if readingStates[source.id] == .reading { return ("在读", palette.accent) }
         return nil
     }
@@ -247,7 +267,7 @@ struct RecentContentHome: View {
     }
 
     private func progressCount(_ item: RecentContentItem) -> Int {
-        model.homeSnapshot.progressRows[item.id]?.count ?? item.excerpts.count
+        model.homeSnapshot.rows[item.id]?.count ?? item.excerpts.count
     }
 
     private func rowMeta(_ item: RecentContentItem) -> String {
@@ -503,7 +523,7 @@ struct RecentContentHome: View {
     }
 
     private var recentThoughts: [RecentThoughtDay] {
-        RecentContentIndex.recentThoughts(days: days)
+        model.homeSnapshot.recentThoughts
     }
 
     private var outcomeBadge: String? {
@@ -551,16 +571,19 @@ struct RecentContentHome: View {
     @ViewBuilder private func organizePrompt(_ item: RecentContentItem) -> some View {
         if let source = materialSource(item) {
             let organizing = model.understandingSource == source.id
+            let blocker = organizeBlocker(source, organizing: organizing)
             VStack(alignment: .leading, spacing: 12) {
                 Text("这份材料还没有整理出想法").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                 HStack(spacing: 10) {
                     Button(organizing ? "正在整理…" : "整理这份材料") {
-                        organizeAttemptSourceID = source.id
-                        model.reidentify(source)
+                        attemptOrganize(source)
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(organizing || model.fullRecordingBusy || !model.modelConfigured || source.localOnly)
+                    .disabled(organizing || blocker != nil || !model.modelConfigured || source.localOnly)
                     if organizing { ProgressView().controlSize(.small) }
+                }
+                if let blocker {
+                    Text(blocker).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                 }
                 if source.localOnly {
                     Text("这份材料仅本机保存，允许云端后才能整理。")
@@ -570,15 +593,51 @@ struct RecentContentHome: View {
                         Text("整理需要先配置文本模型。").vosFont(WorkspaceText.caption).foregroundStyle(palette.warning)
                         Button("配置文本模型…") { model.chooseTextModel() }.vosFont(WorkspaceText.caption)
                     }
-                } else if organizeAttemptSourceID == source.id, !organizing, !model.status.isEmpty {
-                    Text(model.status).vosFont(WorkspaceText.caption)
-                        .foregroundStyle(palette.secondaryText).textSelection(.enabled)
+                } else if organizeToastSourceID == source.id, let toast = organizeToast {
+                    Label(toast, systemImage: "exclamationmark.circle")
+                        .vosFont(WorkspaceText.caption).foregroundStyle(palette.warning).textSelection(.enabled)
                 }
             }
             .padding(18).frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
             .accessibilityIdentifier("home.organizePrompt")
         }
+    }
+
+    private func reloadReadingStates() async {
+        guard model.initialized else { return }
+        readingStates = await model.readingStates()
+    }
+
+    private func organizeBlocker(_ source: SourceRecord, organizing: Bool) -> String? {
+        guard !organizing else { return nil }
+        if model.fullRecordingBusy { return "正在处理录音，完成后再整理。" }
+        if let understanding = model.understandingSource, understanding != source.id {
+            return "正在理解另一份材料，完成后再整理。"
+        }
+        if model.pausedActionBatch?.isRunning == true { return "批量重新识别进行中，完成后再整理。" }
+        return nil
+    }
+
+    private func attemptOrganize(_ source: SourceRecord) {
+        organizeAttemptSourceID = source.id
+        organizeToast = nil
+        organizeToastSourceID = nil
+        model.reidentify(source)
+        guard model.understandingSource != source.id else { return }
+        organizeAttemptSourceID = nil
+        showOrganizeToast("整理没有开始：另有理解或批量任务进行中，请稍后再试。", sourceID: source.id)
+    }
+
+    private func finishOrganizeAttempt(_ understandingSourceID: String?) {
+        guard understandingSourceID == nil, let attempted = organizeAttemptSourceID else { return }
+        organizeAttemptSourceID = nil
+        showOrganizeToast(model.status.isEmpty ? "整理未完成，请稍后再试。" : model.status, sourceID: attempted)
+    }
+
+    private func showOrganizeToast(_ text: String, sourceID: String) {
+        organizeToast = text
+        organizeToastSourceID = sourceID
     }
 
     private func dayLabel(_ date: Date) -> String {

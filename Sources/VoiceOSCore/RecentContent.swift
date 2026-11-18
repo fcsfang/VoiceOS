@@ -387,22 +387,44 @@ public struct RecentContentProgressRow: Identifiable, Equatable, Sendable {
     }
 }
 
+/// One timeline row's precomputed reads: the icon, the count a feedback row
+/// shows, and the status slot's non-default state. The reading state arrives
+/// after the snapshot, so the view merges it in.
+public struct RecentHomeRow: Equatable, Sendable {
+    public enum Status: Equatable, Sendable {
+        case localOnly, organizing, needsReview, issues(Int)
+    }
+    public let icon: String
+    public let count: Int
+    public let status: Status?
+    public init(icon: String, count: Int, status: Status?) {
+        self.icon = icon; self.count = count; self.status = status
+    }
+}
+
 /// The home content derived once per workspace reload: the day layout the
-/// timeline shows, each material item's digest keyed by item id, and each
-/// feedback item's task progress rows keyed by item id. A pure function of its
+/// timeline shows, each material item's digest keyed by item id, each feedback
+/// item's task progress rows keyed by item id, each row's icon, count and
+/// status, and the cross-material recent-thought groups. A pure function of its
 /// inputs, so a render only reads it.
 public struct RecentContentHomeSnapshot: Equatable, Sendable {
     public let days: [RecentContentDay]
     public let digests: [String: RecentContentDigest]
     public let progressRows: [String: [RecentContentProgressRow]]
+    public let rows: [String: RecentHomeRow]
+    public let recentThoughts: [RecentThoughtDay]
 
     public init(days: [RecentContentDay], digests: [String: RecentContentDigest],
-                progressRows: [String: [RecentContentProgressRow]] = [:]) {
+                progressRows: [String: [RecentContentProgressRow]] = [:],
+                rows: [String: RecentHomeRow] = [:],
+                recentThoughts: [RecentThoughtDay] = []) {
         self.days = days; self.digests = digests; self.progressRows = progressRows
+        self.rows = rows; self.recentThoughts = recentThoughts
     }
 
     public static func build(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord],
-                             calendar: Calendar = .current, overrides: [RecentClueOverride] = []) -> RecentContentHomeSnapshot {
+                             calendar: Calendar = .current, overrides: [RecentClueOverride] = [],
+                             now: Date = Date()) -> RecentContentHomeSnapshot {
         let days = RecentContentIndex.build(sources: sources, claims: claims, calendar: calendar)
         let overridesByClue = Dictionary(overrides.map { ($0.clue, $0) }, uniquingKeysWith: { first, _ in first })
         // A section hidden even indirectly through its merge target takes its
@@ -413,12 +435,20 @@ public struct RecentContentHomeSnapshot: Equatable, Sendable {
             guard let target = overridesByClue[id]?.mergeInto, target != id else { return false }
             return overridesByClue[target]?.hidden == true
         }
+        // One index for the whole snapshot. Positions keep the actions' own
+        // order when an item's claims are gathered from a set.
+        var actionPositionsByClaimID: [String: [Int]] = [:]
+        for (position, action) in actions.enumerated()
+        where action.state == "open" && action.validity == "current" && action.kind == "task" {
+            actionPositionsByClaimID[action.claimID, default: []].append(position)
+        }
         var digests: [String: RecentContentDigest] = [:]
         for item in days.flatMap(\.items) where item.kind == .material {
             let claimIDs = Set(item.thoughts.filter { !hidesThought($0.statement) }.map(\.claimID))
-            let tasks = actions
-                .filter { $0.state == "open" && $0.validity == "current" && $0.kind == "task" && claimIDs.contains($0.claimID) }
-                .map { RecentContentTask(id: $0.id, title: StatementTagParser.split($0.title).text) }
+            let tasks = claimIDs.flatMap { actionPositionsByClaimID[$0] ?? [] }.sorted().map { position in
+                let action = actions[position]
+                return RecentContentTask(id: action.id, title: StatementTagParser.split(action.title).text)
+            }
             digests[item.id] = RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration,
                                                          tasks: tasks, overrides: overrides)
         }
@@ -438,7 +468,26 @@ public struct RecentContentHomeSnapshot: Equatable, Sendable {
                 left.date == right.date ? left.id < right.id : left.date > right.date
             }
         }
-        return RecentContentHomeSnapshot(days: days, digests: digests, progressRows: progressRows)
+        var rows: [String: RecentHomeRow] = [:]
+        for item in days.flatMap(\.items) {
+            if item.kind == .feedback {
+                rows[item.id] = RecentHomeRow(icon: "arrow.triangle.2.circlepath",
+                                              count: progressRows[item.id]?.count ?? item.excerpts.count,
+                                              status: nil)
+                continue
+            }
+            let source = item.sourceIDs.first.flatMap { sourcesByID[$0] }
+            let status: RecentHomeRow.Status?
+            if let source, source.localOnly { status = .localOnly }
+            else if let source, ["queued", "running", "reserved"].contains(source.jobState ?? "") { status = .organizing }
+            else if let source, source.needsTranscriptionReview { status = .needsReview }
+            else if let source, source.unresolvedTranscriptionIssueCount > 0 { status = .issues(source.unresolvedTranscriptionIssueCount) }
+            else { status = nil }
+            rows[item.id] = RecentHomeRow(icon: source?.kind.contains("text") == true ? "doc.text" : "waveform",
+                                          count: 0, status: status)
+        }
+        return RecentContentHomeSnapshot(days: days, digests: digests, progressRows: progressRows, rows: rows,
+                                         recentThoughts: RecentContentIndex.recentThoughts(days: days, now: now, calendar: calendar))
     }
 }
 
