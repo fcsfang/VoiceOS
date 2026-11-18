@@ -121,14 +121,18 @@ struct WorkspaceMonitorView: View {
         }
     }
 
+    private var earlierReports: [MonitorReport] {
+        model.monitorReports.filter { $0.reportDate != todayKey }
+    }
+
     private var historySection: some View {
-        WorkspaceSection(title: "历史报告", subtitle: "最近 30 次检查；点开查看同结构内容。",
-                         icon: "clock.arrow.circlepath", count: model.monitorReports.count) {
-            if model.monitorReports.isEmpty {
-                Text("还没有历史报告。").vosFont(WorkspaceText.meta)
+        WorkspaceSection(title: "历史报告", subtitle: "最近 30 次检查中早于今天的报告；点开查看同结构内容。",
+                         icon: "clock.arrow.circlepath", count: earlierReports.count) {
+            if earlierReports.isEmpty {
+                Text("还没有更早的历史报告。").vosFont(WorkspaceText.meta)
                     .foregroundStyle(palette.secondaryText).padding(.vertical, 10)
             } else {
-                ForEach(model.monitorReports) { report in
+                ForEach(earlierReports) { report in
                     WorkspaceRow(
                         title: report.headline.isEmpty ? "未命名报告" : report.headline,
                         subtitle: report.reportDate + " · " + ControlCenter.monitorStateText(report.state)
