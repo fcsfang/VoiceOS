@@ -8,7 +8,11 @@ struct Check {
     static func main() async {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
-            let usage = "usage: voiceos-check <read|import|import-personal-audio|ingest-podcast|task-context|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]"
+            let usage = "usage: voiceos-check <read|import|import-personal-audio|ingest-podcast|task-context|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]\n       voiceos-check ax <dump|click|set-value|wait|scroll-to> --pid <pid> ..."
+            if args.first == "ax" {
+                try AXCommands.run(Array(args.dropFirst()))
+                return
+            }
             guard args.count >= 2 else { throw VoiceOSError(usage) }
             let command = args[0], root = URL(fileURLWithPath: args[1])
             if command == "ingest-podcast" {
@@ -94,6 +98,10 @@ struct Check {
             }]
             print(String(decoding: try JSONSerialization.data(withJSONObject: output, options: [.prettyPrinted, .sortedKeys]), as: UTF8.self))
         } catch {
+            if let driverError = error as? AXDriverError {
+                fputs("\(driverError.localizedDescription)\n", stderr)
+                exit(driverError.exitCode)
+            }
             fputs("\(error.localizedDescription)\n", stderr)
             exit(1)
         }
