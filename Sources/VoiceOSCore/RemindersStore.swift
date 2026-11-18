@@ -46,11 +46,26 @@ public struct ReminderSyncAnomaly: Identifiable, Sendable, Equatable {
         self.desiredTitle = desiredTitle; self.marker = marker; self.state = state
     }
 }
+public enum ReminderSyncFailureStage: String, Codable, Sendable, Equatable {
+    case expression, activation
+}
+/// The newest per-task reminder sync failure. One row per task and stage; a
+/// later success, a confirmed link, or a dropped update deletes it.
+public struct ReminderSyncFailure: Identifiable, Sendable, Equatable {
+    public let actionID: String
+    public let actionTitle: String
+    public let stage: ReminderSyncFailureStage
+    public let reason: String
+    public let failedAt: String
+    public var id: String { actionID + ":" + stage.rawValue }
+}
 public struct ReminderSyncAnomalySummary: Sendable, Equatable {
     public let items: [ReminderSyncAnomaly]
-    public init(items: [ReminderSyncAnomaly] = []) { self.items = items }
+    public let failures: [ReminderSyncFailure]
+    public init(items: [ReminderSyncAnomaly] = [], failures: [ReminderSyncFailure] = []) { self.items = items; self.failures = failures }
     public static let empty = ReminderSyncAnomalySummary()
     public var total: Int { items.count }
+    public var failureTotal: Int { failures.count }
     public func count(_ state: String) -> Int { items.filter { $0.state == state }.count }
 }
 extension VoiceOSStore {
@@ -88,7 +103,8 @@ extension VoiceOSStore {
             ReminderLink(id: $0["id"]!, actionID: $0["action_id"]!, calendarID: $0["calendar_id"]!, state: $0["state"]!, externalID: $0["external_id"], remoteTitle: $0["remote_title"], remoteCompleted: $0["remote_completed"].map { $0 == "1" }, lastObservedAt: $0["observed_at"], lastCheckedAt: $0["last_checked_at"], lastObservationID: $0["observation_id"], remoteMarkerValid: $0["marker_valid"].map { $0 == "1" }, remoteDueDate: try storedReminderDue(observationID: $0["observation_id"]))
         }
     }
-    /// Links whose last readback could not confirm a single Apple reminder.
+    /// Links whose last readback could not confirm a single Apple reminder, plus
+    /// per-task sync failures that stopped short of touching the link.
     public func reminderSyncAnomalies() throws -> ReminderSyncAnomalySummary {
         let items = try db.query("""
             SELECT l.id,l.action_id,l.desired_title,l.marker,l.state,a.title FROM reminder_links l
@@ -98,7 +114,33 @@ extension VoiceOSStore {
                 ReminderSyncAnomaly(id: $0["id"]!, actionID: $0["action_id"]!, actionTitle: $0["title"]!,
                                     desiredTitle: $0["desired_title"]!, marker: $0["marker"]!, state: $0["state"]!)
             }
-        return ReminderSyncAnomalySummary(items: items)
+        let failures = try db.query("""
+            SELECT f.action_id,f.stage,f.reason,f.failed_at,a.title FROM reminder_sync_failures f
+            JOIN actions a ON a.id=f.action_id ORDER BY f.failed_at,a.title,f.action_id
+            """).compactMap { row -> ReminderSyncFailure? in
+                guard let stage = row["stage"].flatMap(ReminderSyncFailureStage.init(rawValue:)) else { return nil }
+                return ReminderSyncFailure(actionID: row["action_id"]!, actionTitle: row["title"]!, stage: stage,
+                                           reason: row["reason"]!, failedAt: row["failed_at"]!)
+            }
+        return ReminderSyncAnomalySummary(items: items, failures: failures)
+    }
+    func recordReminderSyncFailure(actionID: String, stage: ReminderSyncFailureStage, reason: String,
+                                   at timestamp: String = ISO8601DateFormatter().string(from: Date())) throws {
+        try db.execute("INSERT INTO reminder_sync_failures(action_id,stage,reason,failed_at) VALUES(?,?,?,?) ON CONFLICT(action_id,stage) DO UPDATE SET reason=excluded.reason,failed_at=excluded.failed_at",
+                       [actionID, stage.rawValue, reason, timestamp])
+    }
+    func clearReminderSyncFailure(actionID: String, stage: ReminderSyncFailureStage) throws {
+        try db.execute("DELETE FROM reminder_sync_failures WHERE action_id=? AND stage=?", [actionID, stage.rawValue])
+    }
+    /// Rows whose cause is gone stop showing: an activation failure clears once
+    /// its link is confirmed, an expression failure once no completed expression
+    /// still lists the update.
+    func clearResolvedReminderSyncFailures() throws {
+        try db.execute("DELETE FROM reminder_sync_failures WHERE stage='activation' AND EXISTS(SELECT 1 FROM reminder_links l WHERE l.action_id=reminder_sync_failures.action_id AND l.state='linked')")
+        let pending = Set(try recordingExpressions().filter { $0.state == "completed" }.flatMap { $0.reminderUpdates ?? [] })
+        for row in try db.query("SELECT action_id FROM reminder_sync_failures WHERE stage='expression'") where !pending.contains(row["action_id"]!) {
+            try clearReminderSyncFailure(actionID: row["action_id"]!, stage: .expression)
+        }
     }
     /// One create attempt per action identity. Every subsequent invocation only reads.
     public func sendTaskToReminders(actionID: String, expectedVersion: Int, calendarID: String, using port: any RemindersPort, expectedAccessVersion: Int? = nil) async throws {
@@ -158,7 +200,7 @@ extension VoiceOSStore {
             // connector returns normally after the task was cancelled.
             if error is CancellationError || Task.isCancelled { throw CancellationError() }
             if error is ReminderSuccessorPending { throw VoiceOSError(ReminderSuccessorPending.message) }
-            throw VoiceOSError("提醒事项结果尚未确认；尝试已保留，请回读，不会自动重建")
+            throw VoiceOSError("提醒事项结果尚未确认；尝试已保留，请回读，不会自动重建（\(error.localizedDescription)）")
         }
     }
     func reminderSourceAllowed(_ action: ActionRecord) throws -> Bool {

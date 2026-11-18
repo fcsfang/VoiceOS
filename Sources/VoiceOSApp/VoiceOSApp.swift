@@ -3435,7 +3435,11 @@ final class ControlCenter: ObservableObject {
     private func flushPendingReminderSyncs(access: ReminderAccess) async -> Int {
         guard let store, reminders.isAuthorized, !pendingReminderSyncs.isEmpty else { return 0 }
         var written = 0
-        for entry in pendingReminderSyncList where entry.calendarID == access.calendarID {
+        for entry in pendingReminderSyncList {
+            guard entry.calendarID == access.calendarID else {
+                recordPendingReminderSyncFailure(actionID: entry.actionID, reason: "提醒事项清单已变化，等待原清单授权后重试")
+                continue
+            }
             do {
                 guard let link = reminderLinks.first(where: { $0.id == entry.linkID }),
                       let current = try await store.actions(includeHistory: true).first(where: { $0.id == entry.actionID }) else {
@@ -3447,7 +3451,12 @@ final class ControlCenter: ObservableObject {
                     removePendingReminderSync(actionID: entry.actionID)
                     continue
                 }
-                guard ["linked", "unknown"].contains(link.state) else { continue }
+                guard ["linked", "unknown"].contains(link.state) else {
+                    recordPendingReminderSyncFailure(actionID: entry.actionID, reason: link.state == "conflict"
+                        ? "提醒关联匹配到多条或身份已变化，请在提醒事项核对中处理"
+                        : "提醒事项中找不到关联任务，请先重新回读")
+                    continue
+                }
                 try await reminders.setCompletion(calendarID: entry.calendarID, externalID: entry.externalID, marker: entry.marker,
                                                   completed: entry.desiredState == LocalActionState.completed.rawValue) {
                     guard let currentAccess = try await store.reminderAccess(), currentAccess.enabled, currentAccess.version == access.version,
@@ -3536,35 +3545,44 @@ final class ControlCenter: ObservableObject {
                 requestReminderRefresh()
             }
         }
-        do {
-            if await flushPendingReminderSyncs(access: access) > 0 { reminderSyncStatus = "已把本地变更写入提醒事项并回读" }
-            // Field inference must not hold up completion readback or recording intake.
-            try await store.syncRecordingExpressionReminders(using:reminders)
-            if reminderFieldWorker == nil, let reminderFieldModel,
-               !(try await store.prepareReminderFields()).tasks.isEmpty {
-                reminderFieldFailure = nil
-                reminderFieldWorker = Task {
-                    defer { reminderFieldWorker = nil }
-                    do {
-                        try await store.extractReminderFields(using: reminderFieldModel)
-                        reminderFieldFailure = nil
-                        if remindersBusy { reminderFieldsReady = true }
-                        else { requestReminderRefresh() }
-                    } catch {
-                        reminderFieldFailure = error.localizedDescription
-                        reminderSyncStatus = "任务已保存，提醒字段待重试：" + error.localizedDescription
+        var stageFailures:[String] = []
+        if await flushPendingReminderSyncs(access: access) > 0 { reminderSyncStatus = "已把本地变更写入提醒事项并回读" }
+        // Each stage stands alone: a failure keeps its reason and never skips readback.
+        do { try await store.syncRecordingExpressionReminders(using:reminders) }
+        catch { stageFailures.append("提醒补录：" + error.localizedDescription) }
+        // Field inference must not hold up completion readback or recording intake.
+        if reminderFieldWorker == nil, let reminderFieldModel {
+            do {
+                if !(try await store.prepareReminderFields()).tasks.isEmpty {
+                    reminderFieldFailure = nil
+                    reminderFieldWorker = Task {
+                        defer { reminderFieldWorker = nil }
+                        do {
+                            try await store.extractReminderFields(using: reminderFieldModel)
+                            reminderFieldFailure = nil
+                            if remindersBusy { reminderFieldsReady = true }
+                            else { requestReminderRefresh() }
+                        } catch {
+                            reminderFieldFailure = error.localizedDescription
+                            reminderSyncStatus = "任务已保存，提醒字段待重试：" + error.localizedDescription
+                        }
                     }
                 }
-            }
+            } catch { stageFailures.append("提醒字段：" + error.localizedDescription) }
+        }
+        do {
             try await store.refreshAuthorizedReminders(expectedAccessVersion: access.version, using: reminders, requireReviewedFields: true)
             if reminderAccess?.version == access.version {
-                if let failure = reminderFieldFailure { reminderSyncStatus = "已回读既有任务，提醒字段待重试：" + failure }
+                if let failure = stageFailures.first { reminderSyncStatus = "已回读既有任务 · " + failure }
+                else if let failure = reminderFieldFailure { reminderSyncStatus = "已回读既有任务，提醒字段待重试：" + failure }
                 else if reminderFieldWorker != nil { reminderSyncStatus = "已回读既有任务 · 新任务日期和优先级正在后台核对" }
                 else { reminderSyncStatus = "已自动核对「\(access.title)」的关联任务" }
             }
-            try Task.checkCancellation()
         } catch {
-            if reminderAccess?.version == access.version { reminderSyncStatus = "自动同步未全部完成 · 已保存各任务状态，不自动重建" }
+            stageFailures.append("回读：" + error.localizedDescription)
+            if reminderAccess?.version == access.version {
+                reminderSyncStatus = "自动同步未全部完成 · 已保存各任务状态，不自动重建 · " + (stageFailures.first ?? error.localizedDescription)
+            }
         }
         await refresh()
         let changed = Set(actionRecords.filter { $0.kind == "task" && before[$0.id] != String($0.version) + ":" + $0.state }.map(\.id))
