@@ -392,3 +392,17 @@
 ## 波 69 官网正文去站点导航（2026-11-18）
 
 - 官网正文抽取把 `<a>` 转为纯文本后，`div.top_nav` / `div.pc_nav` / `div.crumbs` 等 CMS 导航行随正文进入 `monitor_messages.content`，污染分析输入与证据片段。现在 `ArticleExtractor` 用 U+0001/U+0002 哨兵包裹锚文本，逐行按「锚文本字符占比 > 60% 且链接数 ≥ 2」整行丢弃，单链接附件行与无锚文本行保留；未改调用方、无迁移，只修未来采集。610 测试。
+
+## 波 70-73 无障碍、提醒性能与 AX 操控通道（2026-11-18，已交付并安装）
+
+- 波 70（#246）：71 处 accessibilityIdentifier（导航 7、监测页 31、处理页 38 等，命名 `<区域>.<元素>[.<细节>]`），无标签控件补中文 label。实机：nav.* 7 个全部浮出，按标识 AXPress 打开监测页成功。
+- 波 71（#247）：SwiftUI 容器标识掩蔽修复——事项行与首页最近想法两处容器标识删除，动作标识（complete/dismiss/evidence）落到叶子。实机：105 个唯一标识浮出，`.complete`/`.dismiss`/`.evidence` 全部可按标识寻址。
+- 波 72：提醒对账每轮只加载一次观察数据（`ReminderObservationRound` 快照；`reminder_links.action_id` UNIQUE 使同轮不会读旧写新）。同 fixture（120 关联/500 任务/20 长转写）：中位数 1361ms → 35.6ms，约 38 倍；外部写入序列不变；TLA+ 模型双模式通过。实机：新版启动后 CPU 5 秒内回落（旧版 2 分 48 秒仍满核）。
+- 波 73：`voiceos-check ax` 子命令组（dump/click/set-value/wait/scroll-to，退出码 0/1/2/3，1.5s timeout + 单次重试）。实机链路：`ax click --identifier nav.monitor` 打开监测页，`ax wait monitor.runCheck` 命中，`ax dump --identifier monitor.item.` 输出 105 个动作标识。
+- 效率策略（用户指示）：小修与文档直推 main 不开 PR；实质波次 `--no-ff` 合并进本地 main，一轮集成构建（615 项测试 0 失败）后推 main；任务书与 STATUS 记录、真实退出码照旧保留。
+
+## computer-use 方案调研（2026-11-18，只读结论）
+
+- 事实：Claude 桌面端与 CLI 自 2026-03-23 起有第一方 computer use 研究预览（CLI 内置 MCP server `computer-use`，Pro/Max/Ultra，macOS 14+）；Peekaboo 5,496★（2026-11-17 活跃，MIT，v4.9.9）；munim 41★（2026-09 创建）；macos-automator-mcp 已归档；mcp-server-macos-use 停在 0.1.0。GitHub 数据经 API 实测。
+- 工程判断（非基准实测）：可靠性 XCUITest > AX 直驱+identifier > 截图+VLM > CGEvent 盲点按。推荐栈：voiceos-check ax（已交付）为主通道，第一方/Peekaboo 兜底，XCUITest 冒烟后续。
+- 现状：本机桌面版 6.6395.0 的 System 面板不渲染 computer use 开关（设置搜索索引里有该项但无法激活，AX 与真实点击均试过，未改动任何设置）。用户决定先用 munim 继续。
