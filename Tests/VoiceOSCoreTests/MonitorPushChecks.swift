@@ -55,7 +55,7 @@ final class MonitorPushChecks: XCTestCase {
         XCTAssertTrue(markdown.contains("**适用**"))
         XCTAssertTrue(markdown.contains("**待核对**"))
         XCTAssertTrue(markdown.contains("截止 11月20日"))
-        XCTAssertTrue(markdown.contains(MonitorPushComposer.footer))
+        XCTAssertTrue(markdown.contains(MonitorPushComposer.footer(date: "2026-11-18")))
     }
 
     func testServerChanFormCarriesTitleAndBody() throws {
@@ -134,5 +134,56 @@ final class MonitorPushChecks: XCTestCase {
         XCTAssertTrue(outcome.error?.contains("errcode=93000") == true)
         let stored = try await store.monitorReport(id: reportID)
         XCTAssertEqual(stored?.deliveryState, "failed")
+    }
+
+    private func makeItem(_ id: String, title: String, status: MonitorItemStatus) -> MonitorItem {
+        MonitorItem(id: id, reportID: "report-1", title: title, whyRelevant: "原因",
+                    suggestedAction: "行动", deadlineText: nil, deadlineDate: nil, conditions: nil,
+                    evidenceQuote: "原文", sourceRefsJSON: "[]", uncertainty: nil,
+                    category: .applicable, status: status, relatedItemID: nil,
+                    firstSeenDate: "2026-11-18", lastUpdatedDate: "2026-11-18",
+                    createdAt: "2026-11-18T00:00:00Z", updatedAt: "2026-11-18T00:00:00Z")
+    }
+
+    func testPushBodyKeepsOnlyOpenItemsAndCountsAll() {
+        let content = MonitorPushContent(
+            date: "2026-11-18", headline: "今日", summary: "",
+            items: [
+                MonitorPushItem(title: "已完成事项", deadline: nil, whyRelevant: "已完成",
+                                sourceName: "来源", category: .applicable, status: .done),
+                MonitorPushItem(title: "不适用事项", deadline: nil, whyRelevant: "不适用",
+                                sourceName: "来源", category: .needsCheck, status: .dismissed),
+                MonitorPushItem(title: "未处理事项", deadline: nil, whyRelevant: "待办",
+                                sourceName: "来源", category: .applicable, status: .open)
+            ])
+        let markdown = MonitorPushComposer.wecomMarkdown(content)
+        XCTAssertTrue(markdown.contains("共 3 条，未处理 1 条"), "正文顶部应统计全部条数与未处理条数")
+        XCTAssertTrue(markdown.contains("未处理事项"), "未处理事项应进入推送正文")
+        XCTAssertFalse(markdown.contains("已完成事项"), "已完成事项不应进入推送正文")
+        XCTAssertFalse(markdown.contains("不适用事项"), "不适用事项不应进入推送正文")
+    }
+
+    func testTruncatedPushKeepsOmissionNoteAndFooter() {
+        let items = (1...120).map { index in
+            MonitorPushItem(title: "事项 \(index)", deadline: nil,
+                            whyRelevant: String(repeating: "原因", count: 200),
+                            sourceName: "来源", category: .applicable, status: .open)
+        }
+        let content = MonitorPushContent(date: "2026-11-18", headline: "长报告", summary: "", items: items)
+        let markdown = MonitorPushComposer.wecomMarkdown(content)
+        XCTAssertLessThanOrEqual(markdown.utf8.count, MonitorPushComposer.wecomLimit, "推送正文不能超过通道上限")
+        XCTAssertTrue(markdown.contains("已省略部分事项，完整内容在应用内查看"), "截断后应提示进入应用查看")
+        XCTAssertTrue(markdown.hasSuffix(MonitorPushComposer.footer(date: "2026-11-18")), "截断后页脚仍应保留回看路径")
+    }
+
+    func testItemTallyUsesLiveStatuses() {
+        let tally = MonitorItemTally(items: [
+            makeItem("a", title: "未处理", status: .open),
+            makeItem("b", title: "已完成", status: .done),
+            makeItem("c", title: "不适用", status: .dismissed)
+        ])
+        XCTAssertEqual(tally.total, 3, "总数应包含全部事项")
+        XCTAssertEqual(tally.open, 1, "未处理数应按 open 状态统计")
+        XCTAssertEqual(tally.handled, 2, "已处理数应统计完成与不适用")
     }
 }

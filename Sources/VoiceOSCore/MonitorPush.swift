@@ -23,12 +23,15 @@ public struct MonitorPushItem: Sendable, Equatable {
     public let whyRelevant: String
     public let sourceName: String
     public let category: MonitorItemCategory
-    public init(title: String, deadline: String?, whyRelevant: String, sourceName: String, category: MonitorItemCategory) {
+    public let status: MonitorItemStatus
+    public init(title: String, deadline: String?, whyRelevant: String, sourceName: String,
+                category: MonitorItemCategory, status: MonitorItemStatus = .open) {
         self.title = title
         self.deadline = deadline
         self.whyRelevant = whyRelevant
         self.sourceName = sourceName
         self.category = category
+        self.status = status
     }
 }
 
@@ -59,9 +62,12 @@ public struct MonitorPushRequest {
 }
 
 public enum MonitorPushComposer {
-    public static let footer = "在 VoiceOS 中查看完整原文。"
     public static let wecomLimit = 3800
     public static let serverChanLimit = 30_000
+    static let truncationNote = "已省略部分事项，完整内容在应用内查看"
+    public static func footer(date: String) -> String {
+        "打开 VoiceOS → 消息监测 → 历史报告（\(date)）查看全文"
+    }
     private static let formAllowed = CharacterSet(
         charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
 
@@ -94,17 +100,7 @@ public enum MonitorPushComposer {
     }
 
     public static func wecomMarkdown(_ content: MonitorPushContent) -> String {
-        var lines: [String] = ["### 每日消息监测 · \(content.date)", ""]
-        if !content.headline.isEmpty { lines.append("**\(content.headline)**") }
-        if !content.summary.isEmpty {
-            lines.append("")
-            lines.append(content.summary)
-        }
-        lines += itemLines(content)
-        lines.append("")
-        lines.append(footer)
-        return truncate(lines.joined(separator: "\n"), limit: wecomLimit,
-                         note: "内容较长，已省略部分事项；请在 VoiceOS 中查看完整报告。")
+        render(content, heading: "###", limit: wecomLimit)
     }
 
     public static func serverChanTitle(_ content: MonitorPushContent) -> String {
@@ -114,17 +110,28 @@ public enum MonitorPushComposer {
     }
 
     public static func serverChanDesp(_ content: MonitorPushContent) -> String {
-        var lines: [String] = ["## 每日消息监测 · \(content.date)", ""]
-        if !content.headline.isEmpty { lines.append("**\(content.headline)**") }
+        render(content, heading: "##", limit: serverChanLimit)
+    }
+
+    private static func render(_ content: MonitorPushContent, heading: String, limit: Int) -> String {
+        var lines: [String] = ["\(heading) 每日消息监测 · \(content.date)", "",
+                               "共 \(content.items.count) 条，未处理 \(openItemCount(content)) 条"]
+        if !content.headline.isEmpty {
+            lines.append("")
+            lines.append("**\(content.headline)**")
+        }
         if !content.summary.isEmpty {
             lines.append("")
             lines.append(content.summary)
         }
         lines += itemLines(content)
-        lines.append("")
-        lines.append(footer)
-        return truncate(lines.joined(separator: "\n"), limit: serverChanLimit,
-                         note: "内容较长，已省略部分事项；请在 VoiceOS 中查看完整报告。")
+        let footerBlock = "\n\n" + footer(date: content.date)
+        return truncate(lines.joined(separator: "\n"), limit: limit - footerBlock.utf8.count,
+                        note: truncationNote) + footerBlock
+    }
+
+    private static func openItemCount(_ content: MonitorPushContent) -> Int {
+        content.items.filter { $0.status == .open }.count
     }
 
     public static func validateResponse(channel: MonitorPushChannel, statusCode: Int, body: Data) throws {
@@ -151,12 +158,13 @@ public enum MonitorPushComposer {
     }
 
     private static func itemLines(_ content: MonitorPushContent) -> [String] {
+        let openItems = content.items.filter { $0.status == .open }
+        if openItems.isEmpty { return ["", "今天没有未处理的事项。"] }
         var lines: [String] = []
         let groups: [(String, [MonitorPushItem])] = [
-            ("适用", content.items.filter { $0.category == .applicable }),
-            ("待核对", content.items.filter { $0.category == .needsCheck })
+            ("适用", openItems.filter { $0.category == .applicable }),
+            ("待核对", openItems.filter { $0.category == .needsCheck })
         ]
-        if content.items.isEmpty { lines.append(""); lines.append("今天没有需要关注或行动的事项。") }
         for (title, items) in groups where !items.isEmpty {
             lines.append("")
             lines.append("**\(title)**")

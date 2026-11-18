@@ -99,6 +99,7 @@ struct MonitorSourceStat: Equatable {
 struct MonitorItemEvidence: Identifiable, Equatable {
     let id: String
     let sourceName: String
+    let sourceKind: MonitorSourceKind?
     let sender: String?
     let sentAt: String?
     let url: String?
@@ -167,6 +168,7 @@ extension ControlCenter {
     func loadMonitorEvidence(items: [MonitorItem]) async {
         guard let store else { return }
         let nameBySource = Dictionary(uniqueKeysWithValues: monitorSources.map { ($0.id, $0.displayName) })
+        let kindBySource = Dictionary(uniqueKeysWithValues: monitorSources.map { ($0.id, $0.kind) })
         for item in items where monitorEvidence[item.id] == nil {
             let refs = (try? JSONDecoder().decode([NotificationSourceRef].self,
                                                    from: Data(item.sourceRefsJSON.utf8))) ?? []
@@ -179,6 +181,7 @@ extension ControlCenter {
                     evidence.append(MonitorItemEvidence(
                         id: message.id,
                         sourceName: nameBySource[message.sourceID] ?? "监测来源",
+                        sourceKind: kindBySource[message.sourceID],
                         sender: message.senderName,
                         sentAt: message.sentAt,
                         url: meta["url"] as? String,
@@ -188,6 +191,7 @@ extension ControlCenter {
                     evidence.append(MonitorItemEvidence(
                         id: "source:" + sourceID,
                         sourceName: nameBySource[sourceID] ?? "监测来源",
+                        sourceKind: kindBySource[sourceID],
                         sender: nil, sentAt: nil, url: nil, title: nil))
                 }
             }
@@ -418,7 +422,8 @@ extension ControlCenter {
                                                    from: Data(item.sourceRefsJSON.utf8))) ?? []
             let sourceName = refs.compactMap { nameBySource[$0.sourceID] }.first ?? "监测来源"
             return MonitorPushItem(title: item.title, deadline: item.deadlineText ?? item.deadlineDate,
-                                   whyRelevant: item.whyRelevant, sourceName: sourceName, category: item.category)
+                                   whyRelevant: item.whyRelevant, sourceName: sourceName,
+                                   category: item.category, status: item.status)
         }
         return MonitorPushContent(date: report.reportDate, headline: report.headline,
                                   summary: report.summary, items: pushItems)
@@ -577,6 +582,11 @@ extension ControlCenter {
 
     var monitorNeedsAttention: Bool {
         MonitorAttention.needsAttention(monitorReports.first)
+    }
+
+    var monitorOpenItemCount: Int {
+        guard let report = monitorLatestReport else { return 0 }
+        return MonitorItemTally(items: monitorItemsByReport[report.id] ?? []).open
     }
 
     var monitorAttentionText: String? {

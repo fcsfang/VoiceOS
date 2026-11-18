@@ -166,6 +166,18 @@ public struct MonitorItem: Identifiable, Sendable, Equatable {
     }
 }
 
+/// Counts from live item statuses. The report header, the handled group and
+/// the sidebar badge all read this, never the stored report item count.
+public struct MonitorItemTally: Sendable, Equatable {
+    public let total: Int
+    public let open: Int
+    public var handled: Int { total - open }
+    public init(items: [MonitorItem]) {
+        total = items.count
+        open = items.reduce(0) { $0 + ($1.status == .open ? 1 : 0) }
+    }
+}
+
 extension VoiceOSStore {
     public func addMonitorSource(kind: MonitorSourceKind, displayName: String, configJSON: String, enabled: Bool = true) throws -> MonitorSource {
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
