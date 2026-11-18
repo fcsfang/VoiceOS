@@ -62,6 +62,17 @@ public struct SourcePageIndex: Sendable {
     /// `workspacePausedTasks` derives; dismissed actions never pause.
     public let pausedTasks: [ActionRecord]
     private let expressionIssueBySourceID: [String: String]
+    /// Materials with unresolved transcription doubts, derived once per
+    /// snapshot instead of once per sidebar and processing-page body.
+    public let transcriptReviewPoints: [WorkspaceTranscriptReviewPoint]
+    /// Record-only attention gates: failed or blocked jobs, interrupted or
+    /// quarantined materials, and empty transcriptions awaiting review.
+    public let recordsNeedAttention: Bool
+    /// Open next steps per outcome, counted once per snapshot.
+    public let nextStepCounts: [String: Int]
+    /// The action revision key the actions page uses to refetch focus.
+    public let actionRevisionKey: String
+    private let actionsInOrder: [ActionRecord]
 
     public init(records: [SourceRecord] = [], claims: [CandidateClaim] = [], actions: [ActionRecord] = [],
                 currentClaimsBySource: [String: [CandidateClaim]] = [:],
@@ -123,6 +134,28 @@ public struct SourcePageIndex: Sendable {
         var paused: [ActionRecord] = []
         for action in actions where action.kind == "task" && reviewRequired.contains(action.id) { paused.append(action) }
         pausedTasks = paused
+
+        transcriptReviewPoints = records.compactMap { source -> WorkspaceTranscriptReviewPoint? in
+            guard !source.isTrashed, !source.isArchived else { return nil }
+            let count = source.unresolvedTranscriptionIssueCount
+            guard count > 0 else { return nil }
+            return WorkspaceTranscriptReviewPoint(source: source, count: count)
+        }.sorted { $0.count != $1.count ? $0.count > $1.count : $0.source.displayTitle < $1.source.displayTitle }
+        var needsAttention = false
+        for record in records {
+            if ["failed", "blocked"].contains(record.jobState ?? "")
+                || ["interrupted", "quarantined"].contains(record.state)
+                || record.needsEmptyTranscriptionReview {
+                needsAttention = true
+                break
+            }
+        }
+        recordsNeedAttention = needsAttention
+        nextStepCounts = ActionRowLayout.nextStepCounts(actions)
+        actionRevisionKey = actions.map {
+            $0.id + String($0.version) + $0.state + $0.validity
+        }.joined(separator: "|")
+        actionsInOrder = actions
     }
 
     /// The validated expression for a source, or nil when members or
@@ -166,6 +199,20 @@ public struct SourcePageIndex: Sendable {
     /// The same decision `ControlCenter.workspaceTaskRequiresReview` makes.
     public func requiresReview(_ actionID: String) -> Bool {
         reviewRequiredActionIDs.contains(actionID)
+    }
+
+    /// Expressions validated for the source page, keyed by source. Materials
+    /// grouping reuses this map instead of revalidating each expression.
+    public var expressionsBySourceID: [String: RecordingExpression] { expressionBySourceID }
+
+    /// Topic load keys for the given actions in workspace order. Same filter
+    /// and order as the topic action list, without joining the whole list.
+    public func currentActionKeys(for actionIDs: Set<String>) -> [String] {
+        actionsInOrder.compactMap { action in
+            guard actionIDs.contains(action.id), action.validity == "current",
+                  action.state != "dismissed" else { return nil }
+            return action.id + String(action.version)
+        }
     }
 }
 

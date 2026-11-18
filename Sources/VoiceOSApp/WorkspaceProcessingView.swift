@@ -1,6 +1,10 @@
 import SwiftUI
 import VoiceOSCore
 
+private enum WorkspaceProcessingFormatting {
+    static let iso8601 = ISO8601DateFormatter()
+}
+
 struct WorkspaceProcessingActivity {
     let sourceID: String
     let label: String
@@ -60,10 +64,20 @@ enum WorkspaceProcessingErrorText {
     }
 }
 
-struct WorkspaceTranscriptReviewPoint: Identifiable {
-    let source: SourceRecord
+/// One processing-page body evaluation. The sidebar dot and the processing
+/// page read the same snapshot instead of each accessor rescanning the library.
+struct WorkspaceAttentionSnapshot {
+    let transcriptReviewPoints: [WorkspaceTranscriptReviewPoint]
+    let unfinishedIntents: [ExpressionProcessingIntentRecord]
+    let failedFollowups: [RecordingFollowupReceipt]
+    let failedKnowledgeReviews: [KnowledgeReviewRecord]
+    let failedAssistantExecutions: [AssistantExecutionRecord]
+    let segmentedBatchFailures: [SegmentedProcessingBatch]
+    let topicOrganizationNeedsAttention: Bool
+    let monitorNeedsAttention: Bool
+    let needsAttention: Bool
     let count: Int
-    var id: String { source.id }
+    let processingOutstanding: Bool
 }
 
 extension ControlCenter {
@@ -109,10 +123,7 @@ extension ControlCenter {
     }
     var workspaceProcessingSourceID: String? { pausedActionBatch?.currentSourceID ?? transcriptReviewSourceID ?? processingActivity?.sourceID ?? understandingSource ?? fullRecordingSourceID }
     var workspaceUnfinishedIntents: [ExpressionProcessingIntentRecord] {
-        processingIntents.filter { intent in
-            guard !intent.isDismissed, ![.completed,.cancelled,.frozen].contains(intent.state), let input = intent.snapshot.context.sources.first else { return false }
-            return records.contains { $0.id == input.sourceID && $0.transcriptVersionID == input.transcriptVersionID && $0.policyVersion == intent.snapshot.policyVersion }
-        }
+        UnfinishedProcessingIntents.filter(processingIntents, recordsByID: sourcePageIndex.recordsByID)
     }
     func workspaceTaskRequiresReview(_ action: ActionRecord) -> Bool {
         sourcePageIndex.requiresReview(action.id)
@@ -165,33 +176,48 @@ extension ControlCenter {
         return latest.values.filter { [.rejected, .unknown].contains($0.state) }
             .sorted { ($0.createdAt, $0.id) > ($1.createdAt, $1.id) }
     }
-    var workspaceNeedsAttention: Bool {
-        !startupIssue.isEmpty || !workspacePausedTasks.isEmpty || records.contains { ["failed","blocked"].contains($0.jobState ?? "") || ["interrupted","quarantined"].contains($0.state) } ||
-        records.contains { $0.needsEmptyTranscriptionReview } ||
-        workspaceUnfinishedIntents.contains { $0.needsAttention } ||
-        recordingRequests.contains { $0.state == "blocked" } || !workspaceFailedAssistantExecutions.isEmpty ||
-        workspacePanoramaFailure != nil || !workspaceSegmentedBatchFailures.isEmpty ||
-        records.contains { transcriptReviewIssue(for:$0) != nil } ||
-        reminderFieldIssue != nil || !assistantAssessmentIssues.isEmpty
+    var workspaceAttentionSnapshot: WorkspaceAttentionSnapshot {
+        let points = sourcePageIndex.transcriptReviewPoints
+        let intents = workspaceUnfinishedIntents
+        let followups = workspaceFailedFollowups
+        let knowledge = workspaceFailedKnowledgeReviews
+        let failedAssistant = workspaceFailedAssistantExecutions
+        let segmentedFailures = workspaceSegmentedBatchFailures
+        let needsAttention = !startupIssue.isEmpty
+            || !workspacePausedTasks.isEmpty
+            || sourcePageIndex.recordsNeedAttention
+            || intents.contains { $0.needsAttention }
+            || recordingRequests.contains { $0.state == "blocked" }
+            || !failedAssistant.isEmpty
+            || workspacePanoramaFailure != nil
+            || !segmentedFailures.isEmpty
+            || records.contains { transcriptReviewIssue(for: $0) != nil }
+            || reminderFieldIssue != nil
+            || !assistantAssessmentIssues.isEmpty
+        let topicAttention = topicOrganizationNeedsAttention
+        let monitorAttention = monitorNeedsAttention
+        let count = points.reduce(0) { $0 + $1.count }
+            + followups.count + knowledge.count
+            + (topicAttention ? 1 : 0) + (needsAttention ? 1 : 0) + (monitorAttention ? 1 : 0)
+        let outstanding = needsAttention || topicAttention || !points.isEmpty
+            || !followups.isEmpty || !knowledge.isEmpty || monitorAttention
+            || recordingRequests.contains { $0.state == "waiting" }
+            || intents.contains { $0.state == .queued || $0.state == .running }
+        return .init(transcriptReviewPoints: points, unfinishedIntents: intents,
+                     failedFollowups: followups, failedKnowledgeReviews: knowledge,
+                     failedAssistantExecutions: failedAssistant,
+                     segmentedBatchFailures: segmentedFailures,
+                     topicOrganizationNeedsAttention: topicAttention,
+                     monitorNeedsAttention: monitorAttention,
+                     needsAttention: needsAttention, count: count,
+                     processingOutstanding: outstanding)
     }
     var workspaceTranscriptReviewPoints: [WorkspaceTranscriptReviewPoint] {
-        records.compactMap { source -> WorkspaceTranscriptReviewPoint? in
-            guard !source.isTrashed, !source.isArchived else { return nil }
-            let count = source.unresolvedTranscriptionIssueCount
-            guard count > 0 else { return nil }
-            return WorkspaceTranscriptReviewPoint(source: source, count: count)
-        }.sorted { $0.count != $1.count ? $0.count > $1.count : $0.source.displayTitle < $1.source.displayTitle }
+        sourcePageIndex.transcriptReviewPoints
     }
-    var workspaceAttentionCount: Int {
-        workspaceTranscriptReviewPoints.reduce(0) { $0 + $1.count } + workspaceFailedFollowups.count + workspaceFailedKnowledgeReviews.count + (topicOrganizationNeedsAttention ? 1 : 0) + (workspaceNeedsAttention ? 1 : 0) + (monitorNeedsAttention ? 1 : 0)
-    }
-    var workspaceProcessingOutstanding: Bool {
-        workspaceNeedsAttention || topicOrganizationNeedsAttention || !workspaceTranscriptReviewPoints.isEmpty ||
-        !workspaceFailedFollowups.isEmpty || !workspaceFailedKnowledgeReviews.isEmpty ||
-        monitorNeedsAttention ||
-        recordingRequests.contains { $0.state == "waiting" } ||
-        workspaceUnfinishedIntents.contains { $0.state == .queued || $0.state == .running }
-    }
+    var workspaceAttentionCount: Int { workspaceAttentionSnapshot.count }
+    var workspaceNeedsAttention: Bool { workspaceAttentionSnapshot.needsAttention }
+    var workspaceProcessingOutstanding: Bool { workspaceAttentionSnapshot.processingOutstanding }
 }
 
 struct WorkspaceProcessingBar: View {
@@ -206,7 +232,7 @@ struct WorkspaceProcessingBar: View {
                 ProgressView().controlSize(.small)
                 VStack(alignment:.leading,spacing:3) {
                     Text(title).lineLimit(1)
-                    if let id=model.workspaceProcessingSourceID,let source=model.records.first(where: { $0.id == id }) { Text(source.displayTitle).foregroundStyle(.secondary).lineLimit(1) }
+                    if let id=model.workspaceProcessingSourceID,let source=model.sourcePageIndex.recordsByID[id] { Text(source.displayTitle).foregroundStyle(.secondary).lineLimit(1) }
                 }
             } else if model.workspaceProcessingHasScheduledRetry {
                 Label("等待自动重试",systemImage:"clock.arrow.circlepath").foregroundStyle(.secondary).lineLimit(1)
@@ -242,9 +268,10 @@ struct WorkspaceProcessingView: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment:.leading,spacing:24) {
+                let attention = model.workspaceAttentionSnapshot
                 WorkspaceHeading(eyebrow:"后台处理",title:"进度与需要查看的事项",subtitle:"保持应用运行即可继续处理；可以先阅读其他内容。原文、处理结果与历史分别保留。")
                 ReverifyControls(model:model)
-                if model.monitorNeedsAttention {
+                if attention.monitorNeedsAttention {
                     WorkspaceSection(title:"消息监测",subtitle:"每日检查未完成或推送失败；已采集原文保留，不会重复发送。",icon:"bell.badge",count:1) {
                         if let text = model.monitorAttentionText {
                             WorkspaceNoticeText(message: text, severity: .warning)
@@ -275,7 +302,7 @@ struct WorkspaceProcessingView: View {
                 }
                 if let title = model.workspaceProcessingTitle {
                     WorkspaceSection(title:title,icon:"hourglass") {
-                        if let id=model.workspaceProcessingSourceID,let source=model.records.first(where: { $0.id == id }) {
+                        if let id=model.workspaceProcessingSourceID,let source=model.sourcePageIndex.recordsByID[id] {
                             WorkspaceRow(title:source.displayTitle,subtitle:"当前正在处理这份完整材料",trailing:"查看原文") { openSource(id) }
                         }
                         Text(model.transcriptReviewSourceID != nil ? model.transcriptReviewStatus : model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled).padding(.top,12)
@@ -296,9 +323,9 @@ struct WorkspaceProcessingView: View {
                             .accessibilityIdentifier("processing.panorama.retry")
                     }
                 }
-                if !model.workspaceUnfinishedIntents.isEmpty {
-                    WorkspaceSection(title:"文字理解与关联",icon:"text.bubble",count:model.workspaceUnfinishedIntents.count) {
-                        ForEach(model.workspaceUnfinishedIntents) { intent in
+                if !attention.unfinishedIntents.isEmpty {
+                    WorkspaceSection(title:"文字理解与关联",icon:"text.bubble",count:attention.unfinishedIntents.count) {
+                        ForEach(attention.unfinishedIntents) { intent in
                             VStack(alignment:.leading,spacing:10) {
                                 WorkspaceRow(title:name(intent.sourceID),subtitle:intentLabel(intent),trailing:"核对材料") { openSource(intent.sourceID) }
                                 if let error=intent.error { reason(error) }
@@ -381,7 +408,7 @@ struct WorkspaceProcessingView: View {
                         reasons(waiting.compactMap { request in request.error.map { (name(request.sourceID),$0) } })
                     }
                 }
-                let segmentedFailures=model.workspaceSegmentedBatchFailures
+                let segmentedFailures=attention.segmentedBatchFailures
                 if !segmentedFailures.isEmpty {
                     WorkspaceSection(title:"长录音分段理解未完成",subtitle:"模型输出未通过本地校验，原文与旧处理记录保留。整批重试会作为新的处理任务发送，不覆盖这次记录。",icon:"rectangle.3.group.bubble",count:segmentedFailures.count) {
                         ForEach(segmentedFailures) { batch in
@@ -440,7 +467,7 @@ struct WorkspaceProcessingView: View {
                         }
                     }
                 }
-                let reviewPoints=model.workspaceTranscriptReviewPoints
+                let reviewPoints=attention.transcriptReviewPoints
                 if !reviewPoints.isEmpty {
                     let issueTotal=reviewPoints.reduce(0) { $0 + $1.count }
                     WorkspaceSection(title:"转写疑点待核对",subtitle:"\(reviewPoints.count) 份材料的核对已经完成，仍有 \(issueTotal) 条疑点没有解决。打开材料可以逐条回听原音与查看原文。",icon:"exclamationmark.bubble",count:reviewPoints.count) {
@@ -449,7 +476,7 @@ struct WorkspaceProcessingView: View {
                         }
                     }
                 }
-                let failedFollowups=model.workspaceFailedFollowups
+                let failedFollowups=attention.failedFollowups
                 if !failedFollowups.isEmpty {
                     let followupErrors=failedFollowups.compactMap { receipt in receipt.error.map { (name(receipt.sourceID),$0) } }
                     WorkspaceSection(title:"思想与目标跟进未完成",subtitle:"原文和已有任务已保存；失败后可以重试。",icon:"arrow.triangle.branch",count:failedFollowups.count) {
@@ -464,7 +491,7 @@ struct WorkspaceProcessingView: View {
                         }
                     }
                 }
-                let failedKnowledgeReviews=model.workspaceFailedKnowledgeReviews
+                let failedKnowledgeReviews=attention.failedKnowledgeReviews
                 if !failedKnowledgeReviews.isEmpty {
                     let knowledgeErrors=failedKnowledgeReviews.compactMap { review in review.error.map { (name(review.sourceID),$0) } }
                     WorkspaceSection(title:"知识核查未完成",subtitle:"当前理解与核查结论分别保留；不再跟进的可忽略这次。",icon:"lightbulb",count:failedKnowledgeReviews.count) {
@@ -483,7 +510,7 @@ struct WorkspaceProcessingView: View {
                         }
                     }
                 }
-                if model.topicOrganizationNeedsAttention {
+                if attention.topicOrganizationNeedsAttention {
                     let pending=model.topicOrganizationPendingTopicCount
                     WorkspaceSection(title:"主题整理未完成",subtitle:"已完成的主题会保留；补齐只处理还没整理完的部分。",icon:"square.stack.3d.up",count:pending) {
                         if let text=model.topicOrganizationAttentionText { reason(text) }
@@ -492,7 +519,7 @@ struct WorkspaceProcessingView: View {
                             .accessibilityIdentifier("processing.topic.retry")
                     }
                 }
-                ForEach(model.workspaceFailedAssistantExecutions) { execution in
+                ForEach(attention.failedAssistantExecutions) { execution in
                     WorkspaceSection(title:"AI 代办未完成",icon:"sparkles") {
                         Text(execution.title).vosFont(WorkspaceText.rowTitle).padding(.vertical,12)
                         if let error=execution.error { reason(error) }
@@ -572,7 +599,7 @@ struct WorkspaceProcessingView: View {
                         WorkspaceRow(title:item.title,subtitle:item.category + " · " + item.date.formatted(date:.abbreviated,time:.shortened),trailing:"查看材料") { openSource(item.sourceID) }
                     }
                 } }
-                if model.initialized, !model.workspaceProcessingOutstanding, !model.workspaceProcessingBarVisible,
+                if model.initialized, !attention.processingOutstanding, !model.workspaceProcessingBarVisible,
                    inbox.pendingItems.isEmpty, inbox.folderErrors.isEmpty {
                     VStack(alignment:.leading,spacing:8) {
                         Label("已全部处理",systemImage:"checkmark.circle").foregroundStyle(.secondary)
@@ -583,7 +610,7 @@ struct WorkspaceProcessingView: View {
             }.frame(maxWidth:860,alignment:.leading).padding(30).frame(maxWidth:.infinity,alignment:.top)
         }
     }
-    private func name(_ id:String) -> String { model.records.first(where: { $0.id == id })?.displayTitle ?? "已保存的材料" }
+    private func name(_ id:String) -> String { model.sourcePageIndex.recordsByID[id]?.displayTitle ?? "已保存的材料" }
     private var reminderSyncStatusText: String {
         let summary = model.reminderSyncAnomalies
         guard summary.total > 0 else { return model.reminderSyncStatus }
@@ -598,7 +625,7 @@ struct WorkspaceProcessingView: View {
     }
     private func reminderSyncFailureSubtitle(_ failure: ReminderSyncFailure) -> String {
         let stage = failure.stage == .expression ? "提醒补录" : "新任务发送"
-        let at = ISO8601DateFormatter().date(from: failure.failedAt).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? failure.failedAt
+        let at = WorkspaceProcessingFormatting.iso8601.date(from: failure.failedAt).map { $0.formatted(date: .abbreviated, time: .shortened) } ?? failure.failedAt
         return stage + "失败 · " + at
     }
     @ViewBuilder private func reasons(_ entries:[(String,String)]) -> some View {
@@ -718,10 +745,10 @@ struct WorkspaceExternalCompletionBatchSection: View {
             model.workspaceExternalCompletion(action) == nil ? nil : WorkspaceExternalCompletionItem(action: action)
         }
         let grouped = Dictionary(grouping: items) { item in
-            model.claims.first { $0.id == item.action.claimID }?.references.first?.sourceID ?? ""
+            model.sourcePageIndex.claim(for: item.action.claimID)?.references.first?.sourceID ?? ""
         }
         return grouped.map { sourceID, items in
-            let title = sourceID.isEmpty ? "已保存的材料" : (model.records.first { $0.id == sourceID }?.displayTitle ?? "已保存的材料")
+            let title = sourceID.isEmpty ? "已保存的材料" : (model.sourcePageIndex.recordsByID[sourceID]?.displayTitle ?? "已保存的材料")
             return WorkspaceExternalCompletionGroup(sourceID: sourceID, title: title, items: items.sorted { $0.action.title < $1.action.title })
         }.sorted { $0.title < $1.title }
     }
@@ -775,7 +802,7 @@ struct WorkspaceExternalCompletionBatchSection: View {
             defer { busy = false }
             var done = 0
             for item in group.items {
-                guard let action = model.actionRecords.first(where: { $0.id == item.action.id }),
+                guard let action = model.sourcePageIndex.allAction(for: item.action.id),
                       let candidate = model.workspaceExternalCompletion(action) else {
                     result = "已确认 \(done) 条；「\(item.action.title)」的提醒回读已变化，请查看最新状态"
                     failed = true

@@ -7,6 +7,7 @@ struct WorkspaceTopicReadingView: View {
     let topic: ReflectionQuestion
     let mode: String
     let focus: ConversationReflectionFocus?
+    let reading: TopicReadingData
     let openSource: (String) -> Void
     let openTopic: (String) -> Void
     let openTask: (String) -> Void
@@ -28,15 +29,14 @@ struct WorkspaceTopicReadingView: View {
 
     private var sections: [TopicReadingSection] { topic.organization?.sections ?? [] }
     private var bodyPending: Bool { topic.organization?.bodyPending == true }
-    private var claimIDs: Set<String> { Set(sections.flatMap(\.claimIDs)) }
-    private var actionIDs: Set<String> { Set(sections.flatMap(\.actionIDs)) }
-    private var claims: [CandidateClaim] { model.claims.filter { claimIDs.contains($0.id) && $0.validity == "current" && $0.reviewState != "rejected" } }
-    private var actions: [ActionRecord] { model.actionRecords.filter { actionIDs.contains($0.id) && $0.validity == "current" && $0.state != "dismissed" } }
+    private var claimIDs: Set<String> { reading.claimIDs }
+    private var actionIDs: Set<String> { reading.actionIDs }
+    private var actions: [ActionRecord] { reading.actions }
     private var tasks: [ActionRecord] { actions.filter { $0.kind == "task" } }
     private var deliveries: [AssistantExecutionRecord] {
         model.assistantExecutions.filter { $0.validity == "current" && $0.state == "completed" && ($0.questionID == topic.id || actionIDs.contains($0.actionID)) }
     }
-    private var outcomes: [ActionFeedbackRecord] { (focus?.outcomes ?? []).filter { feedback in actionIDs.contains(feedback.actionID) && feedback.sourceState != "frozen" && actions.contains { $0.id == feedback.actionID && $0.version == feedback.actionVersion } } }
+    private var outcomes: [ActionFeedbackRecord] { (focus?.outcomes ?? []).filter { feedback in actionIDs.contains(feedback.actionID) && feedback.sourceState != "frozen" && reading.actionVersionByID[feedback.actionID] == feedback.actionVersion } }
     private var filterTerm: String { localFilter.trimmingCharacters(in:.whitespacesAndNewlines) }
     private var showsTopicFilter: Bool { sections.count > 4 }
     private var filteredSections: [TopicReadingSection] {
@@ -53,9 +53,9 @@ struct WorkspaceTopicReadingView: View {
     private func sectionMatches(_ section:TopicReadingSection,term:String) -> Bool {
         if section.title.localizedStandardContains(term) || section.summary.localizedStandardContains(term) { return true }
         if section.evidence.contains(where: { $0.quote.localizedStandardContains(term) }) { return true }
-        let sectionClaims=claims.filter { section.claimIDs.contains($0.id) }
+        let sectionClaims=reading.sectionClaims[section.id] ?? []
         if sectionClaims.contains(where: { $0.statement.localizedStandardContains(term) }) { return true }
-        return actions.contains { section.actionIDs.contains($0.id) && $0.title.localizedStandardContains(term) }
+        return (reading.sectionActions[section.id] ?? []).contains { $0.title.localizedStandardContains(term) }
     }
     private var topicFilter: some View {
         HStack(spacing:12) {
@@ -80,12 +80,14 @@ struct WorkspaceTopicReadingView: View {
         var id: String { topic.id }
     }
     private var adjacentTopics: [AdjacentTopic] {
-        let sourceIDs = Set(model.workspaceTopicSources[topic.id] ?? [])
-        guard !sourceIDs.isEmpty else { return [] }
+        let selected = reading.sourceIDs
+        guard !selected.isEmpty else { return [] }
+        let counts = TopicAdjacency.sharedCounts(selectedTopicID: topic.id, selectedSourceIDs: selected,
+                                                 topics: model.workspaceTopics,
+                                                 topicSources: model.workspaceTopicSources)
         return model.workspaceTopics.compactMap { other -> AdjacentTopic? in
-            guard other.id != topic.id else { return nil }
-            let shared = Set(model.workspaceTopicSources[other.id] ?? []).intersection(sourceIDs).count
-            return shared > 0 ? AdjacentTopic(topic: other, sharedCount: shared) : nil
+            guard let shared = counts[other.id], shared > 0 else { return nil }
+            return AdjacentTopic(topic: other, sharedCount: shared)
         }.sorted { left, right in
             if left.sharedCount != right.sharedCount { return left.sharedCount > right.sharedCount }
             return left.topic.title.localizedStandardCompare(right.topic.title) == .orderedAscending
@@ -263,12 +265,12 @@ struct WorkspaceTopicReadingView: View {
     }
 
     private func readingCard(_ section:TopicReadingSection) -> some View {
-        let sectionClaims=claims.filter { section.claimIDs.contains($0.id) }
-        let sectionActions=actions.filter { section.actionIDs.contains($0.id) }
+        let sectionClaims=reading.sectionClaims[section.id] ?? []
+        let sectionActions=reading.sectionActions[section.id] ?? []
         return VStack(alignment:.leading,spacing:16) {
             HStack {
                 Spacer()
-                Text(String(format:"%02d",(sections.firstIndex { $0.id == section.id } ?? 0)+1)).vosFont(WorkspaceText.caption.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
+                Text(String(format:"%02d",(reading.sectionPosition[section.id] ?? 0)+1)).vosFont(WorkspaceText.caption.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
             }
             Text(section.title).vosFont(WorkspaceText.sectionTitle).fixedSize(horizontal:false,vertical:true).accessibilityAddTraits(.isHeader)
             WorkspaceExpandableText(text:section.summary,label:"小节内容",lines:5,size:WorkspaceText.body.size)
@@ -299,7 +301,7 @@ struct WorkspaceTopicReadingView: View {
                     ForEach(Array(section.evidence.enumerated()),id:\.offset) { _,evidence in
                         VStack(alignment:.leading,spacing:8) {
                             Text(evidence.quote).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
-                            Button(model.records.first { $0.id == evidence.sourceID }?.displayTitle ?? "打开来源") { openSource(evidence.sourceID) }.vosFont(WorkspaceText.meta)
+                            Button(model.sourcePageIndex.recordsByID[evidence.sourceID]?.displayTitle ?? "打开来源") { openSource(evidence.sourceID) }.vosFont(WorkspaceText.meta)
                         }
                     }
                 }.padding(.top,12)
@@ -382,13 +384,13 @@ struct WorkspaceTopicReadingView: View {
     }
 
     private func connectionDate(_ connection:ReflectionConnection) -> Date {
-        guard let source=model.records.first(where: { $0.id == connection.sourceID }) else { return .distantPast }
+        guard let source=model.sourcePageIndex.recordsByID[connection.sourceID] else { return .distantPast }
         return source.expressedDate ?? ConversationReflectionFocus.date(source.createdAt) ?? .distantPast
     }
 
     private func historicalSourceID(_ connection:ReflectionConnection) -> String? {
-        let sourceIDs=model.claims.first(where: { $0.id == connection.update.claimID })?.references.map(\.sourceID) ?? []
-        return sourceIDs.first { id in model.records.first(where: { $0.id == id })?.transcript?.contains(connection.update.historicalQuote) == true }
+        let sourceIDs=model.sourcePageIndex.claim(for: connection.update.claimID)?.references.map(\.sourceID) ?? []
+        return sourceIDs.first { id in model.sourcePageIndex.recordsByID[id]?.transcript?.contains(connection.update.historicalQuote) == true }
     }
 
     private func relation(_ value:String) -> String {
@@ -460,7 +462,7 @@ struct WorkspaceTopicReadingView: View {
     private func outcomeCard(_ outcome:ActionFeedbackRecord) -> some View {
         VStack(alignment:.leading,spacing:9) {
             Label("你的实际记录 · " + date(outcome.createdAt),systemImage:"quote.bubble").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            if let action=actions.first(where: { $0.id == outcome.actionID }) {
+            if let action=reading.actionsByID[outcome.actionID] {
                 Button("回应的行动：" + action.title) { openTask(action.id) }.vosFont(WorkspaceText.meta)
             }
             WorkspaceExpandableText(text:outcome.text,label:"结果记录",size:WorkspaceText.body.size)
@@ -472,7 +474,7 @@ struct WorkspaceTopicReadingView: View {
         WorkspaceRow(title:result.title,subtitle:"AI 交付 · 实践效果见实际记录",icon:"doc.text",trailing:"阅读") { openDelivery(result.id) }
     }
     private func sectionClaimCount(_ section:TopicReadingSection) -> Int {
-        claims.filter { section.claimIDs.contains($0.id) }.count
+        reading.sectionClaims[section.id]?.count ?? 0
     }
     private func requestStructureFocus() {
         Task {
