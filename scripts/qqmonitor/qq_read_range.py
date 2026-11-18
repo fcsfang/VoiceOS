@@ -112,7 +112,11 @@ def conversations(request, reader_cls):
         })
     rows.sort(key=lambda row: (-row["latest_timestamp"], str(row["conversation_name"] or ""), row["conversation_id"]))
     rows = rows[:limit]
-    emit({"version": 1, "action": "conversations", "count": len(rows), "conversations": rows})
+    response = {"version": 1, "action": "conversations", "count": len(rows), "conversations": rows}
+    account_dir = getattr(getattr(reader, "nt_db", None), "parent", None)
+    if account_dir is not None:
+        response["account"] = account_dir.name
+    emit(response)
 
 
 def read_range(request):
