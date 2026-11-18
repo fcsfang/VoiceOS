@@ -219,10 +219,12 @@ struct WorkspaceProcessingBar: View {
                     Text(model.dictationElapsedText).monospacedDigit().foregroundStyle(.secondary)
                 }
                 Button("取消并丢弃…") { confirmingDiscard = true }
+                    .accessibilityIdentifier("processing.dictation.discard")
                 Button("停止并整理") { model.stopDictation() }
+                    .accessibilityIdentifier("processing.dictation.stop")
             }
-            else if model.pausedActionBatch?.isRunning == true { Button("停止后续处理") { model.stopPausedActionBatch() } }
-            else if model.fullRecordingBusy { Button("停止后续处理") { model.cancelFullRecording() } }
+            else if model.pausedActionBatch?.isRunning == true { Button("停止后续处理") { model.stopPausedActionBatch() }.accessibilityIdentifier("processing.batch.stop") }
+            else if model.fullRecordingBusy { Button("停止后续处理") { model.cancelFullRecording() }.accessibilityIdentifier("processing.recording.stop") }
             Button("查看处理",action:open).accessibilityIdentifier("workspace.processing")
         }.vosFont(WorkspaceText.meta).padding(.horizontal,20).padding(.vertical,12).background(palette.surface)
             .alert("取消并丢弃这段录音？", isPresented: $confirmingDiscard) {
@@ -251,14 +253,17 @@ struct WorkspaceProcessingView: View {
                         }
                         HStack(spacing:16) {
                             Button("去查看") { openMonitor() }.accessibilityLabel("打开消息监测")
+                                .accessibilityIdentifier("processing.monitor.open")
                             if model.monitorReports.first?.deliveryState == "failed" {
                                 Button("重试推送") { Task { await model.pushLatestMonitorReport() } }
                                     .disabled(model.monitorChecking)
                                     .accessibilityLabel("重试推送今日监测报告")
+                                    .accessibilityIdentifier("processing.monitor.pushRetry")
                             } else {
                                 Button("重新检查") { Task { await model.runMonitorCheck() } }
                                     .disabled(model.monitorChecking)
                                     .accessibilityLabel("重新检查消息监测")
+                                    .accessibilityIdentifier("processing.monitor.recheck")
                             }
                         }.padding(.top,8)
                     }
@@ -267,6 +272,7 @@ struct WorkspaceProcessingView: View {
                     WorkspaceSection(title:"资料库尚未打开",subtitle:"已有资料没有被重建或清空。处理原因后可以重新打开。",icon:"exclamationmark.triangle") {
                         reason(model.startupIssue).padding(.top,12)
                         Button("重试打开资料库") { Task { await model.start() } }
+                            .accessibilityIdentifier("processing.library.retry")
                     }
                 }
                 if let title = model.workspaceProcessingTitle {
@@ -289,6 +295,7 @@ struct WorkspaceProcessingView: View {
                         Button("重试生成全景") { model.retryPanorama() }
                             .disabled(!model.panorama.modelConfigured || model.panorama.isGenerating || model.panorama.state?.status == "running")
                             .accessibilityLabel("重试生成全景")
+                            .accessibilityIdentifier("processing.panorama.retry")
                     }
                 }
                 if !model.workspaceUnfinishedIntents.isEmpty {
@@ -297,18 +304,20 @@ struct WorkspaceProcessingView: View {
                             VStack(alignment:.leading,spacing:10) {
                                 WorkspaceRow(title:name(intent.sourceID),subtitle:intentLabel(intent),trailing:"核对材料") { openSource(intent.sourceID) }
                                 if let error=intent.error { reason(error) }
-                                if intent.state == .queued && !model.modelConfigured { Button("配置模型后继续",action:openSettings).accessibilityLabel("配置模型后继续：" + name(intent.sourceID)) }
+                                if intent.state == .queued && !model.modelConfigured { Button("配置模型后继续",action:openSettings).accessibilityLabel("配置模型后继续：" + name(intent.sourceID)).accessibilityIdentifier("processing.intent." + intent.id + ".configure") }
                                 if intent.state == .queued || intent.state == .running {
-                                    Button("停止处理") { Task { await model.cancelProcessingIntent(intent) } }.accessibilityLabel("停止处理：" + name(intent.sourceID))
+                                    Button("停止处理") { Task { await model.cancelProcessingIntent(intent) } }.accessibilityLabel("停止处理：" + name(intent.sourceID)).accessibilityIdentifier("processing.intent." + intent.id + ".stop")
                                 }
                                 if intent.canReprocess {
                                     Button("重新理解") { Task { await model.reprocessProcessingIntent(intent) } }
                                         .disabled(!model.modelConfigured)
                                         .accessibilityLabel("重新理解：" + name(intent.sourceID))
+                                        .accessibilityIdentifier("processing.intent." + intent.id + ".retry")
                                 }
                                 if intent.canIgnore {
                                     Button("忽略这次") { Task { await model.ignoreProcessingIntent(intent) } }
                                         .accessibilityLabel("忽略这次理解失败：" + name(intent.sourceID))
+                                        .accessibilityIdentifier("processing.intent." + intent.id + ".ignore")
                                 }
                             }
                         }
@@ -334,9 +343,9 @@ struct WorkspaceProcessingView: View {
                         }
                         reasons(sourceErrors)
                         if retryableSources.count > 1 {
-                            Button("重试全部本地转写（\(retryableSources.count)）") { retryAllTranscriptions(retryableSources) }.disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil)
+                            Button("重试全部本地转写（\(retryableSources.count)）") { retryAllTranscriptions(retryableSources) }.disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil).accessibilityIdentifier("processing.transcription.retryAll")
                         } else if let source=retryableSources.first {
-                            Button("重试本地转写") { Task { await model.retry(source) } }.accessibilityLabel("重试本地转写：" + source.displayTitle).disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil)
+                            Button("重试本地转写") { Task { await model.retry(source) } }.accessibilityLabel("重试本地转写：" + source.displayTitle).disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil).accessibilityIdentifier("processing.transcription." + source.id + ".retry")
                         }
                     }
                 }
@@ -347,7 +356,7 @@ struct WorkspaceProcessingView: View {
                             VStack(alignment:.leading,spacing:6) {
                                 WorkspaceRow(title:source.displayTitle,subtitle:emptyTranscriptSubtitle(source),trailing:"查看材料") { openSource(source.id) }
                                 HStack(spacing:12) {
-                                    Button("重新转写") { Task { await model.retry(source) } }.accessibilityLabel("重新转写：" + source.displayTitle).disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil)
+                                    Button("重新转写") { Task { await model.retry(source) } }.accessibilityLabel("重新转写：" + source.displayTitle).disabled(model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil).accessibilityIdentifier("processing.transcription." + source.id + ".retry")
                                     EmptyTranscriptTrashControl(model:model,source:source)
                                 }.padding(.leading,44).padding(.bottom,8)
                             }
@@ -365,8 +374,9 @@ struct WorkspaceProcessingView: View {
                                         Button("重新核对并继续") { Task { await model.retryRecordingRequest(request) } }
                                             .disabled(!model.modelConfigured)
                                             .accessibilityLabel("重新核对并继续录音处理：" + name(request.sourceID))
+                                            .accessibilityIdentifier("processing.request." + request.id + ".recheck")
                                     }
-                                    Button("停止处理") { Task { await model.cancelRecordingRequest(request) } }.accessibilityLabel("停止处理录音处理请求：" + name(request.sourceID))
+                                    Button("停止处理") { Task { await model.cancelRecordingRequest(request) } }.accessibilityLabel("停止处理录音处理请求：" + name(request.sourceID)).accessibilityIdentifier("processing.request." + request.id + ".stop")
                                 }.padding(.bottom,8)
                             }
                         }
@@ -384,6 +394,7 @@ struct WorkspaceProcessingView: View {
                                     Button("整批重试") { model.retrySegmentedBatch(batch) }
                                         .disabled(model.understandingSource != nil || !model.modelConfigured || model.fullRecordingBusy)
                                         .accessibilityLabel("整批重试长录音分段理解：" + name(batch.scope.plan.source.sourceID))
+                                        .accessibilityIdentifier("processing.segmented." + batch.id + ".retry")
                                         .padding(.leading,44).padding(.bottom,8)
                                 }
                             }
@@ -424,9 +435,9 @@ struct WorkspaceProcessingView: View {
                         }
                         reasons(reviewErrors)
                         if reviewSources.count > 1 {
-                            Button("重试全部完整转写核对（\(reviewSources.count)）") { retryAllTranscriptReviews(reviewSources) }.disabled(!model.modelConfigured || model.transcriptReviewSourceID != nil || model.fullRecordingBusy)
+                            Button("重试全部完整转写核对（\(reviewSources.count)）") { retryAllTranscriptReviews(reviewSources) }.disabled(!model.modelConfigured || model.transcriptReviewSourceID != nil || model.fullRecordingBusy).accessibilityIdentifier("processing.transcriptReview.retryAll")
                         } else if let source=reviewSources.first {
-                            Button("重试完整转写核对") { Task { await model.reviewTranscription(sourceID:source.id) } }.accessibilityLabel("重试完整转写核对：" + source.displayTitle).disabled(!model.modelConfigured || model.transcriptReviewSourceID != nil || model.fullRecordingBusy)
+                            Button("重试完整转写核对") { Task { await model.reviewTranscription(sourceID:source.id) } }.accessibilityLabel("重试完整转写核对：" + source.displayTitle).disabled(!model.modelConfigured || model.transcriptReviewSourceID != nil || model.fullRecordingBusy).accessibilityIdentifier("processing.transcriptReview." + source.id + ".retry")
                         }
                     }
                 }
@@ -448,9 +459,9 @@ struct WorkspaceProcessingView: View {
                         }
                         reasons(followupErrors)
                         if failedFollowups.count > 1 {
-                            Button("全部重试（\(failedFollowups.count)）") { model.retryAllFailedFollowups() }.accessibilityLabel("全部重试思想与下一步（\(failedFollowups.count)）").disabled(!model.modelConfigured || model.followupBusy)
+                            Button("全部重试（\(failedFollowups.count)）") { model.retryAllFailedFollowups() }.accessibilityLabel("全部重试思想与下一步（\(failedFollowups.count)）").disabled(!model.modelConfigured || model.followupBusy).accessibilityIdentifier("processing.followup.retryAll")
                         } else if let receipt=failedFollowups.first {
-                            Button("立即重试") { model.refreshFollowup(receipt.sourceID) }.accessibilityLabel("立即重试思想与下一步：" + name(receipt.sourceID)).disabled(!model.modelConfigured || model.followupBusy)
+                            Button("立即重试") { model.refreshFollowup(receipt.sourceID) }.accessibilityLabel("立即重试思想与下一步：" + name(receipt.sourceID)).disabled(!model.modelConfigured || model.followupBusy).accessibilityIdentifier("processing.followup." + receipt.sourceID + ".retry")
                         }
                     }
                 }
@@ -462,13 +473,14 @@ struct WorkspaceProcessingView: View {
                             WorkspaceRow(title:name(review.sourceID),subtitle:"",trailing:"查看材料") { openSource(review.sourceID) }
                             Button("忽略这次") { model.ignoreProcessingFailure("knowledge:" + review.id) }
                                 .accessibilityLabel("忽略这次知识核查：" + name(review.sourceID))
+                                .accessibilityIdentifier("processing.knowledge." + review.id + ".ignore")
                                 .padding(.bottom,8)
                         }
                         reasons(knowledgeErrors)
                         if failedKnowledgeReviews.count > 1 {
-                            Button("全部重试（\(failedKnowledgeReviews.count)）") { Task { await model.retryAllFailedKnowledgeReviews() } }.accessibilityLabel("全部重试知识核查（\(failedKnowledgeReviews.count)）").disabled(!model.modelConfigured || model.knowledgeReviewBusy)
+                            Button("全部重试（\(failedKnowledgeReviews.count)）") { Task { await model.retryAllFailedKnowledgeReviews() } }.accessibilityLabel("全部重试知识核查（\(failedKnowledgeReviews.count)）").disabled(!model.modelConfigured || model.knowledgeReviewBusy).accessibilityIdentifier("processing.knowledge.retryAll")
                         } else if let review=failedKnowledgeReviews.first {
-                            Button("重试知识核查") { Task { await model.reviewKnowledge(sourceID:review.sourceID,retry:true) } }.accessibilityLabel("重试知识核查：" + name(review.sourceID)).disabled(!model.modelConfigured || model.knowledgeReviewBusy)
+                            Button("重试知识核查") { Task { await model.reviewKnowledge(sourceID:review.sourceID,retry:true) } }.accessibilityLabel("重试知识核查：" + name(review.sourceID)).disabled(!model.modelConfigured || model.knowledgeReviewBusy).accessibilityIdentifier("processing.knowledge." + review.id + ".retry")
                         }
                     }
                 }
@@ -478,6 +490,7 @@ struct WorkspaceProcessingView: View {
                         if let text=model.topicOrganizationAttentionText { reason(text) }
                         Button(pending > 0 ? "继续补齐正文（\(pending)）" : "立即重试") { model.queueTopicOrganization(retry:pending == 0, topUp:pending > 0) }
                             .accessibilityLabel(pending > 0 ? "继续补齐主题正文（\(pending)）" : "立即重试主题整理")
+                            .accessibilityIdentifier("processing.topic.retry")
                     }
                 }
                 ForEach(model.workspaceFailedAssistantExecutions) { execution in
@@ -485,15 +498,15 @@ struct WorkspaceProcessingView: View {
                         Text(execution.title).vosFont(WorkspaceText.rowTitle).padding(.vertical,12)
                         if let error=execution.error { reason(error) }
                         HStack(spacing:16) {
-                            Button("查看委托与重试") { model.showTask(execution.actionID) }.accessibilityLabel("查看委托与重试：" + execution.title)
-                            Button("忽略这次") { model.ignoreProcessingFailure("assistant:" + execution.id) }.accessibilityLabel("忽略这次 AI 代办：" + execution.title)
+                            Button("查看委托与重试") { model.showTask(execution.actionID) }.accessibilityLabel("查看委托与重试：" + execution.title).accessibilityIdentifier("processing.assistant." + execution.id + ".open")
+                            Button("忽略这次") { model.ignoreProcessingFailure("assistant:" + execution.id) }.accessibilityLabel("忽略这次 AI 代办：" + execution.title).accessibilityIdentifier("processing.assistant." + execution.id + ".ignore")
                         }
                     }
                 }
                 ForEach(model.assistantAssessmentIssues) { issue in
                     WorkspaceSection(title:"AI 委托识别未完成",icon:"sparkles") {
                         Text(issue.title).padding(.vertical,12);reason(issue.error)
-                        Button("重新识别") { Task { await model.retryAssistantAssessment(issue) } }.accessibilityLabel("重新识别：" + issue.title).disabled(!model.modelConfigured || model.assistantBusy)
+                        Button("重新识别") { Task { await model.retryAssistantAssessment(issue) } }.accessibilityLabel("重新识别：" + issue.title).disabled(!model.modelConfigured || model.assistantBusy).accessibilityIdentifier("processing.assistantAssessment." + issue.id + ".retry")
                     }
                 }
                 let reminderAnomalies = model.reminderSyncAnomalies
@@ -507,6 +520,7 @@ struct WorkspaceProcessingView: View {
                                     if let link=model.reminderLinks.first(where: { $0.id == item.id }) {
                                         Button("重新回读") { Task { await model.readReminder(link) } }
                                             .accessibilityLabel("重新回读：" + item.actionTitle)
+                                            .accessibilityIdentifier("processing.reminder." + item.id + ".reread")
                                             .disabled(model.remindersBusy || model.reminderFieldsPending || model.reminderAccess?.enabled != true)
                                             .padding(.leading,54).padding(.bottom,8)
                                     }
@@ -535,12 +549,14 @@ struct WorkspaceProcessingView: View {
                         Button("现在核对") { Task { await model.retryPendingReminderSyncs() } }
                             .disabled(model.remindersBusy || model.pendingReminderSyncs.isEmpty)
                             .accessibilityLabel("现在核对 \(pendingReminderSyncs.count) 项待同步提醒")
+                            .accessibilityIdentifier("processing.reminderSync.check")
                     }
                 }
                 if !inbox.folders.isEmpty || !inbox.pendingItems.isEmpty || !inbox.folderErrors.isEmpty {
                     WorkspaceSection(title:"录音自动入口",icon:"tray.and.arrow.down") {
                         Text(inbox.status).vosFont(WorkspaceText.meta).padding(.vertical,12)
                         Button("查看接收、重试与权限状态",action:openInbox)
+                            .accessibilityIdentifier("processing.inbox.open")
                     }
                 }
                 if model.initialized { WorkspaceSection(title:"模型与提醒事项",icon:"checklist") {
@@ -548,9 +564,9 @@ struct WorkspaceProcessingView: View {
                     Text(model.reminderAccess?.enabled == true ? reminderSyncStatusText : "尚未连接提醒事项；任务可以先在 VoiceOS 内保存。").vosFont(WorkspaceText.meta)
                     if let error=model.reminderFieldIssue {
                         reason(error)
-                        Button("重试提醒同步") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderFieldsPending)
+                        Button("重试提醒同步") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderFieldsPending).accessibilityIdentifier("processing.reminderSync.retry")
                     }
-                    Button("检查连接与配置",action:openSettings).padding(.top,12)
+                    Button("检查连接与配置",action:openSettings).accessibilityIdentifier("processing.settings.open").padding(.top,12)
                 } }
                 if !model.recentCompletions.isEmpty { WorkspaceSection(title:"最近完成",subtitle:"只保留本次运行最近 5 条；点开可查看对应材料。",icon:"clock.arrow.circlepath",count:model.recentCompletions.count) {
                     ForEach(model.recentCompletions) { item in
@@ -635,6 +651,7 @@ struct EmptyTranscriptTrashControl: View {
     @State private var confirming = false
     var body: some View {
         Button("移入回收站") { confirming = true }.disabled(source.state != "saved")
+            .accessibilityIdentifier("processing.transcription." + source.id + ".trash")
             .alert("把「\(source.displayTitle)」移入回收站？", isPresented: $confirming) {
                 Button("取消", role: .cancel) {}
                 Button("移入回收站", role: .destructive) { Task { await model.manageMaterial(source, disposition: .trashed) } }
@@ -656,6 +673,7 @@ struct WorkspaceExternalCompletionButton: View {
             VStack(alignment:.leading,spacing:6) {
                 if candidate != nil {
                     Button("确认外部已完成") { confirming = true }.disabled(model.savingAction)
+                        .accessibilityIdentifier("processing.external." + action.id + ".confirm")
                 }
                 if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled) }
             }
@@ -725,6 +743,7 @@ struct WorkspaceExternalCompletionBatchSection: View {
                             Button("全部确认（\(group.items.count)）") { pending = group; confirming = true }
                                 .disabled(busy || model.savingAction)
                                 .accessibilityLabel("全部确认「\(group.title)」的 \(group.items.count) 条提醒事项已完成")
+                                .accessibilityIdentifier("processing.external." + group.sourceID + ".confirmAll")
                         }.padding(.vertical,10).padding(.horizontal,10)
                         ForEach(group.items) { item in
                             WorkspaceRow(title:item.action.title,subtitle:model.workspaceExternalCompletionNote(item.action) ?? model.workspaceActionStatus(item.action),icon:"circle",trailing:"查看任务") { model.showTask(item.action.id) }

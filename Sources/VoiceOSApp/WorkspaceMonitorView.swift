@@ -37,6 +37,7 @@ struct WorkspaceMonitorView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(width: 172)
+            .accessibilityIdentifier("monitor.page")
             if showsSettings {
                 settingsSection
             } else {
@@ -96,6 +97,7 @@ struct WorkspaceMonitorView: View {
                 }
                 .disabled(model.monitorChecking)
                 .accessibilityLabel(model.monitorChecking ? "正在检查消息监测" : "立即检查消息监测")
+                .accessibilityIdentifier("monitor.runCheck")
                 Text(model.monitorNextRunText).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             if !model.monitorStatus.isEmpty {
@@ -145,7 +147,7 @@ struct WorkspaceMonitorView: View {
                             selectedReportID = report.id
                             Task { await model.loadMonitorItems(reportID: report.id) }
                         }
-                    }
+                    }.accessibilityIdentifier("monitor.history." + report.id)
                     if selectedReportID == report.id {
                         reportBody(report: report).padding(.leading, 20).padding(.bottom, 16)
                     }
@@ -173,11 +175,14 @@ struct WorkspaceMonitorView: View {
                     if isLatest {
                         if report.state == .failed {
                             Button("去设置") { showsSettings = true }.vosFont(WorkspaceText.meta)
+                                .accessibilityIdentifier("monitor.report.settings")
                             Button("重新检查") { Task { await model.runMonitorCheck() } }
                                 .disabled(model.monitorChecking).vosFont(WorkspaceText.meta)
+                                .accessibilityIdentifier("monitor.report.recheck")
                         } else {
                             Button("立即推送今日报告") { Task { await model.pushLatestMonitorReport() } }
                                 .disabled(model.monitorChecking).vosFont(WorkspaceText.meta)
+                                .accessibilityIdentifier("monitor.report.push")
                         }
                     }
                 }
@@ -219,6 +224,7 @@ struct WorkspaceMonitorView: View {
             .labelsHidden()
             .frame(width: 140)
             .padding(.top, 4)
+            .accessibilityIdentifier("monitor.filter")
             ForEach([MonitorItemCategory.applicable, .needsCheck], id: \.self) { category in
                 let group = openItems.filter { $0.category == category }
                 if !group.isEmpty {
@@ -296,11 +302,14 @@ struct WorkspaceMonitorView: View {
                 if item.status == .open {
                     Button("标记完成") { Task { await model.setMonitorItemStatus(item, status: .done) } }
                         .vosFont(WorkspaceText.meta)
+                        .accessibilityIdentifier("monitor.item." + item.id + ".complete")
                     Button("不适用") { Task { await model.setMonitorItemStatus(item, status: .dismissed) } }
                         .vosFont(WorkspaceText.meta)
+                        .accessibilityIdentifier("monitor.item." + item.id + ".dismiss")
                 } else {
                     Button("重新打开") { Task { await model.setMonitorItemStatus(item, status: .open) } }
                         .vosFont(WorkspaceText.meta)
+                        .accessibilityIdentifier("monitor.item." + item.id + ".reopen")
                 }
                 Spacer()
             }
@@ -311,6 +320,7 @@ struct WorkspaceMonitorView: View {
             RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius)
                 .strokeBorder(palette.border.opacity(0.7), lineWidth: 1)
         }
+        .accessibilityIdentifier("monitor.item." + item.id)
         .padding(.bottom, 6)
     }
 
@@ -353,7 +363,7 @@ struct WorkspaceMonitorView: View {
             }.padding(.top, 6)
         } label: {
             Text("原文与来源").vosFont(WorkspaceText.meta.size, weight: .medium)
-        }
+        }.accessibilityIdentifier("monitor.item." + item.id + ".evidence")
     }
 
     private func evidenceLine(_ entry: MonitorItemEvidence) -> String {
@@ -395,6 +405,7 @@ struct WorkspaceMonitorView: View {
                 HStack(spacing: 12) {
                     Text("未添加 QQ 群来源").vosFont(WorkspaceText.body)
                     Button("去设置") { showsSettings = true }.vosFont(WorkspaceText.meta)
+                        .accessibilityIdentifier("monitor.sources.settings")
                     Spacer()
                 }.padding(.vertical, 8)
             }
@@ -408,6 +419,7 @@ struct WorkspaceMonitorView: View {
                         Button("添加内置来源") {
                             Task { await model.ensureBuiltinMonitorSources(restoreMissing: true) }
                         }.vosFont(WorkspaceText.meta)
+                        .accessibilityIdentifier("monitor.sources.addBuiltin")
                         Spacer()
                     }.padding(.vertical, 8)
                 }
@@ -430,8 +442,10 @@ struct WorkspaceMonitorView: View {
                     set: { value in Task { await model.setMonitorSourceEnabled(source, enabled: value) } }))
                     .toggleStyle(.switch).labelsHidden().controlSize(.small)
                     .accessibilityLabel((source.enabled ? "停用" : "启用") + "来源 " + source.displayName)
+                    .accessibilityIdentifier("monitor.source." + source.id + ".enabled")
                 Button("删除", role: .destructive) { pendingSourceRemoval = source }
                     .vosFont(WorkspaceText.meta)
+                    .accessibilityIdentifier("monitor.source." + source.id + ".delete")
             }
             if !source.enabled {
                 Text("已停用，不参与每日检查；历史消息保留。").vosFont(WorkspaceText.meta)
@@ -448,6 +462,8 @@ struct WorkspaceMonitorView: View {
                     displayedComponents: source.kind == .qqGroup ? [.date, .hourAndMinute] : [.date])
                     .labelsHidden().datePickerStyle(.field)
                     .frame(width: source.kind == .qqGroup ? 190 : 130)
+                    .accessibilityLabel("来源起始时间：" + source.displayName)
+                    .accessibilityIdentifier("monitor.source." + source.id + ".start")
                 Text(startNote(source)).vosFont(WorkspaceText.caption)
                     .foregroundStyle(palette.tertiaryText)
                 Spacer()
@@ -515,6 +531,8 @@ struct WorkspaceMonitorView: View {
                     set: { model.setMonitorScheduleTime($0) }),
                     displayedComponents: .hourAndMinute)
                     .labelsHidden().datePickerStyle(.field).frame(width: 110)
+                    .accessibilityLabel("每日检查时间")
+                    .accessibilityIdentifier("monitor.settings.schedule.time")
                 Text("默认 09:00；每天最多一次。").vosFont(WorkspaceText.meta)
                     .foregroundStyle(palette.secondaryText)
             }
@@ -530,6 +548,7 @@ struct WorkspaceMonitorView: View {
                 get: { model.monitorSettings.cloudAnalysisAuthorized },
                 set: { value in model.updateMonitorSettings { $0.cloudAnalysisAuthorized = value } }))
                 .toggleStyle(.switch).frame(maxWidth: 420, alignment: .leading)
+                .accessibilityIdentifier("monitor.settings.cloudAuthorized")
             Text("开启后，所选来源的新增原文（QQ 群消息与官网正文）会发送给已配置的文本模型分析。模型密钥与整个数据库不会发送。默认关闭；关闭时检查会停在分析前，不偷偷发送。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
                 .fixedSize(horizontal: false, vertical: true)
@@ -546,15 +565,20 @@ struct WorkspaceMonitorView: View {
                 Text("企业微信群机器人").tag(MonitorPushChannel.wecom.rawValue)
                 Text("Server酱式").tag(MonitorPushChannel.serverChan.rawValue)
             }.pickerStyle(.segmented).frame(maxWidth: 420)
+                .accessibilityLabel("推送通道")
+                .accessibilityIdentifier("monitor.settings.push.channel")
             if let channel = model.monitorSettings.pushChannel {
                 Text(channel.webhookHint).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
             }
             HStack(spacing: 10) {
                 SecureField("推送地址", text: $webhookDraft)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 420)
+                    .accessibilityLabel("推送地址")
+                    .accessibilityIdentifier("monitor.settings.push.webhook")
                 Button("保存地址") {
                     if model.saveMonitorWebhook(webhookDraft) { webhookDraft = "" }
                 }.disabled(webhookDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityIdentifier("monitor.settings.push.save")
             }
             Text(model.monitorWebhookTail.isEmpty
                  ? "尚未保存推送地址；地址只保存在系统钥匙串。"
@@ -563,8 +587,10 @@ struct WorkspaceMonitorView: View {
             HStack(spacing: 12) {
                 Button("发送测试") { Task { await model.sendMonitorPushTest() } }
                     .disabled(model.monitorSettings.pushChannel == nil)
+                    .accessibilityIdentifier("monitor.settings.push.test")
                 Button("立即推送今日报告") { Task { await model.pushLatestMonitorReport() } }
                     .disabled(model.monitorLatestReport == nil)
+                    .accessibilityIdentifier("monitor.settings.push.pushNow")
                 Spacer()
             }
             if !model.monitorTestPushStatus.isEmpty {
@@ -605,10 +631,12 @@ struct WorkspaceMonitorView: View {
             }
             HStack(spacing: 12) {
                 Button("保存 QQ 设置") { saveQQSettings() }.vosFont(WorkspaceText.meta)
+                    .accessibilityIdentifier("monitor.settings.qq.save")
                 Button("检查 QQ 依赖") {
                     saveQQSettings()
                     Task { await model.diagnoseMonitorQQ() }
                 }.vosFont(WorkspaceText.meta)
+                    .accessibilityIdentifier("monitor.settings.qq.diagnose")
                 Button("列出群") {
                     saveQQSettings()
                     Task {
@@ -619,6 +647,7 @@ struct WorkspaceMonitorView: View {
                         }
                     }
                 }.vosFont(WorkspaceText.meta)
+                    .accessibilityIdentifier("monitor.settings.qq.list")
                 if !model.monitorQQDiagnosisStatus.isEmpty {
                     Text(model.monitorQQDiagnosisStatus).vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.secondaryText)
@@ -645,6 +674,7 @@ struct WorkspaceMonitorView: View {
                     Text(QQMonitorPermissionGuidance.text).vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.warning).fixedSize(horizontal: false, vertical: true)
                     Button("打开系统设置") { openFullDiskAccessSettings() }.vosFont(WorkspaceText.meta)
+                        .accessibilityIdentifier("monitor.settings.qq.openPrivacy")
                 }
                 .padding(10)
                 .background(palette.warning.opacity(0.08),
@@ -715,11 +745,14 @@ struct WorkspaceMonitorView: View {
                     }.contentShape(Rectangle())
                 }.buttonStyle(.plain)
                     .accessibilityLabel("选择群 " + conversation.name)
+                    .accessibilityIdentifier("monitor.settings.qq.conversation." + conversation.id)
             }
             HStack(spacing: 12) {
                 Text("从这里开始读取").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 DatePicker("", selection: $qqStart, displayedComponents: [.date, .hourAndMinute])
                     .labelsHidden().datePickerStyle(.field).frame(width: 190)
+                    .accessibilityLabel("QQ 起点")
+                    .accessibilityIdentifier("monitor.settings.qq.start")
                 Button("添加所选群") {
                     guard let id = selectedConversationID,
                           let conversation = model.monitorQQConversations.first(where: { $0.id == id }) else { return }
@@ -729,6 +762,7 @@ struct WorkspaceMonitorView: View {
                         }
                     }
                 }.disabled(selectedConversationID == nil)
+                    .accessibilityIdentifier("monitor.settings.qq.addSelected")
                 Spacer()
             }
             Text("只从所选时间开始读取；更早的群消息不会导入。默认从今天开始。")
