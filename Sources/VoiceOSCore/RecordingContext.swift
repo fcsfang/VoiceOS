@@ -52,6 +52,7 @@ public extension SourceRecord {
 public struct SourcePageIndex: Sendable {
     public let recordsByID: [String: SourceRecord]
     private let expressionBySourceID: [String: RecordingExpression]
+    private let claimByID: [String: CandidateClaim]
     private let actionByID: [String: ActionRecord]
     private let actionPositionByID: [String: Int]
     private let actionIDsBySourceID: [String: [String]]
@@ -71,6 +72,7 @@ public struct SourcePageIndex: Sendable {
         var claimByID: [String: CandidateClaim] = [:]
         var actionsByClaimID: [String: [ActionRecord]] = [:]
         for claim in claims { claimByID[claim.id] = claim }
+        self.claimByID = claimByID
         var positions: [String: Int] = [:]
         for (offset, action) in actions.enumerated() {
             actionsByClaimID[action.claimID, default: []].append(action)
@@ -110,6 +112,14 @@ public struct SourcePageIndex: Sendable {
     /// permissions changed since it was saved.
     public func expression(for sourceID: String) -> RecordingExpression? {
         expressionBySourceID[sourceID]
+    }
+
+    public func claim(for claimID: String) -> CandidateClaim? {
+        claimByID[claimID]
+    }
+
+    public func activeAction(for actionID: String) -> ActionRecord? {
+        actionByID[actionID]
     }
 
     /// Actions whose claim cites any of these sources, in workspace order.
