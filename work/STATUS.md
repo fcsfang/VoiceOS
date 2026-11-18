@@ -444,3 +444,10 @@
 
 - 行动页虚拟化修复实测：切入行动页 CPU 从修复前 100-165% 持续 3.5 秒以上，降至 68% 起、约 1.2 秒内回落至 0。
 - 标题栏割裂修复：`WindowCanvasTint` 把 NSWindow 背景设为 canvas 色并透明化标题栏（主题/外观切换自动更新），顶部白带消除；实机截图确认与内容区同色。621 项测试 0 失败。
+
+## 波 82 release 构建内存优化（2026-11-18，已交付）
+
+- 用户反馈：每次构建要 30GB 以上内存。归因：`swift build -c release` 整模块优化（WMO）在单前端编译整个 VoiceOSApp 模块，配合 `-j 4` 峰值 30GB+（16GB 机器大量交换）。
+- 修复：`scripts/app/build.py` 的 release 追加 `-Xswiftc -no-whole-module-optimization`（逐文件优化保留 -O）。实测（干净构建）：`-j 4` 峰值 1.62GB / 158 秒；`-j 1` 峰值 1.07GB / 406 秒。增量构建 4 秒。
+- 验证：build.py 改动后 dist 构建 exit 0、签名完成；安装冒烟（启动、AX 标识）待本记录下方确认。
+- 记忆：已写入 voiceos-build-memory（16GB 上 4 路逐文件优化是安全上限）。
