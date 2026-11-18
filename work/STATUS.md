@@ -461,3 +461,11 @@
 - 波 86（首页）：recentThoughts/行状态进快照、digest 用 claimID 索引、「整理这份材料」补禁用原因与行内反馈、空态错误与导入入口、阅读状态重读。624 测试。
 - 四波合并后集成构建+全量：632 项 0 失败。dist 重建安装与实机复测见下条。
 - build.py 已内置全局构建锁；实测单波构建峰值约 1.7GB，四波并发全进程约 2.6GB。
+
+## 波 87 助理校验定向读取与整库刷新代际门（2026-11-19，已安装）
+
+- 周期性满载归因：每 60 秒 refresh(.full) → 助理执行校验每候选调用 requireReviewedTranscriptions → sources() 全表重读（解码全部转写）；另有整库 workspaceSnapshot 全量重发。实测每轮 20-25 秒 100-200% CPU，期间 AX 树退化成 4000 自嵌套节点，点击/返回看似「很慢」。
+- 修复：新增 `sourceRecords(ids:)` 定向查询（M 端口屏障改用）；ControlCenter 增加数据代际门（`store.dataGeneration` 行变更计数，无写入跳过整库重载，trace 确认 `reload.skipped`）。
+- 验证：632 项测试 0 失败；安装后 StartupTrace：跳过门每周期生效，助理上下文每轮约 240ms×3。
+- 残留：页面切换仍有 3.6-5.2 秒的 AX 点击耗时与 5 秒级 CPU 短峰（渲染/发布 churn，非数据库主路径）；「返回」按键本身 0.81 秒。下一波方向：发布合并与视图身份稳定（避免每次切页重建大子树）。
+- 流程教训：提交与推送必须由构建/测试退出码门控（已写入记忆 voiceos-commit-after-verify）。
