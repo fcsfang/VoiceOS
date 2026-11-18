@@ -83,15 +83,19 @@ extension VoiceOSStore {
     }
     /// Only reconciles already attempted links; never invokes create or selects another list.
     public func reconcileReminders(expectedAccessVersion: Int, using port: any RemindersPort) async throws {
+        try await reconcileReminders(expectedAccessVersion: expectedAccessVersion, using: port, observationStats: nil)
+    }
+    func reconcileReminders(expectedAccessVersion: Int, using port: any RemindersPort, observationStats: ReminderObservationStats?) async throws {
         guard let access = try reminderAccess() else { throw VoiceOSError("尚未授权提醒事项清单") }
         try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
+        let observationRound = ReminderObservationRound()
         var failed = false
         for link in try reminderLinks().filter({ $0.calendarID == access.calendarID }) {
             try Task.checkCancellation()
             try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)
             // A foreground create owns this link; its own readback covers it.
             if activeReminderLinks.contains(link.id) { continue }
-            do { try await readReminder(linkID: link.id, calendarID: access.calendarID, using: port, expectedAccessVersion: expectedAccessVersion) }
+            do { try await readReminder(linkID: link.id, calendarID: access.calendarID, using: port, expectedAccessVersion: expectedAccessVersion, observationRound: observationRound, observationStats: observationStats) }
             catch { failed = true }
         }
         try checkReminderAccess(calendarID: access.calendarID, expectedVersion: expectedAccessVersion)

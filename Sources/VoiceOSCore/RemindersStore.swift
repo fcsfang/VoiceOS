@@ -68,6 +68,21 @@ public struct ReminderSyncAnomalySummary: Sendable, Equatable {
     public var failureTotal: Int { failures.count }
     public func count(_ state: String) -> Int { items.filter { $0.state == state }.count }
 }
+/// One readback round observes one consistent local view. `reminder_links.action_id`
+/// is unique, so the round exists to run the cognition barrier and the action load
+/// once instead of once per link.
+final class ReminderObservationRound {
+    private var actionsByID: [String: ActionRecord]?
+    var isLoaded: Bool { actionsByID != nil }
+    func store(_ actions: [ActionRecord]) {
+        actionsByID = Dictionary(uniqueKeysWithValues: actions.map { ($0.id, $0) })
+    }
+    func action(id: String) -> ActionRecord? { actionsByID?[id] }
+}
+/// Counts full observation loads so the reconcile test can lock one load per round.
+final class ReminderObservationStats: @unchecked Sendable {
+    var fullObservationLoads = 0
+}
 extension VoiceOSStore {
     public func reminderContext(actionID: String) throws -> String {
         guard let action = try actions(includeHistory: true).first(where: { $0.id == actionID }),
@@ -224,6 +239,9 @@ extension VoiceOSStore {
         return true
     }
     public func readReminder(linkID: String, calendarID: String, using port: any RemindersPort, expectedAccessVersion: Int? = nil) async throws {
+        try await readReminder(linkID: linkID, calendarID: calendarID, using: port, expectedAccessVersion: expectedAccessVersion, observationRound: nil, observationStats: nil)
+    }
+    func readReminder(linkID: String, calendarID: String, using port: any RemindersPort, expectedAccessVersion: Int?, observationRound: ReminderObservationRound?, observationStats: ReminderObservationStats?) async throws {
         try Task.checkCancellation()
         try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
         guard !activeReminderLinks.contains(linkID) else { throw VoiceOSError("提醒事项操作正在进行") }
@@ -233,7 +251,7 @@ extension VoiceOSStore {
             let matches = try await port.find(calendarID: calendarID, externalID: link["external_id"], marker: link["marker"]!)
             try checkReminderAccess(calendarID: calendarID, expectedVersion: expectedAccessVersion)
             try Task.checkCancellation()
-            try applyReminder(matches, linkID: linkID)
+            try applyReminder(matches, linkID: linkID, observationRound: observationRound, observationStats: observationStats)
         } catch {
             try preserveConfirmedReminderLink(linkID)
             if error is CancellationError || Task.isCancelled { throw CancellationError() }
@@ -246,7 +264,7 @@ extension VoiceOSStore {
               row["state"] != "linked", row["action_state"] != "completed" else { return }
         try db.execute("UPDATE reminder_links SET state='unknown' WHERE id=?", [linkID])
     }
-    func applyReminder(_ matches: [ReminderSnapshot], linkID: String, includingScheduleOperation: String? = nil, includingCompensationOperation: String? = nil) throws {
+    func applyReminder(_ matches: [ReminderSnapshot], linkID: String, includingScheduleOperation: String? = nil, includingCompensationOperation: String? = nil, observationRound: ReminderObservationRound? = nil, observationStats: ReminderObservationStats? = nil) throws {
         guard let link = try db.query("SELECT * FROM reminder_links WHERE id=?", [linkID]).first else { throw VoiceOSError("提醒事项关联缺失") }
         guard matches.count == 1, let remote = matches.first else {
             try db.transaction {
@@ -259,7 +277,16 @@ extension VoiceOSStore {
         guard !remote.id.isEmpty, remote.id.utf8.count <= 4096, remote.title.unicodeScalars.count <= 10000, remote.marker.utf8.count <= 4096 else { throw VoiceOSError("提醒事项字段无效或过长") }
         try remote.dueDate?.validate()
         try remote.fields?.validate(allowingAlertsWithoutDue: true)
-        let action = try actions(includeHistory: true).first { $0.id == link["action_id"] }
+        let action: ActionRecord?
+        if let observationRound {
+            if !observationRound.isLoaded {
+                observationRound.store(try actions(includeHistory: true))
+                observationStats?.fullObservationLoads += 1
+            }
+            action = observationRound.action(id: link["action_id"]!)
+        } else {
+            action = try actions(includeHistory: true).first { $0.id == link["action_id"] }
+        }
         let validMarker = remote.marker == link["marker"]
         // Once identified, a copied marker on a replacement is a conflict,
         // not permission to transfer identity or complete the original task.
@@ -272,7 +299,7 @@ extension VoiceOSStore {
         var confirmedScheduleOperations: [String] = []
         var confirmedCompensations: [String] = []
         try db.transaction {
-            if validMarker, stableIdentity, let action, let fields = remote.fields { try observeReminderFields(actionID: action.id, fields: fields) }
+            if validMarker, stableIdentity, let action, let fields = remote.fields { try observeReminderFields(action: action, fields: fields) }
             if validMarker, stableIdentity, let action, action.validity == "current" {
                 if remote.completed && action.state == "open" && action.version == baseline {
                     let revisionID = UUID().uuidString
