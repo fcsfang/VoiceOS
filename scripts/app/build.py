@@ -31,7 +31,21 @@ env.pop('SDKROOT', None)
 flags = ['-j', '4']
 if args.configuration == 'release':
     flags += ['-Xswiftc', '-no-whole-module-optimization']
-subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration, *flags, '--product', 'VoiceOS'], cwd=ROOT, env=env, check=True)
+# Serialize with every other swift build on this machine; 16GB cannot hold two.
+lock = Path('/tmp/voiceos-swift-build.lock')
+import time
+for _ in range(240):
+    try:
+        lock.mkdir()
+        break
+    except FileExistsError:
+        if time.time() - lock.stat().st_mtime > 2400:
+            lock.rmdir()
+        time.sleep(10)
+try:
+    subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration, *flags, '--product', 'VoiceOS'], cwd=ROOT, env=env, check=True)
+finally:
+    lock.rmdir()
 bin_path = Path(subprocess.check_output(['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration, '--show-bin-path'], cwd=ROOT, env=env, text=True).strip())
 app = ROOT / 'dist' / 'VoiceOS.app'
 mac = app / 'Contents' / 'MacOS'
