@@ -4,6 +4,9 @@ import CSQLite
 // Confined to the Store actor. No SQLite transaction spans an await.
 final class Database {
     private var handle: OpaquePointer?
+    /// Counts rows changed on this connection, so a statement that matches no
+    /// rows leaves context validation cached. Every write passes through `execute`.
+    private(set) var writeGeneration: Int64 = 0
     init(_ url: URL) throws {
         guard sqlite3_open_v2(url.path, &handle, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
             throw VoiceOSError("无法打开资料库")
@@ -1603,7 +1606,10 @@ final class Database {
         return String(value+1)
     }
     deinit { sqlite3_close(handle) }
-    func execute(_ sql: String, _ arguments: [String?] = []) throws { _ = try query(sql, arguments) }
+    func execute(_ sql: String, _ arguments: [String?] = []) throws {
+        _ = try query(sql, arguments)
+        writeGeneration = sqlite3_total_changes64(handle)
+    }
     /// Rows touched by the last statement; distinguishes an ignored duplicate insert.
     func lastChangeCount() -> Int { Int(sqlite3_changes(handle)) }
     func query(_ sql: String, _ arguments: [String?] = []) throws -> [[String: String]] {

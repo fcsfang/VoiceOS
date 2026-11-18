@@ -121,16 +121,43 @@ extension VoiceOSStore {
     }
     public func localContext(id: String) throws -> LocalTranscriptContext {
         guard let row = try db.query("SELECT * FROM contexts WHERE id=? AND state='current'", [id]).first else { throw VoiceOSError("上下文已失效或不存在") }
-        let context = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(row["snapshot_json"]!.utf8))
+        let snapshot = row["snapshot_json"]!
+        let context = try JSONDecoder().decode(LocalTranscriptContext.self, from: Data(snapshot.utf8))
+        contextSnapshotDecodeBytes += snapshot.utf8.count
         if !contextValidationSuspended {
-            do {
-                try validateLocalTranscriptContext(context)
-                if let focus = context.reflectionFocus { try validateReflectionBasis(focus) }
-                guard try db.query("SELECT i.id FROM context_inputs i JOIN sources s ON s.id=i.source_id WHERE i.context_id=? AND i.policy_version!=s.policy_version", [id]).isEmpty else { throw VoiceOSError("来源授权版本已变化") }
+            let stamp = try contextValidationStamp(id: id, digest: row["digest"]!)
+            if contextValidationStamps[id] != stamp {
+                do {
+                    contextValidationPasses += 1
+                    try validateLocalTranscriptContext(context)
+                    if let focus = context.reflectionFocus { try validateReflectionBasis(focus) }
+                    guard try db.query("SELECT i.id FROM context_inputs i JOIN sources s ON s.id=i.source_id WHERE i.context_id=? AND i.policy_version!=s.policy_version", [id]).isEmpty else { throw VoiceOSError("来源授权版本已变化") }
+                    contextValidationStamps[id] = stamp
+                }
+                catch { try db.transaction { try freezeContext(id) }; throw error }
             }
-            catch { try db.transaction { try freezeContext(id) }; throw error }
         }
         return context
+    }
+    /// Validation re-derives from database rows and from the originals on disk;
+    /// the stamp pins both, so a hit costs one small query and a stat per source.
+    private func contextValidationStamp(id: String, digest: String) throws -> ContextValidationStamp {
+        var files: [String: DurableFiles.Fingerprint] = [:]
+        for row in try db.query("SELECT i.source_id,s.state,s.relative_path FROM context_inputs i JOIN sources s ON s.id=i.source_id WHERE i.context_id=?", [id]) {
+            guard row["state"] == "saved", let relative = row["relative_path"],
+                  let url = try? assetURL(relativePath: relative),
+                  let fingerprint = try? DurableFiles.fingerprint(url) else { continue }
+            files[row["source_id"]!] = fingerprint
+        }
+        return ContextValidationStamp(digest: digest, generation: db.writeGeneration, files: files)
+    }
+    /// Claim listing needs the verdict, not the snapshot; a row whose stamp still
+    /// matches has no new database or file inputs to check.
+    private func validateContextRow(id: String, digest: String) throws {
+        guard !contextValidationSuspended else { return }
+        let stamp = try contextValidationStamp(id: id, digest: digest)
+        if contextValidationStamps[id] == stamp { return }
+        _ = try localContext(id: id)
     }
     /// This slice only supports local fixtures. A reservation is durable before work;
     /// it is not a cloud grant and there is no automatic resend after interruption.
@@ -224,8 +251,8 @@ extension VoiceOSStore {
         // A detail read checks its own producers; it must not decode and validate
         // the whole library for each claim or recording.
         if !contextValidationSuspended {
-        for row in try db.query("SELECT DISTINCT x.id FROM contexts x JOIN model_attempts a ON a.context_id=x.id JOIN claims c ON c.attempt_id=a.id WHERE x.state='current'\(selection)", arguments) {
-            do { _ = try localContext(id: row["id"]!) } catch { try db.transaction { try freezeContext(row["id"]!) } }
+        for row in try db.query("SELECT DISTINCT x.id,x.digest FROM contexts x JOIN model_attempts a ON a.context_id=x.id JOIN claims c ON c.attempt_id=a.id WHERE x.state='current'\(selection)", arguments) {
+            do { try validateContextRow(id: row["id"]!, digest: row["digest"]!) } catch { try db.transaction { try freezeContext(row["id"]!) } }
         }
         }
         let whereClause = includeFrozen ? "WHERE 1=1" : "WHERE c.validity='current' AND x.state='current' AND COALESCE(r.decision,'pending')!='rejected'"
