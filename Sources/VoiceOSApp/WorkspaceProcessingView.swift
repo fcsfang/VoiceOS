@@ -115,9 +115,7 @@ extension ControlCenter {
         }
     }
     func workspaceTaskRequiresReview(_ action: ActionRecord) -> Bool {
-        WorkspaceActionPause.reason(for: action, sources: records, claims: claims,
-                                    currentClaimsBySource: currentClaimsBySource, actions: actionRecords,
-                                    ledgers: actionReviewLedgers) != nil
+        sourcePageIndex.requiresReview(action.id)
     }
     func workspaceActionStatus(_ action: ActionRecord) -> String {
         if action.intent?.followupState == "withdrawn" { return "已在后续录音中撤回 · 不再跟进" }
@@ -140,7 +138,7 @@ extension ControlCenter {
     func workspaceExternalCompletion(_ action: ActionRecord) -> ExternalCompletionCandidate? {
         ExternalCompletionCandidate(action: action, link: workspaceExternalCompletionLink(action))
     }
-    var workspacePausedTasks: [ActionRecord] { actionRecords.filter { $0.kind == "task" && workspaceTaskRequiresReview($0) } }
+    var workspacePausedTasks: [ActionRecord] { sourcePageIndex.pausedTasks }
     var workspaceFailedFollowups: [RecordingFollowupReceipt] {
         var seen=Set<String>()
         return recordingFollowups.reversed().filter { seen.insert($0.sourceID).inserted }.filter { $0.state == "failed" }
@@ -402,12 +400,13 @@ struct WorkspaceProcessingView: View {
                     }
                 }
                 WorkspaceExternalCompletionBatchSection(model:model)
-                if !model.workspacePausedTasks.isEmpty {
-                    WorkspaceSection(title:"这些待办需要核对",subtitle:"以下事项尚未登记完成，行动关系待核对或 AI 提取已暂停。逐条核对：同一件事会接回原记录，两件事会保留两条；核对后即可继续同步。",icon:"pause.circle",count:model.workspacePausedTasks.count) {
-                        let ids=Set(model.workspacePausedTasks.flatMap { task in model.claims.first(where: { $0.id == task.claimID })?.references.map(\.sourceID) ?? [] })
+                let pausedTasks=model.workspacePausedTasks
+                if !pausedTasks.isEmpty {
+                    WorkspaceSection(title:"这些待办需要核对",subtitle:"以下事项尚未登记完成，行动关系待核对或 AI 提取已暂停。逐条核对：同一件事会接回原记录，两件事会保留两条；核对后即可继续同步。",icon:"pause.circle",count:pausedTasks.count) {
+                        let ids=Set(pausedTasks.flatMap { task in model.sourcePageIndex.claim(for: task.claimID)?.references.map(\.sourceID) ?? [] })
                         ForEach(model.records.filter { ids.contains($0.id) }) { source in
                             WorkspaceRow(title:source.displayTitle,subtitle:"查看暂停原因、受影响的任务和处理按钮",trailing:"打开材料") { openSource(source.id) }
-                            ForEach(model.workspacePausedTasks.filter { task in model.claims.first(where: { $0.id == task.claimID })?.references.contains { $0.sourceID == source.id } == true }) { task in
+                            ForEach(pausedTasks.filter { task in model.sourcePageIndex.claim(for: task.claimID)?.references.contains { $0.sourceID == source.id } == true }) { task in
                                 VStack(alignment:.leading,spacing:5) {
                                     Text(task.title)
                                     Text(model.workspaceExternalCompletionNote(task) ?? model.workspaceActionStatus(task)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)

@@ -9,7 +9,7 @@ struct MaterialManagementControls: View {
     @State private var confirmingTrash = false
     @State private var busy = false
     private var count: Int {
-        source.recordingExpression(in:Dictionary(uniqueKeysWithValues:model.records.map { ($0.id,$0) }))?.sourceIDs.count ?? 1
+        model.sourcePageIndex.expression(for: source.id)?.sourceIDs.count ?? 1
     }
     var body: some View {
         Group {

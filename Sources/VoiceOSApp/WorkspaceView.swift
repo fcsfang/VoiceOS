@@ -793,7 +793,7 @@ struct WorkspaceView: View {
                 WorkspaceDeliveryView(model:model,execution:execution,openTask:{ go(.task($0)) },openTopic:{ selectTopic($0) },discuss:{ Task { await toggleDiscussion(force:true) } })
             } else { unavailable("交付暂时不可用",description:"可以回到行动查看当前结果。") }
         case .task(let id):
-            if let action=model.actionRecords.first(where: { $0.id == id }) {
+            if let action=model.sourcePageIndex.allAction(for: id) {
                 WorkspaceTaskView(model:model,action:action,draft:Binding(
                     get: { taskFeedbackDrafts[id] ?? TaskFeedbackDraft() },
                     set: { taskFeedbackDrafts[id] = $0 }
@@ -1103,6 +1103,7 @@ struct WorkspaceView: View {
     @State private var clarifyScope: ClarifyQueueScope = .questions
     private var actions: some View {
         let nextStepCounts=ActionRowLayout.nextStepCounts(model.actionRecords)
+        let rowReads=ActionRowReads(reminderLinks:model.reminderLinks,executions:model.assistantExecutions)
         let listGroup:ActionRowGroup=actionFilter == "已完成" ? .completed : actionFilter == "历史记录" ? .history : actionFilter == "待核对" ? .needsReview : .active
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             HStack(alignment:.top,spacing:12) {
@@ -1183,7 +1184,7 @@ struct WorkspaceView: View {
             if ["全部","我的待办"].contains(actionFilter), !focusedActions.isEmpty {
                 WorkspaceListSection(title:"专注",count:focusedActions.count) {
                     ActionCardList {
-                        ForEach(focusedActions) { action in actionRow(action,nextStepCounts:nextStepCounts) }
+                        ForEach(focusedActions) { action in actionRow(action,nextStepCounts:nextStepCounts,reads:rowReads) }
                     }
                 }
             }
@@ -1194,28 +1195,28 @@ struct WorkspaceView: View {
                 if !overdue.isEmpty {
                     WorkspaceListSection(title:"逾期",subtitle:"已过期限。改天需要提醒事项链接。",count:overdue.count) {
                         ActionCardList {
-                            ForEach(overdue) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts) }
+                            ForEach(overdue) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts,reads:rowReads) }
                         }
                     }
                 }
                 if !dueToday.isEmpty {
                     WorkspaceListSection(title:"今天",subtitle:"今天到期",count:dueToday.count) {
                         ActionCardList {
-                            ForEach(dueToday) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts) }
+                            ForEach(dueToday) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts,reads:rowReads) }
                         }
                     }
                 }
                 if !surface.soon.isEmpty {
                     WorkspaceListSection(title:"即将",subtitle:"7 天内",count:surface.soon.count) {
                         ActionCardList {
-                            ForEach(surface.soon) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts) }
+                            ForEach(surface.soon) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts,reads:rowReads) }
                         }
                     }
                 }
                 if !surface.anytime.isEmpty {
                     WorkspaceListSection(title:"随时",subtitle:"没有日期或更远",count:surface.anytime.count) {
                         ActionCardList {
-                            ForEach(surface.anytime) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts) }
+                            ForEach(surface.anytime) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts,reads:rowReads) }
                         }
                     }
                 }
@@ -1226,14 +1227,14 @@ struct WorkspaceView: View {
             } else if !listed.isEmpty {
                 WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "问题" ? "VoiceOS 先回答；想清楚了可以转成下一步。" : actionFilter == "目标" ? "你要长期达到的结果；转成待办后可提醒。" : "",count:listed.count) {
                     ActionCardList {
-                        ForEach(listed) { action in actionRow(action,group:listGroup,nature:listNature,nextStepCounts:nextStepCounts) }
+                        ForEach(listed) { action in actionRow(action,group:listGroup,nature:listNature,nextStepCounts:nextStepCounts,reads:rowReads) }
                     }
                 }
             }
             if actionFilter == "全部", !paused.isEmpty {
                 WorkspaceListSection(title:"需要核对的待办",subtitle:"打开任务查看原因。",count:paused.count) {
                     ActionCardList {
-                        ForEach(paused) { action in actionRow(action,group:.needsReview,nextStepCounts:nextStepCounts) }
+                        ForEach(paused) { action in actionRow(action,group:.needsReview,nextStepCounts:nextStepCounts,reads:rowReads) }
                     }
                     if model.pausedActionBatch == nil { PausedActionBatchControl(model:model) }
                 }
@@ -1243,7 +1244,7 @@ struct WorkspaceView: View {
                 WorkspaceListSection(title:"问题",subtitle:"VoiceOS 先回答；想清楚了可以转成下一步。",count:overviewQuestions.count) {
                     ActionCardList {
                         ForEach(overviewQuestions.prefix(3)) { action in
-                            actionRow(action,nature:.question,nextStepCounts:nextStepCounts)
+                            actionRow(action,nature:.question,nextStepCounts:nextStepCounts,reads:rowReads)
                         }
                     }
                     if overviewQuestions.count > 3 {
@@ -1257,7 +1258,7 @@ struct WorkspaceView: View {
                 WorkspaceListSection(title:"目标",subtitle:"你要长期达到的结果；转成待办后可提醒。",count:overviewGoals.count) {
                     ActionCardList {
                         ForEach(overviewGoals.prefix(3)) { action in
-                            actionRow(action,nature:.goal,nextStepCounts:nextStepCounts)
+                            actionRow(action,nature:.goal,nextStepCounts:nextStepCounts,reads:rowReads)
                         }
                     }
                     if overviewGoals.count > 3 {
@@ -1386,11 +1387,6 @@ struct WorkspaceView: View {
                 await model.refresh()
             }
         }
-    }
-    /// Raw state of the newest analysis run; the row layout decides how to read it.
-    private func latestAnalysisState(_ action:ActionRecord) -> String {
-        model.assistantExecutions.filter { $0.actionID == action.id && $0.mode == .analysis && $0.validity == "current" }
-            .max { $0.updatedAt < $1.updatedAt }?.state ?? ""
     }
     @ViewBuilder private func executionRows(_ executions: [AssistantExecutionRecord]) -> some View {
         ForEach(executions) { execution in
@@ -1853,7 +1849,7 @@ struct WorkspaceView: View {
         let origin=source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料"
         let issues=source.unresolvedTranscriptionIssueCount
         let reading:(text:String,color:Color)? = issues > 0 ? ("疑点 \(issues)",palette.warning) : materialReadingStatus(source.id)
-        let groupNote=reason ?? (source.recordingExpressionIssue(in:catalog) != nil ? "分组待重新判断" : nil)
+        let groupNote=reason ?? (model.sourcePageIndex.expressionIssue(for: source.id) != nil ? "分组待重新判断" : nil)
         return WorkspaceRow(title:displayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : "") + (groupNote.map { " · " + $0 } ?? ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:"",trailingStyle:reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary,statusAccessibility:reading?.text ?? "",trailingGutter:trailingGutter) { go(.source(source.id)) }
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
@@ -1901,21 +1897,44 @@ struct WorkspaceView: View {
             else { error=model.status }
         }
     }
-    private func actionRowStatus(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil,group:ActionRowGroup,nature:ActionNature? = nil,nextStepCount:Int) -> ActionRowStatus {
+    /// One fold per action-page body: reminder links and analysis runs are read
+    /// per row, so index them by action instead of scanning the arrays again.
+    private struct ActionRowReads {
+        let linkedReminderByActionID: [String: ReminderLink]
+        let dueByActionID: [String: ReminderDueDate]
+        let latestAnalysisStateByActionID: [String: String]
+        init(reminderLinks: [ReminderLink], executions: [AssistantExecutionRecord]) {
+            var linked: [String: ReminderLink] = [:]
+            var due: [String: ReminderDueDate] = [:]
+            for link in reminderLinks where link.state == "linked" {
+                if linked[link.actionID] == nil { linked[link.actionID] = link }
+                if let date = link.remoteDueDate, date != .none, due[link.actionID] == nil { due[link.actionID] = date }
+            }
+            var states: [String: String] = [:]
+            var newest: [String: String] = [:]
+            for execution in executions where execution.mode == .analysis && execution.validity == "current" {
+                if let current = newest[execution.actionID], current >= execution.updatedAt { continue }
+                newest[execution.actionID] = execution.updatedAt
+                states[execution.actionID] = execution.state
+            }
+            linkedReminderByActionID = linked
+            dueByActionID = due
+            latestAnalysisStateByActionID = states
+        }
+    }
+    private func actionRowStatus(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil,group:ActionRowGroup,nature:ActionNature? = nil,nextStepCount:Int,reads:ActionRowReads) -> ActionRowStatus {
         var due=""
         var localUnsynced=false
         if let entry=timeEntry,entry.source == .localSchedule {
             if let date=entry.due { due=(entry.isOverdue ? "已逾期 " : "到期 ") + date.summary }
             localUnsynced=entry.needsLocalSyncLabel
-        } else if action.state == "open", action.validity == "current", let date=model.reminderLinks.first(where: { link in
-            link.actionID == action.id && link.state == "linked" && link.remoteDueDate.map({ $0 != .none }) == true
-        })?.remoteDueDate {
+        } else if action.state == "open", action.validity == "current", let date=reads.dueByActionID[action.id] {
             due=(reminderDueIsPast(date) ? "已逾期 " : "到期 ") + date.summary
         }
         var facts=ActionRowFacts()
         facts.isGoal=nature.map { $0 == .goal } ?? (action.kind != "task")
         facts.isQuestion=nature == .question
-        facts.answerState=nature == .question ? latestAnalysisState(action) : ""
+        facts.answerState=nature == .question ? (reads.latestAnalysisStateByActionID[action.id] ?? "") : ""
         facts.group=group
         facts.state=action.state
         facts.validity=action.validity
@@ -2006,16 +2025,16 @@ struct WorkspaceView: View {
         Button("不再跟进") { dismissAction(action) }.disabled(!canTransition)
         Button(focused ? "移出专注" : "加入专注") { toggleFocus(action.id) }.disabled(!canTransition)
     }
-    private func actionRow(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil,group:ActionRowGroup = .active,nature:ActionNature? = nil,nextStepCounts:[String:Int]) -> some View {
+    private func actionRow(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil,group:ActionRowGroup = .active,nature:ActionNature? = nil,nextStepCounts:[String:Int],reads:ActionRowReads) -> some View {
         let selectable=action.state == "open" && action.validity == "current"
         let actionable=selectable && !selectingActions
         let selected=selectedActionIDs.contains(action.id)
         let keyboardHighlighted=page == .actions && !selectingActions && actionKeyboardHighlightID == action.id
         let focused=focusedActionIDs.contains(action.id)
-        let canChangeDay=actionable && hasLinkedReminder(action) && !model.savingAction && !model.remindersBusy
+        let canChangeDay=actionable && reads.linkedReminderByActionID[action.id] != nil && !model.savingAction && !model.remindersBusy
         let canComplete=actionable && action.kind == "task"
         let externalCompletion=model.workspaceExternalCompletion(action) != nil
-        let layout=actionRowStatus(action,timeEntry:timeEntry,group:group,nature:nature,nextStepCount:nextStepCounts[action.id] ?? 0)
+        let layout=actionRowStatus(action,timeEntry:timeEntry,group:group,nature:nature,nextStepCount:nextStepCounts[action.id] ?? 0,reads:reads)
         let tagged=StatementTagParser.split(action.title)
         let marksSelected=selectingActions && selected
         let trailingStyle:WorkspaceRow.TrailingStyle=marksSelected ? .status(palette.accent) : (layout.status.isEmpty ? .secondary : .status(actionRowToneColor(layout.tone)))
@@ -2050,9 +2069,6 @@ struct WorkspaceView: View {
             focusedActionIDs = next
             error = ""
         }
-    }
-    private func hasLinkedReminder(_ action:ActionRecord) -> Bool {
-        model.reminderLinks.contains { $0.actionID == action.id && $0.state == "linked" }
     }
     private func openReminderSettings(_ action:ActionRecord) {
         Task {
@@ -2688,7 +2704,7 @@ struct WorkspaceView: View {
                   let record = model.sourcePageIndex.recordsByID[sourceID] else { return }
             opened = await model.beginDiscussion(record)
         case .source(let id): opened = if let source=model.sourcePageIndex.recordsByID[id] { await model.beginDiscussion(source) } else { false }
-        case .task(let id): opened = if let action=model.actionRecords.first(where: { $0.id == id }) { await model.beginActionDiscussion(action) } else { false }
+        case .task(let id): opened = if let action=model.sourcePageIndex.allAction(for: id) { await model.beginActionDiscussion(action) } else { false }
         case .delivery(let id): opened = if let execution=model.assistantExecutions.first(where: { $0.id == id }) { await model.beginAssistantDiscussion(execution) } else { false }
         case .themes:
             guard let topic else { error="请先选择一个主题，再开始讨论。"; return }
@@ -2701,7 +2717,7 @@ struct WorkspaceView: View {
             guard let entry=discussionEntry, let record=model.sourcePageIndex.recordsByID[entry.id] else { error="先选中一条材料，再开始讨论。"; return }
             opened = await model.beginDiscussion(record)
         case .actions:
-            guard let entry=discussionEntry, let action=model.actionRecords.first(where: { $0.id == entry.id }) else { error="先选中一条行动，再开始讨论。"; return }
+            guard let entry=discussionEntry, let action=model.sourcePageIndex.allAction(for: entry.id) else { error="先选中一条行动，再开始讨论。"; return }
             opened = await model.beginActionDiscussion(action)
         case .search:
             guard let entry=discussionEntry else { error="先选中一条搜索结果，再开始讨论。"; return }
@@ -2710,7 +2726,7 @@ struct WorkspaceView: View {
                 guard let record=model.sourcePageIndex.recordsByID[entry.id] else { error="这份材料已不在当前资料库。"; return }
                 opened = await model.beginDiscussion(record)
             case .action:
-                guard let action=model.actionRecords.first(where: { $0.id == entry.id }) else { error="这条行动已不在当前资料库。"; return }
+                guard let action=model.sourcePageIndex.allAction(for: entry.id) else { error="这条行动已不在当前资料库。"; return }
                 opened = await model.beginActionDiscussion(action)
             case .claim:
                 guard let claim=model.sourcePageIndex.claim(for: entry.id) else { error="这条观点已不在当前资料库。"; return }
