@@ -226,6 +226,7 @@ struct WorkspaceView: View {
     @ObservedObject var model: ControlCenter
     @AppStorage("voiceos.workspaceTheme") private var theme = WorkspaceTheme.graphite
     @AppStorage("voiceos.backupRetention") private var backupRetention = 7
+    @AppStorage("voiceos.sourceRail.visible") private var sourceRailVisible = true
     @Environment(\.colorScheme) private var colorScheme
     private var palette: WorkspacePalette { WorkspacePalette(theme: theme) }
     private var brandImage: NSImage? { AppBrand.image(for: colorScheme) }
@@ -766,17 +767,27 @@ struct WorkspaceView: View {
             }
         case .initiate: TaskInitiationView(model:model,openSource:{ go(.source($0)) })
         case .source(let id):
-            if let source=model.records.first(where: { $0.id == id }) {
-                if source.isTrashed { TrashedMaterialView(model:model,source:source) }
-                else {
-                    WorkspaceSourceView(model:model,source:source,openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },openDiscussion:{ id in Task { await openSavedDiscussion(id) } },openSource:{ go(.source($0)) },openInitiation:{ id in
-                        model.initiationSourceID = id
-                        model.initiationText = model.records.first(where: { $0.id == id })?.transcript ?? ""
-                        go(.initiate)
-                    },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id))
-                        .id(id)
+            HStack(spacing:0) {
+                if sourceRailVisible {
+                    sourceRail(selectedID:id)
+                    Divider()
+                } else {
+                    collapsedSourceRail
                 }
-            } else { unavailable("这份材料暂时不可用",description:"可以搜索其他材料，或回到主题。") }
+                Group {
+                    if let source=model.records.first(where: { $0.id == id }) {
+                        if source.isTrashed { TrashedMaterialView(model:model,source:source) }
+                        else {
+                            WorkspaceSourceView(model:model,source:source,openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },openDiscussion:{ id in Task { await openSavedDiscussion(id) } },openSource:{ go(.source($0)) },openInitiation:{ id in
+                                model.initiationSourceID = id
+                                model.initiationText = model.records.first(where: { $0.id == id })?.transcript ?? ""
+                                go(.initiate)
+                            },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id))
+                                .id(id)
+                        }
+                    } else { unavailable("这份材料暂时不可用",description:"可以搜索其他材料，或回到主题。") }
+                }.frame(maxWidth:.infinity,maxHeight:.infinity)
+            }
         case .delivery(let id):
             if let execution=model.assistantExecutions.first(where: { $0.id == id }) {
                 WorkspaceDeliveryView(model:model,execution:execution,openTask:{ go(.task($0)) },openTopic:{ selectTopic($0) },discuss:{ Task { await toggleDiscussion(force:true) } })
@@ -2448,6 +2459,52 @@ struct WorkspaceView: View {
             topicID=entry.topicID;topicTab=entry.topicTab;topicReadingMode=entry.topicReadingMode;page=entry.page
         } else { page = .home }
         topicFocus=nil;error=""
+    }
+    private var sourceRailRows: [SourceRecord] {
+        let index=model.sourcePageIndex
+        var seen=Set<String>()
+        return model.records.filter { source in
+            guard !source.isArchived,!source.isTrashed else { return false }
+            guard let expression=index.expression(for:source.id),expression.sourceIDs.count > 1 else { return true }
+            return seen.insert(expression.id).inserted
+        }.sorted { $0.createdAt > $1.createdAt }
+    }
+    private func sourceRail(selectedID:String) -> some View {
+        let rows=sourceRailRows
+        return VStack(alignment:.leading,spacing:0) {
+            HStack(spacing:8) {
+                Text("材料").vosFont(WorkspaceText.meta.size, weight:.semibold).foregroundStyle(palette.secondaryText)
+                Text(String(rows.count)).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                Spacer(minLength:0)
+                WorkspaceIconButton(systemImage:"chevron.left",label:"收起材料列表") { sourceRailVisible=false }
+                    .accessibilityIdentifier("sourceRail.toggle")
+            }.padding(.horizontal,10).padding(.top,12).padding(.bottom,6)
+            ScrollView {
+                LazyVStack(alignment:.leading,spacing:2) {
+                    ForEach(rows) { source in
+                        WorkspaceListRow(density:.compact,title:displayTitle(source.displayTitle),subtitle:source.recordingDateLabel,icon:source.kind.contains("text") ? "doc.text" : "waveform",highlighted:source.id == selectedID) { selectSource(source.id) }
+                            .help(displayTitle(source.displayTitle))
+                            .accessibilityIdentifier("sourceRail.item." + source.id)
+                    }
+                }.padding(.horizontal,8).padding(.bottom,12)
+            }
+        }.frame(width:248).background(palette.sidebar)
+    }
+    private var collapsedSourceRail: some View {
+        VStack(spacing:0) {
+            WorkspaceIconButton(systemImage:"chevron.right",label:"展开材料列表") { sourceRailVisible=true }
+                .accessibilityIdentifier("sourceRail.toggle")
+                .padding(.top,12)
+            Spacer(minLength:0)
+        }.frame(width:28).background(palette.sidebar)
+    }
+    // A material switch replaces the page under the same back stack, so 返回 still lands where the first material was opened from.
+    private func selectSource(_ id:String) {
+        guard case .source(let current)=page else { go(.source(id)); return }
+        guard current != id else { return }
+        page = .source(id)
+        error=""
+        markSourceOpened(id)
     }
     private func selectTopic(_ id:String) {
         if page == .themes { path.append(navigationEntry) }
