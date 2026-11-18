@@ -65,16 +65,17 @@ struct MaterialManagementControls: View {
 }
 
 struct TrashedMaterialView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let source: SourceRecord
     var body: some View {
         VStack(alignment:.leading,spacing:22) {
             WorkspaceHeading(eyebrow:"材料 · 回收站",title:source.displayTitle,subtitle:"原件和历史保留；这份材料已停止用于当前理解。")
-            Text("恢复后仅本机保存。需要云端理解时，请重新允许并整理；之前的结论和任务不会自动重新启用。已连接的 Apple 提醒事项未被删除或取消。")
-                .foregroundStyle(.secondary)
+            Text("恢复后仅本机保存。需要云端理解时，请重新允许并整理；之前的结论和任务不会自动重新启用。已连接的 Apple 提醒事项未被删除或取消。").vosFont(WorkspaceText.body)
+                .foregroundStyle(palette.secondaryText)
             MaterialManagementControls(model:model,source:source)
-            Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+            Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
             Spacer()
-        }.padding(30).frame(maxWidth:820,alignment:.leading).frame(maxWidth:.infinity,alignment:.top)
+        }.padding(WorkspaceMetrics.pagePadding).frame(maxWidth:WorkspaceMetrics.pageWidth,alignment:.leading).frame(maxWidth:.infinity,alignment:.top)
     }
 }
