@@ -788,6 +788,7 @@ final class ControlCenter: ObservableObject {
     @Published var initialized = false
     @Published var workspaceLoaded = false
     private var lastFullReloadGeneration: Int64?
+    private var lastBackgroundResumeGeneration: Int64?
     @Published var textSize: AppTextSize = AppTextSize(rawValue: UserDefaults.standard.string(forKey: "voiceos.textSize.v1") ?? "") ?? .standard
     func setTextSize(_ value: AppTextSize) {
         textSize = value
@@ -3520,7 +3521,17 @@ final class ControlCenter: ObservableObject {
         reminderObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in await self?.refresh(.full); self?.requestReminderRefresh(); self?.resumeRecordingFollowups(); self?.resumeKnowledgeReviews(); await self?.refreshNoticeAuthorization() } })
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh(); self?.resumeRecordingFollowups(); self?.resumeKnowledgeReviews() } }
         reminderTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in Task { @MainActor in self?.requestReminderRefresh() } }
-        followupTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in await self?.refresh(.full); self?.resumeRecordingFollowups(); self?.resumeAssistantExecutions(); self?.resumeKnowledgeReviews() } }
+        followupTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in Task { @MainActor in
+            guard let self, let store = self.store else { return }
+            let generation = await store.dataGeneration
+            if generation != self.lastBackgroundResumeGeneration {
+                self.lastBackgroundResumeGeneration = generation
+                self.resumeRecordingFollowups()
+                self.resumeAssistantExecutions()
+                self.resumeKnowledgeReviews()
+            }
+            await self.refresh(.full)
+        } }
     }
     private func requestReminderRefresh() {
         guard reminderAccess?.enabled == true else { return }
