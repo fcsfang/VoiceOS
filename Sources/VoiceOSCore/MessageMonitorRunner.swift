@@ -251,16 +251,36 @@ public struct MessageMonitorRunner: Sendable {
         let existing = try await store.openMonitorItems().map {
             NotificationExistingItem(id: $0.id, title: $0.title, deadlineDate: $0.deadlineDate, category: $0.category)
         }
-        let inputs = messages.map {
-            NotificationMessageInput(sourceID: $0.sourceID, externalID: $0.externalID, kind: $0.kind,
-                                     senderName: $0.senderName, sentAt: $0.sentAt, text: $0.content,
-                                     needsReview: $0.kind != .text && $0.kind != .article)
-        }
+        let inputs = messages.map { Self.notificationInput(for: $0) }
         let states = statuses.map { NotificationSourceState(sourceID: $0.sourceID, ok: $0.ok, error: $0.error) }
         let digest = VoiceOSStore.relevanceHash(Data((inputs.map { $0.sourceID + "\u{0}" + $0.externalID } + existing.map(\.id))
             .joined(separator: "\n").utf8))
         return NotificationAnalysisInput(sources: descriptors, messages: inputs, existingItems: existing,
                                          sourceStatus: states, digest: digest)
+    }
+
+    /// The quoted text and type marker ride inside the message text because
+    /// both stay fixed-length; batch slicing already budgets text by scalars.
+    static func notificationInput(for message: MonitorMessage) -> NotificationMessageInput {
+        let markers = analysisMarkers(kind: message.kind, metaJSON: message.metaJSON)
+        let text = markers.isEmpty ? message.content : message.content + " " + markers.joined(separator: " ")
+        return NotificationMessageInput(sourceID: message.sourceID, externalID: message.externalID, kind: message.kind,
+                                        senderName: message.senderName, sentAt: message.sentAt, text: text,
+                                        needsReview: message.kind != .text && message.kind != .article)
+    }
+
+    static func analysisMarkers(kind: MonitorMessageKind, metaJSON: String?) -> [String] {
+        var markers: [String] = []
+        switch kind {
+        case .image, .file, .forward, .other:
+            markers.append("（类型：\(MonitorEvidenceBuilder.kindLabel(kind))）")
+        case .text, .article:
+            break
+        }
+        if let reply = MonitorMessageMeta.replyContext(metaJSON) {
+            markers.append("（回复：\(MonitorEvidenceBuilder.truncated(reply.content, limit: 80))）")
+        }
+        return markers
     }
 
     private struct QQSourceConfiguration: Decodable {
@@ -304,4 +324,122 @@ public struct MessageMonitorRunner: Sendable {
     static func isoString(_ date: Date) -> String { ISO8601DateFormatter().string(from: date) }
 
     static func isoDate(_ text: String) -> Date? { ISO8601DateFormatter().date(from: text) }
+}
+
+/// The quoted message as qq_read_range.py forwards it inside meta.replyContext.
+struct MonitorReplyContext: Equatable {
+    let accountName: String?
+    let content: String
+}
+
+enum MonitorMessageMeta {
+    static func replyContext(_ metaJSON: String?) -> MonitorReplyContext? {
+        guard let object = object(metaJSON),
+              let reply = object["replyContext"] as? [String: Any],
+              let content = (reply["content"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !content.isEmpty else { return nil }
+        let name = (reply["accountName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return MonitorReplyContext(accountName: name?.isEmpty == false ? name : nil, content: content)
+    }
+
+    private static func object(_ json: String?) -> [String: Any]? {
+        guard let json, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+}
+
+/// Presentation data for one evidence row: what kind of message it is, what it
+/// said, and what it quoted. Rows survive deleted messages as a source-name
+/// fallback so an item never loses its provenance.
+public struct MonitorEvidenceRecord: Identifiable, Sendable, Equatable {
+    public let id: String
+    public let sourceID: String
+    public let sourceName: String
+    public let sourceKind: MonitorSourceKind?
+    public let kind: MonitorMessageKind?
+    public let sender: String?
+    public let sentAt: String?
+    public let url: String?
+    public let title: String?
+    public let excerpt: String
+    public let replyQuote: String?
+    public let missing: Bool
+}
+
+public enum MonitorEvidenceBuilder {
+    public static let excerptLimit = 120
+
+    public static func kindLabel(_ kind: MonitorMessageKind?) -> String {
+        switch kind {
+        case .text?: return "文本"
+        case .image?: return "图片"
+        case .file?: return "文件"
+        case .forward?: return "合并转发"
+        case .other?: return "语音"
+        case .article?: return "网页"
+        case nil: return ""
+        }
+    }
+
+    public static func truncated(_ text: String, limit: Int) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > limit else { return trimmed }
+        return String(trimmed.prefix(limit)) + "…"
+    }
+
+    public static func build(refs: [NotificationSourceRef], messagesBySource: [String: [MonitorMessage]],
+                             sourceNames: [String: String],
+                             sourceKinds: [String: MonitorSourceKind]) -> [MonitorEvidenceRecord] {
+        var orderedSources: [String] = []
+        var expectedBySource: [String: [String]] = [:]
+        for ref in refs {
+            if expectedBySource[ref.sourceID] == nil { orderedSources.append(ref.sourceID) }
+            if let externalID = ref.externalID,
+               expectedBySource[ref.sourceID, default: []].contains(externalID) == false {
+                expectedBySource[ref.sourceID, default: []].append(externalID)
+            }
+        }
+        var records: [MonitorEvidenceRecord] = []
+        for sourceID in orderedSources {
+            let name = sourceNames[sourceID] ?? "监测来源"
+            let sourceKind = sourceKinds[sourceID]
+            let expected = expectedBySource[sourceID] ?? []
+            let messages = messagesBySource[sourceID] ?? []
+            let foundIDs = Set(messages.map(\.externalID))
+            for message in messages {
+                let meta = metaObject(message.metaJSON)
+                records.append(MonitorEvidenceRecord(
+                    id: message.id, sourceID: sourceID, sourceName: name, sourceKind: sourceKind,
+                    kind: message.kind, sender: message.senderName, sentAt: message.sentAt,
+                    url: meta["url"] as? String, title: meta["title"] as? String,
+                    excerpt: truncated(message.content, limit: excerptLimit),
+                    replyQuote: replyQuote(message.metaJSON), missing: false))
+            }
+            if expected.isEmpty {
+                records.append(MonitorEvidenceRecord(
+                    id: "source:" + sourceID, sourceID: sourceID, sourceName: name, sourceKind: sourceKind,
+                    kind: nil, sender: nil, sentAt: nil, url: nil, title: nil,
+                    excerpt: "", replyQuote: nil, missing: false))
+            } else if expected.contains(where: { !foundIDs.contains($0) }) {
+                records.append(MonitorEvidenceRecord(
+                    id: "missing:" + sourceID, sourceID: sourceID, sourceName: name, sourceKind: sourceKind,
+                    kind: nil, sender: nil, sentAt: nil, url: nil, title: nil,
+                    excerpt: "", replyQuote: nil, missing: true))
+            }
+        }
+        return records
+    }
+
+    static func replyQuote(_ metaJSON: String?) -> String? {
+        guard let reply = MonitorMessageMeta.replyContext(metaJSON) else { return nil }
+        let content = truncated(reply.content, limit: excerptLimit)
+        guard !content.isEmpty else { return nil }
+        if let name = reply.accountName, !name.isEmpty { return "引用：" + name + "：" + content }
+        return "引用：" + content
+    }
+
+    private static func metaObject(_ json: String?) -> [String: Any] {
+        guard let json, let data = json.data(using: .utf8) else { return [:] }
+        return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
 }

@@ -100,10 +100,28 @@ struct MonitorItemEvidence: Identifiable, Equatable {
     let id: String
     let sourceName: String
     let sourceKind: MonitorSourceKind?
+    let kind: MonitorMessageKind?
     let sender: String?
     let sentAt: String?
     let url: String?
     let title: String?
+    let excerpt: String
+    let replyQuote: String?
+    let missing: Bool
+
+    init(_ record: MonitorEvidenceRecord) {
+        id = record.id
+        sourceName = record.sourceName
+        sourceKind = record.sourceKind
+        kind = record.kind
+        sender = record.sender
+        sentAt = record.sentAt
+        url = record.url
+        title = record.title
+        excerpt = record.excerpt
+        replyQuote = record.replyQuote
+        missing = record.missing
+    }
 }
 
 struct MonitorBuiltinWebsite: Identifiable, Equatable {
@@ -172,30 +190,14 @@ extension ControlCenter {
         for item in items where monitorEvidence[item.id] == nil {
             let refs = (try? JSONDecoder().decode([NotificationSourceRef].self,
                                                    from: Data(item.sourceRefsJSON.utf8))) ?? []
-            var evidence: [MonitorItemEvidence] = []
+            var messagesBySource: [String: [MonitorMessage]] = [:]
             for sourceID in Set(refs.map(\.sourceID)) {
                 let externalIDs = refs.filter { $0.sourceID == sourceID }.compactMap(\.externalID)
-                let messages = (try? await store.monitorMessages(sourceID: sourceID, externalIDs: externalIDs)) ?? []
-                for message in messages {
-                    let meta = Self.monitorMeta(message.metaJSON)
-                    evidence.append(MonitorItemEvidence(
-                        id: message.id,
-                        sourceName: nameBySource[message.sourceID] ?? "监测来源",
-                        sourceKind: kindBySource[message.sourceID],
-                        sender: message.senderName,
-                        sentAt: message.sentAt,
-                        url: meta["url"] as? String,
-                        title: meta["title"] as? String))
-                }
-                if messages.isEmpty {
-                    evidence.append(MonitorItemEvidence(
-                        id: "source:" + sourceID,
-                        sourceName: nameBySource[sourceID] ?? "监测来源",
-                        sourceKind: kindBySource[sourceID],
-                        sender: nil, sentAt: nil, url: nil, title: nil))
-                }
+                messagesBySource[sourceID] = (try? await store.monitorMessages(sourceID: sourceID, externalIDs: externalIDs)) ?? []
             }
-            monitorEvidence[item.id] = evidence
+            monitorEvidence[item.id] = MonitorEvidenceBuilder.build(
+                refs: refs, messagesBySource: messagesBySource,
+                sourceNames: nameBySource, sourceKinds: kindBySource).map(MonitorItemEvidence.init)
         }
     }
 
@@ -635,11 +637,5 @@ extension ControlCenter {
     static func monitorTimeText(_ iso: String?) -> String {
         guard let iso, let date = ISO8601DateFormatter().date(from: iso) else { return iso ?? "时间未知" }
         return date.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    private static func monitorMeta(_ json: String?) -> [String: Any] {
-        guard let json, let data = json.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
-        return object
     }
 }

@@ -121,14 +121,18 @@ struct WorkspaceMonitorView: View {
         }
     }
 
+    private var earlierReports: [MonitorReport] {
+        model.monitorReports.filter { $0.reportDate != todayKey }
+    }
+
     private var historySection: some View {
-        WorkspaceSection(title: "历史报告", subtitle: "最近 30 次检查；点开查看同结构内容。",
-                         icon: "clock.arrow.circlepath", count: model.monitorReports.count) {
-            if model.monitorReports.isEmpty {
-                Text("还没有历史报告。").vosFont(WorkspaceText.meta)
+        WorkspaceSection(title: "历史报告", subtitle: "最近 30 次检查中早于今天的报告；点开查看同结构内容。",
+                         icon: "clock.arrow.circlepath", count: earlierReports.count) {
+            if earlierReports.isEmpty {
+                Text("还没有更早的历史报告。").vosFont(WorkspaceText.meta)
                     .foregroundStyle(palette.secondaryText).padding(.vertical, 10)
             } else {
-                ForEach(model.monitorReports) { report in
+                ForEach(earlierReports) { report in
                     WorkspaceRow(
                         title: report.headline.isEmpty ? "未命名报告" : report.headline,
                         subtitle: report.reportDate + " · " + ControlCenter.monitorStateText(report.state)
@@ -317,19 +321,33 @@ struct WorkspaceMonitorView: View {
             set: { expanded in
                 if expanded { expandedItems.insert(item.id) } else { expandedItems.remove(item.id) }
             })) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 10) {
                 Text(item.evidenceQuote).vosFont(WorkspaceText.body)
                     .padding(.leading, 10)
                     .overlay(alignment: .leading) { Rectangle().fill(palette.border).frame(width: 2) }
                     .textSelection(.enabled)
                 ForEach(evidence) { entry in
-                    HStack(spacing: 8) {
-                        Text(evidenceLine(entry)).vosFont(WorkspaceText.meta)
-                            .foregroundStyle(palette.secondaryText)
-                        if let urlText = entry.url, let url = URL(string: urlText) {
-                            Button("在浏览器打开原文") { NSWorkspace.shared.open(url) }.vosFont(WorkspaceText.meta)
+                    let body = evidenceBody(entry)
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 8) {
+                            Text(evidenceLine(entry)).vosFont(WorkspaceText.meta)
+                                .foregroundStyle(palette.secondaryText)
+                            if let urlText = entry.url, let url = URL(string: urlText) {
+                                Button("在浏览器打开原文") { NSWorkspace.shared.open(url) }.vosFont(WorkspaceText.meta)
+                            }
+                            Spacer()
                         }
-                        Spacer()
+                        if entry.missing {
+                            Text("原文未找到").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                        } else {
+                            if !body.isEmpty {
+                                Text(body).vosFont(WorkspaceText.meta).textSelection(.enabled)
+                            }
+                            if let quote = entry.replyQuote {
+                                Text(quote).vosFont(WorkspaceText.meta)
+                                    .foregroundStyle(palette.secondaryText).textSelection(.enabled)
+                            }
+                        }
                     }
                 }
             }.padding(.top, 6)
@@ -339,11 +357,20 @@ struct WorkspaceMonitorView: View {
     }
 
     private func evidenceLine(_ entry: MonitorItemEvidence) -> String {
-        var parts: [String] = [entry.sourceKind == .qqGroup ? "QQ 群消息" : entry.sourceName]
+        if entry.missing { return entry.sourceName }
+        guard entry.sourceKind == .qqGroup else {
+            if let title = entry.title, !title.isEmpty { return entry.sourceName + " · " + title }
+            return entry.sourceName
+        }
+        var parts: [String] = ["QQ 群消息"]
         if let sender = entry.sender, !sender.isEmpty { parts.append(sender) }
         if let sentAt = entry.sentAt { parts.append(ControlCenter.monitorTimeText(sentAt)) }
-        if let title = entry.title, !title.isEmpty { parts.append(title) }
         return parts.joined(separator: " · ")
+    }
+
+    private func evidenceBody(_ entry: MonitorItemEvidence) -> String {
+        [MonitorEvidenceBuilder.kindLabel(entry.kind), entry.excerpt]
+            .filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     @ViewBuilder private func sourceFailureReasons(_ report: MonitorReport) -> some View {
