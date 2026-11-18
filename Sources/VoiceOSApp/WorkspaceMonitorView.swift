@@ -23,6 +23,8 @@ struct WorkspaceMonitorView: View {
     @State private var pendingSourceRemoval: MonitorSource?
     @State private var formLoaded = false
     @State private var showsSettings = false
+    @State private var showsAllItems = false
+    @State private var handledExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
@@ -159,14 +161,20 @@ struct WorkspaceMonitorView: View {
                         .foregroundStyle(palette.secondaryText).lineSpacing(4)
                 }
                 HStack(spacing: 16) {
-                    Text("事项 \(report.itemCount) 条").vosFont(WorkspaceText.meta)
+                    Text(itemCountText(report)).vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.secondaryText)
                     Text(ControlCenter.monitorDeliveryText(report)).vosFont(WorkspaceText.meta)
                         .foregroundStyle(report.deliveryState == "failed" ? palette.warning : palette.secondaryText)
                     Spacer()
                     if isLatest {
-                        Button("立即推送今日报告") { Task { await model.pushLatestMonitorReport() } }
-                            .disabled(model.monitorChecking).vosFont(WorkspaceText.meta)
+                        if report.state == .failed {
+                            Button("去设置") { showsSettings = true }.vosFont(WorkspaceText.meta)
+                            Button("重新检查") { Task { await model.runMonitorCheck() } }
+                                .disabled(model.monitorChecking).vosFont(WorkspaceText.meta)
+                        } else {
+                            Button("立即推送今日报告") { Task { await model.pushLatestMonitorReport() } }
+                                .disabled(model.monitorChecking).vosFont(WorkspaceText.meta)
+                        }
                     }
                 }
                 sourceFailureReasons(report)
@@ -182,6 +190,8 @@ struct WorkspaceMonitorView: View {
             }
             HStack(spacing: 16) {
                 Text(ControlCenter.monitorStateText(report.state)).vosFont(WorkspaceText.meta)
+                Text(itemCountText(report)).vosFont(WorkspaceText.meta)
+                    .foregroundStyle(palette.secondaryText)
                 Text(ControlCenter.monitorDeliveryText(report)).vosFont(WorkspaceText.meta)
                     .foregroundStyle(report.deliveryState == "failed" ? palette.warning : palette.secondaryText)
             }
@@ -193,19 +203,60 @@ struct WorkspaceMonitorView: View {
     @ViewBuilder private func itemsView(report: MonitorReport) -> some View {
         let items = model.monitorItemsByReport[report.id] ?? []
         if items.isEmpty {
-            Text(report.state == .failed ? "报告未完成，暂无事项。先处理上方原因，再重新检查。" : "没有需要关注的事项。")
+            Text(emptyItemsText(report))
                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.vertical, 6)
         } else {
+            let openItems = items.filter { $0.status == .open }
+            Picker("事项筛选", selection: $showsAllItems) {
+                Text("未处理").tag(false)
+                Text("全部").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 140)
+            .padding(.top, 4)
             ForEach([MonitorItemCategory.applicable, .needsCheck], id: \.self) { category in
-                let group = items.filter { $0.category == category }
+                let group = openItems.filter { $0.category == category }
                 if !group.isEmpty {
-                    Text(category == .applicable ? "适用" : "待核对")
+                    Text((category == .applicable ? "适用" : "待核对") + " \(group.count)")
                         .vosFont(WorkspaceText.meta.size, weight: .semibold)
                         .foregroundStyle(palette.secondaryText).padding(.top, 8)
                         .accessibilityAddTraits(.isHeader)
                     ForEach(group) { item in itemView(item) }
                 }
             }
+            if openItems.isEmpty {
+                Text("没有未处理的事项。")
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.vertical, 6)
+            }
+            if showsAllItems {
+                let handled = items.filter { $0.status != .open }
+                if !handled.isEmpty {
+                    DisclosureGroup(isExpanded: $handledExpanded) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(handled) { item in itemView(item) }
+                        }.padding(.top, 6)
+                    } label: {
+                        Text("已处理（\(handled.count)）")
+                            .vosFont(WorkspaceText.meta.size, weight: .semibold)
+                            .foregroundStyle(palette.secondaryText)
+                            .accessibilityAddTraits(.isHeader)
+                    }.padding(.top, 8)
+                }
+            }
+        }
+    }
+
+    private func itemCountText(_ report: MonitorReport) -> String {
+        let tally = MonitorItemTally(items: model.monitorItemsByReport[report.id] ?? [])
+        return "未处理 \(tally.open) · 已处理 \(tally.handled)"
+    }
+
+    private func emptyItemsText(_ report: MonitorReport) -> String {
+        switch report.state {
+        case .failed: return "报告未完成，暂无事项。先处理上方原因，再重新检查。"
+        case .incomplete: return "检查不完整，可能漏项"
+        case .complete: return "没有需要关注的事项。"
         }
     }
 
@@ -276,7 +327,7 @@ struct WorkspaceMonitorView: View {
                         Text(evidenceLine(entry)).vosFont(WorkspaceText.meta)
                             .foregroundStyle(palette.secondaryText)
                         if let urlText = entry.url, let url = URL(string: urlText) {
-                            Button("打开原文") { NSWorkspace.shared.open(url) }.vosFont(WorkspaceText.meta)
+                            Button("在浏览器打开原文") { NSWorkspace.shared.open(url) }.vosFont(WorkspaceText.meta)
                         }
                         Spacer()
                     }
@@ -288,7 +339,7 @@ struct WorkspaceMonitorView: View {
     }
 
     private func evidenceLine(_ entry: MonitorItemEvidence) -> String {
-        var parts: [String] = [entry.sourceName]
+        var parts: [String] = [entry.sourceKind == .qqGroup ? "QQ 群消息" : entry.sourceName]
         if let sender = entry.sender, !sender.isEmpty { parts.append(sender) }
         if let sentAt = entry.sentAt { parts.append(ControlCenter.monitorTimeText(sentAt)) }
         if let title = entry.title, !title.isEmpty { parts.append(title) }
@@ -313,6 +364,13 @@ struct WorkspaceMonitorView: View {
         WorkspaceSection(title: "来源状态",
                          subtitle: "QQ 显示 VoiceOS 本地库中的最新消息时间；没有新消息不等于采集失败，失败会单独标出。",
                          icon: "antenna.radiowaves.left.and.right") {
+            if !model.monitorSources.contains(where: { $0.kind == .qqGroup }) {
+                HStack(spacing: 12) {
+                    Text("未添加 QQ 群来源").vosFont(WorkspaceText.body)
+                    Button("去设置") { showsSettings = true }.vosFont(WorkspaceText.meta)
+                    Spacer()
+                }.padding(.vertical, 8)
+            }
             ForEach(model.monitorSources) { source in
                 sourceRow(source)
             }
