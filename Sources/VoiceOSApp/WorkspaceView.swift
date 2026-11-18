@@ -2925,7 +2925,7 @@ private struct ActionCardList<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment:.leading,spacing:8) {
+        LazyVStack(alignment:.leading,spacing:8) {
             content()
         }.padding(.top,8)
     }
