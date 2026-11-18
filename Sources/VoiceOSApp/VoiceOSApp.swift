@@ -1234,7 +1234,7 @@ final class ControlCenter: ObservableObject {
             status = "资料库尚未打开：" + error.localizedDescription
         }
     }
-    private var refreshWorker: Task<Void, Never>?
+    private var refreshWorker: Task<Bool, Never>?
     private var pendingRefreshPlan: RefreshPlan?
     private var panoramaLaunchRetryIssued = false
     private var panoramaDraftIssued = false
@@ -1243,15 +1243,18 @@ final class ControlCenter: ObservableObject {
         if var pending = pendingRefreshPlan { pending.merge(request); pendingRefreshPlan = pending }
         else { pendingRefreshPlan = request }
         if let refreshWorker { await refreshWorker.value; return }
-        let work = Task {
+        let work = Task { () -> Bool in
             defer { refreshWorker = nil }
+            var didWork = false
             while let plan = pendingRefreshPlan, !Task.isCancelled {
                 pendingRefreshPlan = nil
-                await reloadWorkspace(plan)
+                if await reloadWorkspace(plan) { didWork = true }
             }
+            return didWork
         }
         refreshWorker = work
-        await work.value
+        let didWork = await work.value
+        guard didWork else { StartupTrace.mark("refresh.idleSkip"); return }
         StartupTrace.mark("refresh.reloaded")
         await reloadMonitorState()
         writeMarkdownMirror()
@@ -1531,19 +1534,21 @@ final class ControlCenter: ObservableObject {
         assistantAssessmentIssues = snapshot.assistantAssessmentIssues
         StartupTrace.mark("secondary.assistant=\(assistantExecutions.count) issues=\(assistantAssessmentIssues.count)")
     }
-    private func reloadWorkspace(_ plan: RefreshPlan) async {
-        guard let store else { return }
+    @discardableResult
+    private func reloadWorkspace(_ plan: RefreshPlan) async -> Bool {
+        guard let store else { return false }
         if plan.full {
-            await reloadFullWorkspace(store: store)
-            return
+            return await reloadFullWorkspace(store: store)
         }
         await reloadScopedWorkspace(plan, store: store)
+        return true
     }
-    private func reloadFullWorkspace(store: VoiceOSStore) async {
+    @discardableResult
+    private func reloadFullWorkspace(store: VoiceOSStore) async -> Bool {
         let generation = await store.dataGeneration
         if workspaceLoaded, generation == lastFullReloadGeneration {
             StartupTrace.mark("reload.skipped")
-            return
+            return false
         }
         StartupTrace.mark("reload.begin")
         await panoramaChanged()
@@ -1602,6 +1607,7 @@ final class ControlCenter: ObservableObject {
         resumeAssistantExecutions(snapshot: contextsFroze ? nil : assistantSnapshot)
         queueTopicOrganization()
         lastFullReloadGeneration = await store.dataGeneration
+        return true
     }
     private func reloadScopedWorkspace(_ plan: RefreshPlan, store: VoiceOSStore) async {
         StartupTrace.mark("reload.begin")
