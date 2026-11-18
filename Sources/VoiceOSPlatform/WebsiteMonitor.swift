@@ -23,9 +23,13 @@ public struct WebsiteMonitor: WebsiteMonitorCollecting {
         for (index, link) in links.enumerated() {
             if index > 0 { try await Task.sleep(for: .seconds(Self.requestSpacing)) }
             var text = link.title
+            var publishedAt = link.publishedAt
             var note: String?
             do {
                 let articleHTML = try await fetchHTML(link.url)
+                if let articleDate = MonitorListParser.articlePublishedDate(in: articleHTML) {
+                    publishedAt = articleDate
+                }
                 if let article = ArticleExtractor.extract(html: articleHTML, baseURL: link.url), article.text.count > text.count {
                     text = article.text
                 }
@@ -35,7 +39,7 @@ public struct WebsiteMonitor: WebsiteMonitorCollecting {
                 note = error.localizedDescription
             }
             entries.append(WebsiteMonitorEntry(url: link.url.absoluteString, title: link.title,
-                                              publishedAt: link.publishedAt, text: text, note: note))
+                                              publishedAt: publishedAt, text: text, note: note))
         }
         return entries
     }
@@ -103,19 +107,74 @@ public enum MonitorListParser {
                 || path.range(of: "/\\d{3,}", options: .regularExpression) != nil
             guard looksLikeArticle else { continue }
             guard seen.insert(url.absoluteString).inserted else { continue }
-            links.append(ArticleLink(url: url, title: title,
-                                     publishedAt: publishedDate(in: title + " " + url.absoluteString)))
+            let innerHTML = String(html[titleRange])
+            let siblingHTML = siblingDateContext(html: html, after: match.range)
+            let published = splitDayMonthDate(in: innerHTML)
+                ?? isoOrChineseDate(in: siblingHTML)
+                ?? isoOrChineseDate(in: innerHTML)
+                ?? isoOrChineseDate(in: title + " " + url.absoluteString)
+            links.append(ArticleLink(url: url, title: title, publishedAt: published))
         }
         return links
     }
 
-    private static func publishedDate(in text: String) -> Date? {
-        guard let regex = try? NSRegularExpression(pattern: "(20\\d{2})[-/.年](\\d{1,2})[-/.月](\\d{1,2})") else { return nil }
-        let ns = text as NSString
-        guard let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
-              let year = Int(ns.substring(with: match.range(at: 1))),
+    /// Text right after the anchor, bounded at the list item or the next link,
+    /// where the graduate school column puts its publish date.
+    private static func siblingDateContext(html: String, after match: NSRange) -> String {
+        let ns = html as NSString
+        let start = match.location + match.length
+        guard start < ns.length else { return "" }
+        var tail = ns.substring(with: NSRange(location: start, length: min(400, ns.length - start)))
+        for marker in ["</li>", "<a "] {
+            if let range = tail.range(of: marker, options: .caseInsensitive) {
+                tail = String(tail[..<range.lowerBound])
+            }
+        }
+        return tail
+    }
+
+    static func articlePublishedDate(in html: String) -> Date? {
+        guard let regex = try? NSRegularExpression(
+            pattern: "(?:发布时间|发布日期|发表时间|时间)\\s*[:：]\\s*(20\\d{2})[-/.年](\\d{1,2})[-/.月](\\d{1,2})",
+            options: [.caseInsensitive]) else { return nil }
+        let ns = html as NSString
+        guard let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        guard let year = Int(ns.substring(with: match.range(at: 1))),
               let month = Int(ns.substring(with: match.range(at: 2))),
               let day = Int(ns.substring(with: match.range(at: 3))) else { return nil }
+        return calendarDate(year: year, month: month, day: day)
+    }
+
+    private static func isoOrChineseDate(in text: String) -> Date? {
+        for pattern in ["(20\\d{2})[-/.](\\d{1,2})[-/.](\\d{1,2})",
+                        "(20\\d{2})年(\\d{1,2})月(\\d{1,2})日"] {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let ns = text as NSString
+            guard let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: ns.length)),
+                  let year = Int(ns.substring(with: match.range(at: 1))),
+                  let month = Int(ns.substring(with: match.range(at: 2))),
+                  let day = Int(ns.substring(with: match.range(at: 3))) else { continue }
+            return calendarDate(year: year, month: month, day: day)
+        }
+        return nil
+    }
+
+    /// The computer science column splits the date into a day node followed by
+    /// a year-month node, both inside the anchor.
+    private static func splitDayMonthDate(in html: String) -> Date? {
+        guard let regex = try? NSRegularExpression(
+            pattern: "<p[^>]*class\\s*=\\s*[\"']dd[\"'][^>]*>\\s*(\\d{1,2})\\s*</p>[\\s\\S]*?<p[^>]*class\\s*=\\s*[\"']ym[\"'][^>]*>\\s*(20\\d{2})-(\\d{1,2})\\s*</p>",
+            options: [.caseInsensitive]) else { return nil }
+        let ns = html as NSString
+        guard let match = regex.firstMatch(in: html, range: NSRange(location: 0, length: ns.length)) else { return nil }
+        guard let day = Int(ns.substring(with: match.range(at: 1))),
+              let year = Int(ns.substring(with: match.range(at: 2))),
+              let month = Int(ns.substring(with: match.range(at: 3))) else { return nil }
+        return calendarDate(year: year, month: month, day: day)
+    }
+
+    private static func calendarDate(year: Int, month: Int, day: Int) -> Date? {
+        guard (1...12).contains(month), (1...31).contains(day) else { return nil }
         var components = DateComponents()
         components.year = year; components.month = month; components.day = day
         components.timeZone = .current
