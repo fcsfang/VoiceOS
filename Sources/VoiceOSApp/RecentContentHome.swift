@@ -537,7 +537,6 @@ struct RecentContentHome: View {
             }
             Rectangle().fill(palette.border).frame(height: 1).padding(.top, 4)
         }
-        .accessibilityIdentifier("home.recentThoughts")
     }
 
     @ViewBuilder private func organizePrompt(_ item: RecentContentItem) -> some View {
