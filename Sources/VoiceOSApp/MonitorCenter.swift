@@ -47,8 +47,11 @@ enum MonitorQQSettingsStore {
         }
         return settings
     }
-    static func save(_ settings: MonitorQQUserSettings) {
-        if let data = try? JSONEncoder().encode(settings) { UserDefaults.standard.set(data, forKey: key) }
+    @discardableResult
+    static func save(_ settings: MonitorQQUserSettings) -> Bool {
+        guard let data = try? JSONEncoder().encode(settings) else { return false }
+        UserDefaults.standard.set(data, forKey: key)
+        return true
     }
     static func resolvedPythonPath(_ settings: MonitorQQUserSettings) -> String {
         let trimmed = settings.pythonPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -413,9 +416,14 @@ extension ControlCenter {
         monitorQQDiagnosisStatus = items.allSatisfy(\.ok) ? "QQ 读取环境可用" : "有 \(items.filter { !$0.ok }.count) 项需要处理"
     }
 
-    func saveMonitorQQSettings(_ settings: MonitorQQUserSettings) {
-        MonitorQQSettingsStore.save(settings)
+    @discardableResult
+    func saveMonitorQQSettings(_ settings: MonitorQQUserSettings) -> Bool {
+        guard MonitorQQSettingsStore.save(settings) else {
+            monitorStatus = "QQ 读取设置保存失败，请重试；若仍失败请重启应用后再试"
+            return false
+        }
         monitorStatus = "QQ 读取设置已保存（只保存路径与账号，不保存密钥内容）"
+        return true
     }
 
     var monitorWebhookTail: String { MonitorCredentialStore.tail(MonitorCredentialStore.loadWebhookURL()) }

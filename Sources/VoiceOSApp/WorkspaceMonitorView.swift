@@ -25,6 +25,10 @@ struct WorkspaceMonitorView: View {
     @State private var showsSettings = false
     @State private var showsAllItems = false
     @State private var handledExpanded = false
+    @State private var monitorLoaded = false
+    @State private var failedItemReportIDs: Set<String> = []
+    @State private var qqSaveFeedback = ""
+    @State private var qqSaveFailed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
@@ -61,6 +65,7 @@ struct WorkspaceMonitorView: View {
             Task {
                 await model.ensureBuiltinMonitorSources()
                 await model.reloadMonitorState()
+                monitorLoaded = true
                 model.markMonitorAttentionSeen()
             }
         }
@@ -110,7 +115,11 @@ struct WorkspaceMonitorView: View {
     }
 
     @ViewBuilder private var todayReportSection: some View {
-        if let report = model.monitorLatestReport, report.reportDate == todayKey {
+        if !monitorLoaded {
+            WorkspaceSection(title: "今日报告", icon: "doc.text") {
+                monitorLoadingRow("正在读取今日报告…")
+            }
+        } else if let report = model.monitorLatestReport, report.reportDate == todayKey {
             reportSection(title: "今日报告", report: report, isLatest: true)
         } else {
             WorkspaceSection(title: "今日报告",
@@ -129,8 +138,10 @@ struct WorkspaceMonitorView: View {
 
     private var historySection: some View {
         WorkspaceSection(title: "历史报告", subtitle: "最近 30 次检查中早于今天的报告；点开查看同结构内容。",
-                         icon: "clock.arrow.circlepath", count: earlierReports.count) {
-            if earlierReports.isEmpty {
+                         icon: "clock.arrow.circlepath", count: monitorLoaded ? earlierReports.count : nil) {
+            if !monitorLoaded {
+                monitorLoadingRow("正在读取历史报告…")
+            } else if earlierReports.isEmpty {
                 Text("还没有更早的历史报告。").vosFont(WorkspaceText.meta)
                     .foregroundStyle(palette.secondaryText).padding(.vertical, 10)
             } else {
@@ -141,12 +152,7 @@ struct WorkspaceMonitorView: View {
                             + " · " + ControlCenter.monitorDeliveryText(report),
                         icon: report.reportDate == todayKey ? "doc.text" : "doc.text.magnifyingglass",
                         trailing: selectedReportID == report.id ? "收起" : "查看") {
-                        if selectedReportID == report.id {
-                            selectedReportID = nil
-                        } else {
-                            selectedReportID = report.id
-                            Task { await model.loadMonitorItems(reportID: report.id) }
-                        }
+                        revealReport(report)
                     }.accessibilityIdentifier("monitor.history." + report.id)
                     if selectedReportID == report.id {
                         reportBody(report: report).padding(.leading, 20).padding(.bottom, 16)
@@ -210,11 +216,18 @@ struct WorkspaceMonitorView: View {
     }
 
     @ViewBuilder private func itemsView(report: MonitorReport) -> some View {
-        let items = model.monitorItemsByReport[report.id] ?? []
-        if items.isEmpty {
+        switch MonitorItemsPresentation.resolve(items: model.monitorItemsByReport[report.id],
+                                                loadFailed: failedItemReportIDs.contains(report.id)) {
+        case .loading:
+            monitorLoadingRow("正在读取事项…")
+        case .failed:
+            Text("事项读取失败，请收起后重新展开重试。")
+                .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning).padding(.vertical, 6)
+        case .empty:
             Text(emptyItemsText(report))
                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.vertical, 6)
-        } else {
+        case .items:
+            let items = model.monitorItemsByReport[report.id] ?? []
             let openItems = items.filter { $0.status == .open }
             Picker("事项筛选", selection: $showsAllItems) {
                 Text("未处理").tag(false)
@@ -258,7 +271,10 @@ struct WorkspaceMonitorView: View {
     }
 
     private func itemCountText(_ report: MonitorReport) -> String {
-        let tally = MonitorItemTally(items: model.monitorItemsByReport[report.id] ?? [])
+        guard let items = model.monitorItemsByReport[report.id] else {
+            return failedItemReportIDs.contains(report.id) ? "事项读取失败" : "正在读取事项…"
+        }
+        let tally = MonitorItemTally(items: items)
         return "未处理 \(tally.open) · 已处理 \(tally.handled)"
     }
 
@@ -267,6 +283,26 @@ struct WorkspaceMonitorView: View {
         case .failed: return "报告未完成，暂无事项。先处理上方原因，再重新检查。"
         case .incomplete: return "检查不完整，可能漏项"
         case .complete: return "没有需要关注的事项。"
+        }
+    }
+
+    private func monitorLoadingRow(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(text).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+        }.padding(.vertical, 8)
+    }
+
+    private func revealReport(_ report: MonitorReport) {
+        guard selectedReportID != report.id else {
+            selectedReportID = nil
+            return
+        }
+        selectedReportID = report.id
+        failedItemReportIDs.remove(report.id)
+        Task {
+            _ = await model.loadMonitorItems(reportID: report.id)
+            if model.monitorItemsByReport[report.id] == nil { failedItemReportIDs.insert(report.id) }
         }
     }
 
@@ -400,7 +436,9 @@ struct WorkspaceMonitorView: View {
         WorkspaceSection(title: "来源状态",
                          subtitle: "QQ 显示 VoiceOS 本地库中的最新消息时间；没有新消息不等于采集失败，失败会单独标出。",
                          icon: "antenna.radiowaves.left.and.right") {
-            if !model.monitorSources.contains(where: { $0.kind == .qqGroup }) {
+            if !monitorLoaded {
+                monitorLoadingRow("正在读取来源状态…")
+            } else if !model.monitorSources.contains(where: { $0.kind == .qqGroup }) {
                 HStack(spacing: 12) {
                     Text("未添加 QQ 群来源").vosFont(WorkspaceText.body)
                     Button("去设置") { showsSettings = true }.vosFont(WorkspaceText.meta)
@@ -412,7 +450,7 @@ struct WorkspaceMonitorView: View {
                 sourceRow(source)
             }
             ForEach(ControlCenter.monitorBuiltinWebsites) { item in
-                if model.monitorSource(forBuiltinURL: item.url) == nil {
+                if monitorLoaded, model.monitorSource(forBuiltinURL: item.url) == nil {
                     HStack(spacing: 12) {
                         Text("内置栏目未添加：\(item.name)").vosFont(WorkspaceText.body)
                         Button("添加内置来源") {
@@ -652,6 +690,11 @@ struct WorkspaceMonitorView: View {
                         .foregroundStyle(palette.secondaryText)
                 }
             }
+            if !qqSaveFeedback.isEmpty {
+                Text(qqSaveFeedback).vosFont(WorkspaceText.meta)
+                    .foregroundStyle(qqSaveFailed ? palette.warning : palette.secondaryText)
+                    .textSelection(.enabled)
+            }
             if !model.monitorQQDiagnostics.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(model.monitorQQDiagnostics) { item in
@@ -836,7 +879,8 @@ struct WorkspaceMonitorView: View {
         settings.keyPath = qqKeyPath
         settings.account = qqAccount
         settings.scriptPathOverride = qqScriptOverride
-        model.saveMonitorQQSettings(settings)
+        qqSaveFailed = !model.saveMonitorQQSettings(settings)
+        qqSaveFeedback = model.monitorStatus
     }
 
     private func openFullDiskAccessSettings() {
