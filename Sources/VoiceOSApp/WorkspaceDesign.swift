@@ -396,3 +396,32 @@ extension View {
         background(WorkspaceResizableSheet(minimumSize: minimumSize))
     }
 }
+
+/// The content paints itself with the palette canvas, so the NSWindow must
+/// do the same; otherwise the titlebar keeps the system near-white and reads
+/// as a separate strip above the warm canvas.
+private struct WindowCanvasTint: NSViewRepresentable {
+    let color: Color
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { apply(to: view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { apply(to: nsView.window) }
+    }
+
+    private func apply(to window: NSWindow?) {
+        guard let window, window.backgroundColor != NSColor(color) else { return }
+        window.backgroundColor = NSColor(color)
+        window.titlebarAppearsTransparent = true
+    }
+}
+
+extension View {
+    func windowCanvasTint(_ color: Color) -> some View {
+        background(WindowCanvasTint(color: color))
+    }
+}

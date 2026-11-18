@@ -367,6 +367,7 @@ struct WorkspaceView: View {
     private var styledContent: some View {
         chrome
             .vosFont(WorkspaceText.body).foregroundStyle(palette.text).background(palette.canvas).tint(palette.accent)
+            .windowCanvasTint(palette.canvas)
             .environment(\.workspacePalette, palette)
             .environment(\.vosTextScale, model.textSize.scale)
             .dynamicTypeSize(model.textSize.dynamicType)
