@@ -1,6 +1,16 @@
 import Foundation
 import VoiceOSCore
 
+/// macOS TCC blocks QQ container reads until VoiceOS has Full Disk Access.
+/// The stderr signatures stand in for the code so an older bundled script
+/// that still calls this `key_invalid` is classified correctly.
+public enum QQMonitorPermissionGuidance {
+    public static let text = "需要完全磁盘访问权限：请打开 系统设置 → 隐私与安全性 → 完全磁盘访问权限，勾选 VoiceOS，然后完全退出并重新打开 VoiceOS；若刚更新过应用，可能需要重新授权"
+    public static func matches(_ text: String) -> Bool {
+        text.contains("Operation not permitted") || text.contains("PermissionError") || text.contains("permission_denied")
+    }
+}
+
 public struct QQMonitorConversation: Identifiable, Sendable, Equatable {
     public let id: String
     public let name: String
@@ -19,11 +29,13 @@ public struct QQMonitorDiagnosisItem: Identifiable, Sendable, Equatable {
     public let title: String
     public let ok: Bool
     public let detail: String
-    public init(id: String, title: String, ok: Bool, detail: String) {
+    public let needsFullDiskAccess: Bool
+    public init(id: String, title: String, ok: Bool, detail: String, needsFullDiskAccess: Bool = false) {
         self.id = id
         self.title = title
         self.ok = ok
         self.detail = detail
+        self.needsFullDiskAccess = needsFullDiskAccess
     }
 }
 
@@ -96,6 +108,9 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
                                             stdin: nil, timeout: 30, operation: "QQ 环境探测")
             guard result.exitCode == 0 else {
                 let stderr = String(decoding: result.stderr, as: UTF8.self)
+                if QQMonitorPermissionGuidance.matches(stderr) {
+                    return .failed(QQMonitorPermissionGuidance.text + "；QQ 数据未被修改")
+                }
                 if stderr.contains("ModuleNotFoundError") || stderr.contains("No module named") {
                     return .packageMissing("缺少 qqnt-export-macos：该 Python（\(settings.pythonPath)）无法导入该库；请安装 0.4.0 或更新版本，应用不会自动下载或修改 QQ")
                 }
@@ -221,10 +236,16 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
             """
             let result = try await Self.run(pythonPath: settings.pythonPath, arguments: ["-c", probe, settings.account ?? ""],
                                             stdin: nil, timeout: 30, operation: "QQ 数据目录检查")
-            let path = String(decoding: result.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            let ok = result.exitCode == 0 && !path.isEmpty && fileManager.fileExists(atPath: path)
-            items.append(.init(id: "qqdata", title: "QQ 账号数据目录", ok: ok,
-                               detail: ok ? path : "未找到该账号的 QQ 数据目录；请确认 QQ 已安装并登录过该账号" + (settings.account.map { "（\($0)）" } ?? "")))
+            let stderr = String(decoding: result.stderr, as: UTF8.self)
+            if QQMonitorPermissionGuidance.matches(stderr) {
+                items.append(.init(id: "qqdata", title: "QQ 账号数据目录", ok: false,
+                                   detail: QQMonitorPermissionGuidance.text, needsFullDiskAccess: true))
+            } else {
+                let path = String(decoding: result.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                let ok = result.exitCode == 0 && !path.isEmpty && fileManager.fileExists(atPath: path)
+                items.append(.init(id: "qqdata", title: "QQ 账号数据目录", ok: ok,
+                                   detail: ok ? path : "未找到该账号的 QQ 数据目录；请确认 QQ 已安装并登录过该账号" + (settings.account.map { "（\($0)）" } ?? "")))
+            }
         } catch {
             items.append(.init(id: "qqdata", title: "QQ 账号数据目录", ok: false, detail: error.localizedDescription))
         }
@@ -273,18 +294,26 @@ public struct QQMonitorHelper: QQMonitorCollecting, Sendable {
                          stderr: (try? Data(contentsOf: stderrURL)) ?? Data())
     }
 
-    private static func contractError(stderr: Data) -> VoiceOSError {
+    static func contractError(stderr: Data) -> VoiceOSError {
         let text = String(decoding: stderr, as: UTF8.self)
         let line = text.split(whereSeparator: \.isNewline).last.map(String.init) ?? text
         guard let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let error = object["error"] as? [String: Any] else {
+            if QQMonitorPermissionGuidance.matches(text) {
+                return VoiceOSError("QQ 读取失败（permission_denied）：" + QQMonitorPermissionGuidance.text
+                                    + "（" + String(text.prefix(200)) + "）；QQ 数据未被修改")
+            }
             let detail = line.isEmpty ? "脚本没有返回诊断信息" : String(line.prefix(200))
             return VoiceOSError("QQ 读取失败：" + detail + "；QQ 数据未被修改")
         }
         let code = error["code"] as? String ?? "unknown"
         let zh = error["zh"] as? String ?? "原因未知"
         let en = error["en"] as? String ?? ""
+        if code == "permission_denied" || QQMonitorPermissionGuidance.matches(en) || QQMonitorPermissionGuidance.matches(zh) {
+            let detail = en.isEmpty ? "" : "。技术细节：" + String(en.prefix(200))
+            return VoiceOSError("QQ 读取失败（permission_denied）：" + QQMonitorPermissionGuidance.text + detail + "；QQ 数据未被修改")
+        }
         let hint: String
         switch code {
         case "import_failed":

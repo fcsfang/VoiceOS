@@ -63,12 +63,19 @@ def reader_for(key_path, cache_dir, account, reader_cls):
     return reader_cls(key_file, cache_dir=Path(cache_dir).expanduser(), account=account)
 
 
+FULL_DISK_ACCESS_ZH = (
+    "需要完全磁盘访问权限：请打开 系统设置 → 隐私与安全性 → 完全磁盘访问权限，"
+    "勾选 VoiceOS，然后完全退出并重新打开 VoiceOS；若刚更新过应用，可能需要重新授权"
+)
+
+
 def read_failure(exc):
     if isinstance(exc, FileNotFoundError):
         fail("qq_data_missing", "未找到该账号的 QQ 数据目录", f"{type(exc).__name__}: {exc}")
-    if isinstance(exc, PermissionError):
-        fail("key_invalid", "密钥或 QQ 数据无法读取", f"{type(exc).__name__}: {exc}")
-    fail("read_failed", "QQ 数据读取失败", f"{type(exc).__name__}: {exc}")
+    detail = f"{type(exc).__name__}: {exc}"
+    if isinstance(exc, PermissionError) or "Operation not permitted" in detail:
+        fail("permission_denied", FULL_DISK_ACCESS_ZH, detail)
+    fail("read_failed", "QQ 数据读取失败", detail)
 
 
 def conversations(request, reader_cls):
