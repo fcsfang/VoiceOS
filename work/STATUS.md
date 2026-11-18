@@ -406,3 +406,9 @@
 - 事实：Claude 桌面端与 CLI 自 2026-03-23 起有第一方 computer use 研究预览（CLI 内置 MCP server `computer-use`，Pro/Max/Ultra，macOS 14+）；Peekaboo 5,496★（2026-11-17 活跃，MIT，v4.9.9）；munim 41★（2026-09 创建）；macos-automator-mcp 已归档；mcp-server-macos-use 停在 0.1.0。GitHub 数据经 API 实测。
 - 工程判断（非基准实测）：可靠性 XCUITest > AX 直驱+identifier > 截图+VLM > CGEvent 盲点按。推荐栈：voiceos-check ax（已交付）为主通道，第一方/Peekaboo 兜底，XCUITest 冒烟后续。
 - 现状：本机桌面版 6.6395.0 的 System 面板不渲染 computer use 开关（设置搜索索引里有该项但无法激活，AX 与真实点击均试过，未改动任何设置）。用户决定先用 munim 继续。
+
+## 波 74 首页卡片边界（2026-11-18，已交付并安装）
+
+- 用户反馈：首页最近想法与时间线每条记录全是文字、无边界、行距 3-4 点，分不清不同想法。
+- 修复（RecentContentHome.swift 单文件 63+/34-）：文件内私有 `homeCard(isSelected:)` 修饰符——未选中 `palette.surface` 底 + `palette.border` 1 点描边 + 圆角 8 + 内边距 12/10；选中态沿用 selection + focusRing，不叠加双层描边。时间线组头加 2×12 accent 竖条，组头到首行 6、行间 8；最近想法 entry 间距 8、组内两行间距 4。identifier、键盘导航、滚动锚点、reader 区零改动。
+- 验证：615 项测试 0 失败；实机安装截图确认浅色下条目边界清晰。深色跟随系统外观，待在深色模式下复核。
