@@ -47,6 +47,90 @@ public extension SourceRecord {
         return expression
     }
 }
+
+/// Everything the source page reads, derived once per workspace snapshot.
+public struct SourcePageIndex: Sendable {
+    public let recordsByID: [String: SourceRecord]
+    private let expressionBySourceID: [String: RecordingExpression]
+    private let actionByID: [String: ActionRecord]
+    private let actionPositionByID: [String: Int]
+    private let actionIDsBySourceID: [String: [String]]
+    private let reviewRequiredActionIDs: Set<String>
+
+    public init(records: [SourceRecord] = [], claims: [CandidateClaim] = [], actions: [ActionRecord] = [],
+                currentClaimsBySource: [String: [CandidateClaim]] = [:],
+                ledgers: [String: ActionReviewLedger] = [:]) {
+        let recordsByID = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        self.recordsByID = recordsByID
+        var expressions: [String: RecordingExpression] = [:]
+        for record in records {
+            if let expression = record.recordingExpression(in: recordsByID) { expressions[record.id] = expression }
+        }
+        expressionBySourceID = expressions
+
+        var claimByID: [String: CandidateClaim] = [:]
+        var actionsByClaimID: [String: [ActionRecord]] = [:]
+        for claim in claims { claimByID[claim.id] = claim }
+        var positions: [String: Int] = [:]
+        for (offset, action) in actions.enumerated() {
+            actionsByClaimID[action.claimID, default: []].append(action)
+            positions[action.id] = offset
+        }
+        var actionIDsBySourceID: [String: [String]] = [:]
+        var actionByID: [String: ActionRecord] = [:]
+        for action in actions where action.state != "dismissed" {
+            actionByID[action.id] = action
+            guard let claim = claimByID[action.claimID] else { continue }
+            for sourceID in Set(claim.references.map(\.sourceID)) {
+                actionIDsBySourceID[sourceID, default: []].append(action.id)
+            }
+        }
+        self.actionByID = actionByID
+        actionPositionByID = positions
+        self.actionIDsBySourceID = actionIDsBySourceID
+
+        // The pause gate only reads sources that carry an expression, and the
+        // other two arguments narrow to this action's own claim and actions.
+        let expressionSources = records.filter { $0.presentation?.expression != nil }
+        var reviewRequired: Set<String> = []
+        for action in actionByID.values {
+            let claim = claimByID[action.claimID]
+            if WorkspaceActionPause.reason(for: action, sources: expressionSources,
+                                           claims: claim.map { [$0] } ?? [],
+                                           currentClaimsBySource: currentClaimsBySource,
+                                           actions: actionsByClaimID[action.claimID] ?? [],
+                                           ledgers: ledgers) != nil {
+                reviewRequired.insert(action.id)
+            }
+        }
+        reviewRequiredActionIDs = reviewRequired
+    }
+
+    /// The validated expression for a source, or nil when members or
+    /// permissions changed since it was saved.
+    public func expression(for sourceID: String) -> RecordingExpression? {
+        expressionBySourceID[sourceID]
+    }
+
+    /// Actions whose claim cites any of these sources, in workspace order.
+    public func actions(for sourceIDs: Set<String>) -> [ActionRecord] {
+        var seen: Set<String> = []
+        var ids: [String] = []
+        for sourceID in sourceIDs {
+            for id in actionIDsBySourceID[sourceID] ?? [] {
+                if seen.insert(id).inserted { ids.append(id) }
+            }
+        }
+        ids.sort { (actionPositionByID[$0] ?? 0) < (actionPositionByID[$1] ?? 0) }
+        return ids.compactMap { actionByID[$0] }
+    }
+
+    /// The same decision `ControlCenter.workspaceTaskRequiresReview` makes.
+    public func requiresReview(_ actionID: String) -> Bool {
+        reviewRequiredActionIDs.contains(actionID)
+    }
+}
+
 extension VoiceOSStore {
     public func attachRecordingContext(personalSourceID: String, externalSourceID: String, sessionID: String, offsetMS: Int = 0) throws {
         let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
