@@ -42,8 +42,7 @@ extension VoiceOSStore {
     /// Local reading and local models remain available while that review is pending.
     func requireReviewedTranscriptions(sourceIDs: [String], destination: ModelDestination) throws {
         guard destination == .cloud else { return }
-        let ids = Set(sourceIDs)
-        let pending = try sources().filter { ids.contains($0.id) && $0.needsTranscriptionReview }
+        let pending = try sourceRecords(ids: sourceIDs).filter(\.needsTranscriptionReview)
         guard !pending.isEmpty else { return }
         for source in pending {
             // Completed cloud derivations from the unchecked transcript remain

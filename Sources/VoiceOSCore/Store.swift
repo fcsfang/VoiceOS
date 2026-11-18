@@ -244,17 +244,26 @@ public actor VoiceOSStore {
             throw error
         }
     }
-    public func sources() throws -> [SourceRecord] {
-        try db.query("""
+    private static let sourceSelect = """
         SELECT s.id,s.asset_id,s.name,s.state,s.kind,s.created_at,s.expected_bytes,s.duration,s.error,s.relative_path,
                s.local_only,s.policy_version,s.origin,s.speaker,s.feedback_json,s.timezone,s.presentation_json,
                j.state AS job_state,j.error AS job_error,v.text AS transcript,t.current_version_id AS transcript_version_id,t.backend AS transcription_backend,v.spans_json
         FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
-        LEFT JOIN transcripts t ON t.job_id=j.id LEFT JOIN transcript_versions v ON v.id=t.current_version_id ORDER BY s.created_at DESC,s.id
-        """).map { row in
-            let feedback = try Self.feedbackIntent(row["feedback_json"])
-            return SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!, transcriptVersionID: row["transcript_version_id"], transcriptionBackend: row["transcription_backend"], spans: try row["spans_json"].map { try JSONDecoder().decode([TranscriptSpan].self, from: Data($0.utf8)) } ?? [], localOnly: row["local_only"] != "0", policyVersion: Int(row["policy_version"]!)!, origin: row["origin"]!, speaker: row["speaker"]!, feedbackActionID: feedback?.actionID, feedbackActionVersion: feedback?.actionVersion, feedbackKind: feedback?.kind.rawValue, feedbackRelation: feedback?.relation, timeZone: row["timezone"]!, presentation: try row["presentation_json"].map { try JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8)) })
-        }
+        LEFT JOIN transcripts t ON t.job_id=j.id LEFT JOIN transcript_versions v ON v.id=t.current_version_id
+        """
+    public func sources() throws -> [SourceRecord] {
+        try db.query(Self.sourceSelect + " ORDER BY s.created_at DESC,s.id").map(Self.sourceRecord)
+    }
+    /// Targeted read for callers that hold ids; the full-table variant decodes
+    /// every transcript and is far too heavy to run once per checked id.
+    public func sourceRecords(ids: [String]) throws -> [SourceRecord] {
+        guard !ids.isEmpty else { return [] }
+        let marks = Array(repeating: "?", count: ids.count).joined(separator: ",")
+        return try db.query(Self.sourceSelect + " WHERE s.id IN (\(marks))", ids).map(Self.sourceRecord)
+    }
+    private static func sourceRecord(_ row: [String: String]) throws -> SourceRecord {
+        let feedback = try feedbackIntent(row["feedback_json"])
+        return SourceRecord(id: row["id"]!, assetID: row["asset_id"]!, name: row["name"]!, state: row["state"]!, kind: row["kind"]!, createdAt: row["created_at"]!, bytes: Int64(row["expected_bytes"]!)!, duration: row["duration"].flatMap(Double.init), jobState: row["job_state"], transcript: ["saved", "reference_only"].contains(row["state"] ?? "") ? row["transcript"] : nil, error: row["error"] ?? row["job_error"], relativePath: row["relative_path"]!, transcriptVersionID: row["transcript_version_id"], transcriptionBackend: row["transcription_backend"], spans: try row["spans_json"].map { try JSONDecoder().decode([TranscriptSpan].self, from: Data($0.utf8)) } ?? [], localOnly: row["local_only"] != "0", policyVersion: Int(row["policy_version"]!)!, origin: row["origin"]!, speaker: row["speaker"]!, feedbackActionID: feedback?.actionID, feedbackActionVersion: feedback?.actionVersion, feedbackKind: feedback?.kind.rawValue, feedbackRelation: feedback?.relation, timeZone: row["timezone"]!, presentation: try row["presentation_json"].map { try JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8)) })
     }
     public func playableURL(sourceID: String) throws -> URL {
         guard let row = try db.query("SELECT * FROM sources WHERE id=? AND state='saved'", [sourceID]).first else { throw VoiceOSError("此原件尚未可靠保存") }
