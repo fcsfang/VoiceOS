@@ -139,17 +139,16 @@ struct WorkspaceMonitorView: View {
 
     @ViewBuilder private var pushNotConfiguredBanner: some View {
         if monitorLoaded, let report = model.monitorLatestReport, !model.monitorPushConfigured {
-            WorkspaceNoticeText(message: report.reportDate == todayKey
-                                ? "今天的报告已生成，微信推送尚未配置"
-                                : "最近一次报告已生成，微信推送尚未配置",
-                                severity: .warning)
-                .overlay(alignment: .trailing) {
-                    Button("去设置") { showsSettings = true }
-                        .buttonStyle(.workspaceQuietCompact)
-                        .padding(.trailing, 10)
-                        .accessibilityIdentifier("monitor.push.banner.settings")
-                }
-                .accessibilityIdentifier("monitor.push.banner")
+            HStack(spacing: 10) {
+                WorkspaceNoticeText(message: report.reportDate == todayKey
+                                    ? "今天的报告已生成，微信推送尚未配置"
+                                    : "最近一次报告已生成，微信推送尚未配置",
+                                    severity: .warning)
+                Button("去设置") { showsSettings = true }
+                    .buttonStyle(.workspaceQuietCompact)
+                    .accessibilityIdentifier("monitor.push.banner.settings")
+            }
+            .accessibilityIdentifier("monitor.push.banner")
         }
     }
 
@@ -463,7 +462,6 @@ struct WorkspaceMonitorView: View {
                 }
             }
             .padding(.vertical, 6)
-            .accessibilityIdentifier("monitor.earlierOpen")
         }
     }
 

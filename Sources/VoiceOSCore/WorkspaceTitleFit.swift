@@ -16,6 +16,8 @@ public enum WorkspaceTitleFit {
         }
     }
 
+    private static let genericSegments: Set<String> = ["watch", "s", "p", "index", "view", "detail"]
+
     public static func present(_ raw: String) -> Presentation {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         while text.hasPrefix("#") {
@@ -29,11 +31,13 @@ public enum WorkspaceTitleFit {
         }
         var host = (url.host ?? "").lowercased()
         if host.hasPrefix("www.") { host.removeFirst(4) }
+        guard !host.isEmpty else { return Presentation(title: text) }
         let segments = url.pathComponents.filter { $0 != "/" }.compactMap { $0.removingPercentEncoding }
         let last = segments.last?.trimmingCharacters(in: .whitespaces) ?? ""
-        let title = last.isEmpty ? host : last
+        let generic = last.isEmpty || last.utf8.count <= 2 || genericSegments.contains(last.lowercased())
+        let title = generic ? host : last
         let parent = segments.dropLast().joined(separator: "/")
-        var source: String? = parent.isEmpty ? host : host + "/" + parent
+        var source: String? = generic ? nil : (parent.isEmpty ? host : host + "/" + parent)
         if source == title { source = nil }
         return Presentation(title: title, source: source)
     }

@@ -250,24 +250,18 @@ private struct WorkspaceAttentionDot: View {
         let count = attention.count
         let inboxNeedsAttention = inbox.pendingItems.contains(where: { $0.state == .needsAttention }) || !inbox.folderErrors.isEmpty
         if count > 0 || inboxNeedsAttention {
-            let title = count > 0 ? attentionTitle(attention) : "有事项需要查看"
+            let parts = [attention.transcriptIssueCount > 0 ? "转写疑点 \(attention.transcriptIssueCount)" : nil,
+                         attention.otherCount > 0 ? "其他 \(attention.otherCount)" : nil].compactMap { $0 }
+            let title = count > 0 ? "需要查看" + (parts.isEmpty ? "" : " · " + parts.joined(separator:" · ")) : "有事项需要查看"
             Button(action:open) {
-                HStack(spacing:6) {
-                    Text(count > 0 ? "需要查看" : title).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-                    if attention.transcriptIssueCount > 0 {
-                        WorkspaceBadge(text:"转写疑点 \(attention.transcriptIssueCount)", tone:.warning)
-                    }
-                    if attention.otherCount > 0 {
-                        WorkspaceBadge(text:"其他 \(attention.otherCount)", tone:.neutral)
-                    }
+                HStack(alignment:.firstTextBaseline,spacing:6) {
+                    Circle().fill(attention.transcriptIssueCount > 0 ? palette.warning : palette.accent)
+                        .frame(width:6,height:6).offset(y:-1).accessibilityHidden(true)
+                    Text(title).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                        .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).help("打开处理情况").accessibilityLabel(title + "，打开处理情况")
         }
-    }
-    private func attentionTitle(_ attention: WorkspaceAttentionSnapshot) -> String {
-        guard attention.transcriptIssueCount > 0 else { return "有 \(attention.count) 项需要查看" }
-        let issues = "转写疑点 \(attention.transcriptIssueCount)"
-        return attention.otherCount > 0 ? issues + " · 其他 \(attention.otherCount)" : issues
     }
 }
 struct WorkspaceView: View {
@@ -1153,6 +1147,9 @@ struct WorkspaceView: View {
                     if model.unreadDeliveryCount > 0 {
                         Button { actionFilter = "AI 助理"; error = "" } label: {
                             WorkspaceBadge(text:"AI 交付 \(model.unreadDeliveryCount) 份待读", tone:.neutral)
+                                .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
+                                .padding(.horizontal, 6)
+                                .contentShape(Capsule())
                         }.buttonStyle(.plain)
                             .accessibilityLabel("AI 交付 \(model.unreadDeliveryCount) 份待读，打开列表")
                     }
@@ -1748,12 +1745,14 @@ struct WorkspaceView: View {
             if model.remindersPermissionDenied { Button("打开系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!) }.buttonStyle(.workspaceSecondary) }
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } }.buttonStyle(.workspaceSecondary) }
             if let reminderReviewCount {
-                HStack(spacing:10) {
-                    WorkspaceBadge(text:"\(reminderReviewCount) 条提醒待核对", tone:.warning)
-                    Button("去核对") { go(.tool("处理情况")) }
-                        .buttonStyle(.workspaceQuietCompact)
-                        .accessibilityLabel("\(reminderReviewCount) 条提醒待核对，打开处理情况")
+                Button { go(.tool("处理情况")) } label: {
+                    HStack(spacing:10) {
+                        WorkspaceBadge(text:"\(reminderReviewCount) 条提醒待核对", tone:.warning)
+                        Text("去核对")
+                    }
                 }
+                .buttonStyle(.workspaceQuietCompact)
+                .accessibilityLabel("\(reminderReviewCount) 条提醒待核对，去核对")
             }
             VStack(alignment:.leading,spacing:6) {
                 Label("麦克风",systemImage:"mic").vosFont(WorkspaceText.rowTitle)
@@ -1959,7 +1958,7 @@ struct WorkspaceView: View {
         let subtitle=first.recordingDateLabel + " · " + origin + localOnlyNote
         let openCount=model.sourcePageIndex.openActionCount(for:Set(expression?.sourceIDs ?? [source.id]))
         let trailingText=openCount > 0 ? "\(openCount) 条待办" + (issues > 0 ? " · 疑点 \(issues)" : "") : reading?.text ?? ""
-        let trailingDisplay=openCount > 0 ? "\(openCount) 条待办" : trailingText
+        let trailingDisplay=trailingText
         let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .badge(.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
         return WorkspaceRow(title:displayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter) { go(.source(source.id)) }
             .help(metadata)

@@ -1133,7 +1133,6 @@ private struct ReaderEvidenceBlock: View {
             if let question, let openQuestion {
                 Button(action: openQuestion) {
                     Text(question.title)
-                        .vosFont(WorkspaceText.caption)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -1275,7 +1274,7 @@ private struct ReaderDisclosure<Content: View>: View {
                 .padding(.vertical, 4)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(title)
+            .accessibilityLabel(title + (count.map { "，\($0) 项" } ?? ""))
             .accessibilityValue(expanded ? "已展开" : "已折叠")
             if expanded { content() }
         }

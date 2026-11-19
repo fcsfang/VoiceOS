@@ -884,7 +884,7 @@ struct WorkspaceSourceView: View {
                 }
                 SourceFold(title:"处理记录",icon:"tray",isExpanded:foldExpanded(\.records)) {
                     SourceSection(title:"依据、修订与处理记录") {
-                        DisclosureGroup("核对依据与适用边界") { KnowledgeReviewSection(model:model,sourceIDs:[source.id]).padding(.top,12) }.padding(.vertical,16)
+                        DisclosureGroup("核对依据与适用边界") { KnowledgeReviewSection(model:model,sourceIDs:[source.id],carded:false).padding(.top,12) }.padding(.vertical,16)
                         Divider()
                         DisclosureGroup("文字校正、理解与修订历史") {
                             VStack(alignment:.leading,spacing:13) {

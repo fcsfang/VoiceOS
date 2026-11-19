@@ -25,4 +25,22 @@ final class WorkspaceTitleFitChecks: XCTestCase {
         XCTAssertEqual(WorkspaceTitleFit.present("了解 a16z 及其可能的播客订阅方式"),
                        .init(title: "了解 a16z 及其可能的播客订阅方式"))
     }
+
+    func testWatchLinkFallsBackToHost() {
+        let fit = WorkspaceTitleFit.present("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        XCTAssertEqual(fit.title, "youtube.com")
+        XCTAssertNil(fit.source)
+    }
+
+    func testWeixinShortPathFallsBackToHost() {
+        let fit = WorkspaceTitleFit.present("https://mp.weixin.qq.com/s?__biz=MjM5NQ==")
+        XCTAssertEqual(fit.title, "mp.weixin.qq.com")
+        XCTAssertNil(fit.source)
+    }
+
+    func testLinkWithEmptyPathFallsBackToHost() {
+        let fit = WorkspaceTitleFit.present("https://www.example.com/")
+        XCTAssertEqual(fit.title, "example.com")
+        XCTAssertNil(fit.source)
+    }
 }
