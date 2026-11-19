@@ -846,6 +846,7 @@ final class ControlCenter: ObservableObject {
     @Published var proposedReminderCalendarID = ""
     @Published var reminderAccess: ReminderAccess?
     @Published var reminderSyncStatus = "尚未启用自动回读"
+    @Published var reminderLastError = ""
     private var reminderObservers: [NSObjectProtocol] = []
     private var wakeObserver: NSObjectProtocol?
     private var reminderTimer: Timer?
@@ -857,6 +858,7 @@ final class ControlCenter: ObservableObject {
     private let reminders = NativeReminders()
     var reminderCalendarTitle: String { reminderCalendars.first { $0.id == reminderCalendarID }?.title ?? (reminderAccess?.enabled == true ? reminderAccess!.title : "未选择清单") }
     var remindersPermissionDenied: Bool { NativeReminders.authorizationStatus() == .denied }
+    var reminderPermission: RemindersAuthorization { NativeReminders.authorizationStatus() }
     /// A completion or reopen that could not reach Apple Reminders. It follows
     /// the reminder compensation lifecycle: persist the intent first, write
     /// only after an authorized readback, and drop it once readback agrees.
@@ -1022,6 +1024,7 @@ final class ControlCenter: ObservableObject {
     private var dictationInterrupted = false
     private var dictationFullOrganization = false
     private let dictation = NativeDictation()
+    @Published private(set) var microphoneAuthorization = NativeDictation.authorizationStatus()
     private var dictationObservers: [NSObjectProtocol] = []
     var dictationBusyReason: String? {
         if dictationBusy { return "正在封存上一段录音，请稍候" }
@@ -1038,6 +1041,12 @@ final class ControlCenter: ObservableObject {
     func noteDictationClock(_ text: String) {
         guard dictationActive, !dictationBusy, !dictationStatusBase.isEmpty else { return }
         status = dictationStatusBase + " · 已录 " + text
+    }
+    func refreshMicrophoneAuthorization() { microphoneAuthorization = NativeDictation.authorizationStatus() }
+    func requestMicrophoneAccess() async -> Bool {
+        let granted = await dictation.requestPermission()
+        microphoneAuthorization = NativeDictation.authorizationStatus()
+        return granted
     }
     func startDictation(processAfterTranscription: Bool = false) async {
         guard let store, dictationBusyReason == nil, !dictationActive else { status = dictationBusyReason ?? "正在录音，停止后才能开始下一段"; return }
@@ -3376,6 +3385,7 @@ final class ControlCenter: ObservableObject {
         guard !remindersBusy else { return }
         remindersBusy = true; defer { remindersBusy = false }
         reminderSyncStatus = "正在核对系统提醒事项权限"
+        reminderLastError = ""
         do {
             reminderCalendars = try await reminders.authorize()
             proposedReminderCalendarID = reminderCalendarID
@@ -3384,6 +3394,7 @@ final class ControlCenter: ObservableObject {
             reminderSyncStatus = "系统权限可用 · 清单授权范围保持原设置"
         } catch {
             status = error.localizedDescription
+            reminderLastError = error.localizedDescription
             reminderSyncStatus = "系统权限核对未完成 · 保留既有连接"
         }
     }
@@ -3394,10 +3405,14 @@ final class ControlCenter: ObservableObject {
         do {
             reminderAccess = try await store.setReminderAccess(calendarID: calendar.id, title: calendar.title, enabled: true, expectedVersion: reminderAccess?.version ?? 0)
             choosingReminderCalendar = false
+            reminderLastError = ""
             status = "提醒事项持续授权已保存"
             reminderSyncStatus = "正在核对所选清单的任务"
             await refresh(); requestReminderRefresh()
-        } catch { status = error.localizedDescription }
+        } catch {
+            status = error.localizedDescription
+            reminderLastError = error.localizedDescription
+        }
     }
     func connectVoiceOSCalendar() async {
         guard !remindersBusy else { return }
@@ -3408,15 +3423,23 @@ final class ControlCenter: ObservableObject {
             proposedReminderCalendarID = calendar.id
             remindersBusy = false
             await saveReminderConnection()
-        } catch { remindersBusy = false; status = error.localizedDescription }
+        } catch {
+            remindersBusy = false
+            status = error.localizedDescription
+            reminderLastError = error.localizedDescription
+        }
     }
     func disconnectReminders() async {
         guard let store, let access = reminderAccess else { return }
         do {
             _ = try await store.setReminderAccess(calendarID: access.calendarID, title: access.title, enabled: false, expectedVersion: access.version)
             reminderRefresh.stop()
+            reminderLastError = ""
             await refresh(); reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留"
-        } catch { status = error.localizedDescription }
+        } catch {
+            status = error.localizedDescription
+            reminderLastError = error.localizedDescription
+        }
     }
     /// Reuses the reminder compensation lifecycle for completions the correction
     /// table cannot express: `reminder_compensation_plans` is gated on a

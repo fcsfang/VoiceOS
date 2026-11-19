@@ -2,6 +2,10 @@ import Foundation
 import AVFoundation
 import VoiceOSCore
 
+public enum MicrophoneAuthorization: Sendable, Equatable {
+    case granted, denied, notDetermined
+}
+
 @MainActor
 public final class NativeDictation: NSObject, AVAudioRecorderDelegate {
     private static weak var owner: NativeDictation?
@@ -9,6 +13,14 @@ public final class NativeDictation: NSObject, AVAudioRecorderDelegate {
     private var finish: (@MainActor (Bool) -> Void)?
     private var watchdog: Task<Void,Never>?
     public func requestPermission() async -> Bool { await AVCaptureDevice.requestAccess(for:.audio) }
+    /// Read-only view of the system microphone permission. Requesting stays in `requestPermission`.
+    public nonisolated static func authorizationStatus() -> MicrophoneAuthorization {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: return .granted
+        case .notDetermined: return .notDetermined
+        default: return .denied
+        }
+    }
     public func start(at file:URL, maximumDuration: TimeInterval? = nil, finished:@escaping @MainActor (Bool) -> Void) throws {
         if let maximumDuration {
             guard maximumDuration.isFinite, maximumDuration > 0, maximumDuration <= 60 else { throw VoiceOSError("限时采集须为大于0且不超过60秒") }
