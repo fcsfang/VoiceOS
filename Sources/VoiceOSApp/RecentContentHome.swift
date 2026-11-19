@@ -14,6 +14,7 @@ final class RecentContentHomeSelection {
 /// the same way.
 struct RecentContentHome: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
     @ObservedObject var model: ControlCenter
     let openSource: (String) -> Void
     let openSpan: (String, String) -> Void
@@ -38,6 +39,10 @@ struct RecentContentHome: View {
     private let timelineSpace = "home.timeline"
     private let tasksAnchor = "home.tasks.summary"
 
+    // Only 特大 (1.45) crosses 1.3; 大 (1.28) keeps the single-line rows.
+    private var isLargeText: Bool { textScale >= 1.3 }
+    private var timelineWidth: CGFloat { 288 * min(max(textScale, 1), 1.3) }
+
     private var days: [RecentContentDay] { model.homeSnapshot.days }
     private var items: [RecentContentItem] { days.flatMap(\.items) }
     private var selected: RecentContentItem? {
@@ -55,7 +60,7 @@ struct RecentContentHome: View {
                     empty.onAppear { StartupTrace.mark("home.appear.empty") }
                 } else {
                     HStack(spacing: 0) {
-                        timeline.frame(width: 288)
+                        timeline.frame(width: timelineWidth)
                         Rectangle().fill(palette.border).frame(width: 1)
                         reader
                     }.onAppear { StartupTrace.mark("home.appear items=\(items.count)") }
@@ -231,9 +236,9 @@ struct RecentContentHome: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(rowTitle(item)).vosFont(WorkspaceText.rowTitle)
-                    .foregroundStyle(palette.text).lineLimit(2).multilineTextAlignment(.leading)
+                    .foregroundStyle(palette.text).lineLimit(isLargeText ? 4 : 2).multilineTextAlignment(.leading)
                 Text(rowMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    .lineLimit(1)
+                    .lineLimit(isLargeText ? 2 : 1)
             }
             Spacer(minLength: 6)
             if let trailing = rowTrailing(item, outcomeBadge: outcomeBadge) {
@@ -635,11 +640,11 @@ struct RecentContentHome: View {
                                 Button { openClaim(entry.id) } label: {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(entry.statement).vosFont(WorkspaceText.meta)
-                                            .foregroundStyle(palette.text).lineLimit(3)
+                                            .foregroundStyle(palette.text).lineLimit(isLargeText ? 4 : 3)
                                             .fixedSize(horizontal: false, vertical: true)
                                             .multilineTextAlignment(.leading)
                                         Text(entry.sourceTitle).vosFont(WorkspaceText.caption)
-                                            .foregroundStyle(palette.secondaryText).lineLimit(2)
+                                            .foregroundStyle(palette.secondaryText).lineLimit(isLargeText ? 3 : 2)
                                             .fixedSize(horizontal: false, vertical: true)
                                             .multilineTextAlignment(.leading)
                                     }
