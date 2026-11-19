@@ -596,3 +596,11 @@
 - 104-D 澄清队列、提醒排期、回访卡片：主次按钮与徽标，当前条目标题块 WorkspaceCard。
 - 集成：四分支合并后 662 项 0 失败。
 - 安装：dist 重建 exit 0（二进制 04:30:57）；preflight 直接执行返回 0（safe idle=11291s）；重启后 pid 40457。显示器仍休眠（截图黑帧、SCStream -3811），102-104 的实机目视验收统一顺延到屏幕唤醒后补做。
+
+## 波 105 特大字号适配（2026-11-20，已合并待安装）
+
+- 审计：1.45x「特大」下 12 处可证实截断（首页时间线 288pt、全景阅读器三按钮、材料侧栏 248pt、主导航 172pt、徽标换行、监测标签 90pt、固定 Picker、主题网格、页头 trailing、筛选网格、图标框）。
+- 105-A 组件与首页：Badge/按钮单行 + minimumScaleFactor；PageHeading ViewThatFits 回退竖排；WorkspaceListRow 特大字号 2 行；时间线宽度随 scale 缩放（上限 1.3）、行标题 4 行、meta 2 行。
+- 105-B 工作台与引导：导航/材料侧栏/筛选网格随 scale；WorkspaceRow 特大 3 行、trailing lineLimit+help；图标框缩放；Onboarding 内容 ScrollView + sheet minWidth。
+- 105-C 监测/主题/全景：pathRow minWidth+fixedSize、Picker 全部 minWidth；主题网格与预览行数；全景阅读器宽度随 scale、动作行 ViewThatFits 竖排回退。
+- 集成：三路合并后 662 项 0 失败。
