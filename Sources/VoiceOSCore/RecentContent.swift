@@ -424,7 +424,7 @@ public struct RecentContentHomeSnapshot: Equatable, Sendable {
 
     public static func build(sources: [SourceRecord], claims: [CandidateClaim], actions: [ActionRecord],
                              calendar: Calendar = .current, overrides: [RecentClueOverride] = [],
-                             now: Date = Date()) -> RecentContentHomeSnapshot {
+                             reviewRequiredActionIDs: Set<String> = [], now: Date = Date()) -> RecentContentHomeSnapshot {
         let days = RecentContentIndex.build(sources: sources, claims: claims, calendar: calendar)
         let overridesByClue = Dictionary(overrides.map { ($0.clue, $0) }, uniquingKeysWith: { first, _ in first })
         // A section hidden even indirectly through its merge target takes its
@@ -439,7 +439,8 @@ public struct RecentContentHomeSnapshot: Equatable, Sendable {
         // order when an item's claims are gathered from a set.
         var actionPositionsByClaimID: [String: [Int]] = [:]
         for (position, action) in actions.enumerated()
-        where action.state == "open" && action.validity == "current" && action.kind == "task" {
+        where action.state == "open" && action.validity == "current" && action.kind == "task"
+            && !reviewRequiredActionIDs.contains(action.id) {
             actionPositionsByClaimID[action.claimID, default: []].append(position)
         }
         var digests: [String: RecentContentDigest] = [:]

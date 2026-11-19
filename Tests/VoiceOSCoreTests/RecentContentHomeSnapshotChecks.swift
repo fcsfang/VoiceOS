@@ -255,4 +255,29 @@ final class RecentContentHomeSnapshotChecks: XCTestCase {
 
         XCTAssertEqual(snapshot.digests["s1"]?.tasks.map(\.id), ["a1", "a2", "a3"], "任务保持行动数组原顺序，且只含未完成的任务")
     }
+
+    func testReviewRequiredActionsStayOutOfDigestTasks() {
+        let sources = [source("s1", createdAt: "2024-05-01T10:00:00Z")]
+        let claims = [claim("c1", sourceIDs: ["s1"], statement: "【观点】整理桌面")]
+        let actions = [
+            action("a1", claimID: "c1", title: "整理桌面"),
+            action("a2", claimID: "c1", title: "待核对的行动"),
+        ]
+
+        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: claims, actions: actions,
+                                                       reviewRequiredActionIDs: ["a2"])
+
+        XCTAssertEqual(snapshot.digests["s1"]?.tasks.map(\.id), ["a1"], "需核对行动不计入首页待办，普通开放行动照常计入")
+    }
+
+    func testDigestTasksEmptyWhenEveryActionNeedsReview() {
+        let sources = [source("s1", createdAt: "2024-05-01T10:00:00Z")]
+        let claims = [claim("c1", sourceIDs: ["s1"], statement: "【观点】整理桌面")]
+        let actions = [action("a1", claimID: "c1", title: "待核对的行动")]
+
+        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: claims, actions: actions,
+                                                       reviewRequiredActionIDs: ["a1"])
+
+        XCTAssertEqual(snapshot.digests["s1"]?.tasks, [], "全部行动需核对时首页待办为空，与材料列表口径一致")
+    }
 }
