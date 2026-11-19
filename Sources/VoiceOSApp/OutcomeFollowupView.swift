@@ -29,7 +29,7 @@ struct OutcomeFollowupView: View {
                             HStack(alignment: .top, spacing: 12) {
                                 Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.success)
                                 Text(action.title).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                                Button("记录结果") { onRecord(action) }.buttonStyle(.borderedProminent)
+                                Button("记录结果") { onRecord(action) }.buttonStyle(.workspacePrimary)
                                 Button("这次跳过") { onSkip(action) }.buttonStyle(.borderless)
                             }
                             DisclosureGroup("查看事项与依据") {

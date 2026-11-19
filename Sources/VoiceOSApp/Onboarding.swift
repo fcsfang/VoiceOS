@@ -78,7 +78,7 @@ struct OnboardingView: View {
             Button("立即试一次") {
                 QuickNoteController.shared.show()
                 finish()
-            }.buttonStyle(.bordered)
+            }.buttonStyle(.workspaceSecondary)
         } else if current.id == 3 {
             VStack(alignment: .leading, spacing: 5) {
                 Text("⌥⌘D 口述")

@@ -40,10 +40,11 @@ struct DictationRecoveryControls: View {
         VStack(alignment:.leading,spacing:8) {
             HStack(spacing:10) {
                 Button("保存可解码片段") { recover() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.workspacePrimary)
                     .disabled(unavailable)
                     .accessibilityLabel("保存可解码片段：" + source.displayTitle)
                 Button("移入回收站",systemImage:"trash",role:.destructive) { confirmingTrash = true }
+                    .buttonStyle(.workspaceDestructive)
                     .disabled(unavailable)
                     .accessibilityLabel("把中断的录音移入回收站：" + source.displayTitle)
                 if busy {

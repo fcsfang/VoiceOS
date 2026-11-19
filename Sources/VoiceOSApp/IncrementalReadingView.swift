@@ -45,7 +45,7 @@ struct IncrementalReadingView: View {
             } else {
                 Text(source.transcript == nil ? "转写尚未完成，完成后可以开始按天读。" : "把这份材料切成小块，每天读一块。进度只记当前位置，原文变化后按最新转写重算。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                 Picker("每块字数", selection:$chunkSize) { ForEach(sizes,id:\.self) { Text(String($0)).tag($0) } }.pickerStyle(.segmented)
-                Button("开始按天读") { start() }.buttonStyle(.borderedProminent).disabled(busy || source.transcript == nil)
+                Button("开始按天读") { start() }.buttonStyle(.workspacePrimary).disabled(busy || source.transcript == nil)
             }
             if !notice.isEmpty { Text(notice).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }

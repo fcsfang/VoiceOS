@@ -899,7 +899,7 @@ private struct RecentClueRenameSheet: View {
                         if await model.renameRecentClue(clue, title: trimmed.isEmpty ? nil : trimmed) { dismiss() }
                         saving = false
                     }
-                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(title.count > 100)
+                }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(title.count > 100)
             }.disabled(saving)
         }.padding(24).frame(width: 520)
     }

@@ -24,7 +24,7 @@ struct ConfirmTaskView: View {
                         if await model.confirmTask(action, title: title, commandID: commandID) { dismiss() }
                         else { error = model.status }
                     }
-                }.buttonStyle(.borderedProminent).disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.buttonStyle(.workspacePrimary).disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
         .onAppear {

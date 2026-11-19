@@ -142,7 +142,7 @@ private struct CompensationConfirmationView: View {
                         saving = false
                         if approved { dismiss() } else { errorText = model.status }
                     }
-                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(saving || model.remindersBusy || !plan.eligibleForConfirmation)
+                }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(saving || model.remindersBusy || !plan.eligibleForConfirmation)
             }
         }.padding(24).frame(width: 640)
     }
