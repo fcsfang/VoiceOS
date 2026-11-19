@@ -31,6 +31,8 @@ struct RecentContentHome: View {
     @State private var organizeAttemptSourceID: String?
     @State private var organizeToast: String?
     @State private var organizeToastSourceID: String?
+    @AppStorage("voiceos.home.recentThoughts.expanded") private var recentThoughtsExpanded = false
+    @State private var frozenViewpointsItemID: String?
     @FocusState private var timelineFocused: Bool
     private let topAnchor = "home.top"
     private let timelineSpace = "home.timeline"
@@ -105,9 +107,14 @@ struct RecentContentHome: View {
                 if model.workspaceLastErrorRetry != nil {
                     Button("重试") { model.retryWorkspaceError() }.buttonStyle(.borderedProminent)
                 }
+            } else if hasAnyMaterial {
+                Text("材料都还没有可读内容").vosFont(WorkspaceText.sectionTitle)
+                Text("材料还在转写或识别，完成并保存后会出现在这里。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                Button("记录想法") { capture() }.buttonStyle(.borderedProminent)
+                Button("导入录音") { model.chooseFullRecording() }
             } else {
-                Text("还没有可以回看的内容").vosFont(WorkspaceText.sectionTitle)
-                Text("录一段，或写几句。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                Text("知识库里还没有材料").vosFont(WorkspaceText.sectionTitle)
+                Text("录一段、导入一段录音，或写几句。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                 Button("记录想法") { capture() }.buttonStyle(.borderedProminent)
                 Button("导入录音") { model.chooseFullRecording() }
             }
@@ -119,7 +126,7 @@ struct RecentContentHome: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
-                    if !recentThoughts.isEmpty { recentThoughtsSection(recentThoughts) }
+                    if !recentThoughts.isEmpty { recentThoughtsEntry(recentThoughts) }
                     ForEach(days) { day in
                         VStack(alignment: .leading, spacing: 6) {
                             dayHeader(day)
@@ -227,8 +234,8 @@ struct RecentContentHome: View {
                 Text(rowMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             Spacer(minLength: 6)
-            if let status = statusSlot(item, outcomeBadge: outcomeBadge) {
-                Text(status.text).vosFont(WorkspaceText.meta).foregroundStyle(status.color).padding(.top, 2)
+            if let trailing = rowTrailing(item, outcomeBadge: outcomeBadge) {
+                Text(trailing.text).vosFont(WorkspaceText.meta).foregroundStyle(trailing.color).padding(.top, 2)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -246,20 +253,24 @@ struct RecentContentHome: View {
         return model.sourcePageIndex.recordsByID[id]
     }
 
-    /// Slot 3 holds only a non-default state, one at a time. The snapshot
-    /// carries every state but reading, which is re-read after it.
-    private func statusSlot(_ item: RecentContentItem, outcomeBadge: String?) -> (text: String, color: Color)? {
+    /// The trailing slot carries the value a material produced: its open tasks.
+    /// Process states read inline as secondary text instead.
+    private func rowTrailing(_ item: RecentContentItem, outcomeBadge: String?) -> (text: String, color: Color)? {
+        if item.kind == .feedback { return outcomeBadge.map { ($0, palette.warning) } }
+        guard let count = model.homeSnapshot.digests[item.id]?.tasks.count, count > 0 else { return nil }
+        return ("\(count) 条待办", palette.accent)
+    }
+
+    private func rowStatusNote(_ item: RecentContentItem) -> String? {
         switch model.homeSnapshot.rows[item.id]?.status {
-        case .some(.localOnly): return ("仅本地", palette.secondaryText)
-        case .some(.organizing): return ("整理中", palette.accent)
-        case .some(.needsReview): return ("待核对", palette.warning)
-        case .some(.issues(let count)): return ("疑点 \(count)", palette.warning)
+        case .some(.localOnly): return "仅本地"
+        case .some(.organizing): return "整理中"
+        case .some(.needsReview): return "待核对"
+        case .some(.issues(let count)): return "疑点 \(count)"
         case nil: break
         }
-        if item.kind == .feedback { return outcomeBadge.map { ($0, palette.warning) } }
-        guard let source = materialSource(item) else { return nil }
-        if readingStates[source.id] == .reading { return ("在读", palette.accent) }
-        return nil
+        guard item.kind == .material, let source = materialSource(item), readingStates[source.id] == .reading else { return nil }
+        return "在读"
     }
 
     private func rowTitle(_ item: RecentContentItem) -> String {
@@ -271,7 +282,9 @@ struct RecentContentHome: View {
     }
 
     private func rowMeta(_ item: RecentContentItem) -> String {
-        timeLabel(item.date)
+        var parts = [timeLabel(item.date)]
+        if let note = rowStatusNote(item) { parts.append(note) }
+        return parts.joined(separator: " · ")
     }
 
     private var reader: some View {
@@ -526,40 +539,74 @@ struct RecentContentHome: View {
         model.homeSnapshot.recentThoughts
     }
 
+    private var recentThoughtCount: Int {
+        recentThoughts.reduce(0) { $0 + $1.entries.count }
+    }
+
+    /// The same material filter the index uses, so an empty home can tell an
+    /// empty library apart from materials that have no readable content yet.
+    private var hasAnyMaterial: Bool {
+        model.records.contains {
+            ["saved", "reference_only"].contains($0.state) && $0.origin == "user" && $0.speaker == "user"
+                && $0.feedbackKind == nil && !$0.name.hasPrefix("行动反馈")
+        }
+    }
+
     private var outcomeBadge: String? {
         let pending = model.visibleOutcomeFollowups.count
         return pending > 0 ? "\(pending) 项结果待填" : nil
     }
 
-    private func recentThoughtsSection(_ groups: [RecentThoughtDay]) -> some View {
+    private func recentThoughtsEntry(_ groups: [RecentThoughtDay]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("最近想法").vosFont(WorkspaceText.meta.size, weight: .semibold)
-                .foregroundStyle(palette.secondaryText).padding(.horizontal, 10)
-                .accessibilityAddTraits(.isHeader)
-            ForEach(groups) { group in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("\(dayLabel(group.date)) · \(group.entries.count) 条")
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { recentThoughtsExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(recentThoughtsExpanded ? 90 : 0))
+                        .vosFont(WorkspaceText.caption.size, weight: .semibold)
+                        .foregroundStyle(palette.tertiaryText)
+                        .accessibilityHidden(true)
+                    Text("最近想法").vosFont(WorkspaceText.meta.size, weight: .semibold)
+                        .foregroundStyle(palette.secondaryText)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("\(recentThoughtCount) 条 · 近 14 天")
                         .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
-                        .padding(.horizontal, 10)
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(group.entries) { entry in
-                            Button { openClaim(entry.id) } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(entry.statement).vosFont(WorkspaceText.meta)
-                                        .foregroundStyle(palette.text).lineLimit(3)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .multilineTextAlignment(.leading)
-                                    Text(entry.sourceTitle).vosFont(WorkspaceText.caption)
-                                        .foregroundStyle(palette.secondaryText).lineLimit(2)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(recentThoughtsExpanded ? "收起最近想法" : "展开最近想法，查看近 14 天的观点")
+            .accessibilityIdentifier("home.recentThoughts.toggle")
+            if recentThoughtsExpanded {
+                ForEach(groups) { group in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(dayLabel(group.date)) · \(group.entries.count) 条")
+                            .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                            .padding(.horizontal, 10)
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(group.entries) { entry in
+                                Button { openClaim(entry.id) } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(entry.statement).vosFont(WorkspaceText.meta)
+                                            .foregroundStyle(palette.text).lineLimit(3)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .multilineTextAlignment(.leading)
+                                        Text(entry.sourceTitle).vosFont(WorkspaceText.caption)
+                                            .foregroundStyle(palette.secondaryText).lineLimit(2)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                            .multilineTextAlignment(.leading)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .homeCard(isSelected: false)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .homeCard(isSelected: false)
+                                .buttonStyle(.plain)
+                                .help("打开这条想法的原话")
+                                .accessibilityIdentifier("recent.thought")
                             }
-                            .buttonStyle(.plain)
-                            .help("打开这条想法的原话")
-                            .accessibilityIdentifier("recent.thought")
                         }
                     }
                 }
@@ -572,15 +619,47 @@ struct RecentContentHome: View {
         if let source = materialSource(item) {
             let organizing = model.understandingSource == source.id
             let blocker = organizeBlocker(source, organizing: organizing)
+            let frozen = frozenThoughts(item)
             VStack(alignment: .leading, spacing: 12) {
-                Text("这份材料还没有整理出想法").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                if frozen.isEmpty {
+                    Text("这份材料还没有整理出想法").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                } else {
+                    Text("这份材料上次整理的观点已冻结").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                    Text("原话或处理许可变化后，旧观点不再作为当前观点显示。重新整理会生成新的观点，旧观点保留为历史。")
+                        .vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                }
                 HStack(spacing: 10) {
-                    Button(organizing ? "正在整理…" : "整理这份材料") {
+                    if !frozen.isEmpty {
+                        Button(frozenViewpointsItemID == item.id ? "收起旧观点" : "查看旧观点") {
+                            frozenViewpointsItemID = frozenViewpointsItemID == item.id ? nil : item.id
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityIdentifier("home.frozenViewpoints.toggle")
+                    }
+                    Button(organizing ? "正在整理…" : (frozen.isEmpty ? "整理这份材料" : "重新整理这份材料")) {
                         attemptOrganize(source)
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(organizing || blocker != nil || !model.modelConfigured || source.localOnly)
                     if organizing { ProgressView().controlSize(.small) }
+                }
+                if frozenViewpointsItemID == item.id, !frozen.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(frozen) { thought in
+                            HStack(alignment: .top, spacing: 10) {
+                                Text(thought.statement).vosFont(WorkspaceText.body).lineSpacing(4)
+                                    .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                                Button("看原话") { openClaim(thought.claimID) }
+                                    .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                                    .accessibilityLabel("查看这条旧观点的原话")
+                            }
+                            if thought.id != frozen.last?.id { WorkspaceListDivider() }
+                        }
+                    }
+                    .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                    .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border, lineWidth: 1) }
+                    .accessibilityIdentifier("home.frozenViewpoints")
                 }
                 if let blocker {
                     Text(blocker).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
@@ -601,6 +680,20 @@ struct RecentContentHome: View {
             .padding(18).frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
             .accessibilityIdentifier("home.organizePrompt")
+        }
+    }
+
+    /// Old viewpoints whose claims were frozen keep their audit trail but no
+    /// longer read as current thoughts. Newest first, one row per statement.
+    private func frozenThoughts(_ item: RecentContentItem) -> [RecentContentThought] {
+        let sourceIDs = Set(item.sourceIDs)
+        var seen: Set<String> = []
+        return model.claims.reversed().compactMap { claim in
+            guard claim.validity == "frozen", claim.ownership == "user_tentative", claim.reviewState != "rejected",
+                  claim.references.contains(where: { sourceIDs.contains($0.sourceID) }),
+                  let statement = RecentContentIndex.thoughtStatement(claim.statement),
+                  seen.insert(statement).inserted else { return nil }
+            return RecentContentThought(claimID: claim.id, statement: statement)
         }
     }
 
