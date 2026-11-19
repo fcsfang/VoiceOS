@@ -55,7 +55,7 @@ struct RecentContentHome: View {
                     empty.onAppear { StartupTrace.mark("home.appear.empty") }
                 } else {
                     HStack(spacing: 0) {
-                        timeline.frame(width: 264)
+                        timeline.frame(width: 288)
                         Rectangle().fill(palette.border).frame(width: 1)
                         reader
                     }.onAppear { StartupTrace.mark("home.appear items=\(items.count)") }
@@ -106,18 +106,18 @@ struct RecentContentHome: View {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .vosFont(WorkspaceText.body).foregroundStyle(palette.danger).textSelection(.enabled)
                 if model.workspaceLastErrorRetry != nil {
-                    Button("重试") { model.retryWorkspaceError() }.buttonStyle(.borderedProminent)
+                    Button("重试") { model.retryWorkspaceError() }.buttonStyle(.workspacePrimary)
                 }
             } else if hasAnyMaterial {
                 Text("材料都还没有可读内容").vosFont(WorkspaceText.sectionTitle)
                 Text("材料还在转写或识别，完成并保存后会出现在这里。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                Button("记录想法") { capture() }.buttonStyle(.borderedProminent)
-                Button("导入录音") { model.chooseFullRecording() }
+                Button("记录想法") { capture() }.buttonStyle(.workspacePrimary)
+                Button("导入录音") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
             } else {
                 Text("知识库里还没有材料").vosFont(WorkspaceText.sectionTitle)
                 Text("录一段、导入一段录音，或写几句。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                Button("记录想法") { capture() }.buttonStyle(.borderedProminent)
-                Button("导入录音") { model.chooseFullRecording() }
+                Button("记录想法") { capture() }.buttonStyle(.workspacePrimary)
+                Button("导入录音") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -233,10 +233,16 @@ struct RecentContentHome: View {
                 Text(rowTitle(item)).vosFont(WorkspaceText.rowTitle)
                     .foregroundStyle(palette.text).lineLimit(2).multilineTextAlignment(.leading)
                 Text(rowMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    .lineLimit(1)
             }
             Spacer(minLength: 6)
             if let trailing = rowTrailing(item, outcomeBadge: outcomeBadge) {
-                Text(trailing.text).vosFont(WorkspaceText.meta).foregroundStyle(trailing.color).padding(.top, 2)
+                switch trailing {
+                case .badge(let text, let tone):
+                    WorkspaceBadge(text: text, tone: tone).padding(.top, 1)
+                case .text(let text, let color):
+                    Text(text).vosFont(WorkspaceText.meta).foregroundStyle(color).padding(.top, 2)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -256,10 +262,15 @@ struct RecentContentHome: View {
 
     /// The trailing slot carries the value a material produced: its open tasks.
     /// Process states read inline as secondary text instead.
-    private func rowTrailing(_ item: RecentContentItem, outcomeBadge: String?) -> (text: String, color: Color)? {
-        if item.kind == .feedback { return outcomeBadge.map { ($0, palette.warning) } }
+    private enum RowTrailing {
+        case badge(String, WorkspaceBadge.Tone)
+        case text(String, Color)
+    }
+
+    private func rowTrailing(_ item: RecentContentItem, outcomeBadge: String?) -> RowTrailing? {
+        if item.kind == .feedback { return outcomeBadge.map { .text($0, palette.warning) } }
         guard let count = model.homeSnapshot.digests[item.id]?.tasks.count, count > 0 else { return nil }
-        return ("\(count) 条待办", palette.accent)
+        return .badge("\(count) 条待办", .accent)
     }
 
     private func rowStatusNote(_ item: RecentContentItem) -> String? {
@@ -275,7 +286,8 @@ struct RecentContentHome: View {
     }
 
     private func rowTitle(_ item: RecentContentItem) -> String {
-        item.kind == .feedback ? item.title + " · \(progressCount(item)) 条" : item.title
+        let fit = WorkspaceTitleFit.present(item.title)
+        return item.kind == .feedback ? fit.title + " · \(progressCount(item)) 条" : fit.title
     }
 
     private func progressCount(_ item: RecentContentItem) -> Int {
@@ -283,7 +295,9 @@ struct RecentContentHome: View {
     }
 
     private func rowMeta(_ item: RecentContentItem) -> String {
-        var parts = [timeLabel(item.date)]
+        var parts: [String] = []
+        if let source = WorkspaceTitleFit.present(item.title).source { parts.append(source) }
+        parts.append(timeLabel(item.date))
         if let note = rowStatusNote(item) { parts.append(note) }
         return parts.joined(separator: " · ")
     }
@@ -407,8 +421,13 @@ struct RecentContentHome: View {
                         .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                 }
             }
-            Text(item.title).vosFont(WorkspaceText.pageTitle).lineSpacing(4)
+            let fit = WorkspaceTitleFit.present(item.title)
+            Text(fit.title).vosFont(WorkspaceText.pageTitle).lineSpacing(4).lineLimit(4)
                 .padding(.top, 16).textSelection(.enabled).accessibilityAddTraits(.isHeader)
+            if let source = fit.source {
+                Text(source).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+                    .padding(.top, 6).textSelection(.enabled)
+            }
             if !item.summary.isEmpty {
                 Text(item.summary).vosFont(WorkspaceText.body).lineSpacing(5)
                     .textSelection(.enabled)
@@ -492,7 +511,7 @@ struct RecentContentHome: View {
                 }
                 .padding(.vertical, 13).padding(.horizontal, 17)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
+                .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 .padding(.top, 20).padding(.leading, 42)
             }
         }.accessibilityIdentifier("home.thread")
@@ -657,13 +676,13 @@ struct RecentContentHome: View {
                         Button(frozenViewpointsItemID == item.id ? "收起旧观点" : "查看旧观点") {
                             frozenViewpointsItemID = frozenViewpointsItemID == item.id ? nil : item.id
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.workspaceSecondary)
                         .accessibilityIdentifier("home.frozenViewpoints.toggle")
                     }
                     Button(organizing ? "正在整理…" : (frozen.isEmpty ? "整理这份材料" : "重新整理这份材料")) {
                         attemptOrganize(source)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.workspacePrimary)
                     .disabled(organizing || blocker != nil || !model.modelConfigured || source.localOnly)
                     if organizing { ProgressView().controlSize(.small) }
                 }
@@ -702,7 +721,7 @@ struct RecentContentHome: View {
                 }
             }
             .padding(18).frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: 9))
+            .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             .accessibilityIdentifier("home.organizePrompt")
         }
     }
