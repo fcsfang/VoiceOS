@@ -102,6 +102,7 @@ private enum SourceLoadPhase: Equatable {
 }
 private struct SourceFold<Content: View>: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
     let title:String
     var icon=""
     var count:Int?=nil
@@ -113,7 +114,7 @@ private struct SourceFold<Content: View>: View {
                 Button { isExpanded.toggle() } label: {
                     HStack(alignment:.top,spacing:12) {
                         if !icon.isEmpty {
-                            Image(systemName:icon).vosFont(19, weight:.medium).foregroundStyle(palette.accent).frame(width:26,height:28).accessibilityHidden(true)
+                            Image(systemName:icon).vosFont(19, weight:.medium).foregroundStyle(palette.accent).frame(minWidth: 26 * vosLayoutScale(textScale), minHeight: 28 * vosLayoutScale(textScale)).accessibilityHidden(true)
                         }
                         Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
                         Spacer(minLength:8)

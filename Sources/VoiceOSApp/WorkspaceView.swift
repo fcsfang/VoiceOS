@@ -138,6 +138,8 @@ func workspaceStateLabel(_ value:String) -> String {
 }
 fileprivate func displayTitle(_ raw:String) -> String { MarkdownDocument.plainTitle(raw) }
 fileprivate let recentSearchDefaultsKey = "voiceos.recentSearches.v1"
+/// Fixed widths and icon boxes follow the reading size up to 1.3, so 特大 still fits a desktop window.
+func vosLayoutScale(_ scale: CGFloat) -> CGFloat { min(max(scale, 1), 1.3) }
 struct WorkspaceRow: View {
     enum TrailingStyle {
         case secondary
@@ -151,6 +153,7 @@ struct WorkspaceRow: View {
         let complete: () -> Void
     }
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
     @State private var hovered = false
     let title: String
     let subtitle: String
@@ -171,7 +174,7 @@ struct WorkspaceRow: View {
                 Button(action:completion.complete) {
                     Image(systemName:"circle").vosFont(21)
                         .foregroundStyle(completion.enabled ? palette.accent : palette.disabledText)
-                        .frame(width:30,height:30,alignment:.top).contentShape(Rectangle())
+                        .frame(width:30 * vosLayoutScale(textScale),height:30 * vosLayoutScale(textScale),alignment:.top).contentShape(Rectangle())
                 }.buttonStyle(.plain).disabled(!completion.enabled)
                     .help("标为完成").accessibilityLabel("标为完成：" + title)
                 Button(action:open) { titleAndTrailing }
@@ -185,7 +188,7 @@ struct WorkspaceRow: View {
             Button(action:open) {
                 HStack(alignment:.top,spacing:14) {
                     Image(systemName:icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(iconTint ?? palette.accent)
-                        .frame(width:30,height:30).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                        .frame(width:30 * vosLayoutScale(textScale),height:30 * vosLayoutScale(textScale)).background(palette.selection.opacity(0.6),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .accessibilityHidden(true)
                     titleAndTrailing
                 }.padding(.vertical,10).padding(.horizontal,10).padding(.trailing,trailingGutter)
@@ -205,8 +208,8 @@ struct WorkspaceRow: View {
     private var titleAndTrailing: some View {
         HStack(alignment:.top,spacing:14) {
             VStack(alignment:.leading,spacing:3) {
-                Text(title).vosFont(WorkspaceText.rowTitle).lineSpacing(3).lineLimit(2).fixedSize(horizontal:false,vertical:true).help(title)
-                if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(subtitleTone ?? palette.secondaryText).lineSpacing(3).lineLimit(2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
+                Text(title).vosFont(WorkspaceText.rowTitle).lineSpacing(3).lineLimit(textScale >= 1.3 ? 3 : 2).fixedSize(horizontal:false,vertical:true).help(title)
+                if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(subtitleTone ?? palette.secondaryText).lineSpacing(3).lineLimit(textScale >= 1.3 ? 3 : 2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
             }
             Spacer(minLength:8)
             if showsTrailing { trailingLabel }
@@ -219,18 +222,18 @@ struct WorkspaceRow: View {
     @ViewBuilder private var trailingLabel: some View {
         switch trailingStyle {
         case .secondary:
-            Text(trailing).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.top,3)
+            Text(trailing).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1).help(trailing).padding(.top,3)
         case .status(let color):
-            Text(trailing).vosFont(WorkspaceText.meta).foregroundStyle(color).padding(.top,3)
+            Text(trailing).vosFont(WorkspaceText.meta).foregroundStyle(color).lineLimit(1).help(trailing).padding(.top,3)
         case .link:
             HStack(spacing:3) {
-                Text(trailing).vosFont(WorkspaceText.meta)
+                Text(trailing).vosFont(WorkspaceText.meta).lineLimit(1)
                 Image(systemName:"chevron.right").vosFont(WorkspaceText.caption.size, weight: .semibold)
             }.foregroundStyle(palette.accent).padding(.top,3)
         case .dot(let color):
             HStack(spacing:5) {
                 Circle().fill(color).frame(width:6,height:6).accessibilityHidden(true)
-                if !trailing.isEmpty { Text(trailing).vosFont(WorkspaceText.meta).foregroundStyle(color) }
+                if !trailing.isEmpty { Text(trailing).vosFont(WorkspaceText.meta).foregroundStyle(color).lineLimit(1) }
             }.padding(.top,3).help(trailing)
         case .badge(let tone):
             WorkspaceBadge(text:trailing, tone:tone).padding(.top,1).help(trailing)
@@ -273,6 +276,7 @@ struct WorkspaceView: View {
     @AppStorage("voiceos.backupRetention") private var backupRetention = 7
     @AppStorage("voiceos.sourceRail.visible") private var sourceRailVisible = true
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.vosTextScale) private var textScale
     private var palette: WorkspacePalette { WorkspacePalette(theme: theme) }
     private var brandImage: NSImage? { AppBrand.image(for: colorScheme) }
     @State private var page: WorkspacePage = .home
@@ -611,7 +615,7 @@ struct WorkspaceView: View {
         VStack(alignment:.leading,spacing:28) {
             HStack(spacing:9) {
                 if let brandImage {
-                    Image(nsImage: brandImage).resizable().interpolation(.high).frame(width: 26, height: 26)
+                    Image(nsImage: brandImage).resizable().interpolation(.high).frame(width: 26 * vosLayoutScale(textScale), height: 26 * vosLayoutScale(textScale))
                         .accessibilityHidden(true)
                 } else {
                     Image(systemName:"waveform").vosFont(19, weight: .medium)
@@ -633,7 +637,7 @@ struct WorkspaceView: View {
                         ForEach(savedViews) { view in
                             Button { openSavedView(view) } label: {
                                 Label(view.name,systemImage:view.page == .materials ? "books.vertical" : "checkmark.circle")
-                                    .vosFont(WorkspaceText.body).lineLimit(1)
+                                    .vosFont(WorkspaceText.body).lineLimit(textScale >= 1.3 ? 2 : 1)
                                     .frame(maxWidth:.infinity,alignment:.leading)
                                     .padding(.horizontal,9).padding(.vertical,7)
                                     .contentShape(Rectangle())
@@ -671,14 +675,14 @@ struct WorkspaceView: View {
                     case .back: back()
                     }
                 }
-        }.padding(.horizontal,13).padding(.vertical,28).frame(width:172).background(palette.sidebar)
+        }.padding(.horizontal,13).padding(.vertical,28).frame(width: 172 * vosLayoutScale(textScale)).background(palette.sidebar)
             .onAppear { AppBrand.applyApplicationIcon() }
             .onChange(of: colorScheme) { _, _ in AppBrand.applyApplicationIcon() }
     }
     private func nav(_ title:String,icon:String,target:WorkspacePage,id:String,badge:Int = 0,badgeAccessibility:String? = nil) -> some View {
         Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
             HStack(spacing:8) {
-                Label(title,systemImage:icon).vosFont(WorkspaceText.body.size, weight: section == title ? .semibold : .regular)
+                Label(title,systemImage:icon).vosFont(WorkspaceText.body.size, weight: section == title ? .semibold : .regular).lineLimit(textScale >= 1.3 ? 2 : 1)
                 Spacer(minLength:0)
                 if badge > 0 {
                     Text(String(badge)).vosFont(WorkspaceText.caption.size, weight: .semibold)
@@ -2510,7 +2514,7 @@ struct WorkspaceView: View {
                 Button("现在核对") { Task { await model.retryPendingReminderSyncs() } }
                     .disabled(model.remindersBusy || model.pendingReminderSyncs.isEmpty)
             }
-        }.padding(24).frame(width:520)
+        }.padding(24).frame(minWidth:520)
     }
     private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
@@ -2564,7 +2568,7 @@ struct WorkspaceView: View {
                     }
                 }.padding(.horizontal,8).padding(.bottom,12)
             }
-        }.frame(width:248).background(palette.sidebar)
+        }.frame(width: 248 * vosLayoutScale(textScale)).background(palette.sidebar)
     }
     private var collapsedSourceRail: some View {
         VStack(spacing:0) {
@@ -3051,6 +3055,7 @@ private struct WorkspaceFilterTabItem: Identifiable {
 /// The identifier keeps the old combined label so saved UI checks still resolve.
 private struct WorkspaceFilterTabs: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
     let items: [WorkspaceFilterTabItem]
     let selection: String
     let onSelect: (String) -> Void
@@ -3060,7 +3065,7 @@ private struct WorkspaceFilterTabs: View {
             HStack(spacing: 18) {
                 ForEach(items) { item in tab(item) }
             }.fixedSize(horizontal: true, vertical: false)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 56), spacing: 14)], alignment: .leading, spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 56 * vosLayoutScale(textScale)), spacing: 14)], alignment: .leading, spacing: 10) {
                 ForEach(items) { item in tab(item, fill: true) }
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -3077,7 +3082,7 @@ private struct WorkspaceFilterTabs: View {
                         .lineLimit(1)
                     if let count = item.count {
                         Text(count).vosFont(WorkspaceText.meta.size, monospacedDigit: true)
-                            .foregroundStyle(palette.tertiaryText)
+                            .foregroundStyle(palette.tertiaryText).lineLimit(1)
                     }
                 }
                 Rectangle().fill(selected ? palette.accent : Color.clear).frame(height: 2)

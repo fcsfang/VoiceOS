@@ -22,6 +22,7 @@ struct OnboardingView: View {
     @ObservedObject var model: ControlCenter
     let finish: () -> Void
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
     @State private var step = 0
     @State private var microphone = OnboardingView.currentMicrophoneAuthorization()
 
@@ -29,22 +30,28 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("欢迎使用 VoiceOS").vosFont(WorkspaceText.pageTitle)
-            HStack(spacing: 14) {
-                Image(systemName: current.symbol)
-                    .vosFont(28)
-                    .foregroundStyle(palette.secondaryText)
-                    .frame(width: 40)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(current.title).vosFont(WorkspaceText.rowTitle)
-                    Text(current.detail)
-                        .vosFont(WorkspaceText.body)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("欢迎使用 VoiceOS").vosFont(WorkspaceText.pageTitle)
+                    HStack(spacing: 14) {
+                        Image(systemName: current.symbol)
+                            .vosFont(28)
+                            .foregroundStyle(palette.secondaryText)
+                            .frame(width: 40 * vosLayoutScale(textScale))
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(current.title).vosFont(WorkspaceText.rowTitle)
+                            Text(current.detail)
+                                .vosFont(WorkspaceText.body)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    stepExtra
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            stepExtra
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxHeight: 520)
             stepDots
             HStack {
                 Button("跳过", action: finish)
@@ -62,7 +69,7 @@ struct OnboardingView: View {
             }
         }
         .padding(28)
-        .frame(width: WorkspaceMetrics.modalSmall)
+        .frame(minWidth: WorkspaceMetrics.modalSmall)
         .interactiveDismissDisabled()
     }
 
