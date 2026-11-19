@@ -100,11 +100,15 @@ struct WeeklyReviewView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    HStack(alignment: .top) {
-                        WorkspaceHeading(eyebrow: "行动 · 每周回顾", title: "这一周，行动走到了哪里", subtitle: "今天收尾可直接完成或不再跟进；点开任意一条查看任务、原话与结果。")
-                        Button("认知地图", systemImage: "point.3.connected.trianglepath.dotted") { showingReflectionMap = true }
-                            .help("周期切换、认知对照与一起回顾都在这里")
-                        Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
+                    WorkspacePageHeading(eyebrow: "行动 · 每周回顾", title: "这一周，行动走到了哪里", subtitle: "今天收尾可直接完成或不再跟进；点开任意一条查看任务、原话与结果。") {
+                        HStack(spacing: 10) {
+                            Button("认知地图", systemImage: "point.3.connected.trianglepath.dotted") { showingReflectionMap = true }
+                                .buttonStyle(.workspaceSecondary)
+                                .help("周期切换、认知对照与一起回顾都在这里")
+                            Button("关闭") { dismiss() }
+                                .buttonStyle(.workspaceQuiet)
+                                .keyboardShortcut(.cancelAction)
+                        }
                     }
                     summaryRow(proxy)
                     if !loadError.isEmpty {
@@ -158,29 +162,31 @@ struct WeeklyReviewView: View {
                                              stalledGoals: stalledGoals.count,
                                              unclarifiedTasks: unclarifiedTasks.count)
         return HStack(spacing: 10) {
-            summaryStat("本周完成 \(weekCompleted.count)", target: "review.completed", isLink: links.completed, proxy: proxy)
+            summaryStat("本周完成", count: weekCompleted.count, target: "review.completed", isLink: links.completed, proxy: proxy)
             Text("·").foregroundStyle(palette.tertiaryText)
-            summaryStat("待补结果 \(model.visibleOutcomeFollowups.count)", target: pendingOutcomeAnchor, isLink: links.pendingOutcome, proxy: proxy)
+            summaryStat("待补结果", count: model.visibleOutcomeFollowups.count, target: pendingOutcomeAnchor, isLink: links.pendingOutcome, proxy: proxy)
             Text("·").foregroundStyle(palette.tertiaryText)
-            summaryStat("停滞目标 \(stalledGoals.count)", target: "review.stalled", isLink: links.stalled, proxy: proxy)
+            summaryStat("停滞目标", count: stalledGoals.count, target: "review.stalled", isLink: links.stalled, proxy: proxy)
             Text("·").foregroundStyle(palette.tertiaryText)
-            summaryStat("待确认 \(unclarifiedTasks.count)", target: "review.unclarified", isLink: links.unclarified, proxy: proxy)
+            summaryStat("待确认", count: unclarifiedTasks.count, target: "review.unclarified", isLink: links.unclarified, proxy: proxy)
             Spacer(minLength: 0)
         }
     }
 
     @ViewBuilder
-    private func summaryStat(_ label: String, target: String, isLink: Bool, proxy: ScrollViewProxy) -> some View {
+    private func summaryStat(_ title: String, count: Int, target: String, isLink: Bool, proxy: ScrollViewProxy) -> some View {
+        let label = Text(title + " ") + Text("\(count)").monospacedDigit()
         if isLink {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(target, anchor: .top) }
             } label: {
-                Text(label).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.accent)
+                label
             }
-            .buttonStyle(.plain)
-            .help("跳到「" + label + "」所在区块")
+            .buttonStyle(.workspaceQuietCompact)
+            .help("跳到「\(title) \(count)」所在区块")
         } else {
-            Text(label).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.tertiaryText)
+            label.vosFont(WorkspaceText.meta.size, weight: .medium, monospacedDigit: true)
+                .foregroundStyle(palette.secondaryText)
         }
     }
 
@@ -265,7 +271,7 @@ struct WeeklyReviewView: View {
                     Text("今天与逾期共 \(review.remainingCount) 条").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     Button("到行动页查看 →") { jump(.todo) }
-                        .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                        .buttonStyle(.workspaceQuietCompact)
                 }.padding(.top, 10)
             }
             if !actionError.isEmpty {
@@ -297,13 +303,13 @@ struct WeeklyReviewView: View {
                 .accessibilityElement(children: .combine)
             }.buttonStyle(.plain)
             if overdue {
-                Text("逾期").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.warning).padding(.top, 5)
+                WorkspaceBadge(text: "逾期", tone: .warning).padding(.top, 3)
             }
             Button("完成") { apply(entry, .completed) }
-                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .buttonStyle(.workspaceSecondaryCompact).disabled(model.savingAction)
                 .accessibilityLabel("完成：" + entry.action.title)
             Button("不再跟进") { apply(entry, .dismissed) }
-                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .buttonStyle(.workspaceSecondaryCompact).disabled(model.savingAction)
                 .accessibilityLabel("不再跟进：" + entry.action.title)
         }
         .padding(.vertical, 10).padding(.horizontal, 10)
@@ -344,7 +350,7 @@ struct WeeklyReviewView: View {
 
     private func allButton(_ count: Int, _ filter: ReviewFilter) -> some View {
         Button("查看全部 \(count) 条 →") { jump(filter) }
-            .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+            .buttonStyle(.workspaceQuiet)
             .padding(.top, 10)
             .accessibilityLabel("查看全部 \(count) 条")
     }
@@ -361,6 +367,7 @@ struct WeeklyReviewView: View {
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                     .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.border, lineWidth: 1) }
+                    .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
                     .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 }.buttonStyle(.plain)
                     .accessibilityLabel("撤销：\(undoEntry.label)")
@@ -413,7 +420,7 @@ struct WeeklyReviewView: View {
                 HStack(spacing: 8) {
                     Text("已有 3 条专注，先到行动页移出。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                     Button("到行动页移出 →") { jump(.todo) }
-                        .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                        .buttonStyle(.workspaceQuietCompact)
                 }.padding(.top, 8)
             }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, entry in
@@ -426,7 +433,7 @@ struct WeeklyReviewView: View {
                     .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("加入专注") { applyNextWeekFocus() }
-                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .buttonStyle(.workspacePrimary)
                     .disabled(selectedFocusIDs.isEmpty || focusSaving)
             }.padding(.top, 10)
             if !focusError.isEmpty {
@@ -434,7 +441,7 @@ struct WeeklyReviewView: View {
                     Text(focusError).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                     if focusSlots == 0 {
                         Button("到行动页移出 →") { jump(.todo) }
-                            .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                            .buttonStyle(.workspaceQuietCompact)
                     }
                 }.padding(.top, 10)
             }
@@ -471,7 +478,7 @@ struct WeeklyReviewView: View {
                 }
                 Spacer(minLength: 8)
                 if focused {
-                    Text("已专注").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.accent).padding(.top, 5)
+                    WorkspaceBadge(text: "已专注", tone: .accent).padding(.top, 3)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -556,7 +563,7 @@ struct WeeklyReviewView: View {
                 Text(progressUnavailableReason(row)).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
                 if model.records.contains(where: { $0.id == row.id }) {
                     Button("查看材料") { model.requestWorkspaceSource(row.id); dismiss() }
-                        .buttonStyle(.bordered).controlSize(.small)
+                        .buttonStyle(.workspaceSecondaryCompact)
                 }
             }
         }
@@ -600,7 +607,7 @@ struct WeeklyReviewView: View {
                         }
                         Spacer(minLength: 8)
                         if pending {
-                            Text("待补结果").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
+                            WorkspaceBadge(text: "待补结果", tone: .warning).padding(.top, 3)
                         }
                         Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
                     }
@@ -613,7 +620,8 @@ struct WeeklyReviewView: View {
                         outcomeError = ""
                         withAnimation { expandedOutcomeID = expanded ? nil : action.id }
                     }
-                    .buttonStyle(.bordered).controlSize(.small).disabled(model.savingFeedback)
+                    .buttonStyle(expanded ? WorkspaceButtonStyle.workspaceQuietCompact : WorkspaceButtonStyle.workspaceSecondaryCompact)
+                    .disabled(model.savingFeedback)
                     .accessibilityLabel("记录结果：" + action.title)
                 }
             }
@@ -650,7 +658,7 @@ struct WeeklyReviewView: View {
 
     private func linkButton(_ label: String, _ filter: ReviewFilter) -> some View {
         Button(label + " →") { jump(filter) }
-            .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+            .buttonStyle(.workspaceQuiet)
     }
 
     private var pausedSection: some View {
@@ -696,7 +704,7 @@ struct WeeklyReviewView: View {
                         Text("还没有下一步").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
                     }
                     Spacer(minLength: 8)
-                    Text("停滞").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
+                    WorkspaceBadge(text: "停滞", tone: .neutral).padding(.top, 3)
                     Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -705,7 +713,7 @@ struct WeeklyReviewView: View {
                 .accessibilityLabel("目标：" + title + "，还没有下一步")
             }.buttonStyle(.plain)
             Button("加下一步") { nextStepNotice = ""; nextStepGoal = goal }
-                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .buttonStyle(.workspaceSecondaryCompact).disabled(model.savingAction)
                 .accessibilityLabel("加下一步：" + title)
         }
         .padding(.vertical, 10).padding(.horizontal, 10)
@@ -747,13 +755,13 @@ struct WeeklyReviewView: View {
                 .accessibilityElement(children: .combine)
             }.buttonStyle(.plain)
             Button("恢复为目标") { applySomeday(goal, .restore) }
-                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .buttonStyle(.workspaceSecondaryCompact).disabled(model.savingAction)
                 .accessibilityLabel("恢复为目标：" + goal.title)
             Button("仍留到以后") { applySomeday(goal, .keep) }
-                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .buttonStyle(.workspaceSecondaryCompact).disabled(model.savingAction)
                 .accessibilityLabel("记录回看：" + goal.title)
             Button("放弃") { applySomeday(goal, .abandon) }
-                .buttonStyle(.bordered).controlSize(.small).disabled(model.savingAction)
+                .buttonStyle(.workspaceDestructive).disabled(model.savingAction)
                 .accessibilityLabel("放弃：" + goal.title)
         }
         .padding(.vertical, 10).padding(.horizontal, 10)
@@ -792,7 +800,7 @@ struct WeeklyReviewView: View {
                 }
                 Spacer(minLength: 8)
                 if !trailing.isEmpty {
-                    Text(trailing).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
+                    WorkspaceBadge(text: trailing, tone: .neutral).padding(.top, 3)
                 }
                 Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
             }
