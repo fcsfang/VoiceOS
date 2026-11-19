@@ -66,7 +66,7 @@ struct AssistantDelegationView: View {
             Toggle("允许交付要求与以上完整任务原文用于云端代办", isOn: $allowCloud).vosFont(WorkspaceText.body)
             if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled) }
             HStack {
-                Button("取消", action: dismiss).disabled(saving)
+                Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).disabled(saving)
                 Spacer()
                 if saving { ProgressView().controlSize(.small) }
                 Button("委托并开始") {
@@ -76,11 +76,11 @@ struct AssistantDelegationView: View {
                         else { error = model.assistantStatus.isEmpty ? model.status : model.assistantStatus }
                         saving = false
                     }
-                }.buttonStyle(.borderedProminent).tint(palette.accent)
+                }.buttonStyle(.workspacePrimary)
                     .disabled(saving || !allowCloud || !model.modelConfigured || instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             if !model.modelConfigured { Text("先配置模型连接，才能开始代办。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
-        }.padding(24).frame(width: 680)
+        }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
             .background(palette.canvas)
             .interactiveDismissDisabled(saving)
             .task {
@@ -117,7 +117,7 @@ struct AssistantExecutionView: View {
             HStack(alignment: .top) {
                 WorkspaceHero(eyebrow: "YOUR ASSISTANT", title: "把事情，推进到有结果", subtitle: "明确委托，查看成果，再带回自己的主题与行动。")
                 Spacer()
-                Button("完成", action: dismiss).keyboardShortcut(.cancelAction)
+                Button("完成", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
             }.padding(24)
             Divider()
             HStack(spacing: 0) {
@@ -130,12 +130,18 @@ struct AssistantExecutionView: View {
                                 Button {
                                     selectedID = execution.id; questionID = execution.questionID ?? ""; error = ""
                                 } label: {
-                                    VStack(alignment: .leading, spacing: 7) {
-                                        Text(.init(execution.title)).vosFont(WorkspaceText.rowTitle).lineLimit(3)
-                                        Text(assistantExecutionLabel(execution)).vosFont(WorkspaceText.meta).foregroundStyle(execution.state == "failed" ? palette.warning : .secondary)
-                                    }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(selected?.id == execution.id ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                                        .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(selected?.id == execution.id ? palette.accent.opacity(0.5) : .clear) }
+                                    WorkspaceCard(padding: 14, radius: WorkspaceMetrics.panelRadius) {
+                                        VStack(alignment: .leading, spacing: 7) {
+                                            Text(.init(execution.title)).vosFont(WorkspaceText.rowTitle).lineLimit(3)
+                                            Text(assistantExecutionLabel(execution)).vosFont(WorkspaceText.meta).foregroundStyle(execution.state == "failed" ? palette.warning : .secondary)
+                                        }
+                                        .background(selected?.id == execution.id ? palette.selection : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                                    }
+                                    .overlay {
+                                        if selected?.id == execution.id {
+                                            RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).stroke(palette.accent.opacity(0.5))
+                                        }
+                                    }
                                 }.buttonStyle(.plain)
                             }
                         }
@@ -172,10 +178,10 @@ struct AssistantExecutionView: View {
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                 Spacer()
                 if ["queued", "running"].contains(execution.state) {
-                    Button("取消代办") { confirmingCommand = .cancel }.disabled(saving)
+                    Button("取消代办") { confirmingCommand = .cancel }.buttonStyle(.workspaceSecondary).disabled(saving)
                 }
                 if execution.validity == "current", ["failed", "cancelled"].contains(execution.state) {
-                    Button("重新执行") { confirmingCommand = .retry }.disabled(saving)
+                    Button("重新执行") { confirmingCommand = .retry }.buttonStyle(.workspaceQuiet).disabled(saving)
                 }
             }
             ScrollView {
@@ -189,7 +195,7 @@ struct AssistantExecutionView: View {
                             HStack {
                                 Text("AI 交付物").vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.accent)
                                 Spacer()
-                                Button("保存完整报告…") { exportReport(execution) }
+                                Button("保存完整报告…") { exportReport(execution) }.buttonStyle(.workspaceSecondary)
                             }
                             AssistantReportView(report: report)
                             DisclosureGroup("查看完整报告原文") {
@@ -235,14 +241,14 @@ struct AssistantExecutionView: View {
                             if !(await model.attachAssistantResult(execution, questionID: questionID)) { error = model.assistantStatus }
                             saving = false
                         }
-                    }.disabled(questionID.isEmpty || saving)
+                    }.buttonStyle(.workspacePrimary).disabled(questionID.isEmpty || saving)
                     Spacer()
                     if let action = model.actionRecords.first(where: { $0.id == execution.actionID && $0.validity == "current" }) {
-                        Button("记录使用结果") { feedbackAction = action }.disabled(model.savingFeedback)
+                        Button("记录使用结果") { feedbackAction = action }.buttonStyle(.workspaceSecondary).disabled(model.savingFeedback)
                     }
                     Button("带着成果继续讨论") {
                         Task { if await model.beginAssistantDiscussion(execution) { showingDiscussion = true } }
-                    }.buttonStyle(.borderedProminent).tint(palette.accent)
+                    }.buttonStyle(.workspaceSecondary)
                         .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive || saving)
                 }
                 if execution.questionID != nil { Text("成果已关联主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
@@ -325,8 +331,8 @@ struct AssistantReportView: View {
                     ScrollView(.horizontal) {
                         Text(verbatim: block.text).vosFont(WorkspaceText.body.size, design: .monospaced).lineSpacing(5).textSelection(.enabled)
                             .padding(16)
-                    }.background(palette.canvas, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                        .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border,lineWidth:1) }
+                    }.background(palette.canvas, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                        .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.border,lineWidth:1) }
                 } else {
                     Text(inline(block.text))
                         .vosFont(block.heading == 1 ? WorkspaceText.pageTitle : block.heading > 0 ? WorkspaceText.sectionTitle : WorkspaceText.body)

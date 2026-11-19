@@ -14,22 +14,20 @@ struct KnowledgeReviewSection: View {
 
     var body: some View {
         if !sources.isEmpty {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Label("知识理解核查", systemImage: "text.magnifyingglass").vosFont(WorkspaceText.rowTitle)
-                Spacer()
-                if model.knowledgeReviewBusy { ProgressView().controlSize(.small) }
+        WorkspaceCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 12) {
+                WorkspaceSectionHeading(title: "知识核查") {
+                    if model.knowledgeReviewBusy { ProgressView().controlSize(.small) }
+                }
+                Text("对照原话检查事实、推断与适用条件。以下是有依据的 AI 核查建议，是否采纳由你决定；可标为已读、认可或驳回，已认可与已驳回的建议默认折叠。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                ForEach(sources) { source in
+                    sourceReview(source)
+                }
+                if !model.knowledgeReviewStatus.isEmpty {
+                    Text(model.knowledgeReviewStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                }
             }
-            Text("对照原话检查事实、推断与适用条件。以下是有依据的 AI 核查建议，是否采纳由你决定；可标为已读、认可或驳回，已认可与已驳回的建议默认折叠。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            ForEach(sources) { source in
-                sourceReview(source)
-            }
-            if !model.knowledgeReviewStatus.isEmpty {
-                Text(model.knowledgeReviewStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
-            }
-        }.padding(14)
-            .background(palette.accent.opacity(0.045), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius))
-            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius).stroke(palette.accent.opacity(0.15)) }
+        }
         }
     }
 
@@ -56,7 +54,7 @@ struct KnowledgeReviewSection: View {
                 case "failed":
                     Label("本次核查未完成", systemImage: "exclamationmark.circle").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                     if let error = record.error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled) }
-                    Button("重试知识核查") { Task { await model.reviewKnowledge(sourceID: source.id, retry: true) } }
+                    Button("重试知识核查") { Task { await model.reviewKnowledge(sourceID: source.id, retry: true) } }.buttonStyle(.workspaceSecondary)
                         .disabled(!canReview(source))
                 case "frozen":
                     Label("历史核查 · 原话或授权已变化", systemImage: "pause.circle").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
@@ -67,7 +65,7 @@ struct KnowledgeReviewSection: View {
                             issueList(record, issues: issues)
                         }
                     }
-                    Button("核查当前原文") { Task { await model.reviewKnowledge(sourceID: source.id) } }.disabled(!canReview(source))
+                    Button("核查当前原文") { Task { await model.reviewKnowledge(sourceID: source.id) } }.buttonStyle(.workspaceSecondary).disabled(!canReview(source))
                 case "completed":
                     let issues = record.issues.filter { matches($0, source: source) }
                     if record.issues.isEmpty {
@@ -84,7 +82,7 @@ struct KnowledgeReviewSection: View {
                 }
             } else {
                 Text("检查这份资料中可能的事实错误、缺失条件或推断跳跃，并保留查证来源。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-                Button("核查知识理解") { Task { await model.reviewKnowledge(sourceID: source.id) } }.disabled(!canReview(source))
+                Button("核查知识理解") { Task { await model.reviewKnowledge(sourceID: source.id) } }.buttonStyle(.workspacePrimary).disabled(!canReview(source))
             }
             if source.localOnly {
                 Text("这份原文仅本地。先在资料详情允许云端处理，再发起核查。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
@@ -103,8 +101,12 @@ struct KnowledgeReviewSection: View {
     @ViewBuilder private func issueList(_ record: KnowledgeReviewRecord, issues: [KnowledgeReviewIssue]) -> some View {
         let counts = record.issueCounts(of: issues)
         VStack(alignment: .leading, spacing: 10) {
-            Text("待核查 \(counts.pending) · 已读 \(counts.seen) · 已认可 \(counts.accepted) · 已驳回 \(counts.rejected)")
-                .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                WorkspaceBadge(text: "待核查 \(counts.pending)", tone: .warning)
+                WorkspaceBadge(text: "已读 \(counts.seen)", tone: .neutral)
+                WorkspaceBadge(text: "已认可 \(counts.accepted)", tone: .success)
+                WorkspaceBadge(text: "已驳回 \(counts.rejected)", tone: .neutral)
+            }
                 .accessibilityLabel("待核查 \(counts.pending) 条，已读 \(counts.seen) 条，已认可 \(counts.accepted) 条，已驳回 \(counts.rejected) 条")
             ForEach(record.openIssues(from: issues)) { issue in issueCard(issue, record: record) }
             let settled = record.settledIssues(from: issues)
@@ -141,6 +143,7 @@ struct KnowledgeReviewSection: View {
             KnowledgeReviewIssueStatusControls(model: model, record: record, issue: issue)
         }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
             .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.border, lineWidth: 1) }
     }
     @ViewBuilder private func field(_ title: String, _ text: String) -> some View {
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -177,7 +180,7 @@ struct KnowledgeReviewIssueStatusControls: View {
                 Button(actionLabel(state)) {
                     Task { await model.setKnowledgeReviewIssueState(state, reviewID: record.id, issueID: issue.id) }
                 }
-                .vosFont(WorkspaceText.meta).buttonStyle(.bordered).controlSize(.small)
+                .buttonStyle(state == .rejected ? WorkspaceButtonStyle.workspaceQuietCompact : WorkspaceButtonStyle.workspaceSecondaryCompact)
                 .disabled(record.issueState(issue.id) == state)
                 .accessibilityLabel(actionLabel(state) + "：" + issue.quote)
             }
