@@ -748,7 +748,7 @@ struct WorkspaceView: View {
                         })
                 } else {
                     RecentContentHome(model: model, openSource: { go(.source($0)) }, openSpan: { sourceID, spanID in
-                        sourceScrollPositions[sourceID] = ScrollPosition(id: "source-span-" + spanID)
+                        revealSourceSpan(sourceID, spanID: spanID)
                         go(.source(sourceID))
                     }, openTask: { go(.task($0)) }, capture: { go(.capture) })
                 }
@@ -1628,8 +1628,15 @@ struct WorkspaceView: View {
     private func openClaimSource(_ claim: CandidateClaim) {
         guard let reference=claim.references.first else { return }
         let spanExists=model.sourcePageIndex.recordsByID[reference.sourceID]?.spans.contains(where: { $0.id == reference.spanID }) == true
-        if spanExists { sourceScrollPositions[reference.sourceID]=ScrollPosition(id:"source-span-"+reference.spanID) }
+        if spanExists { revealSourceSpan(reference.sourceID, spanID: reference.spanID) }
         go(.source(reference.sourceID))
+    }
+    /// 锚点跳转前先展开「原文与回听」，否则收起状态下面板内锚点不存在，页面会停在顶部。
+    private func revealSourceSpan(_ sourceID: String, spanID: String) {
+        sourceScrollPositions[sourceID] = ScrollPosition(id: "source-span-" + spanID)
+        var state = sourceFoldStates[sourceID] ?? SourceFoldState.initial(transcript: nil)
+        state.original = true
+        sourceFoldStates[sourceID] = state
     }
     private var recentSearchChips: some View {
         ScrollView(.horizontal,showsIndicators:false) {
