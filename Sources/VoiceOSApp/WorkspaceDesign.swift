@@ -259,6 +259,7 @@ struct WorkspaceListRow<Trailing: View>: View {
     enum Density { case comfortable, compact }
     @Environment(\.workspacePalette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.vosTextScale) private var textScale
     var density: Density = .comfortable
     let title: String
     var subtitle: String = ""
@@ -292,11 +293,11 @@ struct WorkspaceListRow<Trailing: View>: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).vosFont(WorkspaceText.rowTitle)
                     .foregroundStyle(action == nil ? palette.disabledText : palette.text)
-                    .lineLimit(1)
+                    .lineLimit(textLineLimit)
                 if !subtitle.isEmpty {
                     Text(subtitle).vosFont(WorkspaceText.meta)
                         .foregroundStyle(action == nil ? palette.disabledText : palette.secondaryText)
-                        .lineLimit(1)
+                        .lineLimit(textLineLimit)
                 }
             }
             Spacer(minLength: 8)
@@ -319,6 +320,11 @@ struct WorkspaceListRow<Trailing: View>: View {
         if highlighted { return palette.selection }
         if hovered && action != nil { return palette.hover }
         return .clear
+    }
+
+    // Only 特大 (1.45) crosses 1.3; 大 (1.28) keeps the single-line row.
+    private var textLineLimit: Int {
+        textScale >= 1.3 ? 2 : 1
     }
 }
 
@@ -455,6 +461,7 @@ private struct WorkspaceButtonBody: View {
         configuration.label
             .vosFont(WorkspaceText.meta.size + 0.5, weight: .medium)
             .lineLimit(1)
+            .minimumScaleFactor(0.85)
             .padding(.horizontal, compact ? 9 : 12)
             .frame(minHeight: compact ? 25 : 29)
             .foregroundStyle(foreground)
@@ -519,6 +526,8 @@ struct WorkspaceBadge: View {
         Text(text)
             .monospacedDigit()
             .vosFont(WorkspaceText.caption.size, weight: .semibold)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
             .foregroundStyle(foreground)
             .padding(.horizontal, 7).padding(.vertical, 2.5)
             .background(tint.opacity(0.13), in: Capsule())
@@ -555,21 +564,31 @@ struct WorkspacePageHeading<Trailing: View>: View {
     @ViewBuilder var trailing: () -> Trailing
 
     var body: some View {
-        HStack(alignment: .top, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                if !eyebrow.isEmpty {
-                    Text(eyebrow)
-                        .vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced)
-                        .tracking(1.4).textCase(.uppercase).foregroundStyle(palette.accent)
-                }
-                Text(title).vosFont(WorkspaceText.pageTitle).accessibilityAddTraits(.isHeader)
-                if !subtitle.isEmpty {
-                    Text(subtitle).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                        .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
-                }
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 16) {
+                titleBlock
+                Spacer(minLength: 12)
+                trailing()
             }
-            Spacer(minLength: 12)
-            trailing()
+            VStack(alignment: .leading, spacing: 12) {
+                titleBlock
+                trailing()
+            }
+        }
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !eyebrow.isEmpty {
+                Text(eyebrow)
+                    .vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced)
+                    .tracking(1.4).textCase(.uppercase).foregroundStyle(palette.accent)
+            }
+            Text(title).vosFont(WorkspaceText.pageTitle).accessibilityAddTraits(.isHeader)
+            if !subtitle.isEmpty {
+                Text(subtitle).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                    .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
