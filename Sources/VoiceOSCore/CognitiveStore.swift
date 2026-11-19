@@ -263,6 +263,12 @@ extension VoiceOSStore {
         CandidateClaim(contentKind: row["reviewed_statement"] != nil && row["reviewed_statement"] != row["statement"] ? nil : row["content_kind"].flatMap(CognitiveContentKind.init(rawValue:)), id: row["id"]!, statement: row["reviewed_statement"] ?? row["statement"]!, ownership: row["reviewed_ownership"] ?? row["ownership"]!, evidenceState: row["evidence_state"]!, validity: row["validity"]!, references: try JSONDecoder().decode([ClaimReference].self, from: Data(row["refs_json"]!.utf8)), reviewVersion: Int(row["review_version"]!)!, reviewState: row["review_state"] ?? "pending")
     }
 
+    /// SQL predicate for an attempt that can own claims, used where
+    /// `model_attempts` is aliased as `a`. Topic organization also records
+    /// attempts, but writes no claims; it runs later over bundled sources, so it
+    /// must not hide the extraction attempt that a source's claims belong to.
+    static let claimExtractionAttemptFilter = "a.provider NOT LIKE 'english_feedback:%' AND a.prompt_version NOT IN ('topic-reading-v2','topic-skeleton-v1','topic-body-v1','topic-skeleton-merge-v1')"
+
     /// Batch source-facing view for the library: validate contexts and read claims
     /// once, rather than repeating both operations for every recording.
     public func latestCandidateClaimsBySource(includeFrozen: Bool = false) throws -> [String: [CandidateClaim]] {
@@ -271,7 +277,7 @@ extension VoiceOSStore {
             SELECT i.source_id,a.id
             FROM model_attempts a
             JOIN context_inputs i ON i.context_id=a.context_id
-            WHERE a.state='completed' AND a.provider NOT LIKE 'english_feedback:%'
+            WHERE a.state='completed' AND \(Self.claimExtractionAttemptFilter)
             ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC
             """) {
             if let sourceID = row["source_id"], latestAttemptBySource[sourceID] == nil {
@@ -300,7 +306,7 @@ extension VoiceOSStore {
             SELECT a.id
             FROM model_attempts a
             JOIN context_inputs i ON i.context_id=a.context_id
-            WHERE i.source_id=? AND a.state='completed' AND a.provider NOT LIKE 'english_feedback:%'
+            WHERE i.source_id=? AND a.state='completed' AND \(Self.claimExtractionAttemptFilter)
             -- created_at is intentionally human-readable and may have only
             -- second-level precision.  producer_sequence is the durable
             -- ordering authority for model results, including rapid retries.

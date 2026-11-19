@@ -388,7 +388,7 @@ extension VoiceOSStore {
     private func knowledgeReviewClaimVersions(sourceID: String) throws -> [String: Int]? {
         guard let attempt = try db.query("""
         SELECT a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
-        WHERE i.source_id=? AND a.state='completed' AND a.provider NOT LIKE 'english_feedback:%'
+        WHERE i.source_id=? AND a.state='completed' AND \(Self.claimExtractionAttemptFilter)
         ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC LIMIT 1
         """,[sourceID]).first?["id"] else { return [:] }
         var result: [String: Int] = [:]
