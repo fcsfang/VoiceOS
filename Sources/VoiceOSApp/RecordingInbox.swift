@@ -62,6 +62,7 @@ final class RecordingInbox: ObservableObject {
     private var rescanTask: Task<Void, Never>?
     private var rescanRequested = false
     private var rescanDelay: TimeInterval = 0
+    private var scheduledScanDelay: TimeInterval?
     private var observed: [String: String] = [:]
     private var contentDigests: [String: (stamp: String, digest: String)] = [:]
     private var receipts: Set<String> = []
@@ -123,7 +124,7 @@ final class RecordingInbox: ObservableObject {
         timer?.invalidate(); timer = nil
         for watch in watchers.values { watch.cancel() }
         watchers = [:]
-        rescanTask?.cancel(); rescanTask = nil; rescanRequested = false; rescanDelay = 0
+        rescanTask?.cancel(); rescanTask = nil; rescanRequested = false; rescanDelay = 0; scheduledScanDelay = nil
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
         if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
         wakeObserver = nil; activationObserver = nil
@@ -170,10 +171,12 @@ final class RecordingInbox: ObservableObject {
     }
     private func scheduleScan(after delay: TimeInterval) {
         rescanTask?.cancel()
+        scheduledScanDelay = delay
         rescanTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(delay)) } catch { return }
             guard let self, !Task.isCancelled else { return }
             self.rescanTask = nil
+            self.scheduledScanDelay = nil
             await self.scan()
         }
     }
@@ -188,6 +191,14 @@ final class RecordingInbox: ObservableObject {
             return
         }
         rescanDelay = unstable ? delay : 0
+        scheduleScan(after: delay)
+    }
+    /// finish() sets nextAttempt long after the batch scan already returned, so a retry needs
+    /// its own one-shot wake; otherwise the event-driven inbox would stay idle past the due time.
+    private func scheduleRetryWake() {
+        guard started else { return }
+        let next = items.values.compactMap(\.nextAttempt).filter { $0 > now() }.min()
+        guard let delay = RecordingInboxScanPacing.retryWakeDelay(nextAttempt: next, pendingScanDelay: scheduledScanDelay, now: now()) else { return }
         scheduleScan(after: delay)
     }
 
@@ -227,11 +238,15 @@ final class RecordingInbox: ObservableObject {
         folders.append(.init(path: url.path, voiceMemos: voiceMemos, bookmark: bookmark, baseline: baseline))
         if url.startAccessingSecurityScopedResource() { scopedURLs.append(url) }
         save(); refreshWatchers(); status = "已连接 · 只处理今后新增或更新的录音，已有 \(baseline.count) 份素材留在原处"
+        // A file landing between the baseline read and watcher installation would otherwise wait
+        // for an external event; one scan right after wiring the watcher closes that gap.
+        requestScan(after: 0.3)
     }
     func setEnabled(_ folder: RecordingInboxFolder, _ enabled: Bool) {
         guard let index = folders.firstIndex(where: { $0.id == folder.id }) else { return }
         folders[index].enabled = enabled; save(); refreshWatchers()
         status = enabled ? "已恢复接收新录音" : "已暂停这个入口"
+        if enabled { requestScan(after: 0.3) }
     }
     func removeFolder(_ folder: RecordingInboxFolder) {
         guard let index = folders.firstIndex(where: { $0.id == folder.id }) else { return }
@@ -307,6 +322,7 @@ final class RecordingInbox: ObservableObject {
             status = "素材需要处理后再重试；原件保留"
         }
         activeFolderID = nil; save()
+        scheduleRetryWake()
     }
     func open(_ folder: RecordingInboxFolder) { NSWorkspace.shared.open(URL(fileURLWithPath: folder.path)) }
     func openPrivacySettings() { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!) }
@@ -344,6 +360,7 @@ final class RecordingInbox: ObservableObject {
         guard !scanning else { rescanRequested = true; return }
         guard activeFolderID == nil else { requestScan(after: 10); return }
         rescanTask?.cancel(); rescanTask = nil
+        scheduledScanDelay = nil
         rescanRequested = false
         scanning = true; defer { scanning = false }
         var unstable = false

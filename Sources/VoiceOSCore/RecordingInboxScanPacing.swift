@@ -22,4 +22,13 @@ public enum RecordingInboxScanPacing {
         if let due = followUp.nextAttempt, due > now { return due.timeIntervalSince(now) }
         return nil
     }
+
+    /// Retry wakeups happen after a batch scan has already returned, so a pending retry needs
+    /// its own one-shot scan. Never postpone a scan that is already due sooner.
+    public static func retryWakeDelay(nextAttempt: Date?, pendingScanDelay: TimeInterval?, now: Date) -> TimeInterval? {
+        guard let nextAttempt, nextAttempt > now else { return nil }
+        let delay = max(0.5, nextAttempt.timeIntervalSince(now))
+        if let pendingScanDelay, pendingScanDelay <= delay { return nil }
+        return delay
+    }
 }

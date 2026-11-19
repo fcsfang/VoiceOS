@@ -23,4 +23,14 @@ final class RecordingInboxScanPacingChecks: XCTestCase {
         let overdue = RecordingInboxScanPacing.FollowUp(nextAttempt: now.addingTimeInterval(-1))
         XCTAssertNil(RecordingInboxScanPacing.delay(for: overdue, after: 0, now: now))
     }
+
+    func testRetryWakeArmsOnlyWhenSoonerThanPendingScan() {
+        let now = Date(timeIntervalSince1970: 8_000)
+        let due = now.addingTimeInterval(60)
+        XCTAssertEqual(RecordingInboxScanPacing.retryWakeDelay(nextAttempt: due, pendingScanDelay: nil, now: now), 60)
+        XCTAssertEqual(RecordingInboxScanPacing.retryWakeDelay(nextAttempt: due, pendingScanDelay: 120, now: now), 60)
+        XCTAssertNil(RecordingInboxScanPacing.retryWakeDelay(nextAttempt: due, pendingScanDelay: 10, now: now))
+        XCTAssertNil(RecordingInboxScanPacing.retryWakeDelay(nextAttempt: nil, pendingScanDelay: nil, now: now))
+        XCTAssertNil(RecordingInboxScanPacing.retryWakeDelay(nextAttempt: now.addingTimeInterval(-60), pendingScanDelay: nil, now: now))
+    }
 }
