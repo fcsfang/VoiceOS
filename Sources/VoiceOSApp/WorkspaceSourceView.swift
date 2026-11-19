@@ -287,13 +287,20 @@ struct WorkspaceSourceView: View {
         case .failed(let message): WorkspaceNoticeText(message:"原文版本读取失败：" + message,severity:.danger)
         }
     }
-    @ViewBuilder private func relatedActionRow(_ action: ActionRecord, in list: [ActionRecord]) -> some View {
+    @ViewBuilder private func relatedActionRow(_ action: ActionRecord, in list: [ActionRecord], reads: ActionRowReads) -> some View {
+        let reminder=actionReminderMeta(action,reads:reads)
         if let delivery=model.assistantExecutions.first(where: { $0.actionID == action.id && $0.validity == "current" && $0.state == "completed" }) {
-            WorkspaceRow(title:action.title,subtitle:"AI 已交付",icon:"doc.text",trailing:"阅读结果") { openDelivery(delivery.id) }
+            WorkspaceRow(title:action.title,subtitle:actionSubtitle("AI 已交付",reminder:reminder),icon:"doc.text",trailing:"阅读结果") { openDelivery(delivery.id) }
         } else {
-            WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),icon:"circle") { openTask(action.id) }
+            WorkspaceRow(title:action.title,subtitle:actionSubtitle(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),reminder:reminder),icon:"circle") { openTask(action.id) }
         }
         if action.id != list.last?.id { Divider() }
+    }
+    private func actionReminderMeta(_ action: ActionRecord, reads: ActionRowReads) -> String {
+        ActionRowLayout.reminderSummary(linkState:reads.reminderLinkStateByActionID[action.id],due:reads.reminderDueByActionID[action.id]) ?? ""
+    }
+    private func actionSubtitle(_ base: String, reminder: String) -> String {
+        reminder.isEmpty ? base : base + " · " + reminder
     }
     private func loadHistory() {
         historyTask?.cancel()
@@ -537,6 +544,7 @@ struct WorkspaceSourceView: View {
     private var readingScrollView: some View {
         ScrollView {
             LazyVStack(alignment:.leading,spacing:WorkspaceMetrics.sectionGap) {
+                let reminderReads=ActionRowReads(reminderLinks:model.reminderLinks,executions:model.assistantExecutions)
                 VStack(alignment:.leading,spacing:10) {
                     HStack(alignment:.top,spacing:16) {
                         WorkspaceHeading(eyebrow:(source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + " · " + source.recordingSubtitle,title:readingTitle)
@@ -622,7 +630,7 @@ struct WorkspaceSourceView: View {
                         if !pausedActions.isEmpty {
                             Text("受影响的任务与问题").vosFont(WorkspaceText.rowTitle)
                             ForEach(pausedActions) { action in
-                                WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看任务") { openTask(action.id) }
+                                WorkspaceRow(title:action.title,subtitle:actionSubtitle(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),reminder:actionReminderMeta(action,reads:reminderReads)),trailing:"查看任务") { openTask(action.id) }
                                 WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
                             }
                         }
@@ -654,7 +662,7 @@ struct WorkspaceSourceView: View {
                 if pausedThoughts.isEmpty && !pausedActions.isEmpty {
                     WorkspaceSection(title:"观点已更正，关联待办需要重新确认",icon:"pause.circle",count:pausedActions.count) {
                         ForEach(pausedActions) { action in
-                            WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看与处理") { openTask(action.id) }
+                            WorkspaceRow(title:action.title,subtitle:actionSubtitle(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),reminder:actionReminderMeta(action,reads:reminderReads)),trailing:"查看与处理") { openTask(action.id) }
                             WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
                         }
                     }
@@ -664,12 +672,12 @@ struct WorkspaceSourceView: View {
                 let currentGoals = currentActions.filter { $0.kind != "task" }
                 if !currentTasks.isEmpty {
                     WorkspaceSection(title:"待办",icon:"checkmark.circle",count:currentTasks.count) {
-                        ForEach(currentTasks) { action in relatedActionRow(action, in: currentTasks) }
+                        ForEach(currentTasks) { action in relatedActionRow(action, in: currentTasks, reads: reminderReads) }
                     }
                 }
                 if !currentGoals.isEmpty {
                     WorkspaceSection(title:"问题与目标",subtitle:"不计为已承诺待办。",icon:"lightbulb",count:currentGoals.count) {
-                        ForEach(currentGoals) { action in relatedActionRow(action, in: currentGoals) }
+                        ForEach(currentGoals) { action in relatedActionRow(action, in: currentGoals, reads: reminderReads) }
                     }
                 }
                 if let review {
@@ -740,7 +748,7 @@ struct WorkspaceSourceView: View {
                     if let failure=contextPhase.failure { SourceLoadFailureText(text:"节目关联读取失败："+failure) }
                     if !historyActions.isEmpty {
                         DisclosureGroup("之前提取的任务与完成记录（\(historyActions.count)）") {
-                            ForEach(historyActions) { action in WorkspaceRow(title:action.title,subtitle:model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),trailing:"查看记录") { openTask(action.id) } }
+                            ForEach(historyActions) { action in WorkspaceRow(title:action.title,subtitle:actionSubtitle(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),reminder:actionReminderMeta(action,reads:reminderReads)),trailing:"查看记录") { openTask(action.id) } }
                         }
                     }
                     if !outlineSections.isEmpty {

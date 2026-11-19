@@ -49,7 +49,47 @@ public struct ActionRowFacts: Sendable {
     public var externalCompletion = false
     public var withdrawn = false
     public var localUnsynced = false
+    /// Latest observed link state, whatever it is; nil when the action never
+    /// reached Reminders. Display-only: the sync state machine owns the write path.
+    public var reminderLinkState: String? = nil
+    /// The newest due date the reminder readback observed for this action.
+    public var reminderDue: ReminderDueDate? = nil
     public init() {}
+}
+
+/// One fold per action-page body: reminder links and analysis runs are read
+/// per row, so index them by action instead of scanning the arrays again.
+public struct ActionRowReads: Sendable {
+    public let linkedReminderByActionID: [String: ReminderLink]
+    public let reminderLinkStateByActionID: [String: String]
+    public let reminderDueByActionID: [String: ReminderDueDate]
+    public let latestAnalysisStateByActionID: [String: String]
+    public init(reminderLinks: [ReminderLink], executions: [AssistantExecutionRecord]) {
+        var newestLinks: [String: ReminderLink] = [:]
+        for link in reminderLinks {
+            if let existing = newestLinks[link.actionID], (existing.lastObservedAt ?? "") >= (link.lastObservedAt ?? "") { continue }
+            newestLinks[link.actionID] = link
+        }
+        var linked: [String: ReminderLink] = [:]
+        var states: [String: String] = [:]
+        var due: [String: ReminderDueDate] = [:]
+        for (actionID, link) in newestLinks {
+            if link.state == "linked" { linked[actionID] = link }
+            states[actionID] = link.state
+            if let date = link.remoteDueDate, date != .none { due[actionID] = date }
+        }
+        var statesByNewest: [String: String] = [:]
+        var newest: [String: String] = [:]
+        for execution in executions where execution.mode == .analysis && execution.validity == "current" {
+            if let current = newest[execution.actionID], current >= execution.updatedAt { continue }
+            newest[execution.actionID] = execution.updatedAt
+            statesByNewest[execution.actionID] = execution.state
+        }
+        linkedReminderByActionID = linked
+        reminderLinkStateByActionID = states
+        reminderDueByActionID = due
+        latestAnalysisStateByActionID = statesByNewest
+    }
 }
 
 public enum ActionRowLayout {
@@ -64,14 +104,16 @@ public enum ActionRowLayout {
         return counts
     }
 
-    /// Line two carries one fact: the due date when there is one, otherwise the
-    /// source. The status slot carries exceptions and, on a goal, the open
-    /// next-action count. A goal with no next actions shows nothing here; the
-    /// page banner already says so.
-    public static func status(_ facts: ActionRowFacts) -> ActionRowStatus {
+    /// Line two carries one fact: the reminder chain when the action reached
+    /// Reminders, otherwise the local due date, otherwise the source. The status
+    /// slot carries exceptions and, on a goal, the open next-action count. A goal
+    /// with no next actions shows nothing here; the page banner already says so.
+    public static func status(_ facts: ActionRowFacts, now: Date = Date(), calendar: Calendar = .current) -> ActionRowStatus {
         var meta = ""
         if facts.group == .completed, !facts.completedAt.isEmpty {
             meta = facts.completedAt
+        } else if let reminder = reminderSummary(linkState: facts.reminderLinkState, due: facts.reminderDue, now: now, calendar: calendar) {
+            meta = reminder
         } else if let due = facts.due, !due.isEmpty {
             meta = due
         } else if let source = facts.sourceTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !source.isEmpty {
@@ -99,5 +141,67 @@ public enum ActionRowLayout {
             return row("\(facts.nextStepCount) 个下一步", .secondary)
         }
         return row("", .secondary)
+    }
+
+    /// The reminder chain on line two: what the linked reminder is doing, then
+    /// the due date it carries. An overdue date keeps the absolute month and day
+    /// so a stale reminder is never mistaken for a fresh one.
+    public static func reminderSummary(linkState: String?, due: ReminderDueDate?, now: Date = Date(), calendar: Calendar = .current) -> String? {
+        let label: String
+        switch linkState {
+        case "linked": label = "已写入提醒事项"
+        case "conflict": label = "提醒待核对"
+        case "missing": label = "提醒缺失"
+        default: return nil
+        }
+        guard let due, due != .none, let day = day(for: due, calendar: calendar) else { return label }
+        if calendar.startOfDay(for: day) < calendar.startOfDay(for: now) {
+            return label + " · 已逾期 " + monthDayLabel(day, calendar: calendar)
+        }
+        return label + " · " + relativeDayLabel(due, now: now, calendar: calendar)
+    }
+
+    /// Today, tomorrow, yesterday and the coming week read as words; anything
+    /// further out falls back to the month and day.
+    public static func relativeDayLabel(_ due: ReminderDueDate, now: Date = Date(), calendar: Calendar = .current) -> String {
+        guard let day = day(for: due, calendar: calendar) else { return "" }
+        let diff = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: day)).day ?? 0
+        switch diff {
+        case 0: return "今天"
+        case 1: return "明天"
+        case -1: return "昨天"
+        case 2...6: return weekdays[calendar.component(.weekday, from: day) - 1]
+        default: return monthDayLabel(day, calendar: calendar)
+        }
+    }
+
+    /// Line two for a local schedule, which is a pledge the user made before
+    /// any reminder readback exists.
+    public static func dueSummary(_ due: ReminderDueDate, isOverdue: Bool, now: Date = Date(), calendar: Calendar = .current) -> String {
+        guard let day = day(for: due, calendar: calendar) else { return "" }
+        return isOverdue ? "已逾期 " + monthDayLabel(day, calendar: calendar) : "到期 " + relativeDayLabel(due, now: now, calendar: calendar)
+    }
+
+    private static let weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"]
+
+    private static func monthDayLabel(_ day: Date, calendar: Calendar) -> String {
+        let components = calendar.dateComponents([.month, .day], from: day)
+        return "\(components.month ?? 0)月\(components.day ?? 0)日"
+    }
+
+    private static func day(for due: ReminderDueDate, calendar: Calendar) -> Date? {
+        switch due {
+        case .none:
+            return nil
+        case let .dateOnly(localDate, zoneID):
+            var zoneCalendar = Calendar(identifier: .gregorian)
+            zoneCalendar.timeZone = zoneID.flatMap(TimeZone.init(identifier:)) ?? calendar.timeZone
+            let parts = localDate.split(separator: "-").compactMap { Int($0) }
+            guard parts.count == 3 else { return nil }
+            return zoneCalendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+        case let .instant(utc, _):
+            if let date = ActionTimeFormatting.isoFractional.date(from: utc) { return date }
+            return ActionTimeFormatting.iso.date(from: utc)
+        }
     }
 }

@@ -194,6 +194,36 @@ final class ActionRowStatusChecks: XCTestCase {
         XCTAssertEqual(row.meta, "来自『早餐时的想法』")
         XCTAssertEqual(row.status, "已登记完成")
     }
+
+    private func reminderRow(state: String, due: ReminderDueDate) -> ActionRowStatus {
+        var facts = ActionRowFacts()
+        facts.reminderLinkState = state
+        facts.reminderDue = due
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 19, hour: 10))!
+        return ActionRowLayout.status(facts, now: now, calendar: calendar)
+    }
+
+    func testReminderMetaShowsLinkedDueToday() {
+        let row = reminderRow(state: "linked", due: .dateOnly(localDate: "2026-11-19", timeZone: nil))
+        XCTAssertEqual(row.meta, "已写入提醒事项 · 今天")
+    }
+
+    func testReminderMetaShowsLinkedDueTomorrow() {
+        let row = reminderRow(state: "linked", due: .dateOnly(localDate: "2026-11-20", timeZone: nil))
+        XCTAssertEqual(row.meta, "已写入提醒事项 · 明天")
+    }
+
+    func testReminderMetaShowsConflictOverdueDate() {
+        let row = reminderRow(state: "conflict", due: .dateOnly(localDate: "2026-11-18", timeZone: nil))
+        XCTAssertEqual(row.meta, "提醒待核对 · 已逾期 11月18日")
+    }
+
+    func testReminderMetaFallsBackToMonthDayBeyondAWeek() {
+        let row = reminderRow(state: "linked", due: .dateOnly(localDate: "2026-12-01", timeZone: nil))
+        XCTAssertEqual(row.meta, "已写入提醒事项 · 12月1日")
+    }
 }
 
 final class ActionCompletionTimeChecks: XCTestCase {
