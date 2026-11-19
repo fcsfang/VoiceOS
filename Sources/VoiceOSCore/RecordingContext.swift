@@ -105,6 +105,7 @@ public struct SourcePageIndex: Sendable {
     private let actionPositionByID: [String: Int]
     private let actionIDsBySourceID: [String: [String]]
     private let reviewRequiredActionIDs: Set<String>
+    private let openActionIDsBySourceID: [String: Set<String>]
     private let allActionByID: [String: ActionRecord]
     /// Task-kind actions that need review, in workspace order. The same set
     /// `workspacePausedTasks` derives; dismissed actions never pause.
@@ -175,6 +176,16 @@ public struct SourcePageIndex: Sendable {
         for action in actions where action.kind == "task" && reviewRequired.contains(action.id) { paused.append(action) }
         pausedTasks = paused
 
+        var openActionIDsBySourceID: [String: Set<String>] = [:]
+        for action in actionByID.values where action.kind == "task" && action.state == "open"
+            && action.validity == "current" && !reviewRequired.contains(action.id) {
+            guard let claim = claimByID[action.claimID] else { continue }
+            for sourceID in Set(claim.references.map(\.sourceID)) {
+                openActionIDsBySourceID[sourceID, default: []].insert(action.id)
+            }
+        }
+        self.openActionIDsBySourceID = openActionIDsBySourceID
+
         transcriptReviewPoints = records.compactMap { source -> WorkspaceTranscriptReviewPoint? in
             guard !source.isTrashed, !source.isArchived else { return nil }
             let count = source.unresolvedTranscriptionIssueCount
@@ -239,6 +250,14 @@ public struct SourcePageIndex: Sendable {
     /// The same decision `ControlCenter.workspaceTaskRequiresReview` makes.
     public func requiresReview(_ actionID: String) -> Bool {
         reviewRequiredActionIDs.contains(actionID)
+    }
+
+    /// Open, current tasks still to do for any of these materials. One
+    /// snapshot lookup per source; expression rows union their members.
+    public func openActionCount(for sourceIDs: Set<String>) -> Int {
+        var ids: Set<String> = []
+        for sourceID in sourceIDs { ids.formUnion(openActionIDsBySourceID[sourceID] ?? []) }
+        return ids.count
     }
 
     /// Expressions validated for the source page, keyed by source. Materials

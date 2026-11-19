@@ -232,10 +232,11 @@ private struct WorkspaceAttentionDot: View {
     @ObservedObject var inbox: RecordingInbox
     let open: () -> Void
     var body: some View {
-        let count = model.workspaceAttentionCount
+        let attention = model.workspaceAttentionSnapshot
+        let count = attention.count
         let inboxNeedsAttention = inbox.pendingItems.contains(where: { $0.state == .needsAttention }) || !inbox.folderErrors.isEmpty
         if count > 0 || inboxNeedsAttention {
-            let title = count > 0 ? "有 \(count) 项需要查看" : "有事项需要查看"
+            let title = count > 0 ? attentionTitle(attention) : "有事项需要查看"
             Button(action:open) {
                 HStack(spacing:7) {
                     Circle().fill(.orange).frame(width:7,height:7)
@@ -243,6 +244,11 @@ private struct WorkspaceAttentionDot: View {
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).help("打开处理情况").accessibilityLabel(title + "，打开处理情况")
         }
+    }
+    private func attentionTitle(_ attention: WorkspaceAttentionSnapshot) -> String {
+        guard attention.transcriptIssueCount > 0 else { return "有 \(attention.count) 项需要查看" }
+        let issues = "转写疑点 \(attention.transcriptIssueCount)"
+        return attention.otherCount > 0 ? issues + " · 其他 \(attention.otherCount)" : issues
     }
 }
 struct WorkspaceView: View {
@@ -1880,7 +1886,12 @@ struct WorkspaceView: View {
         let issues=source.unresolvedTranscriptionIssueCount
         let reading:(text:String,color:Color)? = issues > 0 ? ("疑点 \(issues)",palette.warning) : materialReadingStatus(source.id)
         let groupNote=reason ?? (model.sourcePageIndex.expressionIssue(for: source.id) != nil ? "分组待重新判断" : nil)
-        return WorkspaceRow(title:displayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:first.recordingDateLabel + " · " + origin + (source.localOnly ? " · 仅本地" : "") + (groupNote.map { " · " + $0 } ?? ""),icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:reading?.text ?? "",trailingStyle:reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary,statusAccessibility:reading?.text ?? "",trailingGutter:trailingGutter) { go(.source(source.id)) }
+        let metadata=origin + (source.localOnly ? " · 仅本地" : "") + (groupNote.map { " · " + $0 } ?? "")
+        let openCount=model.sourcePageIndex.openActionCount(for:Set(expression?.sourceIDs ?? [source.id]))
+        let trailingText=openCount > 0 ? "\(openCount) 条待办" + (issues > 0 ? " · 疑点 \(issues)" : "") : reading?.text ?? ""
+        let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .status(palette.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
+        return WorkspaceRow(title:displayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:first.recordingDateLabel,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingText,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter) { go(.source(source.id)) }
+            .help(metadata)
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
                 Button("标为在读") { setMaterialReading(source.id,.reading) }
@@ -2878,14 +2889,18 @@ private extension View {
     func materialCard(highlighted: Bool) -> some View { modifier(MaterialCard(highlighted: highlighted)) }
 }
 
+/// A material row's compact menu stays hidden until hover or keyboard reveal.
+/// A failed operation keeps it visible so the failure note and retry never
+/// disappear with the pointer.
 private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
     @Environment(\.workspacePalette) private var palette
     var revealed: Bool = false
     @ViewBuilder let menu: () -> MenuContent
     @ViewBuilder let row: () -> Row
     @State private var hovered = false
+    @State private var menuContentNeedsAttention = false
 
-    private var menuVisible: Bool { hovered || revealed }
+    private var menuVisible: Bool { hovered || revealed || menuContentNeedsAttention }
 
     var body: some View {
         row()
@@ -2899,9 +2914,15 @@ private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
                     .opacity(menuVisible ? 1 : 0)
                     .allowsHitTesting(menuVisible)
             }
+            .onPreferenceChange(MaterialRowFailurePreferenceKey.self) { menuContentNeedsAttention = $0 }
             .onHover { hovered=$0 }
             .animation(.easeOut(duration:0.12),value:menuVisible)
     }
+}
+
+struct MaterialRowFailurePreferenceKey: PreferenceKey {
+    static var defaultValue: Bool { false }
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
 }
 
 private struct ActionCardList<Content: View>: View {
