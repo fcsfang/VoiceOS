@@ -587,3 +587,11 @@
 - 待办：dist 重建、真机截图目视验收（102+103）、102/103 对抗审查、103-E 共享 WorkspaceHeading 已随 07ee5f0 完成。
 - 安装：dist 重建 exit 0（二进制 03:32:50）；preflight 直接执行返回 0（safe idle=7676s）；重启后 pid 9357。
 - 验证顺延：显示器处于休眠，screencapture 全屏为黑帧，SCStream 报 -3811，AX dump 仅返回 truncated:true；本轮无法做真机截图与 AX 结构验收。启动对账 CPU 回落后（<20% 连续 15 秒）问题依旧，属已知环境退化。视觉验收待显示器唤醒后补做；测试与构建证据为 662 项 0 失败、dist exit 0。
+
+## 波 104 视觉收尾（2026-11-20，已合并待安装）
+
+- 104-A 处理页与活动视图：24 个旧分节 + 10 个活动分节改 WorkspaceCard + WorkspaceSectionHeading；13 处 attention 状态与提醒回读异常改徽标；39 个按钮换档（系统蓝清零）；「停止并整理」primary、丢弃 destructive。
+- 104-B 工作台残余：7 处 borderedProminent、确认按钮、标题编辑器、收件箱按钮全部落档；三条未完成素材状态改徽标；收件箱启用为唯一 primary。
+- 104-C 反思与讨论：五个视图按钮分档、卡片化、编辑器表面化；图视图只动外围控件。
+- 104-D 澄清队列、提醒排期、回访卡片：主次按钮与徽标，当前条目标题块 WorkspaceCard。
+- 集成：四分支合并后 662 项 0 失败。
