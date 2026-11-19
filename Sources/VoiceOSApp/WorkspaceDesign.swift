@@ -425,3 +425,203 @@ extension View {
         background(WindowCanvasTint(color: color))
     }
 }
+
+// MARK: - Action buttons
+
+/// One button vocabulary for the whole app. Primary fills with the ink color
+/// and appears at most once per view; secondary carries a hairline border for
+/// every other action; quiet is accent text with no chrome.
+struct WorkspaceButtonStyle: ButtonStyle {
+    enum Emphasis { case primary, secondary, quiet, destructive }
+    var emphasis: Emphasis = .secondary
+    var compact = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        WorkspaceButtonBody(configuration: configuration, emphasis: emphasis, compact: compact)
+    }
+}
+
+private struct WorkspaceButtonBody: View {
+    @Environment(\.workspacePalette) private var palette
+    @Environment(\.isEnabled) private var isEnabled
+    let configuration: ButtonStyle.Configuration
+    let emphasis: WorkspaceButtonStyle.Emphasis
+    let compact: Bool
+    @State private var hovered = false
+
+    private var radius: CGFloat { 7 }
+
+    var body: some View {
+        configuration.label
+            .vosFont(WorkspaceText.meta.size + 0.5, weight: .medium)
+            .lineLimit(1)
+            .padding(.horizontal, compact ? 9 : 12)
+            .frame(minHeight: compact ? 25 : 29)
+            .foregroundStyle(foreground)
+            .background(background, in: RoundedRectangle(cornerRadius: radius))
+            .overlay {
+                if emphasis == .secondary {
+                    RoundedRectangle(cornerRadius: radius).strokeBorder(palette.border, lineWidth: 1)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: radius))
+            .opacity(opacity)
+            .onHover { hovered = $0 }
+    }
+
+    private var foreground: Color {
+        switch emphasis {
+        case .primary: palette.canvas
+        case .secondary: palette.text
+        case .quiet: palette.accent
+        case .destructive: palette.danger
+        }
+    }
+
+    private var background: Color {
+        switch emphasis {
+        case .primary: palette.text
+        case .secondary: hovered ? palette.hover : palette.surface
+        case .quiet, .destructive: hovered ? palette.hover : .clear
+        }
+    }
+
+    private var opacity: Double {
+        if !isEnabled { return 0.4 }
+        return configuration.isPressed ? 0.72 : 1
+    }
+}
+
+extension ButtonStyle where Self == WorkspaceButtonStyle {
+    /// The single committed action on a surface.
+    static var workspacePrimary: WorkspaceButtonStyle { .init(emphasis: .primary) }
+    /// Every other action: visible, bordered, never reading as disabled.
+    static var workspaceSecondary: WorkspaceButtonStyle { .init(emphasis: .secondary) }
+    /// Accent text actions embedded in copy or headers.
+    static var workspaceQuiet: WorkspaceButtonStyle { .init(emphasis: .quiet) }
+    static var workspaceDestructive: WorkspaceButtonStyle { .init(emphasis: .destructive) }
+    /// Smaller secondary for dense rows.
+    static var workspaceSecondaryCompact: WorkspaceButtonStyle { .init(emphasis: .secondary, compact: true) }
+    static var workspaceQuietCompact: WorkspaceButtonStyle { .init(emphasis: .quiet, compact: true) }
+}
+
+// MARK: - Badges
+
+/// Counts and states share one capsule. Neutral carries counts, accent an
+/// active outcome, warning an unresolved conflict.
+struct WorkspaceBadge: View {
+    enum Tone { case neutral, accent, warning, danger, success }
+    @Environment(\.workspacePalette) private var palette
+    let text: String
+    var tone: Tone = .neutral
+
+    var body: some View {
+        Text(text)
+            .monospacedDigit()
+            .vosFont(WorkspaceText.caption.size, weight: .semibold)
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 7).padding(.vertical, 2.5)
+            .background(tint.opacity(0.13), in: Capsule())
+            .accessibilityLabel(text)
+    }
+
+    private var foreground: Color {
+        switch tone {
+        case .neutral: palette.secondaryText
+        case .accent: palette.accent
+        case .warning: palette.warning
+        case .danger: palette.danger
+        case .success: palette.success
+        }
+    }
+
+    private var tint: Color {
+        switch tone {
+        case .neutral: palette.text
+        default: foreground
+        }
+    }
+}
+
+// MARK: - Page and section headers
+
+/// Every page opens with the same block: optional eyebrow, a page title, an
+/// optional one-line explanation, and actions pinned to the right.
+struct WorkspacePageHeading<Trailing: View>: View {
+    @Environment(\.workspacePalette) private var palette
+    var eyebrow: String = ""
+    let title: String
+    var subtitle: String = ""
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                if !eyebrow.isEmpty {
+                    Text(eyebrow)
+                        .vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced)
+                        .tracking(1.4).textCase(.uppercase).foregroundStyle(palette.accent)
+                }
+                Text(title).vosFont(WorkspaceText.pageTitle).accessibilityAddTraits(.isHeader)
+                if !subtitle.isEmpty {
+                    Text(subtitle).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                        .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 12)
+            trailing()
+        }
+    }
+}
+
+extension WorkspacePageHeading where Trailing == EmptyView {
+    init(eyebrow: String = "", title: String, subtitle: String = "") {
+        self.init(eyebrow: eyebrow, title: title, subtitle: subtitle) { EmptyView() }
+    }
+}
+
+/// A section inside a page: title, optional count, trailing actions.
+struct WorkspaceSectionHeading<Trailing: View>: View {
+    @Environment(\.workspacePalette) private var palette
+    let title: String
+    var count: String? = nil
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(title).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
+            if let count {
+                Text(count).monospacedDigit().vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+            }
+            Spacer(minLength: 8)
+            trailing()
+        }
+    }
+}
+
+extension WorkspaceSectionHeading where Trailing == EmptyView {
+    init(_ title: String, count: String? = nil) {
+        self.init(title: title, count: count) { EmptyView() }
+    }
+}
+
+// MARK: - Cards
+
+/// Raised content surface. All cards share the same radius, padding rhythm and
+/// hairline, so a page never drifts into a different container style.
+struct WorkspaceCard<Content: View>: View {
+    @Environment(\.workspacePalette) private var palette
+    var padding: CGFloat = 20
+    var radius: CGFloat = WorkspaceMetrics.sectionRadius
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(padding)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: radius))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius).strokeBorder(palette.border, lineWidth: 1)
+            }
+    }
+}
