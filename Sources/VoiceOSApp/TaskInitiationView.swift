@@ -46,12 +46,17 @@ struct TaskInitiationView: View {
     }
     private var overLimit: Bool { model.initiationText.unicodeScalars.count > 4000 }
     private let packageAnchor = "initiation.package"
+    /// One primary per state: the composer yields to the package's own action.
+    private var generateStyle: WorkspaceButtonStyle {
+        guard let record = selected else { return .workspacePrimary }
+        return record.route == .captureOnly && !record.isClarifying ? .workspacePrimary : .workspaceSecondary
+    }
 
     var body: some View {
         ScrollViewReader { reader in
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
-                    WorkspaceHeading(eyebrow: "", title: "启动")
+                    WorkspacePageHeading(title: "启动")
                     composer
                     if let record = selected { package(record).id(packageAnchor) }
                     history
@@ -109,7 +114,7 @@ struct TaskInitiationView: View {
                     }
                 }
                 HStack(spacing: 12) {
-                    Menu("从最近材料带入") {
+                    Menu {
                         if materialSources.isEmpty { Button("还没有可用的个人原话") {}.disabled(true) }
                         ForEach(materialSources.prefix(20)) { source in
                             Button(source.displayTitle) {
@@ -117,10 +122,12 @@ struct TaskInitiationView: View {
                                 model.initiationSourceID = source.id
                             }
                         }
-                    }.fixedSize()
+                    } label: {
+                        Text("从最近材料带入")
+                    }.menuStyle(.button).buttonStyle(.workspaceSecondary).fixedSize()
                     Spacer()
                     Text("\(model.initiationText.unicodeScalars.count) / 4000 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true)
-                        .foregroundStyle(overLimit ? palette.danger : .secondary)
+                        .foregroundStyle(overLimit ? palette.danger : palette.tertiaryText)
                 }
                 Picker("生成方式", selection: $mode) {
                     Text("直接给草稿").tag(TaskInitiationMode.direct)
@@ -134,7 +141,7 @@ struct TaskInitiationView: View {
                 }
                 HStack(spacing: 12) {
                     Button(model.initiationBusy ? "正在处理…" : "看看该怎么处理") { generate() }
-                    .buttonStyle(.borderedProminent).tint(palette.accent)
+                    .buttonStyle(generateStyle)
                     .disabled(model.initiationBusy || !model.modelConfigured || !allowCloud)
                     .accessibilityIdentifier("initiation.generate")
                     if model.initiationBusy { ProgressView().controlSize(.small) }
@@ -159,9 +166,9 @@ struct TaskInitiationView: View {
                     }
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 6) {
-                        statusChip(stateLabel(record))
+                        statusChip(stateLabel(record), tone: record.isConfirmed ? .accent : .neutral)
                         if record.copiedAt != nil {
-                            statusChip(record.route == .answer ? "已复制回答" : "已复制 · 复制不代表已执行")
+                            statusChip(record.route == .answer ? "已复制回答" : "已复制 · 复制不代表已执行", tone: .accent)
                         }
                     }
                 }
@@ -181,8 +188,7 @@ struct TaskInitiationView: View {
 
     private func sourceLine(_ record: TaskInitiationRecord) -> some View {
         let title = model.records.first(where: { $0.id == record.sourceID })?.displayTitle ?? "原话材料"
-        return Button("依据：" + title) { openSource(record.sourceID) }.buttonStyle(.borderless).vosFont(WorkspaceText.meta)
-            .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
+        return Button("依据：" + title) { openSource(record.sourceID) }.buttonStyle(.workspaceQuiet)
     }
 
     private func routePicker(_ record: TaskInitiationRecord) -> some View {
@@ -205,11 +211,12 @@ struct TaskInitiationView: View {
             HStack(spacing: 12) {
                 Button(model.initiationBusy ? "正在整理…" : "按这个回答生成") {
                     Task { await model.answerTaskInitiation(record, answer: answer) }
-                }.buttonStyle(.borderedProminent).tint(palette.accent)
+                }.buttonStyle(.workspacePrimary)
                     .disabled(model.initiationBusy || answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Button("先不问，按假设生成") {
                     Task { await model.skipTaskInitiationClarification(record) }
-                }.disabled(model.initiationBusy)
+                }.buttonStyle(.workspaceSecondary)
+                    .disabled(model.initiationBusy)
                 Spacer()
             }
             statusText
@@ -233,9 +240,10 @@ struct TaskInitiationView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(14)
                 .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.border, lineWidth: 1) }
             HStack(spacing: 12) {
                 Button("复制回答") { requestCopy(record) }
-                    .buttonStyle(.borderedProminent).tint(palette.accent)
+                    .buttonStyle(.workspacePrimary)
                     .disabled(model.initiationBusy || record.proposal.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("initiation.answer.copy")
                 if record.isConfirmed {
@@ -243,6 +251,7 @@ struct TaskInitiationView: View {
                     if record.isArchived { statusChip("已归档") }
                 } else {
                     Button("归档保存") { saveAnswer(record) }
+                        .buttonStyle(.workspaceSecondary)
                         .disabled(model.initiationBusy)
                         .accessibilityIdentifier("initiation.answer.archive")
                     discardButton(record)
@@ -267,6 +276,7 @@ struct TaskInitiationView: View {
             Divider()
             HStack(spacing: 12) {
                 Button(model.initiationBusy ? "正在回答…" : "直接回答") { askDirect(record) }
+                    .buttonStyle(.workspaceQuiet)
                     .disabled(model.initiationBusy || !model.modelConfigured || !allowCloud)
                     .accessibilityIdentifier("initiation.answer")
                 Text("对这段原话直接要一份回答，不会创建任务或提醒。")
@@ -278,8 +288,9 @@ struct TaskInitiationView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
                     .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                    .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.border, lineWidth: 1) }
                 HStack {
-                    Button("复制这段回答") { copyText(reply) }
+                    Button("复制这段回答") { copyText(reply) }.buttonStyle(.workspaceQuiet)
                     Spacer()
                 }
             }
@@ -320,12 +331,13 @@ struct TaskInitiationView: View {
                 WorkspaceNoticeText(message: warning, severity: .warning)
             }
             HStack(spacing: 12) {
-                Button("复制") { requestCopy(record) }.buttonStyle(.borderedProminent).tint(palette.accent)
+                Button("复制") { requestCopy(record) }.buttonStyle(.workspaceSecondary)
                     .disabled(model.initiationBusy || artifactDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("initiation.copy")
                 Button("确认这是我要的") {
                     Task { await model.confirmTaskInitiation(record, artifact: artifactDraft) }
                 }
+                .buttonStyle(.workspacePrimary)
                 .disabled(model.initiationBusy || record.isConfirmed || artifactDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("initiation.confirm")
                 if record.isConfirmed {
@@ -334,6 +346,7 @@ struct TaskInitiationView: View {
                         statusChip("已归档")
                     } else {
                         Button("归档这条记录") { archive(record) }
+                            .buttonStyle(.workspaceSecondary)
                             .disabled(model.initiationBusy)
                             .accessibilityIdentifier("initiation.archive")
                     }
@@ -371,7 +384,7 @@ struct TaskInitiationView: View {
                 .workspaceEditorSurface().accessibilityLabel("这一步的记录").disabled(stepSaving)
             HStack(spacing: 12) {
                 Button(stepSaving ? "正在保存…" : "保存这一步") { saveStep(record) }
-                    .buttonStyle(.borderedProminent).tint(palette.accent)
+                    .buttonStyle(.workspaceSecondary)
                     .disabled(stepSaving || stepDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("initiation.step.save")
                 Spacer()
@@ -468,14 +481,13 @@ struct TaskInitiationView: View {
 
     private func discardButton(_ record: TaskInitiationRecord) -> some View {
         Button("不保存这条启动记录") { Task { await model.discardTaskInitiation(record) } }
+            .buttonStyle(.workspaceQuiet)
             .disabled(model.initiationBusy)
             .accessibilityIdentifier("initiation.discard")
     }
 
-    private func statusChip(_ text: String) -> some View {
-        Text(text).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
-            .padding(.horizontal, 9).padding(.vertical, 4)
-            .background(palette.selection, in: Capsule())
+    private func statusChip(_ text: String, tone: WorkspaceBadge.Tone = .neutral) -> some View {
+        WorkspaceBadge(text: text, tone: tone)
     }
 
     @ViewBuilder private var statusText: some View {
