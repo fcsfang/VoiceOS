@@ -80,7 +80,7 @@ extension VoiceOSStore {
         var latestAttempt: [String: String] = [:]
         for row in try db.query("""
         SELECT i.source_id,a.id FROM model_attempts a JOIN context_inputs i ON i.context_id=a.context_id
-        WHERE a.state='completed' AND a.provider NOT LIKE 'english_feedback:%'
+        WHERE a.state='completed' AND \(Self.claimExtractionAttemptFilter)
         AND a.provider!='discussion_derivation' AND substr(a.provider,1,19)!='discussion_outcome:'
         ORDER BY a.producer_sequence DESC,a.created_at DESC,a.id DESC
         """) where latestAttempt[row["source_id"]!] == nil { latestAttempt[row["source_id"]!] = row["id"]! }
