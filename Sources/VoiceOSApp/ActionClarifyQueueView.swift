@@ -64,37 +64,41 @@ struct ActionClarifyQueueView: View {
             HStack(alignment: .top) {
                 heading
                 Spacer(minLength: 12)
-                Button("关闭") { dismiss() }
+                Button("关闭") { dismiss() }.buttonStyle(.workspaceQuiet)
             }
             if let current {
-                Text("剩余 \(remaining.count) 条").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                Text(StatementTagParser.split(current.title).text).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
-                if nature(current) == .unknown {
-                    Text("系统整理的建议 · 未归类").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                    HStack(spacing: 10) {
-                        Button("归为问题") { triage(current, .question) }
-                        Button("归为目标") { triage(current, .goal) }
-                        Button("是旁白") { triage(current, .narration) }
-                    }.disabled(busy)
-                } else if scope == .questions {
-                    questionExits(current)
-                    nextStep(current)
-                    if !model.modelConfigured {
-                        HStack(spacing: 8) {
-                            Text("未配置文本模型，暂时不能试答；配置后可用。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                            Button("配置文本模型…") { model.chooseTextModel() }
+                WorkspaceBadge(text: "剩余 \(remaining.count) 条")
+                WorkspaceCard(padding: 16) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(StatementTagParser.split(current.title).text).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
+                        if nature(current) == .unknown {
+                            Text("系统整理的建议 · 未归类").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            HStack(spacing: 10) {
+                                Button("归为问题") { triage(current, .question) }.buttonStyle(.workspaceSecondary)
+                                Button("归为目标") { triage(current, .goal) }.buttonStyle(.workspaceSecondary)
+                                Button("是旁白") { triage(current, .narration) }.buttonStyle(.workspaceSecondary)
+                            }.disabled(busy)
+                        } else if scope == .questions {
+                            questionExits(current)
+                            nextStep(current)
+                            if !model.modelConfigured {
+                                HStack(spacing: 8) {
+                                    Text("未配置文本模型，暂时不能试答；配置后可用。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                    Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceSecondary)
+                                }
+                            }
+                        } else {
+                            goalExits(current)
+                            nextStep(current)
+                        }
+                        if !error.isEmpty {
+                            Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                         }
                     }
-                } else {
-                    goalExits(current)
-                    nextStep(current)
-                }
-                if !error.isEmpty {
-                    Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                 }
             } else {
                 Text(emptyText).vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-                Button("完成") { dismiss() }.buttonStyle(.borderedProminent)
+                Button("完成") { dismiss() }.buttonStyle(.workspacePrimary)
             }
             Spacer(minLength: 0)
         }
@@ -106,20 +110,20 @@ struct ActionClarifyQueueView: View {
     private func questionExits(_ action: ActionRecord) -> some View {
         HStack(spacing: 10) {
             Button("让 VoiceOS 试答") { trialAnswer(action) }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.workspacePrimary)
                 .disabled(!model.modelConfigured)
-            Button("想清楚了") { apply(action, .complete) }
-            Button("以后再说") { apply(action, .someday) }
-            Button("跳过") { advance(action) }
+            Button("想清楚了") { apply(action, .complete) }.buttonStyle(.workspaceSecondary)
+            Button("以后再说") { apply(action, .someday) }.buttonStyle(.workspaceSecondary)
+            Button("跳过") { advance(action) }.buttonStyle(.workspaceQuiet)
         }.disabled(busy)
     }
 
     private func goalExits(_ action: ActionRecord) -> some View {
         HStack(spacing: 10) {
-            Button("留作目标") { advance(action) }.buttonStyle(.borderedProminent)
-            Button("将来也许") { apply(action, .someday) }
-            Button("不是我要做的事") { apply(action, .abandon) }
-            Button("跳过") { advance(action) }
+            Button("留作目标") { advance(action) }.buttonStyle(.workspacePrimary)
+            Button("将来也许") { apply(action, .someday) }.buttonStyle(.workspaceSecondary)
+            Button("不是我要做的事") { apply(action, .abandon) }.buttonStyle(.workspaceDestructive)
+            Button("跳过") { advance(action) }.buttonStyle(.workspaceQuiet)
         }.disabled(busy)
     }
 
@@ -127,6 +131,7 @@ struct ActionClarifyQueueView: View {
         HStack(spacing: 8) {
             TextField("下一步要做的事", text: $nextTitle).textFieldStyle(.roundedBorder)
             Button("加下一步") { applyNext(action) }
+                .buttonStyle(.workspaceSecondary)
                 .disabled(busy || nextTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
