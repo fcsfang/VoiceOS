@@ -26,7 +26,7 @@ struct TopicUnlinkedReferencesSection: View {
                 if !confirmed.isEmpty {
                     Text("已确认").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 14)
                     ForEach(confirmed) { claim in
-                        row(claim,actionTitle:"取消关联") { unconfirm(claim) }
+                        row(claim,actionTitle:"取消关联",style:.workspaceQuietCompact) { unconfirm(claim) }
                     }
                 }
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger).padding(.top, 10) }
@@ -34,14 +34,14 @@ struct TopicUnlinkedReferencesSection: View {
         }
     }
 
-    private func row(_ claim: CandidateClaim, actionTitle: String, action: @escaping () -> Void) -> some View {
+    private func row(_ claim: CandidateClaim, actionTitle: String, style: WorkspaceButtonStyle = .workspaceSecondaryCompact, action: @escaping () -> Void) -> some View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(claim.statement).vosFont(WorkspaceText.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 Text(sourceTitle(claim)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
             }
             Spacer(minLength: 12)
-            Button(actionTitle,action:action).buttonStyle(.bordered).disabled(busyClaimID != nil)
+            Button(actionTitle,action:action).buttonStyle(style).disabled(busyClaimID != nil)
         }.padding(.vertical, 12)
     }
 

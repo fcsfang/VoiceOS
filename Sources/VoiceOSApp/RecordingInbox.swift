@@ -476,15 +476,15 @@ struct RecordingInboxView: View {
                 .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             Text(RecordingMediaInfo.personalRecordingLayout).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             HStack {
-                Button("启用 VoiceOS收件箱") { inbox.addDefaultInbox() }.buttonStyle(.borderedProminent)
-                Button("其他文件夹…") { inbox.chooseFolder(voiceMemos: false) }
-                Button("连接语音备忘录…") { inbox.chooseFolder(voiceMemos: true) }
+                Button("启用 VoiceOS收件箱") { inbox.addDefaultInbox() }.buttonStyle(.workspacePrimary)
+                Button("其他文件夹…") { inbox.chooseFolder(voiceMemos: false) }.buttonStyle(.workspaceSecondary)
+                Button("连接语音备忘录…") { inbox.chooseFolder(voiceMemos: true) }.buttonStyle(.workspaceSecondary)
             }
             if !inbox.folders.isEmpty && (!model.speechConfigured || !model.textModelConfigured) {
                 Text("已连接；配置模型后开始处理新录音").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 HStack {
-                    if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() } }
-                    if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
+                    if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.buttonStyle(.workspaceSecondaryCompact) }
+                    if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceSecondaryCompact) }
                 }
             }
             ForEach(inbox.folders) { folder in
@@ -493,8 +493,8 @@ struct RecordingInboxView: View {
                         Toggle(folder.voiceMemos ? "语音备忘录" : URL(fileURLWithPath: folder.path).lastPathComponent,
                                isOn: Binding(get: { inbox.folders.first(where: { $0.id == folder.id })?.enabled ?? false }, set: { inbox.setEnabled(folder, $0) }))
                         Spacer()
-                        Button("打开文件夹") { inbox.open(folder) }
-                        Button("移除入口", role: .destructive) { folderPendingRemoval = folder }
+                        Button("打开文件夹") { inbox.open(folder) }.buttonStyle(.workspaceSecondaryCompact)
+                        Button("移除入口", role: .destructive) { folderPendingRemoval = folder }.buttonStyle(.workspaceDestructive)
                     }
                     Text(folder.path).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                     if let error = inbox.folderErrors[folder.id] { WorkspaceNoticeText(message: error) }
@@ -514,17 +514,17 @@ struct RecordingInboxView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(URL(fileURLWithPath: item.path).lastPathComponent).vosFont(WorkspaceText.rowTitle).lineLimit(1)
                                 if item.state == .processing {
-                                    Text("正在整理 · 第 \(item.attempts) 次尝试").foregroundStyle(palette.secondaryText)
+                                    WorkspaceBadge(text: "正在整理 · 第 \(item.attempts) 次尝试", tone: .accent)
                                 } else if let next = item.nextAttempt {
-                                    Text("将在 \(next.formatted(date: .abbreviated, time: .standard)) 自动重试 · 已尝试 \(item.attempts) 次").foregroundStyle(palette.secondaryText)
+                                    WorkspaceBadge(text: "将在 \(next.formatted(date: .abbreviated, time: .standard)) 自动重试 · 已尝试 \(item.attempts) 次")
                                 } else {
-                                    Text("等待手动重试 · 已尝试 \(item.attempts) 次").foregroundStyle(palette.warning)
+                                    WorkspaceBadge(text: "等待手动重试 · 已尝试 \(item.attempts) 次", tone: .warning)
                                 }
                                 Text(item.explanation).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                                 if item.state != .processing {
                                     HStack(spacing: 8) {
-                                        Button("重试这份素材") { inbox.retry(item.id) }
-                                        Button("不再处理这份素材", role: .destructive) { itemPendingIgnore = item }
+                                        Button("重试这份素材") { inbox.retry(item.id) }.buttonStyle(.workspaceSecondaryCompact)
+                                        Button("不再处理这份素材", role: .destructive) { itemPendingIgnore = item }.buttonStyle(.workspaceDestructive)
                                     }
                                 }
                                 if inbox.folders.first(where: { $0.id == item.folderID })?.enabled == false {
@@ -544,10 +544,10 @@ struct RecordingInboxView: View {
             }
             if model.fullRecordingBusy { ProgressView(model.fullRecordingStatus).vosFont(WorkspaceText.meta) }
             HStack {
-                Button("检查新素材") { Task { await inbox.scan() } }
-                Button("重试未完成素材") { inbox.retryFailures() }
-                if inbox.voiceMemosNeedsPermission || inbox.folderErrors.values.contains(where: { $0.contains("隐私") }) { Button("打开系统隐私设置") { inbox.openPrivacySettings() } }
-                Spacer(); if !embedded { Button("完成", action: dismiss).keyboardShortcut(.cancelAction) }
+                Button("检查新素材") { Task { await inbox.scan() } }.buttonStyle(.workspaceSecondary)
+                Button("重试未完成素材") { inbox.retryFailures() }.buttonStyle(.workspaceSecondary)
+                if inbox.voiceMemosNeedsPermission || inbox.folderErrors.values.contains(where: { $0.contains("隐私") }) { Button("打开系统隐私设置") { inbox.openPrivacySettings() }.buttonStyle(.workspaceSecondary) }
+                Spacer(); if !embedded { Button("完成", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction) }
             }
         }.padding(24).frame(width: embedded ? nil : 700)
     }

@@ -24,13 +24,13 @@ struct RecordingTitleEditor: View {
                     Button("恢复自动标题") {
                         saving = true
                         Task { if await model.renameRecording(record, title: nil) { dismiss() }; saving = false }
-                    }
+                    }.buttonStyle(.workspaceQuiet)
                 }
-                Spacer(); Button("取消", action: dismiss).keyboardShortcut(.cancelAction)
+                Spacer(); Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Button("保存") {
                     saving = true
                     Task { if await model.renameRecording(record, title: title) { dismiss() }; saving = false }
-                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+                }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.count > 100)
             }.disabled(saving)
         }.padding(24).frame(width: 600)
