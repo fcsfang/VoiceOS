@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import CryptoKit
+import Darwin
 import VoiceOSCore
 import VoiceOSPlatform
 
@@ -54,7 +55,13 @@ final class RecordingInbox: ObservableObject {
     private let now: () -> Date
     private var items: [String: RecordingInboxItem] = [:]
     private var wakeObserver: NSObjectProtocol?
+    private var activationObserver: NSObjectProtocol?
     private var timer: Timer?
+    private var started = false
+    private var watchers: [String: RecordingInboxDirectoryWatch] = [:]
+    private var rescanTask: Task<Void, Never>?
+    private var rescanRequested = false
+    private var rescanDelay: TimeInterval = 0
     private var observed: [String: String] = [:]
     private var contentDigests: [String: (stamp: String, digest: String)] = [:]
     private var receipts: Set<String> = []
@@ -78,7 +85,8 @@ final class RecordingInbox: ObservableObject {
     }
 
     func start(canProcess: @escaping () -> Bool, resumeSaved: @escaping () async -> Void, receive: @escaping ([RecordingInboxInput], @escaping ([String:RecordingInboxOutcome]) -> Void) async -> Void) {
-        guard timer == nil else { return }
+        guard !started else { return }
+        started = true
         self.canProcess = canProcess; self.resumeSaved = resumeSaved; self.receive = receive
         if let data = defaults.data(forKey: key), let saved = try? JSONDecoder().decode([RecordingInboxFolder].self, from: data) { folders = saved }
         receipts = Set(defaults.stringArray(forKey: key + ".receipts") ?? [])
@@ -99,20 +107,88 @@ final class RecordingInbox: ObservableObject {
             }
         }
         publishItems()
-        status = folders.isEmpty ? "尚未连接自动入口" : (pendingItems.isEmpty ? "等待新录音 · 每 10 秒检查一次" : "已恢复 \(pendingItems.count) 份未完成素材 · 同时接收新录音")
-        timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in Task { await self?.scan() } }
+        status = folders.isEmpty ? "尚未连接自动入口" : (pendingItems.isEmpty ? "等待新录音 · 有新文件时自动检查" : "已恢复 \(pendingItems.count) 份未完成素材 · 同时接收新录音")
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in await self?.scan() }
         }
+        activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in await self?.scan() }
+        }
+        refreshWatchers()
         Task { await scan() }
     }
 
     func stop() {
+        started = false
         timer?.invalidate(); timer = nil
+        for watch in watchers.values { watch.cancel() }
+        watchers = [:]
+        rescanTask?.cancel(); rescanTask = nil; rescanRequested = false; rescanDelay = 0
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
-        wakeObserver = nil
+        if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
+        wakeObserver = nil; activationObserver = nil
         for url in scopedURLs { url.stopAccessingSecurityScopedResource() }
         scopedURLs = []
+    }
+    private func refreshWatchers() {
+        guard started else { return }
+        for watch in watchers.values { watch.cancel() }
+        watchers = [:]
+        var fallbackNeeded = false
+        for folder in folders where folder.enabled {
+            let directory = Self.watchedDirectory(folder)
+            if let watch = RecordingInboxDirectoryWatch(directory: directory, onChange: { [weak self] in self?.requestScan(after: 0.3) }) {
+                watchers[folder.id] = watch
+            } else {
+                fallbackNeeded = true
+            }
+        }
+        if fallbackNeeded { installPollingFallback() } else { removePollingFallback() }
+    }
+    private static func watchedDirectory(_ folder: RecordingInboxFolder) -> URL {
+        let url = URL(fileURLWithPath: folder.path)
+        return folder.voiceMemos && url.lastPathComponent != "Recordings" ? url.appendingPathComponent("Recordings") : url
+    }
+    private func installPollingFallback() {
+        guard timer == nil else { return }
+        let timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.refreshWatchers()
+                await self.scan()
+            }
+        }
+        timer.tolerance = 2
+        self.timer = timer
+    }
+    private func removePollingFallback() {
+        timer?.invalidate(); timer = nil
+    }
+    private func requestScan(after delay: TimeInterval) {
+        rescanRequested = true
+        scheduleScan(after: delay)
+    }
+    private func scheduleScan(after delay: TimeInterval) {
+        rescanTask?.cancel()
+        rescanTask = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            self.rescanTask = nil
+            await self.scan()
+        }
+    }
+    private func scheduleFollowUp(unstable: Bool, blocked: Bool) {
+        if rescanRequested { scheduleScan(after: 0.5); return }
+        let followUp = RecordingInboxScanPacing.FollowUp(
+            unstable: unstable,
+            blocked: blocked,
+            nextAttempt: items.values.compactMap(\.nextAttempt).filter { $0 > now() }.min())
+        guard let delay = RecordingInboxScanPacing.delay(for: followUp, after: rescanDelay, now: now()) else {
+            rescanDelay = 0
+            return
+        }
+        rescanDelay = unstable ? delay : 0
+        scheduleScan(after: delay)
     }
 
     func addDefaultInbox() {
@@ -150,11 +226,11 @@ final class RecordingInbox: ObservableObject {
         let bookmark = try? url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess], includingResourceValuesForKeys: nil, relativeTo: nil)
         folders.append(.init(path: url.path, voiceMemos: voiceMemos, bookmark: bookmark, baseline: baseline))
         if url.startAccessingSecurityScopedResource() { scopedURLs.append(url) }
-        save(); status = "已连接 · 只处理今后新增或更新的录音，已有 \(baseline.count) 份素材留在原处"
+        save(); refreshWatchers(); status = "已连接 · 只处理今后新增或更新的录音，已有 \(baseline.count) 份素材留在原处"
     }
     func setEnabled(_ folder: RecordingInboxFolder, _ enabled: Bool) {
         guard let index = folders.firstIndex(where: { $0.id == folder.id }) else { return }
-        folders[index].enabled = enabled; save()
+        folders[index].enabled = enabled; save(); refreshWatchers()
         status = enabled ? "已恢复接收新录音" : "已暂停这个入口"
     }
     func removeFolder(_ folder: RecordingInboxFolder) {
@@ -169,7 +245,7 @@ final class RecordingInbox: ObservableObject {
         folderErrors[removed.id] = nil
         if activeFolderID == removed.id { activeFolderID = nil }
         status = "已移除入口：\(removed.voiceMemos ? "语音备忘录" : URL(fileURLWithPath: removed.path).lastPathComponent) · 原文件保留在原处"
-        save()
+        save(); refreshWatchers()
     }
     func retryFailures() {
         failures = []
@@ -265,20 +341,28 @@ final class RecordingInbox: ObservableObject {
         return result
     }
     func scan() async {
-        guard !scanning, activeFolderID == nil else { return }
+        guard !scanning else { rescanRequested = true; return }
+        guard activeFolderID == nil else { requestScan(after: 10); return }
+        rescanTask?.cancel(); rescanTask = nil
+        rescanRequested = false
         scanning = true; defer { scanning = false }
+        var unstable = false
+        var blocked = false
         if canProcess() { await resumeSaved() }
         var nextObserved: [String: String] = [:]
         var batch: [RecordingInboxInput] = []
         for folder in folders where folder.enabled {
             do {
                 let found = try await Self.readFiles(in: URL(fileURLWithPath: folder.path), voiceMemos: folder.voiceMemos)
+                let canProcessNow = canProcess()
                 guard folders.contains(where: { $0.id == folder.id && $0.enabled && $0.path == folder.path }) else { continue }
                 if folderErrors[folder.id] != nil { folderErrors[folder.id] = nil }
                 for path in found.keys.sorted() {
                     let stamp = found[path]!
                     nextObserved[path] = stamp
-                    guard folder.baseline[path] != stamp, observed[path] == stamp, canProcess() else { continue }
+                    guard folder.baseline[path] != stamp else { continue }
+                    guard observed[path] == stamp else { unstable = true; continue }
+                    guard canProcessNow else { blocked = true; continue }
                     let url = URL(fileURLWithPath: path)
                     let digest: String
                     if let pending = items.values.first(where: { $0.folderID == folder.id && $0.path == path && $0.fileStamp == stamp }) {
@@ -320,7 +404,7 @@ final class RecordingInbox: ObservableObject {
             }
         }
         observed = nextObserved
-        guard !batch.isEmpty else { return }
+        guard !batch.isEmpty else { scheduleFollowUp(unstable: unstable, blocked: blocked); return }
         activeFolderID = items[batch[0].digest]?.folderID
         status = "正在转写并判断 \(batch.count) 段录音的连续表达"
         save()
@@ -329,6 +413,32 @@ final class RecordingInbox: ObservableObject {
             guard let self else { return }
             for entry in selected { self.finish(entry.digest,outcome:outcomes[entry.digest] ?? .needsAttention("本段整理没有完成回执，原件保留")) }
         }
+        scheduleFollowUp(unstable: unstable, blocked: blocked)
+    }
+}
+
+@MainActor
+private final class RecordingInboxDirectoryWatch {
+    private var source: DispatchSourceFileSystemObject?
+    private var onChange: (() -> Void)?
+
+    init?(directory: URL, onChange: @escaping () -> Void) {
+        let descriptor = open(directory.path, O_EVTONLY)
+        guard descriptor >= 0 else { return nil }
+        self.onChange = onChange
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: [.write, .rename, .delete, .extend], queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.onChange?() }
+        }
+        source.setCancelHandler { _ = close(descriptor) }
+        self.source = source
+        source.resume()
+    }
+
+    func cancel() {
+        source?.cancel()
+        source = nil
+        onChange = nil
     }
 }
 
@@ -345,7 +455,7 @@ struct RecordingInboxView: View {
             WorkspaceHeading(eyebrow: "工具 · 收件箱", title: "自动接收录音",
                              subtitle: "将自己的录音放入收件箱，或连接已同步到 Mac 的语音备忘录。")
             Text("VoiceOS 打开且 Mac 唤醒时，自动完成 Qwen 全长转写，由 AI 识别连续表达并合并理解，再整理观点、任务和提醒事项。").vosFont(WorkspaceText.body)
-            Text("只接收连接后新增或更新的素材；原文件保留。每 10 秒检查，文件连续两次检查不变后自动处理。同批录音先转写再判断分组；稍后到达的补录自动接续。音频在本机处理，文字使用已配置文本模型。")
+            Text("只接收连接后新增或更新的素材；原文件保留。有变化时立即检查，文件连续两次检查不变后自动处理。同批录音先转写再判断分组；稍后到达的补录自动接续。音频在本机处理，文字使用已配置文本模型。")
                 .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             Text(RecordingMediaInfo.personalRecordingLayout).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             HStack {

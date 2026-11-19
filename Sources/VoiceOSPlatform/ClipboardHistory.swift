@@ -40,9 +40,11 @@ public final class ClipboardMonitor {
     public func start() {
         guard timer == nil else { return }
         lastChangeCount = pasteboard.changeCount
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
+        timer.tolerance = 1
+        self.timer = timer
     }
 
     public func stop() {
