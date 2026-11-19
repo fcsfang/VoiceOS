@@ -140,7 +140,7 @@ struct ReflectionTimelineView: View {
                 VStack(spacing: 18) {
                     ContentUnavailableView("从一个持续关心的主题开始", systemImage: "point.3.connected.trianglepath.dotted", description: Text("例如：Agent 记忆、我的学习方法，或一个还没有答案的问题。\n把资料、认识与结果连起来，跨越周与月继续探索。"))
                     Button("建立主题或问题") { showsQuestions = true }
-                        .buttonStyle(.borderedProminent).tint(palette.accent)
+                        .buttonStyle(.workspacePrimary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ContentUnavailableView("暂时无法打开回顾", systemImage: "arrow.triangle.branch", description: Text(error ?? "请刷新资料"))
@@ -161,10 +161,11 @@ struct ReflectionTimelineView: View {
             HStack(alignment: .top) {
                 WorkspaceHero(eyebrow: "REFLECTION ATLAS", title: "认知地图", subtitle: periodPurpose)
                 Spacer()
-                Button { showsQuestions = true } label: { Label("主题与问题", systemImage: "square.stack") }
+                Button { showsQuestions = true } label: { Label("主题与问题", systemImage: "square.stack") }.buttonStyle(.workspaceSecondary)
                 Button { changeID = nil; showsChanges = true } label: { Label("认识对照", systemImage: "rectangle.split.2x1") }
+                    .buttonStyle(.workspaceSecondary)
                     .disabled(focus == nil || loading)
-                Button("完成", action: dismiss).keyboardShortcut(.cancelAction)
+                Button("完成", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
             }
             HStack(spacing: 14) {
                 Picker("探索方式", selection: $periodic) {
@@ -190,11 +191,11 @@ struct ReflectionTimelineView: View {
                 Spacer()
                 Picker("回顾方式", selection: $timeline) { Text("图谱").tag(false); Text("时间线").tag(true) }
                     .labelsHidden().pickerStyle(.segmented).frame(width: 138)
-                Button { Task { await refresh() } } label: { Image(systemName: "arrow.clockwise") }.help(periodic ? "刷新这个周期" : "刷新这个主题").accessibilityLabel(periodic ? "刷新这个周期" : "刷新这个主题").disabled(loading)
+                Button { Task { await refresh() } } label: { Image(systemName: "arrow.clockwise") }.buttonStyle(.workspaceSecondaryCompact).help(periodic ? "刷新这个周期" : "刷新这个主题").accessibilityLabel(periodic ? "刷新这个周期" : "刷新这个主题").disabled(loading)
                 Button {
                     if let focus { Task { if !(await reflect(focus, draft)) { error = model.status } } }
                 } label: { Label(periodic ? "一起回顾" : "一起探索", systemImage: "sparkles") }
-                    .buttonStyle(.borderedProminent).tint(palette.accent)
+                    .buttonStyle(.workspacePrimary)
                     .disabled(focus?.sourceIDs.isEmpty != false || loading || model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
             }
             if focus?.sourceIDs.isEmpty == true {
@@ -363,7 +364,7 @@ struct ReflectionTimelineView: View {
                 if relatedOnly { Text("显示 \(visibleItems.count) 个节点 · 保留原位置").foregroundStyle(.secondary) }
                 Spacer()
                 Button("回到全部") { relatedOnly = false; selection = nil; query = "" }
-                    .buttonStyle(.plain).foregroundStyle(palette.accent)
+                    .buttonStyle(.workspaceQuietCompact)
             }.vosFont(WorkspaceText.meta).padding(.horizontal, 22).padding(.bottom, 12)
             Divider()
             if items.isEmpty {
@@ -478,7 +479,7 @@ struct ReflectionTimelineView: View {
                         Divider()
                         Text("连接").vosFont(WorkspaceText.rowTitle)
                         ForEach(connected) { edge in
-                            Button { selection = edge.id } label: { Label(edge.label + " · 查看依据", systemImage: "arrow.triangle.branch") }.buttonStyle(.plain).vosFont(WorkspaceText.body)
+                            Button { selection = edge.id } label: { Label(edge.label + " · 查看依据", systemImage: "arrow.triangle.branch") }.buttonStyle(.workspaceQuietCompact)
                         }
                     }
                 } else if let edge = links.first(where: { $0.id == selection }) {
@@ -489,12 +490,12 @@ struct ReflectionTimelineView: View {
                         Text(connection.update.reason).vosFont(WorkspaceText.body).textSelection(.enabled)
                         quote("此前原话", connection.update.historicalQuote)
                         quote("本次原话", connection.update.currentQuote)
-                        Button("并排对照与追问") { changeID = connection.id; showsChanges = true }
+                        Button("并排对照与追问") { changeID = connection.id; showsChanges = true }.buttonStyle(.workspaceSecondary)
                     } else {
                         Text(edge.label == "完成登记" ? "这是任务状态的登记；实际收获以你的反馈为依据。" : edge.label == "原话整理" ? "这条内容的整理引用了相连来源的原话；摘要仍需核对。" : edge.label == "行动依据" ? "这项行动保留了所依据的观点与原话。" : "反馈明确关联到这项任务及其当时版本。")
                     }
                     ForEach([edge.from, edge.to], id: \.self) { id in
-                        if let node = items.first(where: { $0.id == id }) { Button(node.title) { selection = id }.buttonStyle(.link) }
+                        if let node = items.first(where: { $0.id == id }) { Button(node.title) { selection = id }.buttonStyle(.workspaceQuiet) }
                     }
                 } else {
                     metric("表达与材料", focus.isTopicOverview ? focus.expressions.count : focus.expressions.filter(\.isInPeriod).count, color: palette.text)
@@ -516,32 +517,32 @@ struct ReflectionTimelineView: View {
                 Text("当前整理 · 不等于事实已验证").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 ForEach(Array(thought.evidence.enumerated()), id: \.offset) { _, evidence in
                     quote("来源原话", evidence.quote)
-                    Button("查看表达全文") { showSource(evidence.reference.sourceID) }
+                    Button("查看表达全文") { showSource(evidence.reference.sourceID) }.buttonStyle(.workspaceQuietCompact)
                 }
-                if let claim = model.claims.first(where: { $0.id == claimID }) { Button("继续讨论这条思考") { discuss(claim) } }
+                if let claim = model.claims.first(where: { $0.id == claimID }) { Button("继续讨论这条思考") { discuss(claim) }.buttonStyle(.workspaceQuietCompact) }
             } else if let feedback = node.feedback {
                 Text("记录时间：" + (ConversationReflectionFocus.date(feedback.createdAt)?.formatted(date: .abbreviated, time: .shortened) ?? feedback.createdAt)).vosFont(WorkspaceText.meta)
                 if let task = focus.tasks.first(where: { $0.actionID == feedback.actionID }) {
                     Text("反馈属于第 \(feedback.actionVersion) 版任务；当前第 \(task.version) 版。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
-                Button("查看结果原文") { showSource(feedback.sourceID) }
-                Button("任务与全部结果") { model.showTask(feedback.actionID); dismiss() }
+                Button("查看结果原文") { showSource(feedback.sourceID) }.buttonStyle(.workspaceQuietCompact)
+                Button("任务与全部结果") { model.showTask(feedback.actionID); dismiss() }.buttonStyle(.workspaceQuietCompact)
             } else if let completion = node.completion {
                 Text("登记于 " + (ConversationReflectionFocus.date(completion.revision.createdAt)?.formatted(date: .abbreviated, time: .shortened) ?? completion.revision.createdAt)).vosFont(WorkspaceText.meta)
                 Text("任务第 \(completion.revision.version) 版 · " + (completion.revision.actor == "user" ? "用户记录" : "提醒状态同步")).vosFont(WorkspaceText.meta)
                 Text("完成状态独立保存；是否取得收获，要看实际结果。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                 if !completion.revision.note.isEmpty { Text(completion.revision.note).vosFont(WorkspaceText.body).textSelection(.enabled) }
-                Button("任务与结果") { model.showTask(completion.actionID); dismiss() }
+                Button("任务与结果") { model.showTask(completion.actionID); dismiss() }.buttonStyle(.workspaceQuietCompact)
             } else if let actionID = node.actionID {
                 Text("当前状态，不能用来推断何时完成或学会。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                Button("打开任务或目标") { model.showTask(actionID); dismiss() }
+                Button("打开任务或目标") { model.showTask(actionID); dismiss() }.buttonStyle(.workspaceQuietCompact)
             } else if let sourceID = node.sourceID {
                 if let source = model.records.first(where: { $0.id == sourceID }) {
                     Text(source.origin == "ai" ? "AI 交付物 · 不代表我的观点或实际验证" : source.origin == "user" ? "个人表达" : "外部资料 · 不代表我的观点").vosFont(WorkspaceText.meta)
                     if let summary = source.contentSummary { Text(summary).vosFont(WorkspaceText.body).textSelection(.enabled) }
                     if let text = source.transcript { DisclosureGroup("完整原文") { Text(text).vosFont(WorkspaceText.body).textSelection(.enabled) } }
                 }
-                Button("查看资料全文") { showSource(sourceID) }
+                Button("查看资料全文") { showSource(sourceID) }.buttonStyle(.workspaceQuietCompact)
             }
         }
     }

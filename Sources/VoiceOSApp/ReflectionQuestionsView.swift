@@ -79,7 +79,7 @@ struct ReflectionQuestionsView: View {
             HStack(alignment: .top) {
                 WorkspaceHero(eyebrow: "TOPICS IN PROGRESS", title: "主题与问题", subtitle: "把跨越时间的材料、认识、尝试与结果接到同一个主题。")
                 Spacer()
-                Button("返回地图") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
+                Button("返回地图") { dismiss() }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(busy)
             }.padding(24)
             Divider()
             HStack(spacing: 0) {
@@ -131,15 +131,15 @@ struct ReflectionQuestionsView: View {
                     }
                 }
             }
-            Button("新增主题或问题") { beginCreating() }.disabled(busy)
+            Button("新增主题或问题") { beginCreating() }.buttonStyle(.workspaceSecondary).disabled(busy)
         }.padding(18)
     }
     private func detail(_ question: ReflectionQuestion) -> some View {
         VStack(alignment: .leading, spacing: 15) {
             Text(question.title).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
             HStack {
-                Button("关联资料 · \(sourceIDs.count)") { managingSources = true }.disabled(busy)
-                Button("查看标题原文") { openSource(question.sourceID) }.disabled(busy)
+                Button("关联资料 · \(sourceIDs.count)") { managingSources = true }.buttonStyle(.workspaceSecondaryCompact).disabled(busy)
+                Button("查看标题原文") { openSource(question.sourceID) }.buttonStyle(.workspaceSecondaryCompact).disabled(busy)
                 Menu("提示设置") {
                     Button("正常显示静默提示") { Task { await setTopicFeedback(question.id, mode: .normal, snooze: false) } }
                     Button("减少提示 · 至少间隔 30 天") { Task { await setTopicFeedback(question.id, mode: .reduced, snooze: false) } }
@@ -149,7 +149,7 @@ struct ReflectionQuestionsView: View {
                     editingQuestion = question; title = question.title
                     titleCloud = model.records.first(where: { $0.id == question.sourceID })?.localOnly == false
                     creating = true
-                }.disabled(busy)
+                }.buttonStyle(.workspaceSecondaryCompact).disabled(busy)
                 Spacer()
                 Button {
                     Task { await startReview(question) }
@@ -158,7 +158,7 @@ struct ReflectionQuestionsView: View {
                         if reviewing { ProgressView().controlSize(.small) }
                         Label(periodicReview ? "一起回顾" : "一起探索", systemImage: "sparkles")
                     }
-                }.buttonStyle(.borderedProminent).tint(palette.accent).disabled(busy || reviewing)
+                }.buttonStyle(.workspacePrimary).disabled(busy || reviewing)
             }
             if let feedback = topicFeedback.first(where: { $0.id == question.id }), feedback.mode != .normal || feedback.snoozedUntil != nil {
                 Text(feedback.mode == .paused ? "此主题的静默提示已暂停，可从提示设置恢复。" : feedback.mode == .reduced ? "此主题已减少提示；不会据此判断你失去兴趣。" : "此主题已选择稍后提示。")
@@ -199,33 +199,35 @@ struct ReflectionQuestionsView: View {
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
     private func entryCard(_ entry: ReflectionQuestionEntry) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                Label(entry.kind.label, systemImage: icon(entry.kind)).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
-                Spacer()
-                Text(date(entry.createdAt) + " · 我的记录").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            }
-            Text(entry.text).vosFont(WorkspaceText.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-            if !entry.unavailableSourceIDs.isEmpty {
-                Text("部分依据已变化或暂停使用；请重新核对，这条历史记录保留原文。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-            }
-            HStack {
-                Button("查看记录原文") { openSource(entry.sourceID) }
-                if !entry.sourceIDs.isEmpty {
-                    Menu("所附依据 · \(entry.sourceIDs.count)") {
-                        ForEach(entry.sourceIDs, id: \.self) { id in
-                            Button(sourceTitle(id)) { openSource(id) }
+        WorkspaceCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Label(entry.kind.label, systemImage: icon(entry.kind)).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                    Spacer()
+                    Text(date(entry.createdAt) + " · 我的记录").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                }
+                Text(entry.text).vosFont(WorkspaceText.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                if !entry.unavailableSourceIDs.isEmpty {
+                    Text("部分依据已变化或暂停使用；请重新核对，这条历史记录保留原文。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                }
+                HStack {
+                    Button("查看记录原文") { openSource(entry.sourceID) }.buttonStyle(.workspaceQuietCompact)
+                    if !entry.sourceIDs.isEmpty {
+                        Menu("所附依据 · \(entry.sourceIDs.count)") {
+                            ForEach(entry.sourceIDs, id: \.self) { id in
+                                Button(sourceTitle(id)) { openSource(id) }
+                            }
                         }
                     }
-                }
-                Spacer()
-                Menu {
-                    Button("停止用于这个主题", role: .destructive) {
-                        Task { await perform { try await model.stopReflectionQuestionEntry(entry.id) } }
-                    }
-                } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 22).help("更多操作").accessibilityLabel("更多操作")
-            }.vosFont(WorkspaceText.meta).disabled(busy)
-        }.padding(14).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                    Spacer()
+                    Menu {
+                        Button("停止用于这个主题", role: .destructive) {
+                            Task { await perform { try await model.stopReflectionQuestionEntry(entry.id) } }
+                        }
+                    } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 22).help("更多操作").accessibilityLabel("更多操作")
+                }.vosFont(WorkspaceText.meta).disabled(busy)
+            }
+        }
     }
     private func composer(_ question: ReflectionQuestion) -> some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -244,9 +246,8 @@ struct ReflectionQuestionsView: View {
                 }
             }
             Text(prompt(kind)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            TextEditor(text: $text).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).padding(6)
-                .frame(height: 78).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(palette.text.opacity(0.14)) }
+            TextEditor(text: $text).vosFont(WorkspaceText.body).scrollContentBackground(.hidden)
+                .frame(height: 78).workspaceEditorSurface()
             HStack {
                 Toggle("允许这条文字用于云端回顾", isOn: $allowCloud).vosFont(WorkspaceText.meta)
                 Spacer()
@@ -257,7 +258,7 @@ struct ReflectionQuestionsView: View {
                         }
                         if saved { text = ""; evidenceIDs = [] }
                     }
-                }.buttonStyle(.borderedProminent).tint(palette.accent)
+                }.buttonStyle(.workspacePrimary)
                     .disabled(busy || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
             }
         }.disabled(busy)
@@ -270,7 +271,7 @@ struct ReflectionQuestionsView: View {
             Text("\(title.unicodeScalars.count) / 200").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Toggle("允许标题用于云端讨论", isOn: $titleCloud).vosFont(WorkspaceText.body)
             HStack {
-                Button("取消") { creating = false }.keyboardShortcut(.cancelAction)
+                Button("取消") { creating = false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(editingQuestion == nil ? "建立主题或问题" : "保存标题") {
                     Task {
@@ -290,7 +291,7 @@ struct ReflectionQuestionsView: View {
                         } catch { self.error = error.localizedDescription; creating = false }
                         busy = false
                     }
-                }.buttonStyle(.borderedProminent).tint(palette.accent).keyboardShortcut(.defaultAction)
+                }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
                     .disabled(busy || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.unicodeScalars.count > 200)
             }
         }.padding(28).frame(width: 560).background(palette.canvas)
@@ -300,7 +301,7 @@ struct ReflectionQuestionsView: View {
             HStack {
                 Text("这个主题的资料").vosFont(WorkspaceText.sectionTitle)
                 Spacer()
-                Button("完成") { managingSources = false }.disabled(busy).keyboardShortcut(.cancelAction)
+                Button("完成") { managingSources = false }.buttonStyle(.workspaceSecondary).disabled(busy).keyboardShortcut(.cancelAction)
             }
             Text("从原文、已有知识或任务接回主题，时间不限。关联保留原话与归属，不代表认可观点或完成任务。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             Picker("关联内容", selection: $sourceMode) {
@@ -322,22 +323,24 @@ struct ReflectionQuestionsView: View {
                         if availableTasks.isEmpty { Text("没有符合条件的当前任务或目标。").foregroundStyle(.secondary).padding() }
                     } else {
                     ForEach(visibleSources) { source in
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack(alignment: .top) {
-                                Toggle(isOn: Binding(get: { sourceIDs.contains(source.id) }, set: { linked in
-                                    guard let id = selectedID else { return }
-                                    Task { await perform { try await model.linkReflectionQuestionSource(questionID: id, sourceID: source.id, linked: linked) } }
-                                })) {
-                                    Text(source.displayTitle).vosFont(WorkspaceText.rowTitle).lineLimit(3)
-                                }.disabled(busy || protectedSourceIDs.contains(source.id))
-                                Spacer()
-                                Text(source.localOnly ? "仅本地" : "文字可云端回顾").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        WorkspaceCard(padding: 12) {
+                            VStack(alignment: .leading, spacing: 7) {
+                                HStack(alignment: .top) {
+                                    Toggle(isOn: Binding(get: { sourceIDs.contains(source.id) }, set: { linked in
+                                        guard let id = selectedID else { return }
+                                        Task { await perform { try await model.linkReflectionQuestionSource(questionID: id, sourceID: source.id, linked: linked) } }
+                                    })) {
+                                        Text(source.displayTitle).vosFont(WorkspaceText.rowTitle).lineLimit(3)
+                                    }.disabled(busy || protectedSourceIDs.contains(source.id))
+                                    Spacer()
+                                    Text(source.localOnly ? "仅本地" : "文字可云端回顾").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                }
+                                DisclosureGroup("查看完整原文") { Text(source.transcript ?? "").vosFont(WorkspaceText.body).textSelection(.enabled) }
+                                if source.localOnly {
+                                    Button("查看原文并设置文字许可") { openSource(source.id) }.buttonStyle(.workspaceQuietCompact)
+                                }
                             }
-                            DisclosureGroup("查看完整原文") { Text(source.transcript ?? "").vosFont(WorkspaceText.body).textSelection(.enabled) }
-                            if source.localOnly {
-                                Button("查看原文并设置文字许可") { openSource(source.id) }.vosFont(WorkspaceText.meta)
-                            }
-                        }.padding(12).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                        }
                     }
                     if visibleSources.isEmpty { Text("没有符合条件的文字资料。").foregroundStyle(.secondary).padding() }
                     }
@@ -348,39 +351,44 @@ struct ReflectionQuestionsView: View {
     private func knowledgeLinkCard(_ claim: CandidateClaim) -> some View {
         let ids = Set(claim.references.map(\.sourceID))
         let linked = !ids.isEmpty && ids.allSatisfy { sourceIDs.contains($0) }
-        return VStack(alignment: .leading, spacing: 9) {
-            Text(claim.statement).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
-            Text(claim.ownership == "ai_candidate" ? "AI 建议 · 关联不代表认可" : claim.ownership == "external" ? "外部主张 · 保留原有归属" : "个人表达的整理 · 仍可核对原话").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            HStack {
-                Menu("原话依据 · \(ids.count)") {
-                    ForEach(ids.sorted(), id: \.self) { id in Button(sourceTitle(id)) { openSource(id) } }
-                }
-                Spacer()
-                Button(linked ? "已关联" : "接回这个主题") {
-                    guard let selectedID else { return }
-                    Task { await perform { try await model.linkTopicClaim(questionID: selectedID, claimID: claim.id, expectedReviewVersion: claim.reviewVersion) } }
-                }.disabled(linked || busy || ids.isEmpty)
-            }.vosFont(WorkspaceText.meta)
-        }.padding(13).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+        return WorkspaceCard(padding: 13) {
+            VStack(alignment: .leading, spacing: 9) {
+                Text(claim.statement).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
+                Text(claim.ownership == "ai_candidate" ? "AI 建议 · 关联不代表认可" : claim.ownership == "external" ? "外部主张 · 保留原有归属" : "个人表达的整理 · 仍可核对原话").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                HStack {
+                    Menu("原话依据 · \(ids.count)") {
+                        ForEach(ids.sorted(), id: \.self) { id in Button(sourceTitle(id)) { openSource(id) } }
+                    }
+                    Spacer()
+                    Button(linked ? "已关联" : "接回这个主题") {
+                        guard let selectedID else { return }
+                        Task { await perform { try await model.linkTopicClaim(questionID: selectedID, claimID: claim.id, expectedReviewVersion: claim.reviewVersion) } }
+                    }.buttonStyle(.workspaceSecondaryCompact).disabled(linked || busy || ids.isEmpty)
+                }.vosFont(WorkspaceText.meta)
+            }
+        }
     }
     private func taskLinkCard(_ action: ActionRecord) -> some View {
         let claim = model.claims.first { $0.id == action.claimID }
         let ids = Set(claim?.references.map(\.sourceID) ?? [])
         let linked = !ids.isEmpty && ids.allSatisfy { sourceIDs.contains($0) }
-        return VStack(alignment: .leading, spacing: 9) {
-            Text(action.title).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
-            Text((action.kind == "task" ? "任务" : action.kind == "ai_suggestion" ? "AI 建议" : "意图与目标") + " · " + (action.state == "completed" ? "已完成登记" : action.state == "dismissed" ? "已放下" : "待跟进")).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            HStack {
-                Menu("原话依据 · \(ids.count)") {
-                    ForEach(ids.sorted(), id: \.self) { id in Button(sourceTitle(id)) { openSource(id) } }
-                }
-                Spacer()
-                Button(linked ? "已关联" : "接回这个主题") {
-                    guard let selectedID else { return }
-                    Task { await perform { try await model.linkTopicAction(questionID: selectedID, actionID: action.id, expectedVersion: action.version) } }
-                }.disabled(linked || busy || ids.isEmpty)
-            }.vosFont(WorkspaceText.meta)
-        }.padding(13).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+        return WorkspaceCard(padding: 13) {
+            VStack(alignment: .leading, spacing: 9) {
+                Text(action.title).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
+                WorkspaceBadge(text: (action.kind == "task" ? "任务" : action.kind == "ai_suggestion" ? "AI 建议" : "意图与目标") + " · " + (action.state == "completed" ? "已完成登记" : action.state == "dismissed" ? "已放下" : "待跟进"),
+                               tone: action.state == "completed" ? .success : action.state == "dismissed" ? .neutral : .warning)
+                HStack {
+                    Menu("原话依据 · \(ids.count)") {
+                        ForEach(ids.sorted(), id: \.self) { id in Button(sourceTitle(id)) { openSource(id) } }
+                    }
+                    Spacer()
+                    Button(linked ? "已关联" : "接回这个主题") {
+                        guard let selectedID else { return }
+                        Task { await perform { try await model.linkTopicAction(questionID: selectedID, actionID: action.id, expectedVersion: action.version) } }
+                    }.buttonStyle(.workspaceSecondaryCompact).disabled(linked || busy || ids.isEmpty)
+                }.vosFont(WorkspaceText.meta)
+            }
+        }
     }
     private func visitTopic(_ id: String) async {
         guard !busy else { return }
