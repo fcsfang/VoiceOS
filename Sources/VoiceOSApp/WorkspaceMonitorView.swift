@@ -336,7 +336,7 @@ struct WorkspaceMonitorView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(width: 140)
+            .frame(minWidth: 140)
             .padding(.top, 4)
             .accessibilityIdentifier("monitor.filter")
             ForEach([MonitorItemCategory.applicable, .needsCheck], id: \.self) { category in
@@ -681,7 +681,7 @@ struct WorkspaceMonitorView: View {
                     set: { date in Task { await setStart(source, date) } }),
                     displayedComponents: source.kind == .qqGroup ? [.date, .hourAndMinute] : [.date])
                     .labelsHidden().datePickerStyle(.field)
-                    .frame(width: source.kind == .qqGroup ? 190 : 130)
+                    .frame(minWidth: source.kind == .qqGroup ? 190 : 130)
                     .accessibilityLabel("来源起始时间：" + source.displayName)
                     .accessibilityIdentifier("monitor.source." + source.id + ".start")
                 Text(startNote(source)).vosFont(WorkspaceText.caption)
@@ -766,7 +766,7 @@ struct WorkspaceMonitorView: View {
                     get: { model.monitorScheduleDate },
                     set: { model.setMonitorScheduleTime($0) }),
                     displayedComponents: .hourAndMinute)
-                    .labelsHidden().datePickerStyle(.field).frame(width: 110)
+                    .labelsHidden().datePickerStyle(.field).frame(minWidth: 110)
                     .accessibilityLabel("每日检查时间")
                     .accessibilityIdentifier("monitor.settings.schedule.time")
                 Text("默认 09:00；每天最多一次。").vosFont(WorkspaceText.meta)
@@ -877,7 +877,7 @@ struct WorkspaceMonitorView: View {
             pathRow("密钥文件", text: $qqKeyPath, check: keyCheck, choose: chooseKeyFile)
             HStack(spacing: 10) {
                 Text("账号").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    .frame(width: 90, alignment: .leading)
+                    .frame(minWidth: 90, alignment: .leading).fixedSize(horizontal: true, vertical: false)
                 TextField("可选；留空自动选择（多数情况留空即可）", text: $qqAccount)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 360)
             }
@@ -977,7 +977,7 @@ struct WorkspaceMonitorView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 10) {
                 Text(label).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    .frame(width: 90, alignment: .leading)
+                    .frame(minWidth: 90, alignment: .leading).fixedSize(horizontal: true, vertical: false)
                 TextField(label, text: text)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 360)
                 Button("选择…", action: choose).buttonStyle(.workspaceQuietCompact)
@@ -1018,7 +1018,7 @@ struct WorkspaceMonitorView: View {
             HStack(spacing: 12) {
                 Text("从这里开始读取").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 DatePicker("", selection: $qqStart, displayedComponents: [.date, .hourAndMinute])
-                    .labelsHidden().datePickerStyle(.field).frame(width: 190)
+                    .labelsHidden().datePickerStyle(.field).frame(minWidth: 190)
                     .accessibilityLabel("QQ 起点")
                     .accessibilityIdentifier("monitor.settings.qq.start")
                 Button("添加所选群") {

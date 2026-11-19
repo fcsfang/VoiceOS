@@ -9,6 +9,7 @@ struct ThoughtPanoramaView: View {
     let readError: String?
     @Binding var selection: PanoramaSelection?
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var scale
     let retry: () -> Void
     let draft: () -> Void
     let retryRefresh: () -> Void
@@ -51,7 +52,7 @@ struct ThoughtPanoramaView: View {
                             self.selection = nil
                             self.focusedRegionID = nil
                             action()
-                        }).frame(width: 310)
+                        }).frame(width: 310 * min(max(scale,1),1.3))
                     }
                 }
                 .sheet(isPresented: Binding(
@@ -1179,16 +1180,26 @@ private struct ReaderQuoteCard: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                HStack(spacing: 12) {
-                    Button("完整原文") { actions.perform { actions.openSource(item.sourceID) } }
-                    Button("更正原文") { actions.perform { actions.correctSource(item.sourceID) } }
-                    claimCorrectionMenu
-                    Spacer(minLength: 0)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) {
+                        actionButtons
+                        Spacer(minLength: 0)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        actionButtons
+                    }
                 }
                 .vosFont(WorkspaceText.meta)
                 .buttonStyle(.workspaceQuietCompact)
             }
         }
+    }
+
+    @ViewBuilder
+    private var actionButtons: some View {
+        Button("完整原文") { actions.perform { actions.openSource(item.sourceID) } }
+        Button("更正原文") { actions.perform { actions.correctSource(item.sourceID) } }
+        claimCorrectionMenu
     }
 
     @ViewBuilder
