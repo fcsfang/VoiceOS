@@ -1186,7 +1186,7 @@ struct WorkspaceView: View {
             if ["目标","全部"].contains(actionFilter), !model.stalledOutcomes.isEmpty { stalledBanner }
             let visible = ["全部","我的待办"].contains(actionFilter) ? todoActions : visibleActions
             let focusedIDs = Set(focusedActions.map(\.id))
-            let listed = actionFilter == "全部" ? visible.filter { !focusedIDs.contains($0.id) } : visible
+            let listed = actionFilter == "全部" ? todoOrder(visible, surface: timeSurface).filter { !focusedIDs.contains($0.id) } : visible
             let executions = model.sortedAssistantDeliveries(model.assistantExecutions.filter { $0.state != "cancelled" })
             let paused = model.workspacePausedTasks
             if ["全部","我的待办"].contains(actionFilter), !focusedActions.isEmpty {
@@ -1248,7 +1248,7 @@ struct WorkspaceView: View {
             }
             let overviewQuestions = actionFilter == "全部" ? model.openQuestions : []
             if !overviewQuestions.isEmpty {
-                WorkspaceListSection(title:"问题",subtitle:"VoiceOS 先回答；想清楚了可以转成下一步。",count:overviewQuestions.count) {
+                WorkspaceListSection(title:"问题",subtitle:"VoiceOS 先回答；想清楚了可以转成下一步。",count:overviewQuestions.count,collapsible:true) {
                     ActionCardList {
                         ForEach(overviewQuestions.prefix(3)) { action in
                             actionRow(action,nature:.question,nextStepCounts:nextStepCounts,reads:rowReads)
@@ -1262,7 +1262,7 @@ struct WorkspaceView: View {
             }
             let overviewGoals = actionFilter == "全部" ? model.openGoals : []
             if !overviewGoals.isEmpty {
-                WorkspaceListSection(title:"目标",subtitle:"你要长期达到的结果；转成待办后可提醒。",count:overviewGoals.count) {
+                WorkspaceListSection(title:"目标",subtitle:"你要长期达到的结果；转成待办后可提醒。",count:overviewGoals.count,collapsible:true) {
                     ActionCardList {
                         ForEach(overviewGoals.prefix(3)) { action in
                             actionRow(action,nature:.goal,nextStepCounts:nextStepCounts,reads:rowReads)
@@ -1287,7 +1287,7 @@ struct WorkspaceView: View {
             }
             let pendingOutcomes = model.visibleOutcomeFollowups.count
             if pendingOutcomes > 0 {
-                WorkspaceListSection(title:"完成后的结果",count:pendingOutcomes,badge:"\(pendingOutcomes) 项待填结果",collapsible:true,initiallyExpanded:true) {
+                WorkspaceListSection(title:"完成后的结果",count:pendingOutcomes,badge:"\(pendingOutcomes) 项待填结果",collapsible:true) {
                     HStack(spacing:12) {
                         Button("记录结果…") { showingOutcome=true }.buttonStyle(.bordered)
                         Button("显示已跳过") { model.showSkippedOutcomes() }
@@ -1432,6 +1432,24 @@ struct WorkspaceView: View {
         default:
             return myTodoActions
         }
+    }
+    /// 「全部」reads like an agenda: overdue first, then today, the coming week,
+    /// and the undated tail newest first. The time surface already orders the
+    /// dated groups; only the undated tail needs its own order.
+    private func todoOrder(_ actions: [ActionRecord], surface: ActionTimeSurface?) -> [ActionRecord] {
+        guard let surface else { return actions }
+        let anytime: [ActionRecord] = surface.anytime.map(\.action).sorted { (left: ActionRecord, right: ActionRecord) -> Bool in
+            if left.createdAt != right.createdAt { return left.createdAt > right.createdAt }
+            return left.id > right.id
+        }
+        let due: [ActionRecord] = surface.today.map(\.action)
+        let soon: [ActionRecord] = surface.soon.map(\.action)
+        var ordered: [ActionRecord] = []
+        ordered.reserveCapacity(due.count + soon.count + anytime.count)
+        ordered.append(contentsOf: due)
+        ordered.append(contentsOf: soon)
+        ordered.append(contentsOf: anytime)
+        return ordered
     }
     private var search: some View {
         let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
@@ -1902,40 +1920,7 @@ struct WorkspaceView: View {
             else { error=model.status }
         }
     }
-    /// One fold per action-page body: reminder links and analysis runs are read
-    /// per row, so index them by action instead of scanning the arrays again.
-    private struct ActionRowReads {
-        let linkedReminderByActionID: [String: ReminderLink]
-        let dueByActionID: [String: ReminderDueDate]
-        let latestAnalysisStateByActionID: [String: String]
-        init(reminderLinks: [ReminderLink], executions: [AssistantExecutionRecord]) {
-            var linked: [String: ReminderLink] = [:]
-            var due: [String: ReminderDueDate] = [:]
-            for link in reminderLinks where link.state == "linked" {
-                if linked[link.actionID] == nil { linked[link.actionID] = link }
-                if let date = link.remoteDueDate, date != .none, due[link.actionID] == nil { due[link.actionID] = date }
-            }
-            var states: [String: String] = [:]
-            var newest: [String: String] = [:]
-            for execution in executions where execution.mode == .analysis && execution.validity == "current" {
-                if let current = newest[execution.actionID], current >= execution.updatedAt { continue }
-                newest[execution.actionID] = execution.updatedAt
-                states[execution.actionID] = execution.state
-            }
-            linkedReminderByActionID = linked
-            dueByActionID = due
-            latestAnalysisStateByActionID = states
-        }
-    }
     private func actionRowStatus(_ action:ActionRecord,timeEntry:ActionTimeEntry? = nil,group:ActionRowGroup,nature:ActionNature? = nil,nextStepCount:Int,reads:ActionRowReads) -> ActionRowStatus {
-        var due=""
-        var localUnsynced=false
-        if let entry=timeEntry,entry.source == .localSchedule {
-            if let date=entry.due { due=(entry.isOverdue ? "已逾期 " : "到期 ") + date.summary }
-            localUnsynced=entry.needsLocalSyncLabel
-        } else if action.state == "open", action.validity == "current", let date=reads.dueByActionID[action.id] {
-            due=(reminderDueIsPast(date) ? "已逾期 " : "到期 ") + date.summary
-        }
         var facts=ActionRowFacts()
         facts.isGoal=nature.map { $0 == .goal } ?? (action.kind != "task")
         facts.isQuestion=nature == .question
@@ -1943,14 +1928,20 @@ struct WorkspaceView: View {
         facts.group=group
         facts.state=action.state
         facts.validity=action.validity
-        facts.due=due
+        if let entry=timeEntry,entry.source == .localSchedule,let date=entry.due {
+            facts.due=ActionRowLayout.dueSummary(date,isOverdue:entry.isOverdue)
+        }
         facts.sourceTitle=actionSourceTitle(action)
         facts.nextStepCount=nextStepCount
         facts.completedAt=group == .completed ? action.completedAt.map { "完成于 " + dateLabel($0) } ?? "" : ""
         facts.requiresReview=model.sourcePageIndex.requiresReview(action.id)
         facts.externalCompletion=model.workspaceExternalCompletionNote(action) != nil
         facts.withdrawn=action.intent?.followupState == "withdrawn"
-        facts.localUnsynced=localUnsynced
+        facts.localUnsynced=timeEntry?.needsLocalSyncLabel ?? false
+        if action.state == "open", action.validity == "current" {
+            facts.reminderLinkState=reads.reminderLinkStateByActionID[action.id]
+            facts.reminderDue=reads.reminderDueByActionID[action.id]
+        }
         return ActionRowLayout.status(facts)
     }
     private func actionRowToneColor(_ tone:ActionRowTone) -> Color {
@@ -1979,17 +1970,6 @@ struct WorkspaceView: View {
             if !title.isEmpty { return title }
         }
         return nil
-    }
-    private func reminderDueIsPast(_ due:ReminderDueDate) -> Bool {
-        switch due {
-        case .none: return false
-        case let .dateOnly(localDate, _):
-            return localDate < ActionTimeFormatting.dayKey.string(from:Date())
-        case let .instant(utc, _):
-            if let date=ActionTimeFormatting.isoFractional.date(from:utc) { return date < Date() }
-            guard let date=ActionTimeFormatting.iso.date(from:utc) else { return false }
-            return date < Date()
-        }
     }
     private var stalledBanner: some View {
         let goals = model.stalledOutcomes
