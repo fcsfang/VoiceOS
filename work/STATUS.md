@@ -491,3 +491,12 @@
 - 波 92：来源/材料/处理/跟进/收件箱五文件 81 处裸 `.secondary` → `palette.secondaryText`、27 处补 `vosFont`、4 处字面量 → `WorkspaceMetrics`/`WorkspaceText` token；保留 12 类无等价 token 的控件尺寸。635 测试。
 - 集成：两波合并无冲突，集成 637 项 0 失败；dist 重建安装。
 - 待办：材料行失败胶囊常驻需改 `WorkspaceView.swift`（悬停胶囊隐藏时反馈随收）；交付页「取消代办」等非主按钮仍只写页底 error。AX 服务退化未恢复，波 90 的 AX 收敛实测仍待补。
+
+## 每日消息监测首次自动运行验收（2026-11-19，只读）
+
+- 今日报告已生成：report_date=2026-11-19，state=complete，item_count=0，headline「检查完成，无新增待办」；created_at 2026-11-18T18:23:46Z（本地 02:23）。02:23 不可能是定时/激活/唤醒触发（检查时间设为 09:00），只能是 `MonitorSchedule.decide` 的启动补跑：当天尚无报告即补跑，符合设计。
+- 来源状态（source_status_json）：计算机学院通知、研究生院通知、南航16院2025级硕士生三个来源全部 ok=true、newMessageCount=0，无来源错误。
+- 游标：三来源 last_success_end 均为 2026-11-18T18:23:21Z，自 11-18 报告时点约 00:10Z 推进 18 小时以上并跨过本地零点；三行 last_error 均为空。
+- 重复推送：`MonitorSettings.pushChannel` 未配置，delivery_state 保持 pending、payload_json 为空，本次没有任何推送，也就不存在重复推送；11-19 仅一条报告，report_date 唯一约束保证每天至多一次。
+- QQ：群 1028551617 读取成功（ok=true、0 条新增），脚本的群存在性检查通过；本次会话无完全磁盘访问权限，无法独立复核群内原文，「零点前后 22 小时 0 条」可能成立但未证实。
+- 结论：首次自动运行成功，本日无缺陷需要修复。02:23 的启动补跑占用当天唯一一次自动检查，09:00 定时不会再次运行；消息不丢，次日运行从 last_success 前 30 分钟重叠窗口继续。
