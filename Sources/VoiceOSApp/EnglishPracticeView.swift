@@ -45,8 +45,8 @@ struct EnglishPracticeView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            WorkspaceHeading(eyebrow: "工具 · 英文练习", title: "英文表达反馈",
-                             subtitle: "只发送选定的个人文字和出处；原始音频不会上传。")
+            WorkspacePageHeading(eyebrow: "工具 · 英文练习", title: "英文表达反馈",
+                                 subtitle: "只发送选定的个人文字和出处；原始音频不会上传。")
             Text("反馈独立保存，不创建认知候选、行动或提醒事项。")
                 .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if sources.isEmpty {
@@ -55,7 +55,7 @@ struct EnglishPracticeView: View {
                 } description: {
                     Text("需要一份已保存、已完成文字转写的个人原话。完成一段英文录音并保存后，回到这里即可练习。")
                 } actions: {
-                    if let openCapture { Button("去记录英文表达", action: openCapture).buttonStyle(.borderedProminent) }
+                    if let openCapture { Button("去记录英文表达", action: openCapture).buttonStyle(.workspacePrimary) }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -85,9 +85,10 @@ struct EnglishPracticeView: View {
                 Text(model.englishStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 HStack {
                     Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)) } } }
+                        .buttonStyle(.workspaceSecondary)
                         .disabled(current == nil || model.englishBusy)
                     Button(model.englishBusy ? "正在发送…" : "发送文本反馈") { Task { await model.performEnglishPractice() } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.workspacePrimary)
                         .disabled(model.englishSnapshot == nil || model.englishBusy || !model.modelConfigured)
                     if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
                     if model.englishSnapshot != nil { Button("查看待发送文字…") { showingInput = true } }
@@ -126,7 +127,7 @@ struct EnglishPracticeView: View {
                     }
                 }
             }
-        }.padding(24).frame(width: embedded ? nil : 700, height: embedded ? nil : 600)
+        }.padding(24).frame(width: embedded ? nil : WorkspaceMetrics.modalMedium, height: embedded ? nil : 600)
         .sheet(isPresented: $showingInput) {
             if let snapshot = model.englishSnapshot { EnglishInputPreview(snapshot: snapshot) { showingInput = false } }
         }

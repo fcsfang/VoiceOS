@@ -34,11 +34,11 @@ struct QuestionStateView: View {
                             if let evidence = revision.input.resolution {
                                 Text("答案原话：" + evidence.quote).vosFont(WorkspaceText.body).textSelection(.enabled)
                                 HStack {
-                                    Button("核对当时答案版本") { answerHistory = revision }
-                                    Button("查看答案来源当前页") { model.requestWorkspaceSource(evidence.reference.sourceID); dismiss() }
+                                    Button("核对当时答案版本") { answerHistory = revision }.buttonStyle(.workspaceSecondaryCompact)
+                                    Button("查看答案来源当前页") { model.requestWorkspaceSource(evidence.reference.sourceID); dismiss() }.buttonStyle(.workspaceQuietCompact)
                                 }
                             }
-                            Text(revision.createdAt).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(ConversationReflectionFocus.date(revision.createdAt)?.formatted(date: .abbreviated, time: .shortened) ?? revision.createdAt).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         }.padding(.vertical, 4)
                     }
                 }
@@ -54,7 +54,7 @@ struct QuestionStateView: View {
                     ScrollView { Text(source.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 260)
                 }
                 HStack { Spacer(); Button("完成") { answerHistory = nil }.keyboardShortcut(.cancelAction) }
-            }.padding(24).frame(width: 620)
+            }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
         }.sheet(isPresented: $changing) {
             QuestionTransitionView(question: question, model: model) { changing = false }
         }
@@ -95,16 +95,16 @@ struct QuestionTransitionView: View {
             }
             Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             HStack {
-                Button("取消", action: dismiss).keyboardShortcut(.cancelAction)
+                Button("取消", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary)
                 Spacer()
                 Button("保存状态") {
                     Task {
                         if await model.changeQuestion(question, to: target, reason: reason, answerSourceID: target == .resolved ? answerSource : nil, answerQuote: target == .resolved ? answerQuote : nil, commandID: commandID) { dismiss() }
                         else { commandID = UUID().uuidString }
                     }
-                }.disabled(model.savingQuestion || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (target == .resolved && (answerSource.isEmpty || answerQuote.isEmpty)))
+                }.buttonStyle(.workspacePrimary).disabled(model.savingQuestion || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (target == .resolved && (answerSource.isEmpty || answerQuote.isEmpty)))
             }
-        }.padding(24).frame(width: 620)
+        }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
         .onAppear { target = allowed[0] }
     }
 }

@@ -24,7 +24,7 @@ struct FullRecordingView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("完整整理我的录音").vosFont(WorkspaceText.sectionTitle)
+            WorkspacePageHeading(title: "完整整理我的录音")
             Text(input.url.lastPathComponent).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
             Text("完整时长 \(duration) · \(input.media.tracks.count) 条音轨").foregroundStyle(.secondary)
             Picker("本人音轨", selection: $track) {
@@ -35,7 +35,7 @@ struct FullRecordingView: View {
             Toggle("所选音轨是我的声音", isOn: $ownVoice)
                 .disabled(model.fullRecordingBusy || model.fullRecordingCount != nil || !trackDecision.allowsOwnVoice)
             Text(input.media.contextTrack != nil && track == input.media.personalTrack ? "Qwen 在本机分别完整转写你的声音和节目声音，AI 校正后结合双轨全文理解，保留双方原话与时间。节目观点、你的复述与看法分开，只有你明确要做的事进入待办。双轨文字使用已配置模型，原始音视频留在本机。" : "Qwen 在本机完整转写本人音轨，AI 依据全文校正识别错误，保留原意与修订历史。随后整理观点与明确待办；原始音视频保留在本机。")
-                .vosFont(WorkspaceText.body)
+                .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             if let issue = model.recordingModelIssue {
                 WorkspaceNoticeText(message: issue)
                 HStack {
@@ -52,12 +52,12 @@ struct FullRecordingView: View {
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
             }
             HStack {
-                if model.fullRecordingBusy { Button("停止处理") { model.cancelFullRecording() } }
-                else { Button("关闭") { model.fullRecordingInput = nil }.keyboardShortcut(.cancelAction) }
+                if model.fullRecordingBusy { Button("停止处理") { model.cancelFullRecording() }.buttonStyle(.workspaceDestructive) }
+                else { Button("关闭") { model.fullRecordingInput = nil }.keyboardShortcut(.cancelAction).buttonStyle(.workspaceQuiet) }
                 Spacer()
                 if model.fullRecordingCount != nil {
                     Button("打开完整清单") { model.openFullRecordingOutput() }
-                    Button("查看任务与后续", action: showTasks).buttonStyle(.borderedProminent)
+                    Button("查看任务与后续", action: showTasks).buttonStyle(.workspacePrimary)
                 }
                 else {
                     if input.media.tracks.count == 1 && !trackDecision.importsAsPersonal {
@@ -65,11 +65,11 @@ struct FullRecordingView: View {
                             .disabled(model.fullRecordingBusy || model.importing)
                     }
                     Button("完整转写并整理") { model.organizeRecording(input, track: track) }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.workspacePrimary)
                         .disabled(!trackDecision.importsAsPersonal || model.fullRecordingBusy || model.recordingModelIssue != nil)
                 }
             }
-        }.padding(24).frame(width: embedded ? nil : 600).frame(maxWidth: embedded ? 780 : nil)
+        }.padding(24).frame(width: embedded ? nil : WorkspaceMetrics.modalSmall).frame(maxWidth: embedded ? 780 : nil)
             .onAppear {
                 track = input.media.personalTrack
                 ownVoice = input.media.usesPersonalRecordingLayout
