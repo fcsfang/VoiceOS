@@ -484,3 +484,10 @@
 - 波 90：来源页八处折叠按材料保留（`sourceFoldStates`）、节目关联/讨论/实体/章节加载占位与失败文案、逐段正文与按钮 `children:.ignore` 收敛、装饰元素隐藏。632 测试（无新增）。
 - 集成：两波合并后 635 项 0 失败；dist 重建安装。
 - 实测受阻：本机系统级 AX 服务再次卡死（VoiceOS 与系统「提醒事项」的 AX 树均退化为自嵌套 AXApplication，应用 CPU 空闲），来源页 AX 元素数与折叠状态等 AX 依赖验证全部顺延；此前记录的「点击慢」与本次退化同源，均属 AX 服务现象，不是应用 CPU 问题。待 AX 服务恢复后补测波 90 的 AX 收敛效果（命令：voiceos-check ax dump --pid <pid> --json 统计 elements 长度）。
+
+## 波 91-92 失败反馈与视觉 token（2026-11-19，已安装）
+
+- 波 91：任务详情/交付页主操作失败在按钮组下方就地显示（warning 短文案 + 重试）；材料归档/回收站失败在行内与行尾胶囊显示并可重试；`InlineFailurePresentation` 纯文案映射进 Core（沿用测试目标先例）。637 测试。
+- 波 92：来源/材料/处理/跟进/收件箱五文件 81 处裸 `.secondary` → `palette.secondaryText`、27 处补 `vosFont`、4 处字面量 → `WorkspaceMetrics`/`WorkspaceText` token；保留 12 类无等价 token 的控件尺寸。635 测试。
+- 集成：两波合并无冲突，集成 637 项 0 失败；dist 重建安装。
+- 待办：材料行失败胶囊常驻需改 `WorkspaceView.swift`（悬停胶囊隐藏时反馈随收）；交付页「取消代办」等非主按钮仍只写页底 error。AX 服务退化未恢复，波 90 的 AX 收敛实测仍待补。
