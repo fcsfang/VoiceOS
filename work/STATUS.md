@@ -624,3 +624,7 @@
 
 - dist 重建 exit 0（二进制 06:25:46）；preflight 直接执行返回 0（safe idle=18035s）；重启后 pid 77261。
 - 显示器仍休眠（screencapture 黑帧、SCStream -3811、AX 树 degraded），102-107 的实机目视验收仍顺延；证据为 668 项测试 0 失败、各单元真实构建退出码与两轮对抗审查结论。
+
+## 波 108 小修（2026-11-20，已推送未安装）
+
+- RecordingFollowupView：跟进摘要改 WorkspaceCard(padding 12)、查看按钮 quietCompact；「完成」quiet；生成跟进 borderedProminent 改 workspacePrimary。668 项 0 失败；随下次安装批次交付。
