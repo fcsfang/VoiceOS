@@ -65,7 +65,7 @@ struct ActionScheduleEditor: View {
             Text("这是你在控制中心作出的期限选择，先仅本地保存。外部期限有差异时，需查看具体改期并确认；不会因为保存而自动修改提醒事项。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
-                Button("取消", action: dismiss).disabled(saving)
+                Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).disabled(saving)
                 Spacer()
                 Button(saving ? "正在保存…" : "保存本地期限") {
                     do {
@@ -79,7 +79,7 @@ struct ActionScheduleEditor: View {
                             if saved { dismiss() } else { errorText = model.status }
                         }
                     } catch { errorText = error.localizedDescription }
-                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(saving || model.savingAction)
+                }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(saving || model.savingAction)
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
     }
@@ -97,8 +97,11 @@ struct ReminderScheduleConfirmationView: View {
             Text("确认本次具体改期").vosFont(WorkspaceText.sectionTitle)
             Text(effect.before.title).vosFont(WorkspaceText.rowTitle)
             Text("清单：" + effect.calendarTitle)
-            Text("上次回读期限：" + (effect.before.dueDate?.summary ?? "未能核对"))
-            Text("拟改为：" + effect.desired.summary).vosFont(WorkspaceText.rowTitle)
+            HStack(spacing: 8) {
+                WorkspaceBadge(text: "上次回读期限：" + (effect.before.dueDate?.summary ?? "未能核对"),
+                               tone: effect.before.dueDate == nil ? .warning : .neutral)
+                WorkspaceBadge(text: "拟改为：" + effect.desired.summary)
+            }
             Text(effect.authority == .userCommitment ? "你的明确期限选择" : "AI 弹性安排，仍非你的明确承诺").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             DisclosureGroup("本次排期依据") {
                 Text(effect.rawExpression).textSelection(.enabled)
@@ -108,7 +111,7 @@ struct ReminderScheduleConfirmationView: View {
             Text("确认不代表任务已完成或观点已验证。可以撤回后续写入许可；已派发的变更不能因此自动撤销。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
-                Button("暂不修改", action: dismiss).disabled(saving)
+                Button("暂不修改", action: dismiss).buttonStyle(.workspaceSecondary).disabled(saving)
                 Spacer()
                 Button(saving ? "正在处理…" : "确认并执行这一次改期") {
                     saving = true; errorText = ""
@@ -117,7 +120,7 @@ struct ReminderScheduleConfirmationView: View {
                         saving = false
                         if approved { dismiss() } else { errorText = model.status }
                     }
-                }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction).disabled(saving || model.remindersBusy)
+                }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(saving || model.remindersBusy)
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
     }
