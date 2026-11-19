@@ -1201,6 +1201,9 @@ struct WorkspaceView: View {
             let visible = ["全部","我的待办"].contains(actionFilter) ? todoActions : visibleActions
             let focusedIDs = Set(focusedActions.map(\.id))
             let listed = actionFilter == "全部" ? todoOrder(visible, surface: timeSurface).filter { !focusedIDs.contains($0.id) } : visible
+            let timeEntries: [String: ActionTimeEntry] = timeSurface.map { surface in
+                Dictionary(uniqueKeysWithValues: (surface.today + surface.soon + surface.anytime).map { ($0.id, $0) })
+            } ?? [:]
             let executions = model.sortedAssistantDeliveries(model.assistantExecutions.filter { $0.state != "cancelled" })
             let paused = model.workspacePausedTasks
             if ["全部","我的待办"].contains(actionFilter), !focusedActions.isEmpty {
@@ -1248,7 +1251,7 @@ struct WorkspaceView: View {
             } else if !listed.isEmpty {
                 WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "问题" ? "VoiceOS 先回答；想清楚了可以转成下一步。" : actionFilter == "目标" ? "你要长期达到的结果；转成待办后可提醒。" : "",count:listed.count) {
                     ActionCardList {
-                        ForEach(listed) { action in actionRow(action,group:listGroup,nature:listNature,nextStepCounts:nextStepCounts,reads:rowReads) }
+                        ForEach(listed) { action in actionRow(action,timeEntry:timeEntries[action.id],group:listGroup,nature:listNature,nextStepCounts:nextStepCounts,reads:rowReads) }
                     }
                 }
             }
@@ -1894,11 +1897,13 @@ struct WorkspaceView: View {
         let issues=source.unresolvedTranscriptionIssueCount
         let reading:(text:String,color:Color)? = issues > 0 ? ("疑点 \(issues)",palette.warning) : materialReadingStatus(source.id)
         let groupNote=reason ?? (model.sourcePageIndex.expressionIssue(for: source.id) != nil ? "分组待重新判断" : nil)
-        let metadata=origin + (source.localOnly ? " · 仅本地" : "") + (groupNote.map { " · " + $0 } ?? "")
+        let localOnlyNote=source.localOnly ? " · 仅本地" : ""
+        let metadata=origin + localOnlyNote + (groupNote.map { " · " + $0 } ?? "")
+        let subtitle=first.recordingDateLabel + " · " + origin + localOnlyNote
         let openCount=model.sourcePageIndex.openActionCount(for:Set(expression?.sourceIDs ?? [source.id]))
         let trailingText=openCount > 0 ? "\(openCount) 条待办" + (issues > 0 ? " · 疑点 \(issues)" : "") : reading?.text ?? ""
         let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .status(palette.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
-        return WorkspaceRow(title:displayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:first.recordingDateLabel,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingText,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter) { go(.source(source.id)) }
+        return WorkspaceRow(title:displayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingText,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter) { go(.source(source.id)) }
             .help(metadata)
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
