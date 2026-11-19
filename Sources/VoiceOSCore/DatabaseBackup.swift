@@ -4,13 +4,19 @@ import CSQLite
 
 public struct LibraryStorageUsage: Sendable, Equatable {
     public let databaseBytes: Int64
-    public let assetsBytes: Int64
-    public let backupBytes: Int64
-    public let localSpeechBytes: Int64
-    public let mirrorBytes: Int64
+    /// nil means the category exists but its directory could not be enumerated;
+    /// zero means the directory is absent. The two must stay distinguishable so
+    /// the settings page can say "无法读取" instead of showing a fake zero.
+    public let assetsBytes: Int64?
+    public let backupBytes: Int64?
+    public let localSpeechBytes: Int64?
+    public let mirrorBytes: Int64?
     public let backupCount: Int
-    public var totalBytes: Int64 { databaseBytes + assetsBytes + backupBytes + localSpeechBytes + mirrorBytes }
-    public init(databaseBytes: Int64, assetsBytes: Int64, backupBytes: Int64, localSpeechBytes: Int64, mirrorBytes: Int64, backupCount: Int) {
+    public var totalBytes: Int64? {
+        guard let assetsBytes, let backupBytes, let localSpeechBytes, let mirrorBytes else { return nil }
+        return databaseBytes + assetsBytes + backupBytes + localSpeechBytes + mirrorBytes
+    }
+    public init(databaseBytes: Int64, assetsBytes: Int64?, backupBytes: Int64?, localSpeechBytes: Int64?, mirrorBytes: Int64?, backupCount: Int) {
         self.databaseBytes = databaseBytes
         self.assetsBytes = assetsBytes
         self.backupBytes = backupBytes
@@ -26,6 +32,14 @@ public enum DatabaseBackup {
         public let count: Int
     }
 
+    /// Distinguishes "no backups yet" from "the directory exists but cannot be
+    /// read"; both used to collapse to a nil summary and show "尚未生成备份".
+    public enum BackupAvailability: Sendable, Equatable {
+        case none
+        case unreadable
+        case summary(Summary)
+    }
+
     private static let metaFileName = ".backup-meta"
 
     public static func successText(at date: Date, count: Int) -> String {
@@ -37,12 +51,24 @@ public enum DatabaseBackup {
     }
 
     public static func summary(directory: URL) -> Summary? {
-        let files = backupFiles(directory: directory)
-        guard !files.isEmpty else { return nil }
+        if case .summary(let summary) = availability(directory: directory) { return summary }
+        return nil
+    }
+
+    public static func availability(directory: URL, fileManager: FileManager = .default) -> BackupAvailability {
+        guard fileManager.fileExists(atPath: directory.path) else { return .none }
+        let files: [URL]
+        do {
+            files = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey])
+                .filter { $0.lastPathComponent.hasPrefix("voiceos-") && $0.pathExtension == "sqlite" }
+        } catch {
+            return .unreadable
+        }
+        guard !files.isEmpty else { return .none }
         let latest = files.compactMap {
             try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
         }.max() ?? .distantPast
-        return Summary(date: latest, count: files.count)
+        return .summary(Summary(date: latest, count: files.count))
     }
 
     public static func lastBackupDate(directory: URL) -> Date? {
@@ -69,14 +95,17 @@ public enum DatabaseBackup {
             backupCount: backupFiles(directory: backups).count)
     }
 
-    public static func directoryBytes(at url: URL, fileManager: FileManager = .default) -> Int64 {
+    /// Absent directory is zero bytes; a directory that exists but cannot be
+    /// enumerated returns nil so the caller can show "无法读取" instead of 0.
+    public static func directoryBytes(at url: URL, fileManager: FileManager = .default) -> Int64? {
         // Foundation 的 enumerator 在遇到指向目录的符号链接并 skipDescendants 时
         // 会连带跳过后续兄弟目录的子项，这里改用手写递归。
+        guard fileManager.fileExists(atPath: url.path) else { return 0 }
         guard let entries = try? fileManager.contentsOfDirectory(
             at: url,
             includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey],
             options: []
-        ) else { return 0 }
+        ) else { return nil }
         var total: Int64 = 0
         for entry in entries {
             guard let values = try? entry.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .isDirectoryKey, .fileSizeKey]) else { continue }
@@ -84,7 +113,8 @@ public enum DatabaseBackup {
             if values.isRegularFile == true {
                 total += Int64(values.fileSize ?? 0)
             } else if values.isDirectory == true {
-                total += directoryBytes(at: entry, fileManager: fileManager)
+                guard let nested = directoryBytes(at: entry, fileManager: fileManager) else { return nil }
+                total += nested
             }
         }
         return total

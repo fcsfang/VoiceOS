@@ -102,4 +102,35 @@ final class StorageUsageChecks: XCTestCase {
     func testOrphanSidecarSweepSkipsMissingDirectory() {
         XCTAssertEqual(DatabaseBackup.removeOrphanSidecars(directory: root.appendingPathComponent("absent")), 0)
     }
+
+    func testUnreadableDirectoryReportsNilBytesAndUsage() throws {
+        try write("assets/a.bin", bytes: 12)
+        let assets = root.appendingPathComponent("assets")
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: assets.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: assets.path) }
+        guard DatabaseBackup.directoryBytes(at: assets) == nil else {
+            throw XCTSkip("当前环境无法模拟不可读目录（可能以 root 运行）")
+        }
+        let usage = DatabaseBackup.storageUsage(root: root)
+        XCTAssertNil(usage.assetsBytes, "读不到的原件目录应报告失败而不是 0")
+        XCTAssertNil(usage.totalBytes, "任一分类不可读时合计不能当作完整数字")
+        XCTAssertEqual(usage.mirrorBytes, 0, "不存在的目录仍按 0 计算")
+    }
+
+    func testBackupAvailabilityDistinguishesMissingFromUnreadable() throws {
+        let backups = root.appendingPathComponent("Backups")
+        XCTAssertEqual(DatabaseBackup.availability(directory: backups), .none)
+
+        try write("Backups/voiceos-20260101-000000.sqlite", bytes: 10)
+        guard case .summary(let summary) = DatabaseBackup.availability(directory: backups) else {
+            return XCTFail("有备份文件时应返回摘要")
+        }
+        XCTAssertEqual(summary.count, 1)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: backups.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: backups.path) }
+        guard DatabaseBackup.availability(directory: backups) == .unreadable else {
+            throw XCTSkip("当前环境无法模拟不可读目录（可能以 root 运行）")
+        }
+    }
 }

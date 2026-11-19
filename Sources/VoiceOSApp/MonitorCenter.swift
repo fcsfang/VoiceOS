@@ -15,18 +15,35 @@ struct MonitorSettings: Codable, Equatable {
     var scheduleSettings: MonitorScheduleSettings { .init(hour: hour, minute: minute) }
 }
 
+struct MonitorSettingsLoad {
+    let settings: MonitorSettings
+    let decodeFailed: Bool
+}
+
 enum MonitorSettingsStore {
     private static let key = "voiceos.monitor.settings.v1"
-    static func load() -> MonitorSettings {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let settings = try? JSONDecoder().decode(MonitorSettings.self, from: data) else {
-            return MonitorSettings()
+    static func loadResult() -> MonitorSettingsLoad {
+        guard let data = UserDefaults.standard.data(forKey: key) else {
+            return MonitorSettingsLoad(settings: MonitorSettings(), decodeFailed: false)
         }
-        return settings
+        do {
+            return MonitorSettingsLoad(settings: try JSONDecoder().decode(MonitorSettings.self, from: data),
+                                       decodeFailed: false)
+        } catch {
+            return MonitorSettingsLoad(settings: MonitorSettings(), decodeFailed: true)
+        }
     }
-    static func save(_ settings: MonitorSettings) {
-        if let data = try? JSONEncoder().encode(settings) { UserDefaults.standard.set(data, forKey: key) }
+    static func load() -> MonitorSettings { loadResult().settings }
+    @discardableResult
+    static func save(_ settings: MonitorSettings) -> Bool {
+        guard let data = try? JSONEncoder().encode(settings) else { return false }
+        UserDefaults.standard.set(data, forKey: key)
+        return true
     }
+}
+
+enum MonitorSettingsBootstrap {
+    static let loaded = MonitorSettingsStore.loadResult()
 }
 
 /// Paths and the account name are not secrets; the key file content never
@@ -38,15 +55,25 @@ struct MonitorQQUserSettings: Codable, Equatable {
     var scriptPathOverride: String = ""
 }
 
+struct MonitorQQSettingsLoad {
+    let settings: MonitorQQUserSettings
+    let decodeFailed: Bool
+}
+
 enum MonitorQQSettingsStore {
     private static let key = "voiceos.monitor.qq.settings.v1"
-    static func load() -> MonitorQQUserSettings {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let settings = try? JSONDecoder().decode(MonitorQQUserSettings.self, from: data) else {
-            return MonitorQQUserSettings()
+    static func loadResult() -> MonitorQQSettingsLoad {
+        guard let data = UserDefaults.standard.data(forKey: key) else {
+            return MonitorQQSettingsLoad(settings: MonitorQQUserSettings(), decodeFailed: false)
         }
-        return settings
+        do {
+            return MonitorQQSettingsLoad(settings: try JSONDecoder().decode(MonitorQQUserSettings.self, from: data),
+                                         decodeFailed: false)
+        } catch {
+            return MonitorQQSettingsLoad(settings: MonitorQQUserSettings(), decodeFailed: true)
+        }
     }
+    static func load() -> MonitorQQUserSettings { loadResult().settings }
     @discardableResult
     static func save(_ settings: MonitorQQUserSettings) -> Bool {
         guard let data = try? JSONEncoder().encode(settings) else { return false }
@@ -101,6 +128,12 @@ struct MonitorSourceStat: Equatable {
     let lastError: String?
     let messageCount: Int
     let latestMessageAt: String?
+}
+
+enum MonitorSourceStart: Equatable {
+    case unset
+    case invalid
+    case date(Date)
 }
 
 struct MonitorItemEvidence: Identifiable, Equatable {
@@ -256,7 +289,7 @@ extension ControlCenter {
         var settings = monitorSettings
         change(&settings)
         monitorSettings = settings
-        MonitorSettingsStore.save(settings)
+        recordMonitorSettingsSave(success: MonitorSettingsStore.save(settings))
     }
 
     func setMonitorScheduleTime(_ date: Date) {
@@ -322,12 +355,27 @@ extension ControlCenter {
     }
 
     func monitorSourceStartDate(_ source: MonitorSource) -> Date? {
-        switch source.kind {
-        case .qqGroup:
-            return MonitorSourceConfigParser.parseStart((try? MonitorSourceConfigParser.qq(source.configJSON))?.startAt)
-        case .websiteColumn:
-            return MonitorSourceConfigParser.parseStart((try? MonitorSourceConfigParser.website(source.configJSON))?.startAt)
+        if case .date(let date) = monitorSourceStart(source) { return date }
+        return nil
+    }
+
+    /// Parses the stored start config explicitly so a corrupt source shows
+    /// "配置无效" instead of pretending no start was ever set.
+    func monitorSourceStart(_ source: MonitorSource) -> MonitorSourceStart {
+        let startAt: String?
+        do {
+            switch source.kind {
+            case .qqGroup:
+                startAt = try MonitorSourceConfigParser.qq(source.configJSON).startAt
+            case .websiteColumn:
+                startAt = try MonitorSourceConfigParser.website(source.configJSON).startAt
+            }
+        } catch {
+            return .invalid
         }
+        guard let raw = startAt?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return .unset }
+        guard let date = MonitorSourceConfigParser.parseStart(raw) else { return .invalid }
+        return .date(date)
     }
 
     func setMonitorSourceEnabled(_ source: MonitorSource, enabled: Bool) async {
@@ -407,7 +455,9 @@ extension ControlCenter {
     func loadQQMonitorConversations() async -> String? {
         monitorQQConversationStatus = "正在读取 QQ 群列表…"
         monitorQQConversations = []
-        let settings = MonitorQQSettingsStore.qqSettings(MonitorQQSettingsStore.load())
+        let loaded = MonitorQQSettingsStore.loadResult()
+        recordMonitorQQSettingsLoad(decodeFailed: loaded.decodeFailed)
+        let settings = MonitorQQSettingsStore.qqSettings(loaded.settings)
         do {
             let list = try await QQMonitorHelper().conversationList(settings: settings)
             monitorQQConversations = list.conversations
@@ -423,7 +473,9 @@ extension ControlCenter {
 
     func diagnoseMonitorQQ() async {
         monitorQQDiagnosisStatus = "正在检查 QQ 依赖…"
-        let settings = MonitorQQSettingsStore.qqSettings(MonitorQQSettingsStore.load())
+        let loaded = MonitorQQSettingsStore.loadResult()
+        recordMonitorQQSettingsLoad(decodeFailed: loaded.decodeFailed)
+        let settings = MonitorQQSettingsStore.qqSettings(loaded.settings)
         let items = await QQMonitorHelper().diagnoseItems(settings: settings)
         monitorQQDiagnostics = items
         monitorQQDiagnosisStatus = items.allSatisfy(\.ok) ? "QQ 读取环境可用" : "有 \(items.filter { !$0.ok }.count) 项需要处理"
@@ -435,6 +487,7 @@ extension ControlCenter {
             monitorStatus = "QQ 读取设置保存失败，请重试；若仍失败请重启应用后再试"
             return false
         }
+        clearMonitorQQSettingsDecodeFailure()
         monitorStatus = "QQ 读取设置已保存（只保存路径与账号，不保存密钥内容）"
         return true
     }
@@ -557,7 +610,9 @@ extension ControlCenter {
         monitorStatus = automatic ? "自动检查开始…" : "正在检查…"
         defer { monitorChecking = false; monitorPhase = "" }
         await ensureBuiltinMonitorSources()
-        let user = MonitorQQSettingsStore.load()
+        let loaded = MonitorQQSettingsStore.loadResult()
+        recordMonitorQQSettingsLoad(decodeFailed: loaded.decodeFailed)
+        let user = loaded.settings
         let analysis: (any NotificationAnalysisPort)? = monitorSettings.cloudAnalysisAuthorized ? monitorAnalysisModel : nil
         let runner = MessageMonitorRunner(
             store: store, analysis: analysis,

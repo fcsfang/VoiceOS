@@ -79,6 +79,28 @@ final class MessageMonitorStorageChecks: XCTestCase {
                        "把起始时间改早后游标应回拨，去重吸收重叠")
     }
 
+    func testCorruptSourceStatusIsMarkedUnreadable() async throws {
+        let store = try await openStore()
+        let reportID = try await store.upsertMonitorReport(
+            date: "2026-11-19", state: .complete, headline: "示例", summary: "示例",
+            sourceStatus: [MonitorSourceStatus(sourceID: "s1", displayName: "示例群", ok: true,
+                                               newMessageCount: 0, error: nil)])
+        let valid = try await store.monitorReport(id: reportID)
+        XCTAssertEqual(valid?.sourceStatus.count, 1)
+        XCTAssertEqual(valid?.sourceStatusUnreadable, false, "合法来源状态不应标记为无法读取")
+
+        let db = await store.db
+        try db.execute("UPDATE monitor_reports SET source_status_json='{broken' WHERE id=?", [reportID])
+        let corrupt = try await store.monitorReport(id: reportID)
+        XCTAssertEqual(corrupt?.sourceStatus.count, 0)
+        XCTAssertEqual(corrupt?.sourceStatusUnreadable, true, "损坏的来源状态应显示为无法读取，而不是静默空数组")
+
+        let emptyID = try await store.upsertMonitorReport(
+            date: "2026-11-20", state: .complete, headline: "空状态", summary: "空状态", sourceStatus: [])
+        let empty = try await store.monitorReport(id: emptyID)
+        XCTAssertEqual(empty?.sourceStatusUnreadable, false, "合法空数组仍表示检查没有来源状态")
+    }
+
     func testOpenItemMergeUpdatesInPlaceAndKeepsUserStatus() async throws {
         let store = try await openStore()
         let source = try await store.addMonitorSource(kind: .qqGroup, displayName: "示例群",
