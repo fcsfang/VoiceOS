@@ -1696,9 +1696,65 @@ struct WorkspaceView: View {
         }
         return attributed
     }
+    private var reminderConnectionStatus: String {
+        switch model.reminderPermission {
+        case .notDetermined: "需要授权"
+        case .denied: "系统已拒绝"
+        case .granted: model.reminderAccess?.enabled == true ? model.reminderCalendarTitle : "未连接"
+        }
+    }
+    private var reminderReviewCount: Int? {
+        let anomalies = model.reminderSyncAnomalies
+        let total = anomalies.total + anomalies.failureTotal
+        return total > 0 ? total : nil
+    }
+    private var microphoneStatus: String {
+        switch model.microphoneAuthorization {
+        case .notDetermined: "尚未授权 · 口述与录音需要麦克风"
+        case .denied: "已拒绝 · 录音前需要到系统设置允许"
+        case .granted: "已允许 · 口述与录音可用"
+        }
+    }
     private var settings: some View {
         VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspaceHeading(eyebrow:"",title:"设置")
+            sectionTitle("模型与服务")
+            WorkspaceRow(title:"语音转文字",subtitle:model.speechSummary,icon:"waveform") { model.chooseLocalSpeech() }
+            WorkspaceRow(title:"理解、核对与 AI 助理",subtitle:model.textModelConfigured ? model.modelSummary : "尚未配置文本模型",icon:"sparkles") { model.chooseTextModel() }
+                .help(model.modelConfigurationPath ?? "选择本地的 .env 或模型 JSON 配置文件；配置后这里显示文件名")
+                .contextMenu {
+                    Button("更换配置…") { model.chooseTextModel() }
+                    Button("清除配置", role: .destructive) { model.clearTextModel() }.disabled(!model.modelConfigured)
+                }
+            sectionTitle("连接与自动入口")
+            WorkspaceRow(title:"自动接收录音",subtitle:"VoiceOS 收件箱与语音备忘录",icon:"tray.and.arrow.down") { go(.tool("自动入口")) }
+            WorkspaceRow(title:"消息监测",subtitle:"QQ 群与学院官网 · 检查时间、推送与依赖",icon:"antenna.radiowaves.left.and.right") { go(.monitor) }
+            WorkspaceRow(title:"Apple 提醒事项",subtitle:reminderConnectionStatus,icon:"checklist") { Task { await model.connectReminders() } }
+            if !model.reminderLastError.isEmpty {
+                WorkspaceNoticeText(message:"最近一次提醒事项操作失败：" + model.reminderLastError,severity:.warning)
+            }
+            if model.remindersPermissionDenied { Button("打开系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!) } }
+            if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
+            if let reminderReviewCount {
+                Button("\(reminderReviewCount) 条提醒待核对") { go(.tool("处理情况")) }
+                    .accessibilityLabel("\(reminderReviewCount) 条提醒待核对，打开处理情况")
+            }
+            VStack(alignment:.leading,spacing:6) {
+                Label("麦克风",systemImage:"mic").vosFont(WorkspaceText.rowTitle)
+                Text(microphoneStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            }
+            .task { model.refreshMicrophoneAuthorization() }
+            if model.microphoneAuthorization == .notDetermined {
+                Button("授权麦克风") { Task { _ = await model.requestMicrophoneAccess() } }
+            } else if model.microphoneAuthorization == .denied {
+                Button("打开系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!) }
+            }
+            WorkspaceRow(title:"系统通知",subtitle:model.noticeAuthorizationDetail,icon:"bell") { model.openNoticeSettings() }
+                .task { await model.refreshNoticeAuthorization() }
+            if model.noticeAuthorization == .denied { Button("打开系统通知设置") { model.openNoticeSettings() } }
+            Toggle("登录时启动", isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLogin($0) }))
+                .toggleStyle(.switch).frame(maxWidth: 360, alignment: .leading)
+            Text(model.launchAtLoginStatus).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             sectionTitle("外观")
             HStack(spacing:12) {
                 ForEach(WorkspaceTheme.allCases) { option in
@@ -1727,25 +1783,6 @@ struct WorkspaceView: View {
             }
             Button("再看一次引导") { model.onboardingRequested = true }
             Divider()
-            sectionTitle("模型与服务")
-            WorkspaceRow(title:"语音转文字",subtitle:model.speechSummary,icon:"waveform") { model.chooseLocalSpeech() }
-            WorkspaceRow(title:"理解、核对与 AI 助理",subtitle:model.textModelConfigured ? (model.modelConfigurationName ?? model.modelSummary) : "尚未配置文本模型",icon:"sparkles") { model.chooseTextModel() }
-                .help(model.modelConfigurationPath ?? "选择本地的 .env 或模型 JSON 配置文件；配置后这里显示文件名")
-                .contextMenu {
-                    Button("更换配置…") { model.chooseTextModel() }
-                    Button("清除配置", role: .destructive) { model.clearTextModel() }.disabled(!model.modelConfigured)
-                }
-            sectionTitle("连接与自动入口")
-            WorkspaceRow(title:"自动接收录音",subtitle:"VoiceOS 收件箱与语音备忘录",icon:"tray.and.arrow.down") { go(.tool("自动入口")) }
-            WorkspaceRow(title:"Apple 提醒事项",subtitle:model.remindersPermissionDenied ? "系统权限已拒绝，需要在系统设置中允许后重试" : model.reminderCalendarTitle,icon:"checklist") { Task { await model.connectReminders() } }
-            if model.remindersPermissionDenied { Button("打开系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!) } }
-            if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } } }
-            WorkspaceRow(title:"系统通知",subtitle:model.noticeAuthorizationDetail,icon:"bell") { model.openNoticeSettings() }
-                .task { await model.refreshNoticeAuthorization() }
-            if model.noticeAuthorization == .denied { Button("打开系统通知设置") { model.openNoticeSettings() } }
-            Toggle("登录时启动", isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLogin($0) }))
-                .toggleStyle(.switch).frame(maxWidth: 360, alignment: .leading)
-            Text(model.launchAtLoginStatus).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             sectionTitle("资料与历史")
             HStack(spacing:12) {
                 Button("导出结构化资料") { model.export(includeMedia:false) }
