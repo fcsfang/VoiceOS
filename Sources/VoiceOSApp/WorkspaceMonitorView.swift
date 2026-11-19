@@ -33,8 +33,7 @@ struct WorkspaceMonitorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
-            WorkspaceHeading(eyebrow: "每日消息监测", title: "消息监测",
-                             subtitle: "每天检查一次 QQ 班级群与学院官网；需要行动的事项在这里跟进，微信收到每日汇总。")
+            WorkspaceHeading(eyebrow: "每日消息监测", title: "消息监测", subtitle: headingSubtitle)
             Picker("消息监测页面", selection: $showsSettings) {
                 Text("报告").tag(false)
                 Text("设置").tag(true)
@@ -47,6 +46,7 @@ struct WorkspaceMonitorView: View {
                 settingsSection
             } else {
                 runBar
+                pushNotConfiguredBanner
                 todayReportSection
                 historySection
                 sourceStatusSection
@@ -67,6 +67,7 @@ struct WorkspaceMonitorView: View {
                 await model.ensureBuiltinMonitorSources()
                 await model.reloadMonitorState()
                 monitorLoaded = true
+                markLatestItemsFailure()
                 earlierOpenSummary = await model.monitorOpenItemsSummary(todayKey: todayKey)
                 model.markMonitorAttentionSeen()
             }
@@ -86,6 +87,12 @@ struct WorkspaceMonitorView: View {
 
     private var todayKey: String { MonitorSourceConfigParser.dayString(Date()) }
 
+    private var headingSubtitle: String {
+        model.monitorPushConfigured
+            ? "每天检查一次 QQ 班级群与学院官网；需要行动的事项在这里跟进，微信收到每日汇总。"
+            : "每天检查一次 QQ 班级群与学院官网；需要行动的事项在这里跟进。微信推送尚未配置。"
+    }
+
     private var qqNeedsFullDiskAccess: Bool {
         model.monitorQQDiagnostics.contains { !$0.ok && $0.needsFullDiskAccess }
             || QQMonitorPermissionGuidance.matches(model.monitorQQConversationStatus)
@@ -97,6 +104,7 @@ struct WorkspaceMonitorView: View {
                 Button {
                     Task {
                         await model.runMonitorCheck()
+                        markLatestItemsFailure()
                         await refreshEarlierOpenSummary()
                     }
                 } label: {
@@ -116,6 +124,27 @@ struct WorkspaceMonitorView: View {
             }
             Text("每天最多自动检查一次。应用退出后不会自动运行，下次启动会补跑；运行中每 10 分钟只比对时间，不读 QQ、不调模型。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+        }
+    }
+
+    @ViewBuilder private var pushNotConfiguredBanner: some View {
+        if monitorLoaded, let report = model.monitorLatestReport, !model.monitorPushConfigured {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.bubble")
+                    .foregroundStyle(palette.warning)
+                Text(report.reportDate == todayKey
+                     ? "今天的报告已生成，微信推送尚未配置"
+                     : "最近一次报告已生成，微信推送尚未配置")
+                    .vosFont(WorkspaceText.body)
+                Spacer()
+                Button("去设置") { showsSettings = true }
+                    .vosFont(WorkspaceText.meta)
+                    .accessibilityIdentifier("monitor.push.banner.settings")
+            }
+            .padding(12)
+            .background(palette.warning.opacity(0.08),
+                        in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+            .accessibilityIdentifier("monitor.push.banner")
         }
     }
 
@@ -170,7 +199,8 @@ struct WorkspaceMonitorView: View {
 
     private func reportSection(title: String, report: MonitorReport, isLatest: Bool) -> some View {
         WorkspaceSection(title: title,
-                         subtitle: report.reportDate + " · " + ControlCenter.monitorStateText(report.state),
+                         subtitle: report.reportDate + " · " + ControlCenter.monitorStateText(report.state)
+                             + (ControlCenter.monitorGeneratedText(report).map { " · " + $0 } ?? ""),
                          icon: "doc.text") {
             VStack(alignment: .leading, spacing: 10) {
                 Text(report.headline.isEmpty ? "没有标题" : report.headline).vosFont(WorkspaceText.rowTitle)
@@ -191,17 +221,26 @@ struct WorkspaceMonitorView: View {
                             Button("重新检查") {
                                 Task {
                                     await model.runMonitorCheck()
+                                    markLatestItemsFailure()
                                     await refreshEarlierOpenSummary()
                                 }
                             }
                                 .disabled(model.monitorChecking).vosFont(WorkspaceText.meta)
                                 .accessibilityIdentifier("monitor.report.recheck")
-                        } else {
+                        } else if model.monitorPushConfigured {
                             Button("立即推送今日报告") { Task { await model.pushLatestMonitorReport() } }
                                 .disabled(model.monitorChecking).vosFont(WorkspaceText.meta)
                                 .accessibilityIdentifier("monitor.report.push")
+                        } else {
+                            Button("配置推送") { showsSettings = true }
+                                .vosFont(WorkspaceText.meta)
+                                .accessibilityIdentifier("monitor.report.pushConfigure")
                         }
                     }
+                }
+                if isLatest, !model.monitorPushStatus.isEmpty {
+                    Text(model.monitorPushStatus).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.secondaryText).textSelection(.enabled)
                 }
                 sourceFailureReasons(report)
                 itemsView(report: report)
@@ -233,8 +272,18 @@ struct WorkspaceMonitorView: View {
         case .loading:
             monitorLoadingRow("正在读取事项…")
         case .failed:
-            Text("事项读取失败，请收起后重新展开重试。")
-                .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning).padding(.vertical, 6)
+            HStack(spacing: 12) {
+                Text(report.id == model.monitorLatestReport?.id
+                     ? "事项读取失败。"
+                     : "事项读取失败，请收起后重新展开重试。")
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                if report.id == model.monitorLatestReport?.id {
+                    Button("重新读取") { Task { await loadItems(report) } }
+                        .vosFont(WorkspaceText.meta)
+                        .accessibilityIdentifier("monitor.report.retryItems")
+                }
+                Spacer()
+            }.padding(.vertical, 6)
         case .empty:
             Text(emptyItemsText(report))
                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.vertical, 6)
@@ -261,7 +310,10 @@ struct WorkspaceMonitorView: View {
                 }
             }
             if openItems.isEmpty {
-                Text("没有未处理的事项。")
+                let handledCount = items.count - openItems.count
+                Text(handledCount > 0 && !showsAllItems
+                     ? "已处理 \(handledCount) 项，切换「全部」查看"
+                     : "没有未处理的事项。")
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.vertical, 6)
             }
             if showsAllItems {
@@ -324,6 +376,12 @@ struct WorkspaceMonitorView: View {
         failedItemReportIDs.remove(report.id)
         _ = await model.loadMonitorItems(reportID: report.id)
         if model.monitorItemsByReport[report.id] == nil { failedItemReportIDs.insert(report.id) }
+    }
+
+    private func markLatestItemsFailure() {
+        guard let latest = model.monitorLatestReport else { return }
+        if model.monitorItemsByReport[latest.id] == nil { failedItemReportIDs.insert(latest.id) }
+        else { failedItemReportIDs.remove(latest.id) }
     }
 
     private func refreshEarlierOpenSummary() async {

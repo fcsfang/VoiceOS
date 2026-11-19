@@ -426,6 +426,11 @@ extension ControlCenter {
         return true
     }
 
+    /// Push is usable only when both the channel and the keychain address exist.
+    var monitorPushConfigured: Bool {
+        monitorSettings.pushChannel != nil && MonitorCredentialStore.loadWebhookURL() != nil
+    }
+
     var monitorWebhookTail: String { MonitorCredentialStore.tail(MonitorCredentialStore.loadWebhookURL()) }
 
     @discardableResult
@@ -681,5 +686,10 @@ extension ControlCenter {
     static func monitorTimeText(_ iso: String?) -> String {
         guard let iso, let date = MonitorDateFormatting.iso8601.date(from: iso) else { return iso ?? "时间未知" }
         return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    static func monitorGeneratedText(_ report: MonitorReport) -> String? {
+        guard let date = MonitorDateFormatting.iso8601.date(from: report.createdAt) else { return nil }
+        return "生成于 " + date.formatted(date: .omitted, time: .shortened)
     }
 }
