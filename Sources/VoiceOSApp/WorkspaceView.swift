@@ -545,8 +545,8 @@ struct WorkspaceView: View {
             }
             HStack {
                 Spacer()
-                Button("取消") { showingSaveView=false }
-                Button("保存") { Task { await saveView() } }.buttonStyle(.borderedProminent).disabled(!canSaveView || savingView)
+                Button("取消") { showingSaveView=false }.buttonStyle(.workspaceSecondary)
+                Button("保存") { Task { await saveView() } }.buttonStyle(.workspacePrimary).disabled(!canSaveView || savingView)
             }
         }.padding(24).frame(width:400)
     }
@@ -574,8 +574,8 @@ struct WorkspaceView: View {
                     } description: {
                         Text(model.startupIssue).textSelection(.enabled)
                     } actions: {
-                        Button("重试打开资料库") { Task { await model.start() } }.buttonStyle(.borderedProminent)
-                        Button("打开其他资料库",action:chooseLibrary)
+                        Button("重试打开资料库") { Task { await model.start() } }.buttonStyle(.workspacePrimary)
+                        Button("打开其他资料库",action:chooseLibrary).buttonStyle(.workspaceSecondary)
                     }
                 } else if !model.initialized || !model.workspaceLoaded {
                     ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
@@ -852,8 +852,8 @@ struct WorkspaceView: View {
                     HStack {
                         Button(model.dictationActive ? "停止并整理" : "开始口述并自动整理",systemImage:model.dictationActive ? "stop.circle" : "mic") {
                             if model.dictationActive { model.stopDictation() } else { Task { await model.startDictation(processAfterTranscription:true) } }
-                        }.buttonStyle(.borderedProminent).disabled(model.dictationBusy || model.fullRecordingBusy || (!model.dictationActive && model.recordingModelIssue != nil))
-                        Button("导入音频 / 视频") { model.chooseFullRecording() }
+                        }.buttonStyle(.workspacePrimary).disabled(model.dictationBusy || model.fullRecordingBusy || (!model.dictationActive && model.recordingModelIssue != nil))
+                        Button("导入音频 / 视频") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
                     }
                     if let issue = model.recordingModelIssue {
                         HStack(spacing:10) {
@@ -1075,8 +1075,8 @@ struct WorkspaceView: View {
                 VStack(alignment:.leading,spacing:14) {
                     TextField("你持续关心的主题或问题",text:$newTopicTitle).textFieldStyle(.roundedBorder)
                     HStack {
-                        Button("取消") { creatingTopic=false;editingTopicID=nil }
-                        Button("保存主题") { Task { await saveTopic() } }.buttonStyle(.borderedProminent).disabled(newTopicTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || savingTopic)
+                        Button("取消") { creatingTopic=false;editingTopicID=nil }.buttonStyle(.workspaceSecondary)
+                        Button("保存主题") { Task { await saveTopic() } }.buttonStyle(.workspacePrimary).disabled(newTopicTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || savingTopic)
                     }
                 }.padding(18).background(palette.selection,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             }
@@ -1129,7 +1129,7 @@ struct WorkspaceView: View {
             let outcomes=(topicFocus?.outcomes ?? []).filter { actionIDs.contains($0.actionID) && ConversationReflectionFocus.date($0.createdAt).map { interval.contains($0) } == true }
             ForEach(outcomes) { outcome in WorkspaceRow(title:outcome.text,subtitle:"实际结果 · " + dateLabel(outcome.createdAt),icon:"leaf") { go(.task(outcome.actionID)) } }
             if sources.isEmpty && outcomes.isEmpty { Text("这段时间还没有新增材料或结果。这个主题的历史脉络仍保留在概览中。").foregroundStyle(.secondary) }
-            Button("让 AI 一起回顾这个周期",systemImage:"sparkles") { Task { do { let focus=try await model.loadQuestionReflection(topic.id,interval:interval,period:reviewPeriod);_ = await openReflection(focus,prompt:reviewPeriod.reviewPrompt(dateLabel:interval.start.formatted(date:.abbreviated,time:.omitted),questionTitle:topic.title)) } catch { self.error=error.localizedDescription } } }.buttonStyle(.borderedProminent)
+            Button("让 AI 一起回顾这个周期",systemImage:"sparkles") { Task { do { let focus=try await model.loadQuestionReflection(topic.id,interval:interval,period:reviewPeriod);_ = await openReflection(focus,prompt:reviewPeriod.reviewPrompt(dateLabel:interval.start.formatted(date:.abbreviated,time:.omitted),questionTitle:topic.title)) } catch { self.error=error.localizedDescription } } }.buttonStyle(.workspacePrimary)
         }
     }
     @State private var showingClarifyQueue = false
@@ -2246,7 +2246,7 @@ struct WorkspaceView: View {
                     Text("从即将与随时里挑选，最多 3 条进入专注。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
                 Spacer(minLength:8)
-                Button("取消") { showingPlanToday=false }
+                Button("取消") { showingPlanToday=false }.buttonStyle(.workspaceSecondary)
             }
             if !focusedActions.isEmpty {
                 Text("已在专注").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
@@ -2278,7 +2278,7 @@ struct WorkspaceView: View {
                 Text("已选 \(planSelection.count) 条").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button(planningToday ? "正在安排…" : "加入专注") { Task { await confirmPlanToday() } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.workspacePrimary)
                     .disabled(planSelection.isEmpty || planningToday)
             }
         }.padding(24).frame(minWidth:560,idealWidth:560,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
@@ -2461,9 +2461,9 @@ struct WorkspaceView: View {
     private var actionSelectionBar: some View {
         HStack(spacing:12) {
             Text(batchRunning ? "正在更新…" : "已选 \(selectedActionIDs.count) 条").vosFont(WorkspaceText.meta.size, weight: .medium)
-            Button("标为完成") { pendingBatchState = .completed }.buttonStyle(.borderedProminent).disabled(batchRunning || batchActions(for: .completed).isEmpty)
-            Button("不再跟进") { pendingBatchState = .dismissed }.buttonStyle(.bordered).disabled(batchRunning || batchActions(for: .dismissed).isEmpty)
-            Button("取消") { exitActionSelection() }.buttonStyle(.borderless).disabled(batchRunning)
+            Button("标为完成") { pendingBatchState = .completed }.buttonStyle(.workspacePrimary).disabled(batchRunning || batchActions(for: .completed).isEmpty)
+            Button("不再跟进") { pendingBatchState = .dismissed }.buttonStyle(.workspaceSecondary).disabled(batchRunning || batchActions(for: .dismissed).isEmpty)
+            Button("取消") { exitActionSelection() }.buttonStyle(.workspaceQuiet).disabled(batchRunning)
         }.padding(.horizontal,18).padding(.vertical,11)
             .background(palette.surface,in:Capsule())
             .overlay(Capsule().strokeBorder(palette.selection,lineWidth:1))
