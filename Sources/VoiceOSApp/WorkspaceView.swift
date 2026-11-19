@@ -320,6 +320,7 @@ struct WorkspaceView: View {
     @State private var newTopicTitle = ""
     @State private var editingTopicID: String? = nil
     @State private var topicFocus: ConversationReflectionFocus?
+    @State private var topicQuery = ""
     @State private var reviewPeriod = ReflectionPeriod.week
     @State private var reviewAnchor = Date()
     @State private var error = ""
@@ -1014,17 +1015,24 @@ struct WorkspaceView: View {
                 WorkspaceTabs(selection:$topicTab,titles:["概览","认识与问题","行动与结果","材料"])
                 topicContent(topic, reading: reading)
             } else {
+                let filter = topicQuery.trimmingCharacters(in:.whitespacesAndNewlines)
+                let visibleTopics = filter.isEmpty ? model.workspaceTopics : model.workspaceTopics.filter {
+                    $0.title.localizedCaseInsensitiveContains(filter) || ($0.organization?.summary ?? "").localizedCaseInsensitiveContains(filter)
+                }
                 HStack { WorkspaceHeading(eyebrow:"",title:"主题")
                     Spacer();Button("新建主题") { newTopicTitle="";editingTopicID=nil;creatingTopic=true }
                 }
-                if !model.workspaceTopics.isEmpty {
+                WorkspaceSearchField(text:$topicQuery,placeholder:"搜索主题标题或摘要")
+                    .accessibilityIdentifier("topics.search")
+                if !visibleTopics.isEmpty {
                     LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing:16)],alignment:.leading,spacing:16) {
-                        ForEach(model.workspaceTopics) { item in
+                        ForEach(visibleTopics) { item in
                             WorkspaceTopicTile(topic:item,sourceCount:model.workspaceTopicSources[item.id]?.count ?? 0) { selectTopic(item.id) }
                         }
                     }
                 }
-                if model.workspaceTopics.isEmpty { Text(model.organizingTopics ? "AI 正在按内容连接主题…" : "授权材料会自动归组。也可以先建立一个你关心的问题。").foregroundStyle(.secondary) }
+                if !filter.isEmpty && visibleTopics.isEmpty { Text("没有匹配的主题").foregroundStyle(.secondary) }
+                if filter.isEmpty && model.workspaceTopics.isEmpty { Text(model.organizingTopics ? "AI 正在按内容连接主题…" : "授权材料会自动归组。也可以先建立一个你关心的问题。").foregroundStyle(.secondary) }
                 let linked=Set(model.workspaceTopicSources.values.flatMap { $0 })
                 let unlinked=activeMaterials.filter { !linked.contains($0.id) }
                 if !unlinked.isEmpty {
