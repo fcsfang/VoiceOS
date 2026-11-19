@@ -24,12 +24,12 @@ struct WorkspaceDeliveryView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
-                WorkspaceHeading(eyebrow: "AI 助理 · " + assistantExecutionLabel(execution), title: execution.title)
+                WorkspacePageHeading(eyebrow: "AI 助理 · " + assistantExecutionLabel(execution), title: execution.title)
                 if model.isDeliveryUnread(execution) {
                     HStack(spacing:10) {
-                        Label("未读交付", systemImage:"circle.fill").vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                        WorkspaceBadge(text:"未读交付", tone:.accent)
                         Button("标为已读", systemImage:"checkmark.circle") { model.markDeliveryRead(execution) }
-                            .vosFont(WorkspaceText.meta)
+                            .buttonStyle(.workspaceSecondaryCompact)
                             .accessibilityLabel("把这份 AI 交付标为已读")
                     }
                 }
@@ -37,34 +37,45 @@ struct WorkspaceDeliveryView: View {
                     Label("依据已变化，这份交付作为历史保留。", systemImage: "pause.circle").foregroundStyle(palette.warning)
                 }
                 if let report = execution.report, !report.isEmpty {
-                    WorkspaceSection(title:"交付正文",subtitle:ConversationReflectionFocus.date(execution.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知",icon:"doc.text",actionTitle:"保存报告…",action:{ export(report) }) {
-                        AssistantReportView(report: report).padding(.top,14)
+                    WorkspaceCard {
+                        VStack(alignment:.leading,spacing:12) {
+                            WorkspaceSectionHeading(title:"交付正文") {
+                                Button("保存报告…") { export(report) }.buttonStyle(.workspaceQuietCompact)
+                            }
+                            Text(ConversationReflectionFocus.date(execution.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                            WorkspaceListDivider()
+                            AssistantReportView(report: report)
+                        }
                     }
                     if let exportFailure, exportFailure.actionID == execution.id {
                         HStack(spacing: 10) {
                             WorkspaceNoticeText(message: exportFailure.message, severity: .warning)
                             Button("重试") { self.exportFailure = nil; exportFailure.retry() }
-                                .vosFont(WorkspaceText.meta).buttonStyle(.borderless)
+                                .buttonStyle(.workspaceQuietCompact)
                                 .accessibilityLabel("重试保存报告")
                         }
                     }
                     if !execution.references.isEmpty {
-                        WorkspaceSection(title:"参考与来源",icon:"link",count:execution.references.count) {
-                            DisclosureGroup("参考来源") {
-                                VStack(alignment: .leading, spacing: 12) {
-                                    ForEach(Array(execution.references.enumerated()), id: \.offset) { _, ref in
-                                        if let url = URL(string: ref.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-                                            Link(ref.title.isEmpty ? ref.url : ref.title, destination: url)
-                                            Text(ref.url).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                        WorkspaceCard {
+                            VStack(alignment:.leading,spacing:12) {
+                                WorkspaceSectionHeading(title:"参考与来源") { WorkspaceBadge(text:"\(execution.references.count)", tone:.neutral) }
+                                WorkspaceListDivider()
+                                DisclosureGroup("参考来源") {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        ForEach(Array(execution.references.enumerated()), id: \.offset) { _, ref in
+                                            if let url = URL(string: ref.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                                                Link(ref.title.isEmpty ? ref.url : ref.title, destination: url)
+                                                Text(ref.url).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                                            }
                                         }
-                                    }
-                                }.padding(.top, 12)
-                            }.padding(.vertical,14)
+                                    }.padding(.top, 12)
+                                }
+                            }
                         }
                     }
                     if execution.validity == "current" {
                         Button("带着成果继续讨论", systemImage: "bubble.left.and.bubble.right", action: discuss)
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(.workspacePrimary)
                     }
                 } else if ["queued", "running"].contains(execution.state) {
                     HStack(spacing: 14) {
@@ -74,39 +85,43 @@ struct WorkspaceDeliveryView: View {
                     Text("可以继续阅读其他材料，VoiceOS 保持运行就会继续处理。").foregroundStyle(.secondary)
                 }
                 if let message = AssistantFailurePresentation.message(execution.error) { WorkspaceNoticeText(message:message,severity:.danger) }
-                WorkspaceSection(title:"继续使用这份成果",icon:"arrow.right.circle") {
-                    HStack {
-                        Button("原任务与使用结果") { openTask(execution.actionID) }
-                        Spacer()
-                        if ["queued", "running"].contains(execution.state) { Button("取消代办") { cancelExecution() } }
-                        if execution.validity == "current", ["failed", "cancelled"].contains(execution.state) { Button("重新执行") { retryExecution() } }
-                    }.padding(.vertical,14)
-                    if let failure, failure.actionID == execution.id {
-                        HStack(spacing:10) {
-                            WorkspaceNoticeText(message: failure.message, severity: .warning)
-                            Button("重试") { self.failure = nil; failure.retry() }
-                                .vosFont(WorkspaceText.meta).buttonStyle(.borderless)
-                                .accessibilityLabel("重试失败的操作")
+                WorkspaceCard {
+                    VStack(alignment:.leading,spacing:12) {
+                        WorkspaceSectionHeading("继续使用这份成果")
+                        WorkspaceListDivider()
+                        HStack {
+                            Button("原任务与使用结果") { openTask(execution.actionID) }.buttonStyle(.workspaceSecondary)
+                            Spacer()
+                            if ["queued", "running"].contains(execution.state) { Button("取消代办") { cancelExecution() }.buttonStyle(.workspaceSecondary) }
+                            if execution.validity == "current", ["failed", "cancelled"].contains(execution.state) { Button("重新执行") { retryExecution() }.buttonStyle(.workspaceSecondary) }
+                        }
+                        if let failure, failure.actionID == execution.id {
+                            HStack(spacing:10) {
+                                WorkspaceNoticeText(message: failure.message, severity: .warning)
+                                Button("重试") { self.failure = nil; failure.retry() }
+                                    .buttonStyle(.workspaceQuietCompact)
+                                    .accessibilityLabel("重试失败的操作")
+                            }
+                        }
+                        if let id = execution.questionID, let topic = model.workspaceTopics.first(where: { $0.id == id }) {
+                            WorkspaceRow(title: topic.title, subtitle: "成果已回流到这个主题", icon: "circle.hexagongrid") { openTopic(id) }
+                        }
+                        if execution.state == "completed", execution.validity == "current" {
+                            DisclosureGroup("调整成果所属主题") {
+                                HStack {
+                                    Picker("主题", selection: $topicID) {
+                                        Text("选择主题").tag("")
+                                        ForEach(model.workspaceTopics) { Text($0.title).tag($0.id) }
+                                    }
+                                    Button("接回主题") { attachToTopic() }.buttonStyle(.workspaceSecondaryCompact).disabled(topicID.isEmpty)
+                                }.padding(.top, 12)
+                            }
+                        }
+                        DisclosureGroup("交付要求与记录") {
+                            Text(execution.instruction).textSelection(.enabled).padding(.top, 8)
+                            Text(ConversationReflectionFocus.date(execution.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         }
                     }
-                    if let id = execution.questionID, let topic = model.workspaceTopics.first(where: { $0.id == id }) {
-                        WorkspaceRow(title: topic.title, subtitle: "成果已回流到这个主题", icon: "circle.hexagongrid") { openTopic(id) }
-                    }
-                    if execution.state == "completed", execution.validity == "current" {
-                        DisclosureGroup("调整成果所属主题") {
-                            HStack {
-                                Picker("主题", selection: $topicID) {
-                                    Text("选择主题").tag("")
-                                    ForEach(model.workspaceTopics) { Text($0.title).tag($0.id) }
-                                }
-                                Button("接回主题") { attachToTopic() }.disabled(topicID.isEmpty)
-                            }.padding(.top, 12)
-                        }.padding(.vertical,14)
-                    }
-                    DisclosureGroup("交付要求与记录") {
-                        Text(execution.instruction).textSelection(.enabled).padding(.top, 8)
-                        Text(ConversationReflectionFocus.date(execution.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                    }.padding(.vertical,14)
                 }
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
@@ -186,9 +201,9 @@ struct TaskFeedbackEditor: View {
                 .accessibilityLabel("实际进展与收获草稿").disabled(model.savingFeedback)
             Text("本窗口内切页保留草稿；正式保存后才接回任务，关闭窗口前请保存。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             HStack {
-                if let onDictate { Button("口述进展或结果", action: onDictate) }
+                if let onDictate { Button("口述进展或结果", action: onDictate).buttonStyle(.workspaceSecondary) }
                 Spacer()
-                Button("保存并接回原任务", action: onSave).buttonStyle(.borderedProminent).disabled(model.savingFeedback || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("保存并接回原任务", action: onSave).buttonStyle(.workspaceSecondary).disabled(model.savingFeedback || draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }
@@ -218,12 +233,14 @@ struct ActionOriginalQuotes: View {
                     }
                     HStack(spacing: 14) {
                         Button("打开材料") { openSource(source.id) }
+                            .buttonStyle(.workspaceQuietCompact)
                             .accessibilityLabel("打开材料：" + source.displayTitle)
                         if let start = span.startMS, let end = span.endMS {
                             Button("回听这段原话", systemImage: "play.circle") { Task { _ = await model.playSpan(source, milliseconds: start, endMilliseconds: end) } }
+                                .buttonStyle(.workspaceQuietCompact)
                                 .accessibilityLabel("回听这段原话：" + source.displayTitle)
                         }
-                    }.vosFont(WorkspaceText.meta)
+                    }
                 }
             } else if let source = model.records.first(where: { $0.id == reference.sourceID }) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -231,7 +248,7 @@ struct ActionOriginalQuotes: View {
                         Text(source.displayTitle).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
                     }
                     Text("原话版本已变化，打开材料查看当前原文。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                    Button("打开材料") { openSource(source.id) }.vosFont(WorkspaceText.meta)
+                    Button("打开材料") { openSource(source.id) }.buttonStyle(.workspaceQuietCompact)
                         .accessibilityLabel("打开材料：" + source.displayTitle)
                 }
             } else {
@@ -426,7 +443,7 @@ struct WorkspaceTaskView: View {
     private var pageContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
-                WorkspaceHeading(eyebrow: eyebrow, title: StatementTagParser.split(action.title).text)
+                WorkspacePageHeading(eyebrow: eyebrow, title: StatementTagParser.split(action.title).text)
                 if let observed = reminderObservedSummary {
                     Label("已回读 · " + observed, systemImage: "calendar").vosFont(WorkspaceText.meta)
                     if let desired = reminderDesiredSummary, desired != observed {
@@ -437,7 +454,7 @@ struct WorkspaceTaskView: View {
                     Text("未确认写入提醒事项").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
                 if let due = linkedReminderDue, dueIsPast(due) {
-                    Label("已逾期 " + due.summary, systemImage: "calendar").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                    WorkspaceBadge(text:"已逾期 " + due.summary, tone:.warning)
                 }
                 if let locationLabel { Label("地点提醒 · " + locationLabel, systemImage: "mappin.and.ellipse").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                 if current, action.kind == "task" {
@@ -445,16 +462,17 @@ struct WorkspaceTaskView: View {
                         switch reminderEntryState {
                         case .linked:
                             Button("日期与提醒", systemImage: "calendar") { openReminderSettings() }
+                                .buttonStyle(.workspaceSecondary)
                                 .disabled(model.savingAction || model.remindersBusy || !canEditReminderSettings)
                             if model.reminderAccess?.enabled == true {
                                 Text(model.reminderSyncStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
-                                Button("核对提醒同步") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderFieldsPending)
+                                Button("核对提醒同步") { Task { await model.refreshTaskReminders() } }.buttonStyle(.workspaceSecondaryCompact).disabled(model.remindersBusy || model.reminderFieldsPending)
                             }
                         case .needsReview:
                             Label("提醒同步需要核对，保留原有尝试", systemImage: "exclamationmark.circle").vosFont(WorkspaceText.meta)
                             if model.reminderAccess?.enabled == true {
                                 Text(model.reminderSyncStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
-                                Button("核对提醒同步") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderFieldsPending)
+                                Button("核对提醒同步") { Task { await model.refreshTaskReminders() } }.buttonStyle(.workspaceSecondaryCompact).disabled(model.remindersBusy || model.reminderFieldsPending)
                             } else {
                                 Text("提醒事项连接已暂停 · 恢复连接后再核对。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             }
@@ -465,26 +483,26 @@ struct WorkspaceTaskView: View {
                         case .fieldsUnchecked(let reason):
                             Text("日期与优先级尚未核对 · " + reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             if canWriteReminder {
-                                Button("立即写入提醒事项") { sendReminderNow() }.disabled(model.remindersBusy)
+                                Button("立即写入提醒事项") { sendReminderNow() }.buttonStyle(.workspaceSecondary).disabled(model.remindersBusy)
                             }
                         case .readyToWrite:
                             Text(canWriteReminder ? "尚未写入提醒事项 · 现在可写入「" + model.reminderCalendarTitle + "」。"
                                  : action.state != "open" ? "尚未写入提醒事项 · 已完成的任务不再新建提醒。"
                                  : "尚未写入提醒事项 · 这条任务仍需核对为明确待办后才能写入。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             if canWriteReminder {
-                                Button("立即写入提醒事项") { sendReminderNow() }.disabled(model.remindersBusy)
+                                Button("立即写入提醒事项") { sendReminderNow() }.buttonStyle(.workspaceSecondary).disabled(model.remindersBusy)
                             }
                         }
                         if let pending = model.pendingReminderSync(for: action.id) {
                             Text(pending.desiredState == LocalActionState.completed.rawValue ? "已本地完成，连接恢复前不会同步到提醒事项。" : "已本地撤销，连接恢复前不会同步到提醒事项。")
                                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                             Button("稍后核对") { Task { await model.retryPendingReminderSyncs() } }
-                                .vosFont(WorkspaceText.meta).disabled(model.remindersBusy)
+                                .buttonStyle(.workspaceQuietCompact).disabled(model.remindersBusy)
                         }
                     }
                 }
                 if action.kind == "opportunity", action.nature == "goal", let progress = goalProgress {
-                    Text(goalProgressText(progress)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    WorkspaceBadge(text:goalProgressText(progress), tone:.neutral)
                         .accessibilityLabel("目标进展：" + goalProgressText(progress))
                 }
                 if isQuestion { QuestionAnswerSection(model: model, action: action, openDelivery: openDelivery, openSource: openSource) }
@@ -501,10 +519,10 @@ struct WorkspaceTaskView: View {
                             Button { setEstimate(minutes) } label: {
                                 Label(String(minutes) + " 分钟", systemImage: actionEstimate == minutes ? "checkmark.circle.fill" : "circle").vosFont(WorkspaceText.meta)
                                     .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
-                            }.buttonStyle(.borderless).disabled(!current || planBusy)
+                            }.buttonStyle(.workspaceSecondaryCompact).disabled(!current || planBusy)
                         }
                         if actionEstimate != nil {
-                            Button("清除") { clearEstimate() }.buttonStyle(.borderless).vosFont(WorkspaceText.meta)
+                            Button("清除") { clearEstimate() }.buttonStyle(.workspaceQuietCompact)
                                 .frame(minHeight: WorkspaceMetrics.rowActionMinHeight).disabled(!current || planBusy)
                         }
                     }
@@ -513,9 +531,9 @@ struct WorkspaceTaskView: View {
                     VStack(alignment:.leading,spacing:12) {
                         Text("这条行动来自你的原话。要把它当作承诺吗？").vosFont(WorkspaceText.body)
                         HStack(spacing:10) {
-                            Button("这是我的承诺") { clarify(.commit) }.buttonStyle(.borderedProminent)
-                            Button("放到问题与目标") { clarify(.opportunity) }
-                            Button("不是") { clarify(.not) }
+                            Button("这是我的承诺") { clarify(.commit) }.buttonStyle(.workspaceSecondary)
+                            Button("放到问题与目标") { clarify(.opportunity) }.buttonStyle(.workspaceSecondary)
+                            Button("不是") { clarify(.not) }.buttonStyle(.workspaceSecondary)
                         }.disabled(model.savingAction)
                     }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
                 }
@@ -534,13 +552,13 @@ struct WorkspaceTaskView: View {
                         }
                         Text(action.state == "completed" ? "这项任务已有完成记录。AI 提取暂停不会撤销完成状态，也不需要你再完成一次。" : model.workspaceTaskRequiresReview(action) ? "AI 之前从材料中提取了这项待办，尚未登记完成；暂停也不代表识别有误。打开下方材料，查看具体原因及处理按钮。" : "这次提取仅作为历史保留。打开下方材料可查看最新识别的任务；本条记录的完成状态仍单独保留。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                         ForEach(pauseReasons,id:\.self) { Text($0).vosFont(WorkspaceText.body).foregroundStyle(.secondary) }
-                        ForEach(sources) { source in Button("打开材料：" + source.displayTitle) { openSource(source.id) } }
+                        ForEach(sources) { source in Button("打开材料：" + source.displayTitle) { openSource(source.id) }.buttonStyle(.workspaceQuietCompact) }
                         if model.workspaceTaskRequiresReview(action), let claim = correctedClaim {
                             Text("你更正后的观点").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
                             Text(claim.statement).textSelection(.enabled)
                             Text("若仍需做这件事，在下方写下准确的待办并保存；之前的任务及完成记录会保留。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                             TextField("要做的事情",text:$replacementTitle)
-                            Button("保存为新的待办") { saveReplacement(claim) }.disabled(saving || replacementTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
+                            Button("保存为新的待办") { saveReplacement(claim) }.buttonStyle(.workspaceSecondary).disabled(saving || replacementTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
                         }
                     }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
                 }
@@ -550,7 +568,7 @@ struct WorkspaceTaskView: View {
                     } else {
                         if current, action.kind == "task" {
                             Button(action.state == "completed" ? "重新跟进" : "标记已完成") { changeState() }
-                                .buttonStyle(.borderedProminent).disabled(model.savingAction || model.remindersBusy)
+                                .buttonStyle(.workspacePrimary).disabled(model.savingAction || model.remindersBusy)
                             if model.remindersBusy {
                                 HStack(spacing: 6) {
                                     ProgressView().controlSize(.small)
@@ -558,38 +576,42 @@ struct WorkspaceTaskView: View {
                                 }.accessibilityElement(children: .combine)
                             }
                             if action.state == "open" {
-                                Button("改天") { openReminderSettings() }.disabled(model.savingAction || model.remindersBusy)
-                                Button("不再跟进", role: .destructive) { confirmingDismiss = true }.disabled(model.savingAction)
+                                Button("改天") { openReminderSettings() }.buttonStyle(.workspaceSecondary).disabled(model.savingAction || model.remindersBusy)
+                                Button("不再跟进", role: .destructive) { confirmingDismiss = true }.buttonStyle(.workspaceDestructive).disabled(model.savingAction)
                             }
                             Button(draft.expanded ? "收起记录" : (action.state == "completed" ? "记录这次的结果或收获" : "记录实际进展")) { draft.expanded.toggle() }
+                                .buttonStyle(.workspaceSecondary)
                                 .disabled(model.savingFeedback)
                         } else if action.canPromoteToTask {
                             Button("添加下一步") { showingNextActionForm = true }
-                                .buttonStyle(.borderedProminent)
+                                .buttonStyle(.workspacePrimary)
                                 .disabled(model.savingAction)
                                 .accessibilityLabel("添加下一步：" + action.title)
                             Button("标记达成") { confirmingCompleteOutcome = true }
+                                .buttonStyle(.workspaceSecondary)
                                 .disabled(model.savingAction)
                                 .accessibilityLabel("标记达成：" + action.title)
                             Button("不再跟进", role: .destructive) { confirmingDismiss = true }
+                                .buttonStyle(.workspaceDestructive)
                                 .disabled(model.savingAction)
                                 .accessibilityLabel("不再跟进：" + action.title)
                         } else if action.validity == "current", action.state == "dismissed" {
-                            Button(isQuestion ? "重新打开" : "重新跟进") { confirmingReopen = true }.buttonStyle(.borderedProminent).disabled(model.savingAction)
+                            Button(isQuestion ? "重新打开" : "重新跟进") { confirmingReopen = true }.buttonStyle(.workspacePrimary).disabled(model.savingAction)
                                 .alert(isQuestion ? "重新打开这个问题？" : "重新跟进这条行动？", isPresented: $confirmingReopen) {
                                     Button(isQuestion ? "重新打开" : "重新跟进") { reopen() }
                                     Button("取消", role: .cancel) {}
                                 } message: {
                                     Text(isQuestion ? "会回到问题列表，回答与讨论都保留。" : "会恢复为待办，历史记录保留。")
                                 }
-                        } else if current, action.intentActor == "user" { Button("核对为待办") { confirming = true } }
+                        } else if current, action.intentActor == "user" { Button("核对为待办") { confirming = true }.buttonStyle(.workspaceSecondary) }
                         if current {
-                            Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
+                            Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss).buttonStyle(.workspaceSecondary)
                             if action.state == "open", action.intentActor == "user" {
                                 if action.kind == "task" {
-                                    Button("交给 AI", systemImage: "sparkles") { instruction = action.title + "\n\n请给出清晰的结论和可用的交付物；调研时附可核查的来源。"; delegating.toggle() }
+                                    Button("交给 AI", systemImage: "sparkles") { instruction = action.title + "\n\n请给出清晰的结论和可用的交付物；调研时附可核查的来源。"; delegating.toggle() }.buttonStyle(.workspaceSecondary)
                                 } else {
                                     Button("让 VoiceOS 分析", systemImage: "text.magnifyingglass") { analyze() }
+                                        .buttonStyle(.workspaceSecondary)
                                         .disabled(model.assistantBusy || !model.modelConfigured)
                                 }
                             }
@@ -605,7 +627,7 @@ struct WorkspaceTaskView: View {
                     HStack(spacing: 10) {
                         WorkspaceNoticeText(message: failure.message, severity: .warning)
                         Button("重试") { mainActionFailure = nil; failure.retry() }
-                            .vosFont(WorkspaceText.meta).buttonStyle(.borderless)
+                            .buttonStyle(.workspaceQuietCompact)
                             .accessibilityLabel("重试失败的操作")
                     }
                 }
@@ -619,20 +641,31 @@ struct WorkspaceTaskView: View {
                 }
                 if action.kind != "task", !isQuestion || !nextActions.isEmpty { nextActionSection }
                 if action.kind == "task" || recurrence != nil {
-                    WorkspaceSection(title:"重复",subtitle:recurrence.map { "完成后按「" + $0.display + "」生成下一次行动。" } ?? "这次完成后不再生成新的行动。",icon:"repeat") {
-                        HStack(spacing: 14) {
-                            Picker("重复", selection: recurrenceSelection) {
-                                Text("不重复").tag(RecurrencePeriod?.none)
-                                ForEach(RecurrencePeriod.allCases, id: \.self) { period in Text(period.display).tag(Optional(period)) }
-                            }.pickerStyle(.menu).labelsHidden().fixedSize().disabled(recurrenceBusy || !recurrenceEditable)
-                            if !hasDue { Text("先设置日期").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
-                            else if action.state != "open" { Text("仅未完成的任务可调整重复。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
-                            if recurrenceBusy { ProgressView().controlSize(.small) }
-                        }.padding(.vertical, 12)
+                    WorkspaceCard {
+                        VStack(alignment:.leading,spacing:12) {
+                            WorkspaceSectionHeading("重复")
+                            Text(recurrence.map { "完成后按「" + $0.display + "」生成下一次行动。" } ?? "这次完成后不再生成新的行动。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+                            WorkspaceListDivider()
+                            HStack(spacing: 14) {
+                                Picker("重复", selection: recurrenceSelection) {
+                                    Text("不重复").tag(RecurrencePeriod?.none)
+                                    ForEach(RecurrencePeriod.allCases, id: \.self) { period in Text(period.display).tag(Optional(period)) }
+                                }.pickerStyle(.menu).labelsHidden().fixedSize().disabled(recurrenceBusy || !recurrenceEditable)
+                                if !hasDue { Text("先设置日期").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                                else if action.state != "open" { Text("仅未完成的任务可调整重复。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                                if recurrenceBusy { ProgressView().controlSize(.small) }
+                            }
+                        }
                     }
                 }
                 if !isQuestion, current || !subtasks.isEmpty {
-                    WorkspaceSection(title:"子任务",subtitle:subtaskSummary,icon:"checklist",count:subtasks.isEmpty ? nil : subtasks.count) {
+                    WorkspaceCard {
+                        VStack(alignment:.leading,spacing:12) {
+                            WorkspaceSectionHeading(title:"子任务") {
+                                if let count = subtasks.isEmpty ? nil : subtasks.count { WorkspaceBadge(text:"\(count)", tone:.neutral) }
+                            }
+                            Text(subtaskSummary).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+                            WorkspaceListDivider()
                         ForEach(subtasks, id: \.id) { subtask in
                             HStack(spacing: 12) {
                                 Button { toggleSubtask(subtask) } label: {
@@ -661,15 +694,20 @@ struct WorkspaceTaskView: View {
                             HStack(spacing: 10) {
                                 TextField("添加子任务", text: $subtaskTitle).textFieldStyle(.roundedBorder)
                                     .onSubmit { addSubtask() }
-                                Button("添加") { addSubtask() }.buttonStyle(.borderedProminent)
+                                Button("添加") { addSubtask() }.buttonStyle(.workspaceSecondaryCompact)
                                     .disabled(planBusy || subtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             }.padding(.top, 12)
+                        }
                         }
                     }
                 }
                 if !isQuestion, !action.note.isEmpty {
-                    WorkspaceSection(title:"任务说明",icon:"text.alignleft") {
-                        WorkspaceExpandableText(text:action.note,label:"完整说明",size:WorkspaceText.body.size).padding(.top,10)
+                    WorkspaceCard {
+                        VStack(alignment:.leading,spacing:12) {
+                            WorkspaceSectionHeading("任务说明")
+                            WorkspaceListDivider()
+                            WorkspaceExpandableText(text:action.note,label:"完整说明",size:WorkspaceText.body.size)
+                        }
                     }
                 }
                 if delegating {
@@ -680,71 +718,84 @@ struct WorkspaceTaskView: View {
                         if !model.modelConfigured {
                             HStack(spacing:8) {
                                 Text("开始代办需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                                Button("配置文本模型…") { model.chooseTextModel() }.vosFont(WorkspaceText.meta)
+                                Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuietCompact)
                             }
                         }
                         HStack {
-                            Button("收起") { delegating = false }
+                            Button("收起") { delegating = false }.buttonStyle(.workspaceSecondary)
                             Spacer()
-                            Button("开始代办") { delegate() }.buttonStyle(.borderedProminent).disabled(saving || !model.modelConfigured || instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            Button("开始代办") { delegate() }.buttonStyle(.workspaceSecondary).disabled(saving || !model.modelConfigured || instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
                     }.padding(18).background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 }
                 if !executions.isEmpty {
-                    WorkspaceSection(title:"AI 的工作与交付",icon:"sparkles",count:executions.count) {
-                        ForEach(executions) { execution in
-                            let unread = model.isDeliveryUnread(execution)
-                            WorkspaceRow(title: execution.title,
-                                         subtitle: (unread ? "未读 · " : "") + assistantExecutionLabel(execution),
-                                         icon: execution.state == "completed" ? "doc.text" : "sparkles",
-                                         iconTint: unread ? palette.accent : nil,
-                                         trailing: unread ? "未读 · 阅读结果" : (execution.state == "completed" ? "阅读结果" : "查看进度"),
-                                         trailingStyle: unread ? .status(palette.accent) : .link) { openDelivery(execution.id) }
-                            if execution.id != executions.last?.id { Divider() }
+                    WorkspaceCard {
+                        VStack(alignment:.leading,spacing:12) {
+                            WorkspaceSectionHeading(title:"AI 的工作与交付") { WorkspaceBadge(text:"\(executions.count)", tone:.neutral) }
+                            WorkspaceListDivider()
+                            ForEach(executions) { execution in
+                                let unread = model.isDeliveryUnread(execution)
+                                WorkspaceRow(title: execution.title,
+                                             subtitle: (unread ? "未读 · " : "") + assistantExecutionLabel(execution),
+                                             icon: execution.state == "completed" ? "doc.text" : "sparkles",
+                                             iconTint: unread ? palette.accent : nil,
+                                             trailing: unread ? "未读 · 阅读结果" : (execution.state == "completed" ? "阅读结果" : "查看进度"),
+                                             trailingStyle: unread ? .status(palette.accent) : .link) { openDelivery(execution.id) }
+                                if execution.id != executions.last?.id { Divider() }
+                            }
                         }
                     }
                 }
                 if let feedbackError {
                     HStack(spacing:10) {
                         WorkspaceNoticeText(message:feedbackError,severity:.danger)
-                        Button("重试") { Task { await loadFeedback() } }.vosFont(WorkspaceText.meta).buttonStyle(.borderless).accessibilityLabel("重试读取反馈历史")
+                        Button("重试") { Task { await loadFeedback() } }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("重试读取反馈历史")
                     }
                 }
                 if !feedbackHistory.isEmpty {
-                    WorkspaceSection(title:"实际进展与收获",icon:"checkmark.circle",count:feedbackHistory.count) {
-                        ForEach(feedbackHistory) { record in
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text(record.label + (record.actionVersion == action.version && record.sourceState != "frozen" ? "" : " · 历史记录")).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
-                                WorkspaceExpandableText(text:record.text,label:"完整记录",size:WorkspaceText.body.size)
-                                Button("查看结果原话") { openSource(record.recordingSourceID ?? record.sourceID) }.vosFont(WorkspaceText.meta)
-                            }.padding(.vertical,18)
-                            if record.id != feedbackHistory.last?.id { Divider() }
+                    WorkspaceCard {
+                        VStack(alignment:.leading,spacing:12) {
+                            WorkspaceSectionHeading(title:"实际进展与收获") { WorkspaceBadge(text:"\(feedbackHistory.count)", tone:.neutral) }
+                            WorkspaceListDivider()
+                            ForEach(feedbackHistory) { record in
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text(record.label + (record.actionVersion == action.version && record.sourceState != "frozen" ? "" : " · 历史记录")).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
+                                    WorkspaceExpandableText(text:record.text,label:"完整记录",size:WorkspaceText.body.size)
+                                    Button("查看结果原话") { openSource(record.recordingSourceID ?? record.sourceID) }.buttonStyle(.workspaceQuietCompact)
+                                }.padding(.vertical,18)
+                                if record.id != feedbackHistory.last?.id { Divider() }
+                            }
                         }
                     }
                 }
-                WorkspaceSection(title:"记录与依据",icon:"quote.bubble") {
-                    if current, !isQuestion, action.kind != "task" {
-                        DisclosureGroup(action.state == "completed" ? "记录这次的结果或收获" : "记录实际进展", isExpanded: $draft.expanded) {
-                            feedbackDraftEditor.padding(.top, 12)
+                WorkspaceCard {
+                    VStack(alignment:.leading,spacing:12) {
+                        WorkspaceSectionHeading("记录与依据")
+                        WorkspaceListDivider()
+                        if current, !isQuestion, action.kind != "task" {
+                            DisclosureGroup(action.state == "completed" ? "记录这次的结果或收获" : "记录实际进展", isExpanded: $draft.expanded) {
+                                feedbackDraftEditor.padding(.top, 12)
+                            }.padding(.vertical,16)
+                            Divider()
+                        }
+                        DisclosureGroup("原话依据与安排") {
+                            VStack(alignment: .leading, spacing: 14) {
+                                ActionOriginalQuotes(model: model, action: action, openSource: openSource)
+                                if current {
+                                    Button(isQuestion ? "回听问题原话" : "回听任务原话") { Task { _ = await model.playActionOriginal(action) } }
+                                        .buttonStyle(.workspaceSecondary)
+                                    if let player = model.player { NativePlayerView(player: player).frame(height: 65) }
+                                }
+                            }.padding(.top, 10)
                         }.padding(.vertical,16)
-                        Divider()
+                        if action.kind == "task" {
+                            Divider()
+                            DisclosureGroup("处理记录与高级") {
+                                VStack(alignment: .leading, spacing: 14) { scheduleSection }.padding(.top, 10)
+                            }.padding(.vertical,16)
+                        }
+                        ActionRevisionHistoryView(revisions: revisions)
                     }
-                    DisclosureGroup("原话依据与安排") {
-                        VStack(alignment: .leading, spacing: 14) {
-                            ActionOriginalQuotes(model: model, action: action, openSource: openSource)
-                            if current {
-                                Button(isQuestion ? "回听问题原话" : "回听任务原话") { Task { _ = await model.playActionOriginal(action) } }
-                                if let player = model.player { NativePlayerView(player: player).frame(height: 65) }
-                            }
-                        }.padding(.top, 10)
-                    }.padding(.vertical,16)
-                    if action.kind == "task" {
-                        Divider()
-                        DisclosureGroup("处理记录与高级") {
-                            VStack(alignment: .leading, spacing: 14) { scheduleSection }.padding(.top, 10)
-                        }.padding(.vertical,16)
-                    }
-                    ActionRevisionHistoryView(revisions: revisions)
                 }
                 if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
@@ -789,7 +840,7 @@ struct WorkspaceTaskView: View {
             if let undoMessage {
                 HStack(spacing: 12) {
                     Text(undoMessage).vosFont(WorkspaceText.meta.size, weight: .medium)
-                    Button("撤销") { undo() }
+                    Button("撤销") { undo() }.buttonStyle(.workspaceQuietCompact)
                 }
                 .padding(.horizontal, 16).padding(.vertical, 10)
                 .background(palette.selection, in: Capsule())
@@ -807,6 +858,7 @@ struct WorkspaceTaskView: View {
     @ViewBuilder private var scheduleSection: some View {
         if action.kind == "task" {
             Button("改到某天") { scheduleAction = action }
+                .buttonStyle(.workspaceSecondary)
                 .disabled(model.savingAction || model.remindersBusy || action.validity != "current" || action.state != "open")
             if let schedule = model.scheduleIntents.first(where: { $0.actionID == action.id }) {
                 Text((schedule.authority == .userCommitment ? "你确认的日期：" : "AI 建议的日期：") + schedule.due.summary).vosFont(WorkspaceText.meta)
@@ -818,10 +870,12 @@ struct WorkspaceTaskView: View {
                         Text("历史记录已冻结，不再写入。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     } else if operation.attempted, operation.state == .unknown || operation.state == .conflict {
                         Button("只读核对") { Task { await model.reconcileSchedule(operation) } }
+                            .buttonStyle(.workspaceSecondaryCompact)
                             .disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
                     } else if operation.state == .blocked, operation.validity == "current" {
                         Text("上次改期没有派发；重新设置期限会建立新的写前核对，旧记录保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         Button("重新设置期限") { scheduleAction = action }
+                            .buttonStyle(.workspaceSecondary)
                             .disabled(model.savingAction || model.remindersBusy || action.validity != "current" || action.state != "open")
                     }
                 } else {
@@ -832,21 +886,23 @@ struct WorkspaceTaskView: View {
                     if model.schedulePreviews[schedule.id]?.disposition == .writeFlexible,
                        let target = model.reminderLinks.first(where: { $0.actionID == action.id }), target.state == "linked" {
                         Button("写入 Apple 提醒事项") { Task { await model.executeSchedule(schedule, link: target) } }
+                            .buttonStyle(.workspaceSecondary)
                             .disabled(model.remindersBusy || model.reminderAccess?.enabled != true || model.reminderCalendarID != target.calendarID)
                     }
                 }
                 if let grant = model.scheduleGrants.first(where: { $0.intentID == schedule.id }) {
                     Text(grant.revoked ? "本次改期确认已撤回" : (grant.validity == "frozen" ? "这次确认仅作历史保留" : "已确认这次改期")).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     if grant.eligibleForExecution, let target = model.reminderLinks.first(where: { $0.actionID == action.id }) {
-                        Button("按确认的日期写入") { Task { await model.executeSchedule(schedule, link: target, grantID: grant.id) } }.disabled(model.remindersBusy)
+                        Button("按确认的日期写入") { Task { await model.executeSchedule(schedule, link: target, grantID: grant.id) } }.buttonStyle(.workspaceSecondary).disabled(model.remindersBusy)
                     }
                     if !grant.revoked, grant.validity == "current" {
                         Button("撤回这次改期确认") { Task { await model.revokeScheduleGrant(grant) } }
+                            .buttonStyle(.workspaceSecondary)
                     }
                 } else if model.schedulePreviews[schedule.id]?.disposition == .requiresConfirmation,
                           let target = model.reminderLinks.first(where: { $0.actionID == action.id }),
                           !model.scheduleOperations.contains(where: { $0.intentID == schedule.id }) {
-                    Button("核对这次改期并确认") { Task { await model.prepareScheduleEffect(schedule, link: target) } }.disabled(model.remindersBusy)
+                    Button("核对这次改期并确认") { Task { await model.prepareScheduleEffect(schedule, link: target) } }.buttonStyle(.workspaceSecondary).disabled(model.remindersBusy)
                 }
                 DisclosureGroup("原话里的日期") {
                     Text(schedule.rawExpression).vosFont(WorkspaceText.meta)
@@ -856,54 +912,62 @@ struct WorkspaceTaskView: View {
         }
     }
     @ViewBuilder private var nextActionSection: some View {
-        WorkspaceSection(title: isQuestion ? "我自己做" : "下一步",
-                         subtitle: openNextActions.isEmpty ? (isQuestion ? "还没有要自己做的事。" : "这个目标还没有下一步。") : (isQuestion ? "还有 \(openNextActions.count) 项未完成。" : "还有 \(openNextActions.count) 个下一步未完成。"),
-                         icon: "arrow.turn.down.right", count: nextActions.isEmpty ? nil : nextActions.count) {
-            ForEach(nextActions) { child in
-                HStack(spacing: 12) {
-                    Button { toggleNextAction(child) } label: {
-                        Image(systemName: child.state == "completed" ? "checkmark.circle.fill" : "circle")
-                            .vosFont(WorkspaceText.sectionTitle.size)
-                            .foregroundStyle(child.state == "completed" ? palette.accent : palette.secondaryText)
-                            .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
-                            .contentShape(Rectangle())
-                    }.buttonStyle(.plain).disabled(model.savingAction || child.state == "dismissed")
-                        .accessibilityLabel(child.state == "completed" ? "重新打开下一步：" + child.title : "完成下一步：" + child.title)
-                    Text(child.title).vosFont(WorkspaceText.body).lineSpacing(3).textSelection(.enabled)
-                        .strikethrough(child.state == "completed").foregroundStyle(child.state == "completed" ? palette.secondaryText : palette.text)
-                    Spacer(minLength: 8)
-                    Button("摘除") { detachNextAction(child) }
-                        .buttonStyle(.borderless).vosFont(WorkspaceText.meta)
-                        .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
-                        .disabled(model.savingAction)
-                        .accessibilityLabel("摘除下一步：" + child.title)
-                }.padding(.vertical, 10).padding(.horizontal, 4)
-                if child.id != nextActions.last?.id { Divider() }
-            }
-            if !nextActionNotice.isEmpty {
-                Label(nextActionNotice, systemImage: "checkmark.circle").vosFont(WorkspaceText.meta)
-                    .foregroundStyle(palette.success).padding(.top, 8)
+        WorkspaceCard {
+            VStack(alignment:.leading,spacing:12) {
+                WorkspaceSectionHeading(title: isQuestion ? "我自己做" : "下一步") {
+                    if let count = nextActions.isEmpty ? nil : nextActions.count { WorkspaceBadge(text:"\(count)", tone:.neutral) }
+                }
+                Text(openNextActions.isEmpty ? (isQuestion ? "还没有要自己做的事。" : "这个目标还没有下一步。") : (isQuestion ? "还有 \(openNextActions.count) 项未完成。" : "还有 \(openNextActions.count) 个下一步未完成。")).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+                WorkspaceListDivider()
+                ForEach(nextActions) { child in
+                    HStack(spacing: 12) {
+                        Button { toggleNextAction(child) } label: {
+                            Image(systemName: child.state == "completed" ? "checkmark.circle.fill" : "circle")
+                                .vosFont(WorkspaceText.sectionTitle.size)
+                                .foregroundStyle(child.state == "completed" ? palette.accent : palette.secondaryText)
+                                .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                                .contentShape(Rectangle())
+                        }.buttonStyle(.plain).disabled(model.savingAction || child.state == "dismissed")
+                            .accessibilityLabel(child.state == "completed" ? "重新打开下一步：" + child.title : "完成下一步：" + child.title)
+                        Text(child.title).vosFont(WorkspaceText.body).lineSpacing(3).textSelection(.enabled)
+                            .strikethrough(child.state == "completed").foregroundStyle(child.state == "completed" ? palette.secondaryText : palette.text)
+                        Spacer(minLength: 8)
+                        Button("摘除") { detachNextAction(child) }
+                            .buttonStyle(.workspaceQuietCompact)
+                            .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
+                            .disabled(model.savingAction)
+                            .accessibilityLabel("摘除下一步：" + child.title)
+                    }.padding(.vertical, 10).padding(.horizontal, 4)
+                    if child.id != nextActions.last?.id { Divider() }
+                }
+                if !nextActionNotice.isEmpty {
+                    Label(nextActionNotice, systemImage: "checkmark.circle").vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.success)
+                }
             }
         }
     }
     @ViewBuilder private var questionActions: some View {
         if action.state == "open" {
             Button("想清楚了") { confirmingCompleteOutcome = true }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.workspacePrimary)
                 .disabled(model.savingAction)
                 .accessibilityLabel("想清楚了：" + action.title)
-            Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
+            Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss).buttonStyle(.workspaceSecondary)
             Button("这件事我自己做") { showingNextActionForm = true }
+                .buttonStyle(.workspaceSecondary)
                 .disabled(model.savingAction)
                 .accessibilityLabel("这件事我自己做：" + action.title)
             Button("以后再说") { someday() }
+                .buttonStyle(.workspaceSecondary)
                 .disabled(model.savingAction)
                 .accessibilityLabel("以后再说：" + action.title)
             Button("放下", role: .destructive) { confirmingDismiss = true }
+                .buttonStyle(.workspaceDestructive)
                 .disabled(model.savingAction)
                 .accessibilityLabel("放下：" + action.title)
         } else if action.state == "completed" {
-            Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss)
+            Button("继续思考", systemImage: "bubble.left.and.bubble.right", action: discuss).buttonStyle(.workspaceSecondary)
         }
     }
     @ViewBuilder private var feedbackDraftEditor: some View {
@@ -1299,13 +1363,13 @@ struct NextActionFormSheet: View {
             }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {
-                Button("取消") { dismiss() }.disabled(busy)
+                Button("取消") { dismiss() }.buttonStyle(.workspaceSecondary).disabled(busy)
                 Spacer()
                 if createdActionID != nil {
-                    Button("重试挂接") { retryAttach() }.buttonStyle(.borderedProminent).disabled(busy)
+                    Button("重试挂接") { retryAttach() }.buttonStyle(.workspacePrimary).disabled(busy)
                         .accessibilityLabel("重试挂接下一步")
                 } else {
-                    Button("添加") { submit() }.buttonStyle(.borderedProminent)
+                    Button("添加") { submit() }.buttonStyle(.workspacePrimary)
                         .disabled(busy || trimmedTitle.isEmpty)
                         .accessibilityLabel("确认添加下一步")
                 }
