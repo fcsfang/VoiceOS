@@ -45,7 +45,9 @@ public struct ActionTimeSurface: Sendable {
 extension ActionTimeSurface {
     /// Groups open tasks by the one date the app already trusts. The latest
     /// current local schedule wins even when it has no date; only an action
-    /// without a local schedule reads its linked reminder observation.
+    /// without a local schedule reads its newest reminder observation, whether
+    /// the link is linked, conflict or missing. An unknown observation is not
+    /// evidence of a date.
     public static func build(actions: [ActionRecord], schedules: [ActionScheduleIntent],
                              links: [ReminderLink], now: Date, calendar: Calendar) -> ActionTimeSurface {
         let latestSchedules = schedules.reduce(into: [String: ActionScheduleIntent]()) { result, intent in
@@ -57,22 +59,28 @@ extension ActionTimeSurface {
             guard link.state == "linked", result[link.actionID] == nil else { return }
             result[link.actionID] = link
         }
+        let observed = links.reduce(into: [String: ReminderLink]()) { result, link in
+            guard ["linked", "conflict", "missing"].contains(link.state) else { return }
+            if let existing = result[link.actionID], (existing.lastObservedAt ?? "") >= (link.lastObservedAt ?? "") { return }
+            result[link.actionID] = link
+        }
         let today = calendar.startOfDay(for: now)
         let soonEnd = calendar.date(byAdding: .day, value: 7, to: today) ?? today
         var rows: [(entry: ActionTimeEntry, day: Date?, index: Int)] = []
         for (index, action) in actions.enumerated() {
-            let remote = Self.meaningful(linked[action.id]?.remoteDueDate)
-            let remoteDate = remote.flatMap { Self.date($0, calendar: calendar) }
+            let readback = Self.meaningful(observed[action.id]?.remoteDueDate)
+            let readbackDate = readback.flatMap { Self.date($0, calendar: calendar) }
+            let linkedDate = Self.meaningful(linked[action.id]?.remoteDueDate).flatMap { Self.date($0, calendar: calendar) }
             let schedule = latestSchedules[action.id]
             let local = Self.meaningful(schedule?.due)
             let localDate = local.flatMap { Self.date($0, calendar: calendar) }
             let usesLocal = schedule != nil
-            let due = usesLocal ? local : remote
-            let day = usesLocal ? localDate : remoteDate
-            let source: ActionTimeSource = usesLocal ? .localSchedule : (remote != nil ? .reminderReadback : .none)
-            let isOverdue = usesLocal ? Self.isPast(local, now: now, calendar: calendar) : Self.isPast(remote, now: now, calendar: calendar)
+            let due = usesLocal ? local : readback
+            let day = usesLocal ? localDate : readbackDate
+            let source: ActionTimeSource = usesLocal ? .localSchedule : (readback != nil ? .reminderReadback : .none)
+            let isOverdue = usesLocal ? Self.isPast(local, now: now, calendar: calendar) : Self.isPast(readback, now: now, calendar: calendar)
             let entry = ActionTimeEntry(action: action, due: due, source: source, isOverdue: isOverdue,
-                                        needsLocalSyncLabel: usesLocal && localDate != remoteDate)
+                                        needsLocalSyncLabel: usesLocal && localDate != linkedDate)
             rows.append((entry, day.map { calendar.startOfDay(for: $0) }, index))
         }
         func ordered(_ values: [(entry: ActionTimeEntry, day: Date?, index: Int)]) -> [ActionTimeEntry] {
