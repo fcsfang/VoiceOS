@@ -550,3 +550,11 @@
 - 波 99-B：首页读者区在观点之前露出「N 条待办」徽标，点击滚动到页尾完整列表（完整列表只留一处）；首页快照收集待办时排除需核对行动（以 SourcePageIndex.requiresReview 为准），publishHomeSnapshot 在索引重建后发布。新增 2 项测试，650。
 - 集成：两波合并后 653 项 0 失败；SSH 推送 0fd734e；dist 重建 exit 0；preflight 通过（safe idle=1703s）后安装（pid 73714）。
 - 审查：波 96-98 的独立对抗审查仍在复核阶段（收件箱维度 1 条发现进入对抗验证），结论回来如有真问题以补丁跟进。
+
+## 波 96-98 审查结论与收件箱唤醒补丁（2026-11-19，已修复）
+
+- 审查（6 子代理，两维度对抗验证）：UI 维度（主题/全景/疑点收起）0 条确认缺陷；收件箱维度 2 条确认，均为事件驱动改造丢失唤醒源：
+  1. 批次扫描返回后 finish() 写入的 nextAttempt 没有对应唤醒（receive 启动 worker 即返回，scheduleFollowUp 按批次前状态计算），自动重试要等窗口激活/系统唤醒/新目录事件才发生，旧 10 秒 Timer 保证的 ≤10 秒重试丢失；
+  2. setEnabled/add 只重建 watcher 不补扫：暂停期间到达的文件、以及 baseline 读取与 watcher 建立之间落盘的文件被搁置，等外部事件才处理。
+- 修复（2150a94）：RecordingInboxScanPacing.retryWakeDelay 纯决策——仅当到期早于既有待扫任务时安排一次性唤醒，绝不推迟更早的扫描；finish() 结束时按全库最早 nextAttempt 唤醒；setEnabled(true) 与 add() 之后补扫一次（0.3s 去抖）；scheduledScanDelay 随任务生命周期清理。新增 1 项测试，654 项 0 失败；直接推 main。
+- 安装：dist 重建 exit 0；安装随下次空闲执行。
