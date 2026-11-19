@@ -147,19 +147,16 @@ struct WorkspaceListSection<Content: View>: View {
                     .rotationEffect(.degrees(expanded ? 90 : 0))
                     .accessibilityHidden(true)
             }
-            Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText)
+            Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.text)
                 .accessibilityAddTraits(.isHeader)
             if !subtitle.isEmpty {
                 Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
             }
             Spacer(minLength: 8)
             if let badge {
-                Text(badge).vosFont(WorkspaceText.caption.size, weight: .semibold)
-                    .foregroundStyle(palette.warning)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(palette.warning.opacity(0.14), in: Capsule())
+                WorkspaceBadge(text: badge, tone: .warning)
             } else if let count {
-                Text(String(count)).vosFont(WorkspaceText.caption.size, monospacedDigit: true)
+                Text(String(count)).vosFont(WorkspaceText.meta.size, weight: WorkspaceText.meta.weight, monospacedDigit: true)
                     .foregroundStyle(palette.tertiaryText)
             }
         }
@@ -184,26 +181,30 @@ struct WorkspaceSection<Content: View>: View {
             HStack(alignment: .top, spacing: 12) {
                 if !icon.isEmpty {
                     Image(systemName: icon).vosFont(19, weight: .medium).frame(width: 26, height: 28)
+                        .foregroundStyle(palette.accent)
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 9) {
-                        Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
+                        Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.text)
+                            .accessibilityAddTraits(.isHeader)
                         if let count {
-                            Text(String(count)).vosFont(WorkspaceText.caption.size, monospacedDigit: true)
-                                .padding(.horizontal, 8).padding(.vertical, 3)
-                                .background(palette.selection, in: Capsule()).foregroundStyle(.secondary)
+                            Text(String(count)).vosFont(WorkspaceText.meta.size, weight: WorkspaceText.meta.weight, monospacedDigit: true)
+                                .foregroundStyle(palette.tertiaryText)
                         }
                     }
                     if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3) }
                 }
                 Spacer(minLength: 0)
-                if let action { Button(actionTitle, action: action).vosFont(WorkspaceText.meta.size, weight: .medium).buttonStyle(.borderless).padding(.top, 4) }
-            }.padding(.bottom, 18)
-            Rectangle().fill(palette.border).frame(height: 1)
+                if let action {
+                    Button(actionTitle, action: action).buttonStyle(.workspaceQuietCompact).padding(.top, 2)
+                }
+            }.padding(.bottom, 16)
+            WorkspaceListDivider()
             LazyVStack(alignment: .leading, spacing: 0, content: content).padding(.top, 8)
-        }.padding(22).frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius))
-            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius).strokeBorder(palette.border.opacity(0.8), lineWidth: 1) }
+        }
+        .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius))
+        .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius).strokeBorder(palette.border, lineWidth: 1) }
     }
 }
 

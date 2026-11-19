@@ -100,12 +100,17 @@ extension ControlCenter {
     }
 }
 struct WorkspaceHeading: View {
+    @Environment(\.workspacePalette) private var palette
     let eyebrow: String
     let title: String
     var subtitle: String = ""
     var body: some View {
-        VStack(alignment:.leading,spacing:11) {
-            if !eyebrow.isEmpty { Text(eyebrow).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+        VStack(alignment:.leading,spacing:8) {
+            if !eyebrow.isEmpty {
+                Text(eyebrow)
+                    .vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced)
+                    .tracking(1.4).textCase(.uppercase).foregroundStyle(palette.accent)
+            }
             Text(title).vosFont(WorkspaceText.pageTitle).textSelection(.enabled).accessibilityAddTraits(.isHeader)
             if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.body).foregroundStyle(.secondary).lineSpacing(4) }
         }.frame(maxWidth:.infinity,alignment:.leading)
@@ -1751,6 +1756,9 @@ struct WorkspaceView: View {
                 Text(microphoneStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             .task { model.refreshMicrophoneAuthorization() }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                model.refreshMicrophoneAuthorization()
+            }
             if model.microphoneAuthorization == .notDetermined {
                 Button("授权麦克风") { Task { _ = await model.requestMicrophoneAccess() } }.buttonStyle(.workspacePrimary)
             } else if model.microphoneAuthorization == .denied {
