@@ -566,3 +566,22 @@
 - 波 101-B（引导）：末步「开始前检查」清单，逐项读取模型/本地语音/麦克风/提醒/通知真实状态并给可执行入口，任何未完成不阻塞「开始使用」。654。
 - 集成：三路合并（10a81b3、86c410e、df8b1d0）后 657 项 0 失败；SSH 推送 df8b1d0；dist 重建 exit 0；preflight 通过（safe idle=168s）后安装（pid 17625）。
 - 审查：波 100-101 的独立对抗审查工作流已启动，结论回来如有真问题以补丁跟进。
+
+## 波 102 视觉系统统一（2026-11-20，已安装待目视）
+
+- 背景：用户明确反馈 UI「还是很杂乱，不像是精心设计过的」，要求系统性处理而不是继续零敲碎打。
+- 共享层（529b9d4）：WorkspaceButtonStyle 四档（primary/secondary/quiet/destructive + compact）、WorkspaceBadge 五色、WorkspacePageHeading、WorkspaceSectionHeading、WorkspaceCard；Core 新增 WorkspaceTitleFit（裸 URL 标题拆成可读名称与来源行，含 4 项测试）。
+- 102-A 首页：时间线 288pt、行标题走 TitleFit、待办计数徽标化、阅读栏标题与来源两段、空态按钮换档。
+- 102-B 材料详情：页头三段（元信息/标题/来源）、状态徽标、全部内容卡 WorkspaceCard、SourceSection 计数改 tertiary、行动作行紧凑化、跟随卡。
+- 102-C 材料/行动/设置：三页页头、筛选页签（墨色 semibold + 2pt accent 下划线）、材料行两行截断与悬停、行动行提醒状态正则化、设置按钮全量换档、侧栏疑点徽标。
+- 102-D 监测：页头与分段、运行条、推送横幅、报告卡与历史卡、更早报告行、设置三卡。
+- 102-E 主题/全景：卡片化、计数徽标、notice 规范、按钮分层；全景星座绘制未动。
+- 共享区块升级（07ee5f0）：WorkspaceSection 换卡片容器与纯数字计数；WorkspaceHeading eyebrow 采用等宽 accent。
+- 102-P 审查补丁（187ee4b）：自动检查后刷新汇总与失败标记；MonitorOpenItemsSummary 新增 unreachableCount 与「载入更早报告」窗口；引导页授权走共享状态并在回前台重采样，视觉同步。662 项测试（新增 1）。
+- 集成：全部单元合并后 662 项 0 失败；标识符集合逐文件比对无删除；行为令牌（disabled/onKeyPress/a11y/Button 数）与改动前一致。
+
+## 波 103 次级页面视觉统一（2026-11-20，已合并待安装）
+
+- 只读审计 13 个文件后并行四单元：103-A 启动（7 处裸按钮分档、5 处旧 tint 主按钮、statusChip 徽标、Menu 次级外观）；103-B 每周回顾（完成/不再跟进、加入专注、放弃、行尾状态徽标、页头 trailing）；103-C 执行/讨论/核查（关联成果与发送本轮文字升为主操作、编辑器表面、知识核查卡片与三按钮分层）；103-D 八个弹窗（系统蓝清零、保存状态主操作、时间戳格式化、输入框表面、ReminderSettings 分组、浮条阴影对齐 Toast）。
+- 集成：四分支合并后 662 项 0 失败。
+- 待办：dist 重建、真机截图目视验收（102+103）、102/103 对抗审查、103-E 共享 WorkspaceHeading 已随 07ee5f0 完成。
