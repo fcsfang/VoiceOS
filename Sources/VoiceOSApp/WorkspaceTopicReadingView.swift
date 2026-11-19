@@ -266,6 +266,7 @@ struct WorkspaceTopicReadingView: View {
 
     private func readingCard(_ section:TopicReadingSection) -> some View {
         let sectionClaims=reading.sectionClaims[section.id] ?? []
+        let previewClaims=Array(sectionClaims.prefix(2))
         let sectionActions=reading.sectionActions[section.id] ?? []
         return VStack(alignment:.leading,spacing:16) {
             HStack {
@@ -274,6 +275,16 @@ struct WorkspaceTopicReadingView: View {
             }
             Text(section.title).vosFont(WorkspaceText.sectionTitle).fixedSize(horizontal:false,vertical:true).accessibilityAddTraits(.isHeader)
             WorkspaceExpandableText(text:section.summary,label:"小节内容",lines:5,size:WorkspaceText.body.size)
+            if !previewClaims.isEmpty {
+                VStack(alignment:.leading,spacing:10) {
+                    ForEach(previewClaims) { claim in
+                        VStack(alignment:.leading,spacing:4) {
+                            Text(ownership(claim)).vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(.secondary)
+                            Text(claim.statement).vosFont(WorkspaceText.body).lineLimit(2)
+                        }
+                    }
+                }
+            }
             if !sectionClaims.isEmpty {
                 DisclosureGroup("相关观点（\(sectionClaims.count)）") {
                     VStack(alignment:.leading,spacing:15) {
