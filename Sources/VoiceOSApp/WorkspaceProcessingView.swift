@@ -77,6 +77,8 @@ struct WorkspaceAttentionSnapshot {
     let monitorNeedsAttention: Bool
     let needsAttention: Bool
     let count: Int
+    let transcriptIssueCount: Int
+    let otherCount: Int
     let processingOutstanding: Bool
 }
 
@@ -196,7 +198,8 @@ extension ControlCenter {
             || !assistantAssessmentIssues.isEmpty
         let topicAttention = topicOrganizationNeedsAttention
         let monitorAttention = monitorNeedsAttention
-        let count = points.reduce(0) { $0 + $1.count }
+        let transcriptIssueCount = points.reduce(0) { $0 + $1.count }
+        let count = transcriptIssueCount
             + followups.count + knowledge.count
             + (topicAttention ? 1 : 0) + (needsAttention ? 1 : 0) + (monitorAttention ? 1 : 0)
         let outstanding = needsAttention || topicAttention || !points.isEmpty
@@ -210,6 +213,7 @@ extension ControlCenter {
                      topicOrganizationNeedsAttention: topicAttention,
                      monitorNeedsAttention: monitorAttention,
                      needsAttention: needsAttention, count: count,
+                     transcriptIssueCount: transcriptIssueCount, otherCount: count - transcriptIssueCount,
                      processingOutstanding: outstanding)
     }
     var workspaceTranscriptReviewPoints: [WorkspaceTranscriptReviewPoint] {
@@ -471,7 +475,7 @@ struct WorkspaceProcessingView: View {
                 let reviewPoints=attention.transcriptReviewPoints
                 if !reviewPoints.isEmpty {
                     let issueTotal=reviewPoints.reduce(0) { $0 + $1.count }
-                    WorkspaceSection(title:"转写疑点待核对",subtitle:"\(reviewPoints.count) 份材料的核对已经完成，仍有 \(issueTotal) 条疑点没有解决。打开材料可以逐条回听原音与查看原文。",icon:"exclamationmark.bubble",count:reviewPoints.count) {
+                    WorkspaceSection(title:"转写疑点待核对",subtitle:"\(reviewPoints.count) 份材料的核对已经完成，仍有 \(issueTotal) 条疑点没有解决。打开材料可以逐条回听原音与查看原文。",icon:"exclamationmark.bubble",count:issueTotal) {
                         ForEach(reviewPoints) { point in
                             WorkspaceRow(title:point.source.displayTitle,subtitle:"仍有 \(point.count) 条疑点未解决",trailing:"查看材料") { openSource(point.source.id) }
                         }
@@ -538,7 +542,10 @@ struct WorkspaceProcessingView: View {
                 }
                 let reminderAnomalies = model.reminderSyncAnomalies
                 if reminderAnomalies.total > 0 || reminderAnomalies.failureTotal > 0 {
-                    WorkspaceSection(title:"提醒事项需要核对",subtitle:"有 \(reminderAnomalies.total) 条关联的提醒事项未完成回读。可能已在提醒事项中被删除，任务保留为本地任务；重新回读只查询，不会重建。",icon:"exclamationmark.circle",count:reminderAnomalies.total + reminderAnomalies.failureTotal) {
+                    let reminderSubtitle = reminderAnomalies.total > 0
+                        ? "有 \(reminderAnomalies.total) 条关联的提醒事项未完成回读" + (reminderAnomalies.failureTotal > 0 ? "，另有 \(reminderAnomalies.failureTotal) 条回读失败" : "") + "。可能已在提醒事项中被删除，任务保留为本地任务；重新回读只查询，不会重建。"
+                        : "有 \(reminderAnomalies.failureTotal) 条回读失败。任务保留为本地任务；重新回读只查询，不会重建。"
+                    WorkspaceSection(title:"提醒事项需要核对",subtitle:reminderSubtitle,icon:"exclamationmark.circle",count:reminderAnomalies.total + reminderAnomalies.failureTotal) {
                         if reminderAnomalies.total > 0 {
                             Text(reminderAnomalyCounts(reminderAnomalies)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.vertical,8)
                             ForEach(reminderAnomalies.items) { item in

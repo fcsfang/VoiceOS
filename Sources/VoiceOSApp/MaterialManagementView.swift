@@ -66,7 +66,7 @@ struct MaterialManagementControls: View {
                 Button("重试") { retry(failure.disposition) }.vosFont(WorkspaceText.meta)
                     .accessibilityLabel("重试：" + failure.message)
             }
-        }
+        }.preference(key: MaterialRowFailurePreferenceKey.self, value: failure != nil)
     }
     private var restoreButton: some View {
         Button("恢复材料",systemImage:"arrow.uturn.backward") { update(.active) }
