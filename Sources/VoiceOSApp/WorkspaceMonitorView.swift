@@ -73,6 +73,13 @@ struct WorkspaceMonitorView: View {
                 model.markMonitorAttentionSeen()
             }
         }
+        .onChange(of: model.monitorReports) { _, _ in
+            markLatestItemsFailure()
+            Task { await refreshEarlierOpenSummary() }
+        }
+        .onChange(of: model.monitorItemsByReport) { _, _ in
+            markLatestItemsFailure()
+        }
         .alert("删除监测来源？", isPresented: Binding(
             get: { pendingSourceRemoval != nil },
             set: { if !$0 { pendingSourceRemoval = nil } })) {
@@ -181,7 +188,7 @@ struct WorkspaceMonitorView: View {
         WorkspaceCard(padding: 20) {
             VStack(alignment: .leading, spacing: 12) {
                 WorkspaceSectionHeading("历史报告", count: monitorLoaded ? "\(earlierReports.count)" : nil)
-                Text("最近 30 次检查中早于今天的报告；点开查看同结构内容。")
+                Text("最近 \(model.monitorReports.count) 次检查中早于今天的报告；点开查看同结构内容。")
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
                 WorkspaceListDivider()
                 if !monitorLoaded {
@@ -204,6 +211,12 @@ struct WorkspaceMonitorView: View {
                             reportBody(report: report).padding(.leading, 20).padding(.bottom, 16)
                         }
                     }
+                }
+                if monitorLoaded, model.monitorReports.count >= ControlCenter.monitorReportLimit,
+                   ControlCenter.monitorReportLimit < ControlCenter.monitorReportLimitCap {
+                    Button("载入更早报告") { loadMoreReports() }
+                        .buttonStyle(.workspaceQuietCompact)
+                        .accessibilityIdentifier("monitor.history.loadMore")
                 }
             }
         }
@@ -415,15 +428,35 @@ struct WorkspaceMonitorView: View {
         earlierOpenSummary = await model.monitorOpenItemsSummary(todayKey: todayKey)
     }
 
+    private func loadMoreReports() {
+        Task {
+            await model.loadMoreMonitorReports()
+            markLatestItemsFailure()
+            await refreshEarlierOpenSummary()
+        }
+    }
+
     @ViewBuilder private var earlierOpenItemsHint: some View {
-        if earlierOpenSummary.earlierCount > 0 {
+        let summary = earlierOpenSummary
+        if summary.earlierCount > 0 || summary.unreachableCount > 0 {
             HStack(spacing: 10) {
-                WorkspaceBadge(text: "\(earlierOpenSummary.earlierCount) 项", tone: .warning)
-                Text("更早报告还有 \(earlierOpenSummary.earlierCount) 项未处理"
-                     + (earlierOpenSummary.earliestReportDate.map { "（最早 \($0)）" } ?? ""))
-                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                if summary.earlierCount > 0 {
+                    WorkspaceBadge(text: "\(summary.earlierCount) 项", tone: .warning)
+                    Text("更早报告还有 \(summary.earlierCount) 项未处理"
+                         + (summary.earliestReportDate.map { "（最早 \($0)）" } ?? ""))
+                        .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                }
                 Spacer(minLength: 0)
-                if let reportID = earlierOpenSummary.earliestReportID {
+                if summary.unreachableCount > 0 {
+                    Text("另有 \(summary.unreachableCount) 项在更早报告里")
+                        .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    if ControlCenter.monitorReportLimit < ControlCenter.monitorReportLimitCap {
+                        Button("载入更早报告") { loadMoreReports() }
+                            .buttonStyle(.workspaceQuietCompact)
+                            .accessibilityIdentifier("monitor.earlierOpen.loadMore")
+                    }
+                }
+                if summary.earlierCount > 0, let reportID = summary.earliestReportID {
                     Button("展开最早的报告") { expandEarlierReport(reportID) }
                         .buttonStyle(.workspaceQuietCompact)
                         .accessibilityIdentifier("monitor.earlierOpen.expand")

@@ -21,6 +21,7 @@ private let onboardingSteps: [OnboardingStep] = [
 struct OnboardingView: View {
     @ObservedObject var model: ControlCenter
     let finish: () -> Void
+    @Environment(\.workspacePalette) private var palette
     @State private var step = 0
     @State private var microphone = OnboardingView.currentMicrophoneAuthorization()
 
@@ -28,11 +29,11 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("欢迎使用 VoiceOS").vosFont(WorkspaceText.sectionTitle)
+            Text("欢迎使用 VoiceOS").vosFont(WorkspaceText.pageTitle)
             HStack(spacing: 14) {
                 Image(systemName: current.symbol)
-                    .font(.system(size: 28))
-                    .foregroundStyle(.secondary)
+                    .vosFont(28)
+                    .foregroundStyle(palette.secondaryText)
                     .frame(width: 40)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(current.title).vosFont(WorkspaceText.rowTitle)
@@ -47,12 +48,16 @@ struct OnboardingView: View {
             stepDots
             HStack {
                 Button("跳过", action: finish)
+                    .buttonStyle(.workspaceQuiet)
                 Spacer()
-                if step > 0 { Button("上一步") { step -= 1 } }
+                if step > 0 {
+                    Button("上一步") { step -= 1 }
+                        .buttonStyle(.workspaceSecondary)
+                }
                 Button(step == onboardingSteps.count - 1 ? "开始使用" : "下一步") {
                     if step == onboardingSteps.count - 1 { finish() } else { step += 1 }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.workspacePrimary)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -103,10 +108,15 @@ struct OnboardingView: View {
             reminderCheckRow
             notificationCheckRow
         }
-        .task {
-            microphone = OnboardingView.currentMicrophoneAuthorization()
-            await model.refreshNoticeAuthorization()
+        .task { resampleAuthorizations() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            resampleAuthorizations()
         }
+    }
+
+    private func resampleAuthorizations() {
+        microphone = OnboardingView.currentMicrophoneAuthorization()
+        Task { await model.refreshNoticeAuthorization() }
     }
 
     private var microphoneCheckRow: OnboardingCheckRow {
@@ -154,7 +164,7 @@ struct OnboardingView: View {
 
     private func requestMicrophone() {
         Task {
-            _ = await AVCaptureDevice.requestAccess(for: .audio)
+            _ = await model.requestMicrophoneAccess()
             microphone = OnboardingView.currentMicrophoneAuthorization()
         }
     }
@@ -177,7 +187,7 @@ struct OnboardingView: View {
             ForEach(onboardingSteps) { item in
                 Button { step = item.id } label: {
                     Circle()
-                        .fill(item.id == step ? Color.accentColor : Color.secondary.opacity(0.28))
+                        .fill(item.id == step ? palette.accent : palette.secondaryText.opacity(0.28))
                         .frame(width: 8, height: 8)
                         .frame(width: 18, height: 18)
                         .contentShape(Rectangle())
@@ -192,6 +202,7 @@ struct OnboardingView: View {
 }
 
 private struct OnboardingCheckRow: View {
+    @Environment(\.workspacePalette) private var palette
     let title: String
     let detail: String
     let ready: Bool
@@ -201,7 +212,7 @@ private struct OnboardingCheckRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: ready ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(ready ? Color.accentColor : Color.secondary)
+                .foregroundStyle(ready ? palette.success : palette.secondaryText)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).vosFont(WorkspaceText.rowTitle)
@@ -212,7 +223,7 @@ private struct OnboardingCheckRow: View {
             }
             Spacer(minLength: 8)
             if let action {
-                Button(action, action: perform).controlSize(.small)
+                Button(action, action: perform).buttonStyle(.workspaceQuietCompact)
             }
         }
         .accessibilityElement(children: .combine)

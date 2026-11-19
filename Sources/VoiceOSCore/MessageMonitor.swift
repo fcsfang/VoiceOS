@@ -195,14 +195,19 @@ public enum MonitorItemsPresentation: Equatable, Sendable {
 /// `openItems` comes from a query filtered to `status='open'`.
 public struct MonitorOpenItemsSummary: Sendable, Equatable {
     public let totalCount: Int
+    /// Open items attached to reports in the loaded window, older than today.
     public let earlierCount: Int
+    /// Open items whose report sits outside the loaded window. The page cannot
+    /// open them until it loads more reports, so it counts them separately.
+    public let unreachableCount: Int
     public let earliestReportDate: String?
     public let earliestReportID: String?
 
-    public init(totalCount: Int = 0, earlierCount: Int = 0,
+    public init(totalCount: Int = 0, earlierCount: Int = 0, unreachableCount: Int = 0,
                 earliestReportDate: String? = nil, earliestReportID: String? = nil) {
         self.totalCount = totalCount
         self.earlierCount = earlierCount
+        self.unreachableCount = unreachableCount
         self.earliestReportDate = earliestReportDate
         self.earliestReportID = earliestReportID
     }
@@ -211,12 +216,15 @@ public struct MonitorOpenItemsSummary: Sendable, Equatable {
         let dateByReportID = Dictionary(reports.map { ($0.id, $0.reportDate) },
                                         uniquingKeysWith: { first, _ in first })
         var earlier = 0
+        var unreachable = 0
         var earliest: (date: String, id: String)?
         for item in openItems {
-            let date = dateByReportID[item.reportID]
+            guard let date = dateByReportID[item.reportID] else {
+                unreachable += 1
+                continue
+            }
             guard date != todayKey else { continue }
             earlier += 1
-            guard let date else { continue }
             if let current = earliest {
                 if date < current.date || (date == current.date && item.reportID < current.id) {
                     earliest = (date, item.reportID)
@@ -227,6 +235,7 @@ public struct MonitorOpenItemsSummary: Sendable, Equatable {
         }
         totalCount = openItems.count
         earlierCount = earlier
+        unreachableCount = unreachable
         earliestReportDate = earliest?.date
         earliestReportID = earliest?.id
     }

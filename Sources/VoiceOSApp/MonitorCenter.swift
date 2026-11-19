@@ -145,6 +145,19 @@ extension ControlCenter {
 
     var monitorLatestReport: MonitorReport? { monitorReports.first }
 
+    /// Reports load in pages so the daily page stays fast. Static because
+    /// ControlCenter keeps its stored properties in VoiceOSApp.swift; paging
+    /// state lives beside the paging code. Reads are internal, writes file-private.
+    private(set) static var monitorReportLimit = 30
+    static let monitorReportLimitCap = 960
+
+    /// Widen the report window one page; loaded item caches stay.
+    func loadMoreMonitorReports() async {
+        guard Self.monitorReportLimit < Self.monitorReportLimitCap else { return }
+        Self.monitorReportLimit = min(Self.monitorReportLimit * 2, Self.monitorReportLimitCap)
+        await reloadMonitorState()
+    }
+
     /// Every refresh path shares one reload; overlapping calls run one more round
     /// instead of each re-reading the store.
     func reloadMonitorState(forceItems: Bool = false) async {
@@ -169,7 +182,7 @@ extension ControlCenter {
         guard let store else { return }
         do {
             let sources = try await store.monitorSources()
-            let reports = try await store.monitorReports(limit: 30)
+            let reports = try await store.monitorReports(limit: Self.monitorReportLimit)
             var stats: [String: MonitorSourceStat] = [:]
             for source in sources {
                 let cursor = try await store.monitorCursor(sourceID: source.id)
