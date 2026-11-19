@@ -4,6 +4,12 @@ import UniformTypeIdentifiers
 import VoiceOSCore
 import VoiceOSPlatform
 
+private struct InlineActionFailure {
+    var actionID: String
+    var message: String
+    var retry: () -> Void
+}
+
 struct WorkspaceDeliveryView: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
@@ -13,6 +19,7 @@ struct WorkspaceDeliveryView: View {
     let discuss: () -> Void
     @State private var topicID = ""
     @State private var error = ""
+    @State private var failure: InlineActionFailure?
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
@@ -63,8 +70,16 @@ struct WorkspaceDeliveryView: View {
                         Button("原任务与使用结果") { openTask(execution.actionID) }
                         Spacer()
                         if ["queued", "running"].contains(execution.state) { Button("取消代办") { Task { await model.cancelAssistant(execution) } } }
-                        if execution.validity == "current", ["failed", "cancelled"].contains(execution.state) { Button("重新执行") { Task { await model.retryAssistant(execution) } } }
+                        if execution.validity == "current", ["failed", "cancelled"].contains(execution.state) { Button("重新执行") { retryExecution() } }
                     }.padding(.vertical,14)
+                    if let failure, failure.actionID == execution.id {
+                        HStack(spacing:10) {
+                            WorkspaceNoticeText(message: failure.message, severity: .warning)
+                            Button("重试") { self.failure = nil; failure.retry() }
+                                .vosFont(WorkspaceText.meta).buttonStyle(.borderless)
+                                .accessibilityLabel("重试失败的操作")
+                        }
+                    }
                     if let id = execution.questionID, let topic = model.workspaceTopics.first(where: { $0.id == id }) {
                         WorkspaceRow(title: topic.title, subtitle: "成果已回流到这个主题", icon: "circle.hexagongrid") { openTopic(id) }
                     }
@@ -75,7 +90,7 @@ struct WorkspaceDeliveryView: View {
                                     Text("选择主题").tag("")
                                     ForEach(model.workspaceTopics) { Text($0.title).tag($0.id) }
                                 }
-                                Button("接回主题") { Task { if !(await model.attachAssistantResult(execution, questionID: topicID)) { error = model.assistantStatus } } }.disabled(topicID.isEmpty)
+                                Button("接回主题") { attachToTopic() }.disabled(topicID.isEmpty)
                             }.padding(.top, 12)
                         }.padding(.vertical,14)
                     }
@@ -88,6 +103,27 @@ struct WorkspaceDeliveryView: View {
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
         }
         .task(id: execution.id) { topicID = execution.questionID ?? "" }
+    }
+    private func retryExecution() {
+        failure = nil
+        Task {
+            if !(await model.retryAssistant(execution)) {
+                failure = InlineActionFailure(actionID: execution.id,
+                    message: InlineFailurePresentation.message(operation: "重新执行", reason: model.assistantStatus),
+                    retry: retryExecution)
+            }
+        }
+    }
+    private func attachToTopic() {
+        failure = nil
+        Task {
+            if !(await model.attachAssistantResult(execution, questionID: topicID)) {
+                error = model.assistantStatus
+                failure = InlineActionFailure(actionID: execution.id,
+                    message: InlineFailurePresentation.message(operation: "接回主题", reason: model.assistantStatus),
+                    retry: attachToTopic)
+            }
+        }
     }
     private func export(_ report: String) {
         let panel = NSSavePanel()
@@ -203,6 +239,7 @@ struct WorkspaceTaskView: View {
     @State private var delegating = false
     @State private var instruction = ""
     @State private var error = ""
+    @State private var mainActionFailure: InlineActionFailure?
     @State private var saving = false
     @State private var confirming = false
     @State private var askingForResult = false
@@ -477,6 +514,14 @@ struct WorkspaceTaskView: View {
                     Button("取消", role: .cancel) {}
                 } message: {
                     Text(isQuestion ? "会移到历史记录，之后仍可找回；VoiceOS 的回答和讨论都会保留。" : (action.kind == "task" ? "会移入历史记录，之后仍可找回。Apple 提醒事项中的提醒需单独处理。" : "会移到历史记录，之后仍可找回；已经添加的下一步仍会保留。"))
+                }
+                if let failure = mainActionFailure, failure.actionID == action.id {
+                    HStack(spacing: 10) {
+                        WorkspaceNoticeText(message: failure.message, severity: .warning)
+                        Button("重试") { mainActionFailure = nil; failure.retry() }
+                            .vosFont(WorkspaceText.meta).buttonStyle(.borderless)
+                            .accessibilityLabel("重试失败的操作")
+                    }
                 }
                 if action.kind == "task", current {
                     Text("键盘：x 或空格完成 · s 改期 · f 记结果；在输入框里打字时不生效。")
@@ -775,9 +820,10 @@ struct WorkspaceTaskView: View {
         TaskFeedbackEditor(model: model, draft: $draft, onDictate: { showingFeedback = true }, onSave: saveFeedback)
     }
     private func completeOutcome() {
+        mainActionFailure = nil
         Task {
             if await model.completeOutcome(action) { error = ""; nextActionNotice = "" }
-            else { error = model.status }
+            else { error = model.status; noteMainActionFailure(isQuestion ? "想清楚" : "标记达成") { completeOutcome() } }
         }
     }
     private func toggleNextAction(_ child: ActionRecord) {
@@ -934,11 +980,21 @@ struct WorkspaceTaskView: View {
             } catch { self.error = "清除预计时长失败：" + error.localizedDescription }
         }
     }
+    private func noteMainActionFailure(_ operation: String, retry: @escaping () -> Void) {
+        mainActionFailure = InlineActionFailure(actionID: action.id,
+            message: InlineFailurePresentation.message(operation: operation, reason: model.status),
+            retry: retry)
+    }
     private func changeState() {
+        mainActionFailure = nil
         let state:LocalActionState=action.state == "completed" ? .open : .completed
         Task {
             let receipt = await model.changeAction(action,state:state)
-            guard model.actionRecords.first(where: { $0.id == action.id })?.state == state.rawValue else { error=model.status; return }
+            guard model.actionRecords.first(where: { $0.id == action.id })?.state == state.rawValue else {
+                error=model.status
+                noteMainActionFailure(state == .completed ? "标记完成" : "重新跟进") { changeState() }
+                return
+            }
             error=""
             if state == .completed {
                 let localOnly = model.pendingReminderSync(for: action.id) != nil
@@ -952,27 +1008,34 @@ struct WorkspaceTaskView: View {
         }
     }
     private func openReminderSettings() {
-        Task { if let snapshot = await model.loadReminderSettings(action) { settings = snapshot; showingSettings = true } else { error = model.status } }
+        mainActionFailure = nil
+        Task { if let snapshot = await model.loadReminderSettings(action) { settings = snapshot; showingSettings = true } else {
+            error = model.status
+            noteMainActionFailure("打开日期与提醒") { openReminderSettings() }
+        } }
     }
     private func stopFollowing() {
+        mainActionFailure = nil
         Task {
             await model.changeAction(action, state: .dismissed)
             if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.dismissed.rawValue { error = "";showUndo(isQuestion ? "已放下" : "已不再跟进") }
-            else { error = model.status }
+            else { error = model.status; noteMainActionFailure(isQuestion ? "放下" : "不再跟进") { stopFollowing() } }
         }
     }
     private func someday() {
+        mainActionFailure = nil
         Task {
             await model.changeAction(action, state: .someday)
             if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.someday.rawValue { error = "";showUndo("已留到以后") }
-            else { error = model.status }
+            else { error = model.status; noteMainActionFailure("留到以后") { someday() } }
         }
     }
     private func reopen() {
+        mainActionFailure = nil
         Task {
             await model.changeAction(action, state: .open)
             if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.open.rawValue { error = "";showUndo(isQuestion ? "已重新打开" : "已重新跟进");undoReopen = true }
-            else { error = model.status }
+            else { error = model.status; noteMainActionFailure(isQuestion ? "重新打开" : "重新跟进") { reopen() } }
         }
     }
     private func showUndo(_ message:String) {
