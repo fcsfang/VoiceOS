@@ -1,4 +1,7 @@
 import SwiftUI
+import AppKit
+import AVFoundation
+import VoiceOSPlatform
 
 private struct OnboardingStep: Identifiable, Sendable {
     let id: Int
@@ -16,8 +19,10 @@ private let onboardingSteps: [OnboardingStep] = [
 ]
 
 struct OnboardingView: View {
+    @ObservedObject var model: ControlCenter
     let finish: () -> Void
     @State private var step = 0
+    @State private var microphone = OnboardingView.currentMicrophoneAuthorization()
 
     private var current: OnboardingStep { onboardingSteps[step] }
 
@@ -70,7 +75,101 @@ struct OnboardingView: View {
                 Text("更多快捷键见「设置 › 键盘快捷键」。")
                     .vosFont(WorkspaceText.caption).foregroundStyle(.secondary).padding(.top, 3)
             }.vosFont(WorkspaceText.body)
+        } else if current.id == 4 {
+            readinessChecklist
         }
+    }
+
+    private var readinessChecklist: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("开始前检查").vosFont(WorkspaceText.rowTitle)
+            Text("未完成的项不影响开始使用；之后可以在设置中补齐。")
+                .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            OnboardingCheckRow(
+                title: "文本模型",
+                detail: model.textModelConfigured ? "已就绪" : "尚未配置",
+                ready: model.textModelConfigured,
+                action: model.textModelConfigured ? nil : "配置文本模型",
+                perform: { model.chooseTextModel() }
+            )
+            OnboardingCheckRow(
+                title: "本地语音",
+                detail: model.speechConfigured ? "已就绪" : "在设置 › 模型与服务中配置",
+                ready: model.speechConfigured,
+                action: model.speechConfigured ? nil : "打开设置",
+                perform: openWorkspaceSettings
+            )
+            microphoneCheckRow
+            reminderCheckRow
+            notificationCheckRow
+        }
+        .task {
+            microphone = OnboardingView.currentMicrophoneAuthorization()
+            await model.refreshNoticeAuthorization()
+        }
+    }
+
+    private var microphoneCheckRow: OnboardingCheckRow {
+        switch microphone {
+        case .authorized:
+            return OnboardingCheckRow(title: "麦克风", detail: "已就绪", ready: true)
+        case .notDetermined:
+            return OnboardingCheckRow(title: "麦克风", detail: "尚未授权", ready: false, action: "授权", perform: requestMicrophone)
+        case .denied, .restricted:
+            return OnboardingCheckRow(title: "麦克风", detail: "系统已拒绝", ready: false, action: "打开系统设置", perform: openMicrophoneSettings)
+        @unknown default:
+            return OnboardingCheckRow(title: "麦克风", detail: "状态未知，请在系统设置中检查", ready: false, action: "打开系统设置", perform: openMicrophoneSettings)
+        }
+    }
+
+    private var reminderCheckRow: OnboardingCheckRow {
+        let authorization = Self.currentReminderAuthorization()
+        if model.reminderAccess?.enabled == true, authorization == .granted {
+            return OnboardingCheckRow(title: "提醒事项", detail: model.reminderAccess?.title ?? "已连接", ready: true)
+        }
+        if authorization == .denied {
+            return OnboardingCheckRow(title: "提醒事项", detail: "系统权限已拒绝", ready: false, action: "打开系统设置", perform: openReminderSettings)
+        }
+        return OnboardingCheckRow(title: "提醒事项", detail: "未连接", ready: false, action: "打开设置", perform: openWorkspaceSettings)
+    }
+
+    private var notificationCheckRow: OnboardingCheckRow {
+        switch model.noticeAuthorization {
+        case .authorized:
+            return OnboardingCheckRow(title: "系统通知", detail: model.noticeAuthorizationDetail, ready: true)
+        case .notRequested:
+            return OnboardingCheckRow(title: "系统通知", detail: model.noticeAuthorizationDetail, ready: false)
+        case .denied:
+            return OnboardingCheckRow(title: "系统通知", detail: model.noticeAuthorizationDetail, ready: false, action: "打开系统通知设置", perform: { model.openNoticeSettings() })
+        }
+    }
+
+    private static func currentMicrophoneAuthorization() -> AVAuthorizationStatus {
+        AVCaptureDevice.authorizationStatus(for: .audio)
+    }
+
+    private static func currentReminderAuthorization() -> RemindersAuthorization {
+        NativeReminders.authorizationStatus()
+    }
+
+    private func requestMicrophone() {
+        Task {
+            _ = await AVCaptureDevice.requestAccess(for: .audio)
+            microphone = OnboardingView.currentMicrophoneAuthorization()
+        }
+    }
+
+    private func openWorkspaceSettings() {
+        finish()
+        model.pendingWorkspaceRoute = .settings
+    }
+
+    private func openMicrophoneSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!)
+    }
+
+    private func openReminderSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!)
     }
 
     private var stepDots: some View {
@@ -89,6 +188,34 @@ struct OnboardingView: View {
                 .accessibilityAddTraits(item.id == step ? [.isSelected] : [])
             }
         }
+    }
+}
+
+private struct OnboardingCheckRow: View {
+    let title: String
+    let detail: String
+    let ready: Bool
+    var action: String? = nil
+    var perform: () -> Void = {}
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: ready ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(ready ? Color.accentColor : Color.secondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).vosFont(WorkspaceText.rowTitle)
+                Text(detail)
+                    .vosFont(WorkspaceText.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            if let action {
+                Button(action, action: perform).controlSize(.small)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -113,7 +240,7 @@ private struct OnboardingPresenter: ViewModifier {
                 showing = true
             }
             .sheet(isPresented: $showing) {
-                OnboardingView {
+                OnboardingView(model: model) {
                     completed = true
                     showing = false
                 }
