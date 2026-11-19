@@ -628,3 +628,9 @@
 ## 波 108 小修（2026-11-20，已推送未安装）
 
 - RecordingFollowupView：跟进摘要改 WorkspaceCard(padding 12)、查看按钮 quietCompact；「完成」quiet；生成跟进 borderedProminent 改 workspacePrimary。668 项 0 失败；随下次安装批次交付。
+
+## 波 109 与安装批次（2026-11-20 07:46）
+
+- 最后 7 处系统按钮样式清零：ConfirmTaskView / CorrectionImpactView / DictationRecoveryControls / IncrementalReadingView / OutcomeFollowupView / RecentContentHome 标题保存 / Onboarding 试用。全库 borderedProminent 与系统 bordered 为 0。
+- 668 项 0 失败；dist 重建 exit 0（二进制 07:45:26）；preflight 0（safe idle=22820s）；重启后 pid 90833（含波 108 思想与下一步卡片化）。
+- 显示器仍休眠；102-109 的实机目视验收继续顺延，等待屏幕唤醒。
