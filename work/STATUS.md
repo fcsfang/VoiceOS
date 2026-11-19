@@ -604,3 +604,18 @@
 - 105-B 工作台与引导：导航/材料侧栏/筛选网格随 scale；WorkspaceRow 特大 3 行、trailing lineLimit+help；图标框缩放；Onboarding 内容 ScrollView + sheet minWidth。
 - 105-C 监测/主题/全景：pathRow minWidth+fixedSize、Picker 全部 minWidth；主题网格与预览行数；全景阅读器宽度随 scale、动作行 ViewThatFits 竖排回退。
 - 集成：三路合并后 662 项 0 失败。
+
+## 波 107 审查回归修复（2026-11-20，已合并）
+
+- 对抗审查（31 代理：3 维度发现 + 每条两名反驳者）14 条原始、11 条确认。
+- 修复：材料行恢复「疑点 M」；侧栏 attention 改单行可折文本（含「需要查看」无障碍名）；KnowledgeReviewSection carded 参数去三层卡片；全景「AI 归纳问题」字号归位；推送横幅按钮回到 HStack；WorkspaceTitleFit 对 watch/s 等通用路径与空路径回退域名；ReaderDisclosure 读数含计数；设置页提醒核对徽标+按钮合一；AI 交付徽标命中区 24pt；删容器级标识符解除 leaf 遮蔽。
+- 新增 3 条 TitleFit 测试，665 项 0 失败；合并后 668。
+
+## 波 106 设置遗留五项（2026-11-20，已合并）
+
+- S6 QQ 设置打开即校验（密钥可读性 + Python 探针惰性启动；起始时间解析失败显示「配置无效」）。
+- S7 设置解码失败可见：两个 Store loadResult + 保存 Bool；监测设置顶部一次性提示；source_status 解码失败显示「状态无法读取」。
+- S9 存储统计失败：目录枚举失败 →「无法读取」而非 0；备份区分不可读与未生成；新增 3 条 Core 测试。
+- S10 设置页新增「隐私与云端」卡（只在本机 / 会发送，DisclosureGroup 细则）。
+- S11 设置页「消息监测」直达其设置分段（一次性标记）。
+- 集成：合并后 668 项 0 失败。
