@@ -156,22 +156,34 @@ private struct UnresolvedIssuesBlock: View {
     let playbackLabel:(TranscriptionReview.Issue)->String
     let play:(TranscriptionReview.Issue)->Void
     let jump:(String)->Void
+    @State private var isExpanded=false
     var body: some View {
         VStack(alignment:.leading,spacing:13) {
-            Label("疑点 \(issues.count) · 核对未完成",systemImage:"exclamationmark.triangle")
-                .vosFont(WorkspaceText.meta.size, weight:.semibold)
-                .foregroundStyle(palette.warning)
-                .accessibilityAddTraits(.isHeader)
-            ForEach(Array(issues.enumerated()),id:\.offset) { _,issue in
-                VStack(alignment:.leading,spacing:7) {
-                    Text(issue.reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                    HStack(spacing:14) {
-                        Button(playbackLabel(issue),systemImage:"play.circle") { play(issue) }
-                            .disabled(!playbackAvailable)
-                            .help(playbackAvailable ? "播放这条核对项对应的原话" : "这份材料当前没有可播放的录音")
-                        Button("跳到原文",systemImage:"text.magnifyingglass") { jump(issue.span_id) }
-                    }.vosFont(WorkspaceText.meta)
-                }.padding(.vertical,4)
+            Button { isExpanded.toggle() } label: {
+                HStack(spacing:9) {
+                    Label("疑点 \(issues.count) · 核对未完成",systemImage:"exclamationmark.triangle")
+                        .vosFont(WorkspaceText.meta.size, weight:.semibold)
+                        .foregroundStyle(palette.warning)
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer(minLength:0)
+                    Image(systemName:isExpanded ? "chevron.up" : "chevron.down")
+                        .vosFont(WorkspaceText.caption)
+                        .foregroundStyle(palette.warning)
+                        .accessibilityHidden(true)
+                }.contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityValue(isExpanded ? "已展开" : "已收起")
+            if isExpanded {
+                ForEach(Array(issues.enumerated()),id:\.offset) { _,issue in
+                    VStack(alignment:.leading,spacing:7) {
+                        Text(issue.reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                        HStack(spacing:14) {
+                            Button(playbackLabel(issue),systemImage:"play.circle") { play(issue) }
+                                .disabled(!playbackAvailable)
+                                .help(playbackAvailable ? "播放这条核对项对应的原话" : "这份材料当前没有可播放的录音")
+                            Button("跳到原文",systemImage:"text.magnifyingglass") { jump(issue.span_id) }
+                        }.vosFont(WorkspaceText.meta)
+                    }.padding(.vertical,4)
+                }
             }
         }
     }

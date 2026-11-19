@@ -446,7 +446,6 @@ struct WorkspaceTaskView: View {
                         case .linked:
                             Button("日期与提醒", systemImage: "calendar") { openReminderSettings() }
                                 .disabled(model.savingAction || model.remindersBusy || !canEditReminderSettings)
-                            Label("已同步提醒事项并回读", systemImage: "checkmark.circle").vosFont(WorkspaceText.meta)
                             if model.reminderAccess?.enabled == true {
                                 Text(model.reminderSyncStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                                 Button("核对提醒同步") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderFieldsPending)
