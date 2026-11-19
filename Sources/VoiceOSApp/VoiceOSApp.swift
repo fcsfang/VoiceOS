@@ -200,8 +200,9 @@ final class ControlCenter: ObservableObject {
             await refresh(); return true
         } catch { status = error.localizedDescription; return false }
     }
-    func manageMaterial(_ record: SourceRecord, disposition: MaterialDisposition) async {
-        guard let store else { return }
+    @discardableResult
+    func manageMaterial(_ record: SourceRecord, disposition: MaterialDisposition) async -> String? {
+        guard let store else { return nil }
         do {
             let catalog=Dictionary(uniqueKeysWithValues:records.map { ($0.id,$0) })
             let ids=record.recordingExpression(in:catalog)?.sourceIDs ?? [record.id]
@@ -213,7 +214,13 @@ final class ControlCenter: ObservableObject {
             case .trashed: status="材料已移入回收站；原件与历史保留，系统提醒事项未修改。"
             case .active: status="材料已恢复；从回收站恢复的内容仅本机保存，旧理解不自动启用。"
             }
-        } catch { status=error.localizedDescription; await refresh() }
+            return nil
+        } catch {
+            let message = error.localizedDescription
+            status = message
+            await refresh()
+            return message
+        }
     }
     @Published var discussionList:[ConversationRecord] = []
     @Published var sourceDiscussions:[ConversationRecord] = []
@@ -5163,9 +5170,10 @@ extension ControlCenter {
             return true
         } catch { assistantStatus = error.localizedDescription; return false }
     }
-    func retryAssistant(_ execution: AssistantExecutionRecord) async {
-        do { try await store?.retryAssistantExecution(id: execution.id); assistantStatus = "已重新排队"; await refresh(.assistant); resumeAssistantExecutions() }
-        catch { assistantStatus = error.localizedDescription }
+    @discardableResult
+    func retryAssistant(_ execution: AssistantExecutionRecord) async -> Bool {
+        do { try await store?.retryAssistantExecution(id: execution.id); assistantStatus = "已重新排队"; await refresh(.assistant); resumeAssistantExecutions(); return true }
+        catch { assistantStatus = error.localizedDescription; return false }
     }
     func retryAssistantAssessment(_ issue: AssistantAssessmentIssue) async {
         guard let store, let port = assistantModel, !assistantBusy else { return }

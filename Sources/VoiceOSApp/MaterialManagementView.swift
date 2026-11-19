@@ -3,11 +3,17 @@ import VoiceOSCore
 
 struct MaterialManagementControls: View {
     enum Style { case full, compact }
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let source: SourceRecord
     var style: Style = .full
     @State private var confirmingTrash = false
     @State private var busy = false
+    @State private var failure: Failure?
+    private struct Failure {
+        var disposition: MaterialDisposition
+        var message: String
+    }
     private var count: Int {
         model.sourcePageIndex.expression(for: source.id)?.sourceIDs.count ?? 1
     }
@@ -23,14 +29,17 @@ struct MaterialManagementControls: View {
             }
     }
     private var fullControls: some View {
-        HStack(spacing:12) {
-            if source.isTrashed {
-                restoreButton
-            } else {
-                Button(source.isArchived ? "取消归档" : "归档",systemImage:"archivebox") { update(source.isArchived ? .active : .archived) }
-                Button("移入回收站",systemImage:"trash",role:.destructive) { confirmingTrash=true }
+        VStack(alignment:.leading,spacing:8) {
+            HStack(spacing:12) {
+                if source.isTrashed {
+                    restoreButton
+                } else {
+                    Button(source.isArchived ? "取消归档" : "归档",systemImage:"archivebox") { update(source.isArchived ? .active : .archived) }
+                    Button("移入回收站",systemImage:"trash",role:.destructive) { confirmingTrash=true }
+                }
+                busyIndicator
             }
-            busyIndicator
+            if let failure { failureRow(failure) }
         }
     }
     private var compactControls: some View {
@@ -50,6 +59,13 @@ struct MaterialManagementControls: View {
                     .accessibilityLabel("更多材料操作").help("更多材料操作")
             }
             busyIndicator
+            if let failure {
+                Image(systemName:"exclamationmark.circle").foregroundStyle(palette.warning)
+                Text(operationLabel(failure.disposition) + "失败").vosFont(WorkspaceText.meta).lineLimit(1)
+                    .help(failure.message)
+                Button("重试") { retry(failure.disposition) }.vosFont(WorkspaceText.meta)
+                    .accessibilityLabel("重试：" + failure.message)
+            }
         }
     }
     private var restoreButton: some View {
@@ -58,9 +74,32 @@ struct MaterialManagementControls: View {
     @ViewBuilder private var busyIndicator: some View {
         if busy { ProgressView().controlSize(.small) }
     }
+    private func failureRow(_ failure: Failure) -> some View {
+        HStack(spacing:8) {
+            Image(systemName:"exclamationmark.circle").foregroundStyle(palette.warning)
+            Text(failure.message).vosFont(WorkspaceText.meta).lineLimit(2).textSelection(.enabled)
+            Button("重试") { retry(failure.disposition) }.vosFont(WorkspaceText.meta).buttonStyle(.borderless)
+                .accessibilityLabel("重试：" + failure.message)
+        }
+    }
+    private func operationLabel(_ disposition: MaterialDisposition) -> String {
+        switch disposition {
+        case .archived: return "归档"
+        case .trashed: return "移入回收站"
+        case .active: return source.isTrashed ? "恢复材料" : "取消归档"
+        }
+    }
     private func update(_ disposition: MaterialDisposition) {
         busy=true
-        Task { await model.manageMaterial(source,disposition:disposition);busy=false }
+        Task {
+            let message = await model.manageMaterial(source,disposition:disposition)
+            busy=false
+            failure = message.map { Failure(disposition: disposition, message: InlineFailurePresentation.message(operation: operationLabel(disposition), reason: $0)) }
+        }
+    }
+    private func retry(_ disposition: MaterialDisposition) {
+        failure = nil
+        update(disposition)
     }
 }
 
