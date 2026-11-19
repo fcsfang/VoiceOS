@@ -90,17 +90,21 @@ public struct MonitorReport: Identifiable, Sendable, Equatable {
     public let headline: String
     public let summary: String
     public let sourceStatus: [MonitorSourceStatus]
+    /// True when stored source_status_json exists but cannot be decoded. The
+    /// page must say "状态无法读取"; an empty array would look like a clean run.
+    public let sourceStatusUnreadable: Bool
     public let itemCount: Int
     public let createdAt: String
     public let deliveredAt: String?
     public let deliveryState: String
     public let deliveryError: String?
     public let payloadJSON: String?
-    public init(id: String, reportDate: String, state: MonitorReportState, headline: String, summary: String, sourceStatus: [MonitorSourceStatus], itemCount: Int, createdAt: String, deliveredAt: String?, deliveryState: String, deliveryError: String?, payloadJSON: String?) {
+    public init(id: String, reportDate: String, state: MonitorReportState, headline: String, summary: String, sourceStatus: [MonitorSourceStatus], itemCount: Int, createdAt: String, deliveredAt: String?, deliveryState: String, deliveryError: String?, payloadJSON: String?, sourceStatusUnreadable: Bool = false) {
         self.id = id; self.reportDate = reportDate; self.state = state; self.headline = headline; self.summary = summary
         self.sourceStatus = sourceStatus; self.itemCount = itemCount; self.createdAt = createdAt
         self.deliveredAt = deliveredAt; self.deliveryState = deliveryState
         self.deliveryError = deliveryError; self.payloadJSON = payloadJSON
+        self.sourceStatusUnreadable = sourceStatusUnreadable
     }
 }
 
@@ -520,18 +524,27 @@ extension VoiceOSStore {
     }
 
     private static func monitorReport(_ row: [String: String]) throws -> MonitorReport {
+        let json = row["source_status_json"] ?? ""
         let statuses: [MonitorSourceStatus]
-        if let json = row["source_status_json"], !json.isEmpty, let data = json.data(using: .utf8) {
-            statuses = (try? JSONDecoder().decode([MonitorSourceStatus].self, from: data)) ?? []
+        let statusUnreadable: Bool
+        if json.isEmpty {
+            statuses = []
+            statusUnreadable = false
+        } else if let data = json.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([MonitorSourceStatus].self, from: data) {
+            statuses = decoded
+            statusUnreadable = false
         } else {
             statuses = []
+            statusUnreadable = true
         }
         return MonitorReport(id: row["id"]!, reportDate: row["report_date"]!,
                              state: MonitorReportState(rawValue: row["state"]!) ?? .failed,
                              headline: row["headline"]!, summary: row["summary"]!, sourceStatus: statuses,
                              itemCount: Int(row["item_count"] ?? "0") ?? 0, createdAt: row["created_at"]!,
                              deliveredAt: row["delivered_at"], deliveryState: row["delivery_state"] ?? "pending",
-                             deliveryError: row["delivery_error"], payloadJSON: row["payload_json"])
+                             deliveryError: row["delivery_error"], payloadJSON: row["payload_json"],
+                             sourceStatusUnreadable: statusUnreadable)
     }
 
     private static func monitorMessage(_ row: [String: String]) -> MonitorMessage {

@@ -1735,9 +1735,33 @@ struct WorkspaceView: View {
                     Button("更换配置…") { model.chooseTextModel() }
                     Button("清除配置", role: .destructive) { model.clearTextModel() }.disabled(!model.modelConfigured)
                 }
+            WorkspaceCard(padding: 20) {
+                VStack(alignment: .leading, spacing: 10) {
+                    WorkspaceSectionHeading("隐私与云端")
+                    WorkspaceListDivider()
+                    Text("只在本机：录音与原件、资料库、模型密钥、QQ 密钥文件")
+                        .vosFont(WorkspaceText.body)
+                    Text("会发送给模型：转写与材料文本；监测原文仅在授权后；英文反馈仅所选文字；任务发起仅那段文字")
+                        .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                    DisclosureGroup("详细说明") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("录音、原件与资料库保存在本机，不上传。")
+                            Text("模型密钥只在本机读取，不随材料发送；整个资料库不会发送。")
+                            Text("QQ 密钥文件只保存路径；内容不复制、不进日志或模型。")
+                            Text("转写与材料文本会发送给已配置的文本模型做理解、核对与整理。")
+                            Text("监测原文默认不发送；开启「允许云端分析监测内容」后才发送所选来源的新增原文。")
+                            Text("英文反馈只发送你选中的那段文字；任务发起只发送任务描述那段文字。")
+                        }
+                        .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                        .padding(.top, 8)
+                    }
+                    .vosFont(WorkspaceText.meta)
+                }
+            }
+            .frame(maxWidth: 620, alignment: .leading)
             sectionTitle("连接与自动入口")
             WorkspaceRow(title:"自动接收录音",subtitle:"VoiceOS 收件箱与语音备忘录",icon:"tray.and.arrow.down") { go(.tool("自动入口")) }
-            WorkspaceRow(title:"消息监测",subtitle:"QQ 群与学院官网 · 检查时间、推送与依赖",icon:"antenna.radiowaves.left.and.right") { go(.monitor) }
+            WorkspaceRow(title:"消息监测",subtitle:"QQ 群与学院官网 · 检查时间、推送与依赖",icon:"antenna.radiowaves.left.and.right") { model.monitorSettingsRequested = true; go(.monitor) }
             WorkspaceRow(title:"Apple 提醒事项",subtitle:reminderConnectionStatus,icon:"checklist") { Task { await model.connectReminders() } }
             if !model.reminderLastError.isEmpty {
                 WorkspaceNoticeText(message:"最近一次提醒事项操作失败：" + model.reminderLastError,severity:.warning)
@@ -1836,13 +1860,14 @@ struct WorkspaceView: View {
             HStack { Button("打开已有资料库") { chooseLibrary() }.buttonStyle(.workspaceSecondary);Button("从迁移包恢复") { go(.tool("恢复资料")) }.buttonStyle(.workspaceSecondary) }
             sectionTitle("存储与清理")
             VStack(alignment:.leading,spacing:7) {
-                storageLine("资料库（含 WAL）", model.storageUsage?.databaseBytes)
-                storageLine("原件", model.storageUsage?.assetsBytes)
-                storageLine("备份", model.storageUsage?.backupBytes, detail: model.storageUsage.map { "\($0.backupCount) 份" })
-                storageLine("本地语音模型", model.storageUsage?.localSpeechBytes)
-                storageLine("镜像", model.storageUsage?.mirrorBytes)
+                storageLine("资料库（含 WAL）", storageReadout { $0.databaseBytes })
+                storageLine("原件", storageReadout { $0.assetsBytes })
+                storageLine("备份", storageReadout { $0.backupBytes },
+                            detail: model.storageUsage.flatMap { $0.backupBytes == nil ? nil : "\($0.backupCount) 份" })
+                storageLine("本地语音模型", storageReadout { $0.localSpeechBytes })
+                storageLine("镜像", storageReadout { $0.mirrorBytes })
                 Divider().frame(maxWidth:420)
-                storageLine("合计", model.storageUsage?.totalBytes, emphasized:true)
+                storageLine("合计", storageReadout { $0.totalBytes }, emphasized:true)
             }
             if model.storageScanBusy { ProgressView().controlSize(.small) }
             HStack(spacing:12) {
@@ -1877,7 +1902,7 @@ struct WorkspaceView: View {
             Button("取消", role:.cancel) {}
             Button("删除", role:.destructive) { model.deleteLocalSpeechModel() }
         } message: {
-            Text("将删除 LocalSpeech 目录中的本地 Qwen 模型文件（当前 " + (model.storageUsage.map { sizeText($0.localSpeechBytes) } ?? "统计中") + "）。删除后本地 Qwen 语音停用，需要重新下载模型才能继续转写；已有录音、原件与逐字稿不受影响。")
+            Text("将删除 LocalSpeech 目录中的本地 Qwen 模型文件（当前 " + (model.storageUsage.map { $0.localSpeechBytes.map(sizeText) ?? "无法读取" } ?? "统计中") + "）。删除后本地 Qwen 语音停用，需要重新下载模型才能继续转写；已有录音、原件与逐字稿不受影响。")
         }
     }
     @ViewBuilder private var processingIssues: some View {
@@ -1910,13 +1935,28 @@ struct WorkspaceView: View {
     }
     private func sectionTitle(_ title:String) -> some View { WorkspaceSectionHeading(title) }
     private func sizeText(_ bytes:Int64) -> String { ByteCountFormatter.string(fromByteCount:bytes,countStyle:.file) }
-    private func storageLine(_ label:String,_ bytes:Int64?,detail:String? = nil,emphasized:Bool = false) -> some View {
+    private enum StorageReadout {
+        case scanning, unreadable, bytes(Int64)
+    }
+    private func storageReadout(_ field: (LibraryStorageUsage) -> Int64?) -> StorageReadout {
+        guard let usage = model.storageUsage else { return .scanning }
+        guard let bytes = field(usage) else { return .unreadable }
+        return .bytes(bytes)
+    }
+    private func storageReadoutText(_ readout: StorageReadout) -> String {
+        switch readout {
+        case .scanning: return "统计中…"
+        case .unreadable: return "无法读取"
+        case .bytes(let bytes): return sizeText(bytes)
+        }
+    }
+    private func storageLine(_ label:String,_ readout: StorageReadout,detail:String? = nil,emphasized:Bool = false) -> some View {
         HStack(spacing:8) {
             Text(label + (detail.map { " · " + $0 } ?? ""))
                 .vosFont(emphasized ? WorkspaceText.rowTitle : WorkspaceText.body)
                 .foregroundStyle(emphasized ? palette.text : palette.secondaryText)
             Spacer(minLength:12)
-            Text(bytes.map(sizeText) ?? "统计中…").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            Text(storageReadoutText(readout)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
         }.frame(maxWidth:420,alignment:.leading)
     }
     private func sourceNavigationTitle(_ id:String) -> String {

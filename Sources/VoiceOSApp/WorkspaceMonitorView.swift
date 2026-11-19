@@ -57,13 +57,17 @@ struct WorkspaceMonitorView: View {
             model.markMonitorAttentionSeen()
             if !formLoaded {
                 formLoaded = true
-                let user = MonitorQQSettingsStore.load()
+                let loaded = MonitorQQSettingsStore.loadResult()
+                model.recordMonitorQQSettingsLoad(decodeFailed: loaded.decodeFailed)
+                let user = loaded.settings
                 qqPythonPath = user.pythonPath.isEmpty ? MonitorQQSettingsStore.resolvedPythonPath(user) : user.pythonPath
                 qqKeyPath = user.keyPath
                 qqAccount = user.account
                 qqScriptOverride = user.scriptPathOverride
                 qqStart = Date()
             }
+            consumeMonitorSettingsRequest()
+            if showsSettings { probeQQDependenciesIfNeeded() }
             Task {
                 await model.ensureBuiltinMonitorSources()
                 await model.reloadMonitorState()
@@ -72,6 +76,12 @@ struct WorkspaceMonitorView: View {
                 earlierOpenSummary = await model.monitorOpenItemsSummary(todayKey: todayKey)
                 model.markMonitorAttentionSeen()
             }
+        }
+        .onChange(of: showsSettings) { _, shows in
+            if shows { probeQQDependenciesIfNeeded() }
+        }
+        .onChange(of: model.monitorSettingsRequested) { _, _ in
+            consumeMonitorSettingsRequest()
         }
         .onChange(of: model.monitorReports) { _, _ in
             markLatestItemsFailure()
@@ -594,6 +604,9 @@ struct WorkspaceMonitorView: View {
     }
 
     @ViewBuilder private func sourceFailureReasons(_ report: MonitorReport) -> some View {
+        if report.sourceStatusUnreadable {
+            Text("状态无法读取").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+        }
         let failures = report.sourceStatus.filter { !$0.ok }
         if !failures.isEmpty {
             DisclosureGroup("查看失败来源原因") {
@@ -721,15 +734,24 @@ struct WorkspaceMonitorView: View {
     }
 
     private func startNote(_ source: MonitorSource) -> String {
-        guard let date = model.monitorSourceStartDate(source) else { return "尚未设置起始时间" }
-        if source.kind == .qqGroup {
-            return "将从 " + date.formatted(date: .abbreviated, time: .shortened) + " 开始读取，更早的群消息不导入"
+        switch model.monitorSourceStart(source) {
+        case .invalid:
+            return "配置无效"
+        case .unset:
+            return "尚未设置起始时间"
+        case .date(let date):
+            if source.kind == .qqGroup {
+                return "将从 " + date.formatted(date: .abbreviated, time: .shortened) + " 开始读取，更早的群消息不导入"
+            }
+            return "起始日期 " + MonitorSourceConfigParser.dayString(date) + "；无发布时间的栏目条目仍会检查"
         }
-        return "起始日期 " + MonitorSourceConfigParser.dayString(date) + "；无发布时间的栏目条目仍会检查"
     }
 
     private var settingsSection: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+            if model.monitorSettingsDecodeFailed || model.monitorQQSettingsDecodeFailed {
+                WorkspaceNoticeText(message: "设置无法读取，已使用默认值，请重新保存", severity: .warning)
+            }
             WorkspaceCard(padding: 20) {
                 VStack(alignment: .leading, spacing: 14) {
                     WorkspaceSectionHeading("检查计划")
@@ -956,6 +978,25 @@ struct WorkspaceMonitorView: View {
             Text("已添加的群来源在「报告」页的「来源状态」中管理启停、起始时间与删除。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
         }
+    }
+
+    private func probeQQDependenciesIfNeeded() {
+        let keyPath = qqKeyPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        qqKeyReadable = keyPath.isEmpty ? nil : QQMonitorHelper.keyIsReadable(keyPath)
+        let pythonPath = qqPythonPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !pythonPath.isEmpty, qqPythonProbe == nil, !qqPythonChecking else { return }
+        qqPythonChecking = true
+        Task {
+            let probe = await QQMonitorHelper().checkPython(pythonPath)
+            qqPythonChecking = false
+            qqPythonProbe = probe
+        }
+    }
+
+    private func consumeMonitorSettingsRequest() {
+        guard model.monitorSettingsRequested else { return }
+        model.monitorSettingsRequested = false
+        showsSettings = true
     }
 
     private var pythonCheck: (text: String, ok: Bool?)? {

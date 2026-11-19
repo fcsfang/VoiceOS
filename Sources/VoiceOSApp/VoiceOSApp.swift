@@ -255,7 +255,12 @@ final class ControlCenter: ObservableObject {
     @Published var monitorItemsByReport: [String: [MonitorItem]] = [:]
     @Published var monitorEvidence: [String: [MonitorItemEvidence]] = [:]
     @Published var monitorSourceStats: [String: MonitorSourceStat] = [:]
-    @Published var monitorSettings = MonitorSettingsStore.load()
+    @Published var monitorSettings = MonitorSettingsBootstrap.loaded.settings
+    @Published private(set) var monitorSettingsDecodeFailed = MonitorSettingsBootstrap.loaded.decodeFailed
+    @Published private(set) var monitorSettingsSaveFailed = false
+    @Published private(set) var monitorQQSettingsDecodeFailed = false
+    /// One-shot request from the settings page; the monitor view consumes it.
+    @Published var monitorSettingsRequested = false
     @Published var monitorChecking = false
     @Published var monitorPhase = ""
     @Published var monitorStatus = ""
@@ -273,6 +278,16 @@ final class ControlCenter: ObservableObject {
     var monitorObservers: [NSObjectProtocol] = []
     var monitorTimer: Timer?
     var monitorAnalysisModel: ResponsesNotificationAnalysisPort?
+    func recordMonitorSettingsSave(success: Bool) {
+        monitorSettingsSaveFailed = !success
+        if success { monitorSettingsDecodeFailed = false }
+    }
+    func recordMonitorQQSettingsLoad(decodeFailed: Bool) {
+        monitorQQSettingsDecodeFailed = decodeFailed
+    }
+    func clearMonitorQQSettingsDecodeFailure() {
+        monitorQQSettingsDecodeFailed = false
+    }
     @Published var recentCompletions: [WorkspaceCompletionRecord] = []
     @Published var noticeAuthorization: LocalNoticeAuthorization = .notRequested
     /// Bumped when a failed processing item is dismissed, so the sidebar dot
@@ -1317,7 +1332,7 @@ final class ControlCenter: ObservableObject {
                     let orphans = DatabaseBackup.removeOrphanSidecars(directory: directory)
                     return (backups, orphans)
                 }.value
-                recordBackupSummary(DatabaseBackup.summary(directory: directory))
+                recordBackupSummary(DatabaseBackup.availability(directory: directory))
                 if result.backups == 0 && result.orphans == 0 {
                     backupCleanupStatus = "没有需要清理的旧备份"
                 } else {
@@ -1398,18 +1413,26 @@ final class ControlCenter: ObservableObject {
             do {
                 _ = try DatabaseBackup.createDailyIfNeeded(database: database, directory: directory, retain: retain)
                 DatabaseBackup.removeOrphanSidecars(directory: directory)
-                let summary = DatabaseBackup.summary(directory: directory)
-                await MainActor.run { self?.recordBackupSummary(summary) }
+                let availability = DatabaseBackup.availability(directory: directory)
+                await MainActor.run { self?.recordBackupSummary(availability) }
             } catch {
                 NSLog("VoiceOS 数据库备份失败：\(error.localizedDescription)")
                 await MainActor.run { self?.backupStatusText = DatabaseBackup.failureText(error) }
             }
         }
     }
-    private func recordBackupSummary(_ summary: DatabaseBackup.Summary?) {
-        guard let summary else { lastBackupAt = nil; backupStatusText = ""; return }
-        lastBackupAt = summary.date
-        backupStatusText = DatabaseBackup.successText(at: summary.date, count: summary.count)
+    private func recordBackupSummary(_ availability: DatabaseBackup.BackupAvailability) {
+        switch availability {
+        case .summary(let summary):
+            lastBackupAt = summary.date
+            backupStatusText = DatabaseBackup.successText(at: summary.date, count: summary.count)
+        case .none:
+            lastBackupAt = nil
+            backupStatusText = ""
+        case .unreadable:
+            lastBackupAt = nil
+            backupStatusText = "备份目录无法读取"
+        }
     }
     /// One-shot library check: live integrity and references, originals on disk,
     /// and a quick_check of the newest backup. Re-runnable from the same button.
