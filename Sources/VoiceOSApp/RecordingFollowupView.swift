@@ -7,15 +7,17 @@ struct RecordingFollowupSummary: View {
     @ObservedObject var model: ControlCenter
     let open: () -> Void
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if let result = receipt.result {
-                Text("旧思想关联 \(result.thoughtUpdates.count) · 目标下一步 \(result.goalPlans.count)" + (result.english.isPractice ? " · 英语反馈已接续" : "")).vosFont(WorkspaceText.meta)
-                if model.followupValidity[receipt.id]?.sourceCurrent != true { Text("录音依据已变化，历史结果保留；可重新生成跟进").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
-            } else {
-                Text(receipt.state == "running" ? "正在后台生成思想关联与下一步" : receipt.state == "queued" ? "思想关联与下一步已排队，录音和任务已保存" : "自动跟进待完成，可重试").vosFont(WorkspaceText.meta)
+        WorkspaceCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                if let result = receipt.result {
+                    Text("旧思想关联 \(result.thoughtUpdates.count) · 目标下一步 \(result.goalPlans.count)" + (result.english.isPractice ? " · 英语反馈已接续" : "")).vosFont(WorkspaceText.meta)
+                    if model.followupValidity[receipt.id]?.sourceCurrent != true { Text("录音依据已变化，历史结果保留；可重新生成跟进").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
+                } else {
+                    Text(receipt.state == "running" ? "正在后台生成思想关联与下一步" : receipt.state == "queued" ? "思想关联与下一步已排队，录音和任务已保存" : "自动跟进待完成，可重试").vosFont(WorkspaceText.meta)
+                }
+                Button("查看思想与下一步", action: open).buttonStyle(.workspaceQuietCompact)
             }
-            Button("查看思想与下一步", action: open)
-        }.padding(10).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+        }
     }
 }
 
@@ -46,7 +48,7 @@ struct RecordingFollowupView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
                 WorkspaceHeading(eyebrow: "工具 · 思想与下一步", title: "思想与下一步")
-                if !embedded { Button("完成", action: dismiss) }
+                if !embedded { Button("完成", action: dismiss).buttonStyle(.workspaceQuiet) }
             }
             Picker("查看", selection: $tab) {
                 Text("思想变化").tag("thoughts"); Text("目标下一步").tag("goals"); Text("英语练习").tag("english")
@@ -58,7 +60,7 @@ struct RecordingFollowupView: View {
                 }
                 Button(sourceID == "all" ? "更新下一步" : "生成或重试跟进") {
                     if let id = sourceID == "all" ? nil : sourceID { model.refreshFollowup(id) }
-                }.buttonStyle(.borderedProminent)
+                }.buttonStyle(.workspacePrimary)
                     .disabled(model.followupBusy || model.fullRecordingBusy || eligible.isEmpty || sourceID == "all")
                 if model.followupBusy { ProgressView().controlSize(.small) }
                 if sourceID == "all", !eligible.isEmpty { Text("先在来源里选择一份录音，再生成跟进。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
