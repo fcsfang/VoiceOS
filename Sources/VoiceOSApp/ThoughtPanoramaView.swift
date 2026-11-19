@@ -612,17 +612,63 @@ struct ThoughtPanoramaView: View {
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private enum PanoramaEmptyMode {
+        case loading
+        case needsModel
+        case unverified(String?)
+        case needsMaterials
+        case settled
+
+        var title: String {
+            switch self {
+            case .loading: return "正在载入全景"
+            case .needsModel: return "选择文本模型后生成全景"
+            case .unverified: return "全景尚未通过核对"
+            case .needsMaterials: return "先整理材料，形成完整单元"
+            case .settled: return "材料已核对，尚未形成持续问题"
+            }
+        }
+
+        var retryLabel: String {
+            if case .unverified = self { return "继续核对" }
+            return "生成或重试全景"
+        }
+    }
+
+    // The discovery headline only belongs to a settled, verified panorama with no
+    // problems; every other empty state names the real cause.
+    private var emptyMode: PanoramaEmptyMode {
+        guard let state else { return .loading }
+        if state.snapshot != nil { return .settled }
+        if ["failed", "unknown"].contains(state.status) { return .unverified(state.error) }
+        if state.input.units.isEmpty { return .needsMaterials }
+        if !modelConfigured && !isGenerating { return .needsModel }
+        return .loading
+    }
+
     private var emptyState: some View {
-        VStack(spacing: 18) {
+        let mode = emptyMode
+        return VStack(spacing: 18) {
             ZStack {
                 Ellipse().fill(palette.selection).frame(width: 300, height: 190).rotationEffect(.degrees(-15))
                 Ellipse().fill(palette.accent.opacity(0.08)).frame(width: 240, height: 160).offset(x: 110, y: 40)
                 Image(systemName: "point.3.connected.trianglepath.dotted").vosFont(62, weight: .light).foregroundStyle(.secondary)
             }.padding(.bottom, 20)
-            Text(state?.snapshot != nil ? "材料已核对，尚未形成持续问题" : isGenerating ? "让完整表达连成脉络" : "从表达中发现持续探索的问题").vosFont(WorkspaceText.sectionTitle)
-            Text(toolbarMessage).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 480).help(toolbarMessageHelp)
-            HStack { Button("打开材料", action: openMaterials); if state?.snapshot == nil, state?.input.units.isEmpty == false { Button("生成或重试全景", action: retry).disabled(!modelConfigured || isGenerating || state?.status == "running") } }
+            if case .loading = mode { ProgressView().controlSize(.regular) }
+            Text(mode.title).vosFont(WorkspaceText.sectionTitle)
+            Text(emptyDetail(mode)).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 480).help(toolbarMessageHelp)
+            HStack {
+                Button("打开材料", action: openMaterials)
+                if state?.snapshot == nil, state?.input.units.isEmpty == false {
+                    Button(mode.retryLabel, action: retry).disabled(!modelConfigured || isGenerating || state?.status == "running")
+                }
+            }
         }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func emptyDetail(_ mode: PanoramaEmptyMode) -> String {
+        if case .unverified(let error) = mode, let error, !error.isEmpty { return error }
+        return toolbarMessage
     }
 
     private func dependencyCount(_ input: PanoramaInput) -> Int {
