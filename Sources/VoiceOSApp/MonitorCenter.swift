@@ -623,6 +623,15 @@ extension ControlCenter {
         return MonitorItemTally(items: monitorItemsByReport[report.id] ?? []).open
     }
 
+    /// Open items can outlive the report that shows them. The today section
+    /// sums every open item so work stranded on earlier reports stays visible.
+    func monitorOpenItemsSummary(todayKey: String) async -> MonitorOpenItemsSummary {
+        guard let store, let openItems = try? await store.openMonitorItems() else {
+            return MonitorOpenItemsSummary()
+        }
+        return MonitorOpenItemsSummary(openItems: openItems, reports: monitorReports, todayKey: todayKey)
+    }
+
     var monitorAttentionText: String? {
         guard monitorNeedsAttention, let report = monitorReports.first else { return nil }
         if report.state == .failed {

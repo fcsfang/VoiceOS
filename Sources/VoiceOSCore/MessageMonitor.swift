@@ -189,6 +189,49 @@ public enum MonitorItemsPresentation: Equatable, Sendable {
     }
 }
 
+/// Open items stay attached to the report that last touched them, so the
+/// latest report can be empty while earlier reports still carry open work.
+/// The page sums them here instead of trusting the latest report's tally.
+/// `openItems` comes from a query filtered to `status='open'`.
+public struct MonitorOpenItemsSummary: Sendable, Equatable {
+    public let totalCount: Int
+    public let earlierCount: Int
+    public let earliestReportDate: String?
+    public let earliestReportID: String?
+
+    public init(totalCount: Int = 0, earlierCount: Int = 0,
+                earliestReportDate: String? = nil, earliestReportID: String? = nil) {
+        self.totalCount = totalCount
+        self.earlierCount = earlierCount
+        self.earliestReportDate = earliestReportDate
+        self.earliestReportID = earliestReportID
+    }
+
+    public init(openItems: [MonitorItem], reports: [MonitorReport], todayKey: String) {
+        let dateByReportID = Dictionary(reports.map { ($0.id, $0.reportDate) },
+                                        uniquingKeysWith: { first, _ in first })
+        var earlier = 0
+        var earliest: (date: String, id: String)?
+        for item in openItems {
+            let date = dateByReportID[item.reportID]
+            guard date != todayKey else { continue }
+            earlier += 1
+            guard let date else { continue }
+            if let current = earliest {
+                if date < current.date || (date == current.date && item.reportID < current.id) {
+                    earliest = (date, item.reportID)
+                }
+            } else {
+                earliest = (date, item.reportID)
+            }
+        }
+        totalCount = openItems.count
+        earlierCount = earlier
+        earliestReportDate = earliest?.date
+        earliestReportID = earliest?.id
+    }
+}
+
 extension VoiceOSStore {
     public func addMonitorSource(kind: MonitorSourceKind, displayName: String, configJSON: String, enabled: Bool = true) throws -> MonitorSource {
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)

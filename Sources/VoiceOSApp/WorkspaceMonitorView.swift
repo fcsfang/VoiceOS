@@ -27,6 +27,7 @@ struct WorkspaceMonitorView: View {
     @State private var handledExpanded = false
     @State private var monitorLoaded = false
     @State private var failedItemReportIDs: Set<String> = []
+    @State private var earlierOpenSummary = MonitorOpenItemsSummary()
     @State private var qqSaveFeedback = ""
     @State private var qqSaveFailed = false
 
@@ -66,6 +67,7 @@ struct WorkspaceMonitorView: View {
                 await model.ensureBuiltinMonitorSources()
                 await model.reloadMonitorState()
                 monitorLoaded = true
+                earlierOpenSummary = await model.monitorOpenItemsSummary(todayKey: todayKey)
                 model.markMonitorAttentionSeen()
             }
         }
@@ -93,7 +95,10 @@ struct WorkspaceMonitorView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 Button {
-                    Task { await model.runMonitorCheck() }
+                    Task {
+                        await model.runMonitorCheck()
+                        await refreshEarlierOpenSummary()
+                    }
                 } label: {
                     HStack(spacing: 7) {
                         if model.monitorChecking { ProgressView().controlSize(.small) }
@@ -128,6 +133,7 @@ struct WorkspaceMonitorView: View {
                              icon: "doc.text") {
                 Text("检查会先从已启用的来源采集，再按授权情况交给模型分析。云端分析未授权时不会发送任何原文。")
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.vertical, 10)
+                earlierOpenItemsHint
             }
         }
     }
@@ -182,7 +188,12 @@ struct WorkspaceMonitorView: View {
                         if report.state == .failed {
                             Button("去设置") { showsSettings = true }.vosFont(WorkspaceText.meta)
                                 .accessibilityIdentifier("monitor.report.settings")
-                            Button("重新检查") { Task { await model.runMonitorCheck() } }
+                            Button("重新检查") {
+                                Task {
+                                    await model.runMonitorCheck()
+                                    await refreshEarlierOpenSummary()
+                                }
+                            }
                                 .disabled(model.monitorChecking).vosFont(WorkspaceText.meta)
                                 .accessibilityIdentifier("monitor.report.recheck")
                         } else {
@@ -194,6 +205,7 @@ struct WorkspaceMonitorView: View {
                 }
                 sourceFailureReasons(report)
                 itemsView(report: report)
+                if isLatest { earlierOpenItemsHint }
             }.padding(.vertical, 12)
         }
     }
@@ -299,10 +311,40 @@ struct WorkspaceMonitorView: View {
             return
         }
         selectedReportID = report.id
+        Task { await loadItems(report) }
+    }
+
+    private func expandEarlierReport(_ reportID: String) {
+        guard let report = model.monitorReports.first(where: { $0.id == reportID }) else { return }
+        selectedReportID = report.id
+        Task { await loadItems(report) }
+    }
+
+    private func loadItems(_ report: MonitorReport) async {
         failedItemReportIDs.remove(report.id)
-        Task {
-            _ = await model.loadMonitorItems(reportID: report.id)
-            if model.monitorItemsByReport[report.id] == nil { failedItemReportIDs.insert(report.id) }
+        _ = await model.loadMonitorItems(reportID: report.id)
+        if model.monitorItemsByReport[report.id] == nil { failedItemReportIDs.insert(report.id) }
+    }
+
+    private func refreshEarlierOpenSummary() async {
+        earlierOpenSummary = await model.monitorOpenItemsSummary(todayKey: todayKey)
+    }
+
+    @ViewBuilder private var earlierOpenItemsHint: some View {
+        if earlierOpenSummary.earlierCount > 0 {
+            HStack(spacing: 12) {
+                Text("更早报告还有 \(earlierOpenSummary.earlierCount) 项未处理"
+                     + (earlierOpenSummary.earliestReportDate.map { "（最早 \($0)）" } ?? ""))
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                if let reportID = earlierOpenSummary.earliestReportID {
+                    Button("展开最早的报告") { expandEarlierReport(reportID) }
+                        .vosFont(WorkspaceText.meta)
+                        .accessibilityIdentifier("monitor.earlierOpen.expand")
+                }
+                Spacer()
+            }
+            .padding(.vertical, 6)
+            .accessibilityIdentifier("monitor.earlierOpen")
         }
     }
 
@@ -336,14 +378,29 @@ struct WorkspaceMonitorView: View {
             evidenceView(item)
             HStack(spacing: 12) {
                 if item.status == .open {
-                    Button("标记完成") { Task { await model.setMonitorItemStatus(item, status: .done) } }
+                    Button("标记完成") {
+                        Task {
+                            await model.setMonitorItemStatus(item, status: .done)
+                            await refreshEarlierOpenSummary()
+                        }
+                    }
                         .vosFont(WorkspaceText.meta)
                         .accessibilityIdentifier("monitor.item." + item.id + ".complete")
-                    Button("不适用") { Task { await model.setMonitorItemStatus(item, status: .dismissed) } }
+                    Button("不适用") {
+                        Task {
+                            await model.setMonitorItemStatus(item, status: .dismissed)
+                            await refreshEarlierOpenSummary()
+                        }
+                    }
                         .vosFont(WorkspaceText.meta)
                         .accessibilityIdentifier("monitor.item." + item.id + ".dismiss")
                 } else {
-                    Button("重新打开") { Task { await model.setMonitorItemStatus(item, status: .open) } }
+                    Button("重新打开") {
+                        Task {
+                            await model.setMonitorItemStatus(item, status: .open)
+                            await refreshEarlierOpenSummary()
+                        }
+                    }
                         .vosFont(WorkspaceText.meta)
                         .accessibilityIdentifier("monitor.item." + item.id + ".reopen")
                 }
