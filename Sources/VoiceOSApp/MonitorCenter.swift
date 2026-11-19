@@ -426,6 +426,11 @@ extension ControlCenter {
         return true
     }
 
+    /// Push is usable only when both the channel and the keychain address exist.
+    var monitorPushConfigured: Bool {
+        monitorSettings.pushChannel != nil && MonitorCredentialStore.loadWebhookURL() != nil
+    }
+
     var monitorWebhookTail: String { MonitorCredentialStore.tail(MonitorCredentialStore.loadWebhookURL()) }
 
     @discardableResult
@@ -623,6 +628,15 @@ extension ControlCenter {
         return MonitorItemTally(items: monitorItemsByReport[report.id] ?? []).open
     }
 
+    /// Open items can outlive the report that shows them. The today section
+    /// sums every open item so work stranded on earlier reports stays visible.
+    func monitorOpenItemsSummary(todayKey: String) async -> MonitorOpenItemsSummary {
+        guard let store, let openItems = try? await store.openMonitorItems() else {
+            return MonitorOpenItemsSummary()
+        }
+        return MonitorOpenItemsSummary(openItems: openItems, reports: monitorReports, todayKey: todayKey)
+    }
+
     var monitorAttentionText: String? {
         guard monitorNeedsAttention, let report = monitorReports.first else { return nil }
         if report.state == .failed {
@@ -672,5 +686,10 @@ extension ControlCenter {
     static func monitorTimeText(_ iso: String?) -> String {
         guard let iso, let date = MonitorDateFormatting.iso8601.date(from: iso) else { return iso ?? "时间未知" }
         return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    static func monitorGeneratedText(_ report: MonitorReport) -> String? {
+        guard let date = MonitorDateFormatting.iso8601.date(from: report.createdAt) else { return nil }
+        return "生成于 " + date.formatted(date: .omitted, time: .shortened)
     }
 }
