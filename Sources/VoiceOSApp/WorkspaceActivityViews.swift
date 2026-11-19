@@ -20,6 +20,7 @@ struct WorkspaceDeliveryView: View {
     @State private var topicID = ""
     @State private var error = ""
     @State private var failure: InlineActionFailure?
+    @State private var exportFailure: InlineActionFailure?
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
@@ -38,6 +39,14 @@ struct WorkspaceDeliveryView: View {
                 if let report = execution.report, !report.isEmpty {
                     WorkspaceSection(title:"交付正文",subtitle:ConversationReflectionFocus.date(execution.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知",icon:"doc.text",actionTitle:"保存报告…",action:{ export(report) }) {
                         AssistantReportView(report: report).padding(.top,14)
+                    }
+                    if let exportFailure, exportFailure.actionID == execution.id {
+                        HStack(spacing: 10) {
+                            WorkspaceNoticeText(message: exportFailure.message, severity: .warning)
+                            Button("重试") { self.exportFailure = nil; exportFailure.retry() }
+                                .vosFont(WorkspaceText.meta).buttonStyle(.borderless)
+                                .accessibilityLabel("重试保存报告")
+                        }
                     }
                     if !execution.references.isEmpty {
                         WorkspaceSection(title:"参考与来源",icon:"link",count:execution.references.count) {
@@ -69,7 +78,7 @@ struct WorkspaceDeliveryView: View {
                     HStack {
                         Button("原任务与使用结果") { openTask(execution.actionID) }
                         Spacer()
-                        if ["queued", "running"].contains(execution.state) { Button("取消代办") { Task { await model.cancelAssistant(execution) } } }
+                        if ["queued", "running"].contains(execution.state) { Button("取消代办") { cancelExecution() } }
                         if execution.validity == "current", ["failed", "cancelled"].contains(execution.state) { Button("重新执行") { retryExecution() } }
                     }.padding(.vertical,14)
                     if let failure, failure.actionID == execution.id {
@@ -114,6 +123,17 @@ struct WorkspaceDeliveryView: View {
             }
         }
     }
+    private func cancelExecution() {
+        failure = nil
+        Task {
+            await model.cancelAssistant(execution)
+            if ["queued", "running"].contains(model.assistantExecutions.first { $0.id == execution.id }?.state ?? "cancelled") {
+                failure = InlineActionFailure(actionID: execution.id,
+                    message: InlineFailurePresentation.message(operation: "取消代办", reason: model.assistantStatus),
+                    retry: cancelExecution)
+            }
+        }
+    }
     private func attachToTopic() {
         failure = nil
         Task {
@@ -126,6 +146,7 @@ struct WorkspaceDeliveryView: View {
         }
     }
     private func export(_ report: String) {
+        exportFailure = nil
         let panel = NSSavePanel()
         panel.title = "保存完整 AI 报告"
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
@@ -135,7 +156,12 @@ struct WorkspaceDeliveryView: View {
             do {
                 let citations = execution.references.map { "- [\($0.title.isEmpty ? $0.url : $0.title)](\($0.url))" }.joined(separator: "\n")
                 try (report + (citations.isEmpty ? "" : "\n\n## 参考来源\n\n" + citations) + "\n").write(to: url, atomically: true, encoding: .utf8)
-            } catch { self.error = error.localizedDescription }
+            } catch {
+                self.error = error.localizedDescription
+                self.exportFailure = InlineActionFailure(actionID: execution.id,
+                    message: InlineFailurePresentation.message(operation: "保存报告", reason: error.localizedDescription),
+                    retry: { self.export(report) })
+            }
         }
     }
 }
@@ -1136,11 +1162,12 @@ struct WorkspaceTaskView: View {
     }
     private func saveFeedback() {
         let input = draft
+        mainActionFailure = nil
         Task {
             if await model.saveFeedback(action, kind: input.kind, text: input.text, commandID: input.commandID) {
                 if draft.commandID == input.commandID && draft.text == input.text && draft.kind == input.kind { draft = TaskFeedbackDraft() }
                 error = ""; await loadFeedback()
-            } else { error = model.status }
+            } else { error = model.status; noteMainActionFailure("保存记录") { saveFeedback() } }
         }
     }
     private func analyze() {
