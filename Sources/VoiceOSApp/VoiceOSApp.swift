@@ -1488,7 +1488,10 @@ final class ControlCenter: ObservableObject {
     /// Recompute the home snapshot from the published arrays it derives from,
     /// so a render only reads it.
     private func publishHomeSnapshot() {
-        homeSnapshot = RecentContentHomeSnapshot.build(sources: records, claims: claims, actions: actionRecords, overrides: recentClueOverrides)
+        // Same review gate the materials list and source page read.
+        let reviewed = Set(actionRecords.lazy.filter { self.sourcePageIndex.requiresReview($0.id) }.map(\.id))
+        homeSnapshot = RecentContentHomeSnapshot.build(sources: records, claims: claims, actions: actionRecords,
+                                                       overrides: recentClueOverrides, reviewRequiredActionIDs: reviewed)
     }
     private func applyCoreSnapshot(_ snapshot: WorkspaceSnapshot, reminderAnomalies: ReminderSyncAnomalySummary = .empty) {
         records = snapshot.sources
@@ -1501,11 +1504,12 @@ final class ControlCenter: ObservableObject {
         actionRecords = snapshot.actions
         actionClarifications = snapshot.actionClarifications
         recentClueOverrides = snapshot.recentClueOverrides
-        publishHomeSnapshot()
         actionReviewLedgers = snapshot.actionReviewLedgers
         // Pause review reads the ledgers, so the index builds after them.
         sourcePageIndex = SourcePageIndex(records: records, claims: claims, actions: actionRecords,
                                           currentClaimsBySource: currentClaimsBySource, ledgers: actionReviewLedgers)
+        // The home snapshot filters tasks by that same index, so it publishes after it.
+        publishHomeSnapshot()
         taskInitiations = snapshot.taskInitiations
         recentOutcomes = snapshot.recentOutcomes
         compensationPlans = snapshot.compensationPlans

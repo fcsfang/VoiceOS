@@ -36,6 +36,7 @@ struct RecentContentHome: View {
     @FocusState private var timelineFocused: Bool
     private let topAnchor = "home.top"
     private let timelineSpace = "home.timeline"
+    private let tasksAnchor = "home.tasks.summary"
 
     private var days: [RecentContentDay] { model.homeSnapshot.days }
     private var items: [RecentContentItem] { days.flatMap(\.items) }
@@ -291,7 +292,7 @@ struct RecentContentHome: View {
         ScrollViewReader { proxy in
             ScrollView {
                 if let item = selected {
-                    readerContent(item)
+                    readerContent(item, proxy: proxy)
                         .frame(maxWidth: WorkspaceMetrics.readerWidth, alignment: .leading)
                         .padding(WorkspaceMetrics.pagePadding)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -304,11 +305,11 @@ struct RecentContentHome: View {
         }
     }
 
-    @ViewBuilder private func readerContent(_ item: RecentContentItem) -> some View {
+    @ViewBuilder private func readerContent(_ item: RecentContentItem, proxy: ScrollViewProxy) -> some View {
         if item.kind == .feedback {
             feedbackReader(item)
         } else {
-            materialReader(item)
+            materialReader(item, proxy: proxy)
         }
     }
 
@@ -389,7 +390,7 @@ struct RecentContentHome: View {
         return model.sourcePageIndex.requiresReview(action.id) ? "任务已暂停" : "任务已结束"
     }
 
-    private func materialReader(_ item: RecentContentItem) -> some View {
+    private func materialReader(_ item: RecentContentItem, proxy: ScrollViewProxy) -> some View {
         let digest = model.homeSnapshot.digests[item.id] ?? RecentContentDigest.build(thoughts: item.thoughts, duration: item.duration, overrides: model.recentClueOverrides)
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
@@ -412,6 +413,28 @@ struct RecentContentHome: View {
                 Text(item.summary).vosFont(WorkspaceText.body).lineSpacing(5)
                     .textSelection(.enabled)
                     .padding(.top, 24)
+            }
+            if !digest.tasks.isEmpty {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(tasksAnchor, anchor: .top) }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "checklist")
+                            .vosFont(WorkspaceText.caption.size, weight: .semibold)
+                            .accessibilityHidden(true)
+                        Text("\(digest.tasks.count) 条待办")
+                            .vosFont(WorkspaceText.meta.size, weight: .semibold)
+                        Text("跳到列表")
+                            .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                    }
+                    .foregroundStyle(palette.accent)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 20)
+                .help("跳到这条材料下方的待办列表")
+                .accessibilityLabel("\(digest.tasks.count) 条待办，跳到列表")
+                .accessibilityIdentifier("home.tasks.badge")
             }
             if item.thoughts.isEmpty {
                 organizePrompt(item).padding(.top, 44)
@@ -532,6 +555,7 @@ struct RecentContentHome: View {
                 }.padding(.top, 8)
             }.padding(.top, 54)
             .accessibilityIdentifier("home.tasks.list")
+            .id(tasksAnchor)
         }
     }
 
