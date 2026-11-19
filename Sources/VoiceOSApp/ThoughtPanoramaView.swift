@@ -36,6 +36,10 @@ struct ThoughtPanoramaView: View {
             let width = geometry.size.width
             let hasSideReader = width >= 740
             VStack(spacing: 0) {
+                WorkspacePageHeading(title: "思考全景")
+                    .padding(.horizontal, 26)
+                    .padding(.top, 12)
+                    .padding(.bottom, 2)
                 constellationToolbar(width: width)
                 if let readError { readErrorBanner(readError) }
                 Divider()
@@ -151,7 +155,6 @@ struct ThoughtPanoramaView: View {
 
     private func toolbarRow(searchWidth: CGFloat, showsStatusText: Bool, toolsInline: Bool) -> some View {
         HStack(spacing: showsStatusText ? 12 : 8) {
-            Text("思考全景").vosFont(WorkspaceText.rowTitle).lineLimit(1)
             if let snapshot = state?.snapshot, snapshot.isPartial {
                 partialChip(snapshot, short: !showsStatusText)
             }
@@ -282,31 +285,19 @@ struct ThoughtPanoramaView: View {
 
     private func readErrorBanner(_ text: String) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(palette.danger)
-            Text(text).vosFont(WorkspaceText.meta).lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button("重试", action: retryRefresh).controlSize(.small)
-            Button { dismissReadError() } label: { Image(systemName: "xmark") }
-                .buttonStyle(.plain)
-                .help("关闭读取错误提示")
-                .accessibilityLabel("关闭读取错误提示")
+            WorkspaceNoticeText(message: text, severity: .danger)
+            Button("重试", action: retryRefresh).buttonStyle(.workspaceSecondaryCompact)
+            WorkspaceIconButton(systemImage: "xmark", label: "关闭读取错误提示") { dismissReadError() }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(palette.danger.opacity(0.10))
     }
 
     private func partialChip(_ snapshot: PanoramaSnapshot, short: Bool) -> some View {
         let verified = snapshot.workflow?.verifiedUnitIDs.count ?? 0
         let total = snapshot.workflow?.totalUnitCount ?? 0
         return Button { showCoverage = true } label: {
-            Text(short ? "\(verified)/\(total)" : "部分全景 \(verified)/\(total)")
-                .vosFont(WorkspaceText.meta.size, weight: .medium)
-                .foregroundStyle(palette.warning)
-                .lineLimit(1)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(palette.warning.opacity(0.14), in: Capsule())
+            WorkspaceBadge(text: short ? "\(verified)/\(total)" : "部分全景 \(verified)/\(total)", tone: .warning)
         }
         .buttonStyle(.plain)
         .help("已核对 \(verified)/\(total) 个完整单元 · 仅显示已核对区域，跨材料联系与全局覆盖尚未完成")
@@ -388,8 +379,7 @@ struct ThoughtPanoramaView: View {
 
     private var locateButton: some View {
         Button("定位") { recenterToken &+= 1 }
-            .vosFont(WorkspaceText.caption)
-            .buttonStyle(.borderless)
+            .buttonStyle(.workspaceQuietCompact)
             .help(locateHelp)
             .accessibilityLabel(locateHelp)
     }
@@ -414,7 +404,7 @@ struct ThoughtPanoramaView: View {
                     .help("连接文本模型")
                     .accessibilityLabel("连接文本模型")
             } else {
-                Button("连接文本模型", action: chooseTextModel)
+                Button("连接文本模型", action: chooseTextModel).buttonStyle(.workspacePrimary)
             }
         } else if let state, ["failed", "unknown"].contains(state.status) {
             if iconOnly {
@@ -431,10 +421,11 @@ struct ThoughtPanoramaView: View {
             } else {
                 if draftAvailable {
                     Button("生成带候选联系的综合草稿", action: draft)
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.workspacePrimary)
                         .help("用已核对单元先生成带候选联系的综合草稿，全局核对尚未完成")
                 }
                 Button("继续核对", action: retry)
+                    .buttonStyle(WorkspaceButtonStyle(emphasis: draftAvailable ? .secondary : .primary))
             }
         }
     }
@@ -514,7 +505,10 @@ struct ThoughtPanoramaView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(relation.label)
-                                Text("AI 候选联系 · 尚待核对").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                HStack(spacing: 6) {
+                                    Text("AI 候选联系").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                    WorkspaceBadge(text: "尚待核对", tone: .warning)
+                                }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -556,9 +550,7 @@ struct ThoughtPanoramaView: View {
             if hits.isEmpty {
                 Text("没有匹配的区域或问题").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 Button("显示全部") { query = "" }
-                    .vosFont(WorkspaceText.meta)
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(palette.accent)
+                    .buttonStyle(.workspaceQuietCompact)
                     .accessibilityLabel("显示全部区域与问题")
             } else {
                 ForEach(hits) { hit in
@@ -648,6 +640,7 @@ struct ThoughtPanoramaView: View {
 
     private var emptyState: some View {
         let mode = emptyMode
+        let canRetry = state?.snapshot == nil && state?.input.units.isEmpty == false
         return VStack(spacing: 18) {
             ZStack {
                 Ellipse().fill(palette.selection).frame(width: 300, height: 190).rotationEffect(.degrees(-15))
@@ -659,8 +652,11 @@ struct ThoughtPanoramaView: View {
             Text(emptyDetail(mode)).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 480).help(toolbarMessageHelp)
             HStack {
                 Button("打开材料", action: openMaterials)
-                if state?.snapshot == nil, state?.input.units.isEmpty == false {
-                    Button(mode.retryLabel, action: retry).disabled(!modelConfigured || isGenerating || state?.status == "running")
+                    .buttonStyle(WorkspaceButtonStyle(emphasis: canRetry ? .secondary : .primary))
+                if canRetry {
+                    Button(mode.retryLabel, action: retry)
+                        .buttonStyle(.workspacePrimary)
+                        .disabled(!modelConfigured || isGenerating || state?.status == "running")
                 }
             }
         }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -675,9 +671,15 @@ struct ThoughtPanoramaView: View {
         Set(input.units.flatMap(\.dependencyIDs)).count
     }
 
+    private func coverageBadge(for source: PanoramaSource, snapshot: PanoramaSnapshot?) -> WorkspaceBadge {
+        if snapshot?.coverage.submittedSourceIDs.contains(source.id) != true { return WorkspaceBadge(text: "尚未核对", tone: .warning) }
+        if snapshot?.coverage.representedSourceIDs.contains(source.id) == true { return WorkspaceBadge(text: "已核对并表达", tone: .success) }
+        return WorkspaceBadge(text: "已核对，未归入具体问题", tone: .neutral)
+    }
+
     private var coverage: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack { Text("完整材料与覆盖情况").vosFont(WorkspaceText.sectionTitle); Spacer(); Button("关闭") { showCoverage = false } }
+            HStack { Text("完整材料与覆盖情况").vosFont(WorkspaceText.sectionTitle); Spacer(); Button("关闭") { showCoverage = false }.buttonStyle(.workspaceQuietCompact) }
             if let state {
                 Text("\(state.input.units.count) 个完整单元 · \(state.input.sources.count) 份来源 · \(dependencyCount(state.input)) 份节目依赖 · \(state.input.claims.count) 条当前认识").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             }
@@ -689,17 +691,17 @@ struct ThoughtPanoramaView: View {
                         }
                         Text("输入不按近期或条数裁剪。仅完整整理、当前版本与许可均有效的材料入选；节目依赖单独计数。AI 未归入项仍保留完整入口。")
                         ForEach(state.input.sources) { source in
-                            HStack { Text(source.title); Spacer(); Text(state.snapshot?.coverage.submittedSourceIDs.contains(source.id) != true ? "尚未核对" : state.snapshot?.coverage.representedSourceIDs.contains(source.id) == true ? "已核对并表达" : "已核对，未归入具体问题").foregroundStyle(.secondary); Button("全文") { showCoverage = false; openSource(source.id) } }
+                            HStack { Text(source.title); Spacer(); coverageBadge(for: source, snapshot: state.snapshot); Button("全文") { showCoverage = false; openSource(source.id) }.buttonStyle(.workspaceQuietCompact) }
                             if let reason = state.snapshot?.coverage.unrepresentedSources.first(where: { $0.id == source.id })?.reason { Text(reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                         }
                         ForEach(state.snapshot?.coverage.unrepresentedClaims ?? [], id: \.id) { item in
                             if let claim = state.input.claims.first(where: { $0.id == item.id }) {
                                 Text(claim.statement).vosFont(WorkspaceText.rowTitle); Text(item.reason).foregroundStyle(.secondary)
-                                HStack { Button("更正理解") { showCoverage = false; correctClaim(item.id) }; if let source = claim.references.first?.sourceID { Button("完整原文") { showCoverage = false; openSource(source) } } }
+                                HStack { Button("更正理解") { showCoverage = false; correctClaim(item.id) }.buttonStyle(.workspaceQuietCompact); if let source = claim.references.first?.sourceID { Button("完整原文") { showCoverage = false; openSource(source) }.buttonStyle(.workspaceQuietCompact) } }
                             }
                         }
                         Divider(); Text("尚未合格的材料").vosFont(WorkspaceText.rowTitle)
-                        ForEach(state.input.exclusions) { item in HStack { VStack(alignment: .leading) { Text(item.title); Text(item.reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }; Spacer(); Button("材料") { showCoverage = false; openSource(item.id) } } }
+                        ForEach(state.input.exclusions) { item in HStack { VStack(alignment: .leading) { Text(item.title); Text(item.reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }; Spacer(); Button("材料") { showCoverage = false; openSource(item.id) }.buttonStyle(.workspaceQuietCompact) } }
                         if let snapshot = state.snapshot {
                             Divider()
                             if let workflow=snapshot.workflow {
@@ -840,9 +842,8 @@ private struct RegionInspectorPanel: View {
                             Spacer(minLength: 0)
                             Image(systemName: "arrow.right")
                         }
-                        .padding(8)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.workspacePrimary)
                     .disabled(topicMatch == nil)
                     Text(topicMatch.map { "将打开主题「" + $0.title + "」" }
                          ?? (regionSourceIDs.isEmpty ? "该区域还没有原话证据" : "该区域的材料还没有挂主题"))
@@ -873,9 +874,7 @@ private struct RegionInspectorPanel: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(replyError).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger)
                             Button("重试") { Task { await loadReply(briefing) } }
-                                .vosFont(WorkspaceText.meta.size, weight: .medium)
-                                .buttonStyle(.borderless)
-                                .foregroundStyle(palette.accent)
+                                .buttonStyle(.workspaceQuietCompact)
                         }
                     }
                     Text("AI 的推断，不是你的结论").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary)
@@ -885,12 +884,10 @@ private struct RegionInspectorPanel: View {
                 if let openQuestion {
                     ReaderSectionLabel("还没想完")
                     ReaderQuestionRow(question: openQuestion) { selection = .question(openQuestion.id) }
-                    Text("\(briefing.openQuestionEvidenceCount) 处原话")
-                        .vosFont(WorkspaceText.caption)
-                        .foregroundStyle(.tertiary)
+                    WorkspaceBadge(text: "\(briefing.openQuestionEvidenceCount) 处原话")
                 }
                 if !otherQuestions.isEmpty {
-                    ReaderDisclosure(title: "其他问题 · \(otherQuestions.count)", expanded: $showsOtherQuestions) {
+                    ReaderDisclosure(title: "其他问题", count: otherQuestions.count, expanded: $showsOtherQuestions) {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(otherQuestions.enumerated()), id: \.offset) { index, question in
                                 if index > 0 { Divider() }
@@ -900,7 +897,7 @@ private struct RegionInspectorPanel: View {
                     }
                 }
                 if !incident.isEmpty {
-                    ReaderDisclosure(title: "候选联系 · \(incident.count)", expanded: $showsRelations) {
+                    ReaderDisclosure(title: "候选联系", count: incident.count, expanded: $showsRelations) {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(incident.enumerated()), id: \.offset) { index, relation in
                                 if index > 0 { Divider() }
@@ -949,21 +946,20 @@ private struct RegionInspectorPanel: View {
     }
 
     private func themeQuoteCard(_ quote: PanoramaThemeQuote) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("“" + quote.text + "”")
-                .vosFont(WorkspaceText.body)
-                .lineSpacing(3)
-                .lineLimit(5)
-                .multilineTextAlignment(.leading)
-                .foregroundStyle(.primary)
-            Text(themeMeta(quote))
-                .vosFont(WorkspaceText.meta)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
+        WorkspaceCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("“" + quote.text + "”")
+                    .vosFont(WorkspaceText.body)
+                    .lineSpacing(3)
+                    .lineLimit(5)
+                    .multilineTextAlignment(.leading)
+                    .foregroundStyle(.primary)
+                Text(themeMeta(quote))
+                    .vosFont(WorkspaceText.meta)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
     }
 
     private func themeMeta(_ quote: PanoramaThemeQuote) -> String {
@@ -1007,9 +1003,7 @@ private struct QuestionInspectorPanel: View {
                     }
                 }
                 Text(question.title).vosFont(WorkspaceText.sectionTitle)
-                Text("\(question.evidence.count) 处原话")
-                    .vosFont(WorkspaceText.caption)
-                    .foregroundStyle(.secondary)
+                WorkspaceBadge(text: "\(question.evidence.count) 处原话")
                 ReaderCappedText(text: question.summary, size: WorkspaceText.body.size)
                 ReaderEvidenceBlock(
                     label: "原话",
@@ -1022,7 +1016,7 @@ private struct QuestionInspectorPanel: View {
                     openQuestion: nil
                 )
                 if !relations.isEmpty {
-                    ReaderDisclosure(title: "候选联系 · \(relations.count)", expanded: $showsRelations) {
+                    ReaderDisclosure(title: "候选联系", count: relations.count, expanded: $showsRelations) {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(relations.enumerated()), id: \.offset) { index, relation in
                                 if index > 0 { Divider() }
@@ -1084,7 +1078,7 @@ private struct RelationInspectorPanel: View {
                     text: area.map { "大区 · " + $0.title } ?? "候选联系"
                 )
                 Text(relation.label).vosFont(WorkspaceText.sectionTitle)
-                Text("AI 候选解释 · 尚待核对").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                WorkspaceBadge(text: "AI 候选解释 · 尚待核对", tone: .warning)
                 Text(relation.explanation).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
                 ReaderEvidenceBlock(
                     label: "一侧原话",
@@ -1119,7 +1113,6 @@ private struct RelationInspectorPanel: View {
 }
 
 private struct ReaderEvidenceBlock: View {
-    @Environment(\.workspacePalette) private var palette
     let label: String
     let question: PanoramaQuestion?
     let evidence: [PanoramaEvidence]
@@ -1140,11 +1133,10 @@ private struct ReaderEvidenceBlock: View {
                 Button(action: openQuestion) {
                     Text(question.title)
                         .vosFont(WorkspaceText.caption)
-                        .foregroundStyle(palette.accent)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.workspaceQuietCompact)
                 .accessibilityLabel("AI 归纳问题：" + question.title)
             }
             if let first = pairs.first {
@@ -1153,7 +1145,7 @@ private struct ReaderEvidenceBlock: View {
                 Text("尚无原话").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             }
             if pairs.count > 1 {
-                ReaderDisclosure(title: "其他 \(pairs.count - 1) 处原话", expanded: $showsMore) {
+                ReaderDisclosure(title: "其他原话", count: pairs.count - 1, expanded: $showsMore) {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(Array(pairs.dropFirst().enumerated()), id: \.offset) { _, pair in
                             ReaderQuoteCard(item: pair.item, source: pair.source, claims: claims, lineLimit: 3, actions: actions)
@@ -1166,7 +1158,6 @@ private struct ReaderEvidenceBlock: View {
 }
 
 private struct ReaderQuoteCard: View {
-    @Environment(\.workspacePalette) private var palette
     let item: PanoramaEvidence
     let source: PanoramaSource
     let claims: [PanoramaClaim]
@@ -1174,31 +1165,30 @@ private struct ReaderQuoteCard: View {
     let actions: ReaderActions
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(source.transcript.origin == "user" && source.transcript.speaker == "user" ? "我的原话" : "外部 / AI 来源 · 不代表本人认可")
-                .vosFont(WorkspaceText.meta.size, weight: .medium)
-            Text("“" + item.quote + "”")
-                .vosFont(WorkspaceText.body)
-                .lineLimit(lineLimit)
-                .textSelection(.enabled)
-            let date = panoramaShortDate(source.occurredAt)
-            Text((date.map { $0 + " · " } ?? "") + readerEvidenceTime(item, source: source) + " · " + source.title)
+        WorkspaceCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(source.transcript.origin == "user" && source.transcript.speaker == "user" ? "我的原话" : "外部 / AI 来源 · 不代表本人认可")
+                    .vosFont(WorkspaceText.meta.size, weight: .medium)
+                Text("“" + item.quote + "”")
+                    .vosFont(WorkspaceText.body)
+                    .lineLimit(lineLimit)
+                    .textSelection(.enabled)
+                let date = panoramaShortDate(source.occurredAt)
+                Text((date.map { $0 + " · " } ?? "") + readerEvidenceTime(item, source: source) + " · " + source.title)
+                    .vosFont(WorkspaceText.meta)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                HStack(spacing: 12) {
+                    Button("完整原文") { actions.perform { actions.openSource(item.sourceID) } }
+                    Button("更正原文") { actions.perform { actions.correctSource(item.sourceID) } }
+                    claimCorrectionMenu
+                    Spacer(minLength: 0)
+                }
                 .vosFont(WorkspaceText.meta)
-                .foregroundStyle(.tertiary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            HStack(spacing: 12) {
-                Button("完整原文") { actions.perform { actions.openSource(item.sourceID) } }
-                Button("更正原文") { actions.perform { actions.correctSource(item.sourceID) } }
-                claimCorrectionMenu
-                Spacer(minLength: 0)
+                .buttonStyle(.workspaceQuietCompact)
             }
-            .vosFont(WorkspaceText.meta)
-            .buttonStyle(.borderless)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.selection.opacity(0.5), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
     }
 
     @ViewBuilder
@@ -1233,9 +1223,8 @@ private struct ReaderPrimaryAction: View {
                     Spacer()
                     Image(systemName: "arrow.right")
                 }
-                .padding(8)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(.workspacePrimary)
             Text("带入相关完整表达与节目原文，先打开可编辑的 AI 候选草稿；点击发送后才成为你的提问。")
                 .vosFont(WorkspaceText.caption)
                 .foregroundStyle(.secondary)
@@ -1245,11 +1234,13 @@ private struct ReaderPrimaryAction: View {
 
 private struct ReaderDisclosure<Content: View>: View {
     let title: String
+    var count: Int? = nil
     @Binding var expanded: Bool
     let content: () -> Content
 
-    init(title: String, expanded: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) {
+    init(title: String, count: Int? = nil, expanded: Binding<Bool>, @ViewBuilder content: @escaping () -> Content) {
         self.title = title
+        self.count = count
         _expanded = expanded
         self.content = content
     }
@@ -1261,6 +1252,7 @@ private struct ReaderDisclosure<Content: View>: View {
                     Text(title)
                         .vosFont(WorkspaceText.meta.size, weight: .semibold)
                         .foregroundStyle(.secondary)
+                    if let count { WorkspaceBadge(text: String(count)) }
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
                         .vosFont(WorkspaceText.caption.size, weight: .semibold)
@@ -1313,7 +1305,6 @@ private struct ReaderSectionLabel: View {
 }
 
 private struct ReaderCappedText: View {
-    @Environment(\.workspacePalette) private var palette
     let text: String
     let size: CGFloat
     @State private var expanded = false
@@ -1327,9 +1318,7 @@ private struct ReaderCappedText: View {
                 .fixedSize(horizontal: false, vertical: true)
             if text.count > 60 {
                 Button(expanded ? "收起" : "展开") { expanded.toggle() }
-                    .vosFont(WorkspaceText.meta)
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(palette.accent)
+                    .buttonStyle(.workspaceQuietCompact)
                     .accessibilityLabel(expanded ? "收起摘要" : "展开摘要")
             }
         }
@@ -1348,10 +1337,7 @@ private struct ReaderQuestionRow: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text("\(question.evidence.count) 处原话")
-                    .vosFont(WorkspaceText.caption)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize()
+                WorkspaceBadge(text: "\(question.evidence.count) 处原话")
             }
             .padding(.vertical, 8)
             .contentShape(Rectangle())

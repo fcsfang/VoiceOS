@@ -118,7 +118,12 @@ struct WorkspaceTopicReadingView: View {
                     if mode == "概览" {
                         DisclosureGroup(isExpanded:$showingStructure) {
                             structure.padding(.top,14)
-                        } label: { Label("内容结构 · \(sections.count) 个小主题",systemImage:"point.3.connected.trianglepath.dotted").vosFont(WorkspaceText.meta.size, weight: .medium) }
+                        } label: {
+                            HStack(spacing:8) {
+                                Label("内容结构",systemImage:"point.3.connected.trianglepath.dotted").vosFont(WorkspaceText.meta.size, weight: .medium)
+                                WorkspaceBadge(text:"\(sections.count) 个小主题")
+                            }
+                        }
                     } else { structure }
                     if mode == "概览" { overviewReadingCards } else { readingCards }
                 }
@@ -141,111 +146,105 @@ struct WorkspaceTopicReadingView: View {
     }
 
     private var introduction: some View {
-        VStack(alignment:.leading,spacing:15) {
-            HStack {
-                Label("主题速览",systemImage:"sparkles").vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
-                Spacer()
-                Text("更新于 " + date(topic.updatedAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+        WorkspaceCard {
+            VStack(alignment:.leading,spacing:15) {
+                HStack {
+                    Label("主题速览",systemImage:"sparkles").vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("更新于 " + date(topic.updatedAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                }
+                if let summary=topic.organization?.summary {
+                    WorkspaceExpandableText(text:summary,label:"主题概述",lines:4,size:WorkspaceText.body.size)
+                } else {
+                    Text("在这里接续这个主题的认识、问题和实践。").vosFont(WorkspaceText.body)
+                }
+                if sectionsWithoutClaims {
+                    Text("这些小节的原文已保留，尚未关联观点").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                }
             }
-            if let summary=topic.organization?.summary {
-                WorkspaceExpandableText(text:summary,label:"主题概述",lines:4,size:WorkspaceText.body.size)
-            } else {
-                Text("在这里接续这个主题的认识、问题和实践。").vosFont(WorkspaceText.body)
-            }
-            if sectionsWithoutClaims {
-                Text("这些小节的原文已保留，尚未关联观点").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            }
-        }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
-            .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
-            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
+        }
     }
 
     private var topicPendingBanner: some View {
         HStack(spacing:12) {
-            Label("主题整理未完成 · 正文待补齐",systemImage:"hourglass")
-                .vosFont(WorkspaceText.meta.size, weight: .medium)
-            Spacer(minLength:0)
+            WorkspaceNoticeText(message:"主题整理未完成 · 正文待补齐",severity:.info)
             if model.organizingTopics { ProgressView().controlSize(.small) }
-            else { Button("补齐正文") { model.queueTopicOrganization(topUp:true) }.disabled(!model.modelConfigured) }
-        }.padding(.horizontal,14).padding(.vertical,10).frame(maxWidth:.infinity,alignment:.leading)
-            .background(palette.action.opacity(0.08),in:RoundedRectangle(cornerRadius:10))
-            .overlay { RoundedRectangle(cornerRadius:10).strokeBorder(palette.action.opacity(0.25),lineWidth:1) }
+            else { Button("补齐正文") { model.queueTopicOrganization(topUp:true) }.buttonStyle(.workspaceSecondaryCompact).disabled(!model.modelConfigured) }
+        }
     }
 
     private var preparingCards: some View {
-        VStack(alignment:.leading,spacing:12) {
-            Label(model.organizingTopics ? "正在整理小主题与阅读卡片" : bodyPending ? "正文整理中" : "这份主题尚未生成结构卡片",systemImage:"rectangle.3.group").vosFont(WorkspaceText.meta.size, weight: .semibold)
-            Text(bodyPending ? "主题骨架已完成；正文按主题分批生成，已完成的会逐批出现并保留。" : "完整材料已保留；整理后会显示要点、原话与行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-            if model.organizingTopics { ProgressView().controlSize(.small) }
-            else if bodyPending {
-                Button("补齐正文") { model.queueTopicOrganization(topUp:true) }.disabled(!model.modelConfigured)
-                if !model.modelConfigured {
-                    HStack(spacing:8) {
-                        Text("整理需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                        Button("配置文本模型…") { model.chooseTextModel() }.vosFont(WorkspaceText.meta)
+        WorkspaceCard {
+            VStack(alignment:.leading,spacing:12) {
+                Label(model.organizingTopics ? "正在整理小主题与阅读卡片" : bodyPending ? "正文整理中" : "这份主题尚未生成结构卡片",systemImage:"rectangle.3.group").vosFont(WorkspaceText.meta.size, weight: .semibold)
+                Text(bodyPending ? "主题骨架已完成；正文按主题分批生成，已完成的会逐批出现并保留。" : "完整材料已保留；整理后会显示要点、原话与行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                if model.organizingTopics { ProgressView().controlSize(.small) }
+                else if bodyPending {
+                    Button("补齐正文") { model.queueTopicOrganization(topUp:true) }.buttonStyle(.workspacePrimary).disabled(!model.modelConfigured)
+                    if !model.modelConfigured {
+                        HStack(spacing:8) {
+                            Text("整理需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuietCompact)
+                        }
                     }
                 }
-            }
-            else {
-                Button("整理主题卡片") { model.queueTopicOrganization(retry:true) }.disabled(!model.modelConfigured)
-                if !model.modelConfigured {
-                    HStack(spacing:8) {
-                        Text("整理需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                        Button("配置文本模型…") { model.chooseTextModel() }.vosFont(WorkspaceText.meta)
+                else {
+                    Button("整理主题卡片") { model.queueTopicOrganization(retry:true) }.buttonStyle(.workspacePrimary).disabled(!model.modelConfigured)
+                    if !model.modelConfigured {
+                        HStack(spacing:8) {
+                            Text("整理需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuietCompact)
+                        }
                     }
                 }
+                if !model.topicOrganizationStatus.isEmpty { Text(model.topicOrganizationStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled) }
             }
-            if !model.topicOrganizationStatus.isEmpty { Text(model.topicOrganizationStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled) }
-        }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
-            .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
-            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border.opacity(0.8),lineWidth:1) }
+        }
     }
 
     private var structure: some View {
-        VStack(alignment:.leading,spacing:16) {
-            HStack {
-                VStack(alignment:.leading,spacing:5) {
-                    Text("内容结构").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
+        WorkspaceCard {
+            VStack(alignment:.leading,spacing:16) {
+                WorkspaceSectionHeading(title:"内容结构") {
+                    if selectedSection != nil { Button("查看全部") { selectedSection=nil }.buttonStyle(.workspaceQuietCompact) }
                 }
-                Spacer()
-                if selectedSection != nil { Button("查看全部") { selectedSection=nil } }
-            }
-            VStack(spacing:0) {
-                Button { selectedSection=nil } label: {
-                    Label(topic.title,systemImage:"circle.hexagongrid").vosFont(WorkspaceText.rowTitle)
-                        .padding(.horizontal,18).padding(.vertical,12).frame(maxWidth:.infinity)
-                        .background(palette.selection,in:RoundedRectangle(cornerRadius:10)).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                Rectangle().fill(palette.border).frame(width:1,height:18)
-                LazyVGrid(columns:[GridItem(.adaptive(minimum:210),spacing:12)],alignment:.leading,spacing:12) {
-                    ForEach(Array(listedSections.enumerated()),id:\.element.id) { index,section in
-                        Button { selectedSection = selectedSection == section.id ? nil : section.id } label: {
-                            HStack(alignment:.top,spacing:10) {
-                                Text(String(format:"%02d",index+1)).vosFont(WorkspaceText.caption.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
-                                Text(section.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                                Spacer(minLength:0)
-                            }.padding(13).frame(maxWidth:.infinity,minHeight:60,alignment:.topLeading)
-                                .background(selectedSection == section.id ? palette.selection : hoveredSectionID == section.id || keyboardSectionID == section.id ? palette.selection.opacity(0.5) : palette.canvas,in:RoundedRectangle(cornerRadius:9))
-                                .overlay { RoundedRectangle(cornerRadius:9).strokeBorder(selectedSection == section.id ? palette.accent : keyboardSectionID == section.id ? palette.focusRing : palette.border,lineWidth:1) }
-                                .contentShape(Rectangle())
-                        }.buttonStyle(.plain).accessibilityValue(selectedSection == section.id ? "已选择" : "")
-                            .accessibilityLabel("小主题：\(section.title)，\(sectionClaimCount(section)) 条认识")
-                            .onHover { inside in hoveredSectionID = inside ? section.id : (hoveredSectionID == section.id ? nil : hoveredSectionID) }
+                VStack(spacing:0) {
+                    Button { selectedSection=nil } label: {
+                        Label(topic.title,systemImage:"circle.hexagongrid").vosFont(WorkspaceText.rowTitle)
+                            .padding(.horizontal,18).padding(.vertical,12).frame(maxWidth:.infinity)
+                            .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+                            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                    Rectangle().fill(palette.border).frame(width:1,height:18)
+                    LazyVGrid(columns:[GridItem(.adaptive(minimum:210),spacing:12)],alignment:.leading,spacing:12) {
+                        ForEach(Array(listedSections.enumerated()),id:\.element.id) { index,section in
+                            Button { selectedSection = selectedSection == section.id ? nil : section.id } label: {
+                                HStack(alignment:.top,spacing:10) {
+                                    Text(String(format:"%02d",index+1)).vosFont(WorkspaceText.caption.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
+                                    Text(section.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
+                                    Spacer(minLength:0)
+                                }.padding(13).frame(maxWidth:.infinity,minHeight:60,alignment:.topLeading)
+                                    .background(selectedSection == section.id ? palette.selection : hoveredSectionID == section.id || keyboardSectionID == section.id ? palette.selection.opacity(0.5) : palette.canvas,in:RoundedRectangle(cornerRadius:9))
+                                    .overlay { RoundedRectangle(cornerRadius:9).strokeBorder(selectedSection == section.id ? palette.accent : keyboardSectionID == section.id ? palette.focusRing : palette.border,lineWidth:1) }
+                                    .contentShape(Rectangle())
+                            }.buttonStyle(.plain).accessibilityValue(selectedSection == section.id ? "已选择" : "")
+                                .accessibilityLabel("小主题：\(section.title)，\(sectionClaimCount(section)) 条认识")
+                                .onHover { inside in hoveredSectionID = inside ? section.id : (hoveredSectionID == section.id ? nil : hoveredSectionID) }
+                        }
                     }
                 }
+                if filteredSections.isEmpty && !filterTerm.isEmpty { Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                if filteredSections.count > 6 { Button(showingAllSections ? "收起结构" : "展开全部 \(filteredSections.count) 个小主题") { showingAllSections.toggle() }.buttonStyle(.workspaceQuietCompact) }
+                Text("连线表示主题下的内容分组").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             }
-            if filteredSections.isEmpty && !filterTerm.isEmpty { Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
-            if filteredSections.count > 6 { Button(showingAllSections ? "收起结构" : "展开全部 \(filteredSections.count) 个小主题") { showingAllSections.toggle() }.vosFont(WorkspaceText.meta) }
-            Text("连线表示主题下的内容分组").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-        }.padding(22).frame(maxWidth:.infinity,alignment:.leading)
-            .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
-            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border.opacity(0.8),lineWidth:1) }
-            .focusable()
-            .focused($structureFocused)
-            .focusEffectDisabled()
-            .onKeyPress { handleStructureKey($0) }
-            .onChange(of: selectedSection) { _, _ in structureFocused=true }
-            .onAppear { requestStructureFocus() }
+        }
+        .focusable()
+        .focused($structureFocused)
+        .focusEffectDisabled()
+        .onKeyPress { handleStructureKey($0) }
+        .onChange(of: selectedSection) { _, _ in structureFocused=true }
+        .onAppear { requestStructureFocus() }
     }
 
     @ViewBuilder private var readingCards: some View {
@@ -266,7 +265,7 @@ struct WorkspaceTopicReadingView: View {
                 ForEach(Array(displayedSections.prefix(3))) { section in readingCard(section) }
             }
             Button("查看全部 \(sections.count) 张卡片",systemImage:"text.book.closed") { showUnderstanding() }
-                .buttonStyle(.bordered)
+                .buttonStyle(.workspaceSecondary)
         }
     }
 
@@ -274,62 +273,71 @@ struct WorkspaceTopicReadingView: View {
         let sectionClaims=reading.sectionClaims[section.id] ?? []
         let previewClaims=Array(sectionClaims.prefix(2))
         let sectionActions=reading.sectionActions[section.id] ?? []
-        return VStack(alignment:.leading,spacing:16) {
-            HStack {
-                Spacer()
-                Text(String(format:"%02d",(reading.sectionPosition[section.id] ?? 0)+1)).vosFont(WorkspaceText.caption.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
-            }
-            Text(section.title).vosFont(WorkspaceText.sectionTitle).fixedSize(horizontal:false,vertical:true).accessibilityAddTraits(.isHeader)
-            WorkspaceExpandableText(text:section.summary,label:"小节内容",lines:5,size:WorkspaceText.body.size)
-            if !previewClaims.isEmpty {
-                VStack(alignment:.leading,spacing:10) {
-                    ForEach(previewClaims) { claim in
-                        VStack(alignment:.leading,spacing:4) {
-                            Text(ownership(claim)).vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(.secondary)
-                            Text(claim.statement).vosFont(WorkspaceText.body).lineLimit(2)
+        return WorkspaceCard {
+            VStack(alignment:.leading,spacing:16) {
+                HStack {
+                    Spacer()
+                    Text(String(format:"%02d",(reading.sectionPosition[section.id] ?? 0)+1)).vosFont(WorkspaceText.caption.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
+                }
+                Text(section.title).vosFont(WorkspaceText.sectionTitle).fixedSize(horizontal:false,vertical:true).accessibilityAddTraits(.isHeader)
+                WorkspaceExpandableText(text:section.summary,label:"小节内容",lines:5,size:WorkspaceText.body.size)
+                if !previewClaims.isEmpty {
+                    VStack(alignment:.leading,spacing:10) {
+                        ForEach(previewClaims) { claim in
+                            VStack(alignment:.leading,spacing:4) {
+                                Text(ownership(claim)).vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(.secondary)
+                                Text(claim.statement).vosFont(WorkspaceText.body).lineLimit(2)
+                            }
                         }
                     }
                 }
-            }
-            if !sectionClaims.isEmpty {
-                DisclosureGroup("相关观点（\(sectionClaims.count)）") {
-                    VStack(alignment:.leading,spacing:15) {
-                        ForEach(sectionClaims) { claim in
-                            VStack(alignment:.leading,spacing:6) {
-                                Text(ownership(claim)).vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(.secondary)
-                                Text(claim.statement).vosFont(WorkspaceText.body).textSelection(.enabled)
-                                HStack {
-                                    Button("更正理解或归属",systemImage:"pencil") { correctingClaim=claim }
-                                    Button("停止使用") { pendingRejection=claim;confirmingRejection=true }
-                                }.vosFont(WorkspaceText.meta).disabled(model.reviewingClaim)
+                if !sectionClaims.isEmpty {
+                    DisclosureGroup {
+                        VStack(alignment:.leading,spacing:15) {
+                            ForEach(sectionClaims) { claim in
+                                VStack(alignment:.leading,spacing:6) {
+                                    Text(ownership(claim)).vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(.secondary)
+                                    Text(claim.statement).vosFont(WorkspaceText.body).textSelection(.enabled)
+                                    HStack {
+                                        Button("更正理解或归属",systemImage:"pencil") { correctingClaim=claim }.buttonStyle(.workspaceQuietCompact)
+                                        Button("停止使用") { pendingRejection=claim;confirmingRejection=true }.buttonStyle(.workspaceQuietCompact)
+                                    }.disabled(model.reviewingClaim)
+                                }
+                            }
+                        }.padding(.top,12)
+                    } label: {
+                        HStack(spacing:8) {
+                            Text("相关观点").vosFont(WorkspaceText.meta)
+                            WorkspaceBadge(text:String(sectionClaims.count))
+                        }
+                    }
+                }
+                if !sectionActions.isEmpty {
+                    DisclosureGroup {
+                        VStack(alignment:.leading,spacing:8) { ForEach(sectionActions) { action in taskButton(action) } }.padding(.top,10)
+                    } label: {
+                        HStack(spacing:8) {
+                            Text("相关行动与问题").vosFont(WorkspaceText.meta)
+                            WorkspaceBadge(text:String(sectionActions.count))
+                        }
+                    }
+                }
+                Divider()
+                DisclosureGroup("查看原话依据") {
+                    VStack(alignment:.leading,spacing:13) {
+                        ForEach(Array(section.evidence.enumerated()),id:\.offset) { _,evidence in
+                            VStack(alignment:.leading,spacing:8) {
+                                Text(evidence.quote).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
+                                Button(model.sourcePageIndex.recordsByID[evidence.sourceID]?.displayTitle ?? "打开来源") { openSource(evidence.sourceID) }.buttonStyle(.workspaceQuietCompact)
                             }
                         }
                     }.padding(.top,12)
                 }.vosFont(WorkspaceText.meta)
-            }
-            if !sectionActions.isEmpty {
-                DisclosureGroup("相关行动与问题（\(sectionActions.count)）") {
-                    VStack(alignment:.leading,spacing:8) { ForEach(sectionActions) { action in taskButton(action) } }.padding(.top,10)
-                }.vosFont(WorkspaceText.meta)
-            }
-            Divider()
-            DisclosureGroup("查看原话依据") {
-                VStack(alignment:.leading,spacing:13) {
-                    ForEach(Array(section.evidence.enumerated()),id:\.offset) { _,evidence in
-                        VStack(alignment:.leading,spacing:8) {
-                            Text(evidence.quote).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
-                            Button(model.sourcePageIndex.recordsByID[evidence.sourceID]?.displayTitle ?? "打开来源") { openSource(evidence.sourceID) }.vosFont(WorkspaceText.meta)
-                        }
-                    }
-                }.padding(.top,12)
-            }.vosFont(WorkspaceText.meta)
-            Button("讨论这个小主题",systemImage:"bubble.left.and.bubble.right") {
-                discuss("围绕“" + section.title + "”继续讨论。请结合现有原话，区分已有结论、不同意见与需要验证的部分。")
-            }.vosFont(WorkspaceText.meta.size, weight: .medium).buttonStyle(.borderless)
-        }.padding(22).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
-            .background(palette.canvas,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
-            .overlay(alignment:.topLeading) { RoundedRectangle(cornerRadius:2).fill(palette.action.opacity(0.65)).frame(width:28,height:3).padding(.leading,22) }
-            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
+                Button("讨论这个小主题",systemImage:"bubble.left.and.bubble.right") {
+                    discuss("围绕“" + section.title + "”继续讨论。请结合现有原话，区分已有结论、不同意见与需要验证的部分。")
+                }.buttonStyle(.workspaceQuietCompact)
+            }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+        }
     }
 
     @ViewBuilder private var overviewActions: some View {
@@ -362,7 +370,7 @@ struct WorkspaceTopicReadingView: View {
                             Text(question).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
                             Spacer(minLength:4)
                             Image(systemName:"arrow.up.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-                        }.padding(18).frame(maxWidth:.infinity,alignment:.leading).background(hoveredQuestion == question ? palette.selection : palette.surface,in:RoundedRectangle(cornerRadius:11)).contentShape(Rectangle())
+                        }.padding(18).frame(maxWidth:.infinity,alignment:.leading).background(hoveredQuestion == question ? palette.selection : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)).overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }.contentShape(Rectangle())
                     }.buttonStyle(.plain).help("带上当前主题继续讨论")
                         .onHover { inside in hoveredQuestion = inside ? question : (hoveredQuestion == question ? nil : hoveredQuestion) }
                 }
@@ -386,10 +394,10 @@ struct WorkspaceTopicReadingView: View {
                             VStack(alignment:.leading,spacing:12) {
                                 Text("此前：" + connection.update.historicalQuote).textSelection(.enabled)
                                 if let sourceID=historicalSourceID(connection) {
-                                    Button("查看此前的来源") { openSource(sourceID) }
+                                    Button("查看此前的来源") { openSource(sourceID) }.buttonStyle(.workspaceQuietCompact)
                                 }
                                 Text("后来：" + connection.update.currentQuote).textSelection(.enabled)
-                                Button("查看后来的表达") { openSource(connection.sourceID) }
+                                Button("查看后来的表达") { openSource(connection.sourceID) }.buttonStyle(.workspaceQuietCompact)
                                 Text("关联依据：" + connection.update.reason).foregroundStyle(.secondary).textSelection(.enabled)
                             }.padding(.top,10)
                         }.vosFont(WorkspaceText.meta)
@@ -445,7 +453,7 @@ struct WorkspaceTopicReadingView: View {
                         Text(entry.kind.label + " · " + date(entry.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         WorkspaceExpandableText(text:entry.text,label:"完整记录",size:WorkspaceText.body.size)
                         if !entry.unavailableSourceIDs.isEmpty { Text("部分关联材料已暂停使用，此处保留当时的表达。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
-                        Button("查看记录原文") { openSource(entry.sourceID) }.vosFont(WorkspaceText.meta)
+                        Button("查看记录原文") { openSource(entry.sourceID) }.buttonStyle(.workspaceQuietCompact)
                     }.padding(.vertical,16)
                 }
             }
@@ -480,10 +488,10 @@ struct WorkspaceTopicReadingView: View {
         VStack(alignment:.leading,spacing:9) {
             Label("你的实际记录 · " + date(outcome.createdAt),systemImage:"quote.bubble").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             if let action=reading.actionsByID[outcome.actionID] {
-                Button("回应的行动：" + action.title) { openTask(action.id) }.vosFont(WorkspaceText.meta)
+                Button("回应的行动：" + action.title) { openTask(action.id) }.buttonStyle(.workspaceQuietCompact)
             }
             WorkspaceExpandableText(text:outcome.text,label:"结果记录",size:WorkspaceText.body.size)
-            Button("查看记录来源") { openSource(outcome.recordingSourceID ?? outcome.sourceID) }.vosFont(WorkspaceText.meta)
+            Button("查看记录来源") { openSource(outcome.recordingSourceID ?? outcome.sourceID) }.buttonStyle(.workspaceQuietCompact)
         }.padding(15).frame(maxWidth:.infinity,alignment:.leading).background(palette.outcome.opacity(0.07),in:RoundedRectangle(cornerRadius:10)).padding(.vertical,8)
     }
 
@@ -527,14 +535,8 @@ struct WorkspaceTopicReadingView: View {
 }
 
 struct TopicStaleBanner: View {
-    @Environment(\.workspacePalette) private var palette
     var body: some View {
-        Label("材料已更新，待重新整理",systemImage:"arrow.clockwise.circle")
-            .vosFont(WorkspaceText.meta.size, weight: .medium)
-            .foregroundStyle(palette.action)
-            .padding(.horizontal,14).padding(.vertical,10).frame(maxWidth:.infinity,alignment:.leading)
-            .background(palette.action.opacity(0.08),in:RoundedRectangle(cornerRadius:10))
-            .overlay { RoundedRectangle(cornerRadius:10).strokeBorder(palette.action.opacity(0.25),lineWidth:1) }
+        WorkspaceNoticeText(message:"材料已更新，待重新整理",severity:.info)
     }
 }
 
@@ -546,31 +548,35 @@ struct WorkspaceTopicTile: View {
     let open: () -> Void
     var body: some View {
         Button(action:open) {
-            VStack(alignment:.leading,spacing:15) {
-                HStack {
-                    Image(systemName:"circle.hexagongrid").vosFont(18).foregroundStyle(palette.action)
-                    Spacer()
-                    Image(systemName:"arrow.up.right").font(.caption).foregroundStyle(.secondary)
-                }
-                Text(topic.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                if topic.organizationStale == true { TopicStaleBanner() }
-                if topic.organization?.bodyPending == true {
-                    Label("正文整理中",systemImage:"hourglass").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                }
-                if let summary=topic.organization?.summary, !summary.isEmpty {
-                    Text(summary).vosFont(WorkspaceText.body).lineSpacing(4)
-                        .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
-                        .lineLimit(2)
-                }
-                Spacer(minLength:0)
-                HStack(spacing:15) {
-                    Label("\(sourceCount) 份材料",systemImage:"doc.text")
-                    if let count=topic.organization?.sections?.count { Label("\(count) 个小主题",systemImage:"square.grid.2x2") }
-                }.vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
-            }.padding(22).frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
-                .background(hovered ? palette.selection.opacity(0.6) : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
-                .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
-                .contentShape(RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+            WorkspaceCard {
+                VStack(alignment:.leading,spacing:15) {
+                    HStack {
+                        Image(systemName:"circle.hexagongrid").vosFont(18).foregroundStyle(palette.action)
+                        Spacer()
+                        Image(systemName:"arrow.up.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                    }
+                    Text(topic.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
+                    if topic.organizationStale == true { TopicStaleBanner() }
+                    if topic.organization?.bodyPending == true {
+                        WorkspaceBadge(text:"正文整理中")
+                    }
+                    if let summary=topic.organization?.summary, !summary.isEmpty {
+                        Text(summary).vosFont(WorkspaceText.body).lineSpacing(4)
+                            .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength:0)
+                    HStack(spacing:15) {
+                        Label("\(sourceCount) 份材料",systemImage:"doc.text")
+                        if let count=topic.organization?.sections?.count { Label("\(count) 个小主题",systemImage:"square.grid.2x2") }
+                    }.vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+                }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)
+                    .strokeBorder(hovered ? palette.accent : .clear,lineWidth:1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
         }.buttonStyle(.plain).onHover { hovered = $0 }
     }
 }
