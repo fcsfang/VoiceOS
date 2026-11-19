@@ -328,6 +328,38 @@ struct WorkspaceTaskView: View {
         if let due = action.intent?.reminderFields?.desired?.due, due != .none { return due }
         return nil
     }
+    private var reminderLink: ReminderLink? { model.reminderLinks.first(where: { $0.actionID == action.id }) }
+    private var linkedReminderDue: ReminderDueDate? {
+        guard let link = reminderLink, link.state == "linked", let due = link.remoteDueDate, due != .none else { return nil }
+        return due
+    }
+    private var reminderObservedSummary: String? {
+        if let observed = action.intent?.reminderFields?.observed, !observed.summary.isEmpty { return observed.summary }
+        return linkedReminderDue?.summary
+    }
+    private var reminderDesiredSummary: String? {
+        guard let desired = action.intent?.reminderFields?.desired, !desired.summary.isEmpty else { return nil }
+        return desired.summary
+    }
+    /// The entry layer's whole sync story in one place, so the view never re-derives it from scattered flags.
+    private enum ReminderEntryState {
+        case linked, needsReview, notConnected, fieldsPending, fieldsUnchecked(String), readyToWrite
+    }
+    private var reminderEntryState: ReminderEntryState {
+        if let link = reminderLink { return link.state == "linked" ? .linked : .needsReview }
+        guard model.reminderAccess?.enabled == true else { return .notConnected }
+        if model.reminderFieldsPending { return .fieldsPending }
+        if let issue = model.reminderFieldIssue { return .fieldsUnchecked(issue) }
+        return .readyToWrite
+    }
+    private var canWriteReminder: Bool {
+        action.state == "open" && action.intentActor == "user"
+            && model.reminderAccess?.enabled == true && !model.reminderCalendarID.isEmpty
+    }
+    private var canEditReminderSettings: Bool {
+        reminderLink?.state == "linked" && model.reminderAccess?.enabled == true
+            && model.reminderAccess?.calendarID == reminderLink?.calendarID
+    }
     private var recurrenceSelection: Binding<RecurrencePeriod?> {
         Binding(get: { self.recurrence }, set: { value in
             let previous = self.recurrence
@@ -369,6 +401,63 @@ struct WorkspaceTaskView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 30) {
                 WorkspaceHeading(eyebrow: eyebrow, title: StatementTagParser.split(action.title).text)
+                if let observed = reminderObservedSummary {
+                    Label("已回读 · " + observed, systemImage: "calendar").vosFont(WorkspaceText.meta)
+                    if let desired = reminderDesiredSummary, desired != observed {
+                        Text("本地期望 · " + desired + " · 未确认写入").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    }
+                } else if let desired = reminderDesiredSummary {
+                    Label("仅本地期望 · " + desired, systemImage: "calendar").vosFont(WorkspaceText.meta)
+                    Text("未确认写入提醒事项").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                }
+                if let due = linkedReminderDue, dueIsPast(due) {
+                    Label("已逾期 " + due.summary, systemImage: "calendar").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                }
+                if let locationLabel { Label("地点提醒 · " + locationLabel, systemImage: "mappin.and.ellipse").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                if current, action.kind == "task" {
+                    VStack(alignment:.leading,spacing:8) {
+                        switch reminderEntryState {
+                        case .linked:
+                            Button("日期与提醒", systemImage: "calendar") { openReminderSettings() }
+                                .disabled(model.savingAction || model.remindersBusy || !canEditReminderSettings)
+                            Label("已同步提醒事项并回读", systemImage: "checkmark.circle").vosFont(WorkspaceText.meta)
+                            if model.reminderAccess?.enabled == true {
+                                Text(model.reminderSyncStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                                Button("核对提醒同步") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderFieldsPending)
+                            }
+                        case .needsReview:
+                            Label("提醒同步需要核对，保留原有尝试", systemImage: "exclamationmark.circle").vosFont(WorkspaceText.meta)
+                            if model.reminderAccess?.enabled == true {
+                                Text(model.reminderSyncStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                                Button("核对提醒同步") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderFieldsPending)
+                            } else {
+                                Text("提醒事项连接已暂停 · 恢复连接后再核对。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            }
+                        case .notConnected:
+                            Text("未连接 Apple 提醒事项 · 任务只保存在 VoiceOS；到「处理」页的「模型与提醒事项」连接后即可同步。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        case .fieldsPending:
+                            Text("正在后台核对日期与优先级 · 完成后即可写入所选清单。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        case .fieldsUnchecked(let reason):
+                            Text("日期与优先级尚未核对 · " + reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            if canWriteReminder {
+                                Button("立即写入提醒事项") { sendReminderNow() }.disabled(model.remindersBusy)
+                            }
+                        case .readyToWrite:
+                            Text(canWriteReminder ? "尚未写入提醒事项 · 现在可写入「" + model.reminderCalendarTitle + "」。"
+                                 : action.state != "open" ? "尚未写入提醒事项 · 已完成的任务不再新建提醒。"
+                                 : "尚未写入提醒事项 · 这条任务仍需核对为明确待办后才能写入。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            if canWriteReminder {
+                                Button("立即写入提醒事项") { sendReminderNow() }.disabled(model.remindersBusy)
+                            }
+                        }
+                        if let pending = model.pendingReminderSync(for: action.id) {
+                            Text(pending.desiredState == LocalActionState.completed.rawValue ? "已本地完成，连接恢复前不会同步到提醒事项。" : "已本地撤销，连接恢复前不会同步到提醒事项。")
+                                .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                            Button("稍后核对") { Task { await model.retryPendingReminderSyncs() } }
+                                .vosFont(WorkspaceText.meta).disabled(model.remindersBusy)
+                        }
+                    }
+                }
                 if action.kind == "opportunity", action.nature == "goal", let progress = goalProgress {
                     Text(goalProgressText(progress)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         .accessibilityLabel("目标进展：" + goalProgressText(progress))
@@ -429,34 +518,6 @@ struct WorkspaceTaskView: View {
                             Button("保存为新的待办") { saveReplacement(claim) }.disabled(saving || replacementTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
                         }
                     }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius))
-                }
-                if let fields = action.intent?.reminderFields?.observed ?? action.intent?.reminderFields?.desired, !fields.summary.isEmpty { Label(fields.summary, systemImage: "calendar").vosFont(WorkspaceText.meta) }
-                if let due = model.reminderLinks.first(where: { $0.actionID == action.id && $0.state == "linked" })?.remoteDueDate, due != .none {
-                    let overdue = dueIsPast(due)
-                    Label((overdue ? "已逾期 " : "到期 ") + due.summary, systemImage: "calendar").vosFont(WorkspaceText.meta)
-                        .foregroundStyle(overdue ? palette.warning : palette.text)
-                }
-                if let locationLabel { Label("地点提醒 · " + locationLabel, systemImage: "mappin.and.ellipse").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
-                if current, action.kind == "task" {
-                    VStack(alignment:.leading,spacing:8) {
-                        Button("日期与提醒", systemImage: "calendar") { openReminderSettings() }
-                            .disabled(model.savingAction || model.remindersBusy)
-                        if let link=model.reminderLinks.first(where: { $0.actionID == action.id }) {
-                            Label(link.state == "linked" ? "已同步提醒事项并回读" : "提醒同步需要核对，保留原有尝试",systemImage:link.state == "linked" ? "checkmark.circle" : "exclamationmark.circle").vosFont(WorkspaceText.meta)
-                        } else {
-                            Text(model.reminderAccess?.enabled != true ? "待办已保存在 VoiceOS，连接提醒事项后可同步。" : model.reminderFieldsPending ? "正在核对日期与优先级，完成后同步所选清单。" : "待办已保存，等待同步到所选清单。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                        }
-                        if let pending = model.pendingReminderSync(for: action.id) {
-                            Text(pending.desiredState == LocalActionState.completed.rawValue ? "已本地完成，连接恢复前不会同步到提醒事项。" : "已本地撤销，连接恢复前不会同步到提醒事项。")
-                                .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                            Button("稍后核对") { Task { await model.retryPendingReminderSyncs() } }
-                                .vosFont(WorkspaceText.meta).disabled(model.remindersBusy)
-                        }
-                        if model.reminderAccess?.enabled == true {
-                            Text(model.reminderSyncStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
-                            Button("核对提醒同步") { Task { await model.refreshTaskReminders() } }.disabled(model.remindersBusy || model.reminderFieldsPending)
-                        }
-                    }
                 }
                 HStack {
                     if current, isQuestion {
@@ -733,6 +794,10 @@ struct WorkspaceTaskView: View {
                     } else if operation.attempted, operation.state == .unknown || operation.state == .conflict {
                         Button("只读核对") { Task { await model.reconcileSchedule(operation) } }
                             .disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
+                    } else if operation.state == .blocked, operation.validity == "current" {
+                        Text("上次改期没有派发；重新设置期限会建立新的写前核对，旧记录保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Button("重新设置期限") { scheduleAction = action }
+                            .disabled(model.savingAction || model.remindersBusy || action.validity != "current" || action.state != "open")
                     }
                 } else {
                     Text(schedule.eligibleForPlanning ? "本地已选日期，还没有写入提醒事项。" : "已暂停写入，记录保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
@@ -1013,6 +1078,16 @@ struct WorkspaceTaskView: View {
             error = model.status
             noteMainActionFailure("打开日期与提醒") { openReminderSettings() }
         } }
+    }
+    private func sendReminderNow() {
+        guard canWriteReminder, !model.remindersBusy else { return }
+        mainActionFailure = nil
+        Task {
+            await model.sendReminder(action)
+            if model.reminderLinks.first(where: { $0.actionID == action.id }) == nil {
+                noteMainActionFailure("写入提醒事项") { sendReminderNow() }
+            }
+        }
     }
     private func stopFollowing() {
         mainActionFailure = nil
