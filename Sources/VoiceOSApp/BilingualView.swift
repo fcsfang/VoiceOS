@@ -34,7 +34,7 @@ struct BilingualView: View {
             HStack {
                 Text("译文对照").vosFont(WorkspaceText.sectionTitle)
                 Spacer()
-                Button("关闭", action: dismiss)
+                Button("关闭", action: dismiss).buttonStyle(.workspaceSecondary)
             }
             Label("AI 译文，仅供参考", systemImage: "exclamationmark.triangle")
                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
@@ -51,18 +51,18 @@ struct BilingualView: View {
         if !model.modelConfigured {
             VStack(alignment: .leading, spacing: 12) {
                 Text("先在设置中选择文本模型").foregroundStyle(.secondary)
-                Button("配置文本模型…") { model.chooseTextModel() }
+                Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceSecondary)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else if currentSource.localOnly {
             VStack(alignment: .leading, spacing: 12) {
                 Text("这份材料仅本机保存；允许云端处理后才能生成译文。").foregroundStyle(.secondary)
-                Button("允许云端处理", action: allowCloud).buttonStyle(.borderedProminent).disabled(model.changingPolicy)
+                Button("允许云端处理", action: allowCloud).buttonStyle(.workspacePrimary).disabled(model.changingPolicy)
                 Text("只改变这份文字的处理许可，原始录音仍仅本机。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else if currentSource.needsTranscriptionReview {
             VStack(alignment: .leading, spacing: 12) {
                 Text("请先完成全文转写校正，再生成译文。").foregroundStyle(.secondary)
-                Button("去更正转写", action: correctTranscript)
+                Button("去更正转写", action: correctTranscript).buttonStyle(.workspaceSecondary)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
             let plan = excerpt.isEmpty ? Bilingual.paragraphs(from: currentSource.transcript ?? "", spans: currentSource.spans) : excerpt
@@ -72,7 +72,7 @@ struct BilingualView: View {
                     Text("按需把原文分段翻译成中文；原文、资料库与其他内容不会改变。")
                         .foregroundStyle(.secondary)
                     Text(sendPreview(plan)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                    Button("生成译文", action: generate).buttonStyle(.borderedProminent)
+                    Button("生成译文", action: generate).buttonStyle(.workspacePrimary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             case .loading:
                 VStack(spacing: 12) {
@@ -82,13 +82,13 @@ struct BilingualView: View {
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 12) {
                     WorkspaceNoticeText(message: "生成译文失败：" + message, severity: .danger)
-                    Button("重试", action: generate)
+                    Button("重试", action: generate).buttonStyle(.workspaceSecondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             case .ready:
                 VStack(alignment: .leading, spacing: 12) {
                     if excerpt.truncated {
                         Text(sendPreview(excerpt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                        Button("继续下一批", action: continueBatch).buttonStyle(.borderedProminent)
+                        Button("继续下一批", action: continueBatch).buttonStyle(.workspacePrimary)
                     }
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 22) {
@@ -104,6 +104,7 @@ struct BilingualView: View {
                                         Text("这段没有返回译文。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                                         HStack(spacing: 10) {
                                             Button(retrying.contains(paragraph.id) ? "正在重试…" : "重试这一段") { retry(paragraph) }
+                                                .buttonStyle(.workspaceQuietCompact)
                                                 .disabled(retrying.contains(paragraph.id))
                                             if let failure = retryFailures[paragraph.id] {
                                                 Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)

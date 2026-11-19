@@ -31,7 +31,7 @@ struct ReflectionChangeView: View {
             HStack(alignment: .top) {
                 WorkspaceHero(eyebrow: "THOUGHTS IN CONTEXT", title: "认识对照", subtitle: "从前后原话出发，看看什么延续了，什么仍需核对。")
                 Spacer()
-                Button("返回地图", action: closeView).keyboardShortcut(.cancelAction)
+                Button("返回地图", action: closeView).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
             }.padding(24)
             Divider()
             if let selected {
@@ -77,7 +77,7 @@ struct ReflectionChangeView: View {
             HStack {
                 Text(relation(update.relation)).vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.accent)
                 Spacer()
-                Text("AI 关系候选 · 待你核对").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                WorkspaceBadge(text: "AI 关系候选 · 待你核对", tone: .warning)
             }
             Text(update.understanding).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
             HStack(alignment: .top, spacing: 14) {
@@ -98,32 +98,32 @@ struct ReflectionChangeView: View {
                 Button {
                     Task { if await reflect(focus, prompt(connection)) { closeView() } else { error = model.status } }
                 } label: { Label("带着原话继续讨论", systemImage: "bubble.left.and.bubble.right") }
-                    .buttonStyle(.borderedProminent).tint(palette.accent)
+                    .buttonStyle(.workspacePrimary)
                     .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
                 Text("先打开可编辑的问题，确认发送后再交给 AI。关联仍作为候选保留。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
     private func evidenceCard(_ title: String, quote: String, sourceIDs: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.accent)
-            Text(quote).vosFont(WorkspaceText.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-            Divider()
-            if sourceIDs.isEmpty { Text("请返回地图核对观点来源").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
-            ForEach(sourceIDs, id: \.self) { id in
-                if let source = model.records.first(where: { $0.id == id }) {
-                    Text(source.displayTitle).vosFont(WorkspaceText.meta.size, weight: .medium).textSelection(.enabled)
-                    Text(source.origin == "user" ? "个人表达" : source.origin == "ai" ? "AI 材料" : "外部资料 · 不代表我的观点").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                    if let date = source.expressedDate { Text(date.formatted(date: .abbreviated, time: .shortened)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+        WorkspaceCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.accent)
+                Text(quote).vosFont(WorkspaceText.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                Divider()
+                if sourceIDs.isEmpty { Text("请返回地图核对观点来源").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                ForEach(sourceIDs, id: \.self) { id in
+                    if let source = model.records.first(where: { $0.id == id }) {
+                        Text(source.displayTitle).vosFont(WorkspaceText.meta.size, weight: .medium).textSelection(.enabled)
+                        Text(source.origin == "user" ? "个人表达" : source.origin == "ai" ? "AI 材料" : "外部资料 · 不代表我的观点").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        if let date = source.expressedDate { Text(date.formatted(date: .abbreviated, time: .shortened)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                    }
+                    Button("查看来源全文") {
+                        if let openSource { openSource(id) }
+                        else { model.requestWorkspaceSource(id); dismiss(); dismissAtlas() }
+                    }.buttonStyle(.workspaceQuietCompact)
                 }
-                Button("查看来源全文") {
-                    if let openSource { openSource(id) }
-                    else { model.requestWorkspaceSource(id); dismiss(); dismissAtlas() }
-                }.vosFont(WorkspaceText.meta)
-            }
-        }.padding(16).frame(maxWidth: .infinity, alignment: .topLeading)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).stroke(palette.accent.opacity(0.14), lineWidth: 1) }
+            }.frame(maxWidth: .infinity, alignment: .topLeading)
+        }
     }
     private func closeView() {
         if let close { close() } else { dismiss() }
