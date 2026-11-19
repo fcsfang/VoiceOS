@@ -70,11 +70,11 @@ struct QuestionAnswerSection: View {
             Text("这个问题还没有 VoiceOS 的回答。").vosFont(WorkspaceText.body)
             HStack(spacing: 12) {
                 Button("让 VoiceOS 回答", systemImage: "sparkles") { ask(fresh: true) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.workspacePrimary)
                     .disabled(model.assistantBusy || !modelReady)
                 if !modelReady {
                     Text("开始回答需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                    Button("配置文本模型…") { model.chooseTextModel() }.vosFont(WorkspaceText.meta)
+                    Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuiet)
                 }
             }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
@@ -108,7 +108,9 @@ struct QuestionAnswerSection: View {
                 }
                 HStack(spacing: 12) {
                     Button("阅读结果", systemImage: "doc.text.magnifyingglass") { openDelivery(answer.id) }
+                        .buttonStyle(.workspaceSecondary)
                     Button("重新回答", systemImage: "arrow.clockwise") { ask(fresh: true) }
+                        .buttonStyle(.workspaceQuiet)
                         .disabled(model.assistantBusy || !modelReady)
                 }
             }
@@ -129,13 +131,13 @@ struct QuestionAnswerSection: View {
                         .disabled(!modelReady || followupSending)
                         .accessibilityLabel("追问内容")
                     Button("追问") { sendFollowup() }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.workspaceSecondary)
                         .disabled(!modelReady || followupSending || followup.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 if !modelReady {
                     HStack(spacing: 8) {
                         Text("追问需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                        Button("配置文本模型…") { model.chooseTextModel() }.vosFont(WorkspaceText.meta)
+                        Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuiet)
                     }
                 }
                 if followups.first?.state == "queued" {
@@ -218,11 +220,11 @@ struct QuestionAnswerSection: View {
             }
             HStack(spacing: 12) {
                 Button("重试", systemImage: "arrow.clockwise") { retry() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.workspaceSecondary)
                     .disabled(model.assistantBusy || !modelReady || answer?.validity != "current")
                 if !modelReady {
                     Text("重试需要先配置文本模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                    Button("配置文本模型…") { model.chooseTextModel() }.vosFont(WorkspaceText.meta)
+                    Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuiet)
                 }
                 if answer?.validity != "current" {
                     Text("依据已变化，旧回答不能重试；可以在操作区重新回答。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)

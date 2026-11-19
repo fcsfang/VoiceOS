@@ -63,7 +63,7 @@ struct TextCaptureView: View {
                     Button("稍后继续", action: dismiss).disabled(draft.saving)
                     Spacer()
                     if draft.saving { ProgressView().controlSize(.small) }
-                    Button("保存") { save() }.buttonStyle(.borderedProminent).tint(palette.accent)
+                    Button("保存") { save() }.buttonStyle(.workspacePrimary)
                         .disabled(draft.saving || !valid)
                 }
             }.padding(20).background(palette.canvas)
@@ -115,12 +115,12 @@ struct TextCaptureView: View {
         VStack(alignment: .leading, spacing: 17) {
             HStack(alignment: .top, spacing: 12) {
                 WorkspaceHero(eyebrow: "", title: "记录想法")
-                Button("导入文字文件") { chooseFile() }.disabled(draft.saving)
-                Button("从链接导入正文") { linkText = ""; showingLinkPrompt = true }.disabled(draft.saving)
+                Button("导入文字文件") { chooseFile() }.buttonStyle(.workspaceSecondary).disabled(draft.saving)
+                Button("从链接导入正文") { linkText = ""; showingLinkPrompt = true }.buttonStyle(.workspaceSecondary).disabled(draft.saving)
                 Menu("模板") { templateMenu }.disabled(draft.saving)
             }
             Text("⌘⇧R 开始或停止口述").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            TextField(draft.ownership == .personal ? "表达标题 · 可留空，默认取正文首行" : "资料标题 · 可留空，默认取正文首行", text: $draft.title).textFieldStyle(.roundedBorder).focused($focus, equals: .title).disabled(draft.saving).accessibilityLabel("标题")
+            TextField(draft.ownership == .personal ? "表达标题 · 可留空，默认取正文首行" : "资料标题 · 可留空，默认取正文首行", text: $draft.title).workspaceFieldSurface().focused($focus, equals: .title).disabled(draft.saving).accessibilityLabel("标题")
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("完整原文").vosFont(WorkspaceText.rowTitle)
@@ -226,64 +226,68 @@ struct TextCaptureView: View {
     }
     private var templateNameSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("保存为模板").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
+            WorkspaceSectionHeading("保存为模板")
             Text("把当前完整原文保存为模板，之后可一键填入草稿。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-            TextField("模板名称", text: $templateName).textFieldStyle(.roundedBorder)
-                .onChange(of: templateName) { _, value in
-                    if value.unicodeScalars.count > 40 { templateName = String(value.unicodeScalars.prefix(40)) }
+            WorkspaceCard(padding: 16) {
+                VStack(alignment: .leading, spacing: 10) {
+                    TextField("模板名称", text: $templateName).workspaceFieldSurface()
+                        .onChange(of: templateName) { _, value in
+                            if value.unicodeScalars.count > 40 { templateName = String(value.unicodeScalars.prefix(40)) }
+                        }
+                    if !templateError.isEmpty { WorkspaceNoticeText(message: templateError, severity: .danger) }
                 }
-            if !templateError.isEmpty { WorkspaceNoticeText(message: templateError, severity: .danger) }
+            }
             HStack {
                 Spacer()
-                Button("取消") { showingTemplateName = false }
+                Button("取消") { showingTemplateName = false }.buttonStyle(.workspaceSecondary)
                 Button(templateSaving ? "正在保存…" : "保存") { Task { await saveTemplate() } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.workspacePrimary)
                     .disabled(templateSaving || templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityLabel("保存为模板")
             }
-        }.padding(24).frame(width: 420)
+        }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
     }
     private var manageTemplatesSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack {
-                Text("管理模板").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-                Spacer()
-                Button("完成") { showingManageTemplates = false }
+            WorkspaceSectionHeading(title: "管理模板") {
+                Button("完成") { showingManageTemplates = false }.buttonStyle(.workspaceQuiet)
             }
             if !templateError.isEmpty { WorkspaceNoticeText(message: templateError, severity: .danger) }
             if templates.isEmpty {
                 Text("还没有模板。写好正文后，从「模板」菜单保存。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             } else {
                 ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(templates) { template in
-                            HStack(alignment: .top, spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(template.name).vosFont(WorkspaceText.rowTitle)
-                                    Text(template.body).vosFont(WorkspaceText.caption).foregroundStyle(.secondary).lineLimit(2)
-                                }
-                                Spacer(minLength: 8)
-                                Button("删除", role: .destructive) { pendingTemplateDelete = template }
-                                    .accessibilityLabel("删除模板：" + template.name)
-                            }.padding(.vertical, 10)
-                            if template.id != templates.last?.id { Divider() }
+                    WorkspaceCard(padding: 12) {
+                        VStack(spacing: 0) {
+                            ForEach(templates) { template in
+                                HStack(alignment: .top, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(template.name).vosFont(WorkspaceText.rowTitle)
+                                        Text(template.body).vosFont(WorkspaceText.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    }
+                                    Spacer(minLength: 8)
+                                    Button("删除", role: .destructive) { pendingTemplateDelete = template }
+                                        .accessibilityLabel("删除模板：" + template.name)
+                                }.padding(.vertical, 10)
+                                if template.id != templates.last?.id { Divider() }
+                            }
                         }
                     }
                 }.frame(maxHeight: 360)
             }
-        }.padding(24).frame(width: 520)
+        }.padding(24).frame(width: WorkspaceMetrics.modalMedium)
     }
     private var linkImportSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("从链接导入正文").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
+            WorkspaceSectionHeading("从链接导入正文")
             Text("只支持 http 或 https 链接。抓取成功后填入当前草稿；当前草稿不为空时会先确认替换。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-            TextField("https://…", text: $linkText).textFieldStyle(.roundedBorder).accessibilityLabel("网页链接")
+            TextField("https://…", text: $linkText).workspaceFieldSurface().accessibilityLabel("网页链接")
             HStack {
-                Button("取消") { showingLinkPrompt = false }
+                Button("取消") { showingLinkPrompt = false }.buttonStyle(.workspaceSecondary)
                 Spacer()
-                Button("抓取正文") { importLink() }.buttonStyle(.borderedProminent)
+                Button("抓取正文") { importLink() }.buttonStyle(.workspacePrimary)
             }
-        }.padding(24).frame(width: 480)
+        }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
     }
     private func importLink() {
         let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -372,6 +376,21 @@ struct TextCaptureView: View {
             draft.saving = false
         }
     }
+}
+
+private struct WorkspaceFieldSurface: ViewModifier {
+    @Environment(\.workspacePalette) private var palette
+    func body(content: Content) -> some View {
+        content.textFieldStyle(.plain)
+            .padding(.horizontal, 10)
+            .frame(minHeight: WorkspaceMetrics.fieldHeight)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border, lineWidth: 1) }
+    }
+}
+
+private extension View {
+    func workspaceFieldSurface() -> some View { modifier(WorkspaceFieldSurface()) }
 }
 
 private extension ControlCenter {

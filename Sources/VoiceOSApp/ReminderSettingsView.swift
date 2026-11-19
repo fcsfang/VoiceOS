@@ -47,14 +47,16 @@ struct ReminderSettingsView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("日期、提醒与优先级").vosFont(WorkspaceText.sectionTitle)
+            WorkspaceSectionHeading("日期、提醒与优先级")
             Text(action.title).vosFont(WorkspaceText.rowTitle)
-            Text("读取的是 Apple 提醒事项当前设置。保存时会再次核对，其他设备刚改过的内容不会被旧设置覆盖。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            Text("读取的是 Apple 提醒事项当前设置。保存时会再次核对，其他设备刚改过的内容不会被旧设置覆盖。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            WorkspaceSectionHeading("稍后提醒")
             HStack(spacing: 8) {
                 ForEach(SnoozePreset.allCases, id: \.self) { preset in
-                    Button(preset.title) { apply(preset) }
+                    Button(preset.title) { apply(preset) }.buttonStyle(.workspaceSecondaryCompact)
                 }
             }
+            Divider()
             Toggle("安排日期", isOn: $hasDate)
             if hasDate {
                 DatePicker("日期", selection: $due, displayedComponents: [.date])
@@ -74,10 +76,12 @@ struct ReminderSettingsView: View {
                     Text("通知时间独立于安排日期。其他已有通知会保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
             }
+            Divider()
             Picker("优先级", selection: $priority) {
                 Text("无").tag(0); Text("高").tag(1); Text("中").tag(5); Text("低").tag(9)
                 if ![0, 1, 5, 9].contains(priority) { Text("当前优先级（\(priority)）").tag(priority) }
             }
+            Divider()
             Toggle("地点提醒", isOn: $hasLocation)
             if hasLocation {
                 TextField("地点名称", text: $locationName).textFieldStyle(.roundedBorder)
@@ -88,7 +92,7 @@ struct ReminderSettingsView: View {
             }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {
-                Button("取消", action: dismiss).disabled(model.reminderFieldEditing)
+                Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).disabled(model.reminderFieldEditing)
                 Spacer()
                 Button("保存到提醒事项") {
                     Task {
@@ -99,9 +103,9 @@ struct ReminderSettingsView: View {
                             else { error = model.status.isEmpty ? "提醒设置未保存" : model.status }
                         } catch { self.error = error.localizedDescription }
                     }
-                }.buttonStyle(.borderedProminent).disabled(model.remindersBusy || model.reminderFieldEditing)
+                }.buttonStyle(.workspacePrimary).disabled(model.remindersBusy || model.reminderFieldEditing)
             }
-        }.padding(24).frame(width: 590).environment(\.timeZone, zone)
+        }.padding(24).frame(width: WorkspaceMetrics.modalSmall).environment(\.timeZone, zone)
         .onAppear { load() }.interactiveDismissDisabled(model.reminderFieldEditing)
         .onChange(of: hasTime) { _, on in
             if !on { hasAlert = false; alert = Date().addingTimeInterval(3600) }

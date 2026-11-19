@@ -15,7 +15,11 @@ struct FeynmanPractice: View {
     private var claimReady: Bool { !claim.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            WorkspaceHeading(eyebrow: "工具 · 费曼复述", title: "复述一遍")
+            VStack(alignment: .leading, spacing: 6) {
+                Text("工具 · 费曼复述").vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced)
+                    .tracking(1.4).textCase(.uppercase).foregroundStyle(palette.accent)
+                Text("复述一遍").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
+            }
             Text("不看原话，用自己的话讲一遍。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if let feedback {
                 result(feedback)
@@ -25,7 +29,7 @@ struct FeynmanPractice: View {
                     Text("\(trimmed.count) 字").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button("取消", action: dismiss).keyboardShortcut(.cancelAction)
-                    Button("对照原话") { submit() }.buttonStyle(.borderedProminent).disabled(!claimReady || trimmed.isEmpty)
+                    Button("对照原话") { submit() }.buttonStyle(.workspacePrimary).disabled(!claimReady || trimmed.isEmpty)
                 }.vosFont(WorkspaceText.meta)
             }
             Text("只对照词面，不判断语义，也不保存复述。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
@@ -41,27 +45,25 @@ struct FeynmanPractice: View {
     }
     @ViewBuilder private func result(_ report: FeynmanFeedback) -> some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                if !report.covered.isEmpty {
-                    Text("覆盖到的要点").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
-                    Text(report.covered.joined(separator: "、")).vosFont(WorkspaceText.body).textSelection(.enabled)
-                }
-                Text("还没讲到的").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
-                if report.missed.isEmpty {
-                    Text("原话里的词都讲到了。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-                } else {
-                    Text(report.missed.joined(separator: "、")).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
-                }
-                if let vague = report.vague { WorkspaceNoticeText(message: vague, severity: .warning) }
-                DisclosureGroup("展开原话核对", isExpanded: $showsOriginal) {
-                    Text(claim).vosFont(WorkspaceText.body).lineSpacing(4).textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
+            WorkspaceCard(padding: 14) {
+                VStack(alignment: .leading, spacing: 12) {
+                    if !report.covered.isEmpty {
+                        Text("覆盖到的要点").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
+                        Text(report.covered.joined(separator: "、")).vosFont(WorkspaceText.body).textSelection(.enabled)
+                    }
+                    Text("还没讲到的").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
+                    if report.missed.isEmpty {
+                        Text("原话里的词都讲到了。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                    } else {
+                        Text(report.missed.joined(separator: "、")).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
+                    }
+                    if let vague = report.vague { WorkspaceNoticeText(message: vague, severity: .warning) }
+                    DisclosureGroup("展开原话核对", isExpanded: $showsOriginal) {
+                        Text(claim).vosFont(WorkspaceText.body).lineSpacing(4).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
+                    }
                 }
             }
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border, lineWidth: 1) }
         }
         HStack {
             Button("再试一次") { response = ""; feedback = nil; showsOriginal = false }
