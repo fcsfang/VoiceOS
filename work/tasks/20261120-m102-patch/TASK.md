@@ -33,3 +33,30 @@
 ## 约束
 
 行为修复类，不改视觉与文案结构；构建/测试真实退出码；新增 P2 的汇总纯逻辑测试；不写实时库、不重启应用、合并走 worktree 分支。
+## 施工记录
+
+2026-11-20，分支 work/m102-patch，基线 4598817。
+
+### 实际改动
+
+- P1：WorkspaceMonitorView.swift:76-82 新增两个 onChange。model.monitorReports 变化时重算 earlierOpenSummary 并重标最新报告事项读取失败；model.monitorItemsByReport 变化时重标失败标记。手动检查路径未改。
+- P2 汇总：MessageMonitor.swift:202 新增 unreachableCount；206 的 init 增加默认参数，旧调用兼容；219-222 把未加载报告的 open 项计入 unreachable；earlierCount 只统计已加载且非今天的项，最早报告逻辑不变。
+- P2 窗口：MonitorCenter.swift:151 新增 monitorReportLimit 默认 30，152 上限 960；155-159 的 loadMoreMonitorReports 翻倍后重载；185 的 performMonitorReload 使用该窗口。
+- P2 界面：WorkspaceMonitorView.swift:191 历史副标题按已加载数量表述；215-220 历史区到达窗口上限时显示「载入更早报告」；439-463 汇总提示增加「另有 N 项在更早报告里」与载入按钮；431-436 载入后重算汇总。
+- P4 授权：Onboarding.swift:167 requestMicrophone 改调 model.requestMicrophoneAccess 再重采样；111-120 就绪清单监听 NSApplication.didBecomeActiveNotification，返回前台重采样麦克风与通知授权。
+- P4 视觉：Onboarding.swift:32 页标题改用 pageTitle；51 跳过用 workspaceQuiet，55 上一步用 workspaceSecondary，60 主 CTA 用 workspacePrimary；226 清单动作按钮用 workspaceQuietCompact；189-190 步骤圆点用 palette.accent 与 palette.secondaryText；215 勾选圈用 palette.success；34-35 步骤图标改用 vosFont。文案与流程不变。
+- 测试：Tests/VoiceOSCoreTests/MonitorOpenItemsSummaryChecks.swift:46-72 新增两个 unreachable 用例，原「旧报告仍计入更早」用例按新契约改写；四个用例全部通过。
+
+### 验证
+
+- swift build -j 2：build_exit=0，Build complete，117.49s。
+- swift test -j 2：test_exit=0，Executed 662 tests, with 0 failures。
+- MonitorOpenItemsSummaryChecks 4 个用例通过，日志 /tmp/m102-patch-test.log。
+- 构建与测试在 /tmp/voiceos-swift-build.lock 互斥锁内执行，锁已释放。
+
+### 取舍与风险
+
+- monitorReportLimit 放在 ControlCenter 扩展里只能是 static，因为扩展不能加实例存储，而 ControlCenter 的存储属性在 VoiceOSApp.swift，本轮不允许修改。该值全应用共享，读写都在 @MainActor 上；以后要按实例隔离应移入类体。
+- earlierCount 语义变化。未加载报告的 open 项从 earlierCount 移入 unreachableCount，界面在窗口小于 960 且已加载数达到窗口时才给载入入口。
+- onChange 让手动检查路径多一次汇总重算，属幂等重复读取；为不改变手动路径未做去重。
+- P4 只做了编译与既有测试验证，未启动真实应用验证系统设置往返，约束禁止重启应用。P3 未触碰 WorkspaceView.swift。
