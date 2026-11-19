@@ -9,25 +9,34 @@ struct KnowledgeReviewSection: View {
     let sourceIDs: [String]
     var quoteFilter: String? = nil
     var matchingQuotesBySource: [String: [String]]? = nil
+    var carded: Bool = true
     @State private var showsSettled = false
     private var sources: [SourceRecord] { model.records.filter { sourceIDs.contains($0.id) && $0.origin == "user" && $0.speaker == "user" } }
 
     var body: some View {
         if !sources.isEmpty {
-        WorkspaceCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 12) {
-                WorkspaceSectionHeading(title: "知识核查") {
-                    if model.knowledgeReviewBusy { ProgressView().controlSize(.small) }
-                }
-                Text("对照原话检查事实、推断与适用条件。以下是有依据的 AI 核查建议，是否采纳由你决定；可标为已读、认可或驳回，已认可与已驳回的建议默认折叠。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                ForEach(sources) { source in
-                    sourceReview(source)
-                }
-                if !model.knowledgeReviewStatus.isEmpty {
-                    Text(model.knowledgeReviewStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
-                }
+            if carded {
+                WorkspaceCard(padding: 14) { content }
+            } else {
+                content
+                    .padding(12)
+                    .background(palette.accent.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
             }
         }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WorkspaceSectionHeading(title: "知识核查") {
+                if model.knowledgeReviewBusy { ProgressView().controlSize(.small) }
+            }
+            Text("对照原话检查事实、推断与适用条件。以下是有依据的 AI 核查建议，是否采纳由你决定；可标为已读、认可或驳回，已认可与已驳回的建议默认折叠。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            ForEach(sources) { source in
+                sourceReview(source)
+            }
+            if !model.knowledgeReviewStatus.isEmpty {
+                Text(model.knowledgeReviewStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+            }
         }
     }
 
