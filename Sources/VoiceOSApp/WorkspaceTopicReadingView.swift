@@ -3,6 +3,7 @@ import VoiceOSCore
 
 struct WorkspaceTopicReadingView: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var scale
     @ObservedObject var model: ControlCenter
     let topic: ReflectionQuestion
     let mode: String
@@ -251,7 +252,7 @@ struct WorkspaceTopicReadingView: View {
         if displayedSections.isEmpty && !filterTerm.isEmpty {
             Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
         } else {
-            LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing:16)],alignment:.leading,spacing:16) {
+            LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:16)],alignment:.leading,spacing:16) {
                 ForEach(displayedSections) { section in readingCard(section) }
             }
         }
@@ -261,7 +262,7 @@ struct WorkspaceTopicReadingView: View {
         if displayedSections.isEmpty && !filterTerm.isEmpty {
             Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
         } else {
-            LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing:16)],alignment:.leading,spacing:16) {
+            LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:16)],alignment:.leading,spacing:16) {
                 ForEach(Array(displayedSections.prefix(3))) { section in readingCard(section) }
             }
             Button("查看全部 \(sections.count) 张卡片",systemImage:"text.book.closed") { showUnderstanding() }
@@ -286,7 +287,7 @@ struct WorkspaceTopicReadingView: View {
                         ForEach(previewClaims) { claim in
                             VStack(alignment:.leading,spacing:4) {
                                 Text(ownership(claim)).vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(.secondary)
-                                Text(claim.statement).vosFont(WorkspaceText.body).lineLimit(2)
+                                Text(claim.statement).vosFont(WorkspaceText.body).lineLimit(scale >= 1.3 ? 3 : 2)
                             }
                         }
                     }
@@ -542,6 +543,7 @@ struct TopicStaleBanner: View {
 
 struct WorkspaceTopicTile: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var scale
     @State private var hovered = false
     let topic: ReflectionQuestion
     let sourceCount: Int
@@ -563,7 +565,7 @@ struct WorkspaceTopicTile: View {
                     if let summary=topic.organization?.summary, !summary.isEmpty {
                         Text(summary).vosFont(WorkspaceText.body).lineSpacing(4)
                             .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
-                            .lineLimit(2)
+                            .lineLimit(scale >= 1.3 ? 3 : 2)
                     }
                     Spacer(minLength:0)
                     HStack(spacing:15) {
