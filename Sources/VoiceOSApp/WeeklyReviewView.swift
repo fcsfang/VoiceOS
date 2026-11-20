@@ -99,14 +99,11 @@ struct WeeklyReviewView: View {
             stalledGoals.isEmpty && somedayRows.isEmpty &&
             nextWeekEntries.isEmpty
     }
-    private var undoHint: some View {
-        Text("完成或不再跟进后可立即撤销，任务页也保留撤销。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-    }
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    WorkspacePageHeading(eyebrow: "行动 · 每周回顾", title: "这一周，行动走到了哪里", subtitle: "今天收尾可直接完成或不再跟进；点开任意一条查看任务、原话与结果。") {
+                VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+                    WorkspacePageHeading(eyebrow: "行动 · 每周回顾", title: "这一周，行动走到了哪里") {
                         HStack(spacing: 10) {
                             Button("认知地图", systemImage: "point.3.connected.trianglepath.dotted") { showingReflectionMap = true }
                                 .buttonStyle(.workspaceSecondary)
@@ -126,7 +123,6 @@ struct WeeklyReviewView: View {
                             Button("重试") { Task { await load() } }.controlSize(.small)
                         }
                     }
-                    undoHint
                     dailyCloseSection
                     if loadState == .loaded && isEmpty {
                         emptyReviewState
@@ -279,7 +275,7 @@ struct WeeklyReviewView: View {
         let review = dailyReview
         let todayRows = Array(review.today.prefix(5))
         let overdueRows = Array(review.overdue.prefix(5))
-        return WorkspaceSection(title: "今天收尾", subtitle: "逐条完成或不再跟进；改天仍到任务页处理。", icon: "checkmark.circle", count: review.remainingCount) {
+        return WorkspaceSection(title: "今天收尾", icon: "checkmark.circle", count: review.remainingCount) {
             if review.isClear {
                 Text("今天没有未收尾的行动").vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 10)
             }
@@ -293,7 +289,7 @@ struct WeeklyReviewView: View {
             if !overdueRows.isEmpty {
                 if !todayRows.isEmpty { Divider() }
                 Text("逾期").vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.warning).accessibilityAddTraits(.isHeader)
-                    .padding(.top, 12).padding(.bottom, 2)
+                    .padding(.top, WorkspaceMetrics.groupGap).padding(.bottom, 2)
                 ForEach(Array(overdueRows.enumerated()), id: \.element.id) { index, entry in
                     if index > 0 { Divider() }
                     dailyRow(entry, overdue: true)
@@ -453,7 +449,7 @@ struct WeeklyReviewView: View {
     private var nextWeekSection: some View {
         let candidates = nextWeekCandidates
         let rows = Array(candidates.prefix(5))
-        return WorkspaceSection(title: "下周先做", subtitle: "从即将与随时里挑最多 3 条，确认后加入专注。", icon: "calendar.badge.plus", count: nextWeekEntries.count) {
+        return WorkspaceSection(title: "下周先做", subtitle: "最多选 3 条加入专注。", icon: "calendar.badge.plus", count: nextWeekEntries.count) {
             if focusSlots == 0 {
                 HStack(spacing: 8) {
                     Text("已有 3 条专注，先到行动页移出。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
@@ -563,7 +559,7 @@ struct WeeklyReviewView: View {
         return WorkspaceSection(title: "待确认", subtitle: "最近 14 天从原话抽取，还没有确认是承诺、问题与目标，还是不是。", icon: "questionmark.circle", count: unclarifiedTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
-                reviewRow(title: action.title, subtitle: "打开任务页完成一次三选一澄清。", trailing: "待确认", icon: "questionmark.circle") { openTask(action.id) }
+                reviewRow(title: action.title, trailing: "待确认", icon: "questionmark.circle") { openTask(action.id) }
             }
             if unclarifiedTasks.count > rows.count { linkButton("到待核对查看", .review).padding(.top, 10) }
         }
@@ -614,13 +610,12 @@ struct WeeklyReviewView: View {
     }
 
     private var weekCompletedSection: some View {
-        WorkspaceSection(title: "本周完成", subtitle: "最近 7 天登记完成的行动，按完成时间倒序；没有记录结果的仍留在列表里。", icon: "checkmark.circle", count: weekCompleted.count) {
+        WorkspaceSection(title: "本周完成", subtitle: "最近 7 天登记完成的行动，按完成时间倒序。", icon: "checkmark.circle", count: weekCompleted.count) {
             ForEach(Array(weekCompleted.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
                 weekCompletedRow(action).id("review.pending." + action.id)
             }
             HStack(spacing: 8) {
-                Text("全部完成事项按完成时间列在「已完成」。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 Spacer(minLength: 0)
                 linkButton("去「已完成」查看", .completed)
             }.padding(.top, 10)
@@ -713,7 +708,7 @@ struct WeeklyReviewView: View {
 
     private var stalledGoalsSection: some View {
         let rows = Array(stalledGoals.prefix(5))
-        return WorkspaceSection(title: "没有下一步的目标", subtitle: "目标还没有可以推进的下一步；逐个澄清，或直接加一个下一步。", icon: "exclamationmark.circle", count: stalledGoals.count,
+        return WorkspaceSection(title: "没有下一步的目标", subtitle: "目标还没有可以推进的下一步。", icon: "exclamationmark.circle", count: stalledGoals.count,
                                 actionTitle: "逐个澄清", action: { showingClarifyQueue = true }) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
                 if index > 0 { Divider() }
@@ -760,7 +755,7 @@ struct WeeklyReviewView: View {
 
     private var somedaySection: some View {
         let rows = Array(somedayRows.prefix(5))
-        return WorkspaceSection(title: "留到以后的问题与目标", subtitle: "超过 60 天没有回看；回看后恢复为目标或放手。", icon: "tray", count: somedayRows.count) {
+        return WorkspaceSection(title: "留到以后的问题与目标", subtitle: "超过 60 天没有回看。", icon: "tray", count: somedayRows.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
                 if index > 0 { Divider() }
                 somedayRow(goal)
@@ -818,7 +813,7 @@ struct WeeklyReviewView: View {
             somedayRows = await model.somedayReviewCandidates()
         }
     }
-    private func reviewRow(title: String, subtitle: String, detail: String = "", trailing: String = "",
+    private func reviewRow(title: String, subtitle: String = "", detail: String = "", trailing: String = "",
                            icon: String = "circle", accessibilityLabel: String? = nil,
                            open: @escaping () -> Void) -> some View {
         Button(action: open) {

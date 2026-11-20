@@ -54,7 +54,7 @@ struct TextCaptureView: View {
                 if !model.initialized { ProgressView("正在恢复资料库与草稿…").controlSize(.small) }
                 if !draft.error.isEmpty { WorkspaceNoticeText(message: draft.error, severity: .danger) }
                 if !model.textCaptureDraftIssue.isEmpty { WorkspaceNoticeText(message: model.textCaptureDraftIssue) }
-                Text("草稿自动保存在本机，切页或重开应用可继续；保存成功后清空。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("草稿自动保存在本机，保存成功后清空。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 if let validationIssue { Text(validationIssue).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                 if importing { ProgressView("正在读取文字、PDF 或识别图片…").controlSize(.small) }
                 if linkImporting { ProgressView("正在抓取网页正文…").controlSize(.small) }
@@ -112,38 +112,40 @@ struct TextCaptureView: View {
             .task { templates = await model.captureTemplates() }
     }
     private var content: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             HStack(alignment: .top, spacing: 12) {
                 WorkspaceHero(eyebrow: "", title: "记录想法")
                 Button("导入文字文件") { chooseFile() }.buttonStyle(.workspaceSecondary).disabled(draft.saving)
                 Button("从链接导入正文") { linkText = ""; showingLinkPrompt = true }.buttonStyle(.workspaceSecondary).disabled(draft.saving)
                 Menu("模板") { templateMenu }.disabled(draft.saving)
             }
-            Text("⌘⇧R 开始或停止口述").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            TextField(draft.ownership == .personal ? "表达标题 · 可留空，默认取正文首行" : "资料标题 · 可留空，默认取正文首行", text: $draft.title).workspaceFieldSurface().focused($focus, equals: .title).disabled(draft.saving).accessibilityLabel("标题")
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("完整原文").vosFont(WorkspaceText.rowTitle)
-                    Spacer()
-                    if let fileName = draft.fileName { Text(fileName).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(1) }
-                    Text("\(draft.text.unicodeScalars.count) 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
+                TextField(draft.ownership == .personal ? "表达标题 · 可留空，默认取正文首行" : "资料标题 · 可留空，默认取正文首行", text: $draft.title).workspaceFieldSurface().focused($focus, equals: .title).disabled(draft.saving).accessibilityLabel("标题")
+                VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
+                    HStack {
+                        Text("完整原文").vosFont(WorkspaceText.rowTitle)
+                        Spacer()
+                        if let fileName = draft.fileName { Text(fileName).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(1) }
+                        Text("\(draft.text.unicodeScalars.count) 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary)
+                    }
+                    TextEditor(text: $draft.text).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight:240)
+                        .workspaceEditorSurface().focused($focus, equals: .text).disabled(draft.saving)
+                        .accessibilityLabel("完整原文")
+                        .help("⌘⇧R 开始或停止口述")
+                }.frame(maxHeight: .infinity)
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Picker("原文归属", selection: $draft.ownership) {
+                            Text("我的表达").tag(TextCaptureOwnership.personal)
+                            Text("外部资料").tag(TextCaptureOwnership.external)
+                        }.pickerStyle(.segmented).disabled(draft.saving)
+                        Toggle("允许云端理解全文", isOn: $draft.allowCloud).disabled(draft.saving)
+                        Text("手打默认我的表达；导入文字或图片默认外部资料并仅本地。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                    }.padding(.top, 8)
+                } label: {
+                    Text("保存选项 · \(draft.ownership == .personal ? "我的表达" : "外部资料") · \(draft.allowCloud ? "允许云端" : "仅本地")")
+                        .vosFont(WorkspaceText.body)
                 }
-                TextEditor(text: $draft.text).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight:240)
-                    .workspaceEditorSurface().focused($focus, equals: .text).disabled(draft.saving)
-                    .accessibilityLabel("完整原文")
-            }.frame(maxHeight: .infinity)
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 12) {
-                    Picker("原文归属", selection: $draft.ownership) {
-                        Text("我的表达").tag(TextCaptureOwnership.personal)
-                        Text("外部资料").tag(TextCaptureOwnership.external)
-                    }.pickerStyle(.segmented).disabled(draft.saving)
-                    Toggle("允许云端理解全文", isOn: $draft.allowCloud).disabled(draft.saving)
-                    Text("手打默认我的表达；导入文字或图片默认外部资料并仅本地。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-                }.padding(.top, 8)
-            } label: {
-                Text("保存选项 · \(draft.ownership == .personal ? "我的表达" : "外部资料") · \(draft.allowCloud ? "允许云端" : "仅本地")")
-                    .vosFont(WorkspaceText.body)
             }
         }
     }
@@ -225,9 +227,9 @@ struct TextCaptureView: View {
             .disabled(templates.isEmpty)
     }
     private var templateNameSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             WorkspaceSectionHeading("保存为模板")
-            Text("把当前完整原文保存为模板，之后可一键填入草稿。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("之后可从「模板」菜单一键填入草稿。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             WorkspaceCard(padding: 16) {
                 VStack(alignment: .leading, spacing: 12) {
                     TextField("模板名称", text: $templateName).workspaceFieldSurface()
@@ -249,13 +251,13 @@ struct TextCaptureView: View {
             .workspaceModalSurface()
     }
     private var manageTemplatesSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             WorkspaceSectionHeading(title: "管理模板") {
                 Button("完成") { showingManageTemplates = false }.buttonStyle(.workspaceQuiet)
             }
             if !templateError.isEmpty { WorkspaceNoticeText(message: templateError, severity: .danger) }
             if templates.isEmpty {
-                Text("还没有模板。写好正文后，从「模板」菜单保存。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                Text("还没有模板；写好正文后从「模板」菜单保存。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             } else {
                 ScrollView {
                     WorkspaceCard(padding: 12) {
@@ -280,9 +282,9 @@ struct TextCaptureView: View {
             .workspaceModalSurface()
     }
     private var linkImportSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             WorkspaceSectionHeading("从链接导入正文")
-            Text("只支持 http 或 https 链接。抓取成功后填入当前草稿；当前草稿不为空时会先确认替换。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("支持 http 或 https 链接；草稿不为空时会先确认替换。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             TextField("https://…", text: $linkText).workspaceFieldSurface().accessibilityLabel("网页链接")
             HStack {
                 Button("取消") { showingLinkPrompt = false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
