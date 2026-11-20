@@ -647,3 +647,12 @@
 
 - 按用户要求全局安装 ui-ux-pro-max v2.15.0（~/.claude/skills/ui-ux-pro-max，含 design、design-system、ui-styling、brand、slides、banner-design 子技能）。数据偏 Web；VoiceOS 只取规则清单，不替换石墨/鼠尾草主题。
 - 首轮对照审计（SwiftUI 规则）：图标按钮无障碍标签、reduced-motion 门控、语义色、残留固定宽度四类，只读发现者运行中；确认的问题按小修直推 main。
+
+## 波 110：设计规则收敛（2026-11-20，已推送）
+
+- 110-A：RecentContentHome / ReflectionGraphView / AssistantExecutionView / MarkdownText —— 动画按 accessibilityReduceMotion 门控（withAnimation/`.animation` 传 nil），宽 18/250 与列表索引随 vosTextScale 缩放；图节点尺寸不动并补 `.help`。
+- 110-B：WeeklyReviewView（8 处）、WorkspaceDiscussionView（2 处）、TaskInitiationView、WorkspaceReadingViews 折叠头 —— 共 10 处动画门控，裸 withAnimation 统一补 .easeOut(0.2)；行为/文案/identifier 不变。
+- 110-C：WorkspaceView 三处悬停淡入门控；导入结果 checkmark/triangle、反馈错误、恢复完成与速记错误改用 palette.success/warning/danger（兜底两处独立 hosting 根按 UserDefaults 主题解析，键与 @AppStorage 一致）；反思主题/认识对照侧列宽 240/210 随字号缩放。
+- 全库未门控 `withAnimation` 归零；Sources/VoiceOSApp 无 Color.green/red/orange 字面量。
+- 集成（main 合并 A+B+C 后）：build_exit=0，test_exit=0，669 项 0 失败。
+- 后续发现（间距盘点，未施工）：spacing 偏离 336/756，卡片 padding 31 处覆盖值 12/13/14/16/18/20/22 混用，设置页 15/7 自成一档；建议 4pt 刻度收敛，列入波 111。
