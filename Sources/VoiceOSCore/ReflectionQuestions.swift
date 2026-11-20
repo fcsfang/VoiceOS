@@ -143,6 +143,58 @@ extension VoiceOSStore {
         }
     }
 
+    /// Manually confirming a topic stops the next AI pass from renaming it or
+    /// folding it back into a clue. The AI title becomes the user's own topic
+    /// name so the title-anchor check still holds after recovery.
+    public func promoteReflectionQuestion(id: String) throws {
+        let row = try reflectionQuestionRow(id)
+        var titleSourceID: String?
+        if row["ai_named"] == "1" { titleSourceID = try recordUserExpression(row["title"]!) }
+        try db.transaction {
+            if let titleSourceID {
+                try db.execute("INSERT INTO reflection_question_sources(id,question_id,source_id) VALUES(?,?,?)", [UUID().uuidString,id,titleSourceID])
+            }
+            try db.execute("UPDATE reflection_questions SET title_source_id=?,ai_named=0,version=version+1,updated_at=? WHERE id=?", [titleSourceID ?? row["title_source_id"]!,Self.now(),id])
+        }
+    }
+
+    /// Merging folds one topic into another and removes the source topic.
+    /// Children move before the row delete so the foreign keys never see an
+    /// orphan; journal sequences continue after the target's own.
+    public func mergeReflectionQuestion(id: String, into targetID: String) throws {
+        guard id != targetID else { throw VoiceOSError("不能把主题合并到它自己") }
+        _ = try reflectionQuestionRow(id)
+        _ = try reflectionQuestionRow(targetID)
+        try db.transaction {
+            let maximum = try db.query("SELECT COALESCE(MAX(sequence),0) AS value FROM reflection_question_entries WHERE question_id=?", [targetID]).first?["value"] ?? "0"
+            let offset = Int(maximum) ?? 0
+            try db.execute("UPDATE reflection_question_entries SET question_id=?,sequence=sequence+? WHERE question_id=?", [targetID,String(offset),id])
+            for row in try db.query("SELECT source_id FROM reflection_question_sources WHERE question_id=?", [id]) {
+                try db.execute("INSERT OR IGNORE INTO reflection_question_sources(id,question_id,source_id) VALUES(?,?,?)", [UUID().uuidString,targetID,row["source_id"]])
+            }
+            try db.execute("DELETE FROM reflection_question_sources WHERE question_id=?", [id])
+            try db.execute("UPDATE assistant_executions SET question_id=? WHERE question_id=?", [targetID,id])
+            // command_id is unique table-wide, so copying a row would be ignored
+            // while the source row still exists. Move confirmations in place and
+            // drop the source row when the target already confirms that claim.
+            for row in try db.query("SELECT claim_id FROM topic_claim_confirmations WHERE topic_id=?", [id]) {
+                if try !db.query("SELECT claim_id FROM topic_claim_confirmations WHERE topic_id=? AND claim_id=?", [targetID,row["claim_id"]]).isEmpty {
+                    try db.execute("DELETE FROM topic_claim_confirmations WHERE topic_id=? AND claim_id=?", [id,row["claim_id"]])
+                } else {
+                    try db.execute("UPDATE topic_claim_confirmations SET topic_id=? WHERE topic_id=? AND claim_id=?", [targetID,id,row["claim_id"]])
+                }
+            }
+            // Feedback is unique per topic: the survivor's own row wins.
+            if try !db.query("SELECT id FROM reflection_topic_feedback WHERE question_id=?", [targetID]).isEmpty {
+                try db.execute("DELETE FROM reflection_topic_feedback WHERE question_id=?", [id])
+            } else {
+                try db.execute("UPDATE reflection_topic_feedback SET question_id=? WHERE question_id=?", [targetID,id])
+            }
+            try db.execute("DELETE FROM reflection_questions WHERE id=?", [id])
+            try db.execute("UPDATE reflection_questions SET version=version+1,updated_at=? WHERE id=?", [Self.now(),targetID])
+        }
+    }
+
     public func reflectionQuestionEntries(questionID: String) throws -> [ReflectionQuestionEntry] {
         _ = try reflectionQuestionRow(questionID)
         let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) })

@@ -56,6 +56,11 @@ private struct TopicListing: Identifiable {
         latestMaterialDate ?? ConversationReflectionFocus.date(topic.updatedAt) ?? .distantPast
     }
 }
+private struct TopicMergeOption: Identifiable {
+    let topic: ReflectionQuestion
+    let materialCount: Int
+    var id: String { topic.id }
+}
 private enum MaterialDayFormatting {
     static let currentYear: DateFormatter = {
         let formatter = DateFormatter()
@@ -348,6 +353,9 @@ struct WorkspaceView: View {
     @State private var savingTopic = false
     @State private var newTopicTitle = ""
     @State private var editingTopicID: String? = nil
+    @State private var mergingTopicID: String?
+    @State private var mergeTargetID = ""
+    @State private var mergingTopic = false
     @State private var topicFocus: ConversationReflectionFocus?
     @State private var topicQuery = ""
     @State private var showingClues = false
@@ -518,6 +526,7 @@ struct WorkspaceView: View {
             .sheet(item:$resultFeedbackTarget) { action in ActionFeedbackView(action:action,model:model) { resultFeedbackTarget=nil } }
             .sheet(isPresented:$showingPendingReminderSyncs) { pendingReminderSyncSheet }
             .sheet(isPresented:$showingBackupRestore) { BackupLibraryRestoreView(currentRoot:model.libraryRoot) { showingBackupRestore=false } }
+            .sheet(isPresented: mergeTopicSheetPresented) { mergeTopicSheet }
     }
     private var alertContent: some View {
         sheetContent
@@ -1041,7 +1050,12 @@ struct WorkspaceView: View {
         }
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             if let topic, let reading {
-                HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil };creatingTopic=false;newTopicTitle="";editingTopicID=nil };Spacer(); Menu("调整主题") { Button("修改主题名称") { newTopicTitle=topic.title;editingTopicID=topic.id;creatingTopic=true };Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) } } }
+                HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil };creatingTopic=false;newTopicTitle="";editingTopicID=nil };Spacer(); Menu("调整主题") {
+                    if topicListing(topic, catalog: catalog).level == .clue { Button("升为主题") { Task { await promoteTopic(topic) } } }
+                    Button("修改主题名称") { newTopicTitle=topic.title;editingTopicID=topic.id;creatingTopic=true }
+                    Button("合并到其他主题…") { beginMergingTopic(topic) }
+                    Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) }
+                } }
                 WorkspaceHeading(eyebrow:"",title:topic.title,subtitle:"\(reading.sources.count) 份材料")
                 if let titleSource=model.sourcePageIndex.recordsByID[topic.sourceID] {
                     Button { go(.source(titleSource.id)) } label: {
@@ -2758,6 +2772,79 @@ struct WorkspaceView: View {
             else { let created=try await model.createReflectionQuestion(newTopicTitle,allowCloud:true);topicID=created.id }
             creatingTopic=false;newTopicTitle="";self.editingTopicID=nil;model.queueTopicOrganization()
         } catch { self.error=error.localizedDescription }
+    }
+    private var mergeTopicSheetPresented: Binding<Bool> {
+        Binding(get: { mergingTopicID != nil }, set: { if !$0 { mergingTopicID=nil;mergeTargetID="" } })
+    }
+    private func beginMergingTopic(_ topic: ReflectionQuestion) {
+        mergeTargetID = ""
+        mergingTopicID = topic.id
+    }
+    private func promoteTopic(_ topic: ReflectionQuestion) async {
+        do {
+            try await model.promoteTopic(topic.id)
+            error = ""
+            toastMessage = "已升为主题「\(topic.title)」"
+        } catch { fail(error.localizedDescription) }
+    }
+    private func mergeTopic(_ source: ReflectionQuestion, into target: ReflectionQuestion) async {
+        guard !mergingTopic else { return }
+        mergingTopic = true
+        defer { mergingTopic = false }
+        do {
+            try await model.mergeTopic(source.id, into: target.id)
+            mergingTopicID = nil; mergeTargetID = ""
+            topicID = nil; topicFocus = nil
+            error = ""
+            toastMessage = "已把「\(source.title)」并入「\(target.title)」"
+        } catch {
+            mergingTopicID = nil; mergeTargetID = ""
+            fail(error.localizedDescription)
+        }
+    }
+    private var mergeTopicSheet: some View {
+        let source = mergingTopicID.flatMap { id in model.workspaceTopics.first { $0.id == id } }
+        let catalog = recordCatalog
+        var options: [TopicMergeOption] = []
+        for candidate in model.workspaceTopics where candidate.id != source?.id {
+            options.append(TopicMergeOption(topic: candidate, materialCount: topicListing(candidate, catalog: catalog).materialCount))
+        }
+        options.sort { left, right in
+            if left.materialCount == right.materialCount {
+                return left.topic.title.localizedStandardCompare(right.topic.title) == .orderedAscending
+            }
+            return left.materialCount > right.materialCount
+        }
+        let selected = options.first { $0.topic.id == mergeTargetID }?.topic
+        return VStack(alignment:.leading,spacing:16) {
+            if let source {
+                Text("合并主题").vosFont(WorkspaceText.sectionTitle)
+                Text("选择要把「\(source.title)」并入的主题。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                if options.isEmpty { Text("还没有其他主题可合并。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
+                ForEach(options) { option in
+                    Button { mergeTargetID = option.topic.id } label: {
+                        HStack(spacing:10) {
+                            VStack(alignment:.leading,spacing:2) {
+                                Text(option.topic.title).vosFont(WorkspaceText.body).foregroundStyle(palette.text)
+                                Text("\(option.materialCount) 份材料").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                            }
+                            Spacer(minLength:8)
+                            if mergeTargetID == option.topic.id { Image(systemName:"checkmark.circle.fill").foregroundStyle(palette.accent) }
+                        }.contentShape(Rectangle()).padding(10)
+                            .background(mergeTargetID == option.topic.id ? palette.selection : Color.clear, in: RoundedRectangle(cornerRadius:8))
+                    }.buttonStyle(.plain)
+                }
+                if let selected {
+                    Text("会把「\(source.title)」的材料并入「\(selected.title)」并删除「\(source.title)」。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                }
+                HStack {
+                    Spacer()
+                    Button("取消") { mergingTopicID=nil;mergeTargetID="" }.buttonStyle(.workspaceSecondary)
+                    Button("确认合并") { if let selected { Task { await mergeTopic(source, into: selected) } } }
+                        .buttonStyle(.workspacePrimary).disabled(selected == nil || mergingTopic)
+                }
+            }
+        }.padding(24).frame(width:460)
     }
     private var trimmedNewViewName: String { newViewName.trimmingCharacters(in:.whitespacesAndNewlines) }
     private var canSaveView: Bool {
