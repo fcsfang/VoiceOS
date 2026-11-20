@@ -192,11 +192,16 @@ extension ControlCenter {
     }
 
     /// Every refresh path shares one reload; overlapping calls run one more round
-    /// instead of each re-reading the store.
-    func reloadMonitorState(forceItems: Bool = false) async {
+    /// instead of each re-reading the store. Returns whether the last round
+    /// succeeded, so callers can tell a failed read from an empty result.
+    @discardableResult
+    func reloadMonitorState(forceItems: Bool = false) async -> Bool {
         monitorReloadPending = true
         monitorReloadForceItems = monitorReloadForceItems || forceItems
-        if let monitorReloadWorker { await monitorReloadWorker.value; return }
+        if let monitorReloadWorker {
+            await monitorReloadWorker.value
+            return Self.monitorLastReloadSucceeded
+        }
         let worker = Task { @MainActor [weak self] in
             defer { self?.monitorReloadWorker = nil }
             while self?.monitorReloadPending == true {
@@ -204,15 +209,20 @@ extension ControlCenter {
                 self.monitorReloadPending = false
                 let force = self.monitorReloadForceItems
                 self.monitorReloadForceItems = false
-                await self.performMonitorReload(forceItems: force)
+                Self.monitorLastReloadSucceeded = await self.performMonitorReload(forceItems: force)
             }
         }
         monitorReloadWorker = worker
         await worker.value
+        return Self.monitorLastReloadSucceeded
     }
 
-    private func performMonitorReload(forceItems: Bool) async {
-        guard let store else { return }
+    /// The worker task outlives the call that started it, so coalesced callers
+    /// read the outcome here after waiting on the same run.
+    private static var monitorLastReloadSucceeded = true
+
+    private func performMonitorReload(forceItems: Bool) async -> Bool {
+        guard let store else { return false }
         do {
             let sources = try await store.monitorSources()
             let reports = try await store.monitorReports(limit: Self.monitorReportLimit)
@@ -235,8 +245,10 @@ extension ControlCenter {
             if let latest = reports.first, monitorItemsByReport[latest.id] == nil {
                 _ = await loadMonitorItems(reportID: latest.id)
             }
+            return true
         } catch {
             monitorStatus = error.localizedDescription
+            return false
         }
     }
 
