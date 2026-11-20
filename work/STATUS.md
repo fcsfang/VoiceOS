@@ -704,3 +704,11 @@
 - dist 重建 exit 0；preflight 0（safe idle=271s）；重启安装。
 - 交付：波 114（监测推送/QQ 互斥与忙态、字号环境覆盖应用级 sheet 与速记、扫描反馈与转写重试保护）。
 - 波 115 施工中；实机目视仍待显示器可用时统一抽查（110-114 累积批次）。
+
+## 波 115：排版收口（2026-11-20，已推送）
+
+- 115-A 数字列与摘要层级：vosFont 样式重载增加 monospacedDigit 参数；存储字节、待同步/已选计数、待办与想法计数、分段区间与时间码、完整时长、批量摘要改等宽；FullRecording 时长行与批量摘要由继承 body 收到 meta，主说明 caption→meta。
+- 115-B 反思与练习页计数等宽：时间线/增量阅读/费曼/认识对照/结果跟进/英文反馈/小主题计数改 mono；TextCapture 草稿提示 caption→meta。
+- 115-C 标题层级：处理条标题 rowTitle + 副标题 meta（条高约 +3pt，lineLimit 保持）；全景面板「问题与联系列表/候选联系」rowTitle→sectionTitle（340pt 侧栏换行核过）；监测计数四处等宽（分组标题 12 semibold 有意保留）。
+- 集成：669 项 0 失败。
+- 留档隐患：WorkspaceDesign.swift:613 的 `Text.monospacedDigit()` 后接 vosFont 会被 `content.font(...)` 覆盖，疑似等宽失效；列入 116 波清理。
