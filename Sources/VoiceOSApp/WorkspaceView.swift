@@ -190,18 +190,28 @@ struct WorkspaceRow: View {
     let open: () -> Void
     var body: some View {
         if let completion {
-            HStack(alignment:.top,spacing:14) {
+            // The open button fills the row so hover and click share one area.
+            // The completion switch stacks above it in the leading slot.
+            ZStack(alignment:.topLeading) {
                 Button(action:completion.complete) {
                     Image(systemName:"circle").vosFont(21)
                         .foregroundStyle(completion.enabled ? palette.accent : palette.disabledText)
-                        .frame(width:30 * vosLayoutScale(textScale),height:30 * vosLayoutScale(textScale),alignment:.top).contentShape(Rectangle())
+                        .frame(width:30 * vosLayoutScale(textScale),height:30 * vosLayoutScale(textScale),alignment:.top)
+                        .padding(.leading,10).padding(.top,10).contentShape(Rectangle())
                 }.buttonStyle(.plain).disabled(!completion.enabled)
                     .help("标为完成").accessibilityLabel("标为完成：" + title)
-                Button(action:open) { titleAndTrailing }
-                    .buttonStyle(.plain).accessibilityLabel(accessibilityText)
+                    .zIndex(1)
+                Button(action:open) {
+                    HStack(alignment:.top,spacing:14) {
+                        Color.clear.frame(width:30 * vosLayoutScale(textScale),height:30 * vosLayoutScale(textScale))
+                        titleAndTrailing
+                    }
+                    .padding(.vertical,10).padding(.horizontal,10).padding(.trailing,trailingGutter)
+                    .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                    .accessibilityElement(children:.combine)
+                }.buttonStyle(.plain).accessibilityLabel(accessibilityText)
+                    .zIndex(0)
             }
-            .padding(.vertical,10).padding(.horizontal,10).padding(.trailing,trailingGutter)
-            .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             .background(hovered ? palette.hover : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             .onHover { hovered=$0 }
         } else {
@@ -340,6 +350,8 @@ struct WorkspaceView: View {
     @FocusState private var searchFocused: Bool
     @State private var searchKeyboardFocus = WorkspaceKeySelection()
     @FocusState private var searchListFocused: Bool
+    @FocusState private var summaryPendingFocus: Bool
+    @FocusState private var summaryTodayFocus: Bool
     @State private var searchHits: [SearchHit] = []
     @State private var searchTotals: [SearchHit.Kind: Int] = [:]
     @State private var searchExpandedKinds: Set<SearchHit.Kind> = []
@@ -1317,8 +1329,12 @@ struct WorkspaceView: View {
                         Image(systemName:"arrow.triangle.2.circlepath").vosFont(WorkspaceText.meta.size, weight:.medium).foregroundStyle(palette.warning)
                         Text("\(model.pendingReminderSyncs.count) 项本地完成待同步 · 稍后核对").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                         Spacer(minLength:0)
-                    }.contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityLabel("本地完成待同步 \(model.pendingReminderSyncs.count) 项，打开核对")
+                    }.frame(minHeight: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .focused($summaryPendingFocus).focusEffectDisabled()
+                    .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.controlRadius)
+                    .overlay { if summaryPendingFocus { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+                    .accessibilityLabel("本地完成待同步 \(model.pendingReminderSyncs.count) 项，打开核对")
             }
             if actionFilter == "全部", let surface = timeSurface {
                 let overdue = surface.today.filter(\.isOverdue).count
@@ -1328,8 +1344,11 @@ struct WorkspaceView: View {
                         Text("今天 \(surface.today.count - overdue) · 逾期 \(overdue)").monospacedDigit().vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         Image(systemName: "chevron.right").vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(palette.disabledText)
                         Spacer(minLength: 0)
-                    }.contentShape(Rectangle())
+                    }.frame(minHeight: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle())
                 }.buttonStyle(.plain)
+                    .focused($summaryTodayFocus).focusEffectDisabled()
+                    .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.controlRadius)
+                    .overlay { if summaryTodayFocus { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
                     .accessibilityLabel("今天 \(surface.today.count - overdue) 项，逾期 \(overdue) 项")
                     .accessibilityHint("切到我的待办")
                     .help("切到我的待办")
@@ -1626,7 +1645,14 @@ struct WorkspaceView: View {
                 let sources=model.records.filter { !$0.isTrashed }
                 if !sources.isEmpty { sectionTitle("材料与原话 · \(sources.count)") }
                 let catalog=recordCatalog
-                ForEach(sources) { source in sourceRow(source,catalog:catalog); if source.id != sources.last?.id { WorkspaceListDivider() } }
+                ForEach(sources) { source in
+                    let rowID="material:" + source.id
+                    sourceRow(source,catalog:catalog)
+                        .background(searchKeyboardFocus.id == rowID ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                        .overlay { if searchKeyboardFocus.id == rowID { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+                        .id(rowID)
+                    if source.id != sources.last?.id { WorkspaceListDivider() }
+                }
             } else {
                 searchResults
             }
@@ -1789,6 +1815,9 @@ struct WorkspaceView: View {
                     rememberSearch(term)
                     suggestion.open()
                 }
+                .background(searchKeyboardFocus.id == suggestion.id ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+                .overlay { if searchKeyboardFocus.id == suggestion.id { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+                .id(suggestion.id)
                 if index < suggestions.count - 1 { WorkspaceListDivider() }
             }
         }
@@ -2612,14 +2641,32 @@ struct WorkspaceView: View {
             return .ignored
         }
     }
+    /// The rows arrow keys walk: suggestions above the results, and the
+    /// material list while the query is empty.
+    private var searchKeyboardRows: [(id:String, open:()->Void)] {
+        let term=query.trimmingCharacters(in:.whitespacesAndNewlines)
+        if term.isEmpty {
+            return model.records.filter { !$0.isTrashed }.map { source in
+                (id: "material:" + source.id, open: { go(.source(source.id)) })
+            }
+        }
+        var rows:[(id:String, open:()->Void)] = []
+        if term.count >= 2 {
+            rows = searchSuggestions.map { suggestion in
+                (id: suggestion.id, open: { rememberSearch(term); suggestion.open() })
+            }
+        }
+        rows.append(contentsOf: searchSections.flatMap(\.rows).map { row in (id: row.id, open: { row.open() }) })
+        return rows
+    }
     private func handleSearchListKey(_ press:KeyPress) -> KeyPress.Result {
         guard page == .search, searchListFocused,
               press.modifiers.isDisjoint(with: [.command,.option,.control]) else { return .ignored }
         if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
-        let rows=searchSections.flatMap(\.rows)
+        let rows=searchKeyboardRows
         switch press.key {
         case .downArrow, .upArrow:
-            guard searchKeyboardFocus.step(up: press.key == .upArrow, over: rows.map(\.id)) else { return .ignored }
+            guard searchKeyboardFocus.step(up: press.key == .upArrow, over: rows.map { $0.id }) else { return .ignored }
             return .handled
         case .return:
             guard !rows.isEmpty else { return .ignored }
@@ -2630,9 +2677,9 @@ struct WorkspaceView: View {
         }
     }
     private func openSearchSelection() {
-        let rows=searchSections.flatMap(\.rows)
+        let rows=searchKeyboardRows
         if let row=rows.first(where: { $0.id == searchKeyboardFocus.id }) { row.open(); return }
-        if let suggestion=searchSuggestions.first { rememberSearch(query.trimmingCharacters(in:.whitespacesAndNewlines)); suggestion.open(); return }
+        guard !query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty else { return }
         rows.first?.open()
     }
     private func installSearchArrowMonitor() {
@@ -2653,7 +2700,7 @@ struct WorkspaceView: View {
               event.specialKey == NSEvent.SpecialKey.upArrow || event.specialKey == NSEvent.SpecialKey.downArrow,
               event.modifierFlags.intersection([.command,.option,.control,.shift]).isEmpty else { return false }
         if let editor = event.window?.firstResponder as? NSTextView, editor.hasMarkedText() { return false }
-        let ids=searchSections.flatMap(\.rows).map(\.id)
+        let ids=searchKeyboardRows.map { $0.id }
         return searchKeyboardFocus.step(up: event.specialKey == NSEvent.SpecialKey.upArrow, over: ids)
     }
     private func batchActions(for state:LocalActionState) -> [ActionRecord] {
@@ -3213,7 +3260,7 @@ private struct RecentSearchChip: View {
             Button(action:remove) {
                 Image(systemName:"xmark").vosFont(WorkspaceText.caption.size, weight: .semibold)
                     .foregroundStyle(palette.secondaryText)
-                    .frame(width:14,height:14).contentShape(Rectangle())
+                    .frame(width:WorkspaceMetrics.rowActionMinHeight,height:WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle())
             }.buttonStyle(.plain)
                 .help("删除这条最近搜索").accessibilityLabel("删除最近搜索：" + term)
                 .opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
