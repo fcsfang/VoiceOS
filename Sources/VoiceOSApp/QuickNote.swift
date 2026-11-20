@@ -84,6 +84,7 @@ private struct QuickNoteView: View {
         }
         .padding(20)
         .frame(width: 480, height: 340)
+        .vosTextEnvironment(model.textSize)
         .task {
             try? await Task.sleep(for: .milliseconds(100))
             editing = true
