@@ -111,6 +111,7 @@ private struct SourceFold<Content: View>: View {
     var icon=""
     var count:Int?=nil
     @Binding var isExpanded:Bool
+    var spacing:CGFloat=0
     @ViewBuilder let content:()->Content
     var body: some View {
         WorkspaceCard() {
@@ -129,7 +130,7 @@ private struct SourceFold<Content: View>: View {
                     }.contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityValue(isExpanded ? "已展开" : "已收起")
                 if isExpanded {
-                    LazyVStack(alignment:.leading,spacing:0,content:content).padding(.top,16)
+                    LazyVStack(alignment:.leading,spacing:spacing,content:content).padding(.top,16)
                 }
             }
         }
@@ -172,7 +173,7 @@ private struct UnresolvedIssuesBlock: View {
     @State private var isExpanded=false
     var body: some View {
         WorkspaceCard() {
-            VStack(alignment:.leading,spacing:13) {
+            VStack(alignment:.leading,spacing:12) {
                 Button { isExpanded.toggle() } label: {
                     HStack(spacing:9) {
                         Label("疑点 \(issues.count) · 核对未完成",systemImage:"exclamationmark.triangle")
@@ -188,7 +189,7 @@ private struct UnresolvedIssuesBlock: View {
                 }.buttonStyle(.plain).accessibilityValue(isExpanded ? "已展开" : "已收起")
                 if isExpanded {
                     ForEach(Array(issues.enumerated()),id:\.offset) { _,issue in
-                        VStack(alignment:.leading,spacing:7) {
+                        VStack(alignment:.leading,spacing:8) {
                             Text(issue.reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                             HStack(spacing:14) {
                                 Button(playbackLabel(issue),systemImage:"play.circle") { play(issue) }
@@ -208,16 +209,12 @@ private struct UnresolvedIssuesBlock: View {
 private struct SourceSection<Content: View>: View {
     @Environment(\.workspacePalette) private var palette
     let title:String
-    var subtitle:String = ""
     var count:Int? = nil
     @ViewBuilder let content:()->Content
     var body: some View {
         WorkspaceCard() {
             VStack(alignment:.leading,spacing:0) {
                 WorkspaceSectionHeading(title,count:count.map { String($0) })
-                if !subtitle.isEmpty {
-                    Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.top,6)
-                }
                 Rectangle().fill(palette.border).frame(height:1).padding(.top,18)
                 LazyVStack(alignment:.leading,spacing:0,content:content).padding(.top,8)
             }
@@ -570,7 +567,7 @@ struct WorkspaceSourceView: View {
                                 Text("原话依据、旁注与调整").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                             }
                         }
-                    }.padding(.vertical,20)
+                    }.padding(.vertical,8)
                     if thought.id != (showAllThoughts ? thoughts.last?.id : thoughts.prefix(3).last?.id) { Divider() }
                 }
                 if thoughts.count > 3 {
@@ -667,7 +664,7 @@ struct WorkspaceSourceView: View {
                             if let link=captureLink(captureInfo.url) { Link(link.host ?? "来源链接", destination: link) }
                             if let date=ConversationReflectionFocus.date(captureInfo.capturedAt) { Text("抓取于 " + date.formatted(date:.abbreviated,time:.shortened)) }
                             else { Text("抓取于 " + captureInfo.capturedAt) }
-                        }.vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                        }.vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).padding(.top,8)
                     }
                     HStack(spacing:12) {
                         if transcriptionRunning {
@@ -686,6 +683,7 @@ struct WorkspaceSourceView: View {
                         }
                         Spacer(minLength:0)
                     }
+                    .padding(.top,8)
                 }
                 if extractionFlag == .empty {
                     WorkspaceCard(padding:16) {
@@ -694,8 +692,6 @@ struct WorkspaceSourceView: View {
                                 .vosFont(WorkspaceText.meta.size, weight:.semibold)
                                 .foregroundStyle(palette.warning)
                                 .accessibilityAddTraits(.isHeader)
-                            Text("整理已经运行过，但没有找到能归属到这段的观点，这段目前对整段理解没有贡献。")
-                                .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             HStack(spacing:14) {
                                 Button("重新整理这段",systemImage:"arrow.clockwise") { organize() }
                                     .buttonStyle(.workspaceSecondaryCompact)
@@ -744,7 +740,7 @@ struct WorkspaceSourceView: View {
                 if source.transcript == nil {
                     Text(source.error ?? "转写尚未完成，理解与待办识别还未开始。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                     if source.dictationRecoveryPending {
-                        Text("这段录音在结束前被中断，还没有完整原件。可以先封存可解码片段并进入正常整理，也可以直接移入回收站。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        Text("这段录音在结束前被中断，还没有完整原件。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         DictationRecoveryControls(model:model,source:source)
                     } else if ["failed","blocked"].contains(source.jobState ?? "") {
                         Button {
@@ -769,7 +765,7 @@ struct WorkspaceSourceView: View {
                     WorkspaceCard() {
                         VStack(alignment:.leading,spacing:12) {
                         Label(automaticallyUpdating ? "正在自动更新理解" : pendingUnderstanding ? "理解尚未更新完成" : "AI 提取需要重新识别",systemImage:automaticallyUpdating ? "arrow.trianglehead.2.clockwise" : "pause.circle").vosFont(WorkspaceText.meta.size, weight: .semibold)
-                        Text(automaticallyUpdating ? "原文已保存，AI 正在结合完整表达与节目背景更新观点、任务和关联。完成后这里会自动更新，无需再次操作。" : pauseExplanation).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                        Text(automaticallyUpdating ? "原文已保存；正在结合完整表达与节目背景更新观点、任务和关联，完成后会自动更新。" : pauseExplanation).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                         if !pausedActions.isEmpty {
                             Text("受影响的任务与问题").vosFont(WorkspaceText.rowTitle)
                             ForEach(pausedActions) { action in
@@ -777,8 +773,8 @@ struct WorkspaceSourceView: View {
                                 WorkspaceExternalCompletionButton(model:model,action:action).padding(.leading,44).padding(.bottom,6)
                             }
                         }
-                        if !automaticallyUpdating {
-                            Text(pendingUnderstanding ? "自动更新尚未完成。可查看处理进度或错误，并点击下方按钮重试；已保存的原文和任务完成记录会保留。" : "点击下方按钮，AI 会读取完整文字和转写核对记录，重新提取观点和任务。只有发现文字没记对时，才需要更正转写。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                        if pendingUnderstanding && !automaticallyUpdating {
+                            Text("自动更新尚未完成；原文与任务完成记录会保留。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                         }
                         if source.localOnly {
                             Text("当前仅本机保存。允许后会将这份完整文字发送给已配置的模型。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
@@ -789,6 +785,7 @@ struct WorkspaceSourceView: View {
                             Button(automaticallyUpdating ? "正在自动更新…" : processing ? "正在重新识别…" : pendingUnderstanding ? "重试更新理解" : "重新识别观点和任务",action:organize)
                                 .buttonStyle(.workspacePrimary)
                                 .disabled(processing || model.fullRecordingBusy || model.understandingSource != nil || !model.modelConfigured || source.state == "quarantined")
+                                .help(automaticallyUpdating || processing ? "正在处理，完成后这里会自动更新" : pendingUnderstanding ? "查看处理进度或错误后，点此重试自动更新" : "AI 会读取完整文字和转写核对记录，重新提取观点和任务；只有文字记错时才需要更正转写")
                         }
                         if !model.modelConfigured {
                             HStack(spacing:8) {
@@ -826,7 +823,7 @@ struct WorkspaceSourceView: View {
                     }
                 }
                 if !currentGoals.isEmpty {
-                    SourceSection(title:"问题与目标",subtitle:"不计为已承诺待办。",count:currentGoals.count) {
+                    SourceSection(title:"问题与目标",count:currentGoals.count) {
                         ForEach(currentGoals) { action in relatedActionRow(action, in: currentGoals, reads: reminderReads) }
                     }
                 }
@@ -838,7 +835,7 @@ struct WorkspaceSourceView: View {
                                 VStack(alignment:.leading,spacing:8) {
                                     WorkspaceExpandableText(text:issue.betterUnderstanding,label:"完整建议",size:WorkspaceText.body.size)
                                     KnowledgeReviewIssueStatusControls(model:model,record:review,issue:issue)
-                                }.padding(.vertical,14)
+                                }.padding(.vertical,8)
                             }
                         }
                     }
@@ -865,13 +862,13 @@ struct WorkspaceSourceView: View {
                         }
                     }
                 }.id("source-original-fold")
-                SourceFold(title:"更多资料",icon:"archivebox",count:extraSectionCount == 0 ? nil : extraSectionCount,isExpanded:foldExpanded(\.extras)) {
+                SourceFold(title:"更多资料",icon:"archivebox",count:extraSectionCount == 0 ? nil : extraSectionCount,isExpanded:foldExpanded(\.extras),spacing:WorkspaceMetrics.groupGap) {
                     if programPairs.isEmpty && contextPhase.isLoading { SourceLoadingRow(title:"正在读取节目关联…") }
                     if !programPairs.isEmpty {
                         SourceSection(title:"节目与我的思考",count:contextLinks.count) {
                             ForEach(programPairs,id:\.externalSourceID) { pair in
                                 if let external=catalog[pair.externalSourceID] {
-                                    WorkspaceRow(title:external.displayTitle,subtitle:pairingIsCurrent(pair) ? "同次录制的完整节目原文 · 可单独回听" : "节目原话或处理许可已变化，关联等待更新",icon:"headphones",trailing:"节目原文") { openSource(external.id) }
+                                    WorkspaceRow(title:external.displayTitle,subtitle:pairingIsCurrent(pair) ? "同次录制的完整节目原文" : "节目原话或处理许可已变化，关联等待更新",icon:"headphones",trailing:"节目原文") { openSource(external.id) }
                                 }
                             }
                             if !contextLinks.isEmpty {
@@ -886,7 +883,7 @@ struct WorkspaceSourceView: View {
                                             Text(link.personalQuote).vosFont(WorkspaceText.body).textSelection(.enabled)
                                             Button(contextPlaybackLabel(link.personalClaimID,role:"我的")) { Task { await playContextClaim(link.personalClaimID) } }.buttonStyle(.workspaceQuietCompact)
                                             Text("AI 关联："+link.explanation).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).textSelection(.enabled)
-                                        }.padding(.vertical,16)
+                                        }.padding(.vertical,8)
                                         Divider()
                                     }
                                 }.padding(.top,12)
@@ -931,7 +928,7 @@ struct WorkspaceSourceView: View {
                         }
                     }
                 }
-                SourceFold(title:"处理记录",icon:"tray",isExpanded:foldExpanded(\.records)) {
+                SourceFold(title:"处理记录",icon:"tray",isExpanded:foldExpanded(\.records),spacing:WorkspaceMetrics.groupGap) {
                     SourceSection(title:"依据、修订与处理记录") {
                         DisclosureGroup("核对依据与适用边界") { KnowledgeReviewSection(model:model,sourceIDs:[source.id],carded:false).padding(.top,12) }.padding(.vertical,16)
                         Divider()
@@ -1409,7 +1406,7 @@ struct WorkspaceSourceView: View {
         if let scroll { scroll.wrappedValue.scrollTo(edge:.top) }
     }
     private func readingLayerRow(_ title:String,_ text:String) -> some View {
-        VStack(alignment:.leading,spacing:7) {
+        VStack(alignment:.leading,spacing:8) {
             Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.secondaryText)
             Text(text).vosFont(WorkspaceText.body).lineSpacing(4).textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
         }
@@ -1616,7 +1613,7 @@ struct WorkspaceTranscriptEditor:View {
     var body:some View {
         VStack(alignment:.leading,spacing:16) {
             Text("更正原文").vosFont(WorkspaceText.sectionTitle)
-            Text(source.localOnly ? "这份材料仅本机保存。更正后保留原话历史，旧理解暂停使用；允许云端处理后可重新整理。" : "保存后自动更新完整理解；原话历史、真实完成与结果保留。不能确定的关联会单独说明。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+            Text(source.localOnly ? "这份材料仅本机保存。更正后保留原话历史，旧理解暂停使用；允许云端处理后可重新整理。" : "保存后会自动更新完整理解；原话历史、真实完成与结果保留。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             TextEditor(text:$text).frame(minHeight:300).workspaceEditorSurface()
             if !failure.isEmpty { Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             HStack {
@@ -1703,7 +1700,7 @@ struct RecordingExpressionTitleEditor:View {
         VStack(alignment:.leading,spacing:16) {
             Text("修改分组标题").vosFont(WorkspaceText.sectionTitle)
             TextField("分组标题",text:$title)
-            Text("这 \(expression.sourceIDs.count) 段录音属于同一段连续表达，标题用于整个分组。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            Text("这 \(expression.sourceIDs.count) 段录音属于同一段连续表达。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             if !model.recordingTitleStatus.isEmpty { Text(model.recordingTitleStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             HStack {
                 if expression.manualTitle != nil { Button("恢复自动标题") { save(nil) }.buttonStyle(.workspaceQuiet).disabled(saving) }
