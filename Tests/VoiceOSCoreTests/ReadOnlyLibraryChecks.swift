@@ -173,6 +173,30 @@ final class ReadOnlyLibraryChecks: XCTestCase {
         XCTAssertEqual(status.topics, 0)
     }
 
+    func testDisplayTitleMatchesApplicationPresentationFunnel() throws {
+        try insertSource("source-manual", name: "原始名字", presentation: RecordingPresentation(manualTitle: "  雨林笔记  "))
+        try insertSource("source-auto", name: "原始名字",
+                         presentation: RecordingPresentation(automatic: RecordingTitleProposal(
+                             sourceID: "source-auto",
+                             title: "## **整理雨林笔记的后续安排与行动清单，先确认素材来源并记录**。",
+                             summary: "s", quotes: [])))
+        let machineName = "行动反馈 · 2026-10-14T12:28:35Z"
+        try insertSource("source-machine", name: machineName)
+        try insertSource("source-plain", name: "普通来源")
+        for suffix in ["manual", "auto", "machine", "plain"] {
+            try insertClaim("claim-" + suffix, sourceID: "source-" + suffix, statement: "语句-" + suffix)
+            try insertAction("action-" + suffix, claimID: "claim-" + suffix,
+                             title: "标题-" + suffix, createdAt: "2026-11-02T00:00:00Z")
+        }
+
+        let rows = try ReadOnlyLibrary(root: base).actions(limit: 100, offset: 0)
+        let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        XCTAssertEqual(byID["action-manual"]?.sourceTitle, "雨林笔记")
+        XCTAssertEqual(byID["action-auto"]?.sourceTitle, "整理雨林笔记的后续安排与行动清单，先确认素材来源…")
+        XCTAssertEqual(byID["action-machine"]?.sourceTitle, MaterialNaming.displayName(machineName))
+        XCTAssertEqual(byID["action-plain"]?.sourceTitle, "普通来源")
+    }
+
     func testDuePrefersLocalScheduleAndMirrorsTimeSurface() throws {
         try insertSource("source-a", name: "来源")
         try insertClaim("claim-a", sourceID: "source-a", statement: "排期依据")

@@ -368,14 +368,17 @@ public struct ReadOnlyLibrary {
 
     static func displayTitle(_ row: [String: String]) -> String {
         let name = row["name"] ?? ""
+        // The read-only door never loads a transcript, so the app's
+        // content-derived fallback is replaced by the humanized name.
         guard let json = row["presentation_json"],
               let presentation = try? JSONDecoder().decode(RecordingPresentation.self, from: Data(json.utf8)) else {
-            return name
+            return MaterialNaming.displayName(name)
         }
         let manual = presentation.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let manual, !manual.isEmpty { return manual }
-        if let automatic = presentation.automatic?.title, !automatic.isEmpty { return automatic }
-        return name
+        if let automatic = presentation.automatic?.title,
+           let title = MaterialTitleText.normalizedGenerated(automatic) { return title }
+        return MaterialNaming.displayName(name)
     }
 
     static func dueValue(json: String?, source: String, now: Date) -> ReadOnlyDue? {
