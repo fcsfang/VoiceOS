@@ -84,20 +84,21 @@ struct PausedActionBatchControl: View {
                 }
             case .some(.finished(let summary)):
                 Text("已更新 \(summary.updated.count) 份 · 跳过 \(summary.skipped.count) 份 · 失败 \(summary.failed.count) 份")
+                    .vosFont(WorkspaceText.meta, monospacedDigit: true)
                 if summary.stoppedRemaining > 0 {
-                    Text("已停止，未处理 \(summary.stoppedRemaining) 份。").foregroundStyle(.secondary)
+                    Text("已停止，未处理 \(summary.stoppedRemaining) 份。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
                 }
                 if !summary.remainingActionIDs.isEmpty {
-                    Text("仍有 \(summary.remainingActionIDs.count) 条暂停待办需要打开任务核对。").foregroundStyle(.secondary)
+                    Text("仍有 \(summary.remainingActionIDs.count) 条暂停待办需要打开任务核对。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
                 }
                 if !summary.reviewOnlyActionIDs.isEmpty {
-                    Text("另有 \(summary.reviewOnlyActionIDs.count) 条行动关系需逐条核对，本次未改动。").foregroundStyle(.secondary)
+                    Text("另有 \(summary.reviewOnlyActionIDs.count) 条行动关系需逐条核对，本次未改动。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
                 }
                 if !summary.withdrawnActionIDs.isEmpty {
-                    Text("另有 \(summary.withdrawnActionIDs.count) 条已在后续录音中撤回，本次未改动。").foregroundStyle(.secondary)
+                    Text("另有 \(summary.withdrawnActionIDs.count) 条已在后续录音中撤回，本次未改动。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
                 }
                 if !summary.unattachedActionIDs.isEmpty {
-                    Text("另有 \(summary.unattachedActionIDs.count) 条待办找不到可重新识别的材料，需在任务里单独查看。").foregroundStyle(.secondary)
+                    Text("另有 \(summary.unattachedActionIDs.count) 条待办找不到可重新识别的材料，需在任务里单独查看。").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
                 }
                 DisclosureGroup("查看本次明细") {
                     ForEach(summary.updated, id: \.sourceID) { row in

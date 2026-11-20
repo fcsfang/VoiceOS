@@ -26,7 +26,7 @@ struct FullRecordingView: View {
         VStack(alignment: .leading, spacing: 18) {
             WorkspacePageHeading(title: "完整整理我的录音")
             Text(input.url.lastPathComponent).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
-            Text("完整时长 \(duration) · \(input.media.tracks.count) 条音轨").foregroundStyle(.secondary)
+            Text("完整时长 \(duration) · \(input.media.tracks.count) 条音轨").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
             Picker("本人音轨", selection: $track) {
                 ForEach(input.media.tracks) { audio in Text(audio.title).tag(audio.id) }
             }.disabled(model.fullRecordingBusy || model.fullRecordingCount != nil)
@@ -35,7 +35,7 @@ struct FullRecordingView: View {
             Toggle("所选音轨是我的声音", isOn: $ownVoice)
                 .disabled(model.fullRecordingBusy || model.fullRecordingCount != nil || !trackDecision.allowsOwnVoice)
             Text(input.media.contextTrack != nil && track == input.media.personalTrack ? "Qwen 在本机分别完整转写你的声音和节目声音，AI 校正后结合双轨全文理解，保留双方原话与时间。节目观点、你的复述与看法分开，只有你明确要做的事进入待办。双轨文字使用已配置模型，原始音视频留在本机。" : "Qwen 在本机完整转写本人音轨，AI 依据全文校正识别错误，保留原意与修订历史。随后整理观点与明确待办；原始音视频保留在本机。")
-                .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             if let issue = model.recordingModelIssue {
                 WorkspaceNoticeText(message: issue)
                 HStack {

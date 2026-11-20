@@ -1070,7 +1070,7 @@ struct WorkspaceView: View {
                             }
                         } label: {
                             HStack(spacing:10) {
-                                Text("尚未归入主题的材料（\(unlinked.count)）").vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
+                                Text("尚未归入主题的材料（\(unlinked.count)）").vosFont(WorkspaceText.sectionTitle, monospacedDigit: true).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
                                 Spacer(minLength:8)
                                 Button(model.organizingTopics ? "AI 正在归组…" : "交给 AI 归组") { model.queueTopicOrganization() }
                                     .vosFont(WorkspaceText.meta)
@@ -1201,7 +1201,7 @@ struct WorkspaceView: View {
                 Button { showingPendingReminderSyncs = true } label: {
                     HStack(spacing:6) {
                         Image(systemName:"arrow.triangle.2.circlepath").vosFont(WorkspaceText.meta.size, weight:.medium).foregroundStyle(palette.warning)
-                        Text("\(model.pendingReminderSyncs.count) 项本地完成待同步 · 稍后核对").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        Text("\(model.pendingReminderSyncs.count) 项本地完成待同步 · 稍后核对").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                         Spacer(minLength:0)
                     }.contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("本地完成待同步 \(model.pendingReminderSyncs.count) 项，打开核对")
@@ -1967,7 +1967,7 @@ struct WorkspaceView: View {
                 .vosFont(emphasized ? WorkspaceText.rowTitle : WorkspaceText.body)
                 .foregroundStyle(emphasized ? palette.text : palette.secondaryText)
             Spacer(minLength:12)
-            Text(storageReadoutText(readout)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            Text(storageReadoutText(readout)).vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
         }.frame(maxWidth:420,alignment:.leading)
     }
     private func sourceNavigationTitle(_ id:String) -> String {
@@ -2334,7 +2334,7 @@ struct WorkspaceView: View {
             if planRemainingSlots == 0 { WorkspaceNoticeText(message:"专注已有 3 条，先移出一条再安排。",severity:.warning) }
             else if !planLimitHint.isEmpty { WorkspaceNoticeText(message:planLimitHint,severity:.warning) }
             HStack {
-                Text("已选 \(planSelection.count) 条").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                Text("已选 \(planSelection.count) 条").vosFont(WorkspaceText.caption, monospacedDigit: true).foregroundStyle(.secondary)
                 Spacer()
                 Button(planningToday ? "正在安排…" : "加入专注") { Task { await confirmPlanToday() } }
                     .buttonStyle(.workspacePrimary)
@@ -2524,7 +2524,7 @@ struct WorkspaceView: View {
     }
     private var actionSelectionBar: some View {
         HStack(spacing:12) {
-            Text(batchRunning ? "正在更新…" : "已选 \(selectedActionIDs.count) 条").vosFont(WorkspaceText.meta.size, weight: .medium)
+            Text(batchRunning ? "正在更新…" : "已选 \(selectedActionIDs.count) 条").vosFont(WorkspaceText.meta.size, weight: .medium, monospacedDigit: true)
             Button("标为完成") { pendingBatchState = .completed }.buttonStyle(.workspacePrimary).disabled(batchRunning || batchActions(for: .completed).isEmpty)
             Button("不再跟进") { pendingBatchState = .dismissed }.buttonStyle(.workspaceSecondary).disabled(batchRunning || batchActions(for: .dismissed).isEmpty)
             Button("取消") { exitActionSelection() }.buttonStyle(.workspaceQuiet).disabled(batchRunning)
