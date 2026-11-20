@@ -19,7 +19,7 @@ struct WorkspacePalette {
     }
 
     var canvas: Color { theme == .graphite ? adaptive(0xF2F2F3, 0x1E1E1E) : adaptive(0xF1F3EE, 0x1B1F1D) }
-    var surface: Color { theme == .graphite ? adaptive(0xFCFCFD, 0x272727) : adaptive(0xFFFFFF, 0x242925) }
+    var surface: Color { theme == .graphite ? adaptive(0xF7F7F8, 0x272727) : adaptive(0xF8FAF5, 0x242925) }
     var sidebar: Color { theme == .graphite ? adaptive(0xECECEE, 0x161616) : adaptive(0xE9EDE6, 0x171C18) }
     var text: Color { theme == .graphite ? adaptive(0x202020, 0xECECEC) : adaptive(0x26352D, 0xE5EBE4) }
     /// Secondary toolbar and metadata copy; one step quieter than `text`.
