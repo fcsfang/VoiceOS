@@ -350,6 +350,15 @@ private struct WorkspaceHoverHighlight: ViewModifier {
     }
 }
 
+/// Sheet roots are separate windows; without a palette fill they fall back to the system near-white.
+private struct WorkspaceModalSurface: ViewModifier {
+    @Environment(\.workspacePalette) private var palette
+
+    func body(content: Content) -> some View {
+        content.background(palette.canvas)
+    }
+}
+
 private struct WorkspaceEditorSurface: ViewModifier {
     @Environment(\.workspacePalette) private var palette
     let radius: CGFloat
@@ -357,7 +366,7 @@ private struct WorkspaceEditorSurface: ViewModifier {
     func body(content: Content) -> some View {
         content.padding(10)
             .scrollContentBackground(.hidden)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: radius))
+            .background(palette.selection, in: RoundedRectangle(cornerRadius: radius))
             .overlay { RoundedRectangle(cornerRadius: radius).strokeBorder(palette.border, lineWidth: 1) }
     }
 }
@@ -365,6 +374,10 @@ private struct WorkspaceEditorSurface: ViewModifier {
 extension View {
     func workspaceHoverHighlight(cornerRadius: CGFloat = WorkspaceMetrics.controlRadius) -> some View {
         modifier(WorkspaceHoverHighlight(cornerRadius: cornerRadius))
+    }
+
+    func workspaceModalSurface() -> some View {
+        modifier(WorkspaceModalSurface())
     }
 
     func workspaceEditorSurface(radius: CGFloat = WorkspaceMetrics.controlRadius) -> some View {

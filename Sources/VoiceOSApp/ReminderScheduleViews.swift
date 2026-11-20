@@ -82,6 +82,7 @@ struct ActionScheduleEditor: View {
                 }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(saving || model.savingAction)
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
+            .workspaceModalSurface()
     }
 }
 
@@ -123,5 +124,6 @@ struct ReminderScheduleConfirmationView: View {
                 }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(saving || model.remindersBusy)
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
+            .workspaceModalSurface()
     }
 }

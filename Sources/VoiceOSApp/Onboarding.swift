@@ -70,6 +70,7 @@ struct OnboardingView: View {
         }
         .padding(28)
         .frame(minWidth: WorkspaceMetrics.modalSmall)
+        .workspaceModalSurface()
         .interactiveDismissDisabled()
     }
 

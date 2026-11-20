@@ -37,6 +37,7 @@ struct FeynmanPractice: View {
         }
         .padding(24)
         .frame(width: WorkspaceMetrics.modalSmall, height: 520)
+        .workspaceModalSurface()
         .task {
             guard claim.isEmpty else { return }
             do { claim = try await model.claimStatement(claimID: claimID) }

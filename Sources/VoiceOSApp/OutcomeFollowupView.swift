@@ -51,5 +51,6 @@ struct OutcomeFollowupView: View {
             }
         }.padding(24).frame(minWidth: 680, idealWidth: 820, minHeight: 540, maxHeight: .infinity)
             .workspaceResizableSheet()
+            .workspaceModalSurface()
     }
 }

@@ -182,6 +182,7 @@ struct DiscussionView: View {
                 ContentUnavailableView("还没有选择讨论",systemImage:"bubble.left.and.bubble.right",description:Text("在资料详情点击“继续讨论”建立新的讨论，或选择已保存历史。"))
             }
         }.padding(24).frame(width:WorkspaceMetrics.modalMedium,height:780)
+        .workspaceModalSurface()
         .onAppear { text = initialText }
         .alert("结束讨论？", isPresented: $confirmingEnd) {
             Button("取消", role: .cancel) {}
@@ -196,6 +197,7 @@ struct DiscussionView: View {
                 ScrollView { Text(preview.text).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
                 HStack { Spacer();Button("完成") { referencePreview=nil }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction) }
             }.padding(24).frame(width:640,height:420)
+                .workspaceModalSurface()
         }
     }
     private var followupSuggestions: [FollowupSuggestion] {

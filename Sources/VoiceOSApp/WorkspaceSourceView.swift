@@ -1627,6 +1627,7 @@ struct WorkspaceTranscriptEditor:View {
                     .disabled(saving || text == source.transcript || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
             }
         }.padding(24).frame(width:650).onAppear { text=source.transcript ?? "" }
+            .workspaceModalSurface()
     }
     private func save() {
         guard !saving else { return }
@@ -1672,6 +1673,7 @@ struct ClaimCorrectionView:View {
                     .disabled(saving || model.reviewingClaim || (text == claim.statement && ownership == claim.ownership) || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || note.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
             }
         }.padding(24).frame(width:WorkspaceMetrics.modalSmall)
+            .workspaceModalSurface()
     }
     private func save() {
         guard !saving else { return }
@@ -1711,6 +1713,7 @@ struct RecordingExpressionTitleEditor:View {
                     .disabled(saving || title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || title.count > 100)
             }
         }.padding(24).frame(width:600)
+            .workspaceModalSurface()
     }
     private func save(_ value:String?) {
         guard !saving else { return }

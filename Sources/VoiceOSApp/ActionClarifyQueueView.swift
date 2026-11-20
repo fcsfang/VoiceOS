@@ -104,6 +104,7 @@ struct ActionClarifyQueueView: View {
         }
         .padding(WorkspaceMetrics.pagePadding)
         .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 420, alignment: .topLeading)
+        .workspaceModalSurface()
         .task { await model.refresh() }
     }
 

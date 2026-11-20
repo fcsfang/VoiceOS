@@ -97,6 +97,7 @@ struct ImportBatchReportView: View {
         }
         .padding(24)
         .frame(width: 560)
+        .background(palette.canvas)
     }
 }
 
@@ -4669,6 +4670,7 @@ struct ActionCreationView: View {
                     .disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 600)
+            .workspaceModalSurface()
     }
 }
 
@@ -4730,6 +4732,7 @@ struct ActionFeedbackView: View {
                 }.keyboardShortcut(.defaultAction).disabled(saving || waitingForVoice || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
             }
         }.padding(24).frame(width:620)
+            .workspaceModalSurface()
             .onChange(of: recording?.transcriptVersionID) { _, _ in applyTranscription() }
             .interactiveDismissDisabled(saving || (recordingID != nil && model.dictationActive))
     }
@@ -4800,6 +4803,7 @@ struct PackageRestoreView: View {
                 }
             }
         }.padding(24).frame(width:640)
+            .workspaceModalSurface()
     }
 }
 
@@ -4873,6 +4877,7 @@ struct BackupLibraryRestoreView: View {
                 }
             }
         }.padding(24).frame(width:640)
+            .workspaceModalSurface()
     }
 }
 
@@ -4885,6 +4890,7 @@ extension FocusedValues {
 }
 
 struct CognitiveFeedbackView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     var embedded = false
     let dismiss: () -> Void
@@ -4917,7 +4923,7 @@ struct CognitiveFeedbackView: View {
                                 Button("查看历史出处") { Task { if await model.openAssociation(item, historical: true) { dismiss() } } }
                                 Button("忽略关联") { Task { await model.ignoreAssociation(item) } }
                             }
-                        }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                        }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.selection, in: RoundedRectangle(cornerRadius: 8))
                     }
                     ForEach(model.quietFeedback) { item in
                         VStack(alignment:.leading,spacing:8) {
@@ -4929,7 +4935,7 @@ struct CognitiveFeedbackView: View {
                                 Button("查看原文与出处") { Task { if await model.openQuietFeedback(item) { dismiss() } } }
                                 Button("忽略这条") { Task { await model.ignoreQuietFeedback(item) } }
                             }
-                        }.padding(12).frame(maxWidth:.infinity,alignment:.leading).background(.quaternary.opacity(0.35),in:RoundedRectangle(cornerRadius:8))
+                        }.padding(12).frame(maxWidth:.infinity,alignment:.leading).background(palette.selection,in:RoundedRectangle(cornerRadius:8))
                     }
                 }.frame(maxWidth:.infinity,alignment:.leading)
             }
@@ -4989,6 +4995,7 @@ struct HistorySearchView: View {
 }
 
 struct RelevanceSearchPanel: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     @ObservedObject var coordinator: RelevanceQueryCoordinator
     @Binding var question: String
@@ -5018,7 +5025,7 @@ struct RelevanceSearchPanel: View {
                     }
                 }
             }
-        }.padding(12).background(.quaternary.opacity(0.35),in:RoundedRectangle(cornerRadius:8))
+        }.padding(12).background(palette.selection,in:RoundedRectangle(cornerRadius:8))
     }
 }
 

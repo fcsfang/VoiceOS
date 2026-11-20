@@ -955,6 +955,7 @@ private struct RecentClueRenameSheet: View {
                 }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(title.count > 100)
             }.disabled(saving)
         }.padding(24).frame(width: 520)
+            .workspaceModalSurface()
     }
 }
 

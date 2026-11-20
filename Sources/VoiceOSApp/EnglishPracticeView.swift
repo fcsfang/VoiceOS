@@ -20,6 +20,7 @@ struct EnglishInputPreview: View {
             }
             HStack { Spacer(); Button("返回", action: dismiss).keyboardShortcut(.cancelAction) }
         }.padding(24).frame(width: 640, height: 480)
+            .workspaceModalSurface()
     }
 }
 struct EnglishPracticeView: View {

@@ -37,5 +37,6 @@ struct TranscriptSegmentationView: View {
             if !model.segmentationStatus.isEmpty { WorkspaceNoticeText(message: model.segmentationStatus) }
             HStack { Spacer(); Button("完成",action:dismiss).keyboardShortcut(.defaultAction) }
         }.padding(24).frame(width:680,height:560)
+            .workspaceModalSurface()
     }
 }

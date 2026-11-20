@@ -27,6 +27,7 @@ struct ConfirmTaskView: View {
                 }.buttonStyle(.workspacePrimary).disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
+        .workspaceModalSurface()
         .onAppear {
             title = action.title.replacingOccurrences(of: "（待核对）", with: "")
             if title.hasPrefix("【"), let end = title.firstIndex(of: "】") { title = String(title[title.index(after: end)...]) }

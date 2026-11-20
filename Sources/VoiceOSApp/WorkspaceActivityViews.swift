@@ -1519,6 +1519,7 @@ struct NextActionFormSheet: View {
                 }
             }
         }.padding(24).frame(width: 420)
+            .workspaceModalSurface()
     }
 
     private func submit() {

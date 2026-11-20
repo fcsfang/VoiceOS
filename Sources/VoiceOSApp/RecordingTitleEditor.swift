@@ -34,5 +34,6 @@ struct RecordingTitleEditor: View {
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.count > 100)
             }.disabled(saving)
         }.padding(24).frame(width: 600)
+            .workspaceModalSurface()
     }
 }

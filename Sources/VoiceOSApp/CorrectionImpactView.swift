@@ -75,6 +75,7 @@ struct CorrectionImpactView: View {
             Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             if !embedded { HStack { Spacer(); Button("完成", action: dismiss).keyboardShortcut(.defaultAction) } }
         }.padding(24).frame(width: embedded ? nil : WorkspaceMetrics.modalMedium, height: embedded ? nil : 620)
+            .workspaceModalSurface()
             .sheet(item: $model.pendingCompensation) { plan in
                 CompensationConfirmationView(plan: plan,model: model) { model.pendingCompensation = nil }
             }
@@ -145,5 +146,6 @@ private struct CompensationConfirmationView: View {
                 }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(saving || model.remindersBusy || !plan.eligibleForConfirmation)
             }
         }.padding(24).frame(width: 640)
+            .workspaceModalSurface()
     }
 }
