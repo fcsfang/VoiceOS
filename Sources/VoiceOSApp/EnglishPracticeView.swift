@@ -97,7 +97,7 @@ struct EnglishPracticeView: View {
                 if let hint = sendHint { Text(hint).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             }
             if !model.englishAttempts.isEmpty {
-                Divider(); Text("反馈历史（\(model.englishAttempts.count)）").vosFont(WorkspaceText.rowTitle)
+                Divider(); Text("反馈历史（\(model.englishAttempts.count)）").vosFont(WorkspaceText.rowTitle.size, weight: .semibold, monospacedDigit: true)
                 ScrollView {
                 ForEach(model.englishAttempts) { attempt in
                     VStack(alignment: .leading, spacing: 6) {

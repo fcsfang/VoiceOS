@@ -66,7 +66,7 @@ struct WorkspaceTopicReadingView: View {
             WorkspaceSearchField(text:$localFilter,placeholder:"筛选小主题、观点与原话")
                 .frame(maxWidth:360)
             if !filterTerm.isEmpty {
-                Text("\(filteredSections.count) / \(sections.count) 个小主题").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("\(filteredSections.count) / \(sections.count) 个小主题").vosFont(WorkspaceText.meta.size, monospacedDigit: true).foregroundStyle(.secondary)
             }
             Spacer(minLength:0)
         }
