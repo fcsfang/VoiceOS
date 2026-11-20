@@ -269,6 +269,7 @@ struct ActionOriginalQuotes: View {
 
 struct WorkspaceTaskView: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: ControlCenter
     let action: ActionRecord
     @Binding var draft: TaskFeedbackDraft
@@ -280,6 +281,9 @@ struct WorkspaceTaskView: View {
     @State private var feedbackLoading = false
     @State private var feedbackPlaceholderVisible = false
     @State private var feedbackGeneration = 0
+    @State private var feedbackHighlightID: String?
+    @State private var feedbackHighlightToken = UUID()
+    @State private var progressScrollToken = UUID()
     @State private var revisions: [ActionRevisionRecord] = []
     @State private var revisionsError: String?
     @State private var feedbackActionID = ""
@@ -427,22 +431,31 @@ struct WorkspaceTaskView: View {
         })
     }
     var body: some View {
-        Group {
-            if action.kind == "task" {
-                pageContent
-                    .focusable()
-                    .focused($pageFocused)
-                    .focusEffectDisabled()
-                    .onKeyPress { handleDetailKey($0) }
-                    .onAppear {
-                        Task {
-                            try? await Task.sleep(for: .milliseconds(100))
-                            // Never steal focus from a field the user already started typing in.
-                            guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
-                            pageFocused = true
+        ScrollViewReader { proxy in
+            Group {
+                if action.kind == "task" {
+                    pageContent
+                        .focusable()
+                        .focused($pageFocused)
+                        .focusEffectDisabled()
+                        .onKeyPress { handleDetailKey($0) }
+                        .onAppear {
+                            Task {
+                                try? await Task.sleep(for: .milliseconds(100))
+                                // Never steal focus from a field the user already started typing in.
+                                guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+                                pageFocused = true
+                            }
                         }
-                    }
-            } else { pageContent }
+                } else { pageContent }
+            }
+            .onChange(of: progressScrollToken) { _, _ in
+                if reduceMotion {
+                    proxy.scrollTo("progress-timeline", anchor: .top)
+                } else {
+                    withAnimation(.easeInOut(duration: 0.25)) { proxy.scrollTo("progress-timeline", anchor: .top) }
+                }
+            }
         }
     }
     private var pageContent: some View {
@@ -644,6 +657,13 @@ struct WorkspaceTaskView: View {
                 if action.kind == "task", current, draft.expanded {
                     feedbackDraftEditor.padding(18).background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 }
+                feedbackProgressCard
+                if let feedbackError {
+                    HStack(spacing:10) {
+                        WorkspaceNoticeText(message:feedbackError,severity:.danger)
+                        Button("重试") { Task { await loadFeedback() } }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("重试读取反馈历史")
+                    }
+                }
                 if action.kind != "task", !isQuestion || !nextActions.isEmpty { nextActionSection }
                 if action.kind == "task" || recurrence != nil {
                     WorkspaceCard {
@@ -751,39 +771,6 @@ struct WorkspaceTaskView: View {
                         }
                     }
                 }
-                if let feedbackError {
-                    HStack(spacing:10) {
-                        WorkspaceNoticeText(message:feedbackError,severity:.danger)
-                        Button("重试") { Task { await loadFeedback() } }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("重试读取反馈历史")
-                    }
-                } else if feedbackPlaceholderVisible && feedbackHistory.isEmpty {
-                    // A one-record history card sits near this height, so the slow read lands without pushing the page down.
-                    HStack(spacing: 10) {
-                        ProgressView().controlSize(.small).accessibilityHidden(true)
-                        Text("正在读取反馈历史…").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 20)
-                    .frame(maxWidth: .infinity, minHeight: 180, alignment: .leading)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("正在读取反馈历史")
-                }
-                if !feedbackHistory.isEmpty {
-                    WorkspaceCard {
-                        VStack(alignment:.leading,spacing:12) {
-                            WorkspaceSectionHeading(title:"实际进展与收获") { WorkspaceBadge(text:"\(feedbackHistory.count)", tone:.neutral) }
-                            WorkspaceListDivider()
-                            ForEach(feedbackHistory) { record in
-                                VStack(alignment: .leading, spacing: 12) {
-                                    Text(record.label + (record.actionVersion == action.version && record.sourceState != "frozen" ? "" : " · 历史记录")).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
-                                    WorkspaceExpandableText(text:record.text,label:"完整记录",size:WorkspaceText.body.size)
-                                    Button("查看结果原话") { openSource(record.recordingSourceID ?? record.sourceID) }.buttonStyle(.workspaceQuietCompact)
-                                }.padding(.vertical,18)
-                                if record.id != feedbackHistory.last?.id { Divider() }
-                            }
-                        }
-                    }
-                }
                 WorkspaceCard {
                     VStack(alignment:.leading,spacing:12) {
                         WorkspaceSectionHeading("记录与依据")
@@ -882,6 +869,11 @@ struct WorkspaceTaskView: View {
             guard undoMessage != nil else { return }
             do { try await Task.sleep(for: .seconds(5)) } catch { return }
             undoMessage = nil
+        }
+        .task(id: feedbackHighlightToken) {
+            guard feedbackHighlightID != nil else { return }
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            feedbackHighlightID = nil
         }
     }
     @State private var showingFeedback = false
@@ -1002,6 +994,80 @@ struct WorkspaceTaskView: View {
     }
     @ViewBuilder private var feedbackDraftEditor: some View {
         TaskFeedbackEditor(model: model, draft: $draft, onDictate: { showingFeedback = true }, onSave: saveFeedback)
+    }
+    @ViewBuilder private var feedbackProgressCard: some View {
+        WorkspaceCard {
+            VStack(alignment:.leading,spacing:12) {
+                WorkspaceSectionHeading(title:"实际进展与收获") {
+                    if !feedbackHistory.isEmpty { WorkspaceBadge(text:"\(feedbackHistory.count)", tone:.neutral) }
+                }
+                WorkspaceListDivider()
+                if feedbackHistory.isEmpty {
+                    if feedbackPlaceholderVisible {
+                        HStack(spacing: 10) {
+                            ProgressView().controlSize(.small).accessibilityHidden(true)
+                            Text("正在读取反馈历史…").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        }.accessibilityElement(children: .combine).accessibilityLabel("正在读取反馈历史")
+                    } else if !feedbackLoading {
+                        Text("还没有记录进展。记录后会按日期在这里形成时间线。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(feedbackHistory.reversed())) { record in
+                            feedbackTimelineRow(record)
+                        }
+                    }
+                }
+            }
+        }
+        .id("progress-timeline")
+    }
+    private func feedbackTimelineRow(_ record: ActionFeedbackRecord) -> some View {
+        let stamp = feedbackStamp(record)
+        let type = record.label + (record.actionVersion == action.version && record.sourceState != "frozen" ? "" : " · 历史记录")
+        return HStack(alignment: .top, spacing: 14) {
+            timelineDot(latest: record.id == feedbackHistory.last?.id)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(stamp + " · " + type).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText)
+                WorkspaceExpandableText(text: record.text, label: "完整记录", size: WorkspaceText.body.size)
+                Button("查看结果原话") { openSource(record.recordingSourceID ?? record.sourceID) }
+                    .buttonStyle(.workspaceQuietCompact)
+            }
+            .padding(.bottom, 16)
+        }
+        .padding(.horizontal, 8)
+        .padding(.top, 6)
+        .background(feedbackHighlightID == record.id ? palette.selection : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: feedbackHighlightID)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(stamp + "，" + type + "，" + record.text)
+    }
+    private func timelineDot(latest: Bool) -> some View {
+        ZStack(alignment: .top) {
+            Rectangle().fill(palette.border).frame(width: 2).frame(maxHeight: .infinity)
+            Circle().fill(latest ? palette.accent : palette.secondaryText).frame(width: 9, height: 9).padding(.top, 5)
+        }
+        .frame(width: 12)
+        .accessibilityHidden(true)
+    }
+    private func feedbackStamp(_ record: ActionFeedbackRecord) -> String {
+        guard let date = ConversationReflectionFocus.date(record.createdAt) else { return record.createdAt }
+        return feedbackDayLabel(date) + " " + feedbackTimeLabel(date)
+    }
+    private func feedbackDayLabel(_ date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "今天" }
+        if calendar.isDateInYesterday(date) { return "昨天" }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = calendar.isDate(date, equalTo: Date(), toGranularity: .year) ? "M月d日" : "yyyy年M月d日"
+        return formatter.string(from: date)
+    }
+    private func feedbackTimeLabel(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
     }
     private func completeOutcome() {
         mainActionFailure = nil
@@ -1287,7 +1353,13 @@ struct WorkspaceTaskView: View {
         Task {
             if await model.saveFeedback(action, kind: input.kind, text: input.text, commandID: input.commandID) {
                 if draft.commandID == input.commandID && draft.text == input.text && draft.kind == input.kind { draft = TaskFeedbackDraft() }
-                error = ""; await loadFeedback()
+                draft.expanded = false
+                error = ""
+                await loadFeedback()
+                feedbackHighlightID = feedbackHistory.last?.id
+                feedbackHighlightToken = UUID()
+                progressScrollToken = UUID()
+                AccessibilityNotification.Announcement("已记录进展").post()
             } else { noteMainActionFailure("保存记录") { saveFeedback() } }
         }
     }
