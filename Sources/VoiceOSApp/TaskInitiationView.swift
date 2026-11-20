@@ -56,7 +56,7 @@ struct TaskInitiationView: View {
     var body: some View {
         ScrollViewReader { reader in
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
+                VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
                     WorkspacePageHeading(title: "启动")
                     composer
                     if let record = selected { package(record).id(packageAnchor) }
@@ -116,7 +116,7 @@ struct TaskInitiationView: View {
                 }
                 HStack(spacing: 12) {
                     if materialSources.isEmpty {
-                        Text("还没有可带入的个人原话；先录制或保存一段由你说出的材料。")
+                        Text("还没有可带入的个人原话；先录制或保存一段你说出的材料。")
                             .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     } else {
                         Menu {
@@ -161,16 +161,16 @@ struct TaskInitiationView: View {
 
     private func package(_ record: TaskInitiationRecord) -> some View {
         WorkspaceSection(title: record.route == .answer ? "这次的问题" : "这次要启动的事", icon: "arrow.up.forward") {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
                 sourceLine(record)
                 HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                         Text(taskInitiationRouteLabel(record.route)).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                         Text(record.proposal.title.isEmpty ? "尚未命名这次启动" : record.proposal.title)
                             .vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
                     }
                     Spacer(minLength: 8)
-                    VStack(alignment: .trailing, spacing: 6) {
+                    VStack(alignment: .trailing, spacing: WorkspaceMetrics.rowGap) {
                         statusChip(stateLabel(record), tone: record.isConfirmed ? .accent : .neutral)
                         if record.copiedAt != nil {
                             statusChip(record.route == .answer ? "已复制回答" : "已复制 · 复制不代表已执行", tone: .accent)
@@ -210,7 +210,7 @@ struct TaskInitiationView: View {
     private func clarify(_ record: TaskInitiationRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(record.proposal.clarifyQuestion).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
-            Text("先回答这一个问题会更准确；也可以跳过，按显式假设给出草稿。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("回答会更准确；也可以跳过，按假设给出草稿。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             TextEditor(text: $answer).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 100)
                 .workspaceEditorSurface().accessibilityLabel("澄清回答")
             HStack(spacing: 12) {
@@ -284,7 +284,7 @@ struct TaskInitiationView: View {
                     .buttonStyle(.workspaceQuiet)
                     .disabled(model.initiationBusy || !model.modelConfigured || !allowCloud)
                     .accessibilityIdentifier("initiation.answer")
-                Text("对这段原话直接要一份回答，不会创建任务或提醒。")
+                Text("直接要一份回答，不创建任务或提醒。")
                     .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 Spacer()
             }
@@ -328,7 +328,7 @@ struct TaskInitiationView: View {
             }.pickerStyle(.segmented).frame(maxWidth: 300)
                 .disabled(model.initiationBusy || record.editedArtifact != nil || record.isConfirmed)
             if record.editedArtifact != nil {
-                Text("材料已手动编辑，偏好不再自动调整。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("已手动编辑，偏好不再自动调整。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             }
             TextEditor(text: $artifactDraft).vosFont(WorkspaceText.body).frame(minHeight: 360)
                 .workspaceEditorSurface().accessibilityLabel("启动材料")

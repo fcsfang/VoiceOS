@@ -122,13 +122,13 @@ struct PausedActionBatchControl: View {
                 if preview.isBatchable {
                     Button("重新识别全部暂停的待办…") { Task { await model.preparePausedActionBatch() } }
                         .disabled(model.pausedActionBatchUnavailableReason != nil)
-                    Text("涉及 \(preview.affectedMaterialCount) 份材料、\(preview.targetActionCount) 条暂停待办。每份材料重新识别一次，会调用已配置的文本模型；长文字或完整录音沿用该材料的现有分段流程，部分材料会先校正完整转写，可能因此多一次模型调用。相同依据会复用，不会重复发送。")
+                    Text("涉及 \(preview.affectedMaterialCount) 份材料、\(preview.targetActionCount) 条暂停待办。每份材料重新识别一次，会调用已配置的文本模型；长文字或完整录音沿用现有分段流程，部分材料会先校正转写，可能多一次调用。相同依据会复用，不会重复发送。")
                         .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                     if let reason = model.pausedActionBatchUnavailableReason {
                         Text(reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     }
                 } else {
-                    Text("当前没有可批量重新识别的暂停待办；上面的事项需要逐条打开核对。")
+                    Text("没有可批量重新识别的暂停待办；上面的事项需要逐条核对。")
                         .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
             }

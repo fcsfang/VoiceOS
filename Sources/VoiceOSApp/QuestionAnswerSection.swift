@@ -58,15 +58,15 @@ struct QuestionAnswerSection: View {
 
     private var subtitle: String {
         switch phase {
-        case .none: return "让 VoiceOS 先回答；答案会保存下来，可以继续追问。"
-        case .running: return "回答正在生成，可以继续做别的事。"
-        case .completed: return "回答已保存，可以在下面继续追问或阅读完整结果。"
+        case .none: return "让 VoiceOS 回答；答案会保存，可继续追问。"
+        case .running: return "回答正在生成，可以先做别的事。"
+        case .completed: return ""
         case .failed: return "这次回答没有完成；可以重试。"
         }
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             Text("这个问题还没有 VoiceOS 的回答。").vosFont(WorkspaceText.body)
             HStack(spacing: 12) {
                 Button("让 VoiceOS 回答", systemImage: "sparkles") { ask(fresh: true) }
@@ -89,7 +89,7 @@ struct QuestionAnswerSection: View {
     }
 
     private var completedState: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             if let answer {
                 if answer.validity != "current" {
                     Label("依据已变化，这份回答作为历史保留。", systemImage: "pause.circle")
@@ -97,11 +97,9 @@ struct QuestionAnswerSection: View {
                 }
                 if let report = answer.report, !report.isEmpty {
                     WorkspaceExpandableText(text: report, label: "完整回答", lines: 6, size: WorkspaceText.body.size)
-                } else {
-                    Text("回答已就绪。").vosFont(WorkspaceText.body)
                 }
                 if !answer.inputReferences.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                         Text("依据原话").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
                         ActionOriginalQuotes(model: model, action: action, openSource: openSource, explicitReferences: answer.inputReferences, quoteLimit: 120)
                     }
@@ -122,7 +120,7 @@ struct QuestionAnswerSection: View {
 
     @ViewBuilder private var followupComposer: some View {
         if canFollowup {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                 Text("接着追问").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
                 HStack(spacing: 10) {
                     TextField("对这份回答继续追问…", text: $followup)
@@ -212,7 +210,7 @@ struct QuestionAnswerSection: View {
     }
 
     private var failedState: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             if let message = AssistantFailurePresentation.message(answer?.error) {
                 WorkspaceNoticeText(message: message, severity: .danger)
             } else {
@@ -227,7 +225,7 @@ struct QuestionAnswerSection: View {
                     Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuiet)
                 }
                 if answer?.validity != "current" {
-                    Text("依据已变化，旧回答不能重试；可以在操作区重新回答。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("依据已变化，旧回答不能重试；可在操作区重新回答。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
             }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }

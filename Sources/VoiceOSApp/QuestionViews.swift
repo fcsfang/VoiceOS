@@ -23,7 +23,7 @@ struct QuestionStateView: View {
             Text("问题第 \(question.version) 版 · \(question.status.displayLabel)").vosFont(WorkspaceText.meta)
             if question.seed.ownership == "ai_candidate" { Text("AI 提出的问题 · 不代表我的疑问").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             if question.validity == "frozen" { Text("历史状态 · 原话、归属或答案依据已变化，暂停当前使用").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
-            if question.canReopen { Text("当前答案依据已变化；可明确重开，旧答案仍保留在历史中。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            if question.canReopen { Text("答案依据已变化；可重开，旧答案仍保留在历史中。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             Button(question.canReopen ? "重新打开并保留历史…" : "登记问题状态…") { changing = true }.disabled((question.validity != "current" && !question.canReopen) || model.savingQuestion)
             if let revisions = model.questionRevisions[question.id], !revisions.isEmpty {
                 DisclosureGroup("问题状态历史（\(revisions.count)）") {
@@ -46,7 +46,7 @@ struct QuestionStateView: View {
         }.sheet(item: $answerHistory) { revision in
             VStack(alignment: .leading, spacing: 12) {
                 Text("当时登记的答案依据").vosFont(WorkspaceText.sectionTitle)
-                Text("这是历史版本。原话更正后仍保留原依据，当前状态可能已冻结。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("历史版本。原话更正后仍保留原依据；当前状态可能已冻结。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 if let evidence = revision.input.resolution,
                    let source = revision.input.resolutionContext?.sources.first(where: { $0.sourceID == evidence.reference.sourceID }) {
                     Text("逐字稿版本：" + source.transcriptVersionID).vosFont(WorkspaceText.meta)
@@ -84,7 +84,7 @@ struct QuestionTransitionView: View {
             }
             TextField("原因或研究进展（必填）", text: $reason)
             if target == .resolved {
-                Text("选择一份明确回答这个问题的个人表达，并引用连续原话。记录解决不改变认知的未验证状态。").vosFont(WorkspaceText.meta)
+                Text("选择一份明确回答这个问题的个人表达，引用连续原话；记录解决不改变未验证状态。").vosFont(WorkspaceText.meta)
                 Picker("答案出处", selection: $answerSource) {
                     Text("请选择我的表达").tag("")
                     ForEach(model.records.filter { $0.origin == "user" && $0.speaker == "user" && $0.transcriptVersionID != nil && !$0.isTrashed }) { source in Text(MaterialNaming.displayName(source.name)).tag(source.id) }
@@ -118,7 +118,7 @@ struct AssociationQuestionsView: View {
     var body: some View {
         if !item.historicalQuestions.isEmpty {
             DisclosureGroup("此历史出处登记的问题（\(item.historicalQuestions.count)）") {
-                Text("这是出处中的问题记录；AI关联提案不确认两次表达是同一问题，也不改变解决状态。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("出处中的问题记录；AI 关联提案不确认两次表达是同一问题，也不改变解决状态。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 ForEach(item.historicalQuestions) { saved in
                     // Prefer the current local projection after an explicit state operation.
                     let question = model.questionRecords.first(where: { $0.id == saved.id }) ?? saved
