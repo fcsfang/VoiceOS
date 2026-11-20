@@ -817,3 +817,11 @@
 
 - voiceos-cli 全新版安装到 ~/.local/bin；`action feedback` 对不存在 id 直接 not_found（exit 2，未投递）；`action complete` 对已完成行动经真实 app 投递，1 秒内 observed，state=completed、version 未变（幂等无新修订），exit 0。URL 通道在正式 bundle 上打通且零数据变更。
 - `claude mcp add voiceos -- python3 Tools/voiceos-mcp/server.py` 已注册（项目级，写入 ~/.claude.json 本仓库条目）。
+
+## 波 124：底色和谐与表面层次（2026-11-20，已推送）
+
+- 用户反馈：整体底色灰、侧边栏与卡片很白，突兀。
+- 124-A 调色板：graphite surface 0xFCFCFD→0xF7F7F8（与 canvas 差 5 级）；sage surface 0xFFFFFF→0xF8FAF5（与 canvas 同绿调）；深色两套不动。对比度实测：正文 15.2:1 / 12.3:1，border 1.37:1，selection 1.16:1。
+- 124-B 表面层次：确立 canvas（页面/模态根）→ sidebar → surface（唯一卡片层）→ selection（卡内面板/编辑器/选中）模型；新增 WorkspaceModalSurface，26 个文件补模态根 palette.canvas（含场景级 sheet 之外的注入修正 WorkspaceView:531），卡内第二层 surface 降为 selection（知识核查 issue 卡、监测条目、编辑器面、字段面）。
+- 残留：场景级 TextCaptureView sheet 的主题 palette 注入仍缺（属主题传播，留待后续）。
+- 集成：696 项 0 失败。
