@@ -106,6 +106,7 @@ struct ReminderSettingsView: View {
                 }.buttonStyle(.workspacePrimary).disabled(model.remindersBusy || model.reminderFieldEditing)
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall).environment(\.timeZone, zone)
+            .workspaceModalSurface()
         .onAppear { load() }.interactiveDismissDisabled(model.reminderFieldEditing)
         .onChange(of: hasTime) { _, on in
             if !on { hasAlert = false; alert = Date().addingTimeInterval(3600) }

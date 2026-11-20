@@ -728,6 +728,7 @@ struct ThoughtPanoramaView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
         }.padding(24)
+            .workspaceModalSurface()
     }
 
     private var navigationIDs: [[String]] {
@@ -923,6 +924,7 @@ private struct RegionInspectorPanel: View {
             }
             .padding(20)
         }
+        .workspaceModalSurface()
         .defaultScrollAnchor(.top)
         .task(id: briefing.digest) {
             guard !briefing.quotes.isEmpty else { return }
@@ -1045,6 +1047,7 @@ private struct QuestionInspectorPanel: View {
             }
             .padding(20)
         }
+        .workspaceModalSurface()
     }
 }
 
@@ -1119,6 +1122,7 @@ private struct RelationInspectorPanel: View {
             }
             .padding(20)
         }
+        .workspaceModalSurface()
     }
 }
 

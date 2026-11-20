@@ -615,7 +615,7 @@ struct WorkspaceMonitorView: View {
             }
         }
         .padding(14)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+        .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
         .overlay {
             RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius)
                 .strokeBorder(palette.border.opacity(0.7), lineWidth: 1)

@@ -499,6 +499,7 @@ struct WorkspaceView: View {
                     Button("取消") { model.choosingReminderCalendar=false }
                 }.padding(24)
                     .frame(minWidth:440,idealWidth:440,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+                    .workspaceModalSurface()
             }
             .sheet(item: $panoramaSourceEditor) { source in
                 WorkspaceTranscriptEditor(model: model, source: source) { panoramaSourceEditor = nil }
@@ -527,6 +528,7 @@ struct WorkspaceView: View {
             .sheet(isPresented:$showingPendingReminderSyncs) { pendingReminderSyncSheet }
             .sheet(isPresented:$showingBackupRestore) { BackupLibraryRestoreView(currentRoot:model.libraryRoot) { showingBackupRestore=false } }
             .sheet(isPresented: mergeTopicSheetPresented) { mergeTopicSheet }
+            .environment(\.workspacePalette, palette)
     }
     private var alertContent: some View {
         sheetContent
@@ -573,6 +575,7 @@ struct WorkspaceView: View {
                 Button("保存") { Task { await saveView() } }.buttonStyle(.workspacePrimary).disabled(!canSaveView || savingView)
             }
         }.padding(24).frame(width:400)
+            .workspaceModalSurface()
     }
     private var importIssueAlertPresented: Binding<Bool> {
         Binding(get: { model.fullRecordingImportIssue != nil }, set: { if !$0 { model.fullRecordingImportIssue = nil } })
@@ -2454,6 +2457,7 @@ struct WorkspaceView: View {
                     .disabled(planSelection.isEmpty || planningToday)
             }
         }.padding(24).frame(minWidth:560,idealWidth:560,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+            .workspaceModalSurface()
     }
     private func planCandidateRow(_ entry:ActionTimeEntry) -> some View {
         let selected=planSelection.contains(entry.action.id)
@@ -2688,6 +2692,7 @@ struct WorkspaceView: View {
                     .disabled(model.remindersBusy || model.pendingReminderSyncs.isEmpty)
             }
         }.padding(24).frame(minWidth:520)
+            .workspaceModalSurface()
     }
     private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
@@ -2845,6 +2850,7 @@ struct WorkspaceView: View {
                 }
             }
         }.padding(24).frame(width:460)
+            .workspaceModalSurface()
     }
     private var trimmedNewViewName: String { newViewName.trimmingCharacters(in:.whitespacesAndNewlines) }
     private var canSaveView: Bool {
@@ -3102,7 +3108,7 @@ private struct WorkspaceTopicEntry: View {
         DisclosureGroup("留下认识、实践或结果") {
             VStack(alignment:.leading,spacing:13) {
                 Picker("记录类型",selection:$kind) { ForEach(ReflectionQuestionEntryKind.allCases,id:\.self) { Text($0.label).tag($0) } }.pickerStyle(.menu)
-                TextEditor(text:$text).frame(minHeight:100).padding(8).background(palette.surface,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                TextEditor(text:$text).frame(minHeight:100).padding(8).background(palette.selection,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 Button("保存并接回主题") { saving=true;Task { do { try await model.saveReflectionQuestionEntry(questionID:topic.id,kind:kind,text:text,sourceIDs:sourceIDs,allowCloud:true);text="";error="" } catch { self.error=error.localizedDescription };saving=false } }.disabled(saving || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
                 if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             }.padding(.top,12)

@@ -44,6 +44,7 @@ struct BilingualView: View {
             Divider()
             content
         }.padding(24).frame(width: WorkspaceMetrics.modalMedium, height: 720)
+            .workspaceModalSurface()
             .onChange(of: excerpt.paragraphs) { _, _ in retrying = []; retryFailures = [:] }
     }
 

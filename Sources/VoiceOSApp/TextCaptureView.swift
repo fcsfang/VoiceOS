@@ -246,6 +246,7 @@ struct TextCaptureView: View {
                     .accessibilityLabel("保存为模板")
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
+            .workspaceModalSurface()
     }
     private var manageTemplatesSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -276,6 +277,7 @@ struct TextCaptureView: View {
                 }.frame(maxHeight: 360)
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalMedium)
+            .workspaceModalSurface()
     }
     private var linkImportSheet: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -288,6 +290,7 @@ struct TextCaptureView: View {
                 Button("抓取正文") { importLink() }.buttonStyle(.workspacePrimary)
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
+            .workspaceModalSurface()
     }
     private func importLink() {
         let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -384,7 +387,7 @@ private struct WorkspaceFieldSurface: ViewModifier {
         content.textFieldStyle(.plain)
             .padding(.horizontal, 12)
             .frame(minHeight: WorkspaceMetrics.fieldHeight)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+            .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
             .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border, lineWidth: 1) }
     }
 }

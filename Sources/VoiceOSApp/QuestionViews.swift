@@ -55,6 +55,7 @@ struct QuestionStateView: View {
                 }
                 HStack { Spacer(); Button("完成") { answerHistory = nil }.keyboardShortcut(.cancelAction) }
             }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
+                .workspaceModalSurface()
         }.sheet(isPresented: $changing) {
             QuestionTransitionView(question: question, model: model) { changing = false }
         }
@@ -105,6 +106,7 @@ struct QuestionTransitionView: View {
                 }.buttonStyle(.workspacePrimary).disabled(model.savingQuestion || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (target == .resolved && (answerSource.isEmpty || answerQuote.isEmpty)))
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
+        .workspaceModalSurface()
         .onAppear { target = allowed[0] }
     }
 }

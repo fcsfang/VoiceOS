@@ -165,6 +165,7 @@ struct WeeklyReviewView: View {
             }
             .sheet(isPresented: $showingReflectionMap) { reflectionMapSheet }
         }
+        .workspaceModalSurface()
     }
 
     private var pendingOutcomeAnchor: String {

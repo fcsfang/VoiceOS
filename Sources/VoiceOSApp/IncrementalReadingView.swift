@@ -51,6 +51,7 @@ struct IncrementalReadingView: View {
             if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
             HStack { Spacer(); Button("关闭",action:dismiss).keyboardShortcut(.defaultAction) }
         }.padding(24).frame(width:680,height:560)
+        .workspaceModalSurface()
         .task(id:source.id) { await reload() }
     }
     private func slice(_ text:String,start:Int,end:Int) -> String {

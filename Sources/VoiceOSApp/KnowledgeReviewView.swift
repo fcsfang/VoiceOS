@@ -160,7 +160,7 @@ struct KnowledgeReviewSection: View {
             }
             KnowledgeReviewIssueStatusControls(model: model, record: record, issue: issue)
         }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+            .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.border, lineWidth: 1) }
     }
     @ViewBuilder private func field(_ title: String, _ text: String) -> some View {
