@@ -30,7 +30,7 @@ struct KnowledgeReviewSection: View {
             WorkspaceSectionHeading(title: "知识核查") {
                 if model.knowledgeReviewBusy { ProgressView().controlSize(.small).accessibilityLabel("正在核查知识") }
             }
-            Text("对照原话检查事实、推断与适用条件。以下是有依据的 AI 核查建议，是否采纳由你决定；可标为已读、认可或驳回，已认可与已驳回的建议默认折叠。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text("对照原话检查事实、推断与适用条件；建议是否采纳由你决定。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             ForEach(sources) { source in
                 sourceReview(source)
             }
@@ -52,7 +52,7 @@ struct KnowledgeReviewSection: View {
     }
     @ViewBuilder private func sourceReview(_ source: SourceRecord) -> some View {
         let record = review(source.id)
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
             if sources.count > 1 { Text(source.displayTitle).vosFont(WorkspaceText.rowTitle).textSelection(.enabled) }
             if let record {
                 switch record.state {
@@ -79,11 +79,9 @@ struct KnowledgeReviewSection: View {
                 case "completed":
                     let issues = record.issues.filter { matches($0, source: source) }
                     if record.issues.isEmpty {
-                        Text("本次未提出需要纠偏的知识判断。").vosFont(WorkspaceText.body)
-                        Text("这不代表全文全部正确；当前核查可能仍有遗漏。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Text("本次未提出需要纠偏的知识判断；这不代表全文正确，核查可能仍有遗漏。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                     } else if issues.isEmpty {
-                        Text("本条思考暂无可按连续原话定位的核查建议。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-                        Text("来源中其他判断的核查可在资料详情查看，未关联到这里。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Text("本条思考暂无可按连续原话定位的核查建议；其他判断的核查见资料详情。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                     } else {
                         issueList(record, issues: issues)
                     }
@@ -118,7 +116,7 @@ struct KnowledgeReviewSection: View {
     }
     @ViewBuilder private func issueList(_ record: KnowledgeReviewRecord, issues: [KnowledgeReviewIssue]) -> some View {
         let counts = record.issueCounts(of: issues)
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
             HStack(spacing: 6) {
                 WorkspaceBadge(text: "待核查 \(counts.pending)", tone: .warning)
                 WorkspaceBadge(text: "已读 \(counts.seen)", tone: .neutral)
@@ -136,7 +134,7 @@ struct KnowledgeReviewSection: View {
         }
     }
     private func issueCard(_ issue: KnowledgeReviewIssue, record: KnowledgeReviewRecord) -> some View {
-        VStack(alignment: .leading, spacing: 11) {
+        VStack(alignment: .leading, spacing: 12) {
             Text(kindLabel(issue.kind.rawValue)).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.accent)
             VStack(alignment: .leading, spacing: 5) {
                 Text("原话").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)

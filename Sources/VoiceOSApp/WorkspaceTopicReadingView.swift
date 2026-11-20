@@ -109,7 +109,7 @@ struct WorkspaceTopicReadingView: View {
     }
 
     var body: some View {
-        VStack(alignment:.leading,spacing:24) {
+        VStack(alignment:.leading,spacing:WorkspaceMetrics.sectionGap) {
             if topic.organizationStale == true { TopicStaleBanner() }
             if bodyPending { topicPendingBanner }
             if mode == "概览" { introduction }
@@ -149,7 +149,7 @@ struct WorkspaceTopicReadingView: View {
 
     private var introduction: some View {
         WorkspaceCard {
-            VStack(alignment:.leading,spacing:16) {
+            VStack(alignment:.leading,spacing:12) {
                 HStack {
                     Label("主题速览",systemImage:"sparkles").vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
                     Spacer()
@@ -185,7 +185,7 @@ struct WorkspaceTopicReadingView: View {
         WorkspaceCard {
             VStack(alignment:.leading,spacing:12) {
                 Label(model.organizingTopics ? "正在整理小主题与阅读卡片" : bodyPending ? "正文整理中" : "这份主题尚未生成结构卡片",systemImage:"rectangle.3.group").vosFont(WorkspaceText.meta.size, weight: .semibold)
-                Text(bodyPending ? "主题骨架已完成；正文按主题分批生成，已完成的会逐批出现并保留。" : "完整材料已保留；整理后会显示要点、原话与行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                Text(bodyPending ? "正文分批生成，已完成的部分会保留。" : "原文已保留；整理后会显示要点、原话与行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                 if model.organizingTopics { ProgressView().controlSize(.small) }
                 else if bodyPending {
                     Button("补齐正文") { model.queueTopicOrganization(topUp:true) }.buttonStyle(.workspacePrimary).disabled(!model.modelConfigured)
@@ -212,7 +212,7 @@ struct WorkspaceTopicReadingView: View {
 
     private var structure: some View {
         WorkspaceCard {
-            VStack(alignment:.leading,spacing:16) {
+            VStack(alignment:.leading,spacing:12) {
                 WorkspaceSectionHeading(title:"内容结构") {
                     if selectedSection != nil { Button("查看全部") { selectedSection=nil }.buttonStyle(.workspaceQuietCompact) }
                 }
@@ -225,7 +225,7 @@ struct WorkspaceTopicReadingView: View {
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain)
                     Rectangle().fill(palette.border).frame(width:1,height:16)
-                    LazyVGrid(columns:[GridItem(.adaptive(minimum:210),spacing:12)],alignment:.leading,spacing:12) {
+                    LazyVGrid(columns:[GridItem(.adaptive(minimum:210),spacing:12)],alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                         ForEach(Array(listedSections.enumerated()),id:\.element.id) { index,section in
                             Button { selectedSection = selectedSection == section.id ? nil : section.id } label: {
                                 HStack(alignment:.top,spacing:8) {
@@ -244,7 +244,6 @@ struct WorkspaceTopicReadingView: View {
                 }
                 if filteredSections.isEmpty && !filterTerm.isEmpty { Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                 if filteredSections.count > 6 { Button(showingAllSections ? "收起结构" : "展开全部 \(filteredSections.count) 个小主题") { showingAllSections.toggle() }.buttonStyle(.workspaceQuietCompact) }
-                Text("连线表示主题下的内容分组").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             }
         }
         .focusable()
@@ -259,7 +258,7 @@ struct WorkspaceTopicReadingView: View {
         if displayedSections.isEmpty && !filterTerm.isEmpty {
             Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
         } else {
-            LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:16)],alignment:.leading,spacing:16) {
+            LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:16)],alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                 ForEach(displayedSections) { section in readingCard(section) }
             }
         }
@@ -269,7 +268,7 @@ struct WorkspaceTopicReadingView: View {
         if displayedSections.isEmpty && !filterTerm.isEmpty {
             Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
         } else {
-            LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:16)],alignment:.leading,spacing:16) {
+            LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:16)],alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                 ForEach(Array(displayedSections.prefix(3))) { section in readingCard(section) }
             }
             Button("查看全部 \(sections.count) 张卡片",systemImage:"text.book.closed") { showUnderstanding() }
@@ -282,7 +281,7 @@ struct WorkspaceTopicReadingView: View {
         let previewClaims=Array(sectionClaims.prefix(2))
         let sectionActions=reading.sectionActions[section.id] ?? []
         return WorkspaceCard {
-            VStack(alignment:.leading,spacing:16) {
+            VStack(alignment:.leading,spacing:12) {
                 HStack {
                     Spacer()
                     Text(String(format:"%02d",(reading.sectionPosition[section.id] ?? 0)+1)).vosFont(WorkspaceText.caption.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
@@ -290,7 +289,7 @@ struct WorkspaceTopicReadingView: View {
                 Text(section.title).vosFont(WorkspaceText.sectionTitle).fixedSize(horizontal:false,vertical:true).accessibilityAddTraits(.isHeader)
                 WorkspaceExpandableText(text:section.summary,label:"小节内容",lines:5,size:WorkspaceText.body.size)
                 if !previewClaims.isEmpty {
-                    VStack(alignment:.leading,spacing:12) {
+                    VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                         ForEach(previewClaims) { claim in
                             VStack(alignment:.leading,spacing:4) {
                                 Text(ownership(claim)).vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(.secondary)
@@ -301,7 +300,7 @@ struct WorkspaceTopicReadingView: View {
                 }
                 if !sectionClaims.isEmpty {
                     DisclosureGroup {
-                        VStack(alignment:.leading,spacing:16) {
+                        VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                             ForEach(sectionClaims) { claim in
                                 VStack(alignment:.leading,spacing:8) {
                                     Text(ownership(claim)).vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(.secondary)
@@ -332,7 +331,7 @@ struct WorkspaceTopicReadingView: View {
                 }
                 Divider()
                 DisclosureGroup("查看原话依据") {
-                    VStack(alignment:.leading,spacing:12) {
+                    VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                         ForEach(Array(section.evidence.enumerated()),id:\.offset) { _,evidence in
                             VStack(alignment:.leading,spacing:8) {
                                 Text(evidence.quote).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
@@ -369,7 +368,7 @@ struct WorkspaceTopicReadingView: View {
     @ViewBuilder private var questions: some View {
         let questions=topic.organization?.questions ?? []
         if !questions.isEmpty {
-            VStack(alignment:.leading,spacing:16) {
+            VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                     Text("值得继续的问题").vosFont(WorkspaceText.sectionTitle)
                 ForEach(questions,id:\.self) { question in
                     Button { discuss(question) } label: {
@@ -409,7 +408,7 @@ struct WorkspaceTopicReadingView: View {
                                 Text("关联依据：" + connection.update.reason).foregroundStyle(.secondary).textSelection(.enabled)
                             }.padding(.top,12)
                         }.vosFont(WorkspaceText.meta)
-                    }.padding(.vertical,16)
+                    }.padding(.vertical,WorkspaceMetrics.rowGap)
                     if connection.id != (mode == "概览" ? Array(connections.prefix(3)) : connections).last?.id { Divider() }
                 }
             }
@@ -431,7 +430,7 @@ struct WorkspaceTopicReadingView: View {
     }
 
     private var actionResults: some View {
-        VStack(alignment:.leading,spacing:24) {
+        VStack(alignment:.leading,spacing:WorkspaceMetrics.sectionGap) {
             if sections.isEmpty { preparingCards }
             let open=tasks.filter { $0.state == "open" }
             let completed=tasks.filter { $0.state == "completed" }
@@ -443,7 +442,7 @@ struct WorkspaceTopicReadingView: View {
             }
             let intentions=actions.filter { $0.kind != "task" }
             if !intentions.isEmpty {
-                WorkspaceSection(title:"探索意图",icon:"lightbulb",count:intentions.count) { ForEach(intentions) { action in taskButton(action).padding(.vertical,12) } }
+                WorkspaceSection(title:"探索意图",icon:"lightbulb",count:intentions.count) { ForEach(intentions) { action in taskButton(action).padding(.vertical,WorkspaceMetrics.rowGap) } }
             }
             if !deliveries.isEmpty {
                 WorkspaceSection(title:"AI 的交付",icon:"doc.text",count:deliveries.count) { ForEach(deliveries) { result in deliveryButton(result) } }
@@ -462,7 +461,7 @@ struct WorkspaceTopicReadingView: View {
                         WorkspaceExpandableText(text:entry.text,label:"完整记录",size:WorkspaceText.body.size)
                         if !entry.unavailableSourceIDs.isEmpty { Text("部分关联材料已暂停使用，此处保留当时的表达。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                         Button("查看记录原文") { openSource(entry.sourceID) }.buttonStyle(.workspaceQuietCompact)
-                    }.padding(.vertical,16)
+                    }.padding(.vertical,WorkspaceMetrics.rowGap)
                 }
             }
         }
@@ -474,7 +473,7 @@ struct WorkspaceTopicReadingView: View {
             taskButton(action)
             if feedback.isEmpty { Text(action.state == "completed" ? "已完成，尚未记录实际效果" : "还没有登记实际进展").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             ForEach(feedback) { outcome in outcomeCard(outcome) }
-        }.padding(.vertical,16)
+        }.padding(.vertical,WorkspaceMetrics.rowGap)
     }
 
     private func taskButton(_ action:ActionRecord) -> some View {
@@ -514,7 +513,7 @@ struct WorkspaceTopicReadingView: View {
     }
 
     private func deliveryButton(_ result:AssistantExecutionRecord) -> some View {
-        WorkspaceRow(title:result.title,subtitle:"AI 交付 · 实践效果见实际记录",icon:"doc.text",trailing:"阅读") { openDelivery(result.id) }
+        WorkspaceRow(title:result.title,subtitle:"AI 交付",icon:"doc.text",trailing:"阅读") { openDelivery(result.id) }
     }
     private func sectionClaimCount(_ section:TopicReadingSection) -> Int {
         reading.sectionClaims[section.id]?.count ?? 0
@@ -568,7 +567,7 @@ struct WorkspaceTopicTile: View {
     var body: some View {
         Button(action:open) {
             WorkspaceCard {
-                VStack(alignment:.leading,spacing:16) {
+                VStack(alignment:.leading,spacing:12) {
                     HStack {
                         Image(systemName:"circle.hexagongrid").vosFont(18).foregroundStyle(palette.action)
                         Spacer()

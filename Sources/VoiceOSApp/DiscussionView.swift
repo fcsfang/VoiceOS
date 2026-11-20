@@ -12,7 +12,7 @@ struct DiscussionView: View {
     @State private var referencePreview:ReferencePreview?
     @State private var confirmingEnd=false
     var body: some View {
-        VStack(alignment:.leading,spacing:12) {
+        VStack(alignment:.leading,spacing:WorkspaceMetrics.groupGap) {
             HStack {
                 Text(model.discussionReflection == nil ? "继续讨论" : "一起回顾 · 认知与行动").vosFont(WorkspaceText.sectionTitle)
                 Spacer()
@@ -26,7 +26,7 @@ struct DiscussionView: View {
             }.disabled(model.discussionSending || model.discussionSaving || model.discussionExtracting || model.dictationActive)
             if let session=model.discussionSession {
                 ScrollView {
-                    VStack(alignment:.leading,spacing:16) {
+                    VStack(alignment:.leading,spacing:WorkspaceMetrics.groupGap) {
                         DisclosureGroup("入口原文与来源") {
                             ForEach(model.discussionHistory,id:\.sourceID) { source in
                                 VStack(alignment:.leading,spacing:6) {
@@ -42,7 +42,7 @@ struct DiscussionView: View {
                             }
                             Text(focus.isTopicOverview ? "主题全貌 · \(focus.sourceIDs.count) 份完整材料" : "回顾 \(focus.start.formatted(date: .abbreviated, time: .omitted)) — \(focus.end.addingTimeInterval(-1).formatted(date: .abbreviated, time: .omitted)) · \(focus.sourceIDs.count) 份完整原文").vosFont(WorkspaceText.meta)
                             Text(focus.reviewPurpose).vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-                            Text("以进入时选定的资料为依据，早期资料作为背景；新记录可从认知地图重新进入回顾。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text("以进入时选定的资料为依据。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         }
                         if model.discussionTurns.isEmpty { Text("先口述或输入本轮发言；保存后再发送。") }
                         ForEach(model.discussionTurns) { turn in

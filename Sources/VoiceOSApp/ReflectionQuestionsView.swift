@@ -88,7 +88,7 @@ struct ReflectionQuestionsView: View {
                 Divider()
                 if let question = selected { detail(question) }
                 else {
-                    ContentUnavailableView("从一个持续关心的主题开始", systemImage: "bubble.left.and.text.bubble.right", description: Text("例如：Agent 记忆，或怎样让 AI Agent 稳定完成真实任务？\n主题与问题都可以承载持续的探索。"))
+                    ContentUnavailableView("从一个持续关心的主题开始", systemImage: "bubble.left.and.text.bubble.right", description: Text("例如：Agent 记忆，或怎样让 AI Agent 稳定完成真实任务？"))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
@@ -100,7 +100,7 @@ struct ReflectionQuestionsView: View {
         .sheet(isPresented: $managingSources) { sourcesSheet }
     }
     private var questionList: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             HStack {
                 Text("长期探索").vosFont(WorkspaceText.sectionTitle)
                 Spacer()
@@ -136,7 +136,7 @@ struct ReflectionQuestionsView: View {
         }.padding(16)
     }
     private func detail(_ question: ReflectionQuestion) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             Text(question.title).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
             HStack {
                 Button("关联资料 · \(sourceIDs.count)") { managingSources = true }.buttonStyle(.workspaceSecondaryCompact).disabled(busy)
@@ -179,16 +179,16 @@ struct ReflectionQuestionsView: View {
                 Spacer()
             }
             if periodicReview { Text(reviewPeriod.reviewTitle + " · " + dateLabel).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
-            Text(periodicReview ? "回顾这个周期的进展，同时带上已关联的完整历史作为依据；下方记录仍显示整个主题。" : "沿着整个主题探索，不按日历截断。已关联的完整资料、个人记录与成果共同构成讨论依据。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            Text(periodicReview ? "回顾这个周期；下方记录仍显示整个主题。" : "沿整个主题探索，不按日历截断。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Picker("记录视角", selection: $entryFilter) {
                 Text("全部记录").tag("all")
                 Text("认识变化").tag(ReflectionQuestionEntryKind.change.rawValue)
                 Text("尝试与结果").tag("practice")
             }.pickerStyle(.segmented)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     if entries.isEmpty {
-                        Text("先关联一份材料，或留下你现在的理解。以后可以回来对照它如何变化。").vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 16)
+                        Text("先关联一份材料，或留下你现在的理解。").vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 16)
                     }
                     ForEach(entryFilter == "practice" ? entries.filter { $0.kind == .experiment || $0.kind == .result } : visibleEntries) { entry in
                         entryCard(entry)
@@ -265,9 +265,9 @@ struct ReflectionQuestionsView: View {
         }.disabled(busy)
     }
     private var createSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             Text(editingQuestion == nil ? "你想持续探索什么？" : "重新表述主题或问题").vosFont(WorkspaceText.sectionTitle)
-            Text("可以写一个主题，也可以写一个具体问题。无需问句；相关资料、想法与实践以后逐渐加入。").foregroundStyle(.secondary)
+            Text("可以写一个主题，也可以写一个具体问题；资料、想法与实践以后逐渐加入。").foregroundStyle(.secondary)
             TextField("例如：Agent 记忆，或如何评估记忆效果？", text: $title).textFieldStyle(.roundedBorder)
             Text("\(title.unicodeScalars.count) / 200").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Toggle("允许标题用于云端讨论", isOn: $titleCloud).vosFont(WorkspaceText.body)
@@ -298,13 +298,13 @@ struct ReflectionQuestionsView: View {
         }.padding(24).frame(width: 560).background(palette.canvas)
     }
     private var sourcesSheet: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             HStack {
                 Text("这个主题的资料").vosFont(WorkspaceText.sectionTitle)
                 Spacer()
                 Button("完成") { managingSources = false }.buttonStyle(.workspaceSecondary).disabled(busy).keyboardShortcut(.cancelAction)
             }
-            Text("从原文、已有知识或任务接回主题，时间不限。关联保留原话与归属，不代表认可观点或完成任务。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("从原文、已有知识或任务接回主题；关联保留原话与归属，不代表认可。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             Picker("关联内容", selection: $sourceMode) {
                 Text("表达与资料").tag("sources")
                 Text("已有知识").tag("knowledge")
@@ -315,7 +315,7 @@ struct ReflectionQuestionsView: View {
                 Toggle("只看已关联", isOn: $onlyLinked).toggleStyle(.checkbox)
             }
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
+                LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     if sourceMode == "knowledge" {
                         ForEach(availableKnowledge) { claim in knowledgeLinkCard(claim) }
                         if availableKnowledge.isEmpty { Text("没有符合条件的当前知识卡片。").foregroundStyle(.secondary).padding() }
