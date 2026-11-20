@@ -16,7 +16,7 @@ struct DiscussionView: View {
             HStack {
                 Text(model.discussionReflection == nil ? "继续讨论" : "一起回顾 · 认知与行动").vosFont(WorkspaceText.sectionTitle)
                 Spacer()
-                Button("关闭",action:dismiss).buttonStyle(.workspaceQuiet)
+                Button("关闭",action:dismiss).buttonStyle(.workspaceQuiet).keyboardShortcut(.cancelAction)
             }
             Picker("讨论历史",selection:Binding(get:{ model.discussionSession?.id ?? "" },set:{ id in text="";Task { await model.openDiscussion(id) } })) {
                 Text("请选择讨论，或从资料进入").tag("")
@@ -194,7 +194,7 @@ struct DiscussionView: View {
                 Text("当时引用的原文版本").vosFont(WorkspaceText.sectionTitle)
                 Text(preview.version).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 ScrollView { Text(preview.text).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
-                HStack { Spacer();Button("完成") { referencePreview=nil }.buttonStyle(.workspaceSecondary) }
+                HStack { Spacer();Button("完成") { referencePreview=nil }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction) }
             }.padding(24).frame(width:640,height:420)
         }
     }

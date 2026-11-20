@@ -92,7 +92,7 @@ struct ReminderSettingsView: View {
             }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {
-                Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).disabled(model.reminderFieldEditing)
+                Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(model.reminderFieldEditing)
                 Spacer()
                 Button("保存到提醒事项") {
                     Task {

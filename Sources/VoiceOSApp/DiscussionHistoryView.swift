@@ -18,7 +18,7 @@ struct DiscussionHistoryView: View {
                     Text("按最近更新排列；打开后沿用当时的依据与许可。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
                 Spacer()
-                WorkspaceIconButton(systemImage: "xmark", label: "关闭历史讨论") { close() }
+                WorkspaceIconButton(systemImage: "xmark", label: "关闭历史讨论") { close() }.keyboardShortcut(.cancelAction)
             }.padding(18)
             Divider()
             Group {

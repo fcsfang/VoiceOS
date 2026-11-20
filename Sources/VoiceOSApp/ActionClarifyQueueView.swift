@@ -64,7 +64,7 @@ struct ActionClarifyQueueView: View {
             HStack(alignment: .top) {
                 heading
                 Spacer(minLength: 12)
-                Button("关闭") { dismiss() }.buttonStyle(.workspaceQuiet)
+                Button("关闭") { dismiss() }.buttonStyle(.workspaceQuiet).keyboardShortcut(.cancelAction)
             }
             if let current {
                 WorkspaceBadge(text: "剩余 \(remaining.count) 条")
