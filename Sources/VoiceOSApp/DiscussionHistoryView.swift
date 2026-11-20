@@ -7,6 +7,7 @@ struct DiscussionHistoryView: View {
     let close: () -> Void
     @State private var previews: [ConversationPreview] = []
     @State private var loading = true
+    @State private var loadError = ""
     @State private var error = ""
 
     var body: some View {
@@ -23,9 +24,15 @@ struct DiscussionHistoryView: View {
             Group {
                 if loading {
                     ProgressView("正在读取讨论历史…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if !loadError.isEmpty {
+                    WorkspaceEmptyState(title: InlineFailurePresentation.message(operation: "读取讨论历史", reason: loadError),
+                                        systemImage: "exclamationmark.triangle",
+                                        description: "请检查资料库后重试。") {
+                        Button("重试") { Task { await load() } }.buttonStyle(.workspaceSecondary)
+                    }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if previews.isEmpty {
                     WorkspaceEmptyState(title: "还没有讨论历史", systemImage: "bubble.left.and.bubble.right",
-                                        description: "从材料详情点击“继续讨论”会建立新的讨论；建立后按最近更新显示在这里。")
+                                        description: "在资料页选中一条材料，点「讨论」建立新的讨论；建立后会按最近更新显示在这里。")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
@@ -70,23 +77,23 @@ struct DiscussionHistoryView: View {
             if await model.openDiscussion(preview.id) {
                 close()
             } else {
-                error = model.discussionStatus
+                error = InlineFailurePresentation.message(operation: "打开讨论", reason: model.discussionStatus)
             }
         }
     }
 
     private func load() async {
+        loading = true
+        loadError = ""
+        defer { loading = false }
         guard let store = model.store else {
-            loading = false
-            error = "资料库尚未打开"
+            loadError = "资料库尚未打开"
             return
         }
         do {
             previews = try await store.conversationPreviews()
-            loading = false
         } catch {
-            loading = false
-            self.error = error.localizedDescription
+            self.loadError = error.localizedDescription
         }
     }
 }

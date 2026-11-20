@@ -115,17 +115,21 @@ struct TaskInitiationView: View {
                     }
                 }
                 HStack(spacing: 12) {
-                    Menu {
-                        if materialSources.isEmpty { Button("还没有可用的个人原话") {}.disabled(true) }
-                        ForEach(materialSources.prefix(20)) { source in
-                            Button(source.displayTitle) {
-                                model.initiationText = source.transcript ?? ""
-                                model.initiationSourceID = source.id
+                    if materialSources.isEmpty {
+                        Text("还没有可带入的个人原话；先录制或保存一段由你说出的材料。")
+                            .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    } else {
+                        Menu {
+                            ForEach(materialSources.prefix(20)) { source in
+                                Button(source.displayTitle) {
+                                    model.initiationText = source.transcript ?? ""
+                                    model.initiationSourceID = source.id
+                                }
                             }
-                        }
-                    } label: {
-                        Text("从最近材料带入")
-                    }.menuStyle(.button).buttonStyle(.workspaceSecondary).fixedSize()
+                        } label: {
+                            Text("从最近材料带入")
+                        }.menuStyle(.button).buttonStyle(.workspaceSecondary).fixedSize()
+                    }
                     Spacer()
                     Text("\(model.initiationText.unicodeScalars.count) / 4000 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true)
                         .foregroundStyle(overLimit ? palette.danger : palette.tertiaryText)
@@ -475,7 +479,7 @@ struct TaskInitiationView: View {
                 if showArchived { reloadArchived() }
                 model.initiationStatus = "已归档；可在启动记录里打开「查看归档」。"
             } catch {
-                model.initiationStatus = error.localizedDescription
+                model.initiationStatus = InlineFailurePresentation.message(operation: "归档", reason: error.localizedDescription)
             }
         }
     }
