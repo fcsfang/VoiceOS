@@ -15,6 +15,7 @@ final class RecentContentHomeSelection {
 struct RecentContentHome: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: ControlCenter
     let openSource: (String) -> Void
     let openSpan: (String, String) -> Void
@@ -476,7 +477,7 @@ struct RecentContentHome: View {
             }
             if !digest.tasks.isEmpty {
                 Button {
-                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(tasksAnchor, anchor: .top) }
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(tasksAnchor, anchor: .top) }
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "checklist")
@@ -536,7 +537,7 @@ struct RecentContentHome: View {
                     ForEach(Array(notes.enumerated()), id: \.element.id) { index, thought in
                         HStack(alignment: .top, spacing: 10) {
                             Text("\(index + 1)").vosFont(WorkspaceText.caption.size, weight: WorkspaceText.caption.weight, monospacedDigit: true)
-                                .foregroundStyle(palette.tertiaryText).frame(width: 18, alignment: .trailing)
+                                .foregroundStyle(palette.tertiaryText).frame(width: 18 * vosLayoutScale(textScale), alignment: .trailing)
                                 .padding(.top, 3)
                             ThoughtLine(thought: thought, openOriginal: { openOriginal(thought) })
                         }
@@ -644,7 +645,7 @@ struct RecentContentHome: View {
     private func recentThoughtsEntry(_ groups: [RecentThoughtDay]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                withAnimation(.easeOut(duration: 0.15)) { recentThoughtsExpanded.toggle() }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { recentThoughtsExpanded.toggle() }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right")
@@ -846,6 +847,7 @@ private struct ClueRenameRequest: Identifiable {
 
 private struct ClueHeaderMenu: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let title: String
     let siblings: [RecentContentThread]
     let hidden: [RecentClueOverride]
@@ -893,7 +895,7 @@ private struct ClueHeaderMenu: View {
         .opacity(visible ? 1 : 0)
         .allowsHitTesting(visible)
         .onHover { hovered = $0 }
-        .animation(.easeOut(duration: 0.12), value: visible)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: visible)
     }
 }
 

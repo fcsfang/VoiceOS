@@ -23,6 +23,7 @@ private struct AtlasEdge: Identifiable {
 
 struct ReflectionTimelineView: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: ControlCenter
     var embeddedTopicID: String? = nil
     var openSource: ((String) -> Void)? = nil
@@ -446,7 +447,7 @@ struct ReflectionTimelineView: View {
             x: min(max(0, center.x * scale + 18 - graphViewport.width / 2), max(0, contentSize.width - graphViewport.width)),
             y: min(max(0, center.y * scale + 18 - graphViewport.height / 2), max(0, contentSize.height - graphViewport.height))
         )
-        withAnimation(.easeInOut(duration: 0.25)) {
+        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
             graphPosition.scrollTo(point: destination)
         }
     }
@@ -460,6 +461,7 @@ struct ReflectionTimelineView: View {
                 }.foregroundStyle(palette.graphColor(node.lane))
                 Text(node.title).vosFont(WorkspaceText.rowTitle).lineLimit(3).multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(node.title)
             }.padding(13).frame(width: 196, height: 104, alignment: .topLeading)
                 .background(palette.surface.opacity(node.context ? 0.5 : 1), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 .overlay(alignment: .leading) { RoundedRectangle(cornerRadius: 2).fill(palette.graphColor(node.lane)).frame(width: 3, height: 30).padding(.leading, 1) }

@@ -98,6 +98,7 @@ private enum ExecutionCommand: String, Identifiable {
 
 struct AssistantExecutionView: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
     @ObservedObject var model: ControlCenter
     var initialExecutionID: String? = nil
     let dismiss: () -> Void
@@ -146,7 +147,7 @@ struct AssistantExecutionView: View {
                             }
                         }
                     }
-                }.padding(18).frame(width: 250)
+                }.padding(18).frame(width: 250 * vosLayoutScale(textScale))
                 Divider()
                 if let execution = selected { detail(execution) }
                 else {

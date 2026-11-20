@@ -54,7 +54,7 @@ struct MarkdownText: View {
                         Text(ordered ? "\(index + 1)." : "•")
                             .vosFont(WorkspaceText.body)
                             .foregroundStyle(palette.secondaryText)
-                            .frame(width: ordered ? 22 : 10, alignment: .trailing)
+                            .frame(minWidth: ordered ? 22 * vosLayoutScale(scale) : 10, alignment: .trailing)
                         Text(items[index].text)
                             .vosFont(WorkspaceText.body)
                             .foregroundStyle(palette.text)
