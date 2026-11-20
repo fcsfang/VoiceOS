@@ -41,8 +41,8 @@ struct AssistantDelegationView: View {
         VStack(alignment: .leading, spacing: 16) {
             Label("交给 AI 助理", systemImage: "sparkles").vosFont(WorkspaceText.sectionTitle)
             Text(action.title).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
-            Text("编辑你希望得到的结果。应用会执行调研、比较或起草；你可以关闭窗口，稍后回来查看。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 7) {
+            Text("写下你想要的结果。应用会调研、比较或起草；可以关闭窗口，稍后回来查看。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                 Text("交付要求").vosFont(WorkspaceText.rowTitle)
                 TextEditor(text: $instruction).vosFont(WorkspaceText.body).frame(height: 190)
                     .padding(8).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
@@ -55,7 +55,7 @@ struct AssistantDelegationView: View {
             Text("本次使用完整任务原文与交付要求。关联主题用于保存成果；AI 产出、实际任务完成情况和你的认识分别保留。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             DisclosureGroup("本次使用的任务原文 · \(taskSources.count) 份") {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                         ForEach(taskSources) { source in
                             Text(source.displayTitle).vosFont(WorkspaceText.rowTitle)
                             Text(source.transcript ?? "尚无可用文字").textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
@@ -132,7 +132,7 @@ struct AssistantExecutionView: View {
                                     selectedID = execution.id; questionID = execution.questionID ?? ""; error = ""
                                 } label: {
                                     WorkspaceCard(padding: 14, radius: WorkspaceMetrics.panelRadius) {
-                                        VStack(alignment: .leading, spacing: 7) {
+                                        VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                                             Text(.init(execution.title)).vosFont(WorkspaceText.rowTitle).lineLimit(3)
                                             Text(assistantExecutionLabel(execution)).vosFont(WorkspaceText.meta).foregroundStyle(execution.state == "failed" ? palette.warning : .secondary)
                                         }
@@ -193,7 +193,7 @@ struct AssistantExecutionView: View {
                         Label("原始任务或资料已有变化。保留这份历史成果，接续使用前请核对当前依据。", systemImage: "pause.circle").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                     }
                     if let report = execution.report, !report.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
+                        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
                             HStack {
                                 Text("AI 交付物").vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.accent)
                                 Spacer()
@@ -218,10 +218,10 @@ struct AssistantExecutionView: View {
                             }
                         }
                     } else if ["queued", "running"].contains(execution.state) {
-                        VStack(alignment: .leading, spacing: 9) {
+                        VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                             ProgressView().controlSize(.small)
                             Text(execution.state == "queued" ? "委托已保存，等待应用执行。" : "正在完成交付要求，成果准备好后会保存在这里。")
-                            Text("可以关闭窗口继续使用 VoiceOS；应用需要保持运行。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text("可以关闭窗口；VoiceOS 需要保持运行。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         }.padding(.vertical, 20)
                     }
                     if let message = execution.error, !message.isEmpty {

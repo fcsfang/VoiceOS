@@ -4715,7 +4715,7 @@ struct ActionFeedbackView: View {
                 }
             }
             TextEditor(text: $text).frame(minHeight: 180).border(.secondary.opacity(0.2)).disabled(saving || waitingForVoice)
-            Text("这是可选记录，原话与原行动保持关联。开启下方选项后，应用会自动核对思想变化与目标下一步；不会把反馈当成事实已验证。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text("可选记录，原话与原行动保持关联。开启下方选项后会自动核对思想变化与目标下一步；反馈不会当成已验证事实。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             if !errorText.isEmpty { Text(errorText).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             Toggle("将反馈文字用于整理知识、更新思想与目标", isOn: $allowFollowup).vosFont(WorkspaceText.meta).disabled(saving)
             HStack {
@@ -4897,7 +4897,7 @@ struct CognitiveFeedbackView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
             Text("静默回顾").vosFont(WorkspaceText.sectionTitle)
-            Text("可以直接关闭，不要求回应。这里显示已接纳的关联提案和主动查找的相关原文。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("可以直接关闭。这里显示已接纳的关联提案和相关原文。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             Picker("显示方式",selection:Binding(get:{ model.quietMode },set:{ mode in Task { await model.changeQuietMode(mode) } })) {
                 Text("正常显示").tag(CognitiveFeedbackMode.normal)
                 Text("减少显示 · 一次一条").tag(CognitiveFeedbackMode.reduced)
@@ -4905,7 +4905,7 @@ struct CognitiveFeedbackView: View {
             }.pickerStyle(.segmented)
             Text(model.quietStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             ScrollView {
-                VStack(alignment:.leading,spacing:16) {
+                VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                     if model.quietFeedback.isEmpty && model.associationFeedback.isEmpty {
                         Text(model.quietMode == .paused ? "已暂停静默回顾，原文与历史保留。" : "暂无可显示的相关原文。无需回复或补做任务。")
                     }

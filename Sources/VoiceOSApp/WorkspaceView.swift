@@ -681,7 +681,7 @@ struct WorkspaceView: View {
                 }
             }
             Spacer()
-            VStack(alignment:.leading,spacing:12) {
+            VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                 HStack(spacing:7) {
                     if model.organizingTopics || model.assistantBusy || model.followupBusy {
                         ProgressView().controlSize(.mini)
@@ -1003,7 +1003,7 @@ struct WorkspaceView: View {
             }
             WorkspaceFilterTabs(items: tabs, selection: materialFilter, onSelect: { materialFilter = $0 })
             if ["已归档","回收站"].contains(materialFilter) {
-                Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留，不用于当前理解；恢复后仅本机保存。Apple 提醒事项未被删除或取消。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。Apple 提醒事项未被删除或取消。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             if rows.isEmpty {
                 if materialFilter == "日常材料" {
@@ -1024,7 +1024,7 @@ struct WorkspaceView: View {
                     }
                 }
             } else {
-                LazyVStack(alignment:.leading,spacing:16) {
+                LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.groupGap) {
                     ForEach(materialDayGroups(rows)) { group in
                         VStack(alignment:.leading,spacing:6) {
                             WorkspaceListGroupHeader(title:group.label)
@@ -1119,7 +1119,6 @@ struct WorkspaceView: View {
                                 Spacer(minLength:8)
                             }.contentShape(Rectangle())
                         }
-                        Text("线索会随材料积累成为主题。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                     }
                 }
                 if !filter.isEmpty && visibleListings.isEmpty { Text("没有匹配的主题").foregroundStyle(.secondary) }
@@ -1206,12 +1205,11 @@ struct WorkspaceView: View {
             .id(topic.id + mode)
     }
     private func review(_ topic:ReflectionQuestion, reading:TopicReadingData) -> some View {
-        VStack(alignment:.leading,spacing:20) {
+        VStack(alignment:.leading,spacing: WorkspaceMetrics.groupGap) {
             HStack {
                 Picker("回顾周期",selection:$reviewPeriod) { ForEach(ReflectionPeriod.allCases,id:\.self) { Text($0.label).tag($0) } }.pickerStyle(.segmented).frame(maxWidth:210)
                 DatePicker("日期",selection:$reviewAnchor,displayedComponents:.date).labelsHidden()
             }
-            Text("放在完整主题的脉络里，看这段时间的变化。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             let interval=reviewPeriod.interval(containing:reviewAnchor)
             let sources=reading.sources.filter { interval.contains($0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt) ?? .distantPast) }
             let catalog=recordCatalog
@@ -1432,11 +1430,10 @@ struct WorkspaceView: View {
                 }
             }
             if actionFilter == "待核对" { processingIssues }
-            if ["全部","我的待办"].contains(actionFilter), !visible.isEmpty {
-                Text("↑↓ 选择 · ↵ 打开 · x 完成 · z 不再跟进 · ⌥⌘Z 撤销上一次变更").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-            }
             HStack { Button("同步提醒事项") { Task { await model.refreshTaskReminders() } }.buttonStyle(.workspaceSecondary).disabled(model.reminderAccess?.enabled != true || model.remindersBusy);Spacer();Text(model.reminderSyncStatus).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).lineLimit(2) }
-        }.task(id: focusRefreshKey) { focusedActionIDs = await model.focusedActionIDs() }
+        }
+        .help("↑↓ 选择 · ↵ 打开 · x 完成 · z 不再跟进 · ⌥⌘Z 撤销上一次变更")
+        .task(id: focusRefreshKey) { focusedActionIDs = await model.focusedActionIDs() }
             .sheet(item:$nextActionOutcome) { outcome in
                 NextActionFormSheet(model:model,outcome:outcome,onAdded:{ _ in toastMessage="已添加下一步" })
             }
@@ -1907,7 +1904,6 @@ struct WorkspaceView: View {
             Picker("文字大小",selection:Binding(get:{ model.textSize },set:{ model.setTextSize($0) })) {
                 ForEach(AppTextSize.allCases) { option in Text(option.label).tag(option) }
             }.pickerStyle(.segmented).frame(maxWidth:360)
-            Text("配色即时生效，并在下次打开时沿用。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Divider()
             sectionTitle("键盘快捷键")
             VStack(alignment:.leading,spacing:8) {
@@ -1917,7 +1913,6 @@ struct WorkspaceView: View {
                 Text("z 不再跟进 · 列表聚焦时")
                 Text("任务详情：x 或空格 完成 · s 改期 · f 记结果")
                 Text("⌥⌘Z 撤销 · 仅本次运行")
-                Text("撤销只对当前会话有效")
                 Text("口述、剪贴板、速记、导入与页面切换在菜单栏的「记录」与「显示」菜单。")
             }.vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             if model.dictationHotKeyConflict {
@@ -1947,8 +1942,7 @@ struct WorkspaceView: View {
                 }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
                 Button(model.backupPruning ? "正在清理…" : "立即清理旧备份") { model.cleanupOldBackups(retain: backupRetention) }
                     .buttonStyle(.workspaceSecondaryCompact).disabled(model.backupPruning || model.libraryRoot == nil)
-            }
-            Text("保留份数在下次备份或立即清理时生效。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+            }.help("保留份数在下次备份或立即清理时生效。")
             if !model.backupCleanupStatus.isEmpty {
                 Text(model.backupCleanupStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
@@ -1989,7 +1983,7 @@ struct WorkspaceView: View {
             WorkspaceRow(title:"查找历史文字",subtitle:"按关键词查找",icon:"text.magnifyingglass") { go(.tool("查找历史文字")) }
             WorkspaceRow(title:"英文表达反馈",subtitle:"英文原话反馈",icon:"character.book.closed") { go(.tool("英文表达反馈")) }
             DisclosureGroup("其他工作与维护") {
-                VStack(alignment:.leading,spacing:16) {
+                VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                     Button("思想关联、目标下一步与英语反馈") { go(.tool("思想与下一步")) }.buttonStyle(.workspaceQuietCompact)
                     Button("纠错后的行动影响") { go(.tool("纠错影响")) }.buttonStyle(.workspaceQuietCompact)
                     Button("表达处理与重试") { go(.tool("处理情况")) }.buttonStyle(.workspaceQuietCompact)
@@ -2668,7 +2662,7 @@ struct WorkspaceView: View {
     private var pendingReminderSyncSheet: some View {
         VStack(alignment:.leading,spacing:16) {
             Text("本地完成待同步").vosFont(WorkspaceText.sectionTitle)
-            Text("这些变更只保存在 VoiceOS。恢复提醒事项连接并授权后，会自动写入 Apple 提醒事项并回读。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("这些变更只保存在 VoiceOS；恢复提醒事项连接并授权后自动写入并回读。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if model.pendingReminderSyncList.isEmpty {
                 Text("没有待同步的本地变更。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             } else {
@@ -2824,7 +2818,6 @@ struct WorkspaceView: View {
         return VStack(alignment:.leading,spacing:16) {
             if let source {
                 Text("合并主题").vosFont(WorkspaceText.sectionTitle)
-                Text("选择要把「\(source.title)」并入的主题。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 if options.isEmpty { Text("还没有其他主题可合并。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                 ForEach(options) { option in
                     Button { mergeTargetID = option.topic.id } label: {
