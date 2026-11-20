@@ -38,4 +38,8 @@ final class MaterialNamingChecks: XCTestCase {
     func testTimestampFollowedByMoreTextStaysUnchanged() {
         XCTAssertEqual(MaterialNaming.displayName("行动反馈 · 2026-10-14T12:28:35Z 已归档", timeZone: shanghai), "行动反馈 · 2026-10-14T12:28:35Z 已归档")
     }
+
+    func testDictationPrefixRendersInShanghaiTime() {
+        XCTAssertEqual(MaterialNaming.displayName("我的口述 · 2026-10-14T12:28:35Z", timeZone: shanghai), "我的口述 · 10月14日 20:28")
+    }
 }

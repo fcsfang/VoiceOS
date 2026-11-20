@@ -3,7 +3,7 @@ import Foundation
 public enum MaterialNaming {
     /// 把存储名里的机器时间后缀转成本地可读时间；无法识别的名字原样返回。
     public static func displayName(_ storedName: String, timeZone: TimeZone = .current) -> String {
-        let prefixes = ["行动反馈 · ", "我的表达 · "]
+        let prefixes = ["行动反馈 · ", "我的表达 · ", "我的口述 · "]
         guard let prefix = prefixes.first(where: { storedName.hasPrefix($0) }) else { return storedName }
         let stamp = String(storedName.dropFirst(prefix.count))
         // 保守解析：整串都必须是时间戳，后面多出任何字符都不转换。
