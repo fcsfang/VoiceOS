@@ -3,6 +3,7 @@ import VoiceOSCore
 
 struct WeeklyReviewView: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: ControlCenter
     let openTask: (String) -> Void
@@ -134,12 +135,12 @@ struct WeeklyReviewView: View {
             }
             .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 560)
             .overlay(alignment: .bottom) { undoBar }
-            .animation(.easeOut(duration: 0.2), value: undoEntry?.id)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: undoEntry?.id)
             .task { await load() }
             .task(id: undoEntry?.id) {
                 guard let id = undoEntry?.id else { return }
                 do { try await Task.sleep(for: .seconds(8)) } catch { return }
-                if undoEntry?.id == id { withAnimation { undoEntry = nil } }
+                if undoEntry?.id == id { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { undoEntry = nil } }
             }
             .sheet(isPresented: $showingClarifyQueue) { ActionClarifyQueueView(model: model, scope: .goals) }
             .sheet(item: $nextStepGoal) { goal in
@@ -178,7 +179,7 @@ struct WeeklyReviewView: View {
         let label = Text(title + " ") + Text("\(count)").monospacedDigit()
         if isLink {
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(target, anchor: .top) }
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { proxy.scrollTo(target, anchor: .top) }
             } label: {
                 label
             }
@@ -325,7 +326,7 @@ struct WeeklyReviewView: View {
                 return
             }
             actionError = ""
-            withAnimation {
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
                 undoEntry = UndoEntry(actionID: entry.action.id,
                                       label: state == .completed ? "已完成" : "不再跟进")
             }
@@ -337,7 +338,7 @@ struct WeeklyReviewView: View {
         Task {
             if await model.undoActionState(actionID: entry.actionID) {
                 actionError = ""
-                withAnimation { undoEntry = nil }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { undoEntry = nil }
             } else {
                 actionError = model.status.isEmpty ? "撤销未能完成，请到任务页核对" : model.status
             }
@@ -618,7 +619,7 @@ struct WeeklyReviewView: View {
                 if pending {
                     Button(expanded ? "收起" : "记录结果") {
                         outcomeError = ""
-                        withAnimation { expandedOutcomeID = expanded ? nil : action.id }
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { expandedOutcomeID = expanded ? nil : action.id }
                     }
                     .buttonStyle(expanded ? WorkspaceButtonStyle.workspaceQuietCompact : WorkspaceButtonStyle.workspaceSecondaryCompact)
                     .disabled(model.savingFeedback)
@@ -649,7 +650,7 @@ struct WeeklyReviewView: View {
             if await model.saveFeedback(action, kind: input.kind, text: input.text, commandID: input.commandID) {
                 outcomeDrafts[action.id] = TaskFeedbackDraft()
                 outcomeError = ""
-                withAnimation { expandedOutcomeID = nil }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { expandedOutcomeID = nil }
             } else {
                 outcomeError = model.status.isEmpty ? "结果未能保存，请稍后重试" : model.status
             }
