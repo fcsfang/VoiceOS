@@ -869,3 +869,8 @@
 - 133-B 状态：错误样式统一 WorkspaceNoticeText(.danger)（代办/继续讨论/回复/完成登记等）；ReflectionGraph 空态补重试（refresh 路径）、检索失败补「重试检索」、主题回顾失败接 errorRetry+token 取消配对；ReflectionGraph/Monitor/启动加载加 150ms 门控；同主题刷新失败保留旧内容并挂区块级错误行（同 key 才保留、换主题清空）；ThoughtPanorama 读取失败进错误态可重试；unavailable 页面改 WorkspaceEmptyState 带「回到行动」，全景空态补「打开材料」。
 - 未采纳遗留：FeynmanPractice:36、QuickNote:77 两处裸 danger 文本（133-A 判定不在其分配项），列 134 处理。
 - 集成：722 tests 全绿（build_exit=0 / test_exit=0）。
+## 波 134：行交互、hover/焦点、禁用态一致性（2026-11-21，已推送）
+- 134-A：行动完成行整行可点（完成圈置前导 overlay，Tab 顺序保持）；两条摘要行补 hover + 焦点环；搜索建议行与空词材料行并入方向键集合（selection 背景 + focusRing）；最近搜索 chip 删除命中区 14→24；周回顾不可用结果行去掉 hover/chevron（只留「查看材料」），dailyRow/somedayRow 补 chevron（nextWeekRow 是开关，不加）；材料详情回听行/人名术语/SourceFold 标题补 hover 与 24pt 命中；首页时间线行 hover 与选中态分层（选中优先）。
+- 134-B：WorkspaceIconButton 读 isEnabled、禁用 0.4 且无 hover（组件级，10 调用点受益）；子任务/下一步完成圈与删除补 hover、禁用转 disabledText；主题 tile hover 改背景 + WorkspaceRowChevron；问题卡补键盘焦点环；反思问题菜单命中区 24pt、禁用行文字 disabledText；全景工具栏图标 22→24pt；费曼/速记错误改 WorkspaceNoticeText（速记注入 palette）。
+- 风险记录：完成圈禁用时点击是否穿透整行未真机验证；搜索键盘集合变更；chip 宽度 +10pt。
+- 集成：722 tests 全绿（build_exit=0 / test_exit=0）。
