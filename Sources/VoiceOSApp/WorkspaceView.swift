@@ -43,6 +43,19 @@ private struct MaterialDayGroup: Identifiable {
     let label: String
     let sources: [SourceRecord]
 }
+private struct TopicListing: Identifiable {
+    let topic: ReflectionQuestion
+    let materialCount: Int
+    let distinctDays: Int
+    let latestMaterialDate: Date?
+    var id: String { topic.id }
+    var level: TopicLevel {
+        TopicLevel.classify(materialCount: materialCount, distinctDays: distinctDays, manual: topic.isAIOrganized == false)
+    }
+    var latestActivity: Date {
+        latestMaterialDate ?? ConversationReflectionFocus.date(topic.updatedAt) ?? .distantPast
+    }
+}
 private enum MaterialDayFormatting {
     static let currentYear: DateFormatter = {
         let formatter = DateFormatter()
@@ -337,6 +350,7 @@ struct WorkspaceView: View {
     @State private var editingTopicID: String? = nil
     @State private var topicFocus: ConversationReflectionFocus?
     @State private var topicQuery = ""
+    @State private var showingClues = false
     @State private var reviewPeriod = ReflectionPeriod.week
     @State private var reviewAnchor = Date()
     @State private var error = ""
@@ -1043,28 +1057,55 @@ struct WorkspaceView: View {
                 topicContent(topic, reading: reading)
             } else {
                 let filter = topicQuery.trimmingCharacters(in:.whitespacesAndNewlines)
-                let visibleTopics = filter.isEmpty ? model.workspaceTopics : model.workspaceTopics.filter {
-                    $0.title.localizedCaseInsensitiveContains(filter) || ($0.organization?.summary ?? "").localizedCaseInsensitiveContains(filter)
+                let listings = model.workspaceTopics.map { topicListing($0, catalog: catalog) }
+                    .sorted { left, right in
+                        if left.latestActivity != right.latestActivity { return left.latestActivity > right.latestActivity }
+                        return left.topic.title.localizedStandardCompare(right.topic.title) == .orderedAscending
+                    }
+                let visibleListings = filter.isEmpty ? listings : listings.filter {
+                    $0.topic.title.localizedCaseInsensitiveContains(filter) || ($0.topic.organization?.summary ?? "").localizedCaseInsensitiveContains(filter)
                 }
+                let themes = visibleListings.filter { $0.level == .theme }
+                let clues = visibleListings.filter { $0.level == .clue }
                 HStack { WorkspaceHeading(eyebrow:"",title:"主题")
                     Spacer();Button("新建主题") { newTopicTitle="";editingTopicID=nil;creatingTopic=true }
                 }
                 WorkspaceSearchField(text:$topicQuery,placeholder:"搜索主题标题或摘要")
                     .accessibilityIdentifier("topics.search")
-                if !visibleTopics.isEmpty {
+                if !themes.isEmpty {
                     LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing:16)],alignment:.leading,spacing:16) {
-                        ForEach(visibleTopics) { item in
-                            WorkspaceTopicTile(topic:item,sourceCount:model.workspaceTopicSources[item.id]?.count ?? 0) { selectTopic(item.id) }
+                        ForEach(themes) { listing in
+                            WorkspaceTopicTile(topic:listing.topic,sourceCount:listing.materialCount) { selectTopic(listing.topic.id) }
                         }
                     }
                 }
-                if !filter.isEmpty && visibleTopics.isEmpty { Text("没有匹配的主题").foregroundStyle(.secondary) }
                 if filter.isEmpty && model.workspaceTopics.isEmpty {
                     HStack(spacing:8) {
                         if model.organizingTopics { ProgressView().controlSize(.small).accessibilityHidden(true) }
                         Text(model.organizingTopics ? "AI 正在按内容连接主题…" : "授权材料会自动归组。也可以先建立一个你关心的问题。")
                     }.foregroundStyle(.secondary)
+                } else if filter.isEmpty && themes.isEmpty {
+                    Text("还没有达到主题判据的关切。线索会随材料积累成为主题。").foregroundStyle(.secondary)
                 }
+                if !clues.isEmpty {
+                    VStack(alignment:.leading,spacing:8) {
+                        DisclosureGroup(isExpanded: Binding(get: { showingClues || !filter.isEmpty }, set: { showingClues = $0 })) {
+                            VStack(alignment:.leading,spacing:0) {
+                                ForEach(clues) { listing in
+                                    WorkspaceRow(title:listing.topic.title,subtitle:"\(listing.materialCount) 份材料 · 最近 " + clueDateLabel(listing.latestMaterialDate),icon:"circle.dotted",trailing:"查看") { selectTopic(listing.topic.id) }
+                                    if listing.id != clues.last?.id { Divider() }
+                                }
+                            }.padding(.top,8)
+                        } label: {
+                            HStack(spacing:10) {
+                                Text("线索（\(clues.count)）").vosFont(WorkspaceText.sectionTitle, monospacedDigit: true).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
+                                Spacer(minLength:8)
+                            }.contentShape(Rectangle())
+                        }
+                        Text("线索会随材料积累成为主题。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                    }
+                }
+                if !filter.isEmpty && visibleListings.isEmpty { Text("没有匹配的主题").foregroundStyle(.secondary) }
                 let linked=Set(model.workspaceTopicSources.values.flatMap { $0 })
                 let unlinked=activeMaterials.filter { !linked.contains($0.id) }
                 if !unlinked.isEmpty {
@@ -1099,6 +1140,21 @@ struct WorkspaceView: View {
             }
         }
     }
+    private func topicListing(_ topic: ReflectionQuestion, catalog: [String: SourceRecord]) -> TopicListing {
+        let ids = model.workspaceTopicSources[topic.id] ?? []
+        var days = Set<Date>()
+        var latest: Date?
+        for id in ids {
+            guard let createdAt = catalog[id]?.createdAt, let date = ConversationReflectionFocus.date(createdAt) else { continue }
+            days.insert(Calendar.current.startOfDay(for: date))
+            if latest == nil || date > latest! { latest = date }
+        }
+        return TopicListing(topic: topic, materialCount: ids.count, distinctDays: days.count, latestMaterialDate: latest)
+    }
+    private func clueDateLabel(_ date: Date?) -> String {
+        guard let date else { return "暂无日期" }
+        return date.formatted(date: .abbreviated, time: .omitted)
+    }
     @ViewBuilder private func topicContent(_ topic:ReflectionQuestion, reading:TopicReadingData) -> some View {
         switch topicTab {
         case "材料":
@@ -1125,7 +1181,8 @@ struct WorkspaceView: View {
         }
     }
     private func topicReading(_ topic:ReflectionQuestion,mode:String,reading:TopicReadingData) -> some View {
-        WorkspaceTopicReadingView(model:model,topic:topic,mode:mode,focus:topicFocus,reading:reading,
+        let level = topicListing(topic, catalog: recordCatalog).level
+        return WorkspaceTopicReadingView(model:model,topic:topic,mode:mode,focus:topicFocus,reading:reading,level:level,
             openSource:{ go(.source($0)) },openTopic:{ selectTopic($0) },openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },
             discuss:{ prompt in Task { await toggleDiscussion(force:true,prompt:prompt) } },showActions:{ topicTab="行动与结果" },
             showUnderstanding:{ topicTab="认识与问题";topicReadingMode="卡片" })
