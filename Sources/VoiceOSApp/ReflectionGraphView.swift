@@ -38,6 +38,8 @@ struct ReflectionTimelineView: View {
     @State private var focus: ConversationReflectionFocus?
     @State private var error: String?
     @State private var loading = false
+    @State private var loadedKey: String?
+    @State private var showSlowLoad = false
     @State private var timeline = false
     @State private var query = ""
     @State private var selection: String?
@@ -115,8 +117,16 @@ struct ReflectionTimelineView: View {
                 }.padding(16)
             }
             WorkspaceListDivider()
+            if let error, focus != nil {
+                HStack(spacing: 10) {
+                    WorkspaceNoticeText(message: error, severity: .danger)
+                    Button("重试") { Task { await refresh() } }.buttonStyle(.workspaceQuietCompact)
+                }.padding(.horizontal, 16).padding(.vertical, 8)
+            }
             if loading && focus == nil {
-                ProgressView(periodic ? "整理这个周期的关系…" : "连接这个主题的完整脉络…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                if showSlowLoad {
+                    ProgressView(periodic ? "整理这个周期的关系…" : "连接这个主题的完整脉络…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else { Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity) }
             } else if let focus {
                 if timeline {
                     ReflectionEventListView(model: model, dismiss: dismiss, discuss: discuss, focus: focus,openSource:openSource)
@@ -144,10 +154,10 @@ struct ReflectionTimelineView: View {
                         .buttonStyle(.workspacePrimary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ContentUnavailableView("暂时无法打开回顾", systemImage: "arrow.triangle.branch", description: Text(error ?? "请刷新资料"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                WorkspaceEmptyState(title: "暂时无法打开回顾", systemImage: "arrow.triangle.branch", description: error ?? "请刷新资料") {
+                    Button("重试") { Task { await refresh() } }.buttonStyle(.workspacePrimary)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).padding(12) }
             HStack {
                 Label("实线：来源与行动关系", systemImage: "line.diagonal")
                 Text("┄ AI 思想关联 · 可查看前后原话")
@@ -157,6 +167,11 @@ struct ReflectionTimelineView: View {
         }
         .foregroundStyle(palette.text).background(palette.canvas)
         .frame(width: embeddedTopicID == nil ? 1100 : nil, height: embeddedTopicID == nil ? 760 : 720)
+        .task(id: loading) {
+            guard loading else { showSlowLoad = false; return }
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            if loading { showSlowLoad = true }
+        }
     }
     private var header: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
@@ -225,7 +240,10 @@ struct ReflectionTimelineView: View {
     private func reload() async {
         let requestedKey = reflectionKey, requestedPeriod = period, requestedInterval = interval
         let topicID = selectedTopic?.id, requestedPeriodic = periodic
-        loading = true; focus = nil; selection = nil; relatedOnly = false; query = ""; error = nil
+        let previousFocus = focus
+        let sameRequest = requestedKey == loadedKey
+        loading = true; showSlowLoad = false; selection = nil; relatedOnly = false; query = ""; error = nil
+        if !sameRequest { focus = nil }
         defer { if requestedKey == reflectionKey { loading = false } }
         guard requestedPeriodic || topicID != nil else { return }
         do {
@@ -238,9 +256,11 @@ struct ReflectionTimelineView: View {
             } else { return }
             guard !Task.isCancelled, requestedKey == reflectionKey else { return }
             focus = snapshot
+            loadedKey = requestedKey
             if !requestedPeriodic, let topicID { try await model.markTopicReviewed(topicID) }
         } catch {
             guard !Task.isCancelled, requestedKey == reflectionKey else { return }
+            if sameRequest { focus = previousFocus }
             self.error = error.localizedDescription
         }
     }

@@ -64,7 +64,7 @@ struct AssistantDelegationView: View {
                 }.frame(maxHeight: 150)
             }
             Toggle("允许交付要求与以上完整任务原文用于云端代办", isOn: $allowCloud).vosFont(WorkspaceText.body)
-            if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled) }
+            if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {
                 Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).disabled(saving)
                 Spacer()
@@ -225,7 +225,7 @@ struct AssistantExecutionView: View {
                         }.padding(.vertical, 20)
                     }
                     if let message = execution.error, !message.isEmpty {
-                        Text(InlineFailurePresentation.message(operation: "代办", reason: message)).foregroundStyle(palette.danger).textSelection(.enabled)
+                        WorkspaceNoticeText(message: InlineFailurePresentation.message(operation: "代办", reason: message), severity: .danger)
                     }
                     Text("这是 AI 产出。它不会自动成为你的观点，也不会把原任务标为完成；采纳与实际结果可以在后续记录。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
@@ -255,7 +255,7 @@ struct AssistantExecutionView: View {
                 }
                 if execution.questionID != nil { Text("成果已关联主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             }
-            if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled) }
+            if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
         }.padding(22).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .alert(confirmingCommand == .cancel ? "取消这次代办？" : "重新执行这次代办？",
                    isPresented: Binding(get: { confirmingCommand != nil }, set: { if !$0 { confirmingCommand = nil } })) {

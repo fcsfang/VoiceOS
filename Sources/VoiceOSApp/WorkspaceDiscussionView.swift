@@ -65,7 +65,7 @@ struct WorkspaceDiscussionView: View {
                                         if reply.state == "reserved" {
                                             Text("正在思考…").foregroundStyle(.secondary)
                                         } else {
-                                            Text("这次回复未完成：" + (reply.error ?? "原因未登记")).foregroundStyle(palette.danger).textSelection(.enabled)
+                                            WorkspaceNoticeText(message: "这次回复未完成：" + (reply.error ?? "原因未登记"), severity: .danger)
                                             if model.discussionWritable {
                                                 Button("重新提问") { editorFocused = true }.buttonStyle(.workspaceQuietCompact)
                                                 Text("失败记录已保留在本轮；写下新的提问会作为下一轮发送。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
