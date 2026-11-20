@@ -2897,6 +2897,19 @@ struct WorkspaceView: View {
     private func routeExternalURL(_ url:URL) {
         if CaptureLink.isCapture(url) { Task { await model.acceptCaptureURL(url) } }
         else if url.scheme?.lowercased() == "voiceos", let host=url.host?.lowercased(), ["action","source","topic"].contains(host) {
+            if host == "action" {
+                do {
+                    if let command = try ExternalActionCommand.parse(url) {
+                        switch command {
+                        case let .feedback(actionID, text, kind, commandID):
+                            submitExternalFeedback(actionID: actionID, text: text, kind: kind, commandID: commandID)
+                        case let .complete(actionID):
+                            completeExternalAction(actionID)
+                        }
+                        return
+                    }
+                } catch let failure { error = failure.localizedDescription; return }
+            }
             let id=url.lastPathComponent
             guard !id.isEmpty else { error="链接缺少条目身份"; return }
             if host == "topic" {
@@ -2913,6 +2926,27 @@ struct WorkspaceView: View {
         else { openReminder(url) }
     }
     private func openReminder(_ url:URL) { Task { if await model.focusReminder(url) { if let id=model.focusedTaskID { go(.task(id)) } else { go(.actions) } } else { error = model.status.isEmpty ? "这条提醒无法定位到当前资料库" : model.status } } }
+    private func submitExternalFeedback(actionID:String,text:String,kind:ActionFeedbackKind,commandID:String) {
+        guard let action=model.actionRecords.first(where: { $0.id == actionID }) else {
+            error="这条行动已不在当前资料库，反馈未写入"; return
+        }
+        Task {
+            if await model.saveFeedback(action,kind:kind,text:text,commandID:commandID) {
+                error="";toastMessage="结果已关联到「\(action.title)」"
+            } else {
+                error=model.status.isEmpty ? "反馈未能写入，请稍后重试。" : model.status
+            }
+        }
+    }
+    private func completeExternalAction(_ actionID:String) {
+        guard let action=model.actionRecords.first(where: { $0.id == actionID }) else {
+            error="这条行动已不在当前资料库，完成未写入"; return
+        }
+        guard action.kind == "task", action.state == "open", action.validity == "current" else {
+            error="这条行动当前不能标记完成"; return
+        }
+        applyActionState(action,to:.completed)
+    }
     private func chooseLibrary() {
         let panel=NSOpenPanel();panel.title="打开已有 VoiceOS 资料库";panel.canChooseDirectories=true;panel.canChooseFiles=false
         panel.begin { response in guard response == .OK,let url=panel.url else { return };guard FileManager.default.fileExists(atPath:url.appendingPathComponent("voiceos.sqlite").path) else { error="所选目录不是 VoiceOS 资料库";return };openWindow(id:"restored-library",value:url.path) }
