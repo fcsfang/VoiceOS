@@ -795,3 +795,12 @@
 ## 搜索修复（2026-11-20，直推 main e399070）
 
 - 用户实测全局搜索搜不到一条「open + frozen」的待办：索引过滤只收 validity=current 的行动。改为行动全状态可搜索（行动不存在时仍过滤悬空索引行）；SearchIndexChecks 断言同步更新；676 项全绿。
+
+## 波 122：待办写回通道（2026-11-20，已推送）
+
+- ExternalActionCommand（Core，纯解析 + 15 条测试）：voiceos://action/<id>/feedback?text&kind&command 与 /complete；UUID、4000 字上限、未知 query 拒绝。
+- App 路由：routeExternalURL 加 feedback/complete 两分支，分别走与界面一致的 saveFeedback 与 applyActionState 路径；复用既有 toast/error。
+- CLI：voiceos-cli action feedback / action complete —— 探测 app 运行（bundle id）、交付 URL、只读轮询落库（feedbackCount/state），未运行 exit 5、超时 exit 4，stdout 结果 JSON。
+- 隔离 e2e（bundle id local.voiceos.e2e + 整库 APFS clone + sqlite .backup 一致快照）：feedback 1 秒落库、complete 1 秒完成并新增 revision、同 command 重发幂等不增行、正式库前后零变化、正式实例全程存活。教训：只复制 sqlite 不带媒体会让恢复冻结全部 claim，必须整库克隆。
+- 集成：696 项 0 失败。
+- 已知限制：CLI 端到端未对正式 bundle id 实跑（会写用户实时库）；幂等重发在 CLI 侧因只读库未暴露 commandID 会表现为超时 exit 4。
