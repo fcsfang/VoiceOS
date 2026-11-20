@@ -57,6 +57,11 @@ private struct QuickNoteView: View {
     @ObservedObject var model: ControlCenter
     let context: String?
     let close: () -> Void
+    /// The quick note panel is its own hosting root, outside WorkspaceView's
+    /// palette injection, so resolve the stored theme directly.
+    private var palette: WorkspacePalette {
+        WorkspacePalette(theme: WorkspaceTheme(rawValue: UserDefaults.standard.string(forKey: "voiceos.workspaceTheme") ?? "") ?? .graphite)
+    }
     @State private var title = ""
     @State private var text = ""
     @State private var saving = false
@@ -69,7 +74,7 @@ private struct QuickNoteView: View {
             if let context { Text("来自 " + context).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             TextField("标题 · 可留空", text: $title).textFieldStyle(.roundedBorder).disabled(saving).accessibilityLabel("标题")
             TextEditor(text: $text).vosFont(WorkspaceText.body).frame(minHeight: 180).focused($editing).disabled(saving).accessibilityLabel("正文")
-            if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(.red) }
+            if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             HStack {
                 Button("取消") { close() }.keyboardShortcut(.cancelAction).disabled(saving)
                 Spacer()

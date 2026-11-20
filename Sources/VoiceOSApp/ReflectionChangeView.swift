@@ -4,6 +4,7 @@ import VoiceOSCore
 /// These are evidence-backed relationship candidates, not an endorsed growth history.
 struct ReflectionChangeView: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
     @ObservedObject var model: ControlCenter
     let focus: ConversationReflectionFocus
     let reflect: (ConversationReflectionFocus, String) async -> Bool
@@ -37,7 +38,7 @@ struct ReflectionChangeView: View {
             if let selected {
                 HStack(spacing: 0) {
                     if focus.connections.count > 1 {
-                        connectionList.frame(width: 210)
+                        connectionList.frame(width: 210 * vosLayoutScale(textScale))
                         Divider()
                     }
                     ScrollView {
