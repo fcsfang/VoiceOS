@@ -9,6 +9,7 @@ struct WorkspaceTopicReadingView: View {
     let mode: String
     let focus: ConversationReflectionFocus?
     let reading: TopicReadingData
+    let level: TopicLevel
     let openSource: (String) -> Void
     let openTopic: (String) -> Void
     let openTask: (String) -> Void
@@ -153,6 +154,12 @@ struct WorkspaceTopicReadingView: View {
                     Label("主题速览",systemImage:"sparkles").vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
                     Spacer()
                     Text("更新于 " + date(topic.updatedAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                }
+                if level == .clue {
+                    HStack(spacing:8) {
+                        WorkspaceBadge(text:"线索")
+                        Text("尚未达到主题判据：至少 \(TopicLevel.minimumMaterials) 份材料且跨 \(TopicLevel.minimumDistinctDays) 个日期").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    }
                 }
                 if let summary=topic.organization?.summary {
                     WorkspaceExpandableText(text:summary,label:"主题概述",lines:4,size:WorkspaceText.body.size)
