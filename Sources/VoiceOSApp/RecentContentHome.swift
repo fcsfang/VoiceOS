@@ -418,7 +418,21 @@ struct RecentContentHome: View {
 
     private func progressRowContent(_ row: RecentContentProgressRow, style: WorkspaceTextStyle) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(row.text).vosFont(style).lineSpacing(style.size > 20 ? 4 : 5).textSelection(.enabled)
+            if let split = WorkspaceTitleFit.splitLeadingLink(row.text) {
+                if style.size > 20 {
+                    Text(WorkspaceTitleFit.present(split.link).title)
+                        .vosFont(style).lineSpacing(4).textSelection(.enabled)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                Text(split.rest)
+                    .vosFont(style.size > 20 ? WorkspaceText.sectionTitle : style)
+                    .lineSpacing(5).textSelection(.enabled)
+                Text(split.link)
+                    .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+            } else {
+                Text(row.text).vosFont(style).lineSpacing(style.size > 20 ? 4 : 5).textSelection(.enabled)
+            }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(row.taskTitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
