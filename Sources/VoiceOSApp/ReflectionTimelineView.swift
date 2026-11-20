@@ -74,12 +74,14 @@ struct ReflectionEventListView: View {
 
     var body: some View {
         let visible = events
-        VStack(alignment: .leading, spacing: 14) {
-            WorkspaceSearchField(text: $query, placeholder: "查找录音、思考、任务或结果")
-            Text("\(visible.filter { $0.source != nil }.count) 条表达 · \(visible.filter { $0.feedback != nil }.count) 条结果与反思 · \(visible.filter { $0.completion != nil }.count) 条完成登记")
-                .vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
+                WorkspaceSearchField(text: $query, placeholder: "查找录音、思考、任务或结果")
+                Text("\(visible.filter { $0.source != nil }.count) 条表达 · \(visible.filter { $0.feedback != nil }.count) 条结果与反思 · \(visible.filter { $0.completion != nil }.count) 条完成登记")
+                    .vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary)
+            }
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     if visible.isEmpty {
                         WorkspaceEmptyState(
                             title: !query.isEmpty ? "还没有找到相关记录" : (focus.isTopicOverview ? "这个主题还没有关联记录" : "这段时间还没有记录"),
@@ -90,13 +92,14 @@ struct ReflectionEventListView: View {
                     }
                     ForEach(days(visible)) { day in
                         Text(day.date?.formatted(date: .complete, time: .omitted) ?? "时间待核对").vosFont(WorkspaceText.meta.size, weight: .semibold)
+                            .padding(.vertical, WorkspaceMetrics.groupGap - WorkspaceMetrics.rowGap)
                         ForEach(day.events) { event in
                             if let source = event.source { expressionCard(source) }
                             if let feedback = event.feedback { outcomeCard(feedback, date: event.date) }
                             if let completion = event.completion {
-                                VStack(alignment: .leading, spacing: 6) {
+                                VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                                     Label("完成登记 · " + (focus.tasks.first { $0.actionID == completion.actionID }?.title ?? "任务"), systemImage: "checkmark.circle")
-                                    Text("按实际状态记录时间排列；不代表已取得收获。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                                    Text("不代表已取得收获。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                                     Button("任务与结果") { model.showTask(completion.actionID); dismiss() }
                                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                             }
@@ -112,7 +115,6 @@ struct ReflectionEventListView: View {
             VStack(alignment: .leading, spacing: 12) {
                 if let summary = source.contentSummary { Text(summary).vosFont(WorkspaceText.body).textSelection(.enabled) }
                 Button(source.kind == "ai_text" ? "查看 AI 交付全文" : source.kind == "user_text" ? "查看表达全文" : "查看录音与全文") { showSource(source.id) }
-                if claims.isEmpty && actions.isEmpty { Text("尚无当前有效的整理内容；可以打开全文查看表达。").vosFont(WorkspaceText.body).foregroundStyle(.secondary) }
                 ForEach(claims) { claim in
                     VStack(alignment: .leading, spacing: 5) {
                         Text(claim.statement).textSelection(.enabled)
@@ -137,7 +139,7 @@ struct ReflectionEventListView: View {
                 }
                 if !actions.isEmpty {
                     Text("任务当前状态").vosFont(WorkspaceText.rowTitle)
-                    Text("这是现在的状态，不代表任务在这一天完成。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("不代表任务在这一天完成。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     ForEach(actions) { task in
                         HStack(alignment: .top) {
                             Image(systemName: task.state == "completed" ? "checkmark.circle" : task.state == "dismissed" ? "minus.circle" : "circle")

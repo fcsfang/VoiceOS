@@ -14,7 +14,7 @@ private let onboardingSteps: [OnboardingStep] = [
     OnboardingStep(id: 0, title: "开始之前", detail: "麦克风用于口述与录音，开口即可记录想法。\n提醒事项用于把待办提醒带回系统，到点由系统提醒你。", symbol: "hand.raised"),
     OnboardingStep(id: 1, title: "记录想法", detail: "按 ⌥⌘D 开始口述，或从菜单栏打开速记（⌥⌘N）。想法先留在本机，再慢慢整理。", symbol: "mic"),
     OnboardingStep(id: 2, title: "资料与行动", detail: "导入录音或文字后，VoiceOS 在本机整理成资料、理解与行动。完成的行动可以回来记录结果。", symbol: "books.vertical"),
-    OnboardingStep(id: 3, title: "快捷键", detail: "常用三条，随时可用。", symbol: "keyboard"),
+    OnboardingStep(id: 3, title: "快捷键", detail: "", symbol: "keyboard"),
     OnboardingStep(id: 4, title: "完成", detail: "菜单栏图标常驻，随时速记；每周结束到行动页打开每周回顾。", symbol: "checkmark.circle")
 ]
 
@@ -29,9 +29,9 @@ struct OnboardingView: View {
     private var current: OnboardingStep { onboardingSteps[step] }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
                     Text("欢迎使用 VoiceOS").vosFont(WorkspaceText.pageTitle)
                     HStack(spacing: 14) {
                         Image(systemName: current.symbol)
@@ -40,10 +40,12 @@ struct OnboardingView: View {
                             .frame(width: 40 * vosLayoutScale(textScale))
                         VStack(alignment: .leading, spacing: 6) {
                             Text(current.title).vosFont(WorkspaceText.rowTitle)
-                            Text(current.detail)
-                                .vosFont(WorkspaceText.body)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
+                            if !current.detail.isEmpty {
+                                Text(current.detail)
+                                    .vosFont(WorkspaceText.body)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -85,16 +87,14 @@ struct OnboardingView: View {
                 Text("⌥⌘D 口述")
                 Text("⌥⌘N 速记")
                 Text("⌘F 搜索")
-                Text("更多快捷键见「设置 › 键盘快捷键」。")
-                    .vosFont(WorkspaceText.caption).foregroundStyle(.secondary).padding(.top, 3)
-            }.vosFont(WorkspaceText.body)
+            }.vosFont(WorkspaceText.body).help("更多快捷键见「设置 › 键盘快捷键」。")
         } else if current.id == 4 {
             readinessChecklist
         }
     }
 
     private var readinessChecklist: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
             Text("开始前检查").vosFont(WorkspaceText.rowTitle)
             Text("未完成的项不影响开始使用；之后可以在设置中补齐。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)

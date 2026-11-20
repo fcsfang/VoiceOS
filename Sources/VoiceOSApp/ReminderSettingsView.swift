@@ -46,34 +46,40 @@ struct ReminderSettingsView: View {
         })
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            WorkspaceSectionHeading("日期、提醒与优先级")
-            Text(action.title).vosFont(WorkspaceText.rowTitle)
-            Text("读取的是 Apple 提醒事项当前设置。保存时会再次核对，其他设备刚改过的内容不会被旧设置覆盖。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            WorkspaceSectionHeading("稍后提醒")
-            HStack(spacing: 8) {
-                ForEach(SnoozePreset.allCases, id: \.self) { preset in
-                    Button(preset.title) { apply(preset) }.buttonStyle(.workspaceSecondaryCompact)
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
+                WorkspaceSectionHeading("日期、提醒与优先级")
+                Text(action.title).vosFont(WorkspaceText.rowTitle)
+                Text("读取的是 Apple 提醒事项当前设置。保存时会再次核对，其他设备刚改过的内容不会被旧设置覆盖。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
+                WorkspaceSectionHeading("稍后提醒")
+                HStack(spacing: 8) {
+                    ForEach(SnoozePreset.allCases, id: \.self) { preset in
+                        Button(preset.title) { apply(preset) }.buttonStyle(.workspaceSecondaryCompact)
+                    }
                 }
             }
             Divider()
-            Toggle("安排日期", isOn: $hasDate)
-            if hasDate {
-                DatePicker("日期", selection: $due, displayedComponents: [.date])
-            }
-            Toggle("具体时刻", isOn: $hasTime).disabled(!hasDate)
-            if hasDate {
-                if hasTime { DatePicker("时刻", selection: $due, displayedComponents: [.hourAndMinute]) }
-                if !hasTime {
-                    Text("仅日期任务固定 09:00 提醒（当前不可关闭）").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                    if let text = defaultAlertText { Text("实际通知时间 " + text).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
+                Toggle("安排日期", isOn: $hasDate)
+                if hasDate {
+                    DatePicker("日期", selection: $due, displayedComponents: [.date])
                 }
-            }
-            if hasTime {
-                Toggle("发送通知", isOn: alertToggle).disabled(!hasDate)
-                if hasDate, hasAlert {
-                    DatePicker("提醒我", selection: $alert, displayedComponents: [.date, .hourAndMinute])
-                    Text("通知时间独立于安排日期。其他已有通知会保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Toggle("具体时刻", isOn: $hasTime).disabled(!hasDate)
+                if hasDate {
+                    if hasTime { DatePicker("时刻", selection: $due, displayedComponents: [.hourAndMinute]) }
+                    if !hasTime {
+                        Text("仅日期任务固定 09:00 提醒（当前不可关闭）").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        if let text = defaultAlertText { Text("实际通知时间 " + text).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                    }
+                }
+                if hasTime {
+                    Toggle("发送通知", isOn: alertToggle).disabled(!hasDate)
+                    if hasDate, hasAlert {
+                        DatePicker("提醒我", selection: $alert, displayedComponents: [.date, .hourAndMinute])
+                        Text("通知时间独立于安排日期。其他已有通知会保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    }
                 }
             }
             Divider()
@@ -82,13 +88,15 @@ struct ReminderSettingsView: View {
                 if ![0, 1, 5, 9].contains(priority) { Text("当前优先级（\(priority)）").tag(priority) }
             }
             Divider()
-            Toggle("地点提醒", isOn: $hasLocation)
-            if hasLocation {
-                TextField("地点名称", text: $locationName).textFieldStyle(.roundedBorder)
-                Picker("提醒方式", selection: $locationProximity) {
-                    Text("到达").tag(ReminderLocation.Proximity.enter); Text("离开").tag(ReminderLocation.Proximity.leave)
-                }.pickerStyle(.segmented)
-                Text("地点由系统按名称解析；只写名称，不联网搜索，也不写入坐标。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
+                Toggle("地点提醒", isOn: $hasLocation)
+                if hasLocation {
+                    TextField("地点名称", text: $locationName).textFieldStyle(.roundedBorder)
+                    Picker("提醒方式", selection: $locationProximity) {
+                        Text("到达").tag(ReminderLocation.Proximity.enter); Text("离开").tag(ReminderLocation.Proximity.leave)
+                    }.pickerStyle(.segmented)
+                    Text("地点由系统按名称解析；只写名称，不联网搜索，也不写入坐标。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                }
             }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {

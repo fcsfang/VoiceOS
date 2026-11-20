@@ -151,14 +151,15 @@ struct ReflectionTimelineView: View {
             HStack {
                 Label("实线：来源与行动关系", systemImage: "line.diagonal")
                 Text("┄ AI 思想关联 · 可查看前后原话")
-                if embeddedTopicID == nil { Spacer();Text("点击节点与关系查看依据") }
+                if embeddedTopicID == nil { Spacer() }
             }.vosFont(WorkspaceText.caption).foregroundStyle(palette.text.opacity(0.65)).padding(.horizontal, 24).padding(.vertical, 12)
+                .help("点击节点与关系查看依据")
         }
         .foregroundStyle(palette.text).background(palette.canvas)
         .frame(width: embeddedTopicID == nil ? 1100 : nil, height: embeddedTopicID == nil ? 760 : 720)
     }
     private var header: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             HStack(alignment: .top) {
                 WorkspaceHero(eyebrow: "REFLECTION ATLAS", title: "认知地图", subtitle: periodPurpose)
                 Spacer()
@@ -472,7 +473,7 @@ struct ReflectionTimelineView: View {
     private func inspector(_ focus: ConversationReflectionFocus) -> some View {
         let items = nodes(focus), links = edges(focus, nodes: items)
         return ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
                 Text(selection == nil ? (focus.isTopicOverview ? "这个主题的脉络" : "这个周期的线索") : "关系与依据").vosFont(WorkspaceText.sectionTitle)
                 if let node = items.first(where: { $0.id == selection }) {
                     nodeDetails(node, focus: focus)
@@ -485,7 +486,7 @@ struct ReflectionTimelineView: View {
                         }
                     }
                 } else if let edge = links.first(where: { $0.id == selection }) {
-                    Text(edge.label).vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.accent)
+                    Text(edge.label).vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.accent).help(edgeExplanation(edge.label))
                     if let connection = edge.connection {
                         Text("AI 关系判断 · 待核对").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         Text(connection.update.understanding).textSelection(.enabled)
@@ -493,8 +494,6 @@ struct ReflectionTimelineView: View {
                         quote("此前原话", connection.update.historicalQuote)
                         quote("本次原话", connection.update.currentQuote)
                         Button("并排对照与追问") { changeID = connection.id; showsChanges = true }.buttonStyle(.workspaceSecondary)
-                    } else {
-                        Text(edge.label == "完成登记" ? "这是任务状态的登记；实际收获以你的反馈为依据。" : edge.label == "原话整理" ? "这条内容的整理引用了相连来源的原话；摘要仍需核对。" : edge.label == "行动依据" ? "这项行动保留了所依据的观点与原话。" : "反馈明确关联到这项任务及其当时版本。")
                     }
                     ForEach([edge.from, edge.to], id: \.self) { id in
                         if let node = items.first(where: { $0.id == id }) { Button(node.title) { selection = id }.buttonStyle(.workspaceQuiet) }
@@ -504,8 +503,7 @@ struct ReflectionTimelineView: View {
                     metric(focus.isTopicOverview ? "完成登记" : "周期内完成登记", focus.completions.count, color: palette.action)
                     metric("结果与反思", focus.isTopicOverview ? focus.outcomes.count : focus.outcomes.filter { focus.contains(timestamp: $0.createdAt) }.count, color: palette.outcome)
                     Divider()
-                    Text(focus.isTopicOverview ? "关联资料跨时间完整展示。先后日期帮助理解判断如何形成，主题不会因换周而中断。任务状态与实际结果分别保留。" : "旧资料作为背景接入，以「此前」标记。任务卡片显示当前状态，完成登记按实际记录时间归入周期。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-                    Text("你带来经历与判断，VoiceOS 帮你找回联系、提出问题。一起回顾后，可以继续讨论并保留有价值的认识。").vosFont(WorkspaceText.body)
+                    Text(focus.isTopicOverview ? "关联资料跨时间展示，任务状态与实际结果分别保留。" : "旧资料以「此前」标记作背景；完成登记按实际记录时间归入周期。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                     Text("AI 使用完整相关原文；先查看并编辑讨论草稿，再确认发送。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
@@ -532,11 +530,11 @@ struct ReflectionTimelineView: View {
             } else if let completion = node.completion {
                 Text("登记于 " + (ConversationReflectionFocus.date(completion.revision.createdAt)?.formatted(date: .abbreviated, time: .shortened) ?? completion.revision.createdAt)).vosFont(WorkspaceText.meta)
                 Text("任务第 \(completion.revision.version) 版 · " + (completion.revision.actor == "user" ? "用户记录" : "提醒状态同步")).vosFont(WorkspaceText.meta)
-                Text("完成状态独立保存；是否取得收获，要看实际结果。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                Text("完成状态独立保存；收获以实际结果为准。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                 if !completion.revision.note.isEmpty { Text(completion.revision.note).vosFont(WorkspaceText.body).textSelection(.enabled) }
                 Button("任务与结果") { model.showTask(completion.actionID); dismiss() }.buttonStyle(.workspaceQuietCompact)
             } else if let actionID = node.actionID {
-                Text("当前状态，不能用来推断何时完成或学会。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("当前状态不代表完成时间或收获。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 Button("打开任务或目标") { model.showTask(actionID); dismiss() }.buttonStyle(.workspaceQuietCompact)
             } else if let sourceID = node.sourceID {
                 if let source = model.records.first(where: { $0.id == sourceID }) {
@@ -563,6 +561,15 @@ struct ReflectionTimelineView: View {
             Text(title).vosFont(WorkspaceText.meta)
             Spacer()
             Text(String(count)).vosFont(WorkspaceText.sectionTitle).foregroundStyle(color)
+        }
+    }
+    private func edgeExplanation(_ label: String) -> String {
+        switch label {
+        case "完成登记": "这是任务状态的登记；实际收获以你的反馈为依据。"
+        case "原话整理": "这条内容的整理引用了相连来源的原话；摘要仍需核对。"
+        case "行动依据": "这项行动保留了所依据的观点与原话。"
+        case "AI 关联": "AI 关系判断 · 待核对"
+        default: "反馈明确关联到这项任务及其当时版本。"
         }
     }
     private func owner(_ value: String) -> String {

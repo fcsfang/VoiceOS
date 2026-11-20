@@ -45,30 +45,32 @@ struct RecordingFollowupView: View {
     private func goalCurrent(_ receipt: RecordingFollowupReceipt, _ id: String) -> Bool { model.followupValidity[receipt.id]?.goalIsCurrent(id) == true }
     private func englishCurrent(_ receipt: RecordingFollowupReceipt) -> Bool { model.followupValidity[receipt.id]?.sourceCurrent == true && model.followupValidity[receipt.id]?.english == true }
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             HStack(alignment: .top) {
                 WorkspaceHeading(eyebrow: "工具 · 思想与下一步", title: "思想与下一步")
                 if !embedded { Button("完成", action: dismiss).buttonStyle(.workspaceQuiet) }
             }
-            Picker("查看", selection: $tab) {
-                Text("思想变化").tag("thoughts"); Text("目标下一步").tag("goals"); Text("英语练习").tag("english")
-            }.pickerStyle(.segmented)
-            HStack {
-                Picker("来源", selection: $sourceID) {
-                    Text("全部录音").tag("all")
-                    ForEach(eligible) { source in Text(source.displayTitle).tag(source.id) }
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
+                Picker("查看", selection: $tab) {
+                    Text("思想变化").tag("thoughts"); Text("目标下一步").tag("goals"); Text("英语练习").tag("english")
+                }.pickerStyle(.segmented)
+                HStack {
+                    Picker("来源", selection: $sourceID) {
+                        Text("全部录音").tag("all")
+                        ForEach(eligible) { source in Text(source.displayTitle).tag(source.id) }
+                    }
+                    Button(sourceID == "all" ? "更新下一步" : "生成或重试跟进") {
+                        if let id = sourceID == "all" ? nil : sourceID { model.refreshFollowup(id) }
+                    }.buttonStyle(.workspacePrimary)
+                        .disabled(model.followupBusy || model.fullRecordingBusy || eligible.isEmpty || sourceID == "all")
+                    if model.followupBusy { ProgressView().controlSize(.small) }
+                    if sourceID == "all", !eligible.isEmpty { Text("先选择来源录音，再生成跟进。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                 }
-                Button(sourceID == "all" ? "更新下一步" : "生成或重试跟进") {
-                    if let id = sourceID == "all" ? nil : sourceID { model.refreshFollowup(id) }
-                }.buttonStyle(.workspacePrimary)
-                    .disabled(model.followupBusy || model.fullRecordingBusy || eligible.isEmpty || sourceID == "all")
-                if model.followupBusy { ProgressView().controlSize(.small) }
-                if sourceID == "all", !eligible.isEmpty { Text("先在来源里选择一份录音，再生成跟进。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
+                Text(model.followupStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Toggle("显示历史版本", isOn: $includeHistory).vosFont(WorkspaceText.meta)
             }
-            Text(model.followupStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-            Toggle("显示历史版本", isOn: $includeHistory).vosFont(WorkspaceText.meta)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     if visible.isEmpty { ContentUnavailableView("新的录音会自动形成跟进", systemImage: "sparkles", description: Text("也可以选择已有录音，补齐思想关联、目标建议和练习反馈。")) }
                     if tab == "goals" { goalList }
                     else {
@@ -89,7 +91,7 @@ struct RecordingFollowupView: View {
                             }
                         }
                         if tab == "thoughts" && visible.allSatisfy({ $0.result?.thoughtUpdates.isEmpty != false }) { Text("这几份录音尚未形成有依据的旧思想关联。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText) }
-                        if tab == "english" && visible.allSatisfy({ $0.result?.english.isPractice != true }) { Text("尚未记录英语表达练习；英文练习录音整理后会自动生成反馈并沿用旧反馈。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText) }
+                        if tab == "english" && visible.allSatisfy({ $0.result?.english.isPractice != true }) { Text("英文练习录音整理后会自动生成反馈，并沿用旧反馈。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText) }
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
             }
@@ -102,7 +104,7 @@ struct RecordingFollowupView: View {
             if receipt.state == "running" { Text("生成中").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             else if receipt.state == "completed" && model.followupValidity[receipt.id]?.sourceCurrent != true { Text("录音依据 · 待刷新").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
             Button("原录音") { model.selected = receipt.sourceID; dismiss() }
-        }
+        }.padding(.vertical, WorkspaceMetrics.groupGap - WorkspaceMetrics.rowGap)
     }
     private func thoughtCard(_ update: ThoughtUpdate, receipt: RecordingFollowupReceipt) -> some View {
         let labels = ["supports": "新增支持", "qualifies": "理解被限定", "contradicts": "前后判断不同", "continues": "思考延续"]
@@ -130,7 +132,7 @@ struct RecordingFollowupView: View {
         let plans = visible.flatMap { receipt in (receipt.result?.goalPlans ?? []).compactMap { plan -> (RecordingFollowupReceipt, GoalPlan)? in
             guard includeHistory || seen.insert(plan.goalID).inserted else { return nil }; return (receipt, plan)
         } }
-        return VStack(alignment: .leading, spacing: 14) {
+        return VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
             if plans.isEmpty { Text("明确的长期目标整理后，会自动形成阶段行动和下一步建议。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText) }
             ForEach(Array(plans.enumerated()), id: \.offset) { _, pair in
                 let receipt = pair.0, plan = pair.1

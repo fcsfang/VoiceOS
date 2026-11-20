@@ -9,7 +9,7 @@ struct EnglishInputPreview: View {
             Text("待发送的英文练习文字").vosFont(WorkspaceText.sectionTitle)
             Text("以下是完整选定文字；关闭此窗口不会发送。发送时会再次核对版本与授权，原始音频不上传。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     ForEach(Array(snapshot.context.sources.enumerated()), id: \.element.sourceID) { index, source in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(index == 0 ? "本次练习" : "旧练习 \(index)").vosFont(WorkspaceText.rowTitle)
@@ -45,11 +45,9 @@ struct EnglishPracticeView: View {
         return nil
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(eyebrow: "工具 · 英文练习", title: "英文表达反馈",
                                  subtitle: "只发送选定的个人文字和出处；原始音频不会上传。")
-            Text("反馈独立保存，不创建认知候选、行动或提醒事项。")
-                .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if sources.isEmpty {
                 ContentUnavailableView {
                     Label("还没有可练习的英文原话", systemImage: "character.book.closed")
@@ -71,18 +69,20 @@ struct EnglishPracticeView: View {
                     if suppressSelectionReset { suppressSelectionReset = false; return }
                     priorIDs = priorIDs.filter { $0 != currentID }; model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
                 }
-                Text("可选旧练习（最多 2 份）").vosFont(WorkspaceText.rowTitle)
-                ScrollView {
-                    ForEach(priorCandidates) { source in
-                        Toggle(isOn: Binding(get: { priorIDs.contains(source.id) }, set: { value in
-                            if value { if priorIDs.count < 2 { priorIDs.insert(source.id) } }
-                            else { priorIDs.remove(source.id) }
-                            model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
-                        })) {
-                            VStack(alignment: .leading) { Text(source.displayTitle); Text(source.transcript ?? "").lineLimit(2).vosFont(WorkspaceText.caption).foregroundStyle(.secondary) }
-                        }.disabled(model.englishBusy || (!priorIDs.contains(source.id) && priorIDs.count >= 2))
-                    }
-                }.frame(maxHeight: model.englishAttempts.isEmpty ? 210 : 110)
+                VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
+                    Text("可选旧练习（最多 2 份）").vosFont(WorkspaceText.rowTitle)
+                    ScrollView {
+                        ForEach(priorCandidates) { source in
+                            Toggle(isOn: Binding(get: { priorIDs.contains(source.id) }, set: { value in
+                                if value { if priorIDs.count < 2 { priorIDs.insert(source.id) } }
+                                else { priorIDs.remove(source.id) }
+                                model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
+                            })) {
+                                VStack(alignment: .leading) { Text(source.displayTitle); Text(source.transcript ?? "").lineLimit(2).vosFont(WorkspaceText.caption).foregroundStyle(.secondary) }
+                            }.disabled(model.englishBusy || (!priorIDs.contains(source.id) && priorIDs.count >= 2))
+                        }
+                    }.frame(maxHeight: model.englishAttempts.isEmpty ? 210 : 110)
+                }
                 Text(model.englishStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 HStack {
                     Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)) } } }

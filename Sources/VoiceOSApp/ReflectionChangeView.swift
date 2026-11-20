@@ -76,7 +76,7 @@ struct ReflectionChangeView: View {
         let update = connection.update
         let thought = focus.thoughts.first { $0.claimID == update.claimID }
         let historicalSources = Array(Set(thought?.evidence.filter { $0.quote.contains(update.historicalQuote) }.map { $0.reference.sourceID } ?? [])).sorted()
-        return VStack(alignment: .leading, spacing: 20) {
+        return VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             HStack {
                 Text(relation(update.relation)).vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.accent)
                 Spacer()
@@ -91,10 +91,10 @@ struct ReflectionChangeView: View {
                 Text("为什么提出这条关联").vosFont(WorkspaceText.rowTitle)
                 Text(update.reason).vosFont(WorkspaceText.body).textSelection(.enabled)
             }
-            Text("原话中的条件、犹豫与归属都属于依据。转写纠错不代表观点改变；支持或延续也不代表已经验证。这里不会自动确认你的认识发生了变化。")
+            Text("原话中的条件与归属是依据；转写纠错、支持或延续都不代表观点已被验证。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Divider()
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                 Text("接着问清楚").vosFont(WorkspaceText.sectionTitle)
                 Text("这个联系成立的条件是什么？有没有相反经历？哪些变化是我明确表达的，哪些只是 AI 的解释？")
                     .vosFont(WorkspaceText.body)
@@ -103,7 +103,7 @@ struct ReflectionChangeView: View {
                 } label: { Label("带着原话继续讨论", systemImage: "bubble.left.and.bubble.right") }
                     .buttonStyle(.workspacePrimary)
                     .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
-                Text("先打开可编辑的问题，确认发送后再交给 AI。关联仍作为候选保留。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                Text("先编辑问题并确认发送；关联仍作为候选保留。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
