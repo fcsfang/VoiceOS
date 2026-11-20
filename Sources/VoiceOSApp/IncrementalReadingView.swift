@@ -27,7 +27,7 @@ struct IncrementalReadingView: View {
             if !loaded {
                 ProgressView("正在读取阅读进度…")
             } else if let plan {
-                Text("第 \(index + 1)/\(chunks.count) 块 · 每块约 \(plan.chunkSize) 字").vosFont(WorkspaceText.meta)
+                Text("第 \(index + 1)/\(chunks.count) 块 · 每块约 \(plan.chunkSize) 字").vosFont(WorkspaceText.meta.size, monospacedDigit: true)
                 if chunks.isEmpty {
                     Text(source.transcript == nil ? "转写尚未完成，完成后可以开始按天读。" : "当前转写没有可读文字。").foregroundStyle(.secondary)
                 } else {

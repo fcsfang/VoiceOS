@@ -77,7 +77,7 @@ struct ReflectionEventListView: View {
         VStack(alignment: .leading, spacing: 14) {
             WorkspaceSearchField(text: $query, placeholder: "查找录音、思考、任务或结果")
             Text("\(visible.filter { $0.source != nil }.count) 条表达 · \(visible.filter { $0.feedback != nil }.count) 条结果与反思 · \(visible.filter { $0.completion != nil }.count) 条完成登记")
-                .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     if visible.isEmpty {

@@ -16,7 +16,7 @@ struct OutcomeFollowupView: View {
                     Text("完成后的结果与收获").vosFont(WorkspaceText.sectionTitle)
                 }
                 Spacer()
-                Text("\(actions.count) 项").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                Text("\(actions.count) 项").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary)
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {

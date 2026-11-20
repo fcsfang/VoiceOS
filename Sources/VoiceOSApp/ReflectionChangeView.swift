@@ -59,7 +59,7 @@ struct ReflectionChangeView: View {
     private var connectionList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                Text("\(focus.connections.count) 条关联候选").vosFont(WorkspaceText.caption).foregroundStyle(.secondary).padding(.bottom, 6)
+                Text("\(focus.connections.count) 条关联候选").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary).padding(.bottom, 6)
                 ForEach(focus.connections) { connection in
                     Button { selectedID = connection.id } label: {
                         VStack(alignment: .leading, spacing: 6) {

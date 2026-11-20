@@ -26,7 +26,7 @@ struct FeynmanPractice: View {
             } else {
                 TextEditor(text: $response).frame(minHeight: 200).workspaceEditorSurface().accessibilityLabel("复述内容")
                 HStack {
-                    Text("\(trimmed.count) 字").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                    Text("\(trimmed.count) 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary)
                     Spacer()
                     Button("取消", action: dismiss).keyboardShortcut(.cancelAction)
                     Button("对照原话") { submit() }.buttonStyle(.workspacePrimary).disabled(!claimReady || trimmed.isEmpty)
