@@ -33,7 +33,7 @@ struct FeynmanPractice: View {
                 }.vosFont(WorkspaceText.meta)
             }
             Text("只对照词面，不判断语义，也不保存复述。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-            if !errorText.isEmpty { Text(errorText).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
+            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
         }
         .padding(24)
         .frame(width: WorkspaceMetrics.modalSmall, height: 520)

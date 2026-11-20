@@ -218,7 +218,7 @@ struct ThoughtPanoramaView: View {
             Button { showCoverage = true } label: { Label("覆盖与未归入项", systemImage: "chart.pie") }
             Button(action: openMaterials) { Label("打开材料", systemImage: "doc.on.doc") }
         } label: {
-            Image(systemName: "ellipsis").frame(width: 22, height: 22)
+            Image(systemName: "ellipsis").frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -383,7 +383,7 @@ struct ThoughtPanoramaView: View {
 
     private var locateIconButton: some View {
         Button { recenterToken &+= 1 } label: {
-            Image(systemName: "scope").frame(width: 22, height: 22)
+            Image(systemName: "scope").frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
         .help(locateHelp)
@@ -393,10 +393,10 @@ struct ThoughtPanoramaView: View {
     @ViewBuilder
     private func contextualControl(iconOnly: Bool) -> some View {
         if isGenerating {
-            ProgressView().controlSize(.small).frame(width: 22, height: 22)
+            ProgressView().controlSize(.small).frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
         } else if !modelConfigured {
             if iconOnly {
-                Button { chooseTextModel() } label: { Image(systemName: "link").frame(width: 22, height: 22) }
+                Button { chooseTextModel() } label: { Image(systemName: "link").frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle()) }
                     .buttonStyle(.borderless)
                     .help("连接文本模型")
                     .accessibilityLabel("连接文本模型")
@@ -406,12 +406,12 @@ struct ThoughtPanoramaView: View {
         } else if let state, ["failed", "unknown"].contains(state.status) {
             if iconOnly {
                 if draftAvailable {
-                    Button { draft() } label: { Image(systemName: "doc.badge.plus").frame(width: 22, height: 22) }
+                    Button { draft() } label: { Image(systemName: "doc.badge.plus").frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle()) }
                         .buttonStyle(.borderless)
                         .help("生成带候选联系的综合草稿")
                         .accessibilityLabel("生成带候选联系的综合草稿")
                 }
-                Button { retry() } label: { Image(systemName: "arrow.clockwise").frame(width: 22, height: 22) }
+                Button { retry() } label: { Image(systemName: "arrow.clockwise").frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle()) }
                     .buttonStyle(.borderless)
                     .help("继续核对")
                     .accessibilityLabel("继续核对")
@@ -428,7 +428,7 @@ struct ThoughtPanoramaView: View {
     }
 
     private var outlineToolbarButton: some View {
-        Button { showOutline = true } label: { Image(systemName: "list.bullet").frame(width: 22, height: 22) }
+        Button { showOutline = true } label: { Image(systemName: "list.bullet").frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle()) }
             .buttonStyle(.borderless)
             .help("问题与联系列表 · 键盘与辅助阅读")
             .accessibilityLabel("问题与联系列表")
@@ -445,14 +445,14 @@ struct ThoughtPanoramaView: View {
     }
 
     private var coverageToolbarButton: some View {
-        Button { showCoverage = true } label: { Image(systemName: "chart.pie").frame(width: 22, height: 22) }
+        Button { showCoverage = true } label: { Image(systemName: "chart.pie").frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle()) }
             .buttonStyle(.borderless)
             .help("覆盖与未归入项")
             .accessibilityLabel("覆盖与未归入项")
     }
 
     private var materialsToolbarButton: some View {
-        Button(action: openMaterials) { Image(systemName: "doc.on.doc").frame(width: 22, height: 22) }
+        Button(action: openMaterials) { Image(systemName: "doc.on.doc").frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle()) }
             .buttonStyle(.borderless)
             .help("打开材料")
             .accessibilityLabel("打开材料")

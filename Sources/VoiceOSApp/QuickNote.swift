@@ -74,7 +74,7 @@ private struct QuickNoteView: View {
             if let context { Text("来自 " + context).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             TextField("标题 · 可留空", text: $title).textFieldStyle(.roundedBorder).disabled(saving).accessibilityLabel("标题")
             TextEditor(text: $text).vosFont(WorkspaceText.body).frame(minHeight: 180).focused($editing).disabled(saving).accessibilityLabel("正文")
-            if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
+            if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {
                 Button("取消") { close() }.keyboardShortcut(.cancelAction).disabled(saving)
                 Spacer()
@@ -85,6 +85,7 @@ private struct QuickNoteView: View {
         .padding(20)
         .frame(width: 480, height: 340)
         .vosTextEnvironment(model.textSize)
+        .environment(\.workspacePalette, palette)
         .task {
             try? await Task.sleep(for: .milliseconds(100))
             editing = true

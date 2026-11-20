@@ -311,6 +311,9 @@ struct WorkspaceTaskView: View {
     @State private var subtaskTitle = ""
     @State private var actionEstimate: Int?
     @State private var planBusy = false
+    @State private var hoveredSubtaskToggleID: String?
+    @State private var hoveredSubtaskDeleteID: String?
+    @State private var hoveredNextActionToggleID: String?
     @State private var recurrence: RecurrencePeriod?
     @State private var recurrenceBusy = false
     @State private var locationLabel: String?
@@ -686,13 +689,16 @@ struct WorkspaceTaskView: View {
                             Text(subtaskSummary).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
                             WorkspaceListDivider()
                         ForEach(subtasks, id: \.id) { subtask in
+                            let editable = current && !planBusy
                             HStack(spacing: 12) {
                                 Button { toggleSubtask(subtask) } label: {
                                     Image(systemName: subtask.done ? "checkmark.circle.fill" : "circle")
-                                        .vosFont(WorkspaceText.sectionTitle.size).foregroundStyle(subtask.done ? palette.accent : palette.secondaryText)
+                                        .vosFont(WorkspaceText.sectionTitle.size).foregroundStyle(editable ? (subtask.done ? palette.accent : palette.secondaryText) : palette.disabledText)
                                         .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                                        .background(hoveredSubtaskToggleID == subtask.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
                                         .contentShape(Rectangle())
-                                }.buttonStyle(.plain).disabled(!current || planBusy)
+                                }.buttonStyle(.plain).disabled(!editable)
+                                    .onHover { inside in hoveredSubtaskToggleID = inside && editable ? subtask.id : (hoveredSubtaskToggleID == subtask.id ? nil : hoveredSubtaskToggleID) }
                                     .accessibilityLabel(subtask.done ? "标为未完成" : "标为已完成")
                                 Text(subtask.title).vosFont(WorkspaceText.body).lineSpacing(3).textSelection(.enabled)
                                     .strikethrough(subtask.done).foregroundStyle(subtask.done ? palette.secondaryText : palette.text)
@@ -701,9 +707,11 @@ struct WorkspaceTaskView: View {
                                     Button { deleteSubtask(subtask) } label: {
                                         Image(systemName:"trash").vosFont(WorkspaceText.meta.size)
                                             .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                                            .background(hoveredSubtaskDeleteID == subtask.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
                                             .contentShape(Rectangle())
                                     }
                                         .buttonStyle(.borderless).foregroundStyle(palette.secondaryText)
+                                        .onHover { inside in hoveredSubtaskDeleteID = inside && !planBusy ? subtask.id : (hoveredSubtaskDeleteID == subtask.id ? nil : hoveredSubtaskDeleteID) }
                                         .accessibilityLabel("删除子任务").disabled(planBusy)
                                 }
                             }.padding(.vertical, 10).padding(.horizontal, 4)
@@ -935,14 +943,17 @@ struct WorkspaceTaskView: View {
                 Text(openNextActions.isEmpty ? (isQuestion ? "还没有要自己做的事。" : "这个目标还没有下一步。") : (isQuestion ? "还有 \(openNextActions.count) 项未完成。" : "还有 \(openNextActions.count) 个下一步未完成。")).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
                 WorkspaceListDivider()
                 ForEach(nextActions) { child in
+                    let editable = !model.savingAction && child.state != "dismissed"
                     HStack(spacing: 12) {
                         Button { toggleNextAction(child) } label: {
                             Image(systemName: child.state == "completed" ? "checkmark.circle.fill" : "circle")
                                 .vosFont(WorkspaceText.sectionTitle.size)
-                                .foregroundStyle(child.state == "completed" ? palette.accent : palette.secondaryText)
+                                .foregroundStyle(editable ? (child.state == "completed" ? palette.accent : palette.secondaryText) : palette.disabledText)
                                 .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                                .background(hoveredNextActionToggleID == child.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
                                 .contentShape(Rectangle())
-                        }.buttonStyle(.plain).disabled(model.savingAction || child.state == "dismissed")
+                        }.buttonStyle(.plain).disabled(!editable)
+                            .onHover { inside in hoveredNextActionToggleID = inside && editable ? child.id : (hoveredNextActionToggleID == child.id ? nil : hoveredNextActionToggleID) }
                             .accessibilityLabel(child.state == "completed" ? "重新打开下一步：" + child.title : "完成下一步：" + child.title)
                         Text(child.title).vosFont(WorkspaceText.body).lineSpacing(3).textSelection(.enabled)
                             .strikethrough(child.state == "completed").foregroundStyle(child.state == "completed" ? palette.secondaryText : palette.text)
