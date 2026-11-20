@@ -4585,6 +4585,7 @@ struct VoiceOSApp: App {
                                     dismiss: { model.showingCaptureComposer = false })
                         .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 560)
                 }
+                .vosTextEnvironment(model.textSize)
         }
             .commands {
                 CommandGroup(replacing: .appSettings) { Button("设置…") { delegate.openSettings() }.keyboardShortcut(",") }
@@ -4616,6 +4617,14 @@ struct VoiceOSApp: App {
         .commands {
             CommandGroup(after: .undoRedo) { Button("撤销上一次变更") { Task { await focusedModel?.undoLastChange() } }.keyboardShortcut("z", modifiers: [.command, .option]).disabled(focusedModel?.canUndoChange != true) }
         }
+    }
+}
+
+extension View {
+    /// Sheets attached at the scene root sit outside WorkspaceView's own
+    /// text-size injection, so the scene applies the same values once here.
+    func vosTextEnvironment(_ size: AppTextSize) -> some View {
+        environment(\.vosTextScale, size.scale).dynamicTypeSize(size.dynamicType)
     }
 }
 
