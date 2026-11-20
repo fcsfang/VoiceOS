@@ -1046,7 +1046,12 @@ struct WorkspaceView: View {
                     }
                 }
                 if !filter.isEmpty && visibleTopics.isEmpty { Text("没有匹配的主题").foregroundStyle(.secondary) }
-                if filter.isEmpty && model.workspaceTopics.isEmpty { Text(model.organizingTopics ? "AI 正在按内容连接主题…" : "授权材料会自动归组。也可以先建立一个你关心的问题。").foregroundStyle(.secondary) }
+                if filter.isEmpty && model.workspaceTopics.isEmpty {
+                    HStack(spacing:8) {
+                        if model.organizingTopics { ProgressView().controlSize(.small) }
+                        Text(model.organizingTopics ? "AI 正在按内容连接主题…" : "授权材料会自动归组。也可以先建立一个你关心的问题。")
+                    }.foregroundStyle(.secondary)
+                }
                 let linked=Set(model.workspaceTopicSources.values.flatMap { $0 })
                 let unlinked=activeMaterials.filter { !linked.contains($0.id) }
                 if !unlinked.isEmpty {
@@ -1743,7 +1748,7 @@ struct WorkspaceView: View {
                 Text("会发送给模型：转写与材料文本；监测原文仅在授权后；英文反馈仅所选文字；任务发起仅那段文字")
                     .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                 DisclosureGroup("详细说明") {
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("录音、原件与资料库保存在本机，不上传。")
                         Text("模型密钥只在本机读取，不随材料发送；整个资料库不会发送。")
                         Text("QQ 密钥文件只保存路径；内容不复制、不进日志或模型。")
@@ -1768,7 +1773,7 @@ struct WorkspaceView: View {
             if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } }.buttonStyle(.workspaceSecondary) }
             if let reminderReviewCount {
                 Button { go(.tool("处理情况")) } label: {
-                    HStack(spacing:10) {
+                    HStack(spacing:12) {
                         WorkspaceBadge(text:"\(reminderReviewCount) 条提醒待核对", tone:.warning)
                         Text("去核对")
                     }
@@ -1807,7 +1812,7 @@ struct WorkspaceView: View {
             Text("配色即时生效，并在下次打开时沿用。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Divider()
             sectionTitle("键盘快捷键")
-            VStack(alignment:.leading,spacing:6) {
+            VStack(alignment:.leading,spacing:8) {
                 Text("↑↓ 选择 · 列表聚焦时")
                 Text("↵ 打开 · 列表聚焦时")
                 Text("x 完成 · 列表聚焦时")
@@ -1827,7 +1832,7 @@ struct WorkspaceView: View {
             HStack(spacing:12) {
                 Button("导出结构化资料") { model.export(includeMedia:false) }.buttonStyle(.workspaceSecondary)
                 Button("导出资料与原件") { model.export(includeMedia:true) }.buttonStyle(.workspaceSecondary)
-                if model.exporting { ProgressView().controlSize(.small) }
+                if model.exporting { ProgressView("正在导出…").controlSize(.small) }
             }.disabled(model.exporting)
             HStack(spacing:12) {
                 Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
@@ -1857,7 +1862,7 @@ struct WorkspaceView: View {
             }
             HStack { Button("打开已有资料库") { chooseLibrary() }.buttonStyle(.workspaceSecondary);Button("从迁移包恢复") { go(.tool("恢复资料")) }.buttonStyle(.workspaceSecondary) }
             sectionTitle("存储与清理")
-            VStack(alignment:.leading,spacing:7) {
+            VStack(alignment:.leading,spacing:8) {
                 storageLine("资料库（含 WAL）", storageReadout { $0.databaseBytes })
                 storageLine("原件", storageReadout { $0.assetsBytes })
                 storageLine("备份", storageReadout { $0.backupBytes },
@@ -1867,7 +1872,7 @@ struct WorkspaceView: View {
                 Divider().frame(maxWidth:420)
                 storageLine("合计", storageReadout { $0.totalBytes }, emphasized:true)
             }
-            if model.storageScanBusy { ProgressView().controlSize(.small) }
+            if model.storageScanBusy { ProgressView("正在统计存储…").controlSize(.small) }
             HStack(spacing:12) {
                 Button("在访达中显示资料库") { model.revealLibraryRoot() }.buttonStyle(.workspaceQuietCompact)
                 Button(model.localSpeechDeleting ? "正在删除…" : "删除本地语音模型") { confirmingLocalSpeechDelete = true }
@@ -1883,13 +1888,13 @@ struct WorkspaceView: View {
             WorkspaceRow(title:"查找历史文字",subtitle:"按关键词查找",icon:"text.magnifyingglass") { go(.tool("查找历史文字")) }
             WorkspaceRow(title:"英文表达反馈",subtitle:"英文原话反馈",icon:"character.book.closed") { go(.tool("英文表达反馈")) }
             DisclosureGroup("其他工作与维护") {
-                VStack(alignment:.leading,spacing:15) {
+                VStack(alignment:.leading,spacing:16) {
                     Button("思想关联、目标下一步与英语反馈") { go(.tool("思想与下一步")) }.buttonStyle(.workspaceQuietCompact)
                     Button("纠错后的行动影响") { go(.tool("纠错影响")) }.buttonStyle(.workspaceQuietCompact)
                     Button("表达处理与重试") { go(.tool("处理情况")) }.buttonStyle(.workspaceQuietCompact)
                     Button("重新整理主题与简报") { model.queueTopicOrganization(retry:true) }.buttonStyle(.workspaceQuietCompact)
                     Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
-                }.padding(.top,15)
+                }.padding(.top,16)
             }
         }
         .onAppear {
@@ -1943,7 +1948,7 @@ struct WorkspaceView: View {
     }
     private func storageReadoutText(_ readout: StorageReadout) -> String {
         switch readout {
-        case .scanning: return "统计中…"
+        case .scanning: return "" // The storage spinner row carries the scanning message.
         case .unreadable: return "无法读取"
         case .bytes(let bytes): return sizeText(bytes)
         }
