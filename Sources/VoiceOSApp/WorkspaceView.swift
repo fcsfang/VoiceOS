@@ -1638,7 +1638,7 @@ struct WorkspaceView: View {
             guard hit.kind == .material, let source = catalog[hit.refID] else { return false }
             return !source.isTrashed
         }.map { hit in
-            row("material:" + hit.refID,displayTitle(hit.title),hit.snippet,"doc.text") { go(.source(hit.refID)) }
+            row("material:" + hit.refID,hit.title,hit.snippet,"doc.text") { go(.source(hit.refID)) }
         }
         let claims = searchHits.filter { hit in
             hit.kind == .claim && model.claims.contains { $0.id == hit.refID && $0.validity == "current" && $0.reviewState != "rejected" }

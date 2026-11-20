@@ -148,7 +148,7 @@ extension VoiceOSStore {
         return SearchTokens(drivable: drivable, filters: filters)
     }
 
-    private var searchIndexShape: String { "cjk-spaced-v1" }
+    private var searchIndexShape: String { "cjk-spaced-v1-titled-" + TimeZone.current.identifier }
 
     private func searchSpaced(_ text: String) -> String {
         var result = ""
@@ -247,8 +247,11 @@ extension VoiceOSStore {
 
     public func rebuildSearchIndex() throws {
         let fingerprint = try searchFingerprint()
+        // The title column holds what the library renders, so generated titles,
+        // humanized stored names, and recording dates are searchable as shown.
+        let titles = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, Self.materialSearchTitle($0)) })
         let materials = try db.query("""
-        SELECT s.id AS id, s.name AS title, COALESCE(GROUP_CONCAT(v.text, ' '), '') AS body
+        SELECT s.id AS id, s.name AS stored_name, COALESCE(GROUP_CONCAT(v.text, ' '), '') AS body
         FROM sources s
         LEFT JOIN transcripts t ON t.source_id = s.id
         LEFT JOIN transcript_versions v ON v.id = t.current_version_id
@@ -261,8 +264,13 @@ extension VoiceOSStore {
         try db.transaction {
             try db.execute("DELETE FROM search_index")
             for row in materials {
+                guard let id = row["id"] else { continue }
+                // The stored name stays in the body so a file name or ISO
+                // timestamp still finds the material after a rename.
+                let storedName = row["stored_name"] ?? ""
+                let title = titles[id] ?? MaterialNaming.displayName(storedName)
                 try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('material', ?, ?, ?)",
-                               [row["id"], searchSpaced(row["title"] ?? ""), searchSpaced(row["body"] ?? "")])
+                               [id, searchSpaced(title), searchSpaced(storedName + " " + (row["body"] ?? ""))])
             }
             for row in claims {
                 try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('claim', ?, ?, ?)",
@@ -280,6 +288,12 @@ extension VoiceOSStore {
             try db.execute("INSERT OR REPLACE INTO search_index_meta(key, value) VALUES('shape', ?)", [searchIndexShape])
             try db.execute("DELETE FROM search_index_meta WHERE key='dirty'")
         }
+    }
+
+    /// Mirrors WorkspaceView's row title: markdown markers stripped, stored
+    /// timestamps humanized in the current time zone.
+    private static func materialSearchTitle(_ source: SourceRecord) -> String {
+        MaterialNaming.displayName(MarkdownDocument.plainTitle(source.displayTitle))
     }
 
     private func searchFingerprint() throws -> String {
