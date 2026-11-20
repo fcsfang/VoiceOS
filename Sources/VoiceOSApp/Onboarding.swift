@@ -33,7 +33,7 @@ struct OnboardingView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
                     Text("欢迎使用 VoiceOS").vosFont(WorkspaceText.pageTitle)
-                    HStack(spacing: 14) {
+                    HStack(spacing: WorkspaceMetrics.controlPadding) {
                         Image(systemName: current.symbol)
                             .vosFont(28)
                             .foregroundStyle(palette.secondaryText)
@@ -70,7 +70,7 @@ struct OnboardingView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .padding(28)
+        .padding(24)
         .frame(minWidth: WorkspaceMetrics.modalSmall)
         .workspaceModalSurface()
         .interactiveDismissDisabled()
@@ -95,9 +95,14 @@ struct OnboardingView: View {
 
     private var readinessChecklist: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
-            Text("开始前检查").vosFont(WorkspaceText.rowTitle)
-            Text("未完成的项不影响开始使用；之后可以在设置中补齐。")
-                .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 0) {
+                WorkspaceSectionHeading("开始前检查")
+                Text("未完成的项不影响开始使用；之后可以在设置中补齐。")
+                    .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                    .padding(.top, 3)
+                    .padding(.bottom, 10)
+                WorkspaceListDivider()
+            }
             OnboardingCheckRow(
                 title: "文本模型",
                 detail: model.textModelConfigured ? "已就绪" : "尚未配置",

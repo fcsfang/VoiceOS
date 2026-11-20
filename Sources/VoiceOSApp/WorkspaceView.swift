@@ -795,7 +795,7 @@ struct WorkspaceView: View {
                         Text("全景").tag(true)
                     }.pickerStyle(.segmented).labelsHidden().frame(width: 172)
                     Spacer()
-                }.padding(.horizontal, 26).padding(.top, 12).padding(.bottom, 2)
+                }.padding(.horizontal, WorkspaceMetrics.pagePadding).padding(.top, 12).padding(.bottom, 2)
                 if homeShowsPanorama {
                     PanoramaHome(screen: model.panorama, retry: model.retryPanorama, draft: model.generateDraftPanorama, chooseTextModel: model.chooseTextModel,
                         openMaterials: { go(.materials) }, openSource: { go(.source($0)) }, correctSource: { id in
@@ -984,7 +984,8 @@ struct WorkspaceView: View {
         let page = materialPage
         // Counts stay on the tabs as a quiet number; the page title carries no floating total.
         let tabs = SavedViewPage.materials.filters.map { filter in
-            WorkspaceFilterTabItem(filter: filter, title: filter, count: String(page.counts[filter] ?? 0))
+            WorkspaceFilterTabItem(filter: filter, title: filter, count: String(page.counts[filter] ?? 0),
+                                   help: filter == "回收站" ? "Apple 提醒事项未被删除或取消。" : "")
         }
         let rows = page.rows
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
@@ -995,15 +996,17 @@ struct WorkspaceView: View {
             }
             if materialFilter == "日常材料", !todayReading.isEmpty {
                 WorkspaceListSection(title:"今日阅读",subtitle:"上次停下的地方，接着读。",count:todayReading.count) {
-                    ForEach(todayReading) { item in
-                        WorkspaceRow(title:displayTitle(item.source.displayTitle),subtitle:chunkLabel(item),icon:"book") { go(.source(item.id)) }
-                        if item.id != todayReading.last?.id { WorkspaceListDivider() }
+                    VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
+                        ForEach(todayReading) { item in
+                            WorkspaceRow(title:displayTitle(item.source.displayTitle),subtitle:chunkLabel(item),icon:"book") { go(.source(item.id)) }
+                                .materialCard(highlighted:false)
+                        }
                     }
                 }
             }
             WorkspaceFilterTabs(items: tabs, selection: materialFilter, onSelect: { materialFilter = $0 })
             if !rows.isEmpty, ["已归档","回收站"].contains(materialFilter) {
-                Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。Apple 提醒事项未被删除或取消。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             if rows.isEmpty {
                 if materialFilter == "日常材料" {
@@ -1011,11 +1014,11 @@ struct WorkspaceView: View {
                         Button("添加材料") { go(.capture) }.buttonStyle(.workspacePrimary)
                     }
                 } else if materialFilter == "未读" {
-                    WorkspaceEmptyState(title:"没有未读材料",systemImage:"eye",description:"新材料默认未读，打开后会标为在读。") {
+                    WorkspaceEmptyState(title:"没有未读材料",systemImage:"eye") {
                         Button("查看日常材料") { materialFilter="日常材料" }.buttonStyle(.workspaceSecondary)
                     }
                 } else if materialFilter == "在读" {
-                    WorkspaceEmptyState(title:"没有在读的材料",systemImage:"book",description:"打开未读材料后会自动出现在这里。") {
+                    WorkspaceEmptyState(title:"没有在读的材料",systemImage:"book") {
                         Button("查看日常材料") { materialFilter="日常材料" }.buttonStyle(.workspaceSecondary)
                     }
                 } else {
@@ -1026,9 +1029,9 @@ struct WorkspaceView: View {
             } else {
                 LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.groupGap) {
                     ForEach(materialDayGroups(rows)) { group in
-                        VStack(alignment:.leading,spacing:6) {
+                        VStack(alignment:.leading,spacing:0) {
                             WorkspaceListGroupHeader(title:group.label)
-                            VStack(alignment:.leading,spacing:8) {
+                            VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                                 ForEach(group.sources) { source in
                                     MaterialMenuRow(revealed: materialKeyboardFocus.id == source.id) {
                                         MaterialManagementControls(model:model,source:source,style:.compact)
@@ -3346,6 +3349,7 @@ private struct WorkspaceFilterTabItem: Identifiable {
     let filter: String
     let title: String
     var count: String? = nil
+    var help: String = ""
     var id: String { filter }
     var label: String { count.map { title + " " + $0 } ?? title }
 }
@@ -3391,6 +3395,7 @@ private struct WorkspaceFilterTabs: View {
             .contentShape(Rectangle())
         }.buttonStyle(.plain)
             .accessibilityAddTraits(selected ? [.isSelected] : [])
+            .help(item.help)
             .accessibilityIdentifier("workspace.tab." + item.label)
     }
 }
