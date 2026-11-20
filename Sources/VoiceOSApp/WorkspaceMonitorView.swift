@@ -25,11 +25,16 @@ struct WorkspaceMonitorView: View {
     @State private var showsSettings = false
     @State private var showsAllItems = false
     @State private var handledExpanded = false
-    @State private var monitorLoaded = false
+    @State private var monitorLoadState: MonitorLoadState = .loading
+    @State private var monitorRetrying = false
     @State private var failedItemReportIDs: Set<String> = []
     @State private var earlierOpenSummary = MonitorOpenItemsSummary()
     @State private var qqSaveFeedback = ""
     @State private var qqSaveFailed = false
+
+    private enum MonitorLoadState { case loading, loaded, failed }
+
+    private var monitorLoaded: Bool { monitorLoadState == .loaded }
 
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
@@ -48,6 +53,7 @@ struct WorkspaceMonitorView: View {
             } else {
                 runBar
                 pushNotConfiguredBanner
+                monitorLoadFailureNotice
                 todayReportSection
                 historySection
                 sourceStatusSection
@@ -70,8 +76,8 @@ struct WorkspaceMonitorView: View {
             if showsSettings { probeQQDependenciesIfNeeded() }
             Task {
                 await model.ensureBuiltinMonitorSources()
-                await model.reloadMonitorState()
-                monitorLoaded = true
+                let loaded = await model.reloadMonitorState()
+                monitorLoadState = loaded ? .loaded : .failed
                 markLatestItemsFailure()
                 earlierOpenSummary = await model.monitorOpenItemsSummary(todayKey: todayKey)
                 model.markMonitorAttentionSeen()
@@ -162,8 +168,41 @@ struct WorkspaceMonitorView: View {
         }
     }
 
+    @ViewBuilder private var monitorLoadFailureNotice: some View {
+        if monitorLoadState == .failed {
+            HStack(spacing: 10) {
+                WorkspaceNoticeText(message: model.monitorStatus.isEmpty
+                                    ? "读取监测数据失败，报告与来源状态未能载入。"
+                                    : "读取监测数据失败：" + model.monitorStatus,
+                                    severity: .danger)
+                Button {
+                    Task { await retryMonitorLoad() }
+                } label: {
+                    HStack(spacing: 7) {
+                        if monitorRetrying { ProgressView().controlSize(.small) }
+                        Text("重新读取")
+                    }
+                }
+                    .buttonStyle(.workspaceSecondaryCompact)
+                    .disabled(monitorRetrying)
+                    .accessibilityIdentifier("monitor.load.retry")
+            }
+            .accessibilityIdentifier("monitor.load.failure")
+        }
+    }
+
+    private func retryMonitorLoad() async {
+        guard !monitorRetrying else { return }
+        monitorRetrying = true
+        defer { monitorRetrying = false }
+        let loaded = await model.reloadMonitorState()
+        monitorLoadState = loaded ? .loaded : .failed
+        markLatestItemsFailure()
+        earlierOpenSummary = await model.monitorOpenItemsSummary(todayKey: todayKey)
+    }
+
     @ViewBuilder private var todayReportSection: some View {
-        if !monitorLoaded {
+        if monitorLoadState == .loading {
             WorkspaceCard(padding: 20) {
                 VStack(alignment: .leading, spacing: 12) {
                     WorkspaceSectionHeading("今日报告")
@@ -173,6 +212,14 @@ struct WorkspaceMonitorView: View {
             }
         } else if let report = model.monitorLatestReport, report.reportDate == todayKey {
             reportSection(title: "今日报告", report: report, isLatest: true)
+        } else if monitorLoadState == .failed {
+            WorkspaceCard(padding: 20) {
+                VStack(alignment: .leading, spacing: 12) {
+                    WorkspaceSectionHeading("今日报告")
+                    Text("暂时无法读取今日报告。修复后点「重新读取」。")
+                        .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                }
+            }
         } else {
             WorkspaceCard(padding: 20) {
                 VStack(alignment: .leading, spacing: 12) {
@@ -196,14 +243,16 @@ struct WorkspaceMonitorView: View {
     private var historySection: some View {
         WorkspaceCard(padding: 20) {
             VStack(alignment: .leading, spacing: 12) {
-                WorkspaceSectionHeading("历史报告", count: monitorLoaded ? "\(earlierReports.count)" : nil)
+                WorkspaceSectionHeading("历史报告", count: monitorLoadState == .loaded || !earlierReports.isEmpty
+                                        ? "\(earlierReports.count)" : nil)
                 Text("最近 \(model.monitorReports.count) 次检查中早于今天的报告；点开查看同结构内容。")
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
                 WorkspaceListDivider()
-                if !monitorLoaded {
+                if monitorLoadState == .loading {
                     monitorLoadingRow("正在读取历史报告…")
                 } else if earlierReports.isEmpty {
-                    Text("还没有更早的历史报告。").vosFont(WorkspaceText.meta)
+                    Text(monitorLoadState == .failed ? "暂时无法读取历史报告。" : "还没有更早的历史报告。")
+                        .vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.secondaryText).padding(.vertical, 10)
                 } else {
                     ForEach(earlierReports) { report in
@@ -322,15 +371,13 @@ struct WorkspaceMonitorView: View {
             monitorLoadingRow("正在读取事项…")
         case .failed:
             HStack(spacing: 12) {
-                Text(report.id == model.monitorLatestReport?.id
-                     ? "事项读取失败。"
-                     : "事项读取失败，请收起后重新展开重试。")
+                Text("事项读取失败。")
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                if report.id == model.monitorLatestReport?.id {
-                    Button("重新读取") { Task { await loadItems(report) } }
-                        .buttonStyle(.workspaceSecondaryCompact)
-                        .accessibilityIdentifier("monitor.report.retryItems")
-                }
+                Button("重新读取") { Task { await loadItems(report) } }
+                    .buttonStyle(.workspaceSecondaryCompact)
+                    .accessibilityIdentifier(report.id == model.monitorLatestReport?.id
+                                             ? "monitor.report.retryItems"
+                                             : "monitor.report.retryItems." + report.id)
                 Spacer()
             }.padding(.vertical, 6)
         case .empty:
@@ -627,9 +674,12 @@ struct WorkspaceMonitorView: View {
                 Text("QQ 显示 VoiceOS 本地库中的最新消息时间；没有新消息不等于采集失败，失败会单独标出。")
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
                 WorkspaceListDivider()
-                if !monitorLoaded {
+                if monitorLoadState == .loading {
                     monitorLoadingRow("正在读取来源状态…")
-                } else if !model.monitorSources.contains(where: { $0.kind == .qqGroup }) {
+                } else if monitorLoadState == .failed, model.monitorSources.isEmpty {
+                    Text("暂时无法读取来源状态。").vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.secondaryText).padding(.vertical, 10)
+                } else if monitorLoaded, !model.monitorSources.contains(where: { $0.kind == .qqGroup }) {
                     HStack(spacing: 12) {
                         Text("未添加 QQ 群来源").vosFont(WorkspaceText.body)
                         Button("去设置") { showsSettings = true }
