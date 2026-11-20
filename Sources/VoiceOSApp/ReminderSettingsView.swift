@@ -50,18 +50,7 @@ struct ReminderSettingsView: View {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
                 WorkspaceSectionHeading("日期、提醒与优先级")
                 Text(action.title).vosFont(WorkspaceText.rowTitle)
-                Text("读取的是 Apple 提醒事项当前设置。保存时会再次核对，其他设备刚改过的内容不会被旧设置覆盖。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            }
-            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
-                WorkspaceSectionHeading("稍后提醒")
-                HStack(spacing: 8) {
-                    ForEach(SnoozePreset.allCases, id: \.self) { preset in
-                        Button(preset.title) { apply(preset) }.buttonStyle(.workspaceSecondaryCompact)
-                    }
-                }
-            }
-            Divider()
-            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
+                Text("保存前会重新核对提醒事项当前设置。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 Toggle("安排日期", isOn: $hasDate)
                 if hasDate {
                     DatePicker("日期", selection: $due, displayedComponents: [.date])
@@ -81,13 +70,21 @@ struct ReminderSettingsView: View {
                         Text("通知时间独立于安排日期。其他已有通知会保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     }
                 }
+                Picker("优先级", selection: $priority) {
+                    Text("无").tag(0); Text("高").tag(1); Text("中").tag(5); Text("低").tag(9)
+                    if ![0, 1, 5, 9].contains(priority) { Text("当前优先级（\(priority)）").tag(priority) }
+                }
             }
-            Divider()
-            Picker("优先级", selection: $priority) {
-                Text("无").tag(0); Text("高").tag(1); Text("中").tag(5); Text("低").tag(9)
-                if ![0, 1, 5, 9].contains(priority) { Text("当前优先级（\(priority)）").tag(priority) }
+            WorkspaceListDivider()
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
+                WorkspaceSectionHeading("稍后提醒")
+                HStack(spacing: 8) {
+                    ForEach(SnoozePreset.allCases, id: \.self) { preset in
+                        Button(preset.title) { apply(preset) }.buttonStyle(.workspaceSecondaryCompact)
+                    }
+                }
             }
-            Divider()
+            WorkspaceListDivider()
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
                 Toggle("地点提醒", isOn: $hasLocation)
                 if hasLocation {
@@ -95,7 +92,7 @@ struct ReminderSettingsView: View {
                     Picker("提醒方式", selection: $locationProximity) {
                         Text("到达").tag(ReminderLocation.Proximity.enter); Text("离开").tag(ReminderLocation.Proximity.leave)
                     }.pickerStyle(.segmented)
-                    Text("地点由系统按名称解析；只写名称，不联网搜索，也不写入坐标。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("只按名称解析，不联网、不写坐标。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
             }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }

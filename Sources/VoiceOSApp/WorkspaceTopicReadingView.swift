@@ -258,7 +258,7 @@ struct WorkspaceTopicReadingView: View {
         if displayedSections.isEmpty && !filterTerm.isEmpty {
             Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
         } else {
-            LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:16)],alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
+            LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:WorkspaceMetrics.groupGap)],alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                 ForEach(displayedSections) { section in readingCard(section) }
             }
         }
@@ -268,7 +268,7 @@ struct WorkspaceTopicReadingView: View {
         if displayedSections.isEmpty && !filterTerm.isEmpty {
             Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
         } else {
-            LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:16)],alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
+            LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:WorkspaceMetrics.groupGap)],alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                 ForEach(Array(displayedSections.prefix(3))) { section in readingCard(section) }
             }
             Button("查看全部 \(sections.count) 张卡片",systemImage:"text.book.closed") { showUnderstanding() }
@@ -330,7 +330,7 @@ struct WorkspaceTopicReadingView: View {
                     }
                 }
                 Divider()
-                DisclosureGroup("查看原话依据") {
+                DisclosureGroup {
                     VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                         ForEach(Array(section.evidence.enumerated()),id:\.offset) { _,evidence in
                             VStack(alignment:.leading,spacing:8) {
@@ -339,7 +339,12 @@ struct WorkspaceTopicReadingView: View {
                             }
                         }
                     }.padding(.top,12)
-                }.vosFont(WorkspaceText.meta)
+                } label: {
+                    HStack(spacing:8) {
+                        Text("查看原话依据").vosFont(WorkspaceText.meta)
+                        WorkspaceBadge(text:String(section.evidence.count))
+                    }
+                }
                 Button("讨论这个小主题",systemImage:"bubble.left.and.bubble.right") {
                     discuss("围绕“" + section.title + "”继续讨论。请结合现有原话，区分已有结论、不同意见与需要验证的部分。")
                 }.buttonStyle(.workspaceQuietCompact)
@@ -368,8 +373,7 @@ struct WorkspaceTopicReadingView: View {
     @ViewBuilder private var questions: some View {
         let questions=topic.organization?.questions ?? []
         if !questions.isEmpty {
-            VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
-                    Text("值得继续的问题").vosFont(WorkspaceText.sectionTitle)
+            WorkspaceSection(title:"值得继续的问题",icon:"questionmark.bubble",count:questions.count) {
                 ForEach(questions,id:\.self) { question in
                     Button { discuss(question) } label: {
                         HStack(alignment:.top,spacing:12) {

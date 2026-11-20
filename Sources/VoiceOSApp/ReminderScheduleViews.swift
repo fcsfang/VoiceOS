@@ -53,9 +53,10 @@ struct ActionScheduleEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
-                Text("设置本地期限选择").vosFont(WorkspaceText.sectionTitle)
+                WorkspaceSectionHeading("设置本地期限选择")
                 Text(action.title).vosFont(WorkspaceText.rowTitle)
             }
+            WorkspaceListDivider()
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
                 Picker("期限类型", selection: $mode) {
                     Text("仅日期").tag("date"); Text("日期与时间").tag("time"); Text("移除期限").tag("none")
@@ -66,7 +67,8 @@ struct ActionScheduleEditor: View {
                     Text("解释时区：" + timeZone.identifier).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
             }
-            Text("期限选择先只保存在本地；外部提醒事项有差异时需查看并确认改期，保存不会自动修改它。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            WorkspaceListDivider()
+            Text("仅保存在本地；外部改期差异需另行确认。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
                 Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(saving)
@@ -100,10 +102,11 @@ struct ReminderScheduleConfirmationView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
-                Text("确认本次具体改期").vosFont(WorkspaceText.sectionTitle)
+                WorkspaceSectionHeading("确认本次具体改期")
                 Text(effect.before.title).vosFont(WorkspaceText.rowTitle)
                 Text("清单：" + effect.calendarTitle)
             }
+            WorkspaceListDivider()
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
                 HStack(spacing: 8) {
                     WorkspaceBadge(text: "上次回读期限：" + (effect.before.dueDate?.summary ?? "未能核对"),
@@ -116,9 +119,10 @@ struct ReminderScheduleConfirmationView: View {
                     Text("表达时刻：" + effect.anchorSummary).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
             }
+            WorkspaceListDivider()
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
-                Text("只允许这一项期限变更。执行前会重新核对；任务、清单或期限发生变化时停止写入。标题、完成状态和其他字段保留。").vosFont(WorkspaceText.body)
-                Text("确认不代表任务已完成或观点已验证。可以撤回后续写入许可；已派发的变更不能因此自动撤销。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                Text("只允许这一项变更，执行前重新核对。").vosFont(WorkspaceText.body)
+                Text("确认不代表任务已完成；撤回后续写入许可不会撤销已派发的变更。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             }
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {

@@ -121,16 +121,14 @@ private struct SourceFold<Content: View>: View {
                         if !icon.isEmpty {
                             Image(systemName:icon).vosFont(19, weight:.medium).foregroundStyle(palette.accent).frame(minWidth: 26 * vosLayoutScale(textScale), minHeight: 28 * vosLayoutScale(textScale)).accessibilityHidden(true)
                         }
-                        Text(title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
-                        Spacer(minLength:8)
-                        if let count {
-                            WorkspaceBadge(text:String(count))
+                        WorkspaceSectionHeading(title:title,count:count.map { String($0) }) {
+                            Image(systemName:isExpanded ? "chevron.up" : "chevron.down").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).accessibilityHidden(true)
                         }
-                        Image(systemName:isExpanded ? "chevron.up" : "chevron.down").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).padding(.top,6).accessibilityHidden(true)
                     }.contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityValue(isExpanded ? "已展开" : "已收起")
+                WorkspaceListDivider().padding(.top,18)
                 if isExpanded {
-                    LazyVStack(alignment:.leading,spacing:spacing,content:content).padding(.top,16)
+                    LazyVStack(alignment:.leading,spacing:spacing,content:content).padding(.top,8)
                 }
             }
         }
@@ -207,7 +205,6 @@ private struct UnresolvedIssuesBlock: View {
     }
 }
 private struct SourceSection<Content: View>: View {
-    @Environment(\.workspacePalette) private var palette
     let title:String
     var count:Int? = nil
     @ViewBuilder let content:()->Content
@@ -215,7 +212,7 @@ private struct SourceSection<Content: View>: View {
         WorkspaceCard() {
             VStack(alignment:.leading,spacing:0) {
                 WorkspaceSectionHeading(title,count:count.map { String($0) })
-                Rectangle().fill(palette.border).frame(height:1).padding(.top,18)
+                WorkspaceListDivider().padding(.top,18)
                 LazyVStack(alignment:.leading,spacing:0,content:content).padding(.top,8)
             }
         }
@@ -793,7 +790,7 @@ struct WorkspaceSourceView: View {
                                 Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuietCompact)
                             }
                         }
-                        Text("之前的提取与完成记录会保留为历史。已连接的 Apple 提醒事项可能仍会通知，重新识别不等于已撤销系统提醒。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                        Text("旧提取保留为历史；已连接的提醒事项不受影响。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                         }
                     }
                 }
@@ -933,7 +930,7 @@ struct WorkspaceSourceView: View {
                         DisclosureGroup("核对依据与适用边界") { KnowledgeReviewSection(model:model,sourceIDs:[source.id],carded:false).padding(.top,12) }.padding(.vertical,16)
                         Divider()
                         DisclosureGroup("文字校正、理解与修订历史") {
-                            VStack(alignment:.leading,spacing:13) {
+                            VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                                 if source.transcriptionReview != nil {
                                     Text("转写校正已保存，原始版本可追溯。").vosFont(WorkspaceText.meta)
                                     let issues=source.unresolvedTranscriptionIssues
@@ -973,7 +970,7 @@ struct WorkspaceSourceView: View {
                         }
                         Divider()
                         DisclosureGroup("主题归属与处理情况") {
-                            VStack(alignment:.leading,spacing:13) {
+                            VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                                 ForEach(model.workspaceTopics) { topic in
                                     let linked=model.workspaceTopicSources[topic.id]?.contains(source.id) == true
                                     Toggle(topic.title,isOn:Binding(get:{linked},set:{ value in Task { do { try await model.linkReflectionQuestionSource(questionID:topic.id,sourceID:source.id,linked:value);await model.refresh() } catch { self.error=error.localizedDescription } } }))
@@ -992,7 +989,7 @@ struct WorkspaceSourceView: View {
                     if !source.dictationRecoveryPending {
                         VStack(alignment:.leading,spacing:10) {
                             MaterialManagementControls(model:model,source:source)
-                            Text(source.isArchived ? "已归档：从日常材料列表收起，仍可作为历史依据使用。" : "归档只收起材料；移入回收站会暂停相关理解，原件和历史仍可恢复。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                            Text(source.isArchived ? "已归档：从日常材料列表收起，仍可作为历史依据使用。" : "归档只收起材料；移入回收站会暂停相关理解，但可恢复。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                         }
                     }
                     if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
@@ -1700,7 +1697,7 @@ struct RecordingExpressionTitleEditor:View {
         VStack(alignment:.leading,spacing:16) {
             Text("修改分组标题").vosFont(WorkspaceText.sectionTitle)
             TextField("分组标题",text:$title)
-            Text("这 \(expression.sourceIDs.count) 段录音属于同一段连续表达。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            Text("\(expression.sourceIDs.count) 段录音同属一段连续表达。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             if !model.recordingTitleStatus.isEmpty { Text(model.recordingTitleStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             HStack {
                 if expression.manualTitle != nil { Button("恢复自动标题") { save(nil) }.buttonStyle(.workspaceQuiet).disabled(saving) }
