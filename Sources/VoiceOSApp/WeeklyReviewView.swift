@@ -27,9 +27,14 @@ struct WeeklyReviewView: View {
     @State private var showingDiscussion = false
     @State private var discussionDraft = ""
     @State private var loadError = ""
+    @State private var loadState: LoadState = .idle
+    @State private var showSlowLoad = false
 
     private enum ReviewFilter: String {
         case todo = "我的待办", review = "待核对", completed = "已完成"
+    }
+    private enum LoadState: Equatable {
+        case idle, loading, loaded, failed
     }
     private struct UndoEntry: Identifiable, Equatable {
         let id = UUID()
@@ -112,6 +117,9 @@ struct WeeklyReviewView: View {
                         }
                     }
                     summaryRow(proxy)
+                    if loadState == .loading && showSlowLoad {
+                        ProgressView("正在读取本周行动…").controlSize(.small)
+                    }
                     if !loadError.isEmpty {
                         HStack(alignment: .top, spacing: 10) {
                             WorkspaceNoticeText(message: loadError, severity: .danger)
@@ -120,8 +128,8 @@ struct WeeklyReviewView: View {
                     }
                     undoHint
                     dailyCloseSection
-                    if isEmpty {
-                        Text("这一周没有需要回顾的行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                    if loadState == .loaded && isEmpty {
+                        emptyReviewState
                     }
                     if !nextWeekEntries.isEmpty { nextWeekSection }
                     if !staleTasks.isEmpty { staleSection }
@@ -137,6 +145,11 @@ struct WeeklyReviewView: View {
             .overlay(alignment: .bottom) { undoBar }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: undoEntry?.id)
             .task { await load() }
+            .task(id: loadState) {
+                guard loadState == .loading else { return }
+                do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+                if loadState == .loading { showSlowLoad = true }
+            }
             .task(id: undoEntry?.id) {
                 guard let id = undoEntry?.id else { return }
                 do { try await Task.sleep(for: .seconds(8)) } catch { return }
@@ -193,11 +206,30 @@ struct WeeklyReviewView: View {
 
     private func load() async {
         loadError = ""
+        loadState = .loading
+        showSlowLoad = false
         let previousStatus = model.status
         focusedIDs = await model.focusedActionIDs()
         somedayRows = await model.somedayReviewCandidates()
         focusLoaded = true
-        if model.status != previousStatus { loadError = model.status }
+        if model.status != previousStatus {
+            loadError = model.status
+            loadState = .failed
+        } else {
+            loadState = .loaded
+        }
+    }
+
+    private var emptyReviewState: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("这一周没有需要回顾的行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button("打开行动页") { jump(.todo) }
+                    .buttonStyle(.workspaceQuiet)
+                Button("查看待确认") { jump(.review) }
+                    .buttonStyle(.workspaceQuiet)
+            }
+        }
     }
 
     private var reflectionMapSheet: some View {
@@ -568,7 +600,7 @@ struct WeeklyReviewView: View {
                 }
             }
         }
-        .padding(.vertical, 14).padding(.horizontal, 10)
+        .padding(.vertical, 10).padding(.horizontal, 10)
     }
 
     private func progressUnavailableReason(_ row: RecentContentProgressRow) -> String {
@@ -805,7 +837,7 @@ struct WeeklyReviewView: View {
                 }
                 Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
             }
-            .padding(.vertical, 14).padding(.horizontal, 10)
+            .padding(.vertical, 10).padding(.horizontal, 10)
             .contentShape(Rectangle())
             .accessibilityElement(children: .combine)
         }.buttonStyle(.plain)
