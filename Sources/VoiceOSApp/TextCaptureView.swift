@@ -54,7 +54,7 @@ struct TextCaptureView: View {
                 if !model.initialized { ProgressView("正在恢复资料库与草稿…").controlSize(.small) }
                 if !draft.error.isEmpty { WorkspaceNoticeText(message: draft.error, severity: .danger) }
                 if !model.textCaptureDraftIssue.isEmpty { WorkspaceNoticeText(message: model.textCaptureDraftIssue) }
-                Text("草稿自动保存在本机，保存成功后清空。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("草稿保存在本机，切页或重开可继续；保存后清空。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 if let validationIssue { Text(validationIssue).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                 if importing { ProgressView("正在读取文字、PDF 或识别图片…").controlSize(.small) }
                 if linkImporting { ProgressView("正在抓取网页正文…").controlSize(.small) }
