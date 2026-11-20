@@ -316,6 +316,7 @@ struct WorkspaceSourceView: View {
     @State private var bilingualPhase=BilingualPhase.idle
     @State private var bilingualTask: Task<Void, Never>?
     @State private var bilingualConsumed=0
+    @State private var retryingTranscription=false
     @State private var showAllThoughts=false
     @State private var historyState = SourceHistoryState.idle
     @State private var historyTask: Task<Void, Never>?
@@ -746,7 +747,21 @@ struct WorkspaceSourceView: View {
                         Text("这段录音在结束前被中断，还没有完整原件。可以先封存可解码片段并进入正常整理，也可以直接移入回收站。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         DictationRecoveryControls(model:model,source:source)
                     } else if ["failed","blocked"].contains(source.jobState ?? "") {
-                        Button("重试本地转写") { Task { await model.retry(source) } }.buttonStyle(.workspacePrimary)
+                        Button {
+                            guard !retryingTranscription else { return }
+                            retryingTranscription = true
+                            Task {
+                                await model.retry(source)
+                                retryingTranscription = false
+                            }
+                        } label: {
+                            HStack(spacing: 6) {
+                                if retryingTranscription { ProgressView().controlSize(.small) }
+                                Text(retryingTranscription ? "正在重试…" : "重试本地转写")
+                            }
+                        }
+                        .buttonStyle(.workspacePrimary)
+                        .disabled(retryingTranscription || model.dictationBusy || model.fullRecordingBusy || model.processingActivity != nil)
                     }
                 }
                 digestSections
