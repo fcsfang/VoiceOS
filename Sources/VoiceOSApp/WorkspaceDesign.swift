@@ -6,7 +6,11 @@ enum WorkspaceMetrics {
     static let pageWidth: CGFloat = 860
     static let readerWidth: CGFloat = 720
     static let pagePadding: CGFloat = 32
-    static let sectionGap: CGFloat = 24
+    // Spacing rhythm asks the eye to group before it reads: rows inside one
+    // group stay tight, groups breathe, sections start a new plane.
+    static let rowGap: CGFloat = 8
+    static let groupGap: CGFloat = 18
+    static let sectionGap: CGFloat = 28
     static let controlPadding: CGFloat = 12
     static let toolbarPadding: CGFloat = 16
     static let sectionRadius: CGFloat = 16
