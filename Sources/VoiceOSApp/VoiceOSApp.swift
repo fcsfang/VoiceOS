@@ -5185,6 +5185,16 @@ extension ControlCenter {
         }
         await refresh()
     }
+    func mergeTopic(_ id: String, into targetID: String) async throws {
+        guard let store else { throw VoiceOSError("资料库尚未打开") }
+        try await store.mergeReflectionQuestion(id: id, into: targetID)
+        await refresh()
+    }
+    func promoteTopic(_ id: String) async throws {
+        guard let store else { throw VoiceOSError("资料库尚未打开") }
+        try await store.promoteReflectionQuestion(id: id)
+        await refresh()
+    }
     func saveReflectionQuestionEntry(questionID: String, kind: ReflectionQuestionEntryKind, text: String, sourceIDs: [String], allowCloud: Bool) async throws {
         guard let store else { throw VoiceOSError("资料库尚未打开") }
         let entry = try await store.addReflectionQuestionEntry(questionID: questionID, kind: kind, text: text, sourceIDs: sourceIDs)
