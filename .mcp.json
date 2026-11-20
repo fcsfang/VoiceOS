@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "voiceos": {
+      "command": "python3",
+      "args": ["Tools/voiceos-mcp/server.py"]
+    }
+  }
+}
