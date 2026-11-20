@@ -203,6 +203,49 @@ final class MonitorOperationGate: ObservableObject {
     func endQQ(_ operation: QQ) {
         if qq == operation { qq = nil }
     }
+
+    struct SourceWrite: Equatable {
+        var enabled: Bool?
+        var start: Date?
+    }
+
+    @Published private(set) var sourceBusy: Set<String> = []
+    @Published private(set) var addingBuiltinSources = false
+    private var pendingSourceWrites: [String: SourceWrite] = [:]
+
+    /// Keeps only the newest value per source row. A row that is already busy
+    /// leaves the value queued for the owner, so the last toggle wins.
+    func queueSourceWrite(_ sourceID: String, enabled: Bool? = nil, start: Date? = nil) -> Bool {
+        var pending = pendingSourceWrites[sourceID] ?? SourceWrite()
+        if let enabled { pending.enabled = enabled }
+        if let start { pending.start = start }
+        pendingSourceWrites[sourceID] = pending
+        guard !sourceBusy.contains(sourceID) else { return false }
+        sourceBusy.insert(sourceID)
+        return true
+    }
+
+    func takeSourceWrite(_ sourceID: String) -> SourceWrite? {
+        pendingSourceWrites.removeValue(forKey: sourceID)
+    }
+
+    func hasPendingSourceWrite(_ sourceID: String) -> Bool {
+        pendingSourceWrites[sourceID] != nil
+    }
+
+    func endSource(_ sourceID: String) {
+        sourceBusy.remove(sourceID)
+    }
+
+    func beginBuiltinSources() -> Bool {
+        guard !addingBuiltinSources else { return false }
+        addingBuiltinSources = true
+        return true
+    }
+
+    func endBuiltinSources() {
+        addingBuiltinSources = false
+    }
 }
 
 extension ControlCenter {
@@ -371,6 +414,8 @@ extension ControlCenter {
         guard let store else { return }
         let seededKey = "voiceos.monitor.builtinSeeded.v2"
         if !restoreMissing, UserDefaults.standard.bool(forKey: seededKey) { return }
+        guard Self.monitorOperations.beginBuiltinSources() else { return }
+        defer { Self.monitorOperations.endBuiltinSources() }
         do {
             let existing = try await store.monitorSources()
             let start = MonitorSourceConfigParser.dayString(Date())
@@ -427,45 +472,60 @@ extension ControlCenter {
     }
 
     func setMonitorSourceEnabled(_ source: MonitorSource, enabled: Bool) async {
-        guard let store else { return }
-        do {
-            _ = try await store.updateMonitorSource(id: source.id, displayName: source.displayName,
-                                                    configJSON: source.configJSON, enabled: enabled)
-            await reloadMonitorState()
-        } catch {
-            monitorStatus = error.localizedDescription
-        }
+        await drainMonitorSourceWrites(sourceID: source.id, enabled: enabled)
     }
 
     func setMonitorWebsiteStart(_ source: MonitorSource, date: Date) async {
-        guard let store else { return }
-        do {
-            var config = try MonitorSourceConfigParser.website(source.configJSON)
-            config.startAt = MonitorSourceConfigParser.dayString(date)
-            let json = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
-            _ = try await store.updateMonitorSource(id: source.id, displayName: source.displayName,
-                                                    configJSON: json, enabled: source.enabled)
-            await reloadMonitorState()
-        } catch {
-            monitorStatus = error.localizedDescription
-        }
+        await drainMonitorSourceWrites(sourceID: source.id, start: date)
     }
 
     /// The start control is the cursor itself: moving it later skips the
     /// history the user chose to skip, and moving it earlier re-reads from
     /// that moment; dedupe absorbs the overlap.
     func setMonitorQQStart(_ source: MonitorSource, date: Date) async {
+        await drainMonitorSourceWrites(sourceID: source.id, start: date)
+    }
+
+    /// One drain loop owns a source row at a time. Each queued write re-reads
+    /// the row so a start change and a toggle queued behind it cannot clobber
+    /// each other; the newest value wins without concurrent store writes.
+    private func drainMonitorSourceWrites(sourceID: String, enabled: Bool? = nil, start: Date? = nil) async {
         guard let store else { return }
-        do {
-            var config = try MonitorSourceConfigParser.qq(source.configJSON)
-            config.startAt = MonitorSourceConfigParser.timestampString(date)
-            let json = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
-            _ = try await store.updateMonitorSource(id: source.id, displayName: source.displayName,
-                                                    configJSON: json, enabled: source.enabled)
-            try await store.alignMonitorCursorToStart(sourceID: source.id, start: date)
-            await reloadMonitorState()
-        } catch {
-            monitorStatus = error.localizedDescription
+        guard Self.monitorOperations.queueSourceWrite(sourceID, enabled: enabled, start: start) else { return }
+        defer { Self.monitorOperations.endSource(sourceID) }
+        var wrote = false
+        while true {
+            while let write = Self.monitorOperations.takeSourceWrite(sourceID) {
+                do {
+                    guard let source = try await store.monitorSources().first(where: { $0.id == sourceID }) else { continue }
+                    var configJSON = source.configJSON
+                    var cursorStart: Date?
+                    if let date = write.start {
+                        switch source.kind {
+                        case .websiteColumn:
+                            var config = try MonitorSourceConfigParser.website(configJSON)
+                            config.startAt = MonitorSourceConfigParser.dayString(date)
+                            configJSON = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
+                        case .qqGroup:
+                            var config = try MonitorSourceConfigParser.qq(configJSON)
+                            config.startAt = MonitorSourceConfigParser.timestampString(date)
+                            configJSON = String(decoding: try JSONEncoder().encode(config), as: UTF8.self)
+                            cursorStart = date
+                        }
+                    }
+                    _ = try await store.updateMonitorSource(id: sourceID, displayName: source.displayName,
+                                                            configJSON: configJSON, enabled: write.enabled ?? source.enabled)
+                    if let cursorStart {
+                        try await store.alignMonitorCursorToStart(sourceID: sourceID, start: cursorStart)
+                    }
+                    wrote = true
+                } catch {
+                    monitorStatus = error.localizedDescription
+                }
+            }
+            if wrote { await reloadMonitorState() }
+            if Self.monitorOperations.hasPendingSourceWrite(sourceID) { continue }
+            break
         }
     }
 

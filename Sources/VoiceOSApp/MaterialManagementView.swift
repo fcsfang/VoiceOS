@@ -90,6 +90,7 @@ struct MaterialManagementControls: View {
         }
     }
     private func update(_ disposition: MaterialDisposition) {
+        guard !busy else { return }
         busy=true
         Task {
             let message = await model.manageMaterial(source,disposition:disposition)
