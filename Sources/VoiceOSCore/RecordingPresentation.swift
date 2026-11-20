@@ -116,6 +116,13 @@ public extension SourceRecord {
         if let contentTitle { return contentTitle }
         if ["audio", "video"].contains(kind) { return "录音 · " + recordingDateLabel }
         if let text = transcript {
+            let firstLine = String(text.drop(while: { $0 == "\n" }).prefix(while: { $0 != "\n" }))
+                .trimmingCharacters(in: .whitespaces)
+            // A capture that is nothing but a link must reach the headline intact;
+            // truncating at 48 characters leaves a fragment no title view can read.
+            if firstLine.hasPrefix("http://") || firstLine.hasPrefix("https://"), !firstLine.contains(" ") {
+                return String(firstLine.prefix(240))
+            }
             let line = text.drop(while: { $0 == "\n" }).prefix(49).prefix(while: { $0 != "\n" })
             let cleaned = String(line.prefix(48)).trimmingCharacters(in: .whitespaces)
             if !cleaned.isEmpty { return cleaned + (line.count > 48 ? "…" : "") }

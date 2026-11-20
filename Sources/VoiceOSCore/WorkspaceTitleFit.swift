@@ -18,6 +18,18 @@ public enum WorkspaceTitleFit {
 
     private static let genericSegments: Set<String> = ["watch", "s", "p", "index", "view", "detail"]
 
+    /// Splits a note that starts with a bare link into the link and the rest, so
+    /// a captured URL plus commentary does not headline as one long string.
+    public static func splitLeadingLink(_ raw: String) -> (link: String, rest: String)? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let space = text.firstIndex(where: { $0 == " " || $0 == "\n" || $0 == "\t" }) else { return nil }
+        let token = String(text[..<space])
+        guard token.hasPrefix("http://") || token.hasPrefix("https://") else { return nil }
+        let rest = String(text[space...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rest.isEmpty else { return nil }
+        return (token, rest)
+    }
+
     public static func present(_ raw: String) -> Presentation {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         while text.hasPrefix("#") {

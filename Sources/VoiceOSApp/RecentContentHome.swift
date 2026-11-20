@@ -355,10 +355,7 @@ struct RecentContentHome: View {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(item.excerpts.enumerated()), id: \.offset) { index, excerpt in
                         if index > 0 { Divider() }
-                        Text(excerpt)
-                            .vosFont(index == 0 ? WorkspaceText.pageTitle : WorkspaceText.body)
-                            .lineSpacing(index == 0 ? 4 : 5)
-                            .textSelection(.enabled)
+                        feedbackExcerpt(excerpt, primary: index == 0)
                     }
                 }
             } else if let first = rows.first {
@@ -368,6 +365,31 @@ struct RecentContentHome: View {
                     progressRow(row, style: WorkspaceText.body)
                 }
             }
+        }
+    }
+
+    /// A captured note may start with a link followed by commentary. Headline
+    /// the readable words; keep the link on its own quiet line.
+    @ViewBuilder private func feedbackExcerpt(_ excerpt: String, primary: Bool) -> some View {
+        if let split = WorkspaceTitleFit.splitLeadingLink(excerpt) {
+            VStack(alignment: .leading, spacing: 8) {
+                if primary {
+                    Text(WorkspaceTitleFit.present(split.link).title)
+                        .vosFont(WorkspaceText.pageTitle).lineSpacing(4)
+                        .textSelection(.enabled).accessibilityAddTraits(.isHeader)
+                }
+                Text(split.rest)
+                    .vosFont(primary ? WorkspaceText.sectionTitle : WorkspaceText.body)
+                    .lineSpacing(5).textSelection(.enabled)
+                Text(split.link)
+                    .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+            }
+        } else {
+            Text(excerpt)
+                .vosFont(primary ? WorkspaceText.pageTitle : WorkspaceText.body)
+                .lineSpacing(primary ? 4 : 5)
+                .textSelection(.enabled)
         }
     }
 

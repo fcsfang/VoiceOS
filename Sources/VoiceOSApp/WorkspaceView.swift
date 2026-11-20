@@ -137,6 +137,7 @@ func workspaceStateLabel(_ value:String) -> String {
     }
 }
 fileprivate func displayTitle(_ raw:String) -> String { MarkdownDocument.plainTitle(raw) }
+fileprivate func fittedDisplayTitle(_ raw:String) -> String { WorkspaceTitleFit.present(displayTitle(raw)).title }
 fileprivate let recentSearchDefaultsKey = "voiceos.recentSearches.v1"
 /// Fixed widths and icon boxes follow the reading size up to 1.3, so 特大 still fits a desktop window.
 func vosLayoutScale(_ scale: CGFloat) -> CGFloat { min(max(scale, 1), 1.3) }
@@ -1735,28 +1736,25 @@ struct WorkspaceView: View {
                     Button("更换配置…") { model.chooseTextModel() }
                     Button("清除配置", role: .destructive) { model.clearTextModel() }.disabled(!model.modelConfigured)
                 }
-            WorkspaceCard(padding: 20) {
-                VStack(alignment: .leading, spacing: 10) {
-                    WorkspaceSectionHeading("隐私与云端")
-                    WorkspaceListDivider()
-                    Text("只在本机：录音与原件、资料库、模型密钥、QQ 密钥文件")
-                        .vosFont(WorkspaceText.body)
-                    Text("会发送给模型：转写与材料文本；监测原文仅在授权后；英文反馈仅所选文字；任务发起仅那段文字")
-                        .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                    DisclosureGroup("详细说明") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("录音、原件与资料库保存在本机，不上传。")
-                            Text("模型密钥只在本机读取，不随材料发送；整个资料库不会发送。")
-                            Text("QQ 密钥文件只保存路径；内容不复制、不进日志或模型。")
-                            Text("转写与材料文本会发送给已配置的文本模型做理解、核对与整理。")
-                            Text("监测原文默认不发送；开启「允许云端分析监测内容」后才发送所选来源的新增原文。")
-                            Text("英文反馈只发送你选中的那段文字；任务发起只发送任务描述那段文字。")
-                        }
-                        .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
-                        .padding(.top, 8)
+            sectionTitle("隐私与云端")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("只在本机：录音与原件、资料库、模型密钥、QQ 密钥文件")
+                    .vosFont(WorkspaceText.body)
+                Text("会发送给模型：转写与材料文本；监测原文仅在授权后；英文反馈仅所选文字；任务发起仅那段文字")
+                    .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                DisclosureGroup("详细说明") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("录音、原件与资料库保存在本机，不上传。")
+                        Text("模型密钥只在本机读取，不随材料发送；整个资料库不会发送。")
+                        Text("QQ 密钥文件只保存路径；内容不复制、不进日志或模型。")
+                        Text("转写与材料文本会发送给已配置的文本模型做理解、核对与整理。")
+                        Text("监测原文默认不发送；开启「允许云端分析监测内容」后才发送所选来源的新增原文。")
+                        Text("英文反馈只发送你选中的那段文字；任务发起只发送任务描述那段文字。")
                     }
-                    .vosFont(WorkspaceText.meta)
+                    .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                    .padding(.top, 8)
                 }
+                .vosFont(WorkspaceText.meta)
             }
             .frame(maxWidth: 620, alignment: .leading)
             sectionTitle("连接与自动入口")
@@ -1964,8 +1962,8 @@ struct WorkspaceView: View {
         let catalog=pageIndex.recordsByID
         guard let source=catalog[id] else { return "材料" }
         if let expression=pageIndex.expression(for:id),expression.sourceIDs.count > 1,
-           let index=expression.sourceIDs.firstIndex(of:id) { return expression.displayTitle(in:catalog)+" / 第 \(index+1) 段原文" }
-        return displayTitle(source.displayTitle)
+           let index=expression.sourceIDs.firstIndex(of:id) { return fittedDisplayTitle(expression.displayTitle(in:catalog))+" / 第 \(index+1) 段原文" }
+        return fittedDisplayTitle(source.displayTitle)
     }
     private var todayReading: [TodayReadingItem] {
         let catalog=recordCatalog
@@ -2000,7 +1998,7 @@ struct WorkspaceView: View {
         let trailingText=openCount > 0 ? "\(openCount) 条待办" + (issues > 0 ? " · 疑点 \(issues)" : "") : reading?.text ?? ""
         let trailingDisplay=trailingText
         let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .badge(.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
-        return WorkspaceRow(title:displayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter) { go(.source(source.id)) }
+        return WorkspaceRow(title:fittedDisplayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter) { go(.source(source.id)) }
             .help(metadata)
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
@@ -2601,8 +2599,8 @@ struct WorkspaceView: View {
             ScrollView {
                 LazyVStack(alignment:.leading,spacing:2) {
                     ForEach(rows) { source in
-                        WorkspaceListRow(density:.compact,title:displayTitle(source.displayTitle),subtitle:source.recordingDateLabel,icon:source.kind.contains("text") ? "doc.text" : "waveform",highlighted:source.id == selectedID) { selectSource(source.id) }
-                            .help(displayTitle(source.displayTitle))
+                        WorkspaceListRow(density:.compact,title:fittedDisplayTitle(source.displayTitle),subtitle:source.recordingDateLabel,icon:source.kind.contains("text") ? "doc.text" : "waveform",highlighted:source.id == selectedID) { selectSource(source.id) }
+                            .help(fittedDisplayTitle(source.displayTitle))
                             .accessibilityIdentifier("sourceRail.item." + source.id)
                     }
                 }.padding(.horizontal,8).padding(.bottom,12)

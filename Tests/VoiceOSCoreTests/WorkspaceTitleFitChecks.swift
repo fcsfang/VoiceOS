@@ -26,6 +26,14 @@ final class WorkspaceTitleFitChecks: XCTestCase {
                        .init(title: "了解 a16z 及其可能的播客订阅方式"))
     }
 
+    func testLeadingLinkSplitsFromCommentary() {
+        let split = WorkspaceTitleFit.splitLeadingLink("https://github.com/Adkid-Zephyr/anti-defensive-writing-Skill 学术写作 skill，值得读")
+        XCTAssertEqual(split?.link, "https://github.com/Adkid-Zephyr/anti-defensive-writing-Skill")
+        XCTAssertEqual(split?.rest, "学术写作 skill，值得读")
+        XCTAssertNil(WorkspaceTitleFit.splitLeadingLink("只是普通的一句话"))
+        XCTAssertNil(WorkspaceTitleFit.splitLeadingLink("https://example.com"))
+    }
+
     func testWatchLinkFallsBackToHost() {
         let fit = WorkspaceTitleFit.present("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
         XCTAssertEqual(fit.title, "youtube.com")
