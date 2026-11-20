@@ -329,6 +329,7 @@ struct WeeklyReviewView: View {
                         }
                     }
                     Spacer(minLength: 8)
+                    WorkspaceRowChevron().padding(.top, 3)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -599,10 +600,8 @@ struct WeeklyReviewView: View {
                         .buttonStyle(.workspaceQuietCompact)
                 }
             }
-            Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
         }
         .padding(.vertical, 10).padding(.horizontal, 10)
-        .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
     }
 
     private func progressUnavailableReason(_ row: RecentContentProgressRow) -> String {
@@ -783,6 +782,7 @@ struct WeeklyReviewView: View {
                         Text("将来也许 · 留到以后").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 8)
+                    WorkspaceRowChevron().padding(.top, 3)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())

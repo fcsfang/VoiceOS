@@ -124,8 +124,10 @@ private struct SourceFold<Content: View>: View {
                         WorkspaceSectionHeading(title:title,count:count.map { String($0) }) {
                             Image(systemName:isExpanded ? "chevron.up" : "chevron.down").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).accessibilityHidden(true)
                         }
-                    }.contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityValue(isExpanded ? "已展开" : "已收起")
+                    }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                    .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.controlRadius)
+                    .accessibilityValue(isExpanded ? "已展开" : "已收起")
                 WorkspaceListDivider().padding(.top,18)
                 if isExpanded {
                     LazyVStack(alignment:.leading,spacing:spacing,content:content).padding(.top,8)
@@ -918,8 +920,9 @@ struct WorkspaceSourceView: View {
                                         HStack(spacing:8) {
                                             Text(entity.name + " · " + String(entity.mentionCount) + " 次").vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
                                             Spacer(minLength:0)
-                                        }.padding(.horizontal,8).padding(.vertical,6).contentShape(Rectangle())
+                                        }.padding(.horizontal,8).padding(.vertical,6).frame(minHeight: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle())
                                     }.buttonStyle(.plain)
+                                        .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.controlRadius)
                                 }
                             }
                         }
@@ -1528,6 +1531,7 @@ private struct SourceSpanPlaybackLabel: View, Equatable {
     let startMS:Int
     let endMS:Int
     let active:Bool
+    @State private var hovered = false
     static func == (lhs:SourceSpanPlaybackLabel,rhs:SourceSpanPlaybackLabel)->Bool {
         lhs.startMS == rhs.startMS && lhs.endMS == rhs.endMS && lhs.active == rhs.active
     }
@@ -1535,8 +1539,10 @@ private struct SourceSpanPlaybackLabel: View, Equatable {
         Text(sourceTime(startMS) + "—" + sourceTime(endMS) + " · 回听")
             .vosFont(WorkspaceText.meta.size, weight: active ? .semibold : .regular)
             .padding(.horizontal,8).padding(.vertical,3)
-            .background(active ? palette.selection : .clear, in: RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+            .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
+            .background(active ? palette.selection : hovered ? palette.hover : .clear, in: RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
             .contentShape(Rectangle())
+            .onHover { hovered = $0 }
     }
 }
 private struct SourceOutlinePlaybackList: View {
@@ -1585,6 +1591,7 @@ private struct SourceTimedPlaybackLabel: View, Equatable {
     let startMS:Int
     let title:String
     let active:Bool
+    @State private var hovered = false
     static func == (lhs:SourceTimedPlaybackLabel,rhs:SourceTimedPlaybackLabel)->Bool {
         lhs.startMS == rhs.startMS && lhs.title == rhs.title && lhs.active == rhs.active
     }
@@ -1594,8 +1601,10 @@ private struct SourceTimedPlaybackLabel: View, Equatable {
             Text(title).vosFont(WorkspaceText.rowTitle.size, weight: active ? .semibold : .regular).multilineTextAlignment(.leading)
             Spacer(minLength:0)
         }.padding(.horizontal,8).padding(.vertical,6)
-            .background(active ? palette.selection : .clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+            .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
+            .background(active ? palette.selection : hovered ? palette.hover : .clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
             .contentShape(Rectangle())
+            .onHover { hovered = $0 }
     }
 }
 struct WorkspaceTranscriptEditor:View {
