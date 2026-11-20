@@ -690,3 +690,11 @@
 - dist 重建 exit 0；首次 preflight 因应用忙（idle=11s）返回 1，未重启；等到 safe idle=345s 后 preflight 0，重启安装（pid 见下行）。
 - 交付：波 112（工具页三态、设置页反馈与节奏、行动详情加载态）+ 波 113（反思/阅读页 4pt 节奏、页面级错误恢复）。
 - 波 114（监测推送/QQ 忙标志、字号环境注入全覆盖、素材扫描反馈与转写重试保护）施工中。
+
+## 波 114：外部操作互斥与字号覆盖（2026-11-20，已推送）
+
+- 114-A 监测外部操作：新增 MonitorOperationGate（@MainActor ObservableObject，push/qq 两组枚举锁）；pushMonitorReport / sendMonitorPushTest / loadQQMonitorConversations / diagnoseMonitorQQ / addQQMonitorSource 全部互斥、defer 释放；加群按 conversationID 幂等（monitor_sources 无唯一索引，先读后比）；自动投递与手动推送共享锁（手动占锁时自动跳过不排队）；六个入口忙态 spinner + 文案 + 禁用。
+- 114-B 字号环境：scene 根 .vosTextEnvironment(model.textSize) 一次覆盖主窗口与四个应用级 sheet（新手引导/导入结果/记录想法）；QuickNote 独立 hosting 根注入同源 textSize；抽 View.vosTextEnvironment 扩展，WorkspaceView 内注入保留。
+- 114-C 扫描与转写重试：RecordingInbox.scanning 改 @Published，检查新素材/重试未完成素材扫描中显示进度并禁用；资料详情重试本地转写对齐处理页 disabled 条件 + 一次性防连点（模型层 ControlCenter.retry 仍无 guard，记录为后续项）。
+- 集成（main 合并三支后）：build_exit=0，test_exit=0，669 项 0 失败。
+- 波 115（数字列等宽、摘要字号回落、处理条/全景标题层级）施工中。
