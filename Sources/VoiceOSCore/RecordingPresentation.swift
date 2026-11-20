@@ -113,7 +113,10 @@ public extension SourceRecord {
         return name.hasPrefix("我的口述") || ["user_text", "external_text", "ai_text"].contains(kind) ? ConversationReflectionFocus.date(createdAt) : nil
     }
     var displayTitle: String {
-        if let contentTitle { return contentTitle }
+        if let manual = presentation?.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !manual.isEmpty { return manual }
+        if presentation?.transcriptVersionID == transcriptVersionID,
+           let automatic = presentation?.automatic?.title,
+           let title = MaterialTitleText.normalizedGenerated(automatic) { return title }
         if ["audio", "video"].contains(kind) { return "录音 · " + recordingDateLabel }
         if let text = transcript {
             let firstLine = String(text.drop(while: { $0 == "\n" }).prefix(while: { $0 != "\n" }))
@@ -123,6 +126,7 @@ public extension SourceRecord {
             if firstLine.hasPrefix("http://") || firstLine.hasPrefix("https://"), !firstLine.contains(" ") {
                 return String(firstLine.prefix(240))
             }
+            if let derived = MaterialTitleText.derived(fromTranscript: text) { return derived }
             let line = text.drop(while: { $0 == "\n" }).prefix(49).prefix(while: { $0 != "\n" })
             let cleaned = String(line.prefix(48)).trimmingCharacters(in: .whitespaces)
             if !cleaned.isEmpty { return cleaned + (line.count > 48 ? "…" : "") }
@@ -222,8 +226,10 @@ extension VoiceOSStore {
         try db.transaction {
             for proposal in proposals {
                 guard let source = catalog[proposal.sourceID], !source.localOnly, source.policyVersion == input.policies[source.id] else { throw VoiceOSError("命名期间录音授权已变化") }
+                guard let title = MaterialTitleText.normalizedGenerated(proposal.title) else { continue }
                 var saved = source.presentation ?? RecordingPresentation()
-                saved.automatic = proposal; saved.transcriptVersionID = source.transcriptVersionID; saved.responseIDs = ids
+                saved.automatic = RecordingTitleProposal(sourceID: proposal.sourceID, title: title, summary: proposal.summary, quotes: proposal.quotes)
+                saved.transcriptVersionID = source.transcriptVersionID; saved.responseIDs = ids
                 try savePresentation(saved, sourceID: source.id)
             }
         }
