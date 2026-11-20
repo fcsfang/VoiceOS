@@ -1110,13 +1110,13 @@ struct WorkspaceView: View {
                             VStack(alignment:.leading,spacing:0) {
                                 ForEach(clues) { listing in
                                     WorkspaceRow(title:listing.topic.title,subtitle:"\(listing.materialCount) 份材料 · 最近 " + clueDateLabel(listing.latestMaterialDate),icon:"circle.dotted",trailing:"查看") { selectTopic(listing.topic.id) }
-                                    if listing.id != clues.last?.id { Divider() }
+                                    if listing.id != clues.last?.id { WorkspaceListDivider() }
                                 }
                             }.padding(.top,8)
                         } label: {
-                            HStack(spacing:10) {
-                                Text("线索（\(clues.count)）").vosFont(WorkspaceText.sectionTitle, monospacedDigit: true).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
-                                Spacer(minLength:8)
+                            VStack(alignment:.leading,spacing:0) {
+                                WorkspaceSectionHeading("线索", count:"\(clues.count)").padding(.bottom,16)
+                                WorkspaceListDivider()
                             }.contentShape(Rectangle())
                         }
                     }
@@ -1125,19 +1125,24 @@ struct WorkspaceView: View {
                 let linked=Set(model.workspaceTopicSources.values.flatMap { $0 })
                 let unlinked=activeMaterials.filter { !linked.contains($0.id) }
                 if !unlinked.isEmpty {
+                    let expressions=distinctExpressions(unlinked)
                     VStack(alignment:.leading,spacing:8) {
                         DisclosureGroup {
-                            ForEach(distinctExpressions(unlinked)) { source in
-                                sourceRow(source,catalog:catalog,reason:source.topicAssignmentReason(in:catalog))
-                            }
+                            VStack(alignment:.leading,spacing:0) {
+                                ForEach(expressions) { source in
+                                    sourceRow(source,catalog:catalog,reason:source.topicAssignmentReason(in:catalog))
+                                    if source.id != expressions.last?.id { WorkspaceListDivider() }
+                                }
+                            }.padding(.top,8)
                         } label: {
-                            HStack(spacing:10) {
-                                Text("尚未归入主题的材料（\(unlinked.count)）").vosFont(WorkspaceText.sectionTitle, monospacedDigit: true).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
-                                Spacer(minLength:8)
-                                Button(model.organizingTopics ? "AI 正在归组…" : "交给 AI 归组") { model.queueTopicOrganization() }
-                                    .vosFont(WorkspaceText.meta)
-                                    .disabled(model.organizingTopics || !model.modelConfigured)
-                                    .help(model.modelConfigured ? "让 AI 把这些材料连接到已有或新的主题" : "先配置文本模型，才能交给 AI 归组")
+                            VStack(alignment:.leading,spacing:0) {
+                                WorkspaceSectionHeading(title:"尚未归入主题的材料", count:"\(unlinked.count)") {
+                                    Button(model.organizingTopics ? "AI 正在归组…" : "交给 AI 归组") { model.queueTopicOrganization() }
+                                        .vosFont(WorkspaceText.meta)
+                                        .disabled(model.organizingTopics || !model.modelConfigured)
+                                        .help(model.modelConfigured ? "让 AI 把这些材料连接到已有或新的主题" : "先配置文本模型，才能交给 AI 归组")
+                                }.padding(.bottom,16)
+                                WorkspaceListDivider()
                             }.contentShape(Rectangle())
                         }
                         Text(unassignedTopicReasonSummary(unlinked,catalog:catalog)).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
