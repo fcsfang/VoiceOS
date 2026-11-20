@@ -1100,8 +1100,10 @@ struct WorkspaceTaskView: View {
         do {
             let history = try await store.actionFeedback(actionID: action.id)
             guard generation == feedbackGeneration else { return }
+            let announceLoaded = feedbackPlaceholderVisible
             feedbackHistory = history
             feedbackError = nil
+            if announceLoaded { AccessibilityNotification.Announcement("反馈历史已载入").post() }
         } catch {
             guard generation == feedbackGeneration else { return }
             feedbackError = "读取反馈历史失败：" + error.localizedDescription

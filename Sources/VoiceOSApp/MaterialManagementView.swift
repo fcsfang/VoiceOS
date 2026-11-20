@@ -72,7 +72,7 @@ struct MaterialManagementControls: View {
         Button("恢复材料",systemImage:"arrow.uturn.backward") { update(.active) }
     }
     @ViewBuilder private var busyIndicator: some View {
-        if busy { ProgressView().controlSize(.small) }
+        if busy { ProgressView().controlSize(.small).accessibilityLabel("正在处理材料") }
     }
     private func failureRow(_ failure: Failure) -> some View {
         HStack(spacing:8) {

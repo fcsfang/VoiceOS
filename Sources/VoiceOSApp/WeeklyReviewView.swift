@@ -145,6 +145,10 @@ struct WeeklyReviewView: View {
             .overlay(alignment: .bottom) { undoBar }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: undoEntry?.id)
             .task { await load() }
+            .onChange(of: loadState) { previous, state in
+                guard state == .loaded, previous != .loaded else { return }
+                AccessibilityNotification.Announcement("本周行动已载入").post()
+            }
             .task(id: loadState) {
                 guard loadState == .loading else { return }
                 do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
