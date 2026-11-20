@@ -2902,6 +2902,7 @@ private struct WorkspaceSearchSuggestion: Identifiable {
 
 private struct RecentSearchChip: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let term: String
     let open: () -> Void
     let remove: () -> Void
@@ -2926,7 +2927,7 @@ private struct RecentSearchChip: View {
         .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
         .onHover { hovered=$0 }
         .contextMenu { Button("删除这条最近搜索",role:.destructive,action:remove) }
-        .animation(.easeOut(duration:0.12),value:hovered)
+        .animation(reduceMotion ? nil : .easeOut(duration:0.12),value:hovered)
     }
 }
 
@@ -2999,6 +3000,7 @@ private extension View {
 /// disappear with the pointer.
 private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var revealed: Bool = false
     @ViewBuilder let menu: () -> MenuContent
     @ViewBuilder let row: () -> Row
@@ -3021,7 +3023,7 @@ private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
             }
             .onPreferenceChange(MaterialRowFailurePreferenceKey.self) { menuContentNeedsAttention = $0 }
             .onHover { hovered=$0 }
-            .animation(.easeOut(duration:0.12),value:menuVisible)
+            .animation(reduceMotion ? nil : .easeOut(duration:0.12),value:menuVisible)
     }
 }
 
@@ -3042,6 +3044,7 @@ private struct ActionCardList<Content: View>: View {
 
 private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let action: ActionRecord
     let canTransition: Bool
     var revealed: Bool = false
@@ -3076,7 +3079,7 @@ private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
                 }
             }
             .onHover { hovered=$0 }
-            .animation(.easeOut(duration:0.12),value:menuVisible)
+            .animation(reduceMotion ? nil : .easeOut(duration:0.12),value:menuVisible)
     }
 }
 

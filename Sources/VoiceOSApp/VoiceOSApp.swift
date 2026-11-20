@@ -63,6 +63,11 @@ struct ImportBatchReport: Identifiable {
 struct ImportBatchReportView: View {
     let report: ImportBatchReport
     let dismiss: () -> Void
+    /// This sheet hangs off the scene root, outside WorkspaceView's palette
+    /// injection, so resolve the stored theme directly.
+    private var palette: WorkspacePalette {
+        WorkspacePalette(theme: WorkspaceTheme(rawValue: UserDefaults.standard.string(forKey: "voiceos.workspaceTheme") ?? "") ?? .graphite)
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("导入结果").vosFont(WorkspaceText.sectionTitle)
@@ -75,7 +80,7 @@ struct ImportBatchReportView: View {
                     ForEach(report.results) { result in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Image(systemName: result.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                                .foregroundStyle(result.succeeded ? Color.green : Color.orange)
+                                .foregroundStyle(result.succeeded ? palette.success : palette.warning)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(result.fileName).vosFont(WorkspaceText.body)
                                 Text(result.message).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
@@ -4652,6 +4657,7 @@ struct ActionFeedbackView: View {
     let action: ActionRecord
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
+    @Environment(\.workspacePalette) private var palette
     @State private var allowFollowup = true
     @State private var kind = "outcome"
     @State private var text = ""
@@ -4689,7 +4695,7 @@ struct ActionFeedbackView: View {
             }
             TextEditor(text: $text).frame(minHeight: 180).border(.secondary.opacity(0.2)).disabled(saving || waitingForVoice)
             Text("这是可选记录，原话与原行动保持关联。开启下方选项后，应用会自动核对思想变化与目标下一步；不会把反馈当成事实已验证。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            if !errorText.isEmpty { Text(errorText).vosFont(WorkspaceText.meta).foregroundStyle(.red) }
+            if !errorText.isEmpty { Text(errorText).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             Toggle("将反馈文字用于整理知识、更新思想与目标", isOn: $allowFollowup).vosFont(WorkspaceText.meta).disabled(saving)
             HStack {
                 Button("取消", action:dismiss).disabled(saving || (recordingID != nil && (model.dictationActive || model.dictationBusy)))
@@ -4718,6 +4724,7 @@ struct RestoredLibraryView: View {
 struct PackageRestoreView: View {
     let dismiss: () -> Void
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.workspacePalette) private var palette
     @State private var package: URL?
     @State private var summary: PackageSummary?
     @State private var parent: URL?
@@ -4756,7 +4763,7 @@ struct PackageRestoreView: View {
             TextField("新资料库文件夹名称",text:$folderName).disabled(restoring || restored != nil)
             if let destination { Text(destination.path).vosFont(WorkspaceText.meta).textSelection(.enabled) }
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
-            if let restored { Text("恢复完成 · 当前库保留，外部连接未启用").foregroundStyle(.green); Button("打开恢复的资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() } }
+            if let restored { Text("恢复完成 · 当前库保留，外部连接未启用").foregroundStyle(palette.success); Button("打开恢复的资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() } }
             HStack {
                 Button(restored == nil ? "取消" : "完成",action:dismiss).disabled(restoring)
                 Spacer()
@@ -4781,6 +4788,7 @@ struct BackupLibraryRestoreView: View {
     let currentRoot: URL?
     let dismiss: () -> Void
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.workspacePalette) private var palette
     @State private var parent: URL?
     @State private var folderName: String
     @State private var restoring = false
@@ -4819,7 +4827,7 @@ struct BackupLibraryRestoreView: View {
             if let destination { Text(destination.path).vosFont(WorkspaceText.meta).textSelection(.enabled) }
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             if let restored {
-                Text("已从最近备份建立新资料库 · 当前库未改动").foregroundStyle(.green)
+                Text("已从最近备份建立新资料库 · 当前库未改动").foregroundStyle(palette.success)
                 Text(restored.path).vosFont(WorkspaceText.meta).textSelection(.enabled)
                 HStack {
                     Button("打开新资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() }

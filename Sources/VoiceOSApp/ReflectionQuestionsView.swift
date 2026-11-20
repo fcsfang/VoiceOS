@@ -4,6 +4,7 @@ import VoiceOSCore
 /// Topics and questions retain the user's own words; AI discussion remains an explicit next step.
 struct ReflectionQuestionsView: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
     @ObservedObject var model: ControlCenter
     let period: ReflectionPeriod
     let anchor: Date
@@ -83,7 +84,7 @@ struct ReflectionQuestionsView: View {
             }.padding(24)
             Divider()
             HStack(spacing: 0) {
-                questionList.frame(width: 240)
+                questionList.frame(width: 240 * vosLayoutScale(textScale))
                 Divider()
                 if let question = selected { detail(question) }
                 else {
