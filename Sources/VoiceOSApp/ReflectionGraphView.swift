@@ -112,7 +112,7 @@ struct ReflectionTimelineView: View {
                     Text("主题里的材料、认识、行动与结果").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                     Spacer()
                     Picker("查看方式",selection:$timeline) { Text("图谱").tag(false);Text("时间线").tag(true) }.labelsHidden().pickerStyle(.segmented).frame(width:140)
-                }.padding(14)
+                }.padding(16)
             }
             Divider().overlay(palette.text.opacity(0.12))
             if loading && focus == nil {
@@ -138,7 +138,7 @@ struct ReflectionTimelineView: View {
                     }
                 }
             } else if !periodic && topics.isEmpty && error == nil {
-                VStack(spacing: 18) {
+                VStack(spacing: 16) {
                     ContentUnavailableView("从一个持续关心的主题开始", systemImage: "point.3.connected.trianglepath.dotted", description: Text("例如：Agent 记忆、我的学习方法，或一个还没有答案的问题。\n把资料、认识与结果连起来，跨越周与月继续探索。"))
                     Button("建立主题或问题") { showsQuestions = true }
                         .buttonStyle(.workspacePrimary)
@@ -147,7 +147,7 @@ struct ReflectionTimelineView: View {
                 ContentUnavailableView("暂时无法打开回顾", systemImage: "arrow.triangle.branch", description: Text(error ?? "请刷新资料"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).padding(10) }
+            if let error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).padding(12) }
             HStack {
                 Label("实线：来源与行动关系", systemImage: "line.diagonal")
                 Text("┄ AI 思想关联 · 可查看前后原话")
@@ -158,7 +158,7 @@ struct ReflectionTimelineView: View {
         .frame(width: embeddedTopicID == nil ? 1100 : nil, height: embeddedTopicID == nil ? 760 : 720)
     }
     private var header: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
                 WorkspaceHero(eyebrow: "REFLECTION ATLAS", title: "认知地图", subtitle: periodPurpose)
                 Spacer()
@@ -168,7 +168,7 @@ struct ReflectionTimelineView: View {
                     .disabled(focus == nil || loading)
                 Button("完成", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
             }
-            HStack(spacing: 14) {
+            HStack(spacing: 12) {
                 Picker("探索方式", selection: $periodic) {
                     Text("主题探索").tag(false)
                     Text("周期回顾").tag(true)
@@ -203,7 +203,7 @@ struct ReflectionTimelineView: View {
                 Text(periodic ? "当前周期没有可探索的材料" : "当前主题没有可探索的材料")
                     .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             }
-        }.padding(.horizontal, 26).padding(.top, 24).padding(.bottom, 20)
+        }.padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 20)
     }
     private func shift(_ value: Int) {
         anchor = Calendar.current.date(byAdding: period.component, value: value, to: anchor) ?? anchor
@@ -338,17 +338,17 @@ struct ReflectionTimelineView: View {
         return VStack(spacing: 0) {
             HStack {
                 WorkspaceSearchField(text: $query, placeholder: "在图谱中定位内容…") {
-                    if let node = matches.first { locate(node.id, layout: layout, contentSize: CGSize(width: width * scale + 36, height: height * scale + 36)) }
+                    if let node = matches.first { locate(node.id, layout: layout, contentSize: CGSize(width: width * scale + 32, height: height * scale + 32)) }
                 }
                 Text("\(items.count) 个节点 · \(links.count) 条关系").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 Slider(value: $scale, in: 0.55...1.2).frame(width: 75).accessibilityLabel("图谱缩放")
-            }.padding(.horizontal, 22).padding(.vertical, 14)
+            }.padding(.horizontal, 24).padding(.vertical, 12)
             if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
                         if matches.isEmpty { Text("没有找到相符的内容").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                         ForEach(matches) { node in
-                            Button { locate(node.id, layout: layout, contentSize: CGSize(width: width * scale + 36, height: height * scale + 36)) } label: {
+                            Button { locate(node.id, layout: layout, contentSize: CGSize(width: width * scale + 32, height: height * scale + 32)) } label: {
                                 HStack(alignment: .top, spacing: 8) {
                                     Circle().fill(palette.graphColor(node.lane)).frame(width: 5, height: 5).padding(.top, 5)
                                     Text(node.title).lineLimit(2).multilineTextAlignment(.leading)
@@ -357,7 +357,7 @@ struct ReflectionTimelineView: View {
                                 }.vosFont(WorkspaceText.meta).frame(maxWidth: .infinity, alignment: .leading)
                             }.buttonStyle(.plain).help("在地图中定位并查看依据")
                         }
-                    }.padding(.horizontal, 22).padding(.vertical, 10)
+                    }.padding(.horizontal, 24).padding(.vertical, 12)
                 }.frame(maxHeight: 112).background(palette.surface)
             }
             HStack(spacing: 12) {
@@ -366,7 +366,7 @@ struct ReflectionTimelineView: View {
                 Spacer()
                 Button("回到全部") { relatedOnly = false; selection = nil; query = "" }
                     .buttonStyle(.workspaceQuietCompact)
-            }.vosFont(WorkspaceText.meta).padding(.horizontal, 22).padding(.bottom, 12)
+            }.vosFont(WorkspaceText.meta).padding(.horizontal, 24).padding(.bottom, 12)
             Divider()
             if items.isEmpty {
                 ContentUnavailableView("这一页，等待新的连接", systemImage: "point.3.connected.trianglepath.dotted", description: Text(focus.isTopicOverview ? "为这个主题关联资料，或留下现在的认识与实践结果。" : "换一个日、周或月，找回已经留下的表达与成果。"))
@@ -391,7 +391,7 @@ struct ReflectionTimelineView: View {
                             }
                         }
                         ForEach(Array(["表达与材料", "认知与问题", "行动与目标", "结果与反思"].enumerated()), id: \.offset) { lane, title in
-                            HStack(spacing: 7) {
+                            HStack(spacing: 8) {
                                 Circle().fill(palette.graphColor(lane)).frame(width: 5, height: 5)
                                 Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold)
                             }.position(x: CGFloat(112 + lane * 246), y: 30)
@@ -423,7 +423,7 @@ struct ReflectionTimelineView: View {
                     }.frame(width: width, height: height)
                         .scaleEffect(scale, anchor: .topLeading)
                         .frame(width: width * scale, height: height * scale, alignment: .topLeading)
-                        .padding(18)
+                        .padding(16)
                 }
                 .scrollPosition($graphPosition)
                 .onGeometryChange(for: CGSize.self) { geometry in geometry.size } action: { graphViewport = $0 }
@@ -444,8 +444,8 @@ struct ReflectionTimelineView: View {
         // The atlas scales its canvas. Scroll using actual scaled content
         // coordinates rather than node IDs inside that transform.
         let destination = CGPoint(
-            x: min(max(0, center.x * scale + 18 - graphViewport.width / 2), max(0, contentSize.width - graphViewport.width)),
-            y: min(max(0, center.y * scale + 18 - graphViewport.height / 2), max(0, contentSize.height - graphViewport.height))
+            x: min(max(0, center.x * scale + 16 - graphViewport.width / 2), max(0, contentSize.width - graphViewport.width)),
+            y: min(max(0, center.y * scale + 16 - graphViewport.height / 2), max(0, contentSize.height - graphViewport.height))
         )
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
             graphPosition.scrollTo(point: destination)
@@ -453,7 +453,7 @@ struct ReflectionTimelineView: View {
     }
     private func nodeButton(_ node: AtlasNode) -> some View {
         Button { selection = node.id } label: {
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 4) {
                     Text(node.label).vosFont(WorkspaceText.caption.size, weight: .semibold).lineLimit(1)
                     Spacer(minLength: 0)
@@ -462,7 +462,7 @@ struct ReflectionTimelineView: View {
                 Text(node.title).vosFont(WorkspaceText.rowTitle).lineLimit(3).multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .help(node.title)
-            }.padding(13).frame(width: 196, height: 104, alignment: .topLeading)
+            }.padding(12).frame(width: 196, height: 104, alignment: .topLeading)
                 .background(palette.surface.opacity(node.context ? 0.5 : 1), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 .overlay(alignment: .leading) { RoundedRectangle(cornerRadius: 2).fill(palette.graphColor(node.lane)).frame(width: 3, height: 30).padding(.leading, 1) }
                 .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).stroke(selection == node.id ? palette.graphColor(node.lane) : palette.text.opacity(0.12), lineWidth: selection == node.id ? 2 : 1) }
@@ -472,7 +472,7 @@ struct ReflectionTimelineView: View {
     private func inspector(_ focus: ConversationReflectionFocus) -> some View {
         let items = nodes(focus), links = edges(focus, nodes: items)
         return ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 20) {
                 Text(selection == nil ? (focus.isTopicOverview ? "这个主题的脉络" : "这个周期的线索") : "关系与依据").vosFont(WorkspaceText.sectionTitle)
                 if let node = items.first(where: { $0.id == selection }) {
                     nodeDetails(node, focus: focus)
@@ -508,11 +508,11 @@ struct ReflectionTimelineView: View {
                     Text("你带来经历与判断，VoiceOS 帮你找回联系、提出问题。一起回顾后，可以继续讨论并保留有价值的认识。").vosFont(WorkspaceText.body)
                     Text("AI 使用完整相关原文；先查看并编辑讨论草稿，再确认发送。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 }
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(22)
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
         }.background(palette.surface)
     }
     private func nodeDetails(_ node: AtlasNode, focus: ConversationReflectionFocus) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             Text(node.label + (node.context ? " · 此前背景" : "")).vosFont(WorkspaceText.meta).foregroundStyle(palette.graphColor(node.lane))
             Text(node.title).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
             if let claimID = node.claimID, let thought = focus.thoughts.first(where: { $0.claimID == claimID }) {
@@ -553,7 +553,7 @@ struct ReflectionTimelineView: View {
         else { model.requestWorkspaceSource(id); dismiss() }
     }
     private func quote(_ title: String, _ text: String) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(title).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             Text(text).vosFont(WorkspaceText.body).textSelection(.enabled)
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))

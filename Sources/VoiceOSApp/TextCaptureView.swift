@@ -50,7 +50,7 @@ struct TextCaptureView: View {
                     .frame(maxWidth: .infinity)
             }
             Divider()
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 if !model.initialized { ProgressView("正在恢复资料库与草稿…").controlSize(.small) }
                 if !draft.error.isEmpty { WorkspaceNoticeText(message: draft.error, severity: .danger) }
                 if !model.textCaptureDraftIssue.isEmpty { WorkspaceNoticeText(message: model.textCaptureDraftIssue) }
@@ -112,7 +112,7 @@ struct TextCaptureView: View {
             .task { templates = await model.captureTemplates() }
     }
     private var content: some View {
-        VStack(alignment: .leading, spacing: 17) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .top, spacing: 12) {
                 WorkspaceHero(eyebrow: "", title: "记录想法")
                 Button("导入文字文件") { chooseFile() }.buttonStyle(.workspaceSecondary).disabled(draft.saving)
@@ -133,7 +133,7 @@ struct TextCaptureView: View {
                     .accessibilityLabel("完整原文")
             }.frame(maxHeight: .infinity)
             DisclosureGroup {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     Picker("原文归属", selection: $draft.ownership) {
                         Text("我的表达").tag(TextCaptureOwnership.personal)
                         Text("外部资料").tag(TextCaptureOwnership.external)
@@ -229,7 +229,7 @@ struct TextCaptureView: View {
             WorkspaceSectionHeading("保存为模板")
             Text("把当前完整原文保存为模板，之后可一键填入草稿。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             WorkspaceCard(padding: 16) {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     TextField("模板名称", text: $templateName).workspaceFieldSurface()
                         .onChange(of: templateName) { _, value in
                             if value.unicodeScalars.count > 40 { templateName = String(value.unicodeScalars.prefix(40)) }
@@ -382,7 +382,7 @@ private struct WorkspaceFieldSurface: ViewModifier {
     @Environment(\.workspacePalette) private var palette
     func body(content: Content) -> some View {
         content.textFieldStyle(.plain)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
             .frame(minHeight: WorkspaceMetrics.fieldHeight)
             .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
             .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border, lineWidth: 1) }
