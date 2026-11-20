@@ -4917,7 +4917,7 @@ struct CognitiveFeedbackView: View {
                             Text("为何现在相关：" + item.proposal.reason).textSelection(.enabled)
                             Text("这次原话：" + item.proposal.current.quote).textSelection(.enabled)
                             Text("历史原话：" + item.proposal.historicalQuote).textSelection(.enabled)
-                            Text(item.historical.document.name + " · " + item.historical.document.createdAt).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(MaterialNaming.displayName(item.historical.document.name) + " · " + item.historical.document.createdAt).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             HStack {
                                 Button("查看这次原话") { Task { if await model.openAssociation(item, historical: false) { dismiss() } } }
                                 Button("查看历史出处") { Task { if await model.openAssociation(item, historical: true) { dismiss() } } }
@@ -4930,7 +4930,7 @@ struct CognitiveFeedbackView: View {
                             Text("你查找的是：\(item.query)").vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
                             Text("模型选中的相关原文 · \(item.hit.document.origin == "user" ? "用户表达" : "外部资料")").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             Text(item.hit.document.text).textSelection(.enabled)
-                            Text(item.hit.document.name + " · " + item.hit.document.createdAt).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(MaterialNaming.displayName(item.hit.document.name) + " · " + item.hit.document.createdAt).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             HStack {
                                 Button("查看原文与出处") { Task { if await model.openQuietFeedback(item) { dismiss() } } }
                                 Button("忽略这条") { Task { await model.ignoreQuietFeedback(item) } }
@@ -4971,7 +4971,7 @@ struct HistorySearchView: View {
                     if result.hits.isEmpty { Text("未找到候选；可以换个说法或关键词。").foregroundStyle(.secondary) }
                     ForEach(result.hits) { hit in
                         VStack(alignment:.leading,spacing:6) {
-                            Text(model.records.first(where: { $0.id == hit.document.sourceID })?.displayTitle ?? hit.document.name).vosFont(WorkspaceText.rowTitle)
+                            Text(model.records.first(where: { $0.id == hit.document.sourceID })?.displayTitle ?? MaterialNaming.displayName(hit.document.name)).vosFont(WorkspaceText.rowTitle)
                             Toggle("加入相关性判断",isOn:Binding(get:{ selectedIDs.contains(hit.id) },set:{ value in
                                 if value { selectedIDs.insert(hit.id) } else { selectedIDs.remove(hit.id) }
                             })).disabled(!selectedIDs.contains(hit.id) && selectedIDs.count >= 8)
