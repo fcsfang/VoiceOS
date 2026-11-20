@@ -656,3 +656,10 @@
 - 全库未门控 `withAnimation` 归零；Sources/VoiceOSApp 无 Color.green/red/orange 字面量。
 - 集成（main 合并 A+B+C 后）：build_exit=0，test_exit=0，669 项 0 失败。
 - 后续发现（间距盘点，未施工）：spacing 偏离 336/756，卡片 padding 31 处覆盖值 12/13/14/16/18/20/22 混用，设置页 15/7 自成一档；建议 4pt 刻度收敛，列入波 111。
+
+## 波 111：三态收口（2026-11-20，已推送）
+
+- 111-A 材料详情：新增 SourceLoadFailureRow（InlineFailurePresentation 口径 + 重试），用于节目关联/章节/人名与术语/讨论四节与原文版本；重试沿既有 phase `.task(id:)` 计数重启（单 in-flight），重试中显示 SourceLoadingRow。转写等待按 Store jobState 拆三态：排队/转写中 spinner「正在转写…」，失败才显示警告「转写失败 · 原件已保存」。卡片内边距 22/18/14 收敛为默认 20 与 16 两档。
+- 111-B 周回顾：loadState 四态（idle/loading/loaded/failed），空态仅 loaded 后出现；超过 150ms 才显示「正在读取本周行动…」；失败只留错误区与重试；空态补「打开行动页 / 查看待确认」（复用既有 jump/openFilter 闭包）；同类回顾行 vertical 14 → 10 与 WorkspaceRow 对齐。
+- 111-C 消息监测：reloadMonitorState/performMonitorReload 返回真实成败；视图 MonitorLoadState 三态代替布尔 monitorLoaded；失败显示 danger 提示 +「重新读取」（保留报告与事项缓存，不回整页 spinner）；空态不再冒充读取失败；事项失败任一展开报告均可重试。
+- 集成（main 合并三支后）：build_exit=0，test_exit=0，669 项 0 失败。三支各自在共享锁上真实构建+测试通过（C 首轮 LOCK_TIMEOUT 后重跑一次）。
