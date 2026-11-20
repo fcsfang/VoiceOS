@@ -149,7 +149,7 @@ struct RecentContentHome: View {
     private var timeline: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 18) {
+                LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
                     if !recentThoughts.isEmpty { recentThoughtsEntry(recentThoughts) }
                     ForEach(days) { day in
                         VStack(alignment: .leading, spacing: 6) {
@@ -353,14 +353,14 @@ struct RecentContentHome: View {
     private func feedbackReader(_ item: RecentContentItem) -> some View {
         let rows = model.homeSnapshot.progressRows[item.id] ?? []
         let count = rows.isEmpty ? item.excerpts.count : rows.count
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             Text([dateLabel(item.date), timeLabel(item.date)].joined(separator: " · "))
                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             Text("\(item.title) · \(count) 条")
                 .vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText)
                 .accessibilityAddTraits(.isHeader)
             if rows.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     ForEach(Array(item.excerpts.enumerated()), id: \.offset) { index, excerpt in
                         if index > 0 { Divider() }
                         feedbackExcerpt(excerpt, primary: index == 0)
@@ -472,7 +472,7 @@ struct RecentContentHome: View {
             }
             let fit = WorkspaceTitleFit.present(item.title)
             Text(fit.title).vosFont(WorkspaceText.pageTitle).lineSpacing(4).lineLimit(4)
-                .padding(.top, 16).textSelection(.enabled).accessibilityAddTraits(.isHeader)
+                .padding(.top, WorkspaceMetrics.groupGap).textSelection(.enabled).accessibilityAddTraits(.isHeader)
             if let source = fit.source {
                 Text(source).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
                     .padding(.top, 6).textSelection(.enabled)
@@ -480,7 +480,7 @@ struct RecentContentHome: View {
             if !item.summary.isEmpty {
                 Text(item.summary).vosFont(WorkspaceText.body).lineSpacing(5)
                     .textSelection(.enabled)
-                    .padding(.top, 24)
+                    .padding(.top, WorkspaceMetrics.sectionGap)
             }
             if !digest.tasks.isEmpty {
                 Button {
@@ -499,7 +499,7 @@ struct RecentContentHome: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .padding(.top, 20)
+                .padding(.top, WorkspaceMetrics.groupGap)
                 .help("跳到这条材料下方的待办列表")
                 .accessibilityLabel("\(digest.tasks.count) 条待办，跳到列表")
                 .accessibilityIdentifier("home.tasks.badge")
@@ -509,7 +509,7 @@ struct RecentContentHome: View {
             } else {
                 ForEach(digest.threads) { thread in
                     threadSection(thread, siblings: digest.threads.filter { $0.id != thread.id })
-                        .padding(.top, 44)
+                        .padding(.top, WorkspaceMetrics.sectionGap)
                         .id("home.thread.\(thread.id)")
                 }
             }
@@ -527,7 +527,7 @@ struct RecentContentHome: View {
     private func threadSection(_ thread: RecentContentThread, siblings: [RecentContentThread]) -> some View {
         let notes = thread.thoughts.filter { $0.kind != .goal }
         return VStack(alignment: .leading, spacing: 0) {
-            Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 18)
+            Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, WorkspaceMetrics.groupGap)
             HStack(alignment: .center, spacing: 14) {
                 Text(thread.title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
@@ -540,7 +540,7 @@ struct RecentContentHome: View {
                                restore: { override in setClueHidden(override.clue, hidden: false) })
             }
             if !notes.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     ForEach(Array(notes.enumerated()), id: \.element.id) { index, thought in
                         HStack(alignment: .top, spacing: 10) {
                             Text("\(index + 1)").vosFont(WorkspaceText.caption.size, weight: WorkspaceText.caption.weight, monospacedDigit: true)
@@ -549,7 +549,7 @@ struct RecentContentHome: View {
                             ThoughtLine(thought: thought, openOriginal: { openOriginal(thought) })
                         }
                     }
-                }.padding(.top, 18).padding(.leading, 42)
+                }.padding(.top, WorkspaceMetrics.groupGap).padding(.leading, 42)
             }
             if !thread.goals.isEmpty {
                 VStack(alignment: .leading, spacing: 7) {
@@ -561,7 +561,7 @@ struct RecentContentHome: View {
                 .padding(.vertical, 13).padding(.horizontal, 17)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-                .padding(.top, 20).padding(.leading, 42)
+                .padding(.top, WorkspaceMetrics.groupGap).padding(.leading, 42)
             }
         }.accessibilityIdentifier("home.thread")
     }
@@ -601,7 +601,7 @@ struct RecentContentHome: View {
     @ViewBuilder private func tasksSummary(_ tasks: [RecentContentTask]) -> some View {
         if !tasks.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 20)
+                Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, WorkspaceMetrics.groupGap)
                 Text("这条材料带出了 \(tasks.count) 条待办").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                 VStack(spacing: 0) {
                     ForEach(tasks) { task in
@@ -621,7 +621,7 @@ struct RecentContentHome: View {
                         if task.id != tasks.last?.id { WorkspaceListDivider() }
                     }
                 }.padding(.top, 8)
-            }.padding(.top, 54)
+            }.padding(.top, WorkspaceMetrics.sectionGap)
             .accessibilityIdentifier("home.tasks.list")
             .id(tasksAnchor)
         }
@@ -714,7 +714,7 @@ struct RecentContentHome: View {
                     Text("这份材料还没有整理出想法").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                 } else {
                     Text("这份材料上次整理的观点已冻结").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                    Text("原话或处理许可变化后，旧观点不再作为当前观点显示。重新整理会生成新的观点，旧观点保留为历史。")
+                    Text("重新整理会生成新观点，旧观点保留为历史。")
                         .vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                 }
                 HStack(spacing: 10) {
@@ -920,7 +920,7 @@ private struct RecentClueRenameSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("修改线索标题").vosFont(WorkspaceText.sectionTitle)
             TextField("线索标题", text: $title)
-            Text("只改变这条线索的显示名，原始想法不变；留空或恢复默认后回到「\(RecentContentDigest.threadTitle(clue))」。")
+            Text("只改变这条线索的显示名，原始想法不变。")
                 .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if !model.status.isEmpty {
                 Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)

@@ -117,9 +117,7 @@ struct WorkspaceMonitorView: View {
     private var todayKey: String { MonitorSourceConfigParser.dayString(Date()) }
 
     private var headingSubtitle: String {
-        model.monitorPushConfigured
-            ? "每天检查一次 QQ 班级群与学院官网；需要行动的事项在这里跟进，微信收到每日汇总。"
-            : "每天检查一次 QQ 班级群与学院官网；需要行动的事项在这里跟进。微信推送尚未配置。"
+        "每天检查一次 QQ 班级群与学院官网；需要行动的事项在这里跟进。"
     }
 
     private var qqNeedsFullDiskAccess: Bool {
@@ -128,7 +126,7 @@ struct WorkspaceMonitorView: View {
     }
 
     private var runBar: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
             HStack(spacing: 12) {
                 Button {
                     Task {
@@ -153,8 +151,6 @@ struct WorkspaceMonitorView: View {
                 Text(model.monitorStatus).vosFont(WorkspaceText.meta)
                     .foregroundStyle(palette.secondaryText).textSelection(.enabled)
             }
-            Text("每天最多自动检查一次；应用退出后不自动运行，下次启动补跑；每 10 分钟只比对时间，不读 QQ、不调模型。")
-                .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
         }
     }
 
@@ -270,7 +266,7 @@ struct WorkspaceMonitorView: View {
             VStack(alignment: .leading, spacing: 12) {
                 WorkspaceSectionHeading("历史报告", count: monitorLoadState == .loaded || !earlierReports.isEmpty
                                         ? "\(earlierReports.count)" : nil)
-                Text("最近 \(model.monitorReports.count) 次检查中早于今天的报告；点开查看同结构内容。")
+                Text("最近 \(model.monitorReports.count) 次检查中早于今天的报告。")
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
                 WorkspaceListDivider()
                 if monitorLoadState == .loading {
@@ -430,7 +426,7 @@ struct WorkspaceMonitorView: View {
                 if !group.isEmpty {
                     Text((category == .applicable ? "适用" : "待核对") + " \(group.count)")
                         .vosFont(WorkspaceText.meta.size, weight: .semibold, design: .default, monospacedDigit: true)
-                        .foregroundStyle(palette.secondaryText).padding(.top, 8)
+                        .foregroundStyle(palette.secondaryText).padding(.top, WorkspaceMetrics.groupGap)
                         .accessibilityAddTraits(.isHeader)
                     ForEach(group) { item in itemView(item) }
                 }
@@ -470,7 +466,7 @@ struct WorkspaceMonitorView: View {
 
     private func emptyItemsText(_ report: MonitorReport) -> String {
         switch report.state {
-        case .failed: return "报告未完成，暂无事项。先处理上方原因，再重新检查。"
+        case .failed: return "报告未完成，暂无事项。"
         case .incomplete: return "检查不完整，可能漏项"
         case .complete: return "没有需要关注的事项。"
         }
@@ -885,7 +881,7 @@ struct WorkspaceMonitorView: View {
                     .foregroundStyle(palette.secondaryText)
             }
             Text(model.monitorNextRunText).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-            Text("应用退出后不会自动运行；下次启动会补跑漏掉的一天。检查开始前只比对时间，不读 QQ、不调模型。")
+            Text("应用退出时不自动运行，下次启动会补跑。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
         }
     }
@@ -897,7 +893,7 @@ struct WorkspaceMonitorView: View {
                 set: { value in model.updateMonitorSettings { $0.cloudAnalysisAuthorized = value } }))
                 .toggleStyle(.switch).frame(maxWidth: 420, alignment: .leading)
                 .accessibilityIdentifier("monitor.settings.cloudAuthorized")
-            Text("开启后，所选来源的新增原文（QQ 群消息与官网正文）会发送给已配置的文本模型分析。模型密钥与整个数据库不会发送。默认关闭；关闭时检查会停在分析前，不偷偷发送。")
+            Text("开启后，所选来源的新增原文（QQ 群消息与官网正文）会发送给已配置的文本模型分析。模型密钥与整个数据库不会发送。默认关闭；关闭时检查在分析前停止。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1000,7 +996,7 @@ struct WorkspaceMonitorView: View {
             HStack(spacing: 10) {
                 Text("账号").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     .frame(minWidth: 90, alignment: .leading).fixedSize(horizontal: true, vertical: false)
-                TextField("可选；留空自动选择（多数情况留空即可）", text: $qqAccount)
+                TextField("可选，留空自动选择", text: $qqAccount)
                     .textFieldStyle(.roundedBorder).frame(maxWidth: 360)
             }
             DisclosureGroup("高级") {
@@ -1092,8 +1088,6 @@ struct WorkspaceMonitorView: View {
             if !model.monitorQQConversations.isEmpty {
                 conversationPicker
             }
-            Text("已添加的群来源在「报告」页的「来源状态」中管理启停、起始时间与删除。")
-                .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
         }
     }
 
@@ -1148,7 +1142,7 @@ struct WorkspaceMonitorView: View {
 
     private var conversationPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("选择要监测的群（同名时按最新消息时间和群号区分，不默认选择）")
+            Text("选择要监测的群")
                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             ForEach(model.monitorQQConversations) { conversation in
                 Button {

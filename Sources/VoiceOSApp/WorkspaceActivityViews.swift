@@ -23,7 +23,7 @@ struct WorkspaceDeliveryView: View {
     @State private var exportFailure: InlineActionFailure?
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 30) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
                 WorkspacePageHeading(eyebrow: "AI 助理 · " + assistantExecutionLabel(execution), title: execution.title)
                 if model.isDeliveryUnread(execution) {
                     HStack(spacing:10) {
@@ -82,7 +82,6 @@ struct WorkspaceDeliveryView: View {
                         ProgressView().controlSize(.small)
                         Text(execution.state == "queued" ? "委托已保存，正在等待执行。" : "AI 正在完成交付，结果会保存在这里。")
                     }.padding(.vertical, 30)
-                    Text("可以继续阅读其他材料，VoiceOS 保持运行就会继续处理。").foregroundStyle(.secondary)
                 }
                 if let message = AssistantFailurePresentation.message(execution.error) { WorkspaceNoticeText(message:message,severity:.danger) }
                 WorkspaceCard {
@@ -199,7 +198,7 @@ struct TaskFeedbackEditor: View {
             Picker("记录类型", selection: $draft.kind) { Text("实际结果 / 进展").tag(ActionFeedbackKind.outcome); Text("我的反思").tag(ActionFeedbackKind.reflection) }.pickerStyle(.menu).disabled(model.savingFeedback)
             TextEditor(text: $draft.text).frame(minHeight: 100).workspaceEditorSurface()
                 .accessibilityLabel("实际进展与收获草稿").disabled(model.savingFeedback)
-            Text("本窗口内切页保留草稿；正式保存后才接回任务，关闭窗口前请保存。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text("未保存的草稿只在本窗口保留，关闭窗口前请保存。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             HStack {
                 if let onDictate { Button("口述进展或结果", action: onDictate).buttonStyle(.workspaceSecondary) }
                 Spacer()
@@ -460,7 +459,7 @@ struct WorkspaceTaskView: View {
     }
     private var pageContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 30) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
                 WorkspacePageHeading(eyebrow: eyebrow, title: StatementTagParser.split(action.title).text)
                 if let observed = reminderObservedSummary {
                     Label("已回读 · " + observed, systemImage: "calendar").vosFont(WorkspaceText.meta)
@@ -568,7 +567,7 @@ struct WorkspaceTaskView: View {
                             Label(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),systemImage:action.state == "completed" ? "checkmark.circle" : "pause.circle").vosFont(WorkspaceText.meta.size, weight: .semibold)
                             WorkspaceExternalCompletionButton(model:model,action:action)
                         }
-                        Text(action.state == "completed" ? "这项任务已有完成记录。AI 提取暂停不会撤销完成状态，也不需要你再完成一次。" : model.workspaceTaskRequiresReview(action) ? "AI 之前从材料中提取了这项待办，尚未登记完成；暂停也不代表识别有误。打开下方材料，查看具体原因及处理按钮。" : "这次提取仅作为历史保留。打开下方材料可查看最新识别的任务；本条记录的完成状态仍单独保留。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                        Text(action.state == "completed" ? "这项任务已有完成记录，无需再次完成。" : model.workspaceTaskRequiresReview(action) ? "这项待办尚未登记完成；暂停不代表识别有误，打开下方材料查看原因。" : "这次提取作为历史保留；本条记录仍单独保留完成状态。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                         ForEach(pauseReasons,id:\.self) { Text($0).vosFont(WorkspaceText.body).foregroundStyle(.secondary) }
                         ForEach(sources) { source in Button("打开材料：" + source.displayTitle) { openSource(source.id) }.buttonStyle(.workspaceQuietCompact) }
                         if model.workspaceTaskRequiresReview(action), let claim = correctedClaim {
@@ -648,11 +647,6 @@ struct WorkspaceTaskView: View {
                             .buttonStyle(.workspaceQuietCompact)
                             .accessibilityLabel("重试失败的操作")
                     }
-                }
-                if action.kind == "task", current {
-                    Text("键盘：x 或空格完成 · s 改期 · f 记结果；在输入框里打字时不生效。")
-                        .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-                        .accessibilityLabel("快捷键：x 或空格完成，s 改期，f 记结果。")
                 }
                 if action.kind == "task", current, draft.expanded {
                     feedbackDraftEditor.padding(18).background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
@@ -812,6 +806,7 @@ struct WorkspaceTaskView: View {
                 }
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
         }
+        .help("快捷键：x 或空格完成，s 改期，f 记结果；在输入框里打字时不生效。")
         .task(id: action.id + String(action.version) + action.validity + sources.map { $0.id + String($0.policyVersion) + $0.state }.joined()) {
             guard action.validity != "current", let store = model.store else { pauseReasons = []; return }
             var reasons: [String] = []
@@ -888,14 +883,12 @@ struct WorkspaceTaskView: View {
                 if let operation = model.scheduleOperations.first(where: { $0.intentID == schedule.id }) {
                     Text("上次改期：" + operation.state.summary).vosFont(WorkspaceText.meta)
                     Text(operation.reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                    if operation.validity == "frozen" {
-                        Text("历史记录已冻结，不再写入。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                    } else if operation.attempted, operation.state == .unknown || operation.state == .conflict {
+                    if operation.validity != "frozen", operation.attempted, operation.state == .unknown || operation.state == .conflict {
                         Button("只读核对") { Task { await model.reconcileSchedule(operation) } }
                             .buttonStyle(.workspaceSecondaryCompact)
                             .disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
                     } else if operation.state == .blocked, operation.validity == "current" {
-                        Text("上次改期没有派发；重新设置期限会建立新的写前核对，旧记录保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Text("上次改期未派发；重新设置期限会重新核对，旧记录保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         Button("重新设置期限") { scheduleAction = action }
                             .buttonStyle(.workspaceSecondary)
                             .disabled(model.savingAction || model.remindersBusy || action.validity != "current" || action.state != "open")
@@ -1009,7 +1002,7 @@ struct WorkspaceTaskView: View {
                             Text("正在读取反馈历史…").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         }.accessibilityElement(children: .combine).accessibilityLabel("正在读取反馈历史")
                     } else if !feedbackLoading {
-                        Text("还没有记录进展。记录后会按日期在这里形成时间线。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        Text("还没有记录进展。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
@@ -1033,10 +1026,9 @@ struct WorkspaceTaskView: View {
                 Button("查看结果原话") { openSource(record.recordingSourceID ?? record.sourceID) }
                     .buttonStyle(.workspaceQuietCompact)
             }
-            .padding(.bottom, 16)
+            .padding(.bottom, WorkspaceMetrics.rowGap)
         }
         .padding(.horizontal, 8)
-        .padding(.top, 6)
         .background(feedbackHighlightID == record.id ? palette.selection : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: feedbackHighlightID)
         .accessibilityElement(children: .combine)
