@@ -277,11 +277,16 @@ struct WorkspaceTaskView: View {
     let discuss: () -> Void
     @State private var feedbackHistory: [ActionFeedbackRecord] = []
     @State private var feedbackError: String?
+    @State private var feedbackLoading = false
+    @State private var feedbackPlaceholderVisible = false
+    @State private var feedbackGeneration = 0
     @State private var revisions: [ActionRevisionRecord] = []
+    @State private var revisionsError: String?
     @State private var feedbackActionID = ""
     @State private var delegating = false
     @State private var instruction = ""
     @State private var error = ""
+    @State private var errorRetry: (() -> Void)?
     @State private var mainActionFailure: InlineActionFailure?
     @State private var saving = false
     @State private var confirming = false
@@ -416,7 +421,7 @@ struct WorkspaceTaskView: View {
                     self.error = ""
                 } catch {
                     self.recurrence = previous
-                    self.error = "保存重复失败：" + error.localizedDescription
+                    self.fail("保存重复失败：" + error.localizedDescription + "。重新选择周期会再次保存。")
                 }
             }
         })
@@ -751,6 +756,17 @@ struct WorkspaceTaskView: View {
                         WorkspaceNoticeText(message:feedbackError,severity:.danger)
                         Button("重试") { Task { await loadFeedback() } }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("重试读取反馈历史")
                     }
+                } else if feedbackPlaceholderVisible && feedbackHistory.isEmpty {
+                    // A one-record history card sits near this height, so the slow read lands without pushing the page down.
+                    HStack(spacing: 10) {
+                        ProgressView().controlSize(.small).accessibilityHidden(true)
+                        Text("正在读取反馈历史…").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 20)
+                    .frame(maxWidth: .infinity, minHeight: 180, alignment: .leading)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("正在读取反馈历史")
                 }
                 if !feedbackHistory.isEmpty {
                     WorkspaceCard {
@@ -794,10 +810,19 @@ struct WorkspaceTaskView: View {
                                 VStack(alignment: .leading, spacing: 14) { scheduleSection }.padding(.top, 10)
                             }.padding(.vertical,16)
                         }
-                        ActionRevisionHistoryView(revisions: revisions)
+                        ActionRevisionHistoryView(revisions: revisions, loadError: revisionsError, retry: { Task { await loadRevisions() } })
                     }
                 }
-                if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
+                if !error.isEmpty {
+                    HStack(spacing: 10) {
+                        WorkspaceNoticeText(message:error,severity:.danger)
+                        if let errorRetry {
+                            Button("重试") { errorRetry() }
+                                .buttonStyle(.workspaceQuietCompact)
+                                .accessibilityLabel("重试失败的操作")
+                        }
+                    }
+                }
             }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
         }
         .task(id: action.id + String(action.version) + action.validity + sources.map { $0.id + String($0.policyVersion) + $0.state }.joined()) {
@@ -810,6 +835,11 @@ struct WorkspaceTaskView: View {
             pauseReasons = reasons
         }
         .task(id: action.id + String(action.version) + String(model.recentOutcomes.count)) { await loadFeedback() }
+        .task(id: feedbackLoading) {
+            guard feedbackLoading else { feedbackPlaceholderVisible = false; return }
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            if feedbackLoading { feedbackPlaceholderVisible = true }
+        }
         .task(id: action.id + String(action.version)) { await loadPlan() }
         .task(id: action.id + String(action.version)) {
             recurrence = await model.actionRecurrence(action.id)
@@ -977,23 +1007,26 @@ struct WorkspaceTaskView: View {
         mainActionFailure = nil
         Task {
             if await model.completeOutcome(action) { error = ""; nextActionNotice = "" }
-            else { error = model.status; noteMainActionFailure(isQuestion ? "想清楚" : "标记达成") { completeOutcome() } }
+            else { noteMainActionFailure(isQuestion ? "想清楚" : "标记达成") { completeOutcome() } }
         }
     }
     private func toggleNextAction(_ child: ActionRecord) {
         let target: LocalActionState = child.state == "completed" ? .open : .completed
         Task {
             await model.changeAction(child, state: target)
-            if model.actionRecords.first(where: { $0.id == child.id })?.state != target.rawValue { error = model.status }
+            if model.actionRecords.first(where: { $0.id == child.id })?.state != target.rawValue {
+                fail(InlineFailurePresentation.message(operation: "更新下一步", reason: model.status), retry: { toggleNextAction(child) })
+            } else { error = "" }
         }
     }
     private func detachNextAction(_ child: ActionRecord) {
         Task {
-            if await model.detachNextAction(child) { error = "" } else { error = model.status }
+            if await model.detachNextAction(child) { error = "" }
+            else { fail(InlineFailurePresentation.message(operation: "摘除下一步", reason: model.status), retry: { detachNextAction(child) }) }
         }
     }
     private func clarify(_ decision: ActionClarificationDecision) {
-        Task { if await model.clarifyAction(action, decision: decision) { error = "" } else { error = model.status } }
+        Task { if await model.clarifyAction(action, decision: decision) { error = "" } else { fail(InlineFailurePresentation.message(operation: "更新行动", reason: model.status), retry: { clarify(decision) }) } }
     }
     private func saveReplacement(_ claim: CandidateClaim) {
         guard let store=model.store else { return }
@@ -1004,7 +1037,7 @@ struct WorkspaceTaskView: View {
                 let id = try await store.createAction(claimID:claim.id,expectedClaimReviewVersion:claim.reviewVersion,title:replacementTitle,kind:.task,note:"根据更正后的观点重新确认。",commandID:"workspace-reconfirm:" + action.id + ":" + String(claim.reviewVersion))
                 await model.refresh();model.showTask(id)
                 error=""
-            } catch { self.error=error.localizedDescription }
+            } catch { self.fail(InlineFailurePresentation.message(operation: "重新确认行动", reason: error.localizedDescription), retry: { saveReplacement(claim) }) }
         }
     }
     private var goalProgressKey: String {
@@ -1053,23 +1086,40 @@ struct WorkspaceTaskView: View {
         return .handled
     }
     private func loadFeedback() async {
-        if feedbackActionID != action.id { feedbackActionID = action.id; feedbackHistory = [] }
+        if feedbackActionID != action.id {
+            feedbackActionID = action.id
+            feedbackHistory = []
+            feedbackError = nil
+            feedbackPlaceholderVisible = false
+        }
+        feedbackGeneration &+= 1
+        let generation = feedbackGeneration
+        feedbackLoading = true
+        defer { if generation == feedbackGeneration { feedbackLoading = false } }
         guard let store = model.store else { feedbackError = "资料库尚未打开，无法读取反馈历史"; return }
-        do { feedbackHistory = try await store.actionFeedback(actionID: action.id); feedbackError = nil }
-        catch { feedbackError = "读取反馈历史失败：" + error.localizedDescription }
+        do {
+            let history = try await store.actionFeedback(actionID: action.id)
+            guard generation == feedbackGeneration else { return }
+            feedbackHistory = history
+            feedbackError = nil
+        } catch {
+            guard generation == feedbackGeneration else { return }
+            feedbackError = "读取反馈历史失败：" + error.localizedDescription
+        }
     }
     private func loadRevisions() async {
-        guard let store = model.store else { revisions = []; return }
-        do { revisions = try await store.actionRevisions(actionID: action.id) }
-        catch { revisions = []; self.error = "读取变更历史失败：" + error.localizedDescription }
+        guard let store = model.store else { revisions = []; revisionsError = "资料库尚未打开，无法读取变更历史"; return }
+        do { revisions = try await store.actionRevisions(actionID: action.id); revisionsError = nil }
+        catch { revisions = []; revisionsError = "读取变更历史失败：" + error.localizedDescription }
     }
     private func loadPlan() async {
-        guard let store = model.store else { error = "资料库尚未打开，无法读取子任务"; return }
+        guard let store = model.store else { fail("资料库尚未打开，无法读取子任务", retry: { Task { await loadPlan() } }); return }
         do {
             subtasks = try await store.subtasks(actionID: action.id)
             let estimates = try await store.actionEstimates()
             actionEstimate = estimates[action.id]
-        } catch { self.error = "读取子任务失败：" + error.localizedDescription }
+            error = ""
+        } catch { self.fail("读取子任务失败：" + error.localizedDescription, retry: { Task { await loadPlan() } }) }
     }
     private func addSubtask() {
         let title = subtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1077,61 +1127,61 @@ struct WorkspaceTaskView: View {
         planBusy = true
         Task {
             defer { planBusy = false }
-            guard let store = model.store else { error = "资料库尚未打开"; return }
+            guard let store = model.store else { fail("资料库尚未打开", retry: { addSubtask() }); return }
             do {
                 _ = try await store.addSubtask(actionID: action.id, title: title)
                 subtasks = try await store.subtasks(actionID: action.id)
                 subtaskTitle = ""
                 error = ""
-            } catch { self.error = "添加子任务失败：" + error.localizedDescription }
+            } catch { self.fail("添加子任务失败：" + error.localizedDescription, retry: { addSubtask() }) }
         }
     }
     private func toggleSubtask(_ subtask: ActionSubtask) {
         planBusy = true
         Task {
             defer { planBusy = false }
-            guard let store = model.store else { error = "资料库尚未打开"; return }
+            guard let store = model.store else { fail("资料库尚未打开", retry: { toggleSubtask(subtask) }); return }
             do {
                 _ = try await store.setSubtaskDone(id: subtask.id, done: !subtask.done)
                 subtasks = try await store.subtasks(actionID: action.id)
                 error = ""
-            } catch { self.error = "更新子任务失败：" + error.localizedDescription }
+            } catch { self.fail("更新子任务失败：" + error.localizedDescription, retry: { toggleSubtask(subtask) }) }
         }
     }
     private func deleteSubtask(_ subtask: ActionSubtask) {
         planBusy = true
         Task {
             defer { planBusy = false }
-            guard let store = model.store else { error = "资料库尚未打开"; return }
+            guard let store = model.store else { fail("资料库尚未打开", retry: { deleteSubtask(subtask) }); return }
             do {
                 _ = try await store.deleteSubtask(id: subtask.id)
                 subtasks = try await store.subtasks(actionID: action.id)
                 error = ""
-            } catch { self.error = "删除子任务失败：" + error.localizedDescription }
+            } catch { self.fail("删除子任务失败：" + error.localizedDescription, retry: { deleteSubtask(subtask) }) }
         }
     }
     private func setEstimate(_ minutes: Int) {
         planBusy = true
         Task {
             defer { planBusy = false }
-            guard let store = model.store else { error = "资料库尚未打开"; return }
+            guard let store = model.store else { fail("资料库尚未打开", retry: { setEstimate(minutes) }); return }
             do {
                 _ = try await store.setActionEstimate(actionID: action.id, minutes: minutes)
                 actionEstimate = minutes
                 error = ""
-            } catch { self.error = "保存预计时长失败：" + error.localizedDescription }
+            } catch { self.fail("保存预计时长失败：" + error.localizedDescription, retry: { setEstimate(minutes) }) }
         }
     }
     private func clearEstimate() {
         planBusy = true
         Task {
             defer { planBusy = false }
-            guard let store = model.store else { error = "资料库尚未打开"; return }
+            guard let store = model.store else { fail("资料库尚未打开", retry: { clearEstimate() }); return }
             do {
                 _ = try await store.clearActionEstimate(actionID: action.id)
                 actionEstimate = nil
                 error = ""
-            } catch { self.error = "清除预计时长失败：" + error.localizedDescription }
+            } catch { self.fail("清除预计时长失败：" + error.localizedDescription, retry: { clearEstimate() }) }
         }
     }
     private func noteMainActionFailure(_ operation: String, retry: @escaping () -> Void) {
@@ -1139,13 +1189,18 @@ struct WorkspaceTaskView: View {
             message: InlineFailurePresentation.message(operation: operation, reason: model.status),
             retry: retry)
     }
+    /// Page-level failures always pair their message with the retry they offer,
+    /// so a stale retry from an earlier failure never lands under a new one.
+    private func fail(_ message: String, retry: (() -> Void)? = nil) {
+        error = message
+        errorRetry = retry
+    }
     private func changeState() {
         mainActionFailure = nil
         let state:LocalActionState=action.state == "completed" ? .open : .completed
         Task {
             let receipt = await model.changeAction(action,state:state)
             guard model.actionRecords.first(where: { $0.id == action.id })?.state == state.rawValue else {
-                error=model.status
                 noteMainActionFailure(state == .completed ? "标记完成" : "重新跟进") { changeState() }
                 return
             }
@@ -1164,7 +1219,6 @@ struct WorkspaceTaskView: View {
     private func openReminderSettings() {
         mainActionFailure = nil
         Task { if let snapshot = await model.loadReminderSettings(action) { settings = snapshot; showingSettings = true } else {
-            error = model.status
             noteMainActionFailure("打开日期与提醒") { openReminderSettings() }
         } }
     }
@@ -1183,7 +1237,7 @@ struct WorkspaceTaskView: View {
         Task {
             await model.changeAction(action, state: .dismissed)
             if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.dismissed.rawValue { error = "";showUndo(isQuestion ? "已放下" : "已不再跟进") }
-            else { error = model.status; noteMainActionFailure(isQuestion ? "放下" : "不再跟进") { stopFollowing() } }
+            else { noteMainActionFailure(isQuestion ? "放下" : "不再跟进") { stopFollowing() } }
         }
     }
     private func someday() {
@@ -1191,7 +1245,7 @@ struct WorkspaceTaskView: View {
         Task {
             await model.changeAction(action, state: .someday)
             if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.someday.rawValue { error = "";showUndo("已留到以后") }
-            else { error = model.status; noteMainActionFailure("留到以后") { someday() } }
+            else { noteMainActionFailure("留到以后") { someday() } }
         }
     }
     private func reopen() {
@@ -1199,7 +1253,7 @@ struct WorkspaceTaskView: View {
         Task {
             await model.changeAction(action, state: .open)
             if model.actionRecords.first(where: { $0.id == action.id })?.state == LocalActionState.open.rawValue { error = "";showUndo(isQuestion ? "已重新打开" : "已重新跟进");undoReopen = true }
-            else { error = model.status; noteMainActionFailure(isQuestion ? "重新打开" : "重新跟进") { reopen() } }
+            else { noteMainActionFailure(isQuestion ? "重新打开" : "重新跟进") { reopen() } }
         }
     }
     private func showUndo(_ message:String) {
@@ -1214,13 +1268,15 @@ struct WorkspaceTaskView: View {
             undoMessage = nil
             Task {
                 await model.changeAction(action, state: .dismissed)
-                if model.actionRecords.first(where: { $0.id == id })?.state != LocalActionState.dismissed.rawValue { error = model.status }
+                if model.actionRecords.first(where: { $0.id == id })?.state != LocalActionState.dismissed.rawValue {
+                    fail(InlineFailurePresentation.message(operation: "撤销", reason: model.status) + "。重新打开详情可核对当前状态。")
+                }
             }
             return
         }
         Task {
             if await model.undoActionState(actionID: id) { undoMessage = nil }
-            else { error = model.status }
+            else { fail(InlineFailurePresentation.message(operation: "撤销", reason: model.status) + "。重新打开详情可核对当前状态。") }
         }
     }
     private func saveFeedback() {
@@ -1230,13 +1286,13 @@ struct WorkspaceTaskView: View {
             if await model.saveFeedback(action, kind: input.kind, text: input.text, commandID: input.commandID) {
                 if draft.commandID == input.commandID && draft.text == input.text && draft.kind == input.kind { draft = TaskFeedbackDraft() }
                 error = ""; await loadFeedback()
-            } else { error = model.status; noteMainActionFailure("保存记录") { saveFeedback() } }
+            } else { noteMainActionFailure("保存记录") { saveFeedback() } }
         }
     }
     private func analyze() {
         Task {
             if await model.analyzeThought(action) { error = "" }
-            else { error = model.assistantStatus }
+            else { self.fail(InlineFailurePresentation.message(operation: "分析", reason: model.assistantStatus), retry: { analyze() }) }
         }
     }
     private func delegate() {
@@ -1245,7 +1301,7 @@ struct WorkspaceTaskView: View {
             let sourceIDs = Set(sources.map(\.id))
             let topicID = model.workspaceTopics.first { !(Set(model.workspaceTopicSources[$0.id] ?? []).intersection(sourceIDs)).isEmpty }?.id
             if await model.enqueueAssistant(action, instruction: instruction, questionID: topicID, allowCloud: true) { delegating = false; error = "" }
-            else { error = model.assistantStatus }
+            else { self.fail(InlineFailurePresentation.message(operation: "交给 AI", reason: model.assistantStatus) + "。可以再点一次「开始代办」，写好的内容会保留。") }
             saving = false
         }
     }
@@ -1273,7 +1329,21 @@ struct WorkspaceTaskView: View {
 
 struct ActionRevisionHistoryView: View {
     let revisions: [ActionRevisionRecord]
+    var loadError: String?
+    var retry: (() -> Void)?
+
     var body: some View {
+        if let loadError {
+            Divider()
+            HStack(spacing: 10) {
+                WorkspaceNoticeText(message: loadError, severity: .danger)
+                if let retry {
+                    Button("重试") { retry() }
+                        .buttonStyle(.workspaceQuietCompact)
+                        .accessibilityLabel("重试读取变更历史")
+                }
+            }.padding(.vertical, 16)
+        }
         if !revisions.isEmpty {
             Divider()
             DisclosureGroup("变更历史（\(revisions.count)）") {
