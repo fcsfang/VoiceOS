@@ -6,6 +6,7 @@ import VoiceOSPlatform
 struct WorkspaceMonitorView: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
+    @ObservedObject private var operations = ControlCenter.monitorOperations
 
     @State private var selectedReportID: String?
     @State private var expandedItems: Set<String> = []
@@ -321,9 +322,14 @@ struct WorkspaceMonitorView: View {
                                     .disabled(model.monitorChecking)
                                     .accessibilityIdentifier("monitor.report.recheck")
                             } else if model.monitorPushConfigured {
-                                Button("立即推送今日报告") { Task { await model.pushLatestMonitorReport() } }
+                                Button { Task { await model.pushLatestMonitorReport() } } label: {
+                                    HStack(spacing: 7) {
+                                        if operations.push == .report { ProgressView().controlSize(.small) }
+                                        Text(operations.push == .report ? "正在推送…" : "立即推送今日报告")
+                                    }
+                                }
                                     .buttonStyle(.workspaceSecondaryCompact)
-                                    .disabled(model.monitorChecking)
+                                    .disabled(operations.push != nil || model.monitorChecking)
                                     .accessibilityIdentifier("monitor.report.push")
                             } else {
                                 Button("配置推送") { showsSettings = true }
@@ -893,13 +899,23 @@ struct WorkspaceMonitorView: View {
                 Text("地址只保存在系统钥匙串。").vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
             }
             HStack(spacing: 12) {
-                Button("发送测试") { Task { await model.sendMonitorPushTest() } }
+                Button { Task { await model.sendMonitorPushTest() } } label: {
+                    HStack(spacing: 7) {
+                        if operations.push == .test { ProgressView().controlSize(.small) }
+                        Text(operations.push == .test ? "正在发送测试…" : "发送测试")
+                    }
+                }
                     .buttonStyle(.workspaceQuiet)
-                    .disabled(model.monitorSettings.pushChannel == nil)
+                    .disabled(operations.push != nil || model.monitorSettings.pushChannel == nil)
                     .accessibilityIdentifier("monitor.settings.push.test")
-                Button("立即推送今日报告") { Task { await model.pushLatestMonitorReport() } }
+                Button { Task { await model.pushLatestMonitorReport() } } label: {
+                    HStack(spacing: 7) {
+                        if operations.push == .report { ProgressView().controlSize(.small) }
+                        Text(operations.push == .report ? "正在推送…" : "立即推送今日报告")
+                    }
+                }
                     .buttonStyle(.workspaceQuiet)
-                    .disabled(model.monitorLatestReport == nil)
+                    .disabled(operations.push != nil || model.monitorLatestReport == nil)
                     .accessibilityIdentifier("monitor.settings.push.pushNow")
                 Spacer()
             }
@@ -962,13 +978,19 @@ struct WorkspaceMonitorView: View {
                 Button("保存 QQ 设置") { saveQQSettings() }
                     .buttonStyle(.workspaceSecondary)
                     .accessibilityIdentifier("monitor.settings.qq.save")
-                Button("检查 QQ 依赖") {
+                Button {
                     saveQQSettings()
                     Task { await model.diagnoseMonitorQQ() }
+                } label: {
+                    HStack(spacing: 7) {
+                        if operations.qq == .diagnose { ProgressView().controlSize(.small) }
+                        Text(operations.qq == .diagnose ? "正在检查…" : "检查 QQ 依赖")
+                    }
                 }
                     .buttonStyle(.workspaceQuiet)
+                    .disabled(operations.qq != nil)
                     .accessibilityIdentifier("monitor.settings.qq.diagnose")
-                Button("列出群") {
+                Button {
                     saveQQSettings()
                     Task {
                         qqListedAccount = await model.loadQQMonitorConversations()
@@ -977,8 +999,14 @@ struct WorkspaceMonitorView: View {
                             qqAccount = account
                         }
                     }
+                } label: {
+                    HStack(spacing: 7) {
+                        if operations.qq == .list { ProgressView().controlSize(.small) }
+                        Text(operations.qq == .list ? "正在列出群…" : "列出群")
+                    }
                 }
                     .buttonStyle(.workspaceQuiet)
+                    .disabled(operations.qq != nil)
                     .accessibilityIdentifier("monitor.settings.qq.list")
                 if !model.monitorQQDiagnosisStatus.isEmpty {
                     Text(model.monitorQQDiagnosisStatus).vosFont(WorkspaceText.meta)
@@ -1110,7 +1138,7 @@ struct WorkspaceMonitorView: View {
                     .labelsHidden().datePickerStyle(.field).frame(minWidth: 190)
                     .accessibilityLabel("QQ 起点")
                     .accessibilityIdentifier("monitor.settings.qq.start")
-                Button("添加所选群") {
+                Button {
                     guard let id = selectedConversationID,
                           let conversation = model.monitorQQConversations.first(where: { $0.id == id }) else { return }
                     Task {
@@ -1118,9 +1146,14 @@ struct WorkspaceMonitorView: View {
                             selectedConversationID = nil
                         }
                     }
+                } label: {
+                    HStack(spacing: 7) {
+                        if operations.qq == .add { ProgressView().controlSize(.small) }
+                        Text(operations.qq == .add ? "正在添加…" : "添加所选群")
+                    }
                 }
                     .buttonStyle(.workspaceSecondary)
-                    .disabled(selectedConversationID == nil)
+                    .disabled(operations.qq != nil || selectedConversationID == nil)
                     .accessibilityIdentifier("monitor.settings.qq.addSelected")
                 Spacer()
             }

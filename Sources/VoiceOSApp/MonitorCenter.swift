@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import Foundation
 import VoiceOSCore
 import VoiceOSPlatform
@@ -170,6 +171,40 @@ struct MonitorBuiltinWebsite: Identifiable, Equatable {
     var id: String { url }
 }
 
+/// One in-flight operation per external channel: the push webhook and the
+/// read-only QQ child process. Automatic delivery takes the same push slot as
+/// the manual buttons, so one report leaves at most once. The gate is static
+/// because ControlCenter's stored properties live in VoiceOSApp.swift; views
+/// observe it directly for busy labels.
+@MainActor
+final class MonitorOperationGate: ObservableObject {
+    enum Push: Equatable { case report, test }
+    enum QQ: Equatable { case diagnose, list, add }
+
+    @Published private(set) var push: Push?
+    @Published private(set) var qq: QQ?
+
+    func beginPush(_ operation: Push) -> Bool {
+        guard push == nil else { return false }
+        push = operation
+        return true
+    }
+
+    func endPush(_ operation: Push) {
+        if push == operation { push = nil }
+    }
+
+    func beginQQ(_ operation: QQ) -> Bool {
+        guard qq == nil else { return false }
+        qq = operation
+        return true
+    }
+
+    func endQQ(_ operation: QQ) {
+        if qq == operation { qq = nil }
+    }
+}
+
 extension ControlCenter {
     static let monitorBuiltinWebsites: [MonitorBuiltinWebsite] = [
         MonitorBuiltinWebsite(name: "计算机学院通知", url: "https://cs.nuaa.edu.cn/10851/list.htm"),
@@ -183,6 +218,7 @@ extension ControlCenter {
     /// state lives beside the paging code. Reads are internal, writes file-private.
     private(set) static var monitorReportLimit = 30
     static let monitorReportLimitCap = 960
+    static let monitorOperations = MonitorOperationGate()
 
     /// Widen the report window one page; loaded item caches stay.
     func loadMoreMonitorReports() async {
@@ -436,7 +472,19 @@ extension ControlCenter {
     @discardableResult
     func addQQMonitorSource(_ conversation: QQMonitorConversation, start: Date) async -> Bool {
         guard let store else { return false }
+        guard Self.monitorOperations.beginQQ(.add) else { return false }
+        defer { Self.monitorOperations.endQQ(.add) }
         do {
+            let sources = try await store.monitorSources()
+            let existing = sources.first { source in
+                guard source.kind == .qqGroup,
+                      let config = try? MonitorSourceConfigParser.qq(source.configJSON) else { return false }
+                return config.conversationID == conversation.id
+            }
+            if let existing {
+                monitorStatus = "「\(existing.displayName)」已在监测来源中；如需调整起点，请在「来源状态」里改起始时间"
+                return true
+            }
             let json = try MonitorSourceConfigParser.qqJSON(
                 conversationID: conversation.id,
                 conversationName: conversation.name,
@@ -465,6 +513,8 @@ extension ControlCenter {
 
     @discardableResult
     func loadQQMonitorConversations() async -> String? {
+        guard Self.monitorOperations.beginQQ(.list) else { return nil }
+        defer { Self.monitorOperations.endQQ(.list) }
         monitorQQConversationStatus = "正在读取 QQ 群列表…"
         monitorQQConversations = []
         let loaded = MonitorQQSettingsStore.loadResult()
@@ -484,6 +534,8 @@ extension ControlCenter {
     }
 
     func diagnoseMonitorQQ() async {
+        guard Self.monitorOperations.beginQQ(.diagnose) else { return }
+        defer { Self.monitorOperations.endQQ(.diagnose) }
         monitorQQDiagnosisStatus = "正在检查 QQ 依赖…"
         let loaded = MonitorQQSettingsStore.loadResult()
         recordMonitorQQSettingsLoad(decodeFailed: loaded.decodeFailed)
@@ -556,6 +608,11 @@ extension ControlCenter {
             monitorPushStatus = "尚未保存有效的推送地址；请在设置中填写并保存"
             return false
         }
+        guard Self.monitorOperations.beginPush(.report) else {
+            monitorPushStatus = "正在推送，请稍候…"
+            return false
+        }
+        defer { Self.monitorOperations.endPush(.report) }
         monitorPushStatus = "正在推送…"
         let content = await monitorPushContent(for: report)
         let outcome = await MonitorPushService(store: store)
@@ -591,6 +648,11 @@ extension ControlCenter {
             summary: "这是一条固定样例。收到说明通道可用；今日报告内容不会因此发送。",
             items: [MonitorPushItem(title: "示例事项", deadline: "明天", whyRelevant: "验证推送格式",
                                     sourceName: "VoiceOS", category: .applicable)])
+        guard Self.monitorOperations.beginPush(.test) else {
+            monitorTestPushStatus = "正在发送测试，请稍候…"
+            return
+        }
+        defer { Self.monitorOperations.endPush(.test) }
         monitorTestPushStatus = "正在发送测试…"
         let outcome = await MonitorPushService(store: store).sendTest(sample, channel: channel, webhookURL: url)
         monitorTestPushStatus = outcome.success
