@@ -301,12 +301,10 @@ struct WeeklyReviewView: View {
                     .vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
             }
             if review.remainingCount > 0 {
-                HStack(spacing: 8) {
-                    Text("今天与逾期共 \(review.remainingCount) 条").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                    Button("到行动页查看 →") { jump(.todo) }
-                        .buttonStyle(.workspaceQuietCompact)
-                }.padding(.top, 10)
+                Button("到行动页查看 →") { jump(.todo) }
+                    .buttonStyle(.workspaceQuietCompact)
+                    .padding(.top, 10)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
             if !actionError.isEmpty {
                 Text(actionError).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning).padding(.top, 10)
@@ -449,7 +447,7 @@ struct WeeklyReviewView: View {
     private var nextWeekSection: some View {
         let candidates = nextWeekCandidates
         let rows = Array(candidates.prefix(5))
-        return WorkspaceSection(title: "下周先做", subtitle: "最多选 3 条加入专注。", icon: "calendar.badge.plus", count: nextWeekEntries.count) {
+        return WorkspaceSection(title: "下周先做", subtitle: "加入本周专注", icon: "calendar.badge.plus", count: nextWeekEntries.count) {
             if focusSlots == 0 {
                 HStack(spacing: 8) {
                     Text("已有 3 条专注，先到行动页移出。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
@@ -556,7 +554,7 @@ struct WeeklyReviewView: View {
     }
     private var unclarifiedSection: some View {
         let rows = Array(unclarifiedTasks.prefix(5))
-        return WorkspaceSection(title: "待确认", subtitle: "最近 14 天从原话抽取，还没有确认是承诺、问题与目标，还是不是。", icon: "questionmark.circle", count: unclarifiedTasks.count) {
+        return WorkspaceSection(title: "待确认", subtitle: "最近 14 天抽取，尚未确认类型。", icon: "questionmark.circle", count: unclarifiedTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
                 reviewRow(title: action.title, trailing: "待确认", icon: "questionmark.circle") { openTask(action.id) }
@@ -582,7 +580,8 @@ struct WeeklyReviewView: View {
         }
     }
     private func unavailableProgressRow(_ row: RecentContentProgressRow) -> some View {
-        HStack(alignment: .top, spacing: 14) {
+        let hasMaterial = model.records.contains(where: { $0.id == row.id })
+        return HStack(alignment: .top, spacing: 14) {
             Image(systemName: "circle").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
                 .frame(width: 34, height: 34)
                 .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
@@ -595,13 +594,15 @@ struct WeeklyReviewView: View {
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 6) {
                 Text(progressUnavailableReason(row)).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
-                if model.records.contains(where: { $0.id == row.id }) {
+                if hasMaterial {
                     Button("查看材料") { model.requestWorkspaceSource(row.id); dismiss() }
-                        .buttonStyle(.workspaceSecondaryCompact)
+                        .buttonStyle(.workspaceQuietCompact)
                 }
             }
+            Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
         }
         .padding(.vertical, 10).padding(.horizontal, 10)
+        .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
     }
 
     private func progressUnavailableReason(_ row: RecentContentProgressRow) -> String {
@@ -610,7 +611,7 @@ struct WeeklyReviewView: View {
     }
 
     private var weekCompletedSection: some View {
-        WorkspaceSection(title: "本周完成", subtitle: "最近 7 天登记完成的行动，按完成时间倒序。", icon: "checkmark.circle", count: weekCompleted.count) {
+        WorkspaceSection(title: "本周完成", subtitle: "最近 7 天完成的行动。", icon: "checkmark.circle", count: weekCompleted.count) {
             ForEach(Array(weekCompleted.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
                 weekCompletedRow(action).id("review.pending." + action.id)
@@ -696,7 +697,7 @@ struct WeeklyReviewView: View {
 
     private var pausedSection: some View {
         let rows = Array(pausedTasks.prefix(5))
-        return WorkspaceSection(title: "暂停与冻结", subtitle: "AI 提取暂停或行动关系待核对、暂不同步的待办；状态保留。", icon: "pause.circle", count: pausedTasks.count) {
+        return WorkspaceSection(title: "暂停与冻结", subtitle: "暂停或待核对的待办；状态保留。", icon: "pause.circle", count: pausedTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { Divider() }
                 reviewRow(title: action.title, subtitle: model.workspaceActionStatus(action),
@@ -708,7 +709,7 @@ struct WeeklyReviewView: View {
 
     private var stalledGoalsSection: some View {
         let rows = Array(stalledGoals.prefix(5))
-        return WorkspaceSection(title: "没有下一步的目标", subtitle: "目标还没有可以推进的下一步。", icon: "exclamationmark.circle", count: stalledGoals.count,
+        return WorkspaceSection(title: "没有下一步的目标", icon: "exclamationmark.circle", count: stalledGoals.count,
                                 actionTitle: "逐个澄清", action: { showingClarifyQueue = true }) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
                 if index > 0 { Divider() }
@@ -833,7 +834,7 @@ struct WeeklyReviewView: View {
                 }
                 Spacer(minLength: 8)
                 if !trailing.isEmpty {
-                    WorkspaceBadge(text: trailing, tone: .neutral).padding(.top, 3)
+                    Text(trailing).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
                 }
                 Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
             }

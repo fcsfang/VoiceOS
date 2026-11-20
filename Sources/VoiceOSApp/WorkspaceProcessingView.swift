@@ -502,7 +502,7 @@ struct WorkspaceProcessingView: View {
                                         ForEach(model.actionReviewPairs(for:task)) { pair in
                                             ActionReviewResolutionControl(model:model,pair:pair)
                                         }
-                                    }.padding(.leading,26).padding(.bottom,12)
+                                    }.padding(.leading,44).padding(.bottom,12)
                                 }
                             }
                             if model.pausedActionBatch == nil { PausedActionBatchControl(model:model) }
@@ -544,7 +544,7 @@ struct WorkspaceProcessingView: View {
                     WorkspaceCard {
                         VStack(alignment:.leading,spacing:12) {
                             WorkspaceSectionHeading(title:"转写疑点待核对") { WorkspaceBadge(text:"\(issueTotal)", tone:.warning) }
-                            Text("\(reviewPoints.count) 份材料的核对已经完成，仍有 \(issueTotal) 条疑点没有解决。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3).help("打开材料可以逐条回听原音与查看原文")
+                            Text("核对完成，仍有未解决疑点。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3).help("打开材料可以逐条回听原音与查看原文")
                             WorkspaceListDivider()
                             ForEach(reviewPoints) { point in
                                 WorkspaceRow(title:point.source.displayTitle,subtitle:"仍有 \(point.count) 条疑点未解决",trailing:"查看材料") { openSource(point.source.id) }
@@ -661,7 +661,7 @@ struct WorkspaceProcessingView: View {
                                                 .accessibilityLabel("重新回读：" + item.actionTitle)
                                                 .accessibilityIdentifier("processing.reminder." + item.id + ".reread")
                                                 .disabled(model.remindersBusy || model.reminderFieldsPending || model.reminderAccess?.enabled != true)
-                                                .padding(.leading,54).padding(.bottom,8)
+                                                .padding(.leading,44).padding(.bottom,8)
                                         }
                                     }
                                 }
@@ -669,7 +669,7 @@ struct WorkspaceProcessingView: View {
                             ForEach(reminderAnomalies.failures) { failure in
                                 VStack(alignment:.leading,spacing:6) {
                                     WorkspaceRow(title:failure.actionTitle,subtitle:reminderSyncFailureSubtitle(failure),trailing:"查看任务") { model.showTask(failure.actionID) }
-                                    Text("原因：" + WorkspaceProcessingErrorText.display(failure.reason)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled).padding(.leading,54).padding(.bottom,8)
+                                    Text("原因：" + WorkspaceProcessingErrorText.display(failure.reason)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled).padding(.leading,44).padding(.bottom,8)
                                 }
                             }
                         }
@@ -726,7 +726,6 @@ struct WorkspaceProcessingView: View {
                 if !model.recentCompletions.isEmpty { WorkspaceCard {
                     VStack(alignment:.leading,spacing:12) {
                         WorkspaceSectionHeading(title:"最近完成") { WorkspaceBadge(text:"\(model.recentCompletions.count)", tone:.neutral) }
-                        Text("只保留本次运行最近 5 条。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
                         WorkspaceListDivider()
                         ForEach(model.recentCompletions) { item in
                             WorkspaceRow(title:item.title,subtitle:item.category + " · " + item.date.formatted(date:.abbreviated,time:.shortened),trailing:"查看材料") { openSource(item.sourceID) }
@@ -897,7 +896,7 @@ struct WorkspaceExternalCompletionBatchSection: View {
             WorkspaceCard {
                 VStack(alignment:.leading,spacing:12) {
                     WorkspaceSectionHeading(title:"提醒事项已完成待登记") { WorkspaceBadge(text:"\(total)", tone:.accent) }
-                    Text("共 \(total) 条，来自 \(groups.count) 份材料；确认后进入结果队列，Apple 提醒事项本身不会被修改。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+                    Text("共 \(total) 条，来自 \(groups.count) 份材料。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
                     WorkspaceListDivider()
                     ForEach(groups) { group in
                         VStack(alignment:.leading,spacing:0) {
@@ -916,7 +915,7 @@ struct WorkspaceExternalCompletionBatchSection: View {
                             }.padding(.vertical,10).padding(.horizontal,10)
                             ForEach(group.items) { item in
                                 WorkspaceRow(title:item.action.title,subtitle:model.workspaceExternalCompletionNote(item.action) ?? model.workspaceActionStatus(item.action),icon:"circle",trailing:"查看任务") { model.showTask(item.action.id) }
-                                    .padding(.leading,40)
+                                    .padding(.leading,44)
                             }
                         }.padding(.bottom,8)
                     }
