@@ -847,3 +847,11 @@
 - 128 后首页仍长短混排：行尾「N 条待办」胶囊占标题宽度，15 字 AI 标题被迫折行。
 - RecentContentHome 行结构改为固定两行：标题独占一行（普通字号 lineLimit 1，特大 2），「N 条待办」移入元数据行（「21:22 · 在读 · 1 条待办」，accent 计数）。
 - 集成：716 tests 全绿（build_exit=0 / test_exit=0）。
+## 波 130：搜索索引对齐显示标题、页面层级统一（2026-11-21，已推送）
+- 130-A 搜索：索引 title 列改用与列表同源的显示标题（SourceRecord.displayTitle → plainTitle → MaterialNaming），原始存储名并入 body；shape 升级为 `cjk-spaced-v1-titled-<时区>`（存量库首次搜索自动全量重建、换时区也重建）；sources 脏触发器纳入 presentation_json（改名/生成标题后下次查询刷新）。修复「AI 标题搜不到」（搜「多智能体协作」等 0 命中）与「搜索行与列表标题不同源」；反馈材料的搜索行也从「行动反馈 · ISO 名」变为与列表一致的正文派生标题，同刻重复行自然消失。原始 ISO/文件名仍可经 body 命中。
+- 130-A 测试修正：旧用例「按人间化日期搜到」前提错误（反馈材料显示标题一直是正文派生），改为断言搜索行标题与列表同源；21 个 SearchIndex 用例全绿。
+- 130-B 一致性：材料详情 SourceFold 头部改用 WorkspaceSectionHeading+发丝线+纯数字（与 SourceSection 同构）；主题阅读网格 groupGap、问题区块 WorkspaceSection、原话依据补计数；提醒设置/排期面板分隔线统一 WorkspaceListDivider，优先级移回日期组，四条长文案压缩。
+- 130-C：周回顾副标题去重与压缩、「本周结果」行结构统一（不可用行补 chevron/hover、按钮降 quiet）；监测页失败态补分隔线、机制句移 .help、四段隐私说明合一；处理页重复说明合并、嵌套按钮缩进统一 44。
+- 130-D：已归档/回收站说明仅非空时显示（与空态去重）；搜索空态与周期回顾的分隔线只在行间；主题瓦片网格 16→groupGap；设置页去两条孤立 Divider、快捷键四行合一。
+- 延后：设置页 8 个区块仍夹在扁平 28 间距栈内（组内收紧到 12 的结构重排）留下波。
+- 集成：721 tests 全绿（build_exit=0 / test_exit=0；首轮 2 失败由测试前提错误，已修正）。

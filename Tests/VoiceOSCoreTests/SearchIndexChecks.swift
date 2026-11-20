@@ -432,18 +432,20 @@ final class SearchIndexChecks: XCTestCase {
         XCTAssertEqual(hits.first?.title, "多智能体协作的项目规划")
     }
 
-    func testMaterialStoredNameSearchesByHumanizedDate() async throws {
+    func testMaterialRowTitleIsWhatSearchShows() async throws {
+        // A feedback material renders its transcript-derived title in the
+        // library, never the stored "行动反馈 · ISO" name; search must index
+        // the same title the row shows.
         let store = try await openStore()
         let db = await store.db
-        let storedName = "行动反馈 · 2026-10-14T12:28:35Z"
-        let material = try insertSource(db, name: storedName)
-        let shown = MaterialNaming.displayName(storedName)
-        let day = String(shown.split(separator: " ")[2])
+        let material = try insertSource(db, name: "行动反馈 · 2026-10-14T12:28:35Z", transcript: "今天我想复盘一下昨天的会议记录，然后列出改进点。")
         try await store.rebuildSearchIndex()
 
-        let hits = try await store.search(query: day)
+        let hits = try await store.search(query: "复盘")
         XCTAssertEqual(hits.map(\.refID), [material])
-        XCTAssertEqual(hits.first?.title, shown)
+        let title = try XCTUnwrap(hits.first?.title)
+        XCTAssertTrue(title.contains("复盘"), title)
+        XCTAssertFalse(title.contains("行动反馈"), title)
     }
 
     func testMaterialStoredNameStillSearchesRawText() async throws {
