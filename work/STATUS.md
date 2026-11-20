@@ -731,3 +731,11 @@
 - 116-B 忙标志：ControlCenter.backupRunning 在共享 backupLibrary 里 guard + defer（手动重试与每日自动备份共用，错误路径复位）；refreshFollowup 按 sourceID 去重入队；retry(_:) 按 sourceID 去重转写重试（模型层双保险）；设置页备份/整理主题/AI 委托/思想与下一步四行按钮忙态文案 + spinner + 行内禁用。
 - 116-C 连点保护：AssistantExecution alert 取消/重新执行复用 saving 标志 + disabled；MonitorOperationGate 扩为每来源 sourceBusy + addingBuiltinSources + pendingSourceWrites 队列，启停/官网起点/QQ 起点统一 drain（每次写前重读，最后值生效）；监测行开关与日期选择器按忙禁用。MaterialManagementView 经核对已有 disabled(busy)（任务书证据过期），仅补 update() 模型层 guard。
 - 集成（main 合并三支后）：build_exit=0，test_exit=0，669 项 0 失败。
+
+## 波 117：VoiceOver 语义（2026-11-20，已推送）
+
+- 117-A 行级朗读：首页主列表行、主题阅读行动行、监测事项行与 QQ 诊断行改 `.accessibilityElement(children: .ignore)` + 显式 label（状态/时间/徽标按序入库），状态图标与 chevron 隐藏；监测检查结束按终态播报一次。
+- 117-B Esc 路径：九个文件十余个取消/关闭按钮补 `.keyboardShortcut(.cancelAction)`；全景联系浮层与覆盖面板空快照补「还没有可显示的内容」空态；未新增 dismiss 限制。
+- 117-C 播报与命名：设计系统搜索/通知/行首图标隐藏；检索完成、周回顾载入、处理完成、知识核查终态、反馈历史载入按跃迁播报（签名去重）；无名 spinner 按邻近文案处理；三处关闭按钮补 Escape。
+- 集成：669 项 0 失败。
+- 新任务（用户反馈，优先）：待办进展要变时间线（日期时间 + 内容串联），并把「实际进展」从详情页底部提到首屏（波 118）；主题产品的理念要重构，定义「什么才配称为一个主题」（先做数据与实现侦察后给方案）。
