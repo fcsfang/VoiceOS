@@ -724,3 +724,10 @@
 - 逐屏目视（新装 dist，pid 27071）：首页（三段式任务进展、时间线）、材料列表（日期分组、待办徽标、TitleFit 标题）、材料详情此前已验、消息监测（今日报告卡、计数 "未处理 0 · 已处理 8 · 尚未推送"、筛选 chips、展开更早报告）、设置（模型与服务、隐私与云端普通分组、连接与自动入口；浅色/深色两态均正常）、周回顾（统计行、今天收尾卡、逾期徽标、完成/不再跟进）、行动列表（61 目标提示条、待办行）、行动详情（提醒核对通知、时长 chips、主次按钮、重复/子任务卡）、主题卡片栅格（计数与悬停边线）、主题阅读（面包屑、概览/认识与问题/行动与结果/材料页签、速览卡、内容结构）、全景加载态（spinner + 说明 + 打开材料/生成重试）。
 - 结论：统一视觉成立，未发现需要修复的回归。
 - 限制：设置页 AX 滚动不生效，存储/备份区未逐屏目视（112-B 加载态为瞬态，代码与测试为准）；讨论历史、反思页、记录想法 sheet 未逐一打开。
+
+## 波 116：等宽修正与连点保护（2026-11-20，已推送）
+
+- 116-A 等宽覆盖：确认 `Text.monospacedDigit()` 会被后置 vosFont 的 content.font 覆盖；WorkspaceBadge、WorkspaceSectionHeading 与 WorkspaceButtonStyle（新增默认 false 的 monospacedDigit 参数）改由 vosFont 参数承载；WeeklyReview 摘要链接分支收回单个 Text。留档五文件外疑似失效两处：WorkspaceProcessingView:247（祖级 meta 覆盖）、WorkspaceView:1214（下游覆盖）。
+- 116-B 忙标志：ControlCenter.backupRunning 在共享 backupLibrary 里 guard + defer（手动重试与每日自动备份共用，错误路径复位）；refreshFollowup 按 sourceID 去重入队；retry(_:) 按 sourceID 去重转写重试（模型层双保险）；设置页备份/整理主题/AI 委托/思想与下一步四行按钮忙态文案 + spinner + 行内禁用。
+- 116-C 连点保护：AssistantExecution alert 取消/重新执行复用 saving 标志 + disabled；MonitorOperationGate 扩为每来源 sourceBusy + addingBuiltinSources + pendingSourceWrites 队列，启停/官网起点/QQ 起点统一 drain（每次写前重读，最后值生效）；监测行开关与日期选择器按忙禁用。MaterialManagementView 经核对已有 disabled(busy)（任务书证据过期），仅补 update() 模型层 guard。
+- 集成（main 合并三支后）：build_exit=0，test_exit=0，669 项 0 失败。
