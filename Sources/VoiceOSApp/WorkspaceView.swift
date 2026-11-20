@@ -1139,7 +1139,7 @@ struct WorkspaceView: View {
                             }.padding(.top,8)
                         } label: {
                             VStack(alignment:.leading,spacing:0) {
-                                WorkspaceSectionHeading(title:"尚未归入主题的材料", count:"\(unlinked.count)") {
+                                WorkspaceSectionHeading(title:"尚未归入主题的材料", count:"\(expressions.count)") {
                                     Button(model.organizingTopics ? "AI 正在归组…" : "交给 AI 归组") { model.queueTopicOrganization() }
                                         .vosFont(WorkspaceText.meta)
                                         .disabled(model.organizingTopics || !model.modelConfigured)
