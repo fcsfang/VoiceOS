@@ -464,9 +464,8 @@ struct ThoughtPanoramaView: View {
     private func outlinePanel(_ snapshot: PanoramaSnapshot) -> some View {
         let model = ConstellationModel(snapshot: snapshot, now: .now)
         return ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                 Text("问题与联系列表").vosFont(WorkspaceText.sectionTitle)
-                Text("与画布一致；键盘可逐项浏览。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 if hasQuery { outlineSearchResults(model) }
                 ForEach(model.regions) { region in
                     DisclosureGroup {
@@ -648,7 +647,7 @@ struct ThoughtPanoramaView: View {
     private var emptyState: some View {
         let mode = emptyMode
         let canRetry = state?.snapshot == nil && state?.input.units.isEmpty == false
-        return VStack(spacing: 18) {
+        return VStack(spacing: WorkspaceMetrics.groupGap) {
             ZStack {
                 Ellipse().fill(palette.selection).frame(width: 300, height: 190).rotationEffect(.degrees(-15))
                 Ellipse().fill(palette.accent.opacity(0.08)).frame(width: 240, height: 160).offset(x: 110, y: 40)
@@ -685,7 +684,7 @@ struct ThoughtPanoramaView: View {
     }
 
     private var coverage: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             HStack { Text("完整材料与覆盖情况").vosFont(WorkspaceText.sectionTitle); Spacer(); Button("关闭") { showCoverage = false }.buttonStyle(.workspaceQuietCompact).keyboardShortcut(.cancelAction) }
             if let state {
                 Text("\(state.input.units.count) 个完整单元 · \(state.input.sources.count) 份来源 · \(dependencyCount(state.input)) 份节目依赖 · \(state.input.claims.count) 条当前认识").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
@@ -694,12 +693,12 @@ struct ThoughtPanoramaView: View {
                                     description: "完成生成与核对后，这里会列出材料与覆盖情况。")
             }
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     if let state {
                         if let snapshot=state.snapshot, snapshot.isPartial {
-                            Text("这是已核对区域。其余完整单元、跨单元联系与全局覆盖尚未完成；当前结果不代表本人认可。").foregroundStyle(palette.warning)
+                            Text("仅显示已核对区域；跨单元联系与全局覆盖尚未完成，不代表本人认可。").foregroundStyle(palette.warning)
                         }
-                        Text("输入不按近期或条数裁剪。仅完整整理、当前版本与许可均有效的材料入选；节目依赖单独计数。AI 未归入项仍保留完整入口。")
+                        Text("只选入完整整理、当前版本且许可有效的材料；未归入项仍保留入口。")
                         ForEach(state.input.sources) { source in
                             HStack { Text(source.title); Spacer(); coverageBadge(for: source, snapshot: state.snapshot); Button("全文") { showCoverage = false; openSource(source.id) }.buttonStyle(.workspaceQuietCompact) }
                             if let reason = state.snapshot?.coverage.unrepresentedSources.first(where: { $0.id == source.id })?.reason { Text(reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
@@ -831,7 +830,7 @@ private struct RegionInspectorPanel: View {
             question.id != openQuestion?.id && !quoted.contains(question.id)
         }
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
                 HStack(spacing: 8) {
                     ReaderKicker(
                         dot: area.map { RegionIdentity.color(index: $0.identityIndex, scheme: colorScheme) } ?? palette.accent,
@@ -997,7 +996,7 @@ private struct QuestionInspectorPanel: View {
         let model = ConstellationModel(snapshot: snapshot, now: .now)
         let relations = snapshot.proposal.relations.filter { $0.from == question.id || $0.to == question.id }
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
                 HStack(spacing: 8) {
                     if let backRegion {
                         Button { selection = nil } label: {
@@ -1069,7 +1068,7 @@ private struct RelationInspectorPanel: View {
         let areaIndex = anchor.flatMap { $0.areaIndex }
         let area = areaIndex.flatMap { index in model.areas.first { $0.identityIndex == index } }
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
                 HStack(spacing: 8) {
                     if let backRegion {
                         Button { selection = nil } label: {
@@ -1113,7 +1112,7 @@ private struct RelationInspectorPanel: View {
                     actions: actions,
                     openQuestion: { selection = .question(relation.to) }
                 )
-                Text("对联系有异议，可沿线讨论。原话与理解更正分别返回材料的正式更正入口。")
+                Text("对联系有异议，可沿线讨论；更正请在材料中进行。")
                     .vosFont(WorkspaceText.caption)
                     .foregroundStyle(.secondary)
                 ReaderPrimaryAction(title: "沿这条线索继续") {
@@ -1159,7 +1158,7 @@ private struct ReaderEvidenceBlock: View {
             }
             if pairs.count > 1 {
                 ReaderDisclosure(title: "其他原话", count: pairs.count - 1, expanded: $showsMore) {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                         ForEach(Array(pairs.dropFirst().enumerated()), id: \.offset) { _, pair in
                             ReaderQuoteCard(item: pair.item, source: pair.source, claims: claims, lineLimit: 3, actions: actions)
                         }
@@ -1248,7 +1247,7 @@ private struct ReaderPrimaryAction: View {
                 }
             }
             .buttonStyle(.workspacePrimary)
-            Text("带入相关完整表达与节目原文，先打开可编辑的 AI 候选草稿；点击发送后才成为你的提问。")
+            Text("带入相关完整原话；发送后才成为你的提问。")
                 .vosFont(WorkspaceText.caption)
                 .foregroundStyle(.secondary)
         }

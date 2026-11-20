@@ -274,9 +274,9 @@ struct WorkspaceProcessingView: View {
     let openMonitor: () -> Void
     var body: some View {
         ScrollView {
-            LazyVStack(alignment:.leading,spacing:24) {
+            LazyVStack(alignment:.leading,spacing:WorkspaceMetrics.sectionGap) {
                 let attention = model.workspaceAttentionSnapshot
-                WorkspacePageHeading(eyebrow:"后台处理",title:"进度与需要查看的事项",subtitle:"保持应用运行即可继续处理；可以先阅读其他内容。原文、处理结果与历史分别保留。")
+                WorkspacePageHeading(eyebrow:"后台处理",title:"进度与需要查看的事项",subtitle:"保持应用运行即可继续处理；原文、处理结果与历史分别保留。")
                 ReverifyControls(model:model)
                 if attention.monitorNeedsAttention {
                     WorkspaceCard {
@@ -359,7 +359,7 @@ struct WorkspaceProcessingView: View {
                             WorkspaceSectionHeading(title:"文字理解与关联") { WorkspaceBadge(text:"\(attention.unfinishedIntents.count)", tone:.warning) }
                             WorkspaceListDivider()
                             ForEach(attention.unfinishedIntents) { intent in
-                                VStack(alignment:.leading,spacing:10) {
+                                VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                                     WorkspaceRow(title:name(intent.sourceID),subtitle:intentLabel(intent),trailing:"核对材料") { openSource(intent.sourceID) }
                                     if let error=intent.error { reason(error) }
                                     if intent.state == .queued && !model.modelConfigured { Button("配置模型后继续",action:openSettings).buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("配置模型后继续：" + name(intent.sourceID)).accessibilityIdentifier("processing.intent." + intent.id + ".configure") }
@@ -396,7 +396,7 @@ struct WorkspaceProcessingView: View {
                     WorkspaceCard {
                         VStack(alignment:.leading,spacing:12) {
                             WorkspaceSectionHeading(title:"录音与转写需要查看") { WorkspaceBadge(text:"\(failedSources.count)", tone:.warning) }
-                            Text("录音被中断时已保存的片段仍保留；本地转写失败时原件仍保留。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+                            Text("中断录音的已保存片段和转写失败的原件都会保留。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
                             WorkspaceListDivider()
                             ForEach(failedSources) { source in
                                 VStack(alignment:.leading,spacing:6) {
@@ -464,7 +464,7 @@ struct WorkspaceProcessingView: View {
                     WorkspaceCard {
                         VStack(alignment:.leading,spacing:12) {
                             WorkspaceSectionHeading(title:"长录音分段理解未完成") { WorkspaceBadge(text:"\(segmentedFailures.count)", tone:.warning) }
-                            Text("模型输出未通过本地校验，原文与旧处理记录保留。整批重试会作为新的处理任务发送，不覆盖这次记录。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+                            Text("模型输出未通过本地校验，原文与旧记录保留；整批重试会新建处理，不覆盖这次记录。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
                             WorkspaceListDivider()
                             ForEach(segmentedFailures) { batch in
                                 VStack(alignment:.leading,spacing:6) {
@@ -489,11 +489,11 @@ struct WorkspaceProcessingView: View {
                     WorkspaceCard {
                         VStack(alignment:.leading,spacing:12) {
                             WorkspaceSectionHeading(title:"这些待办需要核对") { WorkspaceBadge(text:"\(pausedTasks.count)", tone:.warning) }
-                            Text("以下事项尚未登记完成，行动关系待核对或 AI 提取已暂停。逐条核对：同一件事会接回原记录，两件事会保留两条；核对后即可继续同步。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+                            Text("这些待办尚未登记完成或关系待核对；核对后即可继续同步。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
                             WorkspaceListDivider()
                             let ids=Set(pausedTasks.flatMap { task in model.sourcePageIndex.claim(for: task.claimID)?.references.map(\.sourceID) ?? [] })
                             ForEach(model.records.filter { ids.contains($0.id) }) { source in
-                                WorkspaceRow(title:source.displayTitle,subtitle:"查看暂停原因、受影响的任务和处理按钮",trailing:"打开材料") { openSource(source.id) }
+                                WorkspaceRow(title:source.displayTitle,subtitle:"待核对",trailing:"打开材料") { openSource(source.id) }
                                 ForEach(pausedTasks.filter { task in model.sourcePageIndex.claim(for: task.claimID)?.references.contains { $0.sourceID == source.id } == true }) { task in
                                     VStack(alignment:.leading,spacing:5) {
                                         Text(task.title)
@@ -544,7 +544,7 @@ struct WorkspaceProcessingView: View {
                     WorkspaceCard {
                         VStack(alignment:.leading,spacing:12) {
                             WorkspaceSectionHeading(title:"转写疑点待核对") { WorkspaceBadge(text:"\(issueTotal)", tone:.warning) }
-                            Text("\(reviewPoints.count) 份材料的核对已经完成，仍有 \(issueTotal) 条疑点没有解决。打开材料可以逐条回听原音与查看原文。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+                            Text("\(reviewPoints.count) 份材料的核对已经完成，仍有 \(issueTotal) 条疑点没有解决。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3).help("打开材料可以逐条回听原音与查看原文")
                             WorkspaceListDivider()
                             ForEach(reviewPoints) { point in
                                 WorkspaceRow(title:point.source.displayTitle,subtitle:"仍有 \(point.count) 条疑点未解决",trailing:"查看材料") { openSource(point.source.id) }
@@ -726,7 +726,7 @@ struct WorkspaceProcessingView: View {
                 if !model.recentCompletions.isEmpty { WorkspaceCard {
                     VStack(alignment:.leading,spacing:12) {
                         WorkspaceSectionHeading(title:"最近完成") { WorkspaceBadge(text:"\(model.recentCompletions.count)", tone:.neutral) }
-                        Text("只保留本次运行最近 5 条；点开可查看对应材料。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+                        Text("只保留本次运行最近 5 条。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
                         WorkspaceListDivider()
                         ForEach(model.recentCompletions) { item in
                             WorkspaceRow(title:item.title,subtitle:item.category + " · " + item.date.formatted(date:.abbreviated,time:.shortened),trailing:"查看材料") { openSource(item.sourceID) }
@@ -738,7 +738,7 @@ struct WorkspaceProcessingView: View {
                     VStack(alignment:.leading,spacing:8) {
                         WorkspaceBadge(text:"已全部处理", tone:.success)
                             .accessibilityLabel("已全部处理，没有需要查看的处理结果")
-                        Text(model.recentCompletions.isEmpty ? "本次运行还没有完成记录；长任务完成后会保留最近 5 条，错过通知也能在这里找回。" : "以上是最近完成的记录，可点开查看材料。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        Text(model.recentCompletions.isEmpty ? "本次运行还没有完成记录；最近 5 条会保留在这里。" : "以上是本次运行最近完成的记录。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     }
                 }
             }.frame(maxWidth:WorkspaceMetrics.pageWidth,alignment:.leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth:.infinity,alignment:.top)
