@@ -64,6 +64,15 @@ final class SearchIndexChecks: XCTestCase {
         try db.query("SELECT total_changes() AS changes").first?["changes"]
     }
 
+    private func setPresentation(_ db: Database, sourceID: String, _ presentation: RecordingPresentation) throws {
+        try db.execute("UPDATE sources SET presentation_json=? WHERE id=?",
+                       [String(decoding: try JSONEncoder().encode(presentation), as: UTF8.self), sourceID])
+    }
+
+    private func transcriptVersionID(_ db: Database, sourceID: String) throws -> String? {
+        try db.query("SELECT current_version_id AS id FROM transcripts WHERE source_id=?", [sourceID]).first?["id"]
+    }
+
     func testMigrationCreatesSearchIndex() async throws {
         let store = try await openStore()
         let db = await store.db
@@ -240,8 +249,12 @@ final class SearchIndexChecks: XCTestCase {
         try await store.rebuildSearchIndex()
         XCTAssertFalse(try dirtyFlag(db))
 
-        try db.execute("UPDATE sources SET followup_json='{}',presentation_json='{}',policy_version=2 WHERE id=?", [material])
-        XCTAssertFalse(try dirtyFlag(db), "跟进回执、呈现 JSON 与策略切换不应置脏")
+        try db.execute("UPDATE sources SET followup_json='{}',policy_version=2 WHERE id=?", [material])
+        XCTAssertFalse(try dirtyFlag(db), "跟进回执与策略切换不应置脏")
+
+        try db.execute("UPDATE sources SET presentation_json='{}' WHERE id=?", [material])
+        XCTAssertTrue(try dirtyFlag(db), "重命名与生成标题写在呈现 JSON 里，必须置脏")
+        try clearDirtyFlag(db)
 
         try db.execute("UPDATE actions SET nature='goal',state='completed' WHERE id=?", [action])
         XCTAssertFalse(try dirtyFlag(db), "行动状态与性质不在索引列")
@@ -402,5 +415,57 @@ final class SearchIndexChecks: XCTestCase {
         let result = try await store.searchAll(query: "会", perKindLimit: 20)
         XCTAssertEqual(result.hits(for: .claim).map(\.refID), [current])
         XCTAssertEqual(result.total(for: .claim), 1)
+    }
+
+    func testMaterialTitleIndexesGeneratedTitle() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let material = try insertSource(db, name: "原始文件名材料", transcript: "正文里没有的独特措辞")
+        var presentation = RecordingPresentation()
+        presentation.automatic = RecordingTitleProposal(sourceID: material, title: "多智能体协作的项目规划", summary: "摘要", quotes: [])
+        presentation.transcriptVersionID = try transcriptVersionID(db, sourceID: material)
+        try setPresentation(db, sourceID: material, presentation)
+        try await store.rebuildSearchIndex()
+
+        let hits = try await store.search(query: "多智能体")
+        XCTAssertEqual(hits.map(\.refID), [material])
+        XCTAssertEqual(hits.first?.title, "多智能体协作的项目规划")
+    }
+
+    func testMaterialStoredNameSearchesByHumanizedDate() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let storedName = "行动反馈 · 2026-10-14T12:28:35Z"
+        let material = try insertSource(db, name: storedName)
+        let shown = MaterialNaming.displayName(storedName)
+        let day = String(shown.split(separator: " ")[2])
+        try await store.rebuildSearchIndex()
+
+        let hits = try await store.search(query: day)
+        XCTAssertEqual(hits.map(\.refID), [material])
+        XCTAssertEqual(hits.first?.title, shown)
+    }
+
+    func testMaterialStoredNameStillSearchesRawText() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let material = try insertSource(db, name: "行动反馈 · 2026-10-14T12:28:35Z")
+        try await store.rebuildSearchIndex()
+
+        let hits = try await store.search(query: "2026-10-14T12:28:35Z")
+        XCTAssertEqual(hits.map(\.refID), [material])
+    }
+
+    func testRenamedMaterialTitleRefreshesOnNextQuery() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let material = try insertSource(db, name: "旧名字材料")
+        try await store.rebuildSearchIndex()
+
+        try await store.renameRecording(sourceID: material, title: "新名字材料")
+        XCTAssertTrue(try dirtyFlag(db))
+        let hits = try await store.search(query: "新名字")
+        XCTAssertEqual(hits.map(\.refID), [material])
+        XCTAssertEqual(hits.first?.title, "新名字材料")
     }
 }
