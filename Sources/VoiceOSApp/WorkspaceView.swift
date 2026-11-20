@@ -1002,7 +1002,7 @@ struct WorkspaceView: View {
                 }
             }
             WorkspaceFilterTabs(items: tabs, selection: materialFilter, onSelect: { materialFilter = $0 })
-            if ["已归档","回收站"].contains(materialFilter) {
+            if !rows.isEmpty, ["已归档","回收站"].contains(materialFilter) {
                 Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。Apple 提醒事项未被删除或取消。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             if rows.isEmpty {
@@ -1090,7 +1090,7 @@ struct WorkspaceView: View {
                 WorkspaceSearchField(text:$topicQuery,placeholder:"搜索主题标题或摘要")
                     .accessibilityIdentifier("topics.search")
                 if !themes.isEmpty {
-                    LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing:16)],alignment:.leading,spacing:16) {
+                    LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing: WorkspaceMetrics.groupGap)],alignment:.leading,spacing: WorkspaceMetrics.groupGap) {
                         ForEach(themes) { listing in
                             WorkspaceTopicTile(topic:listing.topic,sourceCount:listing.materialCount) { selectTopic(listing.topic.id) }
                         }
@@ -1213,7 +1213,8 @@ struct WorkspaceView: View {
             let interval=reviewPeriod.interval(containing:reviewAnchor)
             let sources=reading.sources.filter { interval.contains($0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt) ?? .distantPast) }
             let catalog=recordCatalog
-            ForEach(distinctExpressions(sources)) { sourceRow($0,catalog:catalog);Divider() }
+            let expressions=distinctExpressions(sources)
+            ForEach(expressions) { source in sourceRow(source,catalog:catalog); if source.id != expressions.last?.id { Divider() } }
             let actionIDs=reading.actionIDs
             let outcomes=(topicFocus?.outcomes ?? []).filter { actionIDs.contains($0.actionID) && ConversationReflectionFocus.date($0.createdAt).map { interval.contains($0) } == true }
             ForEach(outcomes) { outcome in WorkspaceRow(title:outcome.text,subtitle:"实际结果 · " + dateLabel(outcome.createdAt),icon:"leaf") { go(.task(outcome.actionID)) } }
@@ -1589,7 +1590,7 @@ struct WorkspaceView: View {
                 let sources=model.records.filter { !$0.isTrashed }
                 if !sources.isEmpty { sectionTitle("材料与原话 · \(sources.count)") }
                 let catalog=recordCatalog
-                ForEach(sources) { sourceRow($0,catalog:catalog);Divider() }
+                ForEach(sources) { source in sourceRow(source,catalog:catalog); if source.id != sources.last?.id { Divider() } }
             } else {
                 searchResults
             }
@@ -1904,13 +1905,9 @@ struct WorkspaceView: View {
             Picker("文字大小",selection:Binding(get:{ model.textSize },set:{ model.setTextSize($0) })) {
                 ForEach(AppTextSize.allCases) { option in Text(option.label).tag(option) }
             }.pickerStyle(.segmented).frame(maxWidth:360)
-            Divider()
             sectionTitle("键盘快捷键")
             VStack(alignment:.leading,spacing:8) {
-                Text("↑↓ 选择 · 列表聚焦时")
-                Text("↵ 打开 · 列表聚焦时")
-                Text("x 完成 · 列表聚焦时")
-                Text("z 不再跟进 · 列表聚焦时")
+                Text("列表聚焦时：↑↓ 选择 · ↵ 打开 · x 完成 · z 不再跟进")
                 Text("任务详情：x 或空格 完成 · s 改期 · f 记结果")
                 Text("⌥⌘Z 撤销 · 仅本次运行")
                 Text("口述、剪贴板、速记、导入与页面切换在菜单栏的「记录」与「显示」菜单。")
@@ -1920,7 +1917,6 @@ struct WorkspaceView: View {
                     .vosFont(WorkspaceText.caption).foregroundStyle(palette.warning)
             }
             Button("再看一次引导") { model.onboardingRequested = true }.buttonStyle(.workspaceSecondary)
-            Divider()
             sectionTitle("资料与历史")
             HStack(spacing:12) {
                 Button("导出结构化资料") { model.export(includeMedia:false) }.buttonStyle(.workspaceSecondary)
