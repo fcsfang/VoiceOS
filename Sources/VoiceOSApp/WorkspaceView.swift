@@ -154,7 +154,7 @@ func workspaceStateLabel(_ value:String) -> String {
     default: return "状态待确认"
     }
 }
-fileprivate func displayTitle(_ raw:String) -> String { MarkdownDocument.plainTitle(raw) }
+fileprivate func displayTitle(_ raw:String) -> String { MaterialNaming.displayName(MarkdownDocument.plainTitle(raw)) }
 fileprivate func fittedDisplayTitle(_ raw:String) -> String { WorkspaceTitleFit.present(displayTitle(raw)).title }
 fileprivate let recentSearchDefaultsKey = "voiceos.recentSearches.v1"
 /// Fixed widths and icon boxes follow the reading size up to 1.3, so 特大 still fits a desktop window.

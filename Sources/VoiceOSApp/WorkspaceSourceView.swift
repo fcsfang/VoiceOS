@@ -480,7 +480,7 @@ struct WorkspaceSourceView: View {
                     Text(expression.reason).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).padding(.vertical,10)
                     ForEach(Array(expression.sourceIDs.enumerated()),id:\.element) { index,id in
                         if let member=catalog[id] {
-                            Button("第 \(index+1) 段 · "+member.name+(id == source.id ? "（当前原文）" : "")) { openSource(id) }
+                            Button("第 \(index+1) 段 · "+MaterialNaming.displayName(member.name)+(id == source.id ? "（当前原文）" : "")) { openSource(id) }
                                 .buttonStyle(.workspaceQuietCompact)
                                 .padding(.vertical,5)
                                 .disabled(id == source.id)
@@ -542,7 +542,7 @@ struct WorkspaceSourceView: View {
                                            let span=member.spans.first(where: { $0.id == ref.spanID }),let text=member.transcript {
                                             if expressionIDs.count > 1 {
                                                 QuoteHoverPreview(sourceTitle:member.displayTitle,snippet:quote(span,text:text),open:{ openSource(member.id) }) {
-                                                    Text(member.name).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                                                    Text(MaterialNaming.displayName(member.name)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                                 }
                                             }
                                             if let start=span.startMS,let end=span.endMS {
@@ -850,7 +850,7 @@ struct WorkspaceSourceView: View {
                         SourceSpanPlaybackList(model:model,source:source,
                                                spans:source.spans.filter { $0.startMS != nil && $0.endMS != nil },
                                                clock:playback)
-                        Text("原文件：" + source.name).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
+                        Text("原文件：" + MaterialNaming.displayName(source.name)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                         if source.transcript != nil {
                             Divider()
                             DisclosureGroup("全文选读",isExpanded:foldExpanded(\.fullText)) {
