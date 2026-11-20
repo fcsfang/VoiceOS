@@ -37,6 +37,7 @@ private struct SourceDiscussionReadKey: Hashable {
     }
     let sourceID:String
     let items:[Item]
+    let retry:Int
 }
 private struct SourceContextReadKey: Hashable {
     struct Pair: Hashable {
@@ -58,14 +59,17 @@ private struct SourceContextReadKey: Hashable {
     let policyVersion:Int
     let pairs:[Pair]
     let links:[Link]
+    let retry:Int
 }
 private struct SourceTranscriptReadKey: Hashable {
     let sourceID:String
     let transcriptVersionID:String?
+    let retry:Int
 }
 private struct SourceChapterReadKey: Hashable {
     let sourceID:String
     let kind:String
+    let retry:Int
 }
 private struct SourceExtractionReadKey: Hashable {
     let sourceID:String
@@ -109,7 +113,7 @@ private struct SourceFold<Content: View>: View {
     @Binding var isExpanded:Bool
     @ViewBuilder let content:()->Content
     var body: some View {
-        WorkspaceCard(padding:22) {
+        WorkspaceCard() {
             VStack(alignment:.leading,spacing:0) {
                 Button { isExpanded.toggle() } label: {
                     HStack(alignment:.top,spacing:12) {
@@ -141,11 +145,21 @@ private struct SourceLoadingRow: View {
         }.accessibilityElement(children:.combine)
     }
 }
-private struct SourceLoadFailureText: View {
+private struct SourceLoadFailureRow: View {
     @Environment(\.workspacePalette) private var palette
-    let text:String
+    let operation:String
+    let reason:String
+    let retry:()->Void
     var body:some View {
-        Text(text).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+        HStack(alignment:.firstTextBaseline,spacing:12) {
+            Label(InlineFailurePresentation.message(operation:operation,reason:reason),systemImage:"exclamationmark.triangle")
+                .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
+                .fixedSize(horizontal:false,vertical:true)
+            Spacer(minLength:8)
+            Button("重试",systemImage:"arrow.clockwise",action:retry)
+                .buttonStyle(.workspaceQuietCompact)
+                .help("重新读取")
+        }.padding(.vertical,6)
     }
 }
 private struct UnresolvedIssuesBlock: View {
@@ -157,7 +171,7 @@ private struct UnresolvedIssuesBlock: View {
     let jump:(String)->Void
     @State private var isExpanded=false
     var body: some View {
-        WorkspaceCard(padding:18) {
+        WorkspaceCard() {
             VStack(alignment:.leading,spacing:13) {
                 Button { isExpanded.toggle() } label: {
                     HStack(spacing:9) {
@@ -198,7 +212,7 @@ private struct SourceSection<Content: View>: View {
     var count:Int? = nil
     @ViewBuilder let content:()->Content
     var body: some View {
-        WorkspaceCard(padding:22) {
+        WorkspaceCard() {
             VStack(alignment:.leading,spacing:0) {
                 WorkspaceSectionHeading(title,count:count.map { String($0) })
                 if !subtitle.isEmpty {
@@ -216,7 +230,7 @@ private struct SourceFollowupCard: View {
     @ObservedObject var model:ControlCenter
     let open:()->Void
     var body: some View {
-        WorkspaceCard(padding:14) {
+        WorkspaceCard(padding:16) {
             HStack(alignment:.center,spacing:10) {
                 VStack(alignment:.leading,spacing:6) {
                     if let result=receipt.result {
@@ -263,6 +277,10 @@ struct WorkspaceSourceView: View {
     @State private var discussionsPhase=SourceLoadPhase.idle
     @State private var entitiesPhase=SourceLoadPhase.idle
     @State private var chaptersPhase=SourceLoadPhase.idle
+    @State private var contextRetry=0
+    @State private var discussionsRetry=0
+    @State private var entitiesRetry=0
+    @State private var chaptersRetry=0
     private func pairingIsCurrent(_ pair:RecordingContext)->Bool {
         guard let personal=catalog[pair.personalSourceID],let external=catalog[pair.externalSourceID] else { return false }
         return !personal.localOnly && !external.localOnly && !personal.needsTranscriptionReview && !external.needsTranscriptionReview && personal.transcriptVersionID == pair.personalVersionID && external.transcriptVersionID == pair.externalVersionID && personal.policyVersion == pair.personalPolicyVersion && external.policyVersion == pair.externalPolicyVersion
@@ -285,7 +303,7 @@ struct WorkspaceSourceView: View {
             }
         }
         return .init(sourceID:source.id,expressionID:expression?.id,transcriptVersionID:source.transcriptVersionID,
-                     policyVersion:source.policyVersion,pairs:pairs,links:links)
+                     policyVersion:source.policyVersion,pairs:pairs,links:links,retry:contextRetry)
     }
     @State private var editing:SourceRecord?
     @State private var naming:SourceRecord?
@@ -329,7 +347,10 @@ struct WorkspaceSourceView: View {
     @State private var entities:[SourceEntity]=[]
     @State private var chapters:[SourceChapter]=[]
     private var sourceStatus: String {
-        if source.transcript == nil { return source.jobState == "failed" ? "转写失败 · 原件已保存" : "尚未完成转写 · 原件已保存" }
+        if source.transcript == nil {
+            if transcriptionRunning { return "正在转写…" }
+            return transcriptionFailed ? "转写失败 · 原件已保存" : "尚未完成转写 · 原件已保存"
+        }
         if source.localOnly { return "仅本机保存" }
         if processing { return "AI 正在整理" }
         return thoughts.isEmpty ? "原文已保存 · 整理尚未完成" : "已整理 · 原话可追溯"
@@ -337,6 +358,12 @@ struct WorkspaceSourceView: View {
     private var sourceStatusIcon: String {
         if source.transcript == nil { return "exclamationmark.circle" }
         return source.localOnly ? "internaldrive" : processing ? "sparkles" : "checkmark.circle"
+    }
+    private var transcriptionRunning: Bool {
+        source.transcript == nil && ["queued","running"].contains(source.jobState ?? "")
+    }
+    private var transcriptionFailed: Bool {
+        source.transcript == nil && ["failed","blocked"].contains(source.jobState ?? "")
     }
     @ViewBuilder private var historyVersions: some View {
         switch historyState {
@@ -347,7 +374,7 @@ struct WorkspaceSourceView: View {
             ForEach(versions) { version in
                 DisclosureGroup("第 \(version.number) 版 · " + (ConversationReflectionFocus.date(version.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知")) { Text(version.text).vosFont(WorkspaceText.body).textSelection(.enabled) }
             }
-        case .failed(let message): WorkspaceNoticeText(message:"原文版本读取失败：" + message,severity:.danger)
+        case .failed(let message): SourceLoadFailureRow(operation:"读取原文版本",reason:message,retry:loadHistory)
         }
     }
     @ViewBuilder private func relatedActionRow(_ action: ActionRecord, in list: [ActionRecord], reads: ActionRowReads) -> some View {
@@ -642,7 +669,14 @@ struct WorkspaceSourceView: View {
                         }.vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                     }
                     HStack(spacing:12) {
-                        Label(sourceStatus,systemImage:sourceStatusIcon).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                        if transcriptionRunning {
+                            HStack(spacing:6) {
+                                ProgressView().controlSize(.small).accessibilityHidden(true)
+                                Text("正在转写…").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                            }.accessibilityElement(children:.combine).accessibilityLabel("正在转写")
+                        } else {
+                            Label(sourceStatus,systemImage:sourceStatusIcon).vosFont(WorkspaceText.caption).foregroundStyle(transcriptionFailed ? palette.warning : palette.secondaryText)
+                        }
                         let issueCount=source.unresolvedTranscriptionIssues.count
                         if issueCount > 0 { WorkspaceBadge(text:"转写疑点 \(issueCount)",tone:.warning) }
                         if let attachmentURL {
@@ -717,7 +751,7 @@ struct WorkspaceSourceView: View {
                 }
                 digestSections
                 if !pausedThoughts.isEmpty {
-                    WorkspaceCard(padding:20) {
+                    WorkspaceCard() {
                         VStack(alignment:.leading,spacing:12) {
                         Label(automaticallyUpdating ? "正在自动更新理解" : pendingUnderstanding ? "理解尚未更新完成" : "AI 提取需要重新识别",systemImage:automaticallyUpdating ? "arrow.trianglehead.2.clockwise" : "pause.circle").vosFont(WorkspaceText.meta.size, weight: .semibold)
                         Text(automaticallyUpdating ? "原文已保存，AI 正在结合完整表达与节目背景更新观点、任务和关联。完成后这里会自动更新，无需再次操作。" : pauseExplanation).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
@@ -846,7 +880,7 @@ struct WorkspaceSourceView: View {
                             }
                         }
                     }
-                    if let failure=contextPhase.failure { SourceLoadFailureText(text:"节目关联读取失败："+failure) }
+                    if let failure=contextPhase.failure { SourceLoadFailureRow(operation:"读取节目关联",reason:failure) { contextRetry+=1 } }
                     if !historyActions.isEmpty {
                         DisclosureGroup("之前提取的任务与完成记录（\(historyActions.count)）") {
                             ForEach(historyActions) { action in WorkspaceRow(title:action.title,subtitle:actionSubtitle(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),reminder:actionReminderMeta(action,reads:reminderReads)),trailing:"查看记录") { openTask(action.id) } }
@@ -858,14 +892,14 @@ struct WorkspaceSourceView: View {
                         }
                     }
                     if chapters.isEmpty && chaptersPhase.isLoading { SourceLoadingRow(title:"正在读取章节…") }
-                    if let failure=chaptersPhase.failure, chapters.isEmpty { SourceLoadFailureText(text:"章节读取失败："+failure) }
+                    if let failure=chaptersPhase.failure, chapters.isEmpty { SourceLoadFailureRow(operation:"读取章节",reason:failure) { chaptersRetry+=1 } }
                     if !chapters.isEmpty {
                         SourceFold(title:"章节",icon:"list.number",count:chapters.count,isExpanded:foldExpanded(\.chapters)) {
                             SourceChapterPlaybackList(chapters:chapters,clock:playback) { playChapter($0) }
                         }
                     }
                     if entities.isEmpty && entitiesPhase.isLoading { SourceLoadingRow(title:"正在读取人名与术语…") }
-                    if let failure=entitiesPhase.failure, entities.isEmpty { SourceLoadFailureText(text:"人名与术语读取失败："+failure) }
+                    if let failure=entitiesPhase.failure, entities.isEmpty { SourceLoadFailureRow(operation:"读取人名与术语",reason:failure) { entitiesRetry+=1 } }
                     if !entities.isEmpty {
                         SourceFold(title:"人名与术语",icon:"person.2",count:entities.count,isExpanded:foldExpanded(\.entities)) {
                             ForEach(entityGroups) { group in
@@ -902,7 +936,7 @@ struct WorkspaceSourceView: View {
                                     Text((attempt.state == "completed" ? "理解已完成" : "理解：" + workspaceStateLabel(attempt.state)) + (attempt.contextState == "stale" ? " · 历史依据已变化" : "")).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                 }
                                 if discussionsPhase.isLoading { SourceLoadingRow(title:"正在读取讨论…") }
-                                else if let failure=discussionsPhase.failure { SourceLoadFailureText(text:"讨论读取失败："+failure) }
+                                else if let failure=discussionsPhase.failure { SourceLoadFailureRow(operation:"读取讨论",reason:failure) { discussionsRetry+=1 } }
                                 ForEach(Array(loadedDiscussions.enumerated()),id:\.element.id) { index,session in Button("打开讨论 \(index+1)") { openDiscussion(session.id) }.buttonStyle(.workspaceQuietCompact) }
                             }.padding(.top,12)
                         }.padding(.vertical,16)
@@ -1032,7 +1066,7 @@ struct WorkspaceSourceView: View {
             }
             catch { self.error="原件读取失败：" + error.localizedDescription }
         }
-        .task(id: SourceTranscriptReadKey(sourceID:source.id,transcriptVersionID:source.transcriptVersionID)) {
+        .task(id: SourceTranscriptReadKey(sourceID:source.id,transcriptVersionID:source.transcriptVersionID,retry:entitiesRetry)) {
             entities=[]
             entitiesPhase = .loading
             guard source.transcript != nil,let store=model.store else { entitiesPhase = .idle; return }
@@ -1050,7 +1084,7 @@ struct WorkspaceSourceView: View {
                 entitiesPhase = .failed(error.localizedDescription)
             }
         }
-        .task(id: SourceChapterReadKey(sourceID:source.id,kind:source.kind)) {
+        .task(id: SourceChapterReadKey(sourceID:source.id,kind:source.kind,retry:chaptersRetry)) {
             chapters=[]
             chaptersPhase = .loading
             guard ["audio","video"].contains(source.kind),let store=model.store else { chaptersPhase = .idle; return }
@@ -1099,7 +1133,7 @@ struct WorkspaceSourceView: View {
               transcriptVersionID:source.transcriptVersionID,policyVersion:source.policyVersion,state:source.state)
     }
     private var discussionReadKey:SourceDiscussionReadKey {
-        .init(sourceID:source.id,items:model.discussionList.map { .init(id:$0.id,version:$0.version,validity:$0.validity) })
+        .init(sourceID:source.id,items:model.discussionList.map { .init(id:$0.id,version:$0.version,validity:$0.validity) },retry:discussionsRetry)
     }
     private var extractionFlagRefreshKey:SourceExtractionReadKey {
         .init(sourceID:source.id,transcriptVersionID:source.transcriptVersionID,
@@ -1115,6 +1149,13 @@ struct WorkspaceSourceView: View {
             } else {
                 SourceTranscriptBody(paragraphs:transcriptParagraphs,clock:playback)
             }
+        } else if transcriptionRunning {
+            HStack(spacing:10) {
+                ProgressView().controlSize(.small).accessibilityHidden(true)
+                Text("正在转写… 原件已保存").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            }.accessibilityElement(children:.combine)
+        } else if transcriptionFailed {
+            Text("转写失败 · 原件已保存").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
         } else {
             Text("尚无可用转写 · " + (source.error ?? workspaceStateLabel(source.jobState ?? source.state))).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
         }
