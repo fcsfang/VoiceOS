@@ -484,7 +484,7 @@ struct RecentContentHome: View {
                             .vosFont(WorkspaceText.caption.size, weight: .semibold)
                             .accessibilityHidden(true)
                         Text("\(digest.tasks.count) 条待办")
-                            .vosFont(WorkspaceText.meta.size, weight: .semibold)
+                            .vosFont(WorkspaceText.meta.size, weight: .semibold, monospacedDigit: true)
                         Text("跳到列表")
                             .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
                     }
@@ -595,7 +595,7 @@ struct RecentContentHome: View {
         if !tasks.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, 20)
-                Text("这条材料带出了 \(tasks.count) 条待办").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Text("这条材料带出了 \(tasks.count) 条待办").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                 VStack(spacing: 0) {
                     ForEach(tasks) { task in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -657,7 +657,7 @@ struct RecentContentHome: View {
                         .foregroundStyle(palette.secondaryText)
                         .accessibilityAddTraits(.isHeader)
                     Text("\(recentThoughtCount) 条 · 近 14 天")
-                        .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                        .vosFont(WorkspaceText.caption, monospacedDigit: true).foregroundStyle(palette.tertiaryText)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 10)
@@ -670,7 +670,7 @@ struct RecentContentHome: View {
                 ForEach(groups) { group in
                     VStack(alignment: .leading, spacing: 6) {
                         Text("\(dayLabel(group.date)) · \(group.entries.count) 条")
-                            .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                            .vosFont(WorkspaceText.caption, monospacedDigit: true).foregroundStyle(palette.tertiaryText)
                             .padding(.horizontal, 10)
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(group.entries) { entry in

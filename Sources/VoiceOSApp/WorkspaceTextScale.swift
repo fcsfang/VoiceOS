@@ -59,8 +59,8 @@ extension View {
         modifier(VOSFontModifier(size: size, weight: weight, design: design, digits: monospacedDigit))
     }
 
-    func vosFont(_ style: WorkspaceTextStyle) -> some View {
-        vosFont(style.size, weight: style.weight)
+    func vosFont(_ style: WorkspaceTextStyle, monospacedDigit: Bool = false) -> some View {
+        vosFont(style.size, weight: style.weight, monospacedDigit: monospacedDigit)
     }
 }
 
