@@ -4,6 +4,7 @@ import VoiceOSCore
 
 struct WorkspaceDiscussionView: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: ControlCenter
     @Binding var draft: String
     let close: () -> Void
@@ -119,8 +120,8 @@ struct WorkspaceDiscussionView: View {
                         Color.clear.frame(height: 1).id("discussion-end")
                     }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onChange(of: model.discussionReplies.count) { _, _ in withAnimation { reader.scrollTo("discussion-end", anchor: .bottom) } }
-                .onChange(of: model.discussionTurns.count) { _, _ in withAnimation { reader.scrollTo("discussion-end", anchor: .bottom) } }
+                .onChange(of: model.discussionReplies.count) { _, _ in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { reader.scrollTo("discussion-end", anchor: .bottom) } }
+                .onChange(of: model.discussionTurns.count) { _, _ in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { reader.scrollTo("discussion-end", anchor: .bottom) } }
             }
             Divider()
             VStack(alignment: .leading, spacing: 10) {

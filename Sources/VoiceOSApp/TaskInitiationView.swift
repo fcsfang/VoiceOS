@@ -14,6 +14,7 @@ func taskInitiationRouteLabel(_ route: TaskInitiationRoute) -> String {
 
 struct TaskInitiationView: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: ControlCenter
     let openSource: (String) -> Void
     @State private var selectedID: String?
@@ -70,7 +71,7 @@ struct TaskInitiationView: View {
                 stepStatus = ""
                 stepCommandID = UUID().uuidString
                 guard selectedID != nil else { return }
-                DispatchQueue.main.async { withAnimation { reader.scrollTo(packageAnchor, anchor: .top) } }
+                DispatchQueue.main.async { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { reader.scrollTo(packageAnchor, anchor: .top) } }
             }
         }
         .onAppear {

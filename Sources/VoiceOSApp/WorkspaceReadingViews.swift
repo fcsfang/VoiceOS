@@ -113,6 +113,7 @@ struct WorkspaceListGroupHeader: View {
 /// Collapsible sections start folded unless `initiallyExpanded` says otherwise.
 struct WorkspaceListSection<Content: View>: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let title: String
     var subtitle: String = ""
     var count: Int? = nil
@@ -126,7 +127,7 @@ struct WorkspaceListSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if collapsible {
-                Button { withAnimation(.easeOut(duration: 0.16)) { userExpanded = !expanded } } label: { header }
+                Button { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { userExpanded = !expanded } } label: { header }
                     .buttonStyle(.plain)
                     .accessibilityValue(expanded ? "已展开" : "已收起")
             } else {
