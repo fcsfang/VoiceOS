@@ -825,3 +825,14 @@
 - 124-B 表面层次：确立 canvas（页面/模态根）→ sidebar → surface（唯一卡片层）→ selection（卡内面板/编辑器/选中）模型；新增 WorkspaceModalSurface，26 个文件补模态根 palette.canvas（含场景级 sheet 之外的注入修正 WorkspaceView:531），卡内第二层 surface 降为 selection（知识核查 issue 卡、监测条目、编辑器面、字段面）。
 - 残留：场景级 TextCaptureView sheet 的主题 palette 注入仍缺（属主题传播，留待后续）。
 - 集成：696 项 0 失败。
+## 波 125：首页徽标收口与材料名人间化（2026-11-21，已推送）
+- 125-A 首页：`outcomeBadge` 实为全局 `visibleOutcomeFollowups.count`，却挂在每条 feedback 行尾和阅读器头部，288pt 列里把标题挤成两行。改为「每周回顾」按钮后缀警告色计数（help/a11y 同步），删行尾徽标与 `RowTrailing` 枚举，净减 11 行。
+- 125-B 名称：新增 `MaterialNaming.displayName`（VoiceOSCore）：识别「行动反馈 · / 我的表达 · 」后的 ISO8601（Z/毫秒/+08:00），按本地时区显示「M月d日 HH:mm」，无法识别原样返回；存储名不动，历史 23 条数据与 `hasPrefix` 判断不受影响。接入 9 处：WorkspaceView 标题漏斗、搜索、材料行、来源页、标题编辑器、答案出处 Picker、静默回顾、检索回退。8 个 XCTest（固定 Asia/Shanghai）。
+- 集成：704 tests 全绿（build_exit=0 / test_exit=0）。
+
+## 波 126：表面配色二轮、间距 token、四路小字清扫（2026-11-21，已推送）
+- 126-A 配色：用户反馈「白色突兀感并没有消失」。卡片不再比底色亮一档：graphite surface 0xF7F7F8→0xF4F4F5、sidebar→0xEFEFF1；sage surface→0xF3F5F0、sidebar→0xEDF0EA；深色不动。surface/canvas 1.02、border/surface 1.33、正文 14.8:1 / 11.7:1。分组交给 1px 边框。
+- 间距 token：WorkspaceMetrics 新增 rowGap 8 / groupGap 18，sectionGap 24→28；规则=同组行≤8、组间18、区块间28、卡内12–16。
+- 小字清扫四路（126-B/C、127-A/B/C）：删除复述界面与内部机制句 26 条、压缩多从句 78 条、操作速查移入 .help 5 条；政策/授权/失败/不可逆/丢数据提示全部保留；每条原文与新文在各自 TASK.md。
+- 备注：记录想法草稿提示保留「切页或重开可继续」（集成时修正代理删多）；来源页「整理运行过但无归属观点」整句删除，列为可回退观察项。
+- 集成：704 tests 全绿（build_exit=0 / test_exit=0）。
