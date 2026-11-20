@@ -28,7 +28,7 @@ struct TranscriptSegmentationView: View {
                                         }
                                     }
                                 }
-                                Divider()
+                                WorkspaceListDivider()
                             }
                         }
                     }

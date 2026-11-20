@@ -4979,7 +4979,7 @@ struct HistorySearchView: View {
                             Text(hit.document.text).textSelection(.enabled)
                             Text(ConversationReflectionFocus.date(hit.document.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             Button("查看原文与出处") { Task { if await model.openRetrievalHit(hit) { dismiss() } } }
-                            Divider()
+                            WorkspaceListDivider()
                         }.frame(maxWidth:.infinity,alignment:.leading)
                     }
                 }

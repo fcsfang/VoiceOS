@@ -278,7 +278,7 @@ struct TaskInitiationView: View {
 
     private func directAnswerSection(_ record: TaskInitiationRecord) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Divider()
+            WorkspaceListDivider()
             HStack(spacing: 12) {
                 Button(model.initiationBusy ? "正在回答…" : "直接回答") { askDirect(record) }
                     .buttonStyle(.workspaceQuiet)
@@ -380,7 +380,7 @@ struct TaskInitiationView: View {
     }
 
     @ViewBuilder private func stepNote(_ record: TaskInitiationRecord) -> some View {
-        Divider()
+        WorkspaceListDivider()
         VStack(alignment: .leading, spacing: 10) {
             Text("记下这一步").vosFont(WorkspaceText.rowTitle)
             Text("复制之后做了什么、卡在哪里，记一句。会存为你的原话；允许云端时继续整理成观点与待办。")
@@ -428,7 +428,7 @@ struct TaskInitiationView: View {
 
     private func stepsList(_ steps: [TaskInitiationStep]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Divider()
+            WorkspaceListDivider()
             Text("记下的步骤").vosFont(WorkspaceText.rowTitle)
             ForEach(steps) { step in
                 Button {
@@ -534,7 +534,7 @@ struct TaskInitiationView: View {
                     .accessibilityValue(record.id == selected?.id ? "当前选中" : "未选中")
                     .accessibilityIdentifier("initiation.history.item")
                     .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
-                    if record.id != visibleRecords.last?.id { Divider() }
+                    if record.id != visibleRecords.last?.id { WorkspaceListDivider() }
                 }
             }
         }

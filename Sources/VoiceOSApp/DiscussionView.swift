@@ -79,11 +79,11 @@ struct DiscussionView: View {
                                         }
                                     }
                                 }
-                                Divider()
+                                WorkspaceListDivider()
                             }
                         }
                         ForEach(model.discussionOutcomes) { outcome in
-                            Divider()
+                            WorkspaceListDivider()
                             Text(outcomeTitle(outcome.state)).vosFont(WorkspaceText.rowTitle)
                             if outcome.validity == "frozen" { Text("历史成果已冻结，身份与出处保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                             if !outcome.priorClaimIDs.isEmpty {

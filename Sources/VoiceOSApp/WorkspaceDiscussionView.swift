@@ -35,7 +35,7 @@ struct WorkspaceDiscussionView: View {
                     .disabled(busy)
                 WorkspaceIconButton(systemImage: "xmark", label: "收起讨论，保留阅读位置") { close() }
             }.padding(18)
-            Divider()
+            WorkspaceListDivider()
             ScrollViewReader { reader in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
@@ -122,7 +122,7 @@ struct WorkspaceDiscussionView: View {
                 .onChange(of: model.discussionReplies.count) { _, _ in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { reader.scrollTo("discussion-end", anchor: .bottom) } }
                 .onChange(of: model.discussionTurns.count) { _, _ in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { reader.scrollTo("discussion-end", anchor: .bottom) } }
             }
-            Divider()
+            WorkspaceListDivider()
             VStack(alignment: .leading, spacing: 10) {
                 if model.discussionWritable {
                     TextEditor(text: $draft).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(height: 90).workspaceEditorSurface().focused($editorFocused).disabled(busy)

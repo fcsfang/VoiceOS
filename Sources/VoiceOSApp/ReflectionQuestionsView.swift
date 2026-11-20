@@ -82,7 +82,7 @@ struct ReflectionQuestionsView: View {
                 Spacer()
                 Button("返回地图") { dismiss() }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(busy)
             }.padding(24)
-            Divider()
+            WorkspaceListDivider()
             HStack(spacing: 0) {
                 questionList.frame(width: 240 * vosLayoutScale(textScale))
                 Divider()
@@ -195,7 +195,7 @@ struct ReflectionQuestionsView: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            Divider()
+            WorkspaceListDivider()
             composer(question)
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }

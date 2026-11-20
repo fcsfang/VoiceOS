@@ -48,7 +48,7 @@ struct ReverifyControls: View {
                                 Text(error).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                             }
                         }.padding(.vertical,10)
-                        if source.id != pending.last?.id { Divider() }
+                        if source.id != pending.last?.id { WorkspaceListDivider() }
                     }
                 }
             }
@@ -64,7 +64,7 @@ struct ReverifyControls: View {
                                 Spacer(minLength:8)
                                 Button("打开材料") { model.requestWorkspaceSource(source.id) }
                             }.padding(.vertical,8)
-                            if source.id != restoredSources.last?.id { Divider() }
+                            if source.id != restoredSources.last?.id { WorkspaceListDivider() }
                         }
                     }.padding(.top,8)
                 }.vosFont(WorkspaceText.body)

@@ -33,7 +33,7 @@ struct ClaimReviewHistoryView: View {
                         Text(revision.statement).textSelection(.enabled)
                         Text(owner(revision.ownership) + " · " + (revision.decision == "endorsed" ? "已认可" : revision.decision == "rejected" ? "已停止使用" : "待核对")).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         if !revision.note.isEmpty { Text("原因：" + revision.note).vosFont(WorkspaceText.body) }
-                        Divider()
+                        WorkspaceListDivider()
                     }
                 }
             }

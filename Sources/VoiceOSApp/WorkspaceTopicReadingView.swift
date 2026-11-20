@@ -329,7 +329,7 @@ struct WorkspaceTopicReadingView: View {
                         }
                     }
                 }
-                Divider()
+                WorkspaceListDivider()
                 DisclosureGroup {
                     VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                         ForEach(Array(section.evidence.enumerated()),id:\.offset) { _,evidence in
@@ -413,7 +413,7 @@ struct WorkspaceTopicReadingView: View {
                             }.padding(.top,12)
                         }.vosFont(WorkspaceText.meta)
                     }.padding(.vertical,WorkspaceMetrics.rowGap)
-                    if connection.id != (mode == "概览" ? Array(connections.prefix(3)) : connections).last?.id { Divider() }
+                    if connection.id != (mode == "概览" ? Array(connections.prefix(3)) : connections).last?.id { WorkspaceListDivider() }
                 }
             }
         }

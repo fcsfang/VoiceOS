@@ -50,7 +50,7 @@ struct CorrectionImpactView: View {
                                 }
                             }
                         }
-                        Divider()
+                        WorkspaceListDivider()
                     }
                     if !policyFreezes.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
@@ -64,7 +64,7 @@ struct CorrectionImpactView: View {
                                 }.padding(.vertical, 6)
                             }
                         }
-                        Divider()
+                        WorkspaceListDivider()
                     }
                     if model.correctionImpacts.isEmpty && policyFreezes.isEmpty { Text("目前没有因明确更正或许可调整而暂停的任务。").foregroundStyle(.secondary) }
                 }.frame(maxWidth: .infinity, alignment: .leading)

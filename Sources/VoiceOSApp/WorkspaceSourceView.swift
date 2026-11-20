@@ -379,7 +379,7 @@ struct WorkspaceSourceView: View {
         } else {
             WorkspaceRow(title:action.title,subtitle:actionSubtitle(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action),reminder:reminder),icon:"circle") { openTask(action.id) }
         }
-        if action.id != list.last?.id { Divider() }
+        if action.id != list.last?.id { WorkspaceListDivider() }
     }
     private func actionReminderMeta(_ action: ActionRecord, reads: ActionRowReads) -> String {
         ActionRowLayout.reminderSummary(linkState:reads.reminderLinkStateByActionID[action.id],due:reads.reminderDueByActionID[action.id]) ?? ""
@@ -509,7 +509,7 @@ struct WorkspaceSourceView: View {
                             if let sentence=digest.sentence { readingLayerRow("一句话",sentence) }
                         }.padding(.top,12)
                     }.padding(.bottom,14)
-                    Divider()
+                    WorkspaceListDivider()
                 }
                 ForEach(Array((showAllThoughts ? thoughts : Array(thoughts.prefix(3))).enumerated()),id:\.element.id) { index,thought in
                     HStack(alignment:.top,spacing:14) {
@@ -565,10 +565,10 @@ struct WorkspaceSourceView: View {
                             }
                         }
                     }.padding(.vertical,8)
-                    if thought.id != (showAllThoughts ? thoughts.last?.id : thoughts.prefix(3).last?.id) { Divider() }
+                    if thought.id != (showAllThoughts ? thoughts.last?.id : thoughts.prefix(3).last?.id) { WorkspaceListDivider() }
                 }
                 if thoughts.count > 3 {
-                    Divider()
+                    WorkspaceListDivider()
                     Button(showAllThoughts ? "收起要点" : "展开全部 \(thoughts.count) 条要点",systemImage:showAllThoughts ? "chevron.up" : "chevron.down") { showAllThoughts.toggle() }.buttonStyle(.workspaceQuiet).padding(.top,18)
                 }
             }
@@ -846,7 +846,7 @@ struct WorkspaceSourceView: View {
                                                clock:playback)
                         Text("原文件：" + MaterialNaming.displayName(source.name)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                         if source.transcript != nil {
-                            Divider()
+                            WorkspaceListDivider()
                             DisclosureGroup("全文选读",isExpanded:foldExpanded(\.fullText)) {
                                 VStack(alignment:.leading,spacing:12) {
                                     SelectionActions(selection:selectedText,canPlay:selectedSpan != nil,onSave:saveSelectionAsQuestion,onCopy:copySelectedText,onPlay:playSelectedSpan)
@@ -881,7 +881,7 @@ struct WorkspaceSourceView: View {
                                             Button(contextPlaybackLabel(link.personalClaimID,role:"我的")) { Task { await playContextClaim(link.personalClaimID) } }.buttonStyle(.workspaceQuietCompact)
                                             Text("AI 关联："+link.explanation).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                                         }.padding(.vertical,8)
-                                        Divider()
+                                        WorkspaceListDivider()
                                     }
                                 }.padding(.top,12)
                             } else {
@@ -928,7 +928,7 @@ struct WorkspaceSourceView: View {
                 SourceFold(title:"处理记录",icon:"tray",isExpanded:foldExpanded(\.records),spacing:WorkspaceMetrics.groupGap) {
                     SourceSection(title:"依据、修订与处理记录") {
                         DisclosureGroup("核对依据与适用边界") { KnowledgeReviewSection(model:model,sourceIDs:[source.id],carded:false).padding(.top,12) }.padding(.vertical,16)
-                        Divider()
+                        WorkspaceListDivider()
                         DisclosureGroup("文字校正、理解与修订历史") {
                             VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                                 if source.transcriptionReview != nil {
@@ -950,7 +950,7 @@ struct WorkspaceSourceView: View {
                             }.padding(.top,12)
                         }.padding(.vertical,16)
                         if let corrections=source.transcriptionReview?.corrections,!corrections.isEmpty {
-                            Divider()
+                            WorkspaceListDivider()
                             DisclosureGroup("转写改写 \(corrections.count) 处",isExpanded:$correctionsExpanded) {
                                 VStack(alignment:.leading,spacing:12) {
                                     ForEach(Array(corrections.enumerated()),id:\.offset) { _,correction in
@@ -968,7 +968,7 @@ struct WorkspaceSourceView: View {
                                 }.padding(.top,12)
                             }.padding(.vertical,16)
                         }
-                        Divider()
+                        WorkspaceListDivider()
                         DisclosureGroup("主题归属与处理情况") {
                             VStack(alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
                                 ForEach(model.workspaceTopics) { topic in
