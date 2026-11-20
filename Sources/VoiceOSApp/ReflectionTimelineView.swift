@@ -81,7 +81,12 @@ struct ReflectionEventListView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     if visible.isEmpty {
-                        ContentUnavailableView(query.isEmpty ? (focus.isTopicOverview ? "这个主题还没有关联记录" : "这段时间还没有记录") : "没有找到相关记录", systemImage: "clock", description: Text(focus.isTopicOverview ? "可以关联一份资料、留下认识，或换一个关键词。" : "可以扩大时间范围，或换一个关键词。"))
+                        WorkspaceEmptyState(
+                            title: !query.isEmpty ? "还没有找到相关记录" : (focus.isTopicOverview ? "这个主题还没有关联记录" : "这段时间还没有记录"),
+                            systemImage: "clock",
+                            description: !query.isEmpty ? "换一个关键词，或清空搜索查看全部记录。"
+                                : (focus.isTopicOverview ? "在资料页把材料关联到这个主题，或留下一条认识后，会在这里按时间显示。"
+                                                         : "在上方扩大时间范围，或换一个回顾周期后再查看。"))
                     }
                     ForEach(days(visible)) { day in
                         Text(day.date?.formatted(date: .complete, time: .omitted) ?? "时间待核对").vosFont(WorkspaceText.meta.size, weight: .semibold)

@@ -21,8 +21,8 @@ struct OutcomeFollowupView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     if actions.isEmpty {
-                        ContentUnavailableView("暂无待记录的结果", systemImage: "checkmark.circle",
-                                               description: Text("记录或跳过的事项会从这里收起。"))
+                        WorkspaceEmptyState(title: "还没有待记录的结果", systemImage: "checkmark.circle",
+                                            description: "在行动页完成事项后，会在这里请你记录结果或跳过；记录或跳过的事项会从这里收起。")
                     }
                     ForEach(actions) { action in
                         VStack(alignment: .leading, spacing: 8) {

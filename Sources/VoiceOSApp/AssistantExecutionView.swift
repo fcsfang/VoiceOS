@@ -73,7 +73,7 @@ struct AssistantDelegationView: View {
                     saving = true; error = ""
                     Task {
                         if await model.enqueueAssistant(action, instruction: instruction, questionID: questionID.isEmpty ? nil : questionID, allowCloud: allowCloud) { dismiss() }
-                        else { error = model.assistantStatus.isEmpty ? model.status : model.assistantStatus }
+                        else { error = InlineFailurePresentation.message(operation: "委托", reason: model.assistantStatus.isEmpty ? model.status : model.assistantStatus) }
                         saving = false
                     }
                 }.buttonStyle(.workspacePrimary)
@@ -86,7 +86,7 @@ struct AssistantDelegationView: View {
             .task {
                 instruction = action.title + "\n\n请给出清晰的结论和可用的交付物；调研时附可核查的来源，并说明尚不能确定的地方。"
                 do { questions = try await model.loadReflectionQuestions() }
-                catch { self.error = error.localizedDescription }
+                catch { self.error = InlineFailurePresentation.message(operation: "读取主题", reason: error.localizedDescription) }
             }
     }
 }
@@ -151,7 +151,8 @@ struct AssistantExecutionView: View {
                 Divider()
                 if let execution = selected { detail(execution) }
                 else {
-                    ContentUnavailableView("让 AI 帮你推进一件事", systemImage: "sparkles", description: Text("从任务清单里的“交给 AI”开始。\n调研、比较或起草的结果会回到这里。"))
+                    WorkspaceEmptyState(title: "还没有代办或成果", systemImage: "sparkles",
+                                        description: "在行动页的任务里点「交给 AI」开始；调研、比较或起草的结果会回到这里。")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
@@ -167,7 +168,7 @@ struct AssistantExecutionView: View {
             .task {
                 selectedID = initialExecutionID ?? visible.first?.id
                 do { questions = try await model.loadReflectionQuestions() }
-                catch { self.error = error.localizedDescription }
+                catch { self.error = InlineFailurePresentation.message(operation: "读取主题", reason: error.localizedDescription) }
                 questionID = selected?.questionID ?? ""
             }
     }
@@ -224,7 +225,7 @@ struct AssistantExecutionView: View {
                         }.padding(.vertical, 20)
                     }
                     if let message = execution.error, !message.isEmpty {
-                        Text(message).foregroundStyle(palette.danger).textSelection(.enabled)
+                        Text(InlineFailurePresentation.message(operation: "代办", reason: message)).foregroundStyle(palette.danger).textSelection(.enabled)
                     }
                     Text("这是 AI 产出。它不会自动成为你的观点，也不会把原任务标为完成；采纳与实际结果可以在后续记录。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
@@ -239,7 +240,7 @@ struct AssistantExecutionView: View {
                     Button("关联成果") {
                         saving = true; error = ""
                         Task {
-                            if !(await model.attachAssistantResult(execution, questionID: questionID)) { error = model.assistantStatus }
+                            if !(await model.attachAssistantResult(execution, questionID: questionID)) { error = InlineFailurePresentation.message(operation: "关联成果", reason: model.assistantStatus) }
                             saving = false
                         }
                     }.buttonStyle(.workspacePrimary).disabled(questionID.isEmpty || saving)
@@ -281,7 +282,7 @@ struct AssistantExecutionView: View {
                 let text = report + (citations.isEmpty ? "" : "\n\n## 可核查的来源\n\n" + citations) + "\n\n---\nAI 交付物，不代表用户观点。\n"
                 try text.write(to: url, atomically: true, encoding: .utf8)
                 model.assistantStatus = "完整报告与来源已保存"
-            } catch { self.error = error.localizedDescription }
+            } catch { self.error = InlineFailurePresentation.message(operation: "保存报告", reason: error.localizedDescription) }
         }
     }
 }

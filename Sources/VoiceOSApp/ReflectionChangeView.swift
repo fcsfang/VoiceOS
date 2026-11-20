@@ -46,10 +46,12 @@ struct ReflectionChangeView: View {
                     }
                 }
             } else {
-                ContentUnavailableView("这个周期还没有可对照的关联", systemImage: "rectangle.split.2x1", description: Text("后续表达与已有观点形成有依据的关联时，会在这里展示前后原话。也可以先从地图发起一次回顾。"))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                WorkspaceEmptyState(title: "这个周期还没有可对照的关联", systemImage: "rectangle.split.2x1",
+                                    description: "后续表达与已有观点形成有依据的关联时，会在这里展示前后原话。可以先回到地图发起一次回顾。") {
+                    Button("返回地图", action: closeView).buttonStyle(.workspaceSecondary)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).padding(16) }
+            if let error { Text(InlineFailurePresentation.message(operation: "继续讨论", reason: error)).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).padding(16) }
         }.foregroundStyle(palette.text).background(palette.canvas)
             .frame(width: embedded ? nil : 960, height: embedded ? nil : 680)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
