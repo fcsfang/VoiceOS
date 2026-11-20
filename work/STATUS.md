@@ -804,3 +804,11 @@
 - 隔离 e2e（bundle id local.voiceos.e2e + 整库 APFS clone + sqlite .backup 一致快照）：feedback 1 秒落库、complete 1 秒完成并新增 revision、同 command 重发幂等不增行、正式库前后零变化、正式实例全程存活。教训：只复制 sqlite 不带媒体会让恢复冻结全部 claim，必须整库克隆。
 - 集成：696 项 0 失败。
 - 已知限制：CLI 端到端未对正式 bundle id 实跑（会写用户实时库）；幂等重发在 CLI 侧因只读库未暴露 commandID 会表现为超时 exit 4。
+
+## 波 123：MCP 接口（2026-11-20，已推送）
+
+- Tools/voiceos-mcp/server.py：无第三方依赖的 MCP stdio 服务器，5 个工具（actions list/show、status、action feedback/complete）薄包装 voiceos-cli；参数列表传参、30s 超时、错误折成 isError。
+- test_server.py：13 项协议级检查全绿（initialize 双协议版本、tools/list schema、status、list、not_found 透传、参数校验、未知方法 -32601、ping、解析错误）。
+- 仓库 .mcp.json 提供项目级注册；README 给 claude mcp add 全局注册示例。
+- 集成：696 项 0 失败。CLI 已刷新安装到 ~/.local/bin/voiceos-cli（含 action feedback/complete）。
+- 已知限制：voiceos_actions_list 不暴露 topics（CLI 列表分支不接受该参数）；写命令 e2e 以隔离实例验证为准。
