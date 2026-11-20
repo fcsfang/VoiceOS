@@ -237,6 +237,7 @@ struct WorkspaceMonitorView: View {
             WorkspaceCard(padding: 20) {
                 VStack(alignment: .leading, spacing: 12) {
                     WorkspaceSectionHeading("今日报告")
+                    WorkspaceListDivider()
                     Text("暂时无法读取今日报告。修复后点「重新读取」。")
                         .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
@@ -266,8 +267,6 @@ struct WorkspaceMonitorView: View {
             VStack(alignment: .leading, spacing: 12) {
                 WorkspaceSectionHeading("历史报告", count: monitorLoadState == .loaded || !earlierReports.isEmpty
                                         ? "\(earlierReports.count)" : nil)
-                Text("最近 \(model.monitorReports.count) 次检查中早于今天的报告。")
-                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
                 WorkspaceListDivider()
                 if monitorLoadState == .loading {
                     monitorLoadingRow("正在读取历史报告…")
@@ -706,7 +705,7 @@ struct WorkspaceMonitorView: View {
         WorkspaceCard(padding: 20) {
             VStack(alignment: .leading, spacing: 12) {
                 WorkspaceSectionHeading("来源状态")
-                Text("QQ 显示 VoiceOS 本地库中的最新消息时间；没有新消息不等于采集失败，失败会单独标出。")
+                Text("显示本地库最新消息时间；失败会单独标出。")
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
                 WorkspaceListDivider()
                 if monitorLoadState == .loading {
@@ -869,6 +868,7 @@ struct WorkspaceMonitorView: View {
     private var scheduleSettings: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("每日自动检查").vosFont(WorkspaceText.rowTitle)
+                .help("应用退出时不自动运行，下次启动会补跑。")
             HStack(spacing: 12) {
                 DatePicker("检查时间", selection: Binding(
                     get: { model.monitorScheduleDate },
@@ -881,8 +881,6 @@ struct WorkspaceMonitorView: View {
                     .foregroundStyle(palette.secondaryText)
             }
             Text(model.monitorNextRunText).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-            Text("应用退出时不自动运行，下次启动会补跑。")
-                .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
         }
     }
 
@@ -893,7 +891,8 @@ struct WorkspaceMonitorView: View {
                 set: { value in model.updateMonitorSettings { $0.cloudAnalysisAuthorized = value } }))
                 .toggleStyle(.switch).frame(maxWidth: 420, alignment: .leading)
                 .accessibilityIdentifier("monitor.settings.cloudAuthorized")
-            Text("开启后，所选来源的新增原文（QQ 群消息与官网正文）会发送给已配置的文本模型分析。模型密钥与整个数据库不会发送。默认关闭；关闭时检查在分析前停止。")
+                .help("默认关闭；关闭时检查在分析前停止。")
+            Text("仅发送所选来源的新增原文；密钥与整库不发送。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -989,7 +988,7 @@ struct WorkspaceMonitorView: View {
 
     private var qqSettings: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("只保存路径、账号与群标识；密钥文件内容不会复制、不会进入日志或模型。应用不会修改 QQ 或系统安全设置。")
+            Text("只保存路径、账号与群标识；密钥内容不会复制、进入日志或模型，也不会修改 QQ 或系统安全设置。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
             pathRow("Python 解释器", text: $qqPythonPath, check: pythonCheck, choose: choosePython)
             pathRow("密钥文件", text: $qqKeyPath, check: keyCheck, choose: chooseKeyFile)
@@ -1190,8 +1189,6 @@ struct WorkspaceMonitorView: View {
                     .accessibilityIdentifier("monitor.settings.qq.addSelected")
                 Spacer()
             }
-            Text("只从所选时间开始读取；更早的群消息不会导入。默认从今天开始。")
-                .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
         }.padding(.top, 4)
     }
 
