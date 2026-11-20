@@ -2,12 +2,13 @@
 import PackageDescription
 let package = Package(
     name: "VoiceOS", platforms: [.macOS("26.0")],
-    products: [.library(name: "VoiceOSCore", targets: ["VoiceOSCore"]), .executable(name: "VoiceOS", targets: ["VoiceOSApp"]), .executable(name: "voiceos-check", targets: ["VoiceOSCheck"])],
+    products: [.library(name: "VoiceOSCore", targets: ["VoiceOSCore"]), .executable(name: "VoiceOS", targets: ["VoiceOSApp"]), .executable(name: "voiceos-check", targets: ["VoiceOSCheck"]), .executable(name: "voiceos-cli", targets: ["VoiceOSCLI"])],
     targets: [
         .systemLibrary(name: "CSQLite"),
         .target(name: "VoiceOSCore", dependencies: ["CSQLite"]),
         .target(name: "VoiceOSPlatform", dependencies: ["VoiceOSCore"]),
         .executableTarget(name: "VoiceOSApp", dependencies: ["VoiceOSCore", "VoiceOSPlatform"]),
         .executableTarget(name: "VoiceOSCheck", dependencies: ["VoiceOSCore", "VoiceOSPlatform"]),
+        .executableTarget(name: "VoiceOSCLI", dependencies: ["VoiceOSCore"]),
         .testTarget(name: "VoiceOSCoreTests", dependencies: ["VoiceOSCore", "VoiceOSPlatform"])
     ])
