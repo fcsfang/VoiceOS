@@ -67,7 +67,7 @@ final class RecordingInbox: ObservableObject {
     private var contentDigests: [String: (stamp: String, digest: String)] = [:]
     private var receipts: Set<String> = []
     private var failures: Set<String> = []
-    private var scanning = false
+    @Published private(set) var scanning = false
     private var scopedURLs: [URL] = []
     private var canProcess: () -> Bool = { false }
     private var resumeSaved: () async -> Void = {}
@@ -544,8 +544,14 @@ struct RecordingInboxView: View {
             }
             if model.fullRecordingBusy { ProgressView(model.fullRecordingStatus).vosFont(WorkspaceText.meta) }
             HStack {
-                Button("检查新素材") { Task { await inbox.scan() } }.buttonStyle(.workspaceSecondary)
-                Button("重试未完成素材") { inbox.retryFailures() }.buttonStyle(.workspaceSecondary)
+                Button("检查新素材") { Task { await inbox.scan() } }.buttonStyle(.workspaceSecondary).disabled(inbox.scanning)
+                Button("重试未完成素材") { inbox.retryFailures() }.buttonStyle(.workspaceSecondary).disabled(inbox.scanning)
+                if inbox.scanning {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("正在检查新素材…").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    }
+                }
                 if inbox.voiceMemosNeedsPermission || inbox.folderErrors.values.contains(where: { $0.contains("隐私") }) { Button("打开系统隐私设置") { inbox.openPrivacySettings() }.buttonStyle(.workspaceSecondary) }
                 Spacer(); if !embedded { Button("完成", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction) }
             }
