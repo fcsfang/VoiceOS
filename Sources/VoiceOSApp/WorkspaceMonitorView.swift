@@ -97,6 +97,10 @@ struct WorkspaceMonitorView: View {
         .onChange(of: model.monitorItemsByReport) { _, _ in
             markLatestItemsFailure()
         }
+        .onChange(of: model.monitorChecking) { wasChecking, isChecking in
+            guard wasChecking, !isChecking else { return }
+            announceMonitorCheckCompletion()
+        }
         .alert("删除监测来源？", isPresented: Binding(
             get: { pendingSourceRemoval != nil },
             set: { if !$0 { pendingSourceRemoval = nil } })) {
@@ -152,6 +156,26 @@ struct WorkspaceMonitorView: View {
             Text("每天最多自动检查一次；应用退出后不自动运行，下次启动补跑；每 10 分钟只比对时间，不读 QQ、不调模型。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
         }
+    }
+
+    private func announceMonitorCheckCompletion() {
+        guard let report = model.monitorLatestReport else {
+            AccessibilityNotification.Announcement("检查结束").post()
+            return
+        }
+        switch report.state {
+        case .failed:
+            AccessibilityNotification.Announcement("检查未完成").post()
+        case .incomplete:
+            AccessibilityNotification.Announcement("检查结束，不完整，" + monitorOpenCountText()).post()
+        case .complete:
+            AccessibilityNotification.Announcement("检查完成，" + monitorOpenCountText()).post()
+        }
+    }
+
+    private func monitorOpenCountText() -> String {
+        let open = model.monitorOpenItemCount
+        return open > 0 ? "\(open) 项待办" : "没有待办"
     }
 
     @ViewBuilder private var pushNotConfiguredBanner: some View {
@@ -534,6 +558,7 @@ struct WorkspaceMonitorView: View {
                 Image(systemName: item.status == .done ? "checkmark.circle.fill"
                         : item.status == .dismissed ? "xmark.circle" : "circle")
                     .foregroundStyle(item.status == .done ? palette.success : palette.secondaryText)
+                    .accessibilityHidden(true)
                 Text(item.title).vosFont(WorkspaceText.rowTitle)
                     .strikethrough(item.status == .dismissed)
                 Spacer()
@@ -542,6 +567,8 @@ struct WorkspaceMonitorView: View {
                     .foregroundStyle(item.deadlineDate == nil && item.deadlineText == nil
                                      ? palette.warning : palette.secondaryText)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(itemRowAccessibilityLabel(item))
             Text("为什么相关：" + item.whyRelevant).vosFont(WorkspaceText.body)
             Text("建议行动：" + item.suggestedAction).vosFont(WorkspaceText.body)
                 .foregroundStyle(palette.secondaryText)
@@ -594,6 +621,12 @@ struct WorkspaceMonitorView: View {
                 .strokeBorder(palette.border.opacity(0.7), lineWidth: 1)
         }
         .padding(.bottom, 6)
+    }
+
+    private func itemRowAccessibilityLabel(_ item: MonitorItem) -> String {
+        let status = item.status == .done ? "已完成" : item.status == .dismissed ? "已忽略" : "待办"
+        let deadline = item.deadlineText ?? (item.deadlineDate.map { "截止 " + $0 } ?? "截止待核对")
+        return [status, item.title, deadline].joined(separator: "，")
     }
 
     @ViewBuilder private func evidenceView(_ item: MonitorItem) -> some View {
@@ -1027,10 +1060,13 @@ struct WorkspaceMonitorView: View {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Image(systemName: item.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                                 .foregroundStyle(item.ok ? palette.success : palette.warning)
+                                .accessibilityHidden(true)
                             Text(item.title).vosFont(WorkspaceText.meta.size, weight: .semibold)
                             Text(item.detail).vosFont(WorkspaceText.meta)
                                 .foregroundStyle(palette.secondaryText).textSelection(.enabled)
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel((item.ok ? "通过，" : "需要处理，") + item.title + "，" + item.detail)
                     }
                 }
                 .padding(10)
