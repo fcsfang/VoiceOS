@@ -634,3 +634,11 @@
 - 最后 7 处系统按钮样式清零：ConfirmTaskView / CorrectionImpactView / DictationRecoveryControls / IncrementalReadingView / OutcomeFollowupView / RecentContentHome 标题保存 / Onboarding 试用。全库 borderedProminent 与系统 bordered 为 0。
 - 668 项 0 失败；dist 重建 exit 0（二进制 07:45:26）；preflight 0（safe idle=22820s）；重启后 pid 90833（含波 108 思想与下一步卡片化）。
 - 显示器仍休眠；102-109 的实机目视验收继续顺延，等待屏幕唤醒。
+
+## 实机验收与标题收口（2026-11-20，显示器唤醒后）
+
+- 屏幕唤醒后完成 102-109 的目视验收：首页、材料列表、材料详情、行动、设置、主题、消息监测七屏均符合统一视觉（页签下划线、徽标、卡片、按钮主次）。
+- 发现并修复四处：纯链接抓取在数据层 48 字截断（displayTitle 保留整条 URL）；材料列表/侧轨/面包屑未走 TitleFit；首页任务进展把链接+笔记整段当 30pt 标题（现拆为标题/正文/来源三段，progressRow 同规则）；设置页隐私与云端卡片包裹改为普通分组。
+- 669 项 0 失败（新增 splitLeadingLink 用例）；main 9555864、49bd081；dist 重建 exit 0（09:06:46）；preflight 0 后安装 pid 4289。
+- 复验：材料列表首行 anti-defensive-writing-Skill；详情页标题 + github.com/Adkid-Zephyr 来源行；首页任务进展三段层级；设置页隐私分组与相邻分组一致。
+- 全景环视（首页「全景」页签）因截图工具点击未切换的分段控件未能目视，结构验收以 102-E/103 记录与测试为准，标注为未目视。
