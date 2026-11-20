@@ -126,7 +126,8 @@ struct ReflectionQuestionsView: View {
                         } label: {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(question.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).lineLimit(4)
-                                Text("更新于 " + date(question.updatedAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                    .foregroundStyle(busy ? palette.disabledText : palette.text)
+                                Text("更新于 " + date(question.updatedAt)).vosFont(WorkspaceText.meta).foregroundStyle(busy ? palette.disabledText : .secondary)
                             }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
                                 .background(selectedID == question.id ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                                 .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(selectedID == question.id ? palette.accent.opacity(0.5) : .clear) }
@@ -227,7 +228,11 @@ struct ReflectionQuestionsView: View {
                         Button("停止用于这个主题", role: .destructive) {
                             Task { await perform { try await model.stopReflectionQuestionEntry(entry.id) } }
                         }
-                    } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton).frame(width: 22).help("更多操作").accessibilityLabel("更多操作")
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(minWidth: WorkspaceMetrics.rowActionMinHeight, minHeight: WorkspaceMetrics.rowActionMinHeight)
+                            .contentShape(Rectangle())
+                    }.menuStyle(.borderlessButton).help("更多操作").accessibilityLabel("更多操作")
                 }.vosFont(WorkspaceText.meta).disabled(busy)
             }
         }

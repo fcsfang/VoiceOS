@@ -112,6 +112,7 @@ extension WorkspaceEmptyState where Actions == EmptyView {
 
 struct WorkspaceIconButton: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.isEnabled) private var isEnabled
     let systemImage: String
     let label: String
     var action: () -> Void
@@ -121,10 +122,11 @@ struct WorkspaceIconButton: View {
         Button(action: action) {
             Image(systemName: systemImage).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
                 .frame(width: WorkspaceMetrics.iconButtonSize, height: WorkspaceMetrics.iconButtonSize)
-                .background(hovered ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
+                .background(hovered && isEnabled ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
                 .contentShape(Rectangle())
-        }.buttonStyle(.plain).onHover { hovered = $0 }
+        }.buttonStyle(.plain).onHover { hovered = $0 && isEnabled }
             .help(label).accessibilityLabel(label)
+            .opacity(isEnabled ? 1 : 0.4)
     }
 }
 

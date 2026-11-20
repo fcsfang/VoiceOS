@@ -129,6 +129,7 @@ struct WorkspaceListSection<Content: View>: View {
             if collapsible {
                 Button { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { userExpanded = !expanded } } label: { header }
                     .buttonStyle(.plain)
+                    .workspaceHoverHighlight()
                     .accessibilityValue(expanded ? "已展开" : "已收起")
             } else {
                 header

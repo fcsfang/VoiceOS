@@ -28,6 +28,7 @@ struct WorkspaceTopicReadingView: View {
     @State private var localFilter = ""
     @State private var keyboardSectionID: String?
     @FocusState private var structureFocused: Bool
+    @FocusState private var focusedQuestion: String?
 
     private var sections: [TopicReadingSection] { topic.organization?.sections ?? [] }
     private var bodyPending: Bool { topic.organization?.bodyPending == true }
@@ -102,7 +103,7 @@ struct WorkspaceTopicReadingView: View {
         if !adjacentTopics.isEmpty {
             WorkspaceSection(title:"相邻主题",icon:"point.3.connected.trianglepath.dotted",count:adjacentTopics.count) {
                 ForEach(adjacentTopics) { adjacent in
-                    WorkspaceRow(title:adjacent.topic.title,subtitle:"共享 \(adjacent.sharedCount) 份材料",icon:"circle.hexagongrid",trailing:"查看") { openTopic(adjacent.topic.id) }
+                    WorkspaceRow(title:adjacent.topic.title,subtitle:"共享 \(adjacent.sharedCount) 份材料",icon:"circle.hexagongrid",trailing:"查看",trailingStyle:.link) { openTopic(adjacent.topic.id) }
                 }
             }
         }
@@ -381,8 +382,11 @@ struct WorkspaceTopicReadingView: View {
                             Text(question).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
                             Spacer(minLength:4)
                             Image(systemName:"arrow.up.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-                        }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(hoveredQuestion == question ? palette.selection : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)).overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }.contentShape(Rectangle())
+                        }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(hoveredQuestion == question ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)).overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(focusedQuestion == question ? palette.focusRing : palette.border,lineWidth:1) }.contentShape(Rectangle())
                     }.buttonStyle(.plain).help("带上当前主题继续讨论")
+                        .focusable()
+                        .focused($focusedQuestion, equals: question)
+                        .focusEffectDisabled()
                         .onHover { inside in hoveredQuestion = inside ? question : (hoveredQuestion == question ? nil : hoveredQuestion) }
                 }
             }
@@ -570,35 +574,32 @@ struct WorkspaceTopicTile: View {
     let open: () -> Void
     var body: some View {
         Button(action:open) {
-            WorkspaceCard {
-                VStack(alignment:.leading,spacing:12) {
-                    HStack {
-                        Image(systemName:"circle.hexagongrid").vosFont(18).foregroundStyle(palette.action)
-                        Spacer()
-                        Image(systemName:"arrow.up.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-                    }
-                    Text(topic.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                    if topic.organizationStale == true { TopicStaleBanner() }
-                    if topic.organization?.bodyPending == true {
-                        WorkspaceBadge(text:"正文整理中")
-                    }
-                    if let summary=topic.organization?.summary, !summary.isEmpty {
-                        Text(summary).vosFont(WorkspaceText.body).lineSpacing(4)
-                            .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
-                            .lineLimit(scale >= 1.3 ? 3 : 2)
-                    }
-                    Spacer(minLength:0)
-                    HStack(spacing:16) {
-                        Label("\(sourceCount) 份材料",systemImage:"doc.text")
-                        if let count=topic.organization?.sections?.count { Label("\(count) 个小主题",systemImage:"square.grid.2x2") }
-                    }.vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
-                }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
-            }
-            .overlay {
-                RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)
-                    .strokeBorder(hovered ? palette.accent : .clear,lineWidth:1)
-            }
-            .contentShape(RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+            VStack(alignment:.leading,spacing:12) {
+                HStack {
+                    Image(systemName:"circle.hexagongrid").vosFont(18).foregroundStyle(palette.action)
+                    Spacer()
+                    WorkspaceRowChevron()
+                }
+                Text(topic.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
+                if topic.organizationStale == true { TopicStaleBanner() }
+                if topic.organization?.bodyPending == true {
+                    WorkspaceBadge(text:"正文整理中")
+                }
+                if let summary=topic.organization?.summary, !summary.isEmpty {
+                    Text(summary).vosFont(WorkspaceText.body).lineSpacing(4)
+                        .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
+                        .lineLimit(scale >= 1.3 ? 3 : 2)
+                }
+                Spacer(minLength:0)
+                HStack(spacing:16) {
+                    Label("\(sourceCount) 份材料",systemImage:"doc.text")
+                    if let count=topic.organization?.sections?.count { Label("\(count) 个小主题",systemImage:"square.grid.2x2") }
+                }.vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+            }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+                .padding(20)
+                .background(hovered ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+                .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
+                .contentShape(RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
         }.buttonStyle(.plain).onHover { hovered = $0 }
     }
 }
