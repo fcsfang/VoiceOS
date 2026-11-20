@@ -30,7 +30,7 @@ struct BilingualView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             HStack {
                 Text("译文对照").vosFont(WorkspaceText.sectionTitle)
                 Spacer()

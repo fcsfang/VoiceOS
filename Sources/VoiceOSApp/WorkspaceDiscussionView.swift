@@ -47,11 +47,10 @@ struct WorkspaceDiscussionView: View {
                                         Text(source.origin == "user" ? "我的表达" : source.origin == "ai" ? "AI 交付" : "外部资料").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                         Text(source.text).lineLimit(3)
                                         if source.localOnly { Text("仅本地 · 发送前需在材料详情授权").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
-                                    }.padding(.vertical, 6)
+                                    }.padding(.vertical, 4)
                                 }.buttonStyle(.plain)
                             }
                         }.vosFont(WorkspaceText.meta)
-                        if model.discussionTurns.isEmpty { Text("带着眼前的内容继续想。输入问题后直接发送。").foregroundStyle(.secondary) }
                         ForEach(model.discussionTurns) { turn in
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("我").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)

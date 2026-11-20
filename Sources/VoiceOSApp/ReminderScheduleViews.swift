@@ -51,18 +51,22 @@ struct ActionScheduleEditor: View {
         return .instant(utc: formatter.string(from: instant), timeZone: timeZone.identifier)
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("设置本地期限选择").vosFont(WorkspaceText.sectionTitle)
-            Text(action.title).vosFont(WorkspaceText.rowTitle)
-            Picker("期限类型", selection: $mode) {
-                Text("仅日期").tag("date"); Text("日期与时间").tag("time"); Text("移除期限").tag("none")
-            }.pickerStyle(.segmented).disabled(saving)
-            if mode != "none" {
-                DatePicker("期限", selection: $date, displayedComponents: mode == "time" ? [.date,.hourAndMinute] : [.date])
-                    .environment(\.timeZone, timeZone).disabled(saving)
-                Text("解释时区：" + timeZone.identifier).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
+                Text("设置本地期限选择").vosFont(WorkspaceText.sectionTitle)
+                Text(action.title).vosFont(WorkspaceText.rowTitle)
             }
-            Text("这是你在控制中心作出的期限选择，先仅本地保存。外部期限有差异时，需查看具体改期并确认；不会因为保存而自动修改提醒事项。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
+                Picker("期限类型", selection: $mode) {
+                    Text("仅日期").tag("date"); Text("日期与时间").tag("time"); Text("移除期限").tag("none")
+                }.pickerStyle(.segmented).disabled(saving)
+                if mode != "none" {
+                    DatePicker("期限", selection: $date, displayedComponents: mode == "time" ? [.date,.hourAndMinute] : [.date])
+                        .environment(\.timeZone, timeZone).disabled(saving)
+                    Text("解释时区：" + timeZone.identifier).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                }
+            }
+            Text("期限选择先只保存在本地；外部提醒事项有差异时需查看并确认改期，保存不会自动修改它。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
                 Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(saving)
@@ -94,22 +98,28 @@ struct ReminderScheduleConfirmationView: View {
     @State private var saving = false
     @State private var errorText = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("确认本次具体改期").vosFont(WorkspaceText.sectionTitle)
-            Text(effect.before.title).vosFont(WorkspaceText.rowTitle)
-            Text("清单：" + effect.calendarTitle)
-            HStack(spacing: 8) {
-                WorkspaceBadge(text: "上次回读期限：" + (effect.before.dueDate?.summary ?? "未能核对"),
-                               tone: effect.before.dueDate == nil ? .warning : .neutral)
-                WorkspaceBadge(text: "拟改为：" + effect.desired.summary)
+        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
+                Text("确认本次具体改期").vosFont(WorkspaceText.sectionTitle)
+                Text(effect.before.title).vosFont(WorkspaceText.rowTitle)
+                Text("清单：" + effect.calendarTitle)
             }
-            Text(effect.authority == .userCommitment ? "你的明确期限选择" : "AI 弹性安排，仍非你的明确承诺").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            DisclosureGroup("本次排期依据") {
-                Text(effect.rawExpression).textSelection(.enabled)
-                Text("表达时刻：" + effect.anchorSummary).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
+                HStack(spacing: 8) {
+                    WorkspaceBadge(text: "上次回读期限：" + (effect.before.dueDate?.summary ?? "未能核对"),
+                                   tone: effect.before.dueDate == nil ? .warning : .neutral)
+                    WorkspaceBadge(text: "拟改为：" + effect.desired.summary)
+                }
+                Text(effect.authority == .userCommitment ? "你的明确期限选择" : "AI 弹性安排，仍非你的明确承诺").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                DisclosureGroup("本次排期依据") {
+                    Text(effect.rawExpression).textSelection(.enabled)
+                    Text("表达时刻：" + effect.anchorSummary).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                }
             }
-            Text("只允许这一项期限变更。执行前会重新核对；任务、清单或期限发生变化时停止写入。标题、完成状态和其他字段保留。").vosFont(WorkspaceText.body)
-            Text("确认不代表任务已完成或观点已验证。可以撤回后续写入许可；已派发的变更不能因此自动撤销。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
+                Text("只允许这一项期限变更。执行前会重新核对；任务、清单或期限发生变化时停止写入。标题、完成状态和其他字段保留。").vosFont(WorkspaceText.body)
+                Text("确认不代表任务已完成或观点已验证。可以撤回后续写入许可；已派发的变更不能因此自动撤销。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            }
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
                 Button("暂不修改", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(saving)
