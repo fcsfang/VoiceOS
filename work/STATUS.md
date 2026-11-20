@@ -663,3 +663,9 @@
 - 111-B 周回顾：loadState 四态（idle/loading/loaded/failed），空态仅 loaded 后出现；超过 150ms 才显示「正在读取本周行动…」；失败只留错误区与重试；空态补「打开行动页 / 查看待确认」（复用既有 jump/openFilter 闭包）；同类回顾行 vertical 14 → 10 与 WorkspaceRow 对齐。
 - 111-C 消息监测：reloadMonitorState/performMonitorReload 返回真实成败；视图 MonitorLoadState 三态代替布尔 monitorLoaded；失败显示 danger 提示 +「重新读取」（保留报告与事项缓存，不回整页 spinner）；空态不再冒充读取失败；事项失败任一展开报告均可重试。
 - 集成（main 合并三支后）：build_exit=0，test_exit=0，669 项 0 失败。三支各自在共享锁上真实构建+测试通过（C 首轮 LOCK_TIMEOUT 后重跑一次）。
+
+## 安装批次（2026-11-20 12:50，波 110-111）
+
+- dist 重建 exit 0（二进制 12:48，重签成功）；preflight 直接执行返回 0（safe idle=2198s）；重启后 pid 59880。
+- 交付：波 110 设计规则收敛（动画门控归零、语义色、宽度随字号）+ 波 111 三态收口（材料详情分节失败重试与转写三态、周回顾四态加载与空态 CTA、监测失败与空态分离可重试）。
+- 实机目视验收待显示器可用时抽查上述三处；波 112（工具子页空态、设置页加载反馈与节奏、行动详情加载态）施工中。
