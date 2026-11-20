@@ -26,6 +26,7 @@ private struct TopicLoadKey: Hashable {
     let updatedAt: String?
     let recentOutcomeCount: Int
     let actionKeys: [String]
+    var token: Int = 0
 }
 private struct WorkspaceReminderSettingsTarget: Identifiable {
     let action: ActionRecord
@@ -363,6 +364,10 @@ struct WorkspaceView: View {
     @State private var reviewAnchor = Date()
     @State private var error = ""
     @State private var errorRetry: (message: String, action: () -> Void)?
+    @State private var topicLoadToken = 0
+    @State private var topicFocusTopicID: String?
+    @State private var topicLoadError = ""
+    @State private var showStartupProgress = false
     @State private var actionUndo: ActionUndoState?
     @State private var resultFeedbackTarget: ActionRecord?
     @State private var localCompletionOffer: ActionRecord?
@@ -450,9 +455,19 @@ struct WorkspaceView: View {
             .task(id:model.initialized) { if model.initialized { savedViews = await model.savedWorkspaceViews() } }
             .task { await model.setPanoramaVisible(page == .home && homeShowsPanorama) }
             .task(id:topicLoadKey) {
-                guard page == .themes, let id=topicID else { topicFocus=nil; return }
-                do { let focus=try await model.loadTopicReflection(id); if topicID == id && !Task.isCancelled { topicFocus=focus } }
-                catch { if topicID == id && !Task.isCancelled { topicFocus=nil; self.error=error.localizedDescription } }
+                guard page == .themes, let id=topicID else { topicFocus=nil;topicFocusTopicID=nil; return }
+                do {
+                    let focus=try await model.loadTopicReflection(id)
+                    guard topicID == id, !Task.isCancelled else { return }
+                    topicFocus=focus;topicFocusTopicID=id
+                    if !topicLoadError.isEmpty, error == topicLoadError { error="";errorRetry=nil }
+                    topicLoadError=""
+                } catch {
+                    guard topicID == id, !Task.isCancelled else { return }
+                    if topicFocusTopicID != id { topicFocus=nil;topicFocusTopicID=nil }
+                    topicLoadError=error.localizedDescription
+                    fail(topicLoadError, retry:{ topicLoadToken += 1 })
+                }
             }
             .onChange(of:page) { _, next in
                 model.stopPlayback()
@@ -604,8 +619,10 @@ struct WorkspaceView: View {
                         Button("重试打开资料库") { Task { await model.start() } }.buttonStyle(.workspacePrimary)
                         Button("打开其他资料库",action:chooseLibrary).buttonStyle(.workspaceSecondary)
                     }
-                } else if !model.initialized || !model.workspaceLoaded {
-                    ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
+                } else if workspaceStarting {
+                    if showStartupProgress {
+                        ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
+                    } else { Color.clear }
                 } else { pageContent }
             }.frame(maxWidth:.infinity,maxHeight:.infinity)
             if !error.isEmpty, error != model.workspaceLastError {
@@ -620,7 +637,13 @@ struct WorkspaceView: View {
                 WorkspaceProcessingBar(model: model) { go(.tool("处理情况")) }
             }
         }.frame(minWidth:440)
+            .task(id:workspaceStarting) {
+                guard workspaceStarting else { showStartupProgress=false; return }
+                do { try await Task.sleep(for:.milliseconds(150)) } catch { return }
+                if workspaceStarting { showStartupProgress=true }
+            }
     }
+    private var workspaceStarting: Bool { !model.initialized || !model.workspaceLoaded }
     @ViewBuilder private var workspaceErrorBanner: some View {
         if let message = model.workspaceLastError {
             HStack(alignment:.firstTextBaseline,spacing:12) {
@@ -634,12 +657,13 @@ struct WorkspaceView: View {
     }
     private var topicLoadKey: TopicLoadKey {
         guard page == .themes, let id = topicID else {
-            return TopicLoadKey(topicID: nil, updatedAt: nil, recentOutcomeCount: 0, actionKeys: [])
+            return TopicLoadKey(topicID: nil, updatedAt: nil, recentOutcomeCount: 0, actionKeys: [], token: topicLoadToken)
         }
         let actionIDs = Set(topic?.organization?.sections?.flatMap(\.actionIDs) ?? [])
         return TopicLoadKey(topicID: id, updatedAt: topic?.updatedAt,
                             recentOutcomeCount: model.recentOutcomes.count,
-                            actionKeys: model.sourcePageIndex.currentActionKeys(for: actionIDs))
+                            actionKeys: model.sourcePageIndex.currentActionKeys(for: actionIDs),
+                            token: topicLoadToken)
     }
     private var sidebar: some View {
         VStack(alignment:.leading,spacing:28) {
@@ -940,7 +964,11 @@ struct WorkspaceView: View {
     private func sourceFoldBinding(_ id:String,transcript:String?) -> Binding<SourceFoldState> {
         Binding(get: { sourceFoldStates[id] ?? SourceFoldState.initial(transcript:transcript) }, set: { sourceFoldStates[id] = $0 })
     }
-    private func unavailable(_ title:String,description:String) -> some View { ContentUnavailableView(title,systemImage:"leaf",description:Text(description)).frame(maxWidth:.infinity) }
+    private func unavailable(_ title:String,description:String) -> some View {
+        WorkspaceEmptyState(title:title,systemImage:"leaf",description:description) {
+            Button("回到行动") { go(.actions) }.buttonStyle(.workspacePrimary)
+        }.frame(maxWidth:.infinity)
+    }
     private func distinctExpressions(_ sources:[SourceRecord]) -> [SourceRecord] {
         let index=model.sourcePageIndex
         let catalog=index.recordsByID
@@ -1608,7 +1636,13 @@ struct WorkspaceView: View {
     }
     @ViewBuilder private var searchResults: some View {
         if searchBusy && searchHits.isEmpty { ProgressView("正在检索…").controlSize(.small) }
-        if searchFailed { WorkspaceNoticeText(message:model.status,severity:.danger) }
+        if searchFailed {
+            let term=query.trimmingCharacters(in:.whitespacesAndNewlines)
+            HStack(alignment:.top,spacing:10) {
+                WorkspaceNoticeText(message:model.status,severity:.danger)
+                Button("重试检索") { Task { await loadSearchHits(term) } }.controlSize(.small)
+            }
+        }
         let sections = searchSections
         if !sections.isEmpty {
             VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {

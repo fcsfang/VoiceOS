@@ -51,7 +51,7 @@ struct ReflectionChangeView: View {
                     Button("返回地图", action: closeView).buttonStyle(.workspaceSecondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if let error { Text(InlineFailurePresentation.message(operation: "继续讨论", reason: error)).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).padding(16) }
+            if let error { WorkspaceNoticeText(message: InlineFailurePresentation.message(operation: "继续讨论", reason: error), severity: .danger).padding(16) }
         }.foregroundStyle(palette.text).background(palette.canvas)
             .frame(width: embedded ? nil : 960, height: embedded ? nil : 680)
             .frame(maxWidth: .infinity, maxHeight: .infinity)

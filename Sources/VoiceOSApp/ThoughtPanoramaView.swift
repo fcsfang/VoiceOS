@@ -437,8 +437,9 @@ struct ThoughtPanoramaView: View {
                     outlinePanel(snapshot)
                 } else {
                     WorkspaceEmptyState(title: "还没有可显示的内容", systemImage: "list.bullet",
-                                        description: "完成生成与核对后，这里会列出问题与联系。")
-                        .frame(width: 340, height: 480)
+                                        description: "完成生成与核对后，这里会列出问题与联系。") {
+                        Button("打开材料") { showOutline = false; openMaterials() }.buttonStyle(.workspacePrimary)
+                    }.frame(width: 340, height: 480)
                 }
             }
     }
@@ -611,6 +612,7 @@ struct ThoughtPanoramaView: View {
         case needsModel
         case unverified(String?)
         case needsMaterials
+        case readFailed(String)
         case settled
 
         var title: String {
@@ -619,13 +621,17 @@ struct ThoughtPanoramaView: View {
             case .needsModel: return "选择文本模型后生成全景"
             case .unverified: return "全景尚未通过核对"
             case .needsMaterials: return "先整理材料，形成完整单元"
+            case .readFailed: return "全景暂时无法读取"
             case .settled: return "材料已核对，尚未形成持续问题"
             }
         }
 
         var retryLabel: String {
-            if case .unverified = self { return "继续核对" }
-            return "生成或重试全景"
+            switch self {
+            case .unverified: return "继续核对"
+            case .readFailed: return "重试读取"
+            default: return "生成或重试全景"
+            }
         }
 
         var detail: String {
@@ -639,6 +645,9 @@ struct ThoughtPanoramaView: View {
                 return "材料有更新或核对未完成；继续核对后会显示结果。"
             case .needsMaterials:
                 return "先导入或录制材料，再整理成完整单元。"
+            case .readFailed(let error):
+                if !error.isEmpty { return error }
+                return "读取全景时出了问题；可以重试，或先打开材料。"
             case .settled:
                 return "现有材料里暂时没有持续的关切。"
             }
@@ -648,7 +657,7 @@ struct ThoughtPanoramaView: View {
     // The discovery headline only belongs to a settled, verified panorama with no
     // problems; every other empty state names the real cause.
     private var emptyMode: PanoramaEmptyMode {
-        guard let state else { return .loading }
+        guard let state else { return readError.map { PanoramaEmptyMode.readFailed($0) } ?? .loading }
         if state.snapshot != nil { return .settled }
         if ["failed", "unknown"].contains(state.status) { return .unverified(state.error) }
         if state.input.units.isEmpty { return .needsMaterials }
@@ -659,6 +668,8 @@ struct ThoughtPanoramaView: View {
     private var emptyState: some View {
         let mode = emptyMode
         let canRetry = state?.snapshot == nil && state?.input.units.isEmpty == false
+        var readFailed = false
+        if case .readFailed = mode { readFailed = true }
         return VStack(spacing: WorkspaceMetrics.groupGap) {
             ZStack {
                 Ellipse().fill(palette.selection).frame(width: 300, height: 190).rotationEffect(.degrees(-15))
@@ -669,8 +680,11 @@ struct ThoughtPanoramaView: View {
                                 description: mode.detail) {
                 HStack {
                     Button("打开材料", action: openMaterials)
-                        .buttonStyle(WorkspaceButtonStyle(emphasis: canRetry ? .secondary : .primary))
-                    if canRetry {
+                        .buttonStyle(WorkspaceButtonStyle(emphasis: canRetry || readFailed ? .secondary : .primary))
+                    if readFailed {
+                        Button(mode.retryLabel, action: retryRefresh)
+                            .buttonStyle(.workspacePrimary)
+                    } else if canRetry {
                         Button(mode.retryLabel, action: retry)
                             .buttonStyle(.workspacePrimary)
                             .disabled(!modelConfigured || isGenerating || state?.status == "running")
@@ -697,7 +711,9 @@ struct ThoughtPanoramaView: View {
                 Text("\(state.input.units.count) 个完整单元 · \(state.input.sources.count) 份来源 · \(dependencyCount(state.input)) 份节目依赖 · \(state.input.claims.count) 条当前认识").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             } else {
                 WorkspaceEmptyState(title: "还没有可显示的内容", systemImage: "chart.pie",
-                                    description: "完成生成与核对后，这里会列出材料与覆盖情况。")
+                                    description: "完成生成与核对后，这里会列出材料与覆盖情况。") {
+                    Button("打开材料") { showCoverage = false; openMaterials() }.buttonStyle(.workspacePrimary)
+                }
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {

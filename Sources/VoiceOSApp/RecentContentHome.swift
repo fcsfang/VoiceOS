@@ -124,24 +124,25 @@ struct RecentContentHome: View {
     }
 
     private var empty: some View {
-        VStack(spacing: 14) {
+        Group {
             if let message = model.workspaceLastError {
-                Text("资料库读取失败").vosFont(WorkspaceText.sectionTitle)
-                Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .vosFont(WorkspaceText.body).foregroundStyle(palette.danger).textSelection(.enabled)
-                if model.workspaceLastErrorRetry != nil {
-                    Button("重试") { model.retryWorkspaceError() }.buttonStyle(.workspacePrimary)
+                WorkspaceEmptyState(title: "资料库读取失败", systemImage: "tray", description: message) {
+                    if model.workspaceLastErrorRetry != nil {
+                        Button("重试") { model.retryWorkspaceError() }.buttonStyle(.workspacePrimary)
+                    }
                 }
             } else if hasAnyMaterial {
-                Text("材料都还没有可读内容").vosFont(WorkspaceText.sectionTitle)
-                Text("材料还在转写或识别，完成并保存后会出现在这里。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                Button("记录想法") { capture() }.buttonStyle(.workspacePrimary)
-                Button("导入录音") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
+                WorkspaceEmptyState(title: "材料都还没有可读内容", systemImage: "tray",
+                                    description: "材料还在转写或识别，完成并保存后会出现在这里。") {
+                    Button("记录想法") { capture() }.buttonStyle(.workspacePrimary)
+                    Button("导入录音") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
+                }
             } else {
-                Text("知识库里还没有材料").vosFont(WorkspaceText.sectionTitle)
-                Text("录一段、导入一段录音，或写几句。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                Button("记录想法") { capture() }.buttonStyle(.workspacePrimary)
-                Button("导入录音") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
+                WorkspaceEmptyState(title: "知识库里还没有材料", systemImage: "tray",
+                                    description: "录一段、导入一段录音，或写几句。") {
+                    Button("记录想法") { capture() }.buttonStyle(.workspacePrimary)
+                    Button("导入录音") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
+                }
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
     }

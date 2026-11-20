@@ -838,7 +838,7 @@ struct WorkspaceExternalCompletionButton: View {
                     Button("确认外部已完成") { confirming = true }.buttonStyle(.workspaceSecondaryCompact).disabled(model.savingAction)
                         .accessibilityIdentifier("processing.external." + action.id + ".confirm")
                 }
-                if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled) }
+                if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             }
             .alert("把「\(action.title)」登记为已完成？", isPresented: $confirming) {
                 Button("确认外部已完成") { confirm() }

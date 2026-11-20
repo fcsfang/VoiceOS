@@ -28,12 +28,13 @@ struct WorkspaceMonitorView: View {
     @State private var handledExpanded = false
     @State private var monitorLoadState: MonitorLoadState = .loading
     @State private var monitorRetrying = false
+    @State private var showSlowLoad = false
     @State private var failedItemReportIDs: Set<String> = []
     @State private var earlierOpenSummary = MonitorOpenItemsSummary()
     @State private var qqSaveFeedback = ""
     @State private var qqSaveFailed = false
 
-    private enum MonitorLoadState { case loading, loaded, failed }
+    private enum MonitorLoadState: Equatable { case loading, loaded, failed }
 
     private var monitorLoaded: Bool { monitorLoadState == .loaded }
 
@@ -100,6 +101,11 @@ struct WorkspaceMonitorView: View {
         .onChange(of: model.monitorChecking) { wasChecking, isChecking in
             guard wasChecking, !isChecking else { return }
             announceMonitorCheckCompletion()
+        }
+        .task(id: monitorLoadState) {
+            guard monitorLoadState == .loading else { showSlowLoad = false; return }
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            if monitorLoadState == .loading { showSlowLoad = true }
         }
         .alert("删除监测来源？", isPresented: Binding(
             get: { pendingSourceRemoval != nil },
@@ -215,6 +221,7 @@ struct WorkspaceMonitorView: View {
     private func retryMonitorLoad() async {
         guard !monitorRetrying else { return }
         monitorRetrying = true
+        showSlowLoad = false
         defer { monitorRetrying = false }
         let loaded = await model.reloadMonitorState()
         monitorLoadState = loaded ? .loaded : .failed
@@ -224,11 +231,13 @@ struct WorkspaceMonitorView: View {
 
     @ViewBuilder private var todayReportSection: some View {
         if monitorLoadState == .loading {
-            WorkspaceCard(padding: 20) {
-                VStack(alignment: .leading, spacing: 12) {
-                    WorkspaceSectionHeading("今日报告")
-                    WorkspaceListDivider()
-                    monitorLoadingRow("正在读取今日报告…")
+            if showSlowLoad {
+                WorkspaceCard(padding: 20) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        WorkspaceSectionHeading("今日报告")
+                        WorkspaceListDivider()
+                        monitorLoadingRow("正在读取今日报告…")
+                    }
                 }
             }
         } else if let report = model.monitorLatestReport, report.reportDate == todayKey {
@@ -269,7 +278,7 @@ struct WorkspaceMonitorView: View {
                                         ? "\(earlierReports.count)" : nil)
                 WorkspaceListDivider()
                 if monitorLoadState == .loading {
-                    monitorLoadingRow("正在读取历史报告…")
+                    if showSlowLoad { monitorLoadingRow("正在读取历史报告…") }
                 } else if earlierReports.isEmpty {
                     Text(monitorLoadState == .failed ? "暂时无法读取历史报告。" : "还没有更早的历史报告。")
                         .vosFont(WorkspaceText.meta)
@@ -709,7 +718,7 @@ struct WorkspaceMonitorView: View {
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
                 WorkspaceListDivider()
                 if monitorLoadState == .loading {
-                    monitorLoadingRow("正在读取来源状态…")
+                    if showSlowLoad { monitorLoadingRow("正在读取来源状态…") }
                 } else if monitorLoadState == .failed, model.monitorSources.isEmpty {
                     Text("暂时无法读取来源状态。").vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.secondaryText).padding(.vertical, 10)
