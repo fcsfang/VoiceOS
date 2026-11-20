@@ -836,3 +836,10 @@
 - 小字清扫四路（126-B/C、127-A/B/C）：删除复述界面与内部机制句 26 条、压缩多从句 78 条、操作速查移入 .help 5 条；政策/授权/失败/不可逆/丢数据提示全部保留；每条原文与新文在各自 TASK.md。
 - 备注：记录想法草稿提示保留「切页或重开可继续」（集成时修正代理删多）；来源页「整理运行过但无归属观点」整句删除，列为可回退观察项。
 - 集成：704 tests 全绿（build_exit=0 / test_exit=0）。
+## 波 128：材料标题契约（2026-11-21，已推送）
+- 用户反馈：首页标题长短与密度混乱，标题要一眼看出「这个想法在干什么」。
+- 根因：库里 55 份材料有 AI 标题（约 17–21 字），约 34 份未整理材料回退为「正文首 48 字口语直出」，两套人群混排。
+- `MaterialTitleText`（VoiceOSCore，新）：`derived(fromTranscript:)` 去句首语气词/叠字、按分句截断、凝练 ≤20 Character（超长在停顿处截断补…，空返回 nil）；`normalizedGenerated(_:)` 收紧 AI 标题：去 markdown/句末标点、≤24 Character。grapheme-safe，20 个用例（含 displayTitle 行为）。
+- 接线：displayTitle（manual 仅 trim；automatic 过 normalizedGenerated；回退优先 derived，nil 保留 48 字兜底；链接特例不变）；落库清洗，清洗为空不落；标题提示词改为「通常 10–20 字、最多 24，说清在做什么，不复述开场口语」。
+- 已知边界：存量 AI 标题 >24 字会截断（多数 17–21 字不受影响）；只读 CLI 的 ReadOnlyLibrary.displayTitle 未纳入（列后续）。
+- 集成：716 tests 全绿（build_exit=0 / test_exit=0）。
