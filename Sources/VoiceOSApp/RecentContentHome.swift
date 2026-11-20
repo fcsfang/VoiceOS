@@ -253,7 +253,22 @@ struct RecentContentHome: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .homeCard(isSelected: isSelected)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(rowAccessibilityLabel(item, outcomeBadge: outcomeBadge))
         .accessibilityAddTraits(isSelected ? .isSelected : AccessibilityTraits())
+    }
+
+    private func rowAccessibilityLabel(_ item: RecentContentItem, outcomeBadge: String?) -> String {
+        var parts = [rowTitle(item)]
+        if let note = rowStatusNote(item) { parts.append(note) }
+        parts.append(timeLabel(item.date))
+        if let trailing = rowTrailing(item, outcomeBadge: outcomeBadge) {
+            switch trailing {
+            case .badge(let text, _): parts.append(text)
+            case .text(let text, _): parts.append(text)
+            }
+        }
+        return parts.joined(separator: "，")
     }
 
     private func rowIcon(_ item: RecentContentItem) -> String {

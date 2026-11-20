@@ -474,15 +474,25 @@ struct WorkspaceTopicReadingView: View {
         Button { openTask(action.id) } label: {
             HStack(alignment:.top,spacing:12) {
                 Image(systemName:action.state == "completed" ? "checkmark.circle.fill" : action.kind == "task" ? "circle" : "lightbulb").foregroundStyle(palette.action)
+                    .accessibilityHidden(true)
                 VStack(alignment:.leading,spacing:4) {
                     Text(action.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
                     Text(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
                 Spacer(minLength:0)
                 Image(systemName:"chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }.padding(10).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
                 .workspaceHoverHighlight(cornerRadius:WorkspaceMetrics.panelRadius)
+                .accessibilityElement(children:.ignore)
+                .accessibilityLabel(taskButtonAccessibilityLabel(action))
         }.buttonStyle(.plain)
+    }
+
+    private func taskButtonAccessibilityLabel(_ action:ActionRecord) -> String {
+        let state = action.state == "completed" ? "已完成" : action.kind == "task" ? "待办" : "想法"
+        return [action.title, state, model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action)]
+            .joined(separator:"，")
     }
 
     private func outcomeCard(_ outcome:ActionFeedbackRecord) -> some View {
