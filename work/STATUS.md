@@ -784,3 +784,14 @@
 - dist 重建 exit 0；直接重启安装（pid 85632）。
 - 交付：波 120（主题升格/合并 + 组织提示词收紧）。
 - 新方向（用户提出，侦察中）：VoiceOS 能力 CLI 化 → skill/MCP。121 只读 CLI + skill，122 写回（经 app），123 MCP。
+
+## 波 121：只读待办 CLI 与 voiceos skill（2026-11-20，已推送）
+
+- ReadOnlyLibrary（VoiceOSCore）：绕过 VoiceOSStore（它建目录/迁移/recover 写库且 app 持独占 flock），用 CSQLite 直连只读打开（READONLY+FULLMUTEX、busy_timeout 5s、query_only、单读事务），user_version≠76 报不兼容；actions list / actions show / status 三命令，JSON 到 stdout、错误 JSON 到 stderr，退出码 0/1/2/3。
+- 新可执行产品 voiceos-cli（避开与 VoiceOS 大小写冲突）；5 项测试（过滤分页聚合、due 本地优先与逾期、show 默认隐去原文与备注、schema 不符、只读拒绝写），681 项全绿。
+- 真实库抽样：status 0（userVersion 76、sources 88、open 424/completed 88/dismissed 18、feedback 22、topics 102），show 与 sqlite3 只读对照一致，缺失 id exit 2。
+- voiceos skill 安装到 ~/.claude/skills/voiceos（仓库副本 .claude/skills/voiceos）；写回通道 122 波上线前 CLI 只读。
+
+## 搜索修复（2026-11-20，直推 main e399070）
+
+- 用户实测全局搜索搜不到一条「open + frozen」的待办：索引过滤只收 validity=current 的行动。改为行动全状态可搜索（行动不存在时仍过滤悬空索引行）；SearchIndexChecks 断言同步更新；676 项全绿。
