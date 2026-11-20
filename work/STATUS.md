@@ -642,3 +642,8 @@
 - 669 项 0 失败（新增 splitLeadingLink 用例）；main 9555864、49bd081；dist 重建 exit 0（09:06:46）；preflight 0 后安装 pid 4289。
 - 复验：材料列表首行 anti-defensive-writing-Skill；详情页标题 + github.com/Adkid-Zephyr 来源行；首页任务进展三段层级；设置页隐私分组与相邻分组一致。
 - 全景环视（首页「全景」页签）因截图工具点击未切换的分段控件未能目视，结构验收以 102-E/103 记录与测试为准，标注为未目视。
+
+## ui-ux-pro-max 技能与规则审计（2026-11-20）
+
+- 按用户要求全局安装 ui-ux-pro-max v2.15.0（~/.claude/skills/ui-ux-pro-max，含 design、design-system、ui-styling、brand、slides、banner-design 子技能）。数据偏 Web；VoiceOS 只取规则清单，不替换石墨/鼠尾草主题。
+- 首轮对照审计（SwiftUI 规则）：图标按钮无障碍标签、reduced-motion 门控、语义色、残留固定宽度四类，只读发现者运行中；确认的问题按小修直推 main。
