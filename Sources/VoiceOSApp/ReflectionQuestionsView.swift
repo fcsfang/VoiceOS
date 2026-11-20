@@ -88,8 +88,10 @@ struct ReflectionQuestionsView: View {
                 Divider()
                 if let question = selected { detail(question) }
                 else {
-                    ContentUnavailableView("从一个持续关心的主题开始", systemImage: "bubble.left.and.text.bubble.right", description: Text("例如：Agent 记忆，或怎样让 AI Agent 稳定完成真实任务？"))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    WorkspaceEmptyState(title: "从一个持续关心的主题开始", systemImage: "bubble.left.and.text.bubble.right", description: "例如：Agent 记忆，或怎样让 AI Agent 稳定完成真实任务？") {
+                        Button("建立主题或问题") { beginCreating() }.buttonStyle(.workspacePrimary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
             if let error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled).padding(12) }

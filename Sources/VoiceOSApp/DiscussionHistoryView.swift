@@ -32,8 +32,10 @@ struct DiscussionHistoryView: View {
                     }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if previews.isEmpty {
                     WorkspaceEmptyState(title: "还没有讨论历史", systemImage: "bubble.left.and.bubble.right",
-                                        description: "在资料页选中一条材料，点「讨论」建立新的讨论；建立后会按最近更新显示在这里。")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        description: "在资料页选中一条材料，点「讨论」建立新的讨论；建立后会按最近更新显示在这里。") {
+                        Button("关闭", action: close).buttonStyle(.workspaceSecondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 2) {
@@ -48,8 +50,7 @@ struct DiscussionHistoryView: View {
             }
             if !error.isEmpty {
                 WorkspaceListDivider()
-                Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger)
-                    .textSelection(.enabled).padding(12)
+                WorkspaceNoticeText(message: error, severity: .danger).padding(12)
             }
         }
         .frame(width: 560, height: 520)
