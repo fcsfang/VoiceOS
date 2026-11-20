@@ -339,6 +339,7 @@ struct WorkspaceView: View {
     @State private var reviewPeriod = ReflectionPeriod.week
     @State private var reviewAnchor = Date()
     @State private var error = ""
+    @State private var errorRetry: (message: String, action: () -> Void)?
     @State private var actionUndo: ActionUndoState?
     @State private var resultFeedbackTarget: ActionRecord?
     @State private var localCompletionOffer: ActionRecord?
@@ -580,7 +581,14 @@ struct WorkspaceView: View {
                     ProgressView("正在打开资料库…").controlSize(.small).frame(maxWidth:.infinity,maxHeight:.infinity)
                 } else { pageContent }
             }.frame(maxWidth:.infinity,maxHeight:.infinity)
-            if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).textSelection(.enabled).padding(12) }
+            if !error.isEmpty, error != model.workspaceLastError {
+                HStack(alignment:.firstTextBaseline,spacing:10) {
+                    WorkspaceNoticeText(message:error,severity:.danger)
+                    if let retry = errorRetry, retry.message == error { Button("重试") { retry.action() } }
+                    Button { error="";errorRetry=nil } label: { Image(systemName:"xmark").vosFont(WorkspaceText.caption) }
+                        .buttonStyle(.plain).accessibilityLabel("关闭错误提示")
+                }.padding(.horizontal,20).padding(.vertical,10)
+            }
             if model.workspaceProcessingBarVisible, page != .tool("处理情况") {
                 WorkspaceProcessingBar(model: model) { go(.tool("处理情况")) }
             }
@@ -2195,6 +2203,10 @@ struct WorkspaceView: View {
             } else { error=model.status }
         }
     }
+    private func fail(_ message:String, retry:(()->Void)? = nil) {
+        error = message
+        errorRetry = retry.map { (message: message, action: $0) }
+    }
     private func applyActionState(_ action:ActionRecord,to state:LocalActionState,nextHighlight:String? = nil) {
         Task {
             await model.changeAction(action,state:state)
@@ -2203,7 +2215,8 @@ struct WorkspaceView: View {
                     localCompletionOffer = action
                     error = ""
                 } else {
-                    error=model.status.isEmpty ? "状态未能更新，请稍后重试。" : model.status
+                    fail(model.status.isEmpty ? "状态未能更新，请稍后重试。" : model.status,
+                         retry: { applyActionState(action, to: state, nextHighlight: nextHighlight) })
                 }
                 return
             }
@@ -2237,7 +2250,7 @@ struct WorkspaceView: View {
             switch undo.kind {
             case .stateChange:
                 if await model.undoActionState(actionID:undo.actionID) { actionUndo=nil;error="" }
-                else { error=model.status.isEmpty ? "未能撤销，请稍后重试。" : model.status }
+                else { fail(model.status.isEmpty ? "未能撤销，请稍后重试。" : model.status, retry: { undoActionChange() }) }
             case .externalCompletion(let expectedVersion):
                 guard let store=model.store else { error="资料库尚未打开"; return }
                 do {
@@ -2492,17 +2505,22 @@ struct WorkspaceView: View {
     private func exitActionSelection() {
         selectingActions=false;selectedActionIDs=[]
     }
-    private func applyActionBatch(_ state:LocalActionState) async {
+    private func applyActionBatch(_ state:LocalActionState, records:[ActionRecord]? = nil) async {
         guard !batchRunning else { return }
         batchRunning=true
         defer { batchRunning=false }
+        let targets = records ?? batchActions(for: state)
         var failures=0
-        for record in batchActions(for: state) {
+        for record in targets {
             await model.changeAction(record,state:state)
             if model.actionRecords.first(where: { $0.id == record.id })?.state != state.rawValue { failures += 1 }
         }
-        exitActionSelection()
-        error=failures == 0 ? "" : "有 \(failures) 条行动未能更新，请稍后重试。"
+        if records == nil { exitActionSelection() }
+        if failures == 0 { error="";errorRetry=nil;return }
+        let failed = targets.filter { record in
+            model.actionRecords.first(where: { $0.id == record.id })?.state != state.rawValue
+        }
+        fail("有 \(failures) 条行动未能更新，请稍后重试。", retry: { Task { await applyActionBatch(state, records: failed) } })
     }
     private var actionSelectionBar: some View {
         HStack(spacing:12) {
@@ -2657,12 +2675,12 @@ struct WorkspaceView: View {
         defer { savingView=false }
         if let views=await model.saveWorkspaceView(name:trimmedNewViewName,page:saveViewPage,filter:saveViewFilter) {
             savedViews=views;showingSaveView=false;error="";toastMessage="已保存视图「\(trimmedNewViewName)」"
-        } else { error="视图未能保存，请稍后重试。" }
+        } else { fail("视图未能保存，请稍后重试。", retry: { Task { await saveView() } }) }
     }
     private func deleteSavedView(_ view:SavedWorkspaceView) {
         Task {
             if let views=await model.deleteWorkspaceView(id:view.id) { savedViews=views;error="";toastMessage="已删除视图「\(view.name)」" }
-            else { error="视图未能删除，请稍后重试。" }
+            else { fail("视图未能删除，请稍后重试。", retry: { deleteSavedView(view) }) }
         }
     }
     private func openSavedView(_ view:SavedWorkspaceView) {
