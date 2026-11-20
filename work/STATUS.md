@@ -672,7 +672,7 @@
 
 ## 波 112：工具页三态与设置/行动详情收口（2026-11-20，已推送）
 
-- 112-A 工具子页：DiscussionHistoryView 拆 loading/失败/空/列表四态，修「读取失败当空态」缺陷（失败带重试，InMemoryFailurePresentation 口径）；OutcomeFollowup/AssistantExecution/ReflectionTimeline/ReflectionChange 空态改「还没有…」并写明下一步（视图无导航闭包的不臆造按钮）；TaskInitiationView 删除禁用空菜单项、无原话时隐藏并说明。
+- 112-A 工具子页：DiscussionHistoryView 拆 loading/失败/空/列表四态，修「读取失败当空态」缺陷（失败带重试，InlineFailurePresentation 口径）；OutcomeFollowup/AssistantExecution/ReflectionTimeline/ReflectionChange 空态改「还没有…」并写明下一步（视图无导航闭包的不臆造按钮）；TaskInitiationView 删除禁用空菜单项、无原话时隐藏并说明。
 - 112-B 设置页：存储扫描与分项「统计中…」合并为唯一 spinner 行「正在统计存储…」；导出 spinner 加「正在导出…」；主题整理加小号 spinner；间距 6/7/15/10 归到 8/12/16/12（标题-说明紧凑组保留 6 并记录）。
 - 112-C 行动详情：反馈历史加载 >150ms 显示固定高度占位行 + 代数计数防旧读取串台；变更历史独立错误与真实「重试」；通用错误只在有真实重试闭包时显示重试（下一步/澄清/重新确认/子任务等），保存重复/撤销/交给 AI 写明下一步不放假重试。
 - 集成（main 合并三支后）：build_exit=0，test_exit=0，669 项 0 失败。
