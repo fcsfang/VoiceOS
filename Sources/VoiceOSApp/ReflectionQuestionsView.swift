@@ -100,7 +100,7 @@ struct ReflectionQuestionsView: View {
         .sheet(isPresented: $managingSources) { sourcesSheet }
     }
     private var questionList: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("长期探索").vosFont(WorkspaceText.sectionTitle)
                 Spacer()
@@ -114,7 +114,7 @@ struct ReflectionQuestionsView: View {
                             Task { await visitTopic(item.id) }
                         }, feedback: { mode, snooze in
                             Task { await setTopicFeedback(item.id, mode: mode, snooze: snooze) }
-                        }).padding(.bottom, 6)
+                        }).padding(.bottom, 8)
                     }
                     ForEach(questions) { question in
                         Button {
@@ -125,7 +125,7 @@ struct ReflectionQuestionsView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text(question.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).lineLimit(4)
                                 Text("更新于 " + date(question.updatedAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                            }.padding(13).frame(maxWidth: .infinity, alignment: .leading)
+                            }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
                                 .background(selectedID == question.id ? palette.selection : palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                                 .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(selectedID == question.id ? palette.accent.opacity(0.5) : .clear) }
                         }.buttonStyle(.plain).disabled(busy)
@@ -133,10 +133,10 @@ struct ReflectionQuestionsView: View {
                 }
             }
             Button("新增主题或问题") { beginCreating() }.buttonStyle(.workspaceSecondary).disabled(busy)
-        }.padding(18)
+        }.padding(16)
     }
     private func detail(_ question: ReflectionQuestion) -> some View {
-        VStack(alignment: .leading, spacing: 15) {
+        VStack(alignment: .leading, spacing: 16) {
             Text(question.title).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
             HStack {
                 Button("关联资料 · \(sourceIDs.count)") { managingSources = true }.buttonStyle(.workspaceSecondaryCompact).disabled(busy)
@@ -155,7 +155,7 @@ struct ReflectionQuestionsView: View {
                 Button {
                     Task { await startReview(question) }
                 } label: {
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         if reviewing { ProgressView().controlSize(.small) }
                         Label(periodicReview ? "一起回顾" : "一起探索", systemImage: "sparkles")
                     }
@@ -188,7 +188,7 @@ struct ReflectionQuestionsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if entries.isEmpty {
-                        Text("先关联一份材料，或留下你现在的理解。以后可以回来对照它如何变化。").vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 18)
+                        Text("先关联一份材料，或留下你现在的理解。以后可以回来对照它如何变化。").vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 16)
                     }
                     ForEach(entryFilter == "practice" ? entries.filter { $0.kind == .experiment || $0.kind == .result } : visibleEntries) { entry in
                         entryCard(entry)
@@ -200,8 +200,8 @@ struct ReflectionQuestionsView: View {
         }.padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
     private func entryCard(_ entry: ReflectionQuestionEntry) -> some View {
-        WorkspaceCard(padding: 14) {
-            VStack(alignment: .leading, spacing: 9) {
+        WorkspaceCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Label(entry.kind.label, systemImage: icon(entry.kind)).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                     Spacer()
@@ -231,7 +231,7 @@ struct ReflectionQuestionsView: View {
         }
     }
     private func composer(_ question: ReflectionQuestion) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Picker("留下什么", selection: $kind) {
                     ForEach(ReflectionQuestionEntryKind.allCases, id: \.self) { Text($0.label).tag($0) }
@@ -295,10 +295,10 @@ struct ReflectionQuestionsView: View {
                 }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
                     .disabled(busy || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.unicodeScalars.count > 200)
             }
-        }.padding(28).frame(width: 560).background(palette.canvas)
+        }.padding(24).frame(width: 560).background(palette.canvas)
     }
     private var sourcesSheet: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("这个主题的资料").vosFont(WorkspaceText.sectionTitle)
                 Spacer()
@@ -325,7 +325,7 @@ struct ReflectionQuestionsView: View {
                     } else {
                     ForEach(visibleSources) { source in
                         WorkspaceCard(padding: 12) {
-                            VStack(alignment: .leading, spacing: 7) {
+                            VStack(alignment: .leading, spacing: 8) {
                                 HStack(alignment: .top) {
                                     Toggle(isOn: Binding(get: { sourceIDs.contains(source.id) }, set: { linked in
                                         guard let id = selectedID else { return }
@@ -352,8 +352,8 @@ struct ReflectionQuestionsView: View {
     private func knowledgeLinkCard(_ claim: CandidateClaim) -> some View {
         let ids = Set(claim.references.map(\.sourceID))
         let linked = !ids.isEmpty && ids.allSatisfy { sourceIDs.contains($0) }
-        return WorkspaceCard(padding: 13) {
-            VStack(alignment: .leading, spacing: 9) {
+        return WorkspaceCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(claim.statement).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
                 Text(claim.ownership == "ai_candidate" ? "AI 建议 · 关联不代表认可" : claim.ownership == "external" ? "外部主张 · 保留原有归属" : "个人表达的整理 · 仍可核对原话").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 HStack {
@@ -373,8 +373,8 @@ struct ReflectionQuestionsView: View {
         let claim = model.claims.first { $0.id == action.claimID }
         let ids = Set(claim?.references.map(\.sourceID) ?? [])
         let linked = !ids.isEmpty && ids.allSatisfy { sourceIDs.contains($0) }
-        return WorkspaceCard(padding: 13) {
-            VStack(alignment: .leading, spacing: 9) {
+        return WorkspaceCard(padding: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text(action.title).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
                 WorkspaceBadge(text: (action.kind == "task" ? "任务" : action.kind == "ai_suggestion" ? "AI 建议" : "意图与目标") + " · " + (action.state == "completed" ? "已完成登记" : action.state == "dismissed" ? "已放下" : "待跟进"),
                                tone: action.state == "completed" ? .success : action.state == "dismissed" ? .neutral : .warning)

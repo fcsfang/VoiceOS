@@ -108,7 +108,7 @@ struct WorkspaceTopicReadingView: View {
     }
 
     var body: some View {
-        VStack(alignment:.leading,spacing:28) {
+        VStack(alignment:.leading,spacing:24) {
             if topic.organizationStale == true { TopicStaleBanner() }
             if bodyPending { topicPendingBanner }
             if mode == "概览" { introduction }
@@ -118,7 +118,7 @@ struct WorkspaceTopicReadingView: View {
                     if showsTopicFilter { topicFilter }
                     if mode == "概览" {
                         DisclosureGroup(isExpanded:$showingStructure) {
-                            structure.padding(.top,14)
+                            structure.padding(.top,16)
                         } label: {
                             HStack(spacing:8) {
                                 Label("内容结构",systemImage:"point.3.connected.trianglepath.dotted").vosFont(WorkspaceText.meta.size, weight: .medium)
@@ -148,7 +148,7 @@ struct WorkspaceTopicReadingView: View {
 
     private var introduction: some View {
         WorkspaceCard {
-            VStack(alignment:.leading,spacing:15) {
+            VStack(alignment:.leading,spacing:16) {
                 HStack {
                     Label("主题速览",systemImage:"sparkles").vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
                     Spacer()
@@ -212,22 +212,22 @@ struct WorkspaceTopicReadingView: View {
                 VStack(spacing:0) {
                     Button { selectedSection=nil } label: {
                         Label(topic.title,systemImage:"circle.hexagongrid").vosFont(WorkspaceText.rowTitle)
-                            .padding(.horizontal,18).padding(.vertical,12).frame(maxWidth:.infinity)
+                            .padding(.horizontal,20).padding(.vertical,12).frame(maxWidth:.infinity)
                             .background(palette.selection,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
                             .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
                             .contentShape(Rectangle())
                     }.buttonStyle(.plain)
-                    Rectangle().fill(palette.border).frame(width:1,height:18)
+                    Rectangle().fill(palette.border).frame(width:1,height:16)
                     LazyVGrid(columns:[GridItem(.adaptive(minimum:210),spacing:12)],alignment:.leading,spacing:12) {
                         ForEach(Array(listedSections.enumerated()),id:\.element.id) { index,section in
                             Button { selectedSection = selectedSection == section.id ? nil : section.id } label: {
-                                HStack(alignment:.top,spacing:10) {
+                                HStack(alignment:.top,spacing:8) {
                                     Text(String(format:"%02d",index+1)).vosFont(WorkspaceText.caption.size, weight: .medium, design: .monospaced).foregroundStyle(.secondary)
                                     Text(section.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
                                     Spacer(minLength:0)
-                                }.padding(13).frame(maxWidth:.infinity,minHeight:60,alignment:.topLeading)
-                                    .background(selectedSection == section.id ? palette.selection : hoveredSectionID == section.id || keyboardSectionID == section.id ? palette.selection.opacity(0.5) : palette.canvas,in:RoundedRectangle(cornerRadius:9))
-                                    .overlay { RoundedRectangle(cornerRadius:9).strokeBorder(selectedSection == section.id ? palette.accent : keyboardSectionID == section.id ? palette.focusRing : palette.border,lineWidth:1) }
+                                }.padding(12).frame(maxWidth:.infinity,minHeight:60,alignment:.topLeading)
+                                    .background(selectedSection == section.id ? palette.selection : hoveredSectionID == section.id || keyboardSectionID == section.id ? palette.selection.opacity(0.5) : palette.canvas,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+                                    .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius).strokeBorder(selectedSection == section.id ? palette.accent : keyboardSectionID == section.id ? palette.focusRing : palette.border,lineWidth:1) }
                                     .contentShape(Rectangle())
                             }.buttonStyle(.plain).accessibilityValue(selectedSection == section.id ? "已选择" : "")
                                 .accessibilityLabel("小主题：\(section.title)，\(sectionClaimCount(section)) 条认识")
@@ -283,7 +283,7 @@ struct WorkspaceTopicReadingView: View {
                 Text(section.title).vosFont(WorkspaceText.sectionTitle).fixedSize(horizontal:false,vertical:true).accessibilityAddTraits(.isHeader)
                 WorkspaceExpandableText(text:section.summary,label:"小节内容",lines:5,size:WorkspaceText.body.size)
                 if !previewClaims.isEmpty {
-                    VStack(alignment:.leading,spacing:10) {
+                    VStack(alignment:.leading,spacing:12) {
                         ForEach(previewClaims) { claim in
                             VStack(alignment:.leading,spacing:4) {
                                 Text(ownership(claim)).vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(.secondary)
@@ -294,9 +294,9 @@ struct WorkspaceTopicReadingView: View {
                 }
                 if !sectionClaims.isEmpty {
                     DisclosureGroup {
-                        VStack(alignment:.leading,spacing:15) {
+                        VStack(alignment:.leading,spacing:16) {
                             ForEach(sectionClaims) { claim in
-                                VStack(alignment:.leading,spacing:6) {
+                                VStack(alignment:.leading,spacing:8) {
                                     Text(ownership(claim)).vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(.secondary)
                                     Text(claim.statement).vosFont(WorkspaceText.body).textSelection(.enabled)
                                     HStack {
@@ -315,7 +315,7 @@ struct WorkspaceTopicReadingView: View {
                 }
                 if !sectionActions.isEmpty {
                     DisclosureGroup {
-                        VStack(alignment:.leading,spacing:8) { ForEach(sectionActions) { action in taskButton(action) } }.padding(.top,10)
+                        VStack(alignment:.leading,spacing:8) { ForEach(sectionActions) { action in taskButton(action) } }.padding(.top,12)
                     } label: {
                         HStack(spacing:8) {
                             Text("相关行动与问题").vosFont(WorkspaceText.meta)
@@ -325,7 +325,7 @@ struct WorkspaceTopicReadingView: View {
                 }
                 Divider()
                 DisclosureGroup("查看原话依据") {
-                    VStack(alignment:.leading,spacing:13) {
+                    VStack(alignment:.leading,spacing:12) {
                         ForEach(Array(section.evidence.enumerated()),id:\.offset) { _,evidence in
                             VStack(alignment:.leading,spacing:8) {
                                 Text(evidence.quote).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
@@ -345,7 +345,7 @@ struct WorkspaceTopicReadingView: View {
         let open=tasks.filter { $0.state == "open" }
         if !open.isEmpty {
             Button { showActions() } label: {
-                HStack(spacing:6) {
+                HStack(spacing:8) {
                     Text("查看 \(open.count) 条开放行动")
                     Image(systemName:"chevron.right").vosFont(WorkspaceText.caption)
                 }.vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.accent).contentShape(Rectangle())
@@ -362,16 +362,16 @@ struct WorkspaceTopicReadingView: View {
     @ViewBuilder private var questions: some View {
         let questions=topic.organization?.questions ?? []
         if !questions.isEmpty {
-            VStack(alignment:.leading,spacing:14) {
+            VStack(alignment:.leading,spacing:16) {
                     Text("值得继续的问题").vosFont(WorkspaceText.sectionTitle)
                 ForEach(questions,id:\.self) { question in
                     Button { discuss(question) } label: {
-                        HStack(alignment:.top,spacing:13) {
+                        HStack(alignment:.top,spacing:12) {
                             Image(systemName:"questionmark.bubble").foregroundStyle(palette.action)
                             Text(question).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
                             Spacer(minLength:4)
                             Image(systemName:"arrow.up.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-                        }.padding(18).frame(maxWidth:.infinity,alignment:.leading).background(hoveredQuestion == question ? palette.selection : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)).overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }.contentShape(Rectangle())
+                        }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(hoveredQuestion == question ? palette.selection : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)).overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }.contentShape(Rectangle())
                     }.buttonStyle(.plain).help("带上当前主题继续讨论")
                         .onHover { inside in hoveredQuestion = inside ? question : (hoveredQuestion == question ? nil : hoveredQuestion) }
                 }
@@ -400,9 +400,9 @@ struct WorkspaceTopicReadingView: View {
                                 Text("后来：" + connection.update.currentQuote).textSelection(.enabled)
                                 Button("查看后来的表达") { openSource(connection.sourceID) }.buttonStyle(.workspaceQuietCompact)
                                 Text("关联依据：" + connection.update.reason).foregroundStyle(.secondary).textSelection(.enabled)
-                            }.padding(.top,10)
+                            }.padding(.top,12)
                         }.vosFont(WorkspaceText.meta)
-                    }.padding(.vertical,17)
+                    }.padding(.vertical,16)
                     if connection.id != (mode == "概览" ? Array(connections.prefix(3)) : connections).last?.id { Divider() }
                 }
             }
@@ -450,7 +450,7 @@ struct WorkspaceTopicReadingView: View {
         if !entries.isEmpty {
             WorkspaceSection(title:"你留下的认识与实践",icon:"quote.bubble",count:entries.count) {
                 ForEach(entries) { entry in
-                    VStack(alignment:.leading,spacing:10) {
+                    VStack(alignment:.leading,spacing:12) {
                         Text(entry.kind.label + " · " + date(entry.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         WorkspaceExpandableText(text:entry.text,label:"完整记录",size:WorkspaceText.body.size)
                         if !entry.unavailableSourceIDs.isEmpty { Text("部分关联材料已暂停使用，此处保留当时的表达。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
@@ -472,28 +472,28 @@ struct WorkspaceTopicReadingView: View {
 
     private func taskButton(_ action:ActionRecord) -> some View {
         Button { openTask(action.id) } label: {
-            HStack(alignment:.top,spacing:11) {
+            HStack(alignment:.top,spacing:12) {
                 Image(systemName:action.state == "completed" ? "checkmark.circle.fill" : action.kind == "task" ? "circle" : "lightbulb").foregroundStyle(palette.action)
-                VStack(alignment:.leading,spacing:5) {
+                VStack(alignment:.leading,spacing:4) {
                     Text(action.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
                     Text(model.workspaceExternalCompletionNote(action) ?? model.workspaceActionStatus(action)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
                 Spacer(minLength:0)
                 Image(systemName:"chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             }.padding(10).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
-                .workspaceHoverHighlight(cornerRadius:10)
+                .workspaceHoverHighlight(cornerRadius:WorkspaceMetrics.panelRadius)
         }.buttonStyle(.plain)
     }
 
     private func outcomeCard(_ outcome:ActionFeedbackRecord) -> some View {
-        VStack(alignment:.leading,spacing:9) {
+        VStack(alignment:.leading,spacing:8) {
             Label("你的实际记录 · " + date(outcome.createdAt),systemImage:"quote.bubble").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             if let action=reading.actionsByID[outcome.actionID] {
                 Button("回应的行动：" + action.title) { openTask(action.id) }.buttonStyle(.workspaceQuietCompact)
             }
             WorkspaceExpandableText(text:outcome.text,label:"结果记录",size:WorkspaceText.body.size)
             Button("查看记录来源") { openSource(outcome.recordingSourceID ?? outcome.sourceID) }.buttonStyle(.workspaceQuietCompact)
-        }.padding(15).frame(maxWidth:.infinity,alignment:.leading).background(palette.outcome.opacity(0.07),in:RoundedRectangle(cornerRadius:10)).padding(.vertical,8)
+        }.padding(16).frame(maxWidth:.infinity,alignment:.leading).background(palette.outcome.opacity(0.07),in:RoundedRectangle(cornerRadius:WorkspaceMetrics.panelRadius)).padding(.vertical,8)
     }
 
     private func deliveryButton(_ result:AssistantExecutionRecord) -> some View {
@@ -551,7 +551,7 @@ struct WorkspaceTopicTile: View {
     var body: some View {
         Button(action:open) {
             WorkspaceCard {
-                VStack(alignment:.leading,spacing:15) {
+                VStack(alignment:.leading,spacing:16) {
                     HStack {
                         Image(systemName:"circle.hexagongrid").vosFont(18).foregroundStyle(palette.action)
                         Spacer()
@@ -568,7 +568,7 @@ struct WorkspaceTopicTile: View {
                             .lineLimit(scale >= 1.3 ? 3 : 2)
                     }
                     Spacer(minLength:0)
-                    HStack(spacing:15) {
+                    HStack(spacing:16) {
                         Label("\(sourceCount) 份材料",systemImage:"doc.text")
                         if let count=topic.organization?.sections?.count { Label("\(count) 个小主题",systemImage:"square.grid.2x2") }
                     }.vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
