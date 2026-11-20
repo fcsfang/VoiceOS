@@ -189,14 +189,14 @@ struct WeeklyReviewView: View {
 
     @ViewBuilder
     private func summaryStat(_ title: String, count: Int, target: String, isLink: Bool, proxy: ScrollViewProxy) -> some View {
-        let label = Text(title + " ") + Text("\(count)").monospacedDigit()
+        let label = Text("\(title) \(count)")
         if isLink {
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { proxy.scrollTo(target, anchor: .top) }
             } label: {
                 label
             }
-            .buttonStyle(.workspaceQuietCompact)
+            .buttonStyle(WorkspaceButtonStyle(emphasis: .quiet, compact: true, monospacedDigit: true))
             .help("跳到「\(title) \(count)」所在区块")
         } else {
             label.vosFont(WorkspaceText.meta.size, weight: .medium, monospacedDigit: true)

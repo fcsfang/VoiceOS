@@ -441,9 +441,10 @@ struct WorkspaceButtonStyle: ButtonStyle {
     enum Emphasis { case primary, secondary, quiet, destructive }
     var emphasis: Emphasis = .secondary
     var compact = false
+    var monospacedDigit = false
 
     func makeBody(configuration: Configuration) -> some View {
-        WorkspaceButtonBody(configuration: configuration, emphasis: emphasis, compact: compact)
+        WorkspaceButtonBody(configuration: configuration, emphasis: emphasis, compact: compact, monospacedDigit: monospacedDigit)
     }
 }
 
@@ -453,13 +454,14 @@ private struct WorkspaceButtonBody: View {
     let configuration: ButtonStyle.Configuration
     let emphasis: WorkspaceButtonStyle.Emphasis
     let compact: Bool
+    let monospacedDigit: Bool
     @State private var hovered = false
 
     private var radius: CGFloat { 7 }
 
     var body: some View {
         configuration.label
-            .vosFont(WorkspaceText.meta.size + 0.5, weight: .medium)
+            .vosFont(WorkspaceText.meta.size + 0.5, weight: .medium, monospacedDigit: monospacedDigit)
             .lineLimit(1)
             .minimumScaleFactor(0.85)
             .padding(.horizontal, compact ? 9 : 12)
@@ -524,8 +526,7 @@ struct WorkspaceBadge: View {
 
     var body: some View {
         Text(text)
-            .monospacedDigit()
-            .vosFont(WorkspaceText.caption.size, weight: .semibold)
+            .vosFont(WorkspaceText.caption.size, weight: .semibold, monospacedDigit: true)
             .lineLimit(1)
             .minimumScaleFactor(0.8)
             .foregroundStyle(foreground)
@@ -610,7 +611,7 @@ struct WorkspaceSectionHeading<Trailing: View>: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(title).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             if let count {
-                Text(count).monospacedDigit().vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+                Text(count).vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.tertiaryText)
             }
             Spacer(minLength: 8)
             trailing()
