@@ -370,8 +370,8 @@ final class SearchIndexChecks: XCTestCase {
         let result = try await store.searchAll(query: "复盘", perKindLimit: 20)
         XCTAssertEqual(result.hits(for: .claim).map(\.refID), [currentClaim])
         XCTAssertEqual(result.total(for: .claim), 1)
-        XCTAssertEqual(result.hits(for: .action).map(\.refID), [openAction])
-        XCTAssertEqual(result.total(for: .action), 1)
+        XCTAssertEqual(Set(result.hits(for: .action).map(\.refID)), Set([openAction, completedAction, frozenAction]))
+        XCTAssertEqual(result.total(for: .action), 3)
     }
 
     func testPerKindLimitAppliesAfterFiltering() async throws {

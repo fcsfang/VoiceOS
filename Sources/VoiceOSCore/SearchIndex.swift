@@ -108,7 +108,7 @@ extension VoiceOSStore {
         LEFT JOIN actions ac ON ranked.kind='action' AND ac.id=ranked.ref_id
         LEFT JOIN reflection_questions rq ON ranked.kind='topic' AND rq.id=ranked.ref_id
         WHERE (ranked.kind!='claim' OR (cl.validity='current' AND COALESCE(cr.decision,'pending')!='rejected'))
-          AND (ranked.kind!='action' OR (ac.state='open' AND ac.validity='current'))
+          AND (ranked.kind!='action' OR ac.id IS NOT NULL)
         ORDER BY CASE WHEN julianday(COALESCE(src.created_at, cl.created_at, ac.created_at, rq.updated_at)) >= julianday('now', '-30 days') THEN ranked.score * 1.05 ELSE ranked.score END,
                  ranked.ref_id
         """, [tokens.matchExpression] + tokens.filterBinds).map(decodeSearchRow)
@@ -130,7 +130,7 @@ extension VoiceOSStore {
         LEFT JOIN reflection_questions rq ON s.kind='topic' AND rq.id=s.ref_id
         WHERE \(tokens.filterClause(qualifyingWith: "s."))
           AND (s.kind!='claim' OR (cl.validity='current' AND COALESCE(cr.decision,'pending')!='rejected'))
-          AND (s.kind!='action' OR (ac.state='open' AND ac.validity='current'))
+          AND (s.kind!='action' OR ac.id IS NOT NULL)
         ORDER BY CASE WHEN instr(s.title, ?) > 0 THEN 0 ELSE 1 END,
                  julianday(COALESCE(src.created_at, cl.created_at, ac.created_at, rq.updated_at)) DESC,
                  s.ref_id
