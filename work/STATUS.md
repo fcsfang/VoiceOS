@@ -712,3 +712,9 @@
 - 115-C 标题层级：处理条标题 rowTitle + 副标题 meta（条高约 +3pt，lineLimit 保持）；全景面板「问题与联系列表/候选联系」rowTitle→sectionTitle（340pt 侧栏换行核过）；监测计数四处等宽（分组标题 12 semibold 有意保留）。
 - 集成：669 项 0 失败。
 - 留档隐患：WorkspaceDesign.swift:613 的 `Text.monospacedDigit()` 后接 vosFont 会被 `content.font(...)` 覆盖，疑似等宽失效；列入 116 波清理。
+
+## 安装批次（2026-11-20 17:38，波 115）
+
+- dist 重建 exit 0；preflight 0（safe idle=216s）；重启安装。
+- 交付：波 115（数字列等宽、摘要字号回落 meta、处理条与全景面板标题层级）。
+- 波 116（等宽覆盖清理、备份与设置后台任务忙标志、材料/助手/来源开关保护）施工中。
