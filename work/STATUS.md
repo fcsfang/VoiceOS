@@ -859,3 +859,8 @@
 - 131-A 设置页：8 个区块各自包进组（组内 controlPadding 12），组间保持 sectionGap 28；页面标题不入组。控件、顺序、文案零改动（脚本剥壳逐行比对 163 行相等）。
 - 131-B 只读库：`ReadOnlyLibrary.displayTitle` 与应用同漏斗——manual 原样、automatic 过 MaterialTitleText.normalizedGenerated、回退 MaterialNaming.displayName；CLI/agent 不再拿到原始 ISO 名或超长带 markdown 的 AI 标题。新增 4 形态行为测试（经 library.actions 的 sourceTitle 断言）。
 - 集成：722 tests 全绿（build_exit=0 / test_exit=0）。
+## 波 132：主题页层级、分隔线全仓收口、全景/材料/启动/引导（2026-11-21，已推送）
+- 132-A 主题页：「线索」「尚未归入主题的材料」两区块头部改 WorkspaceSectionHeading + 发丝线（与「主题材料」同构），计数纯数字，AI 归组按钮入 trailing；列表行间条件分隔线；去重结果提为局部常量。
+- 132-B 分隔线：全仓 86 处裸 `Divider()` 替换为 `WorkspaceListDivider`（24 文件），19 处保留（菜单内容 10、竖向面板分隔 8、工具条 1），脚本断言替换+保留=全部命中并入库；ReflectionGraphView:117 的 overlay 线色随之统一到 border。
+- 132-C 页面：全景删除重复页头、picker 与页面统一 pagePadding 32、大纲浮层区块头与间距收口、阅读流 AI 免责三处留一处 badge；材料页分组缝 6→0（Header 自带内边距）、未读/在读空态机制说明删除、今日阅读与日常材料同壳、回收站长尾移入 .help；启动页空态 WorkspaceEmptyState、历史行 padding 18→10/间距 6→3、区块改 WorkspaceListSection、三连句压缩；引导卡 padding 28→24、步骤间距 token 化、「开始前检查」小节头规范化。
+- 集成：722 tests 全绿（build_exit=0 / test_exit=0）。
