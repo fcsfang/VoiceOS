@@ -239,7 +239,7 @@ struct TextCaptureView: View {
             }
             HStack {
                 Spacer()
-                Button("取消") { showingTemplateName = false }.buttonStyle(.workspaceSecondary)
+                Button("取消") { showingTemplateName = false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Button(templateSaving ? "正在保存…" : "保存") { Task { await saveTemplate() } }
                     .buttonStyle(.workspacePrimary)
                     .disabled(templateSaving || templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -283,7 +283,7 @@ struct TextCaptureView: View {
             Text("只支持 http 或 https 链接。抓取成功后填入当前草稿；当前草稿不为空时会先确认替换。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             TextField("https://…", text: $linkText).workspaceFieldSurface().accessibilityLabel("网页链接")
             HStack {
-                Button("取消") { showingLinkPrompt = false }.buttonStyle(.workspaceSecondary)
+                Button("取消") { showingLinkPrompt = false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("抓取正文") { importLink() }.buttonStyle(.workspacePrimary)
             }

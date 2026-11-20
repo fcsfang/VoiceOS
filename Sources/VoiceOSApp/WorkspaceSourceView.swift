@@ -1620,7 +1620,7 @@ struct WorkspaceTranscriptEditor:View {
             TextEditor(text:$text).frame(minHeight:300).workspaceEditorSurface()
             if !failure.isEmpty { Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             HStack {
-                Button("取消",action:close).buttonStyle(.workspaceSecondary)
+                Button("取消",action:close).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(saving ? "正在保存…" : "保存更正") { save() }
                     .buttonStyle(.workspacePrimary)
@@ -1665,7 +1665,7 @@ struct ClaimCorrectionView:View {
             TextField("更正原因",text:$note)
             if !failure.isEmpty { Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             HStack {
-                Button("取消",action:dismiss).buttonStyle(.workspaceSecondary)
+                Button("取消",action:dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(saving ? "正在更新…" : "更新理解") { save() }
                     .buttonStyle(.workspacePrimary)

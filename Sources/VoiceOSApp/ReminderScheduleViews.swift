@@ -65,7 +65,7 @@ struct ActionScheduleEditor: View {
             Text("这是你在控制中心作出的期限选择，先仅本地保存。外部期限有差异时，需查看具体改期并确认；不会因为保存而自动修改提醒事项。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
-                Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).disabled(saving)
+                Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(saving)
                 Spacer()
                 Button(saving ? "正在保存…" : "保存本地期限") {
                     do {
@@ -111,7 +111,7 @@ struct ReminderScheduleConfirmationView: View {
             Text("确认不代表任务已完成或观点已验证。可以撤回后续写入许可；已派发的变更不能因此自动撤销。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
-                Button("暂不修改", action: dismiss).buttonStyle(.workspaceSecondary).disabled(saving)
+                Button("暂不修改", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(saving)
                 Spacer()
                 Button(saving ? "正在处理…" : "确认并执行这一次改期") {
                     saving = true; errorText = ""

@@ -437,7 +437,13 @@ struct ThoughtPanoramaView: View {
             .help("问题与联系列表 · 键盘与辅助阅读")
             .accessibilityLabel("问题与联系列表")
             .popover(isPresented: $showOutline) {
-                if let snapshot = state?.snapshot { outlinePanel(snapshot) }
+                if let snapshot = state?.snapshot {
+                    outlinePanel(snapshot)
+                } else {
+                    WorkspaceEmptyState(title: "还没有可显示的内容", systemImage: "list.bullet",
+                                        description: "完成生成与核对后，这里会列出问题与联系。")
+                        .frame(width: 340, height: 480)
+                }
             }
     }
 
@@ -680,9 +686,12 @@ struct ThoughtPanoramaView: View {
 
     private var coverage: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack { Text("完整材料与覆盖情况").vosFont(WorkspaceText.sectionTitle); Spacer(); Button("关闭") { showCoverage = false }.buttonStyle(.workspaceQuietCompact) }
+            HStack { Text("完整材料与覆盖情况").vosFont(WorkspaceText.sectionTitle); Spacer(); Button("关闭") { showCoverage = false }.buttonStyle(.workspaceQuietCompact).keyboardShortcut(.cancelAction) }
             if let state {
                 Text("\(state.input.units.count) 个完整单元 · \(state.input.sources.count) 份来源 · \(dependencyCount(state.input)) 份节目依赖 · \(state.input.claims.count) 条当前认识").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            } else {
+                WorkspaceEmptyState(title: "还没有可显示的内容", systemImage: "chart.pie",
+                                    description: "完成生成与核对后，这里会列出材料与覆盖情况。")
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
