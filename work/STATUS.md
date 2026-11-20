@@ -843,3 +843,7 @@
 - 接线：displayTitle（manual 仅 trim；automatic 过 normalizedGenerated；回退优先 derived，nil 保留 48 字兜底；链接特例不变）；落库清洗，清洗为空不落；标题提示词改为「通常 10–20 字、最多 24，说清在做什么，不复述开场口语」。
 - 已知边界：存量 AI 标题 >24 字会截断（多数 17–21 字不受影响）；只读 CLI 的 ReadOnlyLibrary.displayTitle 未纳入（列后续）。
 - 集成：716 tests 全绿（build_exit=0 / test_exit=0）。
+## 波 129：首页行标题独占一行（2026-11-21，已推送）
+- 128 后首页仍长短混排：行尾「N 条待办」胶囊占标题宽度，15 字 AI 标题被迫折行。
+- RecentContentHome 行结构改为固定两行：标题独占一行（普通字号 lineLimit 1，特大 2），「N 条待办」移入元数据行（「21:22 · 在读 · 1 条待办」，accent 计数）。
+- 集成：716 tests 全绿（build_exit=0 / test_exit=0）。

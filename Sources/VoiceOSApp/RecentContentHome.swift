@@ -253,15 +253,21 @@ struct RecentContentHome: View {
                 .frame(width: 28, height: 28).background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
+                // The title line belongs to the title alone. Every row reads one
+                // title line plus one metadata line, so density stays uniform.
                 Text(rowTitle(item)).vosFont(WorkspaceText.rowTitle)
-                    .foregroundStyle(palette.text).lineLimit(isLargeText ? 4 : 2).multilineTextAlignment(.leading)
-                Text(rowMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    .lineLimit(isLargeText ? 2 : 1)
+                    .foregroundStyle(palette.text).lineLimit(isLargeText ? 2 : 1).multilineTextAlignment(.leading)
+                HStack(spacing: 4) {
+                    Text(rowMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        .lineLimit(1)
+                    if let trailing = rowTrailing(item) {
+                        Text("·").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        Text(trailing).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                            .lineLimit(1)
+                    }
+                }
             }
-            Spacer(minLength: 6)
-            if let trailing = rowTrailing(item) {
-                WorkspaceBadge(text: trailing, tone: .accent).padding(.top, 1)
-            }
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .homeCard(isSelected: isSelected)
