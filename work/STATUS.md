@@ -812,3 +812,8 @@
 - 仓库 .mcp.json 提供项目级注册；README 给 claude mcp add 全局注册示例。
 - 集成：696 项 0 失败。CLI 已刷新安装到 ~/.local/bin/voiceos-cli（含 action feedback/complete）。
 - 已知限制：voiceos_actions_list 不暴露 topics（CLI 列表分支不接受该参数）；写命令 e2e 以隔离实例验证为准。
+
+## CLI 冒烟与 MCP 注册（2026-11-20 深夜）
+
+- voiceos-cli 全新版安装到 ~/.local/bin；`action feedback` 对不存在 id 直接 not_found（exit 2，未投递）；`action complete` 对已完成行动经真实 app 投递，1 秒内 observed，state=completed、version 未变（幂等无新修订），exit 0。URL 通道在正式 bundle 上打通且零数据变更。
+- `claude mcp add voiceos -- python3 Tools/voiceos-mcp/server.py` 已注册（项目级，写入 ~/.claude.json 本仓库条目）。
