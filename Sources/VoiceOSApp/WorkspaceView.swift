@@ -1829,168 +1829,184 @@ struct WorkspaceView: View {
     private var settings: some View {
         VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(title:"设置")
-            sectionTitle("模型与服务")
-            WorkspaceRow(title:"语音转文字",subtitle:model.speechSummary,icon:"waveform") { model.chooseLocalSpeech() }
-            WorkspaceRow(title:"理解、核对与 AI 助理",subtitle:model.textModelConfigured ? model.modelSummary : "尚未配置文本模型",icon:"sparkles") { model.chooseTextModel() }
-                .help(model.modelConfigurationPath ?? "选择本地的 .env 或模型 JSON 配置文件；配置后这里显示文件名")
-                .contextMenu {
-                    Button("更换配置…") { model.chooseTextModel() }
-                    Button("清除配置", role: .destructive) { model.clearTextModel() }.disabled(!model.modelConfigured)
-                }
-            sectionTitle("隐私与云端")
-            VStack(alignment: .leading, spacing: 8) {
-                Text("只在本机：录音与原件、资料库、模型密钥、QQ 密钥文件")
-                    .vosFont(WorkspaceText.body)
-                Text("会发送给模型：转写与材料文本；监测原文仅在授权后；英文反馈仅所选文字；任务发起仅那段文字")
-                    .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                DisclosureGroup("详细说明") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("录音、原件与资料库保存在本机，不上传。")
-                        Text("模型密钥只在本机读取，不随材料发送；整个资料库不会发送。")
-                        Text("QQ 密钥文件只保存路径；内容不复制、不进日志或模型。")
-                        Text("转写与材料文本会发送给已配置的文本模型做理解、核对与整理。")
-                        Text("监测原文默认不发送；开启「允许云端分析监测内容」后才发送所选来源的新增原文。")
-                        Text("英文反馈只发送你选中的那段文字；任务发起只发送任务描述那段文字。")
+            VStack(alignment:.leading,spacing: WorkspaceMetrics.controlPadding) {
+                sectionTitle("模型与服务")
+                WorkspaceRow(title:"语音转文字",subtitle:model.speechSummary,icon:"waveform") { model.chooseLocalSpeech() }
+                WorkspaceRow(title:"理解、核对与 AI 助理",subtitle:model.textModelConfigured ? model.modelSummary : "尚未配置文本模型",icon:"sparkles") { model.chooseTextModel() }
+                    .help(model.modelConfigurationPath ?? "选择本地的 .env 或模型 JSON 配置文件；配置后这里显示文件名")
+                    .contextMenu {
+                        Button("更换配置…") { model.chooseTextModel() }
+                        Button("清除配置", role: .destructive) { model.clearTextModel() }.disabled(!model.modelConfigured)
                     }
-                    .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
-                    .padding(.top, 8)
-                }
-                .vosFont(WorkspaceText.meta)
             }
-            .frame(maxWidth: 620, alignment: .leading)
-            sectionTitle("连接与自动入口")
-            WorkspaceRow(title:"自动接收录音",subtitle:"VoiceOS 收件箱与语音备忘录",icon:"tray.and.arrow.down") { go(.tool("自动入口")) }
-            WorkspaceRow(title:"消息监测",subtitle:"QQ 群与学院官网 · 检查时间、推送与依赖",icon:"antenna.radiowaves.left.and.right") { model.monitorSettingsRequested = true; go(.monitor) }
-            WorkspaceRow(title:"Apple 提醒事项",subtitle:reminderConnectionStatus,icon:"checklist") { Task { await model.connectReminders() } }
-            if !model.reminderLastError.isEmpty {
-                WorkspaceNoticeText(message:"最近一次提醒事项操作失败：" + model.reminderLastError,severity:.warning)
-            }
-            if model.remindersPermissionDenied { Button("打开系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!) }.buttonStyle(.workspaceSecondary) }
-            if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } }.buttonStyle(.workspaceSecondary) }
-            if let reminderReviewCount {
-                Button { go(.tool("处理情况")) } label: {
-                    HStack(spacing:12) {
-                        WorkspaceBadge(text:"\(reminderReviewCount) 条提醒待核对", tone:.warning)
-                        Text("去核对")
+            VStack(alignment:.leading,spacing: WorkspaceMetrics.controlPadding) {
+                sectionTitle("隐私与云端")
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("只在本机：录音与原件、资料库、模型密钥、QQ 密钥文件")
+                        .vosFont(WorkspaceText.body)
+                    Text("会发送给模型：转写与材料文本；监测原文仅在授权后；英文反馈仅所选文字；任务发起仅那段文字")
+                        .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                    DisclosureGroup("详细说明") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("录音、原件与资料库保存在本机，不上传。")
+                            Text("模型密钥只在本机读取，不随材料发送；整个资料库不会发送。")
+                            Text("QQ 密钥文件只保存路径；内容不复制、不进日志或模型。")
+                            Text("转写与材料文本会发送给已配置的文本模型做理解、核对与整理。")
+                            Text("监测原文默认不发送；开启「允许云端分析监测内容」后才发送所选来源的新增原文。")
+                            Text("英文反馈只发送你选中的那段文字；任务发起只发送任务描述那段文字。")
+                        }
+                        .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                        .padding(.top, 8)
                     }
+                    .vosFont(WorkspaceText.meta)
                 }
-                .buttonStyle(.workspaceQuietCompact)
-                .accessibilityLabel("\(reminderReviewCount) 条提醒待核对，去核对")
+                .frame(maxWidth: 620, alignment: .leading)
             }
-            VStack(alignment:.leading,spacing:6) {
-                Label("麦克风",systemImage:"mic").vosFont(WorkspaceText.rowTitle)
-                Text(microphoneStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-            }
-            .task { model.refreshMicrophoneAuthorization() }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                model.refreshMicrophoneAuthorization()
-            }
-            if model.microphoneAuthorization == .notDetermined {
-                Button("授权麦克风") { Task { _ = await model.requestMicrophoneAccess() } }.buttonStyle(.workspacePrimary)
-            } else if model.microphoneAuthorization == .denied {
-                Button("打开系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!) }.buttonStyle(.workspaceSecondary)
-            }
-            WorkspaceRow(title:"系统通知",subtitle:model.noticeAuthorizationDetail,icon:"bell") { model.openNoticeSettings() }
-                .task { await model.refreshNoticeAuthorization() }
-            if model.noticeAuthorization == .denied { Button("打开系统通知设置") { model.openNoticeSettings() }.buttonStyle(.workspaceSecondary) }
-            Toggle("登录时启动", isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLogin($0) }))
-                .toggleStyle(.switch).frame(maxWidth: 360, alignment: .leading)
-            Text(model.launchAtLoginStatus).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-            sectionTitle("外观")
-            HStack(spacing:12) {
-                ForEach(WorkspaceTheme.allCases) { option in
-                    WorkspaceThemeOption(theme:option,selected:theme == option) { theme=option }
+            VStack(alignment:.leading,spacing: WorkspaceMetrics.controlPadding) {
+                sectionTitle("连接与自动入口")
+                WorkspaceRow(title:"自动接收录音",subtitle:"VoiceOS 收件箱与语音备忘录",icon:"tray.and.arrow.down") { go(.tool("自动入口")) }
+                WorkspaceRow(title:"消息监测",subtitle:"QQ 群与学院官网 · 检查时间、推送与依赖",icon:"antenna.radiowaves.left.and.right") { model.monitorSettingsRequested = true; go(.monitor) }
+                WorkspaceRow(title:"Apple 提醒事项",subtitle:reminderConnectionStatus,icon:"checklist") { Task { await model.connectReminders() } }
+                if !model.reminderLastError.isEmpty {
+                    WorkspaceNoticeText(message:"最近一次提醒事项操作失败：" + model.reminderLastError,severity:.warning)
                 }
-            }.frame(maxWidth:560)
-            Picker("文字大小",selection:Binding(get:{ model.textSize },set:{ model.setTextSize($0) })) {
-                ForEach(AppTextSize.allCases) { option in Text(option.label).tag(option) }
-            }.pickerStyle(.segmented).frame(maxWidth:360)
-            sectionTitle("键盘快捷键")
-            VStack(alignment:.leading,spacing:8) {
-                Text("列表聚焦时：↑↓ 选择 · ↵ 打开 · x 完成 · z 不再跟进")
-                Text("任务详情：x 或空格 完成 · s 改期 · f 记结果")
-                Text("⌥⌘Z 撤销 · 仅本次运行")
-                Text("口述、剪贴板、速记、导入与页面切换在菜单栏的「记录」与「显示」菜单。")
-            }.vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-            if model.dictationHotKeyConflict {
-                Text("快捷键 ⌥⌘D 被其它应用占用；口述仍可从菜单栏开始。请在系统设置 › 键盘 › 键盘快捷键中查看冲突，或退出占用它的应用后重启 VoiceOS。")
-                    .vosFont(WorkspaceText.caption).foregroundStyle(palette.warning)
-            }
-            Button("再看一次引导") { model.onboardingRequested = true }.buttonStyle(.workspaceSecondary)
-            sectionTitle("资料与历史")
-            HStack(spacing:12) {
-                Button("导出结构化资料") { model.export(includeMedia:false) }.buttonStyle(.workspaceSecondary)
-                Button("导出资料与原件") { model.export(includeMedia:true) }.buttonStyle(.workspaceSecondary)
-                if model.exporting { ProgressView("正在导出…").controlSize(.small) }
-            }.disabled(model.exporting)
-            HStack(spacing:12) {
-                Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                Button(model.backupRunning ? "正在备份…" : "重试备份") { model.retryBackup() }
-                    .buttonStyle(.workspaceSecondaryCompact)
-                    .disabled(model.backupRunning || model.libraryRoot == nil)
-                if model.backupRunning { ProgressView().controlSize(.mini).accessibilityHidden(true) }
-                Button("在访达中显示") { model.revealBackups() }.buttonStyle(.workspaceQuietCompact)
-            }
-            HStack(spacing:12) {
-                Text("保留份数").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                Picker("保留份数", selection: $backupRetention) {
-                    Text("3 份").tag(3); Text("7 份").tag(7); Text("14 份").tag(14)
-                }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
-                Button(model.backupPruning ? "正在清理…" : "立即清理旧备份") { model.cleanupOldBackups(retain: backupRetention) }
-                    .buttonStyle(.workspaceSecondaryCompact).disabled(model.backupPruning || model.libraryRoot == nil)
-            }.help("保留份数在下次备份或立即清理时生效。")
-            if !model.backupCleanupStatus.isEmpty {
-                Text(model.backupCleanupStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-            }
-            HStack(spacing:12) {
-                Button(model.checkingLibraryHealth ? "正在检查资料库…" : "检查资料库") { model.checkLibraryHealth() }.buttonStyle(.workspaceSecondary).disabled(model.checkingLibraryHealth || model.libraryRoot == nil)
-                Button("从最近备份新建资料库") { showingBackupRestore = true }.buttonStyle(.workspaceSecondary).disabled(model.lastBackupAt == nil || model.libraryRoot == nil)
-            }
-            if !model.libraryHealthText.isEmpty {
-                Text(model.libraryHealthText).vosFont(WorkspaceText.meta)
-                    .foregroundStyle(model.libraryHealthProblem ? palette.warning : palette.secondaryText)
-                    .textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
-            }
-            HStack { Button("打开已有资料库") { chooseLibrary() }.buttonStyle(.workspaceSecondary);Button("从迁移包恢复") { go(.tool("恢复资料")) }.buttonStyle(.workspaceSecondary) }
-            sectionTitle("存储与清理")
-            VStack(alignment:.leading,spacing:8) {
-                storageLine("资料库（含 WAL）", storageReadout { $0.databaseBytes })
-                storageLine("原件", storageReadout { $0.assetsBytes })
-                storageLine("备份", storageReadout { $0.backupBytes },
-                            detail: model.storageUsage.flatMap { $0.backupBytes == nil ? nil : "\($0.backupCount) 份" })
-                storageLine("本地语音模型", storageReadout { $0.localSpeechBytes })
-                storageLine("镜像", storageReadout { $0.mirrorBytes })
-                Divider().frame(maxWidth:420)
-                storageLine("合计", storageReadout { $0.totalBytes }, emphasized:true)
-            }
-            if model.storageScanBusy { ProgressView("正在统计存储…").controlSize(.small) }
-            HStack(spacing:12) {
-                Button("在访达中显示资料库") { model.revealLibraryRoot() }.buttonStyle(.workspaceQuietCompact)
-                Button(model.localSpeechDeleting ? "正在删除…" : "删除本地语音模型") { confirmingLocalSpeechDelete = true }
-                    .buttonStyle(.workspaceDestructive)
-                    .disabled(model.localSpeechDeleting || model.speechModelBusy || (model.storageUsage?.localSpeechBytes ?? 0) == 0)
-                    .help(model.speechModelBusy ? "转录或录音进行中，结束后再删除" : "删除 LocalSpeech 中的本地 Qwen 模型文件")
-            }
-            if !model.localSpeechDeleteStatus.isEmpty {
-                Text(model.localSpeechDeleteStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-            }
-            sectionTitle("回顾与查找")
-            WorkspaceRow(title:"静默回顾",subtitle:"看到相关原文",icon:"text.bubble") { go(.tool("静默回顾")) }
-            WorkspaceRow(title:"查找历史文字",subtitle:"按关键词查找",icon:"text.magnifyingglass") { go(.tool("查找历史文字")) }
-            WorkspaceRow(title:"英文表达反馈",subtitle:"英文原话反馈",icon:"character.book.closed") { go(.tool("英文表达反馈")) }
-            DisclosureGroup("其他工作与维护") {
-                VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
-                    Button("思想关联、目标下一步与英语反馈") { go(.tool("思想与下一步")) }.buttonStyle(.workspaceQuietCompact)
-                    Button("纠错后的行动影响") { go(.tool("纠错影响")) }.buttonStyle(.workspaceQuietCompact)
-                    Button("表达处理与重试") { go(.tool("处理情况")) }.buttonStyle(.workspaceQuietCompact)
-                    HStack(spacing:8) {
-                        Button(model.organizingTopics ? "正在重新整理…" : "重新整理主题与简报") { model.queueTopicOrganization(retry:true) }
-                            .buttonStyle(.workspaceQuietCompact)
-                            .disabled(model.organizingTopics)
-                        if model.organizingTopics { ProgressView().controlSize(.mini).accessibilityHidden(true) }
+                if model.remindersPermissionDenied { Button("打开系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!) }.buttonStyle(.workspaceSecondary) }
+                if model.reminderAccess?.enabled == true { Button("暂停提醒事项连接") { Task { await model.disconnectReminders() } }.buttonStyle(.workspaceSecondary) }
+                if let reminderReviewCount {
+                    Button { go(.tool("处理情况")) } label: {
+                        HStack(spacing:12) {
+                            WorkspaceBadge(text:"\(reminderReviewCount) 条提醒待核对", tone:.warning)
+                            Text("去核对")
+                        }
                     }
-                    Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
-                }.padding(.top,16)
+                    .buttonStyle(.workspaceQuietCompact)
+                    .accessibilityLabel("\(reminderReviewCount) 条提醒待核对，去核对")
+                }
+                VStack(alignment:.leading,spacing:6) {
+                    Label("麦克风",systemImage:"mic").vosFont(WorkspaceText.rowTitle)
+                    Text(microphoneStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                }
+                .task { model.refreshMicrophoneAuthorization() }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    model.refreshMicrophoneAuthorization()
+                }
+                if model.microphoneAuthorization == .notDetermined {
+                    Button("授权麦克风") { Task { _ = await model.requestMicrophoneAccess() } }.buttonStyle(.workspacePrimary)
+                } else if model.microphoneAuthorization == .denied {
+                    Button("打开系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!) }.buttonStyle(.workspaceSecondary)
+                }
+                WorkspaceRow(title:"系统通知",subtitle:model.noticeAuthorizationDetail,icon:"bell") { model.openNoticeSettings() }
+                    .task { await model.refreshNoticeAuthorization() }
+                if model.noticeAuthorization == .denied { Button("打开系统通知设置") { model.openNoticeSettings() }.buttonStyle(.workspaceSecondary) }
+                Toggle("登录时启动", isOn: Binding(get: { model.launchAtLoginEnabled }, set: { model.setLaunchAtLogin($0) }))
+                    .toggleStyle(.switch).frame(maxWidth: 360, alignment: .leading)
+                Text(model.launchAtLoginStatus).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+            }
+            VStack(alignment:.leading,spacing: WorkspaceMetrics.controlPadding) {
+                sectionTitle("外观")
+                HStack(spacing:12) {
+                    ForEach(WorkspaceTheme.allCases) { option in
+                        WorkspaceThemeOption(theme:option,selected:theme == option) { theme=option }
+                    }
+                }.frame(maxWidth:560)
+                Picker("文字大小",selection:Binding(get:{ model.textSize },set:{ model.setTextSize($0) })) {
+                    ForEach(AppTextSize.allCases) { option in Text(option.label).tag(option) }
+                }.pickerStyle(.segmented).frame(maxWidth:360)
+            }
+            VStack(alignment:.leading,spacing: WorkspaceMetrics.controlPadding) {
+                sectionTitle("键盘快捷键")
+                VStack(alignment:.leading,spacing:8) {
+                    Text("列表聚焦时：↑↓ 选择 · ↵ 打开 · x 完成 · z 不再跟进")
+                    Text("任务详情：x 或空格 完成 · s 改期 · f 记结果")
+                    Text("⌥⌘Z 撤销 · 仅本次运行")
+                    Text("口述、剪贴板、速记、导入与页面切换在菜单栏的「记录」与「显示」菜单。")
+                }.vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                if model.dictationHotKeyConflict {
+                    Text("快捷键 ⌥⌘D 被其它应用占用；口述仍可从菜单栏开始。请在系统设置 › 键盘 › 键盘快捷键中查看冲突，或退出占用它的应用后重启 VoiceOS。")
+                        .vosFont(WorkspaceText.caption).foregroundStyle(palette.warning)
+                }
+                Button("再看一次引导") { model.onboardingRequested = true }.buttonStyle(.workspaceSecondary)
+            }
+            VStack(alignment:.leading,spacing: WorkspaceMetrics.controlPadding) {
+                sectionTitle("资料与历史")
+                HStack(spacing:12) {
+                    Button("导出结构化资料") { model.export(includeMedia:false) }.buttonStyle(.workspaceSecondary)
+                    Button("导出资料与原件") { model.export(includeMedia:true) }.buttonStyle(.workspaceSecondary)
+                    if model.exporting { ProgressView("正在导出…").controlSize(.small) }
+                }.disabled(model.exporting)
+                HStack(spacing:12) {
+                    Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Button(model.backupRunning ? "正在备份…" : "重试备份") { model.retryBackup() }
+                        .buttonStyle(.workspaceSecondaryCompact)
+                        .disabled(model.backupRunning || model.libraryRoot == nil)
+                    if model.backupRunning { ProgressView().controlSize(.mini).accessibilityHidden(true) }
+                    Button("在访达中显示") { model.revealBackups() }.buttonStyle(.workspaceQuietCompact)
+                }
+                HStack(spacing:12) {
+                    Text("保留份数").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    Picker("保留份数", selection: $backupRetention) {
+                        Text("3 份").tag(3); Text("7 份").tag(7); Text("14 份").tag(14)
+                    }.pickerStyle(.segmented).labelsHidden().frame(width: 220)
+                    Button(model.backupPruning ? "正在清理…" : "立即清理旧备份") { model.cleanupOldBackups(retain: backupRetention) }
+                        .buttonStyle(.workspaceSecondaryCompact).disabled(model.backupPruning || model.libraryRoot == nil)
+                }.help("保留份数在下次备份或立即清理时生效。")
+                if !model.backupCleanupStatus.isEmpty {
+                    Text(model.backupCleanupStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                }
+                HStack(spacing:12) {
+                    Button(model.checkingLibraryHealth ? "正在检查资料库…" : "检查资料库") { model.checkLibraryHealth() }.buttonStyle(.workspaceSecondary).disabled(model.checkingLibraryHealth || model.libraryRoot == nil)
+                    Button("从最近备份新建资料库") { showingBackupRestore = true }.buttonStyle(.workspaceSecondary).disabled(model.lastBackupAt == nil || model.libraryRoot == nil)
+                }
+                if !model.libraryHealthText.isEmpty {
+                    Text(model.libraryHealthText).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(model.libraryHealthProblem ? palette.warning : palette.secondaryText)
+                        .textSelection(.enabled).fixedSize(horizontal:false,vertical:true)
+                }
+                HStack { Button("打开已有资料库") { chooseLibrary() }.buttonStyle(.workspaceSecondary);Button("从迁移包恢复") { go(.tool("恢复资料")) }.buttonStyle(.workspaceSecondary) }
+            }
+            VStack(alignment:.leading,spacing: WorkspaceMetrics.controlPadding) {
+                sectionTitle("存储与清理")
+                VStack(alignment:.leading,spacing:8) {
+                    storageLine("资料库（含 WAL）", storageReadout { $0.databaseBytes })
+                    storageLine("原件", storageReadout { $0.assetsBytes })
+                    storageLine("备份", storageReadout { $0.backupBytes },
+                                detail: model.storageUsage.flatMap { $0.backupBytes == nil ? nil : "\($0.backupCount) 份" })
+                    storageLine("本地语音模型", storageReadout { $0.localSpeechBytes })
+                    storageLine("镜像", storageReadout { $0.mirrorBytes })
+                    Divider().frame(maxWidth:420)
+                    storageLine("合计", storageReadout { $0.totalBytes }, emphasized:true)
+                }
+                if model.storageScanBusy { ProgressView("正在统计存储…").controlSize(.small) }
+                HStack(spacing:12) {
+                    Button("在访达中显示资料库") { model.revealLibraryRoot() }.buttonStyle(.workspaceQuietCompact)
+                    Button(model.localSpeechDeleting ? "正在删除…" : "删除本地语音模型") { confirmingLocalSpeechDelete = true }
+                        .buttonStyle(.workspaceDestructive)
+                        .disabled(model.localSpeechDeleting || model.speechModelBusy || (model.storageUsage?.localSpeechBytes ?? 0) == 0)
+                        .help(model.speechModelBusy ? "转录或录音进行中，结束后再删除" : "删除 LocalSpeech 中的本地 Qwen 模型文件")
+                }
+                if !model.localSpeechDeleteStatus.isEmpty {
+                    Text(model.localSpeechDeleteStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                }
+            }
+            VStack(alignment:.leading,spacing: WorkspaceMetrics.controlPadding) {
+                sectionTitle("回顾与查找")
+                WorkspaceRow(title:"静默回顾",subtitle:"看到相关原文",icon:"text.bubble") { go(.tool("静默回顾")) }
+                WorkspaceRow(title:"查找历史文字",subtitle:"按关键词查找",icon:"text.magnifyingglass") { go(.tool("查找历史文字")) }
+                WorkspaceRow(title:"英文表达反馈",subtitle:"英文原话反馈",icon:"character.book.closed") { go(.tool("英文表达反馈")) }
+                DisclosureGroup("其他工作与维护") {
+                    VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
+                        Button("思想关联、目标下一步与英语反馈") { go(.tool("思想与下一步")) }.buttonStyle(.workspaceQuietCompact)
+                        Button("纠错后的行动影响") { go(.tool("纠错影响")) }.buttonStyle(.workspaceQuietCompact)
+                        Button("表达处理与重试") { go(.tool("处理情况")) }.buttonStyle(.workspaceQuietCompact)
+                        HStack(spacing:8) {
+                            Button(model.organizingTopics ? "正在重新整理…" : "重新整理主题与简报") { model.queueTopicOrganization(retry:true) }
+                                .buttonStyle(.workspaceQuietCompact)
+                                .disabled(model.organizingTopics)
+                            if model.organizingTopics { ProgressView().controlSize(.mini).accessibilityHidden(true) }
+                        }
+                        Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                    }.padding(.top,16)
+                }
             }
         }
         .onAppear {
