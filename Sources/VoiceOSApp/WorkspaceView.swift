@@ -1844,7 +1844,10 @@ struct WorkspaceView: View {
             }.disabled(model.exporting)
             HStack(spacing:12) {
                 Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                Button("重试备份") { model.retryBackup() }.buttonStyle(.workspaceSecondaryCompact)
+                Button(model.backupRunning ? "正在备份…" : "重试备份") { model.retryBackup() }
+                    .buttonStyle(.workspaceSecondaryCompact)
+                    .disabled(model.backupRunning || model.libraryRoot == nil)
+                if model.backupRunning { ProgressView().controlSize(.mini) }
                 Button("在访达中显示") { model.revealBackups() }.buttonStyle(.workspaceQuietCompact)
             }
             HStack(spacing:12) {
@@ -1900,7 +1903,12 @@ struct WorkspaceView: View {
                     Button("思想关联、目标下一步与英语反馈") { go(.tool("思想与下一步")) }.buttonStyle(.workspaceQuietCompact)
                     Button("纠错后的行动影响") { go(.tool("纠错影响")) }.buttonStyle(.workspaceQuietCompact)
                     Button("表达处理与重试") { go(.tool("处理情况")) }.buttonStyle(.workspaceQuietCompact)
-                    Button("重新整理主题与简报") { model.queueTopicOrganization(retry:true) }.buttonStyle(.workspaceQuietCompact)
+                    HStack(spacing:8) {
+                        Button(model.organizingTopics ? "正在重新整理…" : "重新整理主题与简报") { model.queueTopicOrganization(retry:true) }
+                            .buttonStyle(.workspaceQuietCompact)
+                            .disabled(model.organizingTopics)
+                        if model.organizingTopics { ProgressView().controlSize(.mini) }
+                    }
                     Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                 }.padding(.top,16)
             }
@@ -1919,11 +1927,29 @@ struct WorkspaceView: View {
     @ViewBuilder private var processingIssues: some View {
         let catalog=recordCatalog
         ForEach(model.assistantAssessmentIssues) { issue in
-            VStack(alignment:.leading,spacing:8) { Text(issue.title);Text(issue.error).vosFont(WorkspaceText.meta).foregroundStyle(.secondary);Button("重新识别 AI 委托") { Task { await model.retryAssistantAssessment(issue) } }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("重新识别 AI 委托：" + issue.title) }
+            VStack(alignment:.leading,spacing:8) {
+                Text(issue.title);Text(issue.error).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                HStack(spacing:8) {
+                    Button(model.assistantBusy ? "正在重新识别…" : "重新识别 AI 委托") { Task { await model.retryAssistantAssessment(issue) } }
+                        .buttonStyle(.workspaceSecondaryCompact)
+                        .disabled(model.assistantBusy)
+                        .accessibilityLabel("重新识别 AI 委托：" + issue.title)
+                    if model.assistantBusy { ProgressView().controlSize(.mini) }
+                }
+            }
         }
         ForEach(model.recordingFollowups.filter { $0.state == "failed" }) { receipt in
             let title=displayTitle(model.sourcePageIndex.recordsByID[receipt.sourceID]?.displayTitle ?? "资料跟进")
-            VStack(alignment:.leading,spacing:8) { Text(title);Button("重试思想与下一步") { model.refreshFollowup(receipt.sourceID) }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("重试思想与下一步：" + title) }
+            VStack(alignment:.leading,spacing:8) {
+                Text(title)
+                HStack(spacing:8) {
+                    Button(model.followupBusy ? "正在重试…" : "重试思想与下一步") { model.refreshFollowup(receipt.sourceID) }
+                        .buttonStyle(.workspaceSecondaryCompact)
+                        .disabled(model.followupBusy)
+                        .accessibilityLabel("重试思想与下一步：" + title)
+                    if model.followupBusy { ProgressView().controlSize(.mini) }
+                }
+            }
         }
         ForEach(activeMaterials.filter { ["failed","blocked"].contains($0.jobState ?? "") }) { source in sourceRow(source,catalog:catalog) }
         ForEach(model.processingIntents.filter { [.blocked,.unknown].contains($0.state) }) { intent in

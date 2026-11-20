@@ -463,6 +463,7 @@ final class ControlCenter: ObservableObject {
     @Published var storageScanBusy = false
     @Published var backupCleanupStatus = ""
     @Published var backupPruning = false
+    @Published var backupRunning = false
     @Published var localSpeechDeleteStatus = ""
     @Published var localSpeechDeleting = false
     @Published var launchAtLoginEnabled = false
@@ -1411,10 +1412,13 @@ final class ControlCenter: ObservableObject {
         }
     }
     private func backupLibrary(at root: URL) {
+        guard !backupRunning else { return }
+        backupRunning = true
         let database = root.appendingPathComponent("voiceos.sqlite")
         let directory = root.appendingPathComponent("Backups", isDirectory: true)
         let retain = backupRetentionPreference
         Task.detached(priority: .utility) { [weak self] in
+            defer { Task { await MainActor.run { self?.backupRunning = false } } }
             do {
                 _ = try DatabaseBackup.createDailyIfNeeded(database: database, directory: directory, retain: retain)
                 DatabaseBackup.removeOrphanSidecars(directory: directory)
@@ -2370,8 +2374,11 @@ final class ControlCenter: ObservableObject {
             }
         }
     }
+    private var followupEnqueueing = Set<String>()
     func refreshFollowup(_ sourceID: String) {
+        guard followupEnqueueing.insert(sourceID).inserted else { return }
         Task {
+            defer { followupEnqueueing.remove(sourceID) }
             do { _ = try await store?.enqueueRecordingFollowup(sourceID: sourceID, retry: true); await refresh(.interactive); resumeRecordingFollowups() }
             catch { followupStatus = error.localizedDescription }
         }
@@ -4068,7 +4075,10 @@ final class ControlCenter: ObservableObject {
         do { if let url = try await store?.playableURL(sourceID: record.id) { NSWorkspace.shared.open(url) } }
         catch { status = error.localizedDescription; await refresh() }
     }
+    private var retryingSourceIDs = Set<String>()
     func retry(_ record: SourceRecord) async {
+        guard retryingSourceIDs.insert(record.id).inserted else { return }
+        defer { retryingSourceIDs.remove(record.id) }
         do { try await store?.retryTranscription(sourceID: record.id); await refresh(); scheduleProcessing() }
         catch { status = error.localizedDescription }
     }
