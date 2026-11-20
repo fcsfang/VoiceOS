@@ -326,6 +326,7 @@ struct WorkspaceView: View {
     @State private var searchExpandedKinds: Set<SearchHit.Kind> = []
     @State private var searchFailed = false
     @State private var searchBusy = false
+    @State private var lastSearchAnnouncement = ""
     @State private var searchHovered = false
     @State private var recentSearches: [String] = UserDefaults.standard.stringArray(forKey: recentSearchDefaultsKey) ?? []
     @State private var searchArrowMonitor: Any?
@@ -656,7 +657,11 @@ struct WorkspaceView: View {
             Spacer()
             VStack(alignment:.leading,spacing:12) {
                 HStack(spacing:7) {
-                    if model.organizingTopics || model.assistantBusy || model.followupBusy { ProgressView().controlSize(.mini) }
+                    if model.organizingTopics || model.assistantBusy || model.followupBusy {
+                        ProgressView().controlSize(.mini)
+                            .accessibilityHidden(model.organizingTopics)
+                            .accessibilityLabel("正在处理")
+                    }
                     if model.organizingTopics { Text("AI 正在连接主题").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                 }
                 if page != .tool("处理情况") {
@@ -1056,7 +1061,7 @@ struct WorkspaceView: View {
                 if !filter.isEmpty && visibleTopics.isEmpty { Text("没有匹配的主题").foregroundStyle(.secondary) }
                 if filter.isEmpty && model.workspaceTopics.isEmpty {
                     HStack(spacing:8) {
-                        if model.organizingTopics { ProgressView().controlSize(.small) }
+                        if model.organizingTopics { ProgressView().controlSize(.small).accessibilityHidden(true) }
                         Text(model.organizingTopics ? "AI 正在按内容连接主题…" : "授权材料会自动归组。也可以先建立一个你关心的问题。")
                     }.foregroundStyle(.secondary)
                 }
@@ -1594,6 +1599,7 @@ struct WorkspaceView: View {
     private func loadSearchHits(_ term:String) async {
         guard !term.isEmpty else {
             searchHits=[];searchTotals=[:];searchFailed=false;searchBusy=false;searchKeyboardFocus.id=nil;searchExpandedKinds=[]
+            lastSearchAnnouncement=""
             return
         }
         searchBusy=true
@@ -1604,8 +1610,18 @@ struct WorkspaceView: View {
         guard term == query.trimmingCharacters(in:.whitespacesAndNewlines) else { return }
         if let results {
             searchHits=cappedSearchHits(results.hits);searchTotals=results.totals;searchFailed=false
+            let total = results.totals.values.reduce(0, +)
+            let signature = term + "|" + String(total)
+            if signature != lastSearchAnnouncement {
+                lastSearchAnnouncement = signature
+                AccessibilityNotification.Announcement("检索完成，\(total) 条").post()
+            }
         } else {
             searchHits=[];searchTotals=[:];searchFailed=true
+            if lastSearchAnnouncement != "failed|" + term {
+                lastSearchAnnouncement = "failed|" + term
+                AccessibilityNotification.Announcement("检索失败").post()
+            }
         }
     }
     private func expandSearchKind(_ kind: SearchHit.Kind) {
@@ -1847,7 +1863,7 @@ struct WorkspaceView: View {
                 Button(model.backupRunning ? "正在备份…" : "重试备份") { model.retryBackup() }
                     .buttonStyle(.workspaceSecondaryCompact)
                     .disabled(model.backupRunning || model.libraryRoot == nil)
-                if model.backupRunning { ProgressView().controlSize(.mini) }
+                if model.backupRunning { ProgressView().controlSize(.mini).accessibilityHidden(true) }
                 Button("在访达中显示") { model.revealBackups() }.buttonStyle(.workspaceQuietCompact)
             }
             HStack(spacing:12) {
@@ -1907,7 +1923,7 @@ struct WorkspaceView: View {
                         Button(model.organizingTopics ? "正在重新整理…" : "重新整理主题与简报") { model.queueTopicOrganization(retry:true) }
                             .buttonStyle(.workspaceQuietCompact)
                             .disabled(model.organizingTopics)
-                        if model.organizingTopics { ProgressView().controlSize(.mini) }
+                        if model.organizingTopics { ProgressView().controlSize(.mini).accessibilityHidden(true) }
                     }
                     Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                 }.padding(.top,16)
@@ -1934,7 +1950,7 @@ struct WorkspaceView: View {
                         .buttonStyle(.workspaceSecondaryCompact)
                         .disabled(model.assistantBusy)
                         .accessibilityLabel("重新识别 AI 委托：" + issue.title)
-                    if model.assistantBusy { ProgressView().controlSize(.mini) }
+                    if model.assistantBusy { ProgressView().controlSize(.mini).accessibilityHidden(true) }
                 }
             }
         }
@@ -1947,7 +1963,7 @@ struct WorkspaceView: View {
                         .buttonStyle(.workspaceSecondaryCompact)
                         .disabled(model.followupBusy)
                         .accessibilityLabel("重试思想与下一步：" + title)
-                    if model.followupBusy { ProgressView().controlSize(.mini) }
+                    if model.followupBusy { ProgressView().controlSize(.mini).accessibilityHidden(true) }
                 }
             }
         }
@@ -2595,7 +2611,7 @@ struct WorkspaceView: View {
             }
             if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             HStack {
-                Button("关闭") { showingPendingReminderSyncs=false }
+                Button("关闭") { showingPendingReminderSyncs=false }.keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("现在核对") { Task { await model.retryPendingReminderSyncs() } }
                     .disabled(model.remindersBusy || model.pendingReminderSyncs.isEmpty)

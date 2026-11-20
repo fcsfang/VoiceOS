@@ -28,7 +28,7 @@ struct KnowledgeReviewSection: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 12) {
             WorkspaceSectionHeading(title: "知识核查") {
-                if model.knowledgeReviewBusy { ProgressView().controlSize(.small) }
+                if model.knowledgeReviewBusy { ProgressView().controlSize(.small).accessibilityLabel("正在核查知识") }
             }
             Text("对照原话检查事实、推断与适用条件。以下是有依据的 AI 核查建议，是否采纳由你决定；可标为已读、认可或驳回，已认可与已驳回的建议默认折叠。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             ForEach(sources) { source in
@@ -51,13 +51,14 @@ struct KnowledgeReviewSection: View {
         return true
     }
     @ViewBuilder private func sourceReview(_ source: SourceRecord) -> some View {
+        let record = review(source.id)
         VStack(alignment: .leading, spacing: 10) {
             if sources.count > 1 { Text(source.displayTitle).vosFont(WorkspaceText.rowTitle).textSelection(.enabled) }
-            if let record = review(source.id) {
+            if let record {
                 switch record.state {
                 case "queued", "running":
                     HStack {
-                        ProgressView().controlSize(.small)
+                        ProgressView().controlSize(.small).accessibilityHidden(true)
                         Text(record.state == "queued" ? "知识核查已排队" : "正在查证原话中的知识判断…").vosFont(WorkspaceText.meta)
                     }
                 case "failed":
@@ -99,6 +100,14 @@ struct KnowledgeReviewSection: View {
                 Text("配置模型连接后可发起核查。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             } else if (model.currentClaimsBySource[source.id] ?? []).isEmpty {
                 Text("先完成这份原话的理解，再核查其中的知识判断。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: record?.state) { previous, state in
+            guard ["queued", "running"].contains(previous ?? "") else { return }
+            switch state {
+            case "completed": AccessibilityNotification.Announcement("知识核查已完成").post()
+            case "failed": AccessibilityNotification.Announcement("知识核查未完成").post()
+            default: break
             }
         }
     }

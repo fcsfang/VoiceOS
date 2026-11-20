@@ -54,6 +54,7 @@ struct WorkspaceSearchField: View {
     var body: some View {
         HStack(spacing: 9) {
             Image(systemName: "magnifyingglass").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             field
             if !text.isEmpty {
                 Button {
@@ -132,6 +133,7 @@ struct WorkspaceNoticeText: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 9) {
             Image(systemName: icon).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(tint)
+                .accessibilityHidden(true)
             Text(message).vosFont(WorkspaceText.meta).foregroundStyle(palette.text)
                 .lineSpacing(2).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             Spacer(minLength: 0)
@@ -289,6 +291,7 @@ struct WorkspaceListRow<Trailing: View>: View {
                     .foregroundStyle(action == nil ? palette.disabledText : palette.accent)
                     .frame(width: 34, height: 34)
                     .background(iconBackground, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                    .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(title).vosFont(WorkspaceText.rowTitle)

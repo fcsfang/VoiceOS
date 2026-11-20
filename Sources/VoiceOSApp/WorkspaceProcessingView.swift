@@ -743,6 +743,10 @@ struct WorkspaceProcessingView: View {
                 }
             }.frame(maxWidth:WorkspaceMetrics.pageWidth,alignment:.leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth:.infinity,alignment:.top)
         }
+        .onChange(of: model.recentCompletions.first?.id) { previous, current in
+            guard let current, current != previous, let item = model.recentCompletions.first else { return }
+            AccessibilityNotification.Announcement("已完成：" + item.title).post()
+        }
     }
     private func name(_ id:String) -> String { model.sourcePageIndex.recordsByID[id]?.displayTitle ?? "已保存的材料" }
     private var reminderSyncStatusText: String {

@@ -92,7 +92,7 @@ struct ImportBatchReportView: View {
             }.frame(maxHeight: 340)
             HStack {
                 Spacer()
-                Button("完成", action: dismiss).keyboardShortcut(.defaultAction)
+                Button("完成", action: dismiss).keyboardShortcut(.defaultAction).keyboardShortcut(.cancelAction)
             }
         }
         .padding(24)
@@ -4855,6 +4855,7 @@ struct BackupLibraryRestoreView: View {
             }
             HStack {
                 Button(restored == nil ? "取消" : "完成", action: dismiss).disabled(restoring)
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 if restored == nil {
                     Button(restoring ? "正在建立新资料库…" : "新建资料库") {
