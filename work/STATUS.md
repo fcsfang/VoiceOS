@@ -864,3 +864,8 @@
 - 132-B 分隔线：全仓 86 处裸 `Divider()` 替换为 `WorkspaceListDivider`（24 文件），19 处保留（菜单内容 10、竖向面板分隔 8、工具条 1），脚本断言替换+保留=全部命中并入库；ReflectionGraphView:117 的 overlay 线色随之统一到 border。
 - 132-C 页面：全景删除重复页头、picker 与页面统一 pagePadding 32、大纲浮层区块头与间距收口、阅读流 AI 免责三处留一处 badge；材料页分组缝 6→0（Header 自带内边距）、未读/在读空态机制说明删除、今日阅读与日常材料同壳、回收站长尾移入 .help；启动页空态 WorkspaceEmptyState、历史行 padding 18→10/间距 6→3、区块改 WorkspaceListSection、三连句压缩；引导卡 padding 28→24、步骤间距 token 化、「开始前检查」小节头规范化。
 - 集成：722 tests 全绿（build_exit=0 / test_exit=0）。
+## 波 133：空态统一、错误重试、慢加载门控、失败保留内容（2026-11-21，已推送）
+- 133-A 空态：ReflectionQuestions/Discussion/DiscussionHistory/EnglishPractice/RecordingFollowup/OutcomeFollowup 六处改 WorkspaceEmptyState 并补出路（建立主题或问题、关闭、去行动页）；已无 ContentUnavailableView 裸用（四文件判定本无空态或为起始面板，未采纳并记录）。DiscussionHistory 错误文本改 WorkspaceNoticeText(.danger)。
+- 133-B 状态：错误样式统一 WorkspaceNoticeText(.danger)（代办/继续讨论/回复/完成登记等）；ReflectionGraph 空态补重试（refresh 路径）、检索失败补「重试检索」、主题回顾失败接 errorRetry+token 取消配对；ReflectionGraph/Monitor/启动加载加 150ms 门控；同主题刷新失败保留旧内容并挂区块级错误行（同 key 才保留、换主题清空）；ThoughtPanorama 读取失败进错误态可重试；unavailable 页面改 WorkspaceEmptyState 带「回到行动」，全景空态补「打开材料」。
+- 未采纳遗留：FeynmanPractice:36、QuickNote:77 两处裸 danger 文本（133-A 判定不在其分配项），列 134 处理。
+- 集成：722 tests 全绿（build_exit=0 / test_exit=0）。
