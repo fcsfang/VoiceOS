@@ -705,6 +705,7 @@ struct WorkspaceMonitorView: View {
                                 Task { await model.ensureBuiltinMonitorSources(restoreMissing: true) }
                             }
                                 .buttonStyle(.workspaceSecondaryCompact)
+                                .disabled(operations.addingBuiltinSources)
                                 .accessibilityIdentifier("monitor.sources.addBuiltin")
                             Spacer()
                         }.padding(.vertical, 8)
@@ -728,6 +729,7 @@ struct WorkspaceMonitorView: View {
                     get: { source.enabled },
                     set: { value in Task { await model.setMonitorSourceEnabled(source, enabled: value) } }))
                     .toggleStyle(.switch).labelsHidden().controlSize(.small)
+                    .disabled(operations.sourceBusy.contains(source.id))
                     .accessibilityLabel((source.enabled ? "停用" : "启用") + "来源 " + source.displayName)
                     .accessibilityIdentifier("monitor.source." + source.id + ".enabled")
                 Button("删除", role: .destructive) { pendingSourceRemoval = source }
@@ -749,6 +751,7 @@ struct WorkspaceMonitorView: View {
                     displayedComponents: source.kind == .qqGroup ? [.date, .hourAndMinute] : [.date])
                     .labelsHidden().datePickerStyle(.field)
                     .frame(minWidth: source.kind == .qqGroup ? 190 : 130)
+                    .disabled(operations.sourceBusy.contains(source.id))
                     .accessibilityLabel("来源起始时间：" + source.displayName)
                     .accessibilityIdentifier("monitor.source." + source.id + ".start")
                 Text(startNote(source)).vosFont(WorkspaceText.caption)
