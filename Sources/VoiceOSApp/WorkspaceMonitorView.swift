@@ -357,7 +357,7 @@ struct WorkspaceMonitorView: View {
             }
             HStack(spacing: 16) {
                 Text(ControlCenter.monitorStateText(report.state)).vosFont(WorkspaceText.meta)
-                Text(itemCountText(report)).vosFont(WorkspaceText.meta)
+                Text(itemCountText(report)).vosFont(WorkspaceText.meta.size, monospacedDigit: true)
                     .foregroundStyle(palette.secondaryText)
                 Text(ControlCenter.monitorDeliveryText(report)).vosFont(WorkspaceText.meta)
                     .foregroundStyle(report.deliveryState == "failed" ? palette.warning : palette.secondaryText)
@@ -405,7 +405,7 @@ struct WorkspaceMonitorView: View {
                 let group = openItems.filter { $0.category == category }
                 if !group.isEmpty {
                     Text((category == .applicable ? "适用" : "待核对") + " \(group.count)")
-                        .vosFont(WorkspaceText.meta.size, weight: .semibold)
+                        .vosFont(WorkspaceText.meta.size, weight: .semibold, design: .default, monospacedDigit: true)
                         .foregroundStyle(palette.secondaryText).padding(.top, 8)
                         .accessibilityAddTraits(.isHeader)
                     ForEach(group) { item in itemView(item) }
@@ -416,7 +416,7 @@ struct WorkspaceMonitorView: View {
                 Text(handledCount > 0 && !showsAllItems
                      ? "已处理 \(handledCount) 项，切换「全部」查看"
                      : "没有未处理的事项。")
-                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText).padding(.vertical, 6)
+                    .vosFont(WorkspaceText.meta.size, monospacedDigit: true).foregroundStyle(palette.tertiaryText).padding(.vertical, 6)
             }
             if showsAllItems {
                 let handled = items.filter { $0.status != .open }
@@ -427,7 +427,7 @@ struct WorkspaceMonitorView: View {
                         }.padding(.top, 6)
                     } label: {
                         Text("已处理（\(handled.count)）")
-                            .vosFont(WorkspaceText.meta.size, weight: .semibold)
+                            .vosFont(WorkspaceText.meta.size, weight: .semibold, design: .default, monospacedDigit: true)
                             .foregroundStyle(palette.secondaryText)
                             .accessibilityAddTraits(.isHeader)
                     }.padding(.top, 8)

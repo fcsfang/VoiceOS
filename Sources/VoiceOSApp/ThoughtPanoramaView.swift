@@ -459,7 +459,7 @@ struct ThoughtPanoramaView: View {
         let model = ConstellationModel(snapshot: snapshot, now: .now)
         return ScrollView {
             VStack(alignment: .leading, spacing: 10) {
-                Text("问题与联系列表").vosFont(WorkspaceText.rowTitle)
+                Text("问题与联系列表").vosFont(WorkspaceText.sectionTitle)
                 Text("与画布一致；键盘可逐项浏览。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 if hasQuery { outlineSearchResults(model) }
                 ForEach(model.regions) { region in
@@ -493,7 +493,7 @@ struct ThoughtPanoramaView: View {
                     }
                 }
                 Divider()
-                Text("候选联系").vosFont(WorkspaceText.rowTitle)
+                Text("候选联系").vosFont(WorkspaceText.sectionTitle)
                 if snapshot.proposal.relations.isEmpty {
                     Text(snapshot.isPartial ? "跨材料联系尚未核对完成；当前只展示已核对区域。" : "当前没有已核对的跨区域候选联系。")
                         .vosFont(WorkspaceText.meta)

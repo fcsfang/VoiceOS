@@ -235,8 +235,8 @@ struct WorkspaceProcessingBar: View {
             if let title = model.workspaceProcessingTitle {
                 ProgressView().controlSize(.small)
                 VStack(alignment:.leading,spacing:3) {
-                    Text(title).lineLimit(1)
-                    if let id=model.workspaceProcessingSourceID,let source=model.sourcePageIndex.recordsByID[id] { Text(source.displayTitle).foregroundStyle(palette.secondaryText).lineLimit(1) }
+                    Text(title).vosFont(WorkspaceText.rowTitle).lineLimit(1)
+                    if let id=model.workspaceProcessingSourceID,let source=model.sourcePageIndex.recordsByID[id] { Text(source.displayTitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1) }
                 }
             } else if model.workspaceProcessingHasScheduledRetry {
                 WorkspaceBadge(text:"等待自动重试", tone:.warning)
