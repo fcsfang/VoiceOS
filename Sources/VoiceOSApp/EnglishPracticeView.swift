@@ -49,11 +49,8 @@ struct EnglishPracticeView: View {
             WorkspacePageHeading(eyebrow: "工具 · 英文练习", title: "英文表达反馈",
                                  subtitle: "只发送选定的个人文字和出处；原始音频不会上传。")
             if sources.isEmpty {
-                ContentUnavailableView {
-                    Label("还没有可练习的英文原话", systemImage: "character.book.closed")
-                } description: {
-                    Text("需要一份已保存、已完成文字转写的个人原话。完成一段英文录音并保存后，回到这里即可练习。")
-                } actions: {
+                WorkspaceEmptyState(title: "还没有可练习的英文原话", systemImage: "character.book.closed",
+                                    description: "需要一份已保存、已完成文字转写的个人原话。完成一段英文录音并保存后，回到这里即可练习。") {
                     if let openCapture { Button("去记录英文表达", action: openCapture).buttonStyle(.workspacePrimary) }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -83,7 +80,11 @@ struct EnglishPracticeView: View {
                         }
                     }.frame(maxHeight: model.englishAttempts.isEmpty ? 210 : 110)
                 }
-                Text(model.englishStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                if englishStatusIsError {
+                    WorkspaceNoticeText(message: model.englishStatus, severity: .danger)
+                } else {
+                    Text(model.englishStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                }
                 HStack {
                     Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)) } } }
                         .buttonStyle(.workspaceSecondary)
@@ -139,6 +140,12 @@ struct EnglishPracticeView: View {
             model.englishSnapshot = nil
             model.englishStatus = "已选择，准备并核对文字。"
         }
+    }
+    // ControlCenter stores the status and the failure in one string. These are
+    // the only messages it and this view write, so anything else came from a catch.
+    private var englishStatusIsError: Bool {
+        let statuses = ["选择一份我的英文原话", "已选择", "选择已变化", "已准备 ", "正在发送选定文字", "反馈已保存", "反馈结果未知"]
+        return !statuses.contains { model.englishStatus.hasPrefix($0) }
     }
     private func suggestionKindLabel(_ kind: EnglishSuggestionKind) -> String {
         switch kind { case .grammar: "语法"; case .organisation: "结构"; case .reusablePattern: "可复用表达" }

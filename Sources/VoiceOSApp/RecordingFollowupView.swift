@@ -71,7 +71,10 @@ struct RecordingFollowupView: View {
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
-                    if visible.isEmpty { ContentUnavailableView("新的录音会自动形成跟进", systemImage: "sparkles", description: Text("也可以选择已有录音，补齐思想关联、目标建议和练习反馈。")) }
+                    if visible.isEmpty {
+                        WorkspaceEmptyState(title: "新的录音会自动形成跟进", systemImage: "sparkles",
+                                            description: "也可以选择已有录音，补齐思想关联、目标建议和练习反馈。")
+                    }
                     if tab == "goals" { goalList }
                     else {
                         ForEach(visible) { receipt in

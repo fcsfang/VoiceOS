@@ -179,7 +179,8 @@ struct DiscussionView: View {
                     if session.state == "active" { Button("结束讨论") { confirmingEnd = true }.buttonStyle(.workspaceDestructive).disabled(model.discussionSaving || model.dictationActive) }
                 }
             } else {
-                ContentUnavailableView("还没有选择讨论",systemImage:"bubble.left.and.bubble.right",description:Text("在资料详情点击“继续讨论”建立新的讨论，或选择已保存历史。"))
+                WorkspaceEmptyState(title: "还没有选择讨论", systemImage: "bubble.left.and.bubble.right",
+                                    description: "在资料详情点击“继续讨论”建立新的讨论，或选择已保存历史。")
             }
         }.padding(24).frame(width:WorkspaceMetrics.modalMedium,height:780)
         .workspaceModalSurface()
