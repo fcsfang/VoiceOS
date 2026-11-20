@@ -281,17 +281,17 @@ struct WeeklyReviewView: View {
             }
             if !todayRows.isEmpty {
                 ForEach(Array(todayRows.enumerated()), id: \.element.id) { index, entry in
-                    if index > 0 { Divider() }
+                    if index > 0 { WorkspaceListDivider() }
                     dailyRow(entry, overdue: false)
                 }
             }
             if review.today.count > todayRows.count { allButton(review.today.count, .todo) }
             if !overdueRows.isEmpty {
-                if !todayRows.isEmpty { Divider() }
+                if !todayRows.isEmpty { WorkspaceListDivider() }
                 Text("逾期").vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.warning).accessibilityAddTraits(.isHeader)
                     .padding(.top, WorkspaceMetrics.groupGap).padding(.bottom, 2)
                 ForEach(Array(overdueRows.enumerated()), id: \.element.id) { index, entry in
-                    if index > 0 { Divider() }
+                    if index > 0 { WorkspaceListDivider() }
                     dailyRow(entry, overdue: true)
                 }
             }
@@ -456,7 +456,7 @@ struct WeeklyReviewView: View {
                 }.padding(.top, 8)
             }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, entry in
-                if index > 0 { Divider() }
+                if index > 0 { WorkspaceListDivider() }
                 nextWeekRow(entry)
             }
             if candidates.count > rows.count { allButton(candidates.count, .todo) }
@@ -546,7 +546,7 @@ struct WeeklyReviewView: View {
         let rows = Array(staleTasks.prefix(5))
         return WorkspaceSection(title: "长期未动", subtitle: "创建超过 14 天，仍是未完成状态。", icon: "hourglass", count: staleTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
-                if index > 0 { Divider() }
+                if index > 0 { WorkspaceListDivider() }
                 reviewRow(title: action.title, subtitle: staleLabel(action), trailing: "搁置", icon: "hourglass") { openTask(action.id) }
             }
             if staleTasks.count > rows.count { allButton(staleTasks.count, .todo) }
@@ -556,7 +556,7 @@ struct WeeklyReviewView: View {
         let rows = Array(unclarifiedTasks.prefix(5))
         return WorkspaceSection(title: "待确认", subtitle: "最近 14 天抽取，尚未确认类型。", icon: "questionmark.circle", count: unclarifiedTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
-                if index > 0 { Divider() }
+                if index > 0 { WorkspaceListDivider() }
                 reviewRow(title: action.title, trailing: "待确认", icon: "questionmark.circle") { openTask(action.id) }
             }
             if unclarifiedTasks.count > rows.count { linkButton("到待核对查看", .review).padding(.top, 10) }
@@ -566,7 +566,7 @@ struct WeeklyReviewView: View {
         let rows = Array(weekProgress.prefix(5))
         return WorkspaceSection(title: "本周结果", subtitle: "最近 7 天记录的结果与进展。", icon: "checkmark.seal", count: weekProgress.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                if index > 0 { Divider() }
+                if index > 0 { WorkspaceListDivider() }
                 if row.isTaskAvailable {
                     reviewRow(title: row.taskTitle, subtitle: row.relationLabel, detail: row.text,
                               trailing: dayLabel(row.date)) { openTask(row.actionID) }
@@ -613,7 +613,7 @@ struct WeeklyReviewView: View {
     private var weekCompletedSection: some View {
         WorkspaceSection(title: "本周完成", subtitle: "最近 7 天完成的行动。", icon: "checkmark.circle", count: weekCompleted.count) {
             ForEach(Array(weekCompleted.enumerated()), id: \.element.id) { index, action in
-                if index > 0 { Divider() }
+                if index > 0 { WorkspaceListDivider() }
                 weekCompletedRow(action).id("review.pending." + action.id)
             }
             HStack(spacing: 8) {
@@ -699,7 +699,7 @@ struct WeeklyReviewView: View {
         let rows = Array(pausedTasks.prefix(5))
         return WorkspaceSection(title: "暂停与冻结", subtitle: "暂停或待核对的待办；状态保留。", icon: "pause.circle", count: pausedTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
-                if index > 0 { Divider() }
+                if index > 0 { WorkspaceListDivider() }
                 reviewRow(title: action.title, subtitle: model.workspaceActionStatus(action),
                           trailing: "待核对", icon: "pause.circle") { openTask(action.id) }
             }
@@ -712,7 +712,7 @@ struct WeeklyReviewView: View {
         return WorkspaceSection(title: "没有下一步的目标", icon: "exclamationmark.circle", count: stalledGoals.count,
                                 actionTitle: "逐个澄清", action: { showingClarifyQueue = true }) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
-                if index > 0 { Divider() }
+                if index > 0 { WorkspaceListDivider() }
                 stalledGoalRow(goal)
             }
             if stalledGoals.count > rows.count {
@@ -758,7 +758,7 @@ struct WeeklyReviewView: View {
         let rows = Array(somedayRows.prefix(5))
         return WorkspaceSection(title: "留到以后的问题与目标", subtitle: "超过 60 天没有回看。", icon: "tray", count: somedayRows.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
-                if index > 0 { Divider() }
+                if index > 0 { WorkspaceListDivider() }
                 somedayRow(goal)
             }
             if somedayRows.count > rows.count {

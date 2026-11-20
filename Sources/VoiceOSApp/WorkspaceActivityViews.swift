@@ -707,7 +707,7 @@ struct WorkspaceTaskView: View {
                                         .accessibilityLabel("删除子任务").disabled(planBusy)
                                 }
                             }.padding(.vertical, 10).padding(.horizontal, 4)
-                            if subtask.id != subtasks.last?.id { Divider() }
+                            if subtask.id != subtasks.last?.id { WorkspaceListDivider() }
                         }
                         if current {
                             HStack(spacing: 10) {
@@ -760,7 +760,7 @@ struct WorkspaceTaskView: View {
                                              iconTint: unread ? palette.accent : nil,
                                              trailing: unread ? "未读 · 阅读结果" : (execution.state == "completed" ? "阅读结果" : "查看进度"),
                                              trailingStyle: unread ? .status(palette.accent) : .link) { openDelivery(execution.id) }
-                                if execution.id != executions.last?.id { Divider() }
+                                if execution.id != executions.last?.id { WorkspaceListDivider() }
                             }
                         }
                     }
@@ -773,7 +773,7 @@ struct WorkspaceTaskView: View {
                             DisclosureGroup(action.state == "completed" ? "记录这次的结果或收获" : "记录实际进展", isExpanded: $draft.expanded) {
                                 feedbackDraftEditor.padding(.top, 12)
                             }.padding(.vertical,16)
-                            Divider()
+                            WorkspaceListDivider()
                         }
                         DisclosureGroup("原话依据与安排") {
                             VStack(alignment: .leading, spacing: 14) {
@@ -786,7 +786,7 @@ struct WorkspaceTaskView: View {
                             }.padding(.top, 10)
                         }.padding(.vertical,16)
                         if action.kind == "task" {
-                            Divider()
+                            WorkspaceListDivider()
                             DisclosureGroup("处理记录与高级") {
                                 VStack(alignment: .leading, spacing: 14) { scheduleSection }.padding(.top, 10)
                             }.padding(.vertical,16)
@@ -953,7 +953,7 @@ struct WorkspaceTaskView: View {
                             .disabled(model.savingAction)
                             .accessibilityLabel("摘除下一步：" + child.title)
                     }.padding(.vertical, 10).padding(.horizontal, 4)
-                    if child.id != nextActions.last?.id { Divider() }
+                    if child.id != nextActions.last?.id { WorkspaceListDivider() }
                 }
                 if !nextActionNotice.isEmpty {
                     Label(nextActionNotice, systemImage: "checkmark.circle").vosFont(WorkspaceText.meta)
@@ -1400,7 +1400,7 @@ struct ActionRevisionHistoryView: View {
 
     var body: some View {
         if let loadError {
-            Divider()
+            WorkspaceListDivider()
             HStack(spacing: 10) {
                 WorkspaceNoticeText(message: loadError, severity: .danger)
                 if let retry {
@@ -1411,7 +1411,7 @@ struct ActionRevisionHistoryView: View {
             }.padding(.vertical, 16)
         }
         if !revisions.isEmpty {
-            Divider()
+            WorkspaceListDivider()
             DisclosureGroup("变更历史（\(revisions.count)）") {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(revisions) { revision in
@@ -1427,7 +1427,7 @@ struct ActionRevisionHistoryView: View {
                             }
                             Spacer(minLength: 0)
                         }
-                        if revision.id != revisions.last?.id { Divider() }
+                        if revision.id != revisions.last?.id { WorkspaceListDivider() }
                     }
                 }.padding(.top, 10)
             }.padding(.vertical, 16)

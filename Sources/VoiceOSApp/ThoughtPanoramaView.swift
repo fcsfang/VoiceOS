@@ -43,7 +43,7 @@ struct ThoughtPanoramaView: View {
                     .padding(.bottom, 2)
                 constellationToolbar(width: width)
                 if let readError { readErrorBanner(readError) }
-                Divider()
+                WorkspaceListDivider()
                 HStack(spacing: 0) {
                     panorama(state?.snapshot)
                     if hasSideReader, let snapshot = state?.snapshot, hasReader {
@@ -497,7 +497,7 @@ struct ThoughtPanoramaView: View {
                         Text(region.title).vosFont(WorkspaceText.rowTitle)
                     }
                 }
-                Divider()
+                WorkspaceListDivider()
                 Text("候选联系").vosFont(WorkspaceText.sectionTitle)
                 if snapshot.proposal.relations.isEmpty {
                     Text(snapshot.isPartial ? "跨材料联系尚未核对完成；当前只展示已核对区域。" : "当前没有已核对的跨区域候选联系。")
@@ -588,7 +588,7 @@ struct ThoughtPanoramaView: View {
                     .accessibilityLabel((hit.isRegion ? "区域：" : "AI 归纳问题：") + hit.title)
                 }
             }
-            Divider()
+            WorkspaceListDivider()
         }
     }
 
@@ -709,10 +709,10 @@ struct ThoughtPanoramaView: View {
                                 HStack { Button("更正理解") { showCoverage = false; correctClaim(item.id) }.buttonStyle(.workspaceQuietCompact); if let source = claim.references.first?.sourceID { Button("完整原文") { showCoverage = false; openSource(source) }.buttonStyle(.workspaceQuietCompact) } }
                             }
                         }
-                        Divider(); Text("尚未合格的材料").vosFont(WorkspaceText.rowTitle)
+                        WorkspaceListDivider(); Text("尚未合格的材料").vosFont(WorkspaceText.rowTitle)
                         ForEach(state.input.exclusions) { item in HStack { VStack(alignment: .leading) { Text(item.title); Text(item.reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }; Spacer(); Button("材料") { showCoverage = false; openSource(item.id) }.buttonStyle(.workspaceQuietCompact) } }
                         if let snapshot = state.snapshot {
-                            Divider()
+                            WorkspaceListDivider()
                             if let workflow=snapshot.workflow {
                                 Text(snapshot.isPartial ? "以下回执分别对应已核对单元；全局核对尚未完成。" : "分阶段生成与独立核对回执").vosFont(WorkspaceText.caption)
                                 ForEach(Array(workflow.receipts.enumerated()), id: \.offset) { _, item in
@@ -900,7 +900,7 @@ private struct RegionInspectorPanel: View {
                     ReaderDisclosure(title: "其他问题", count: otherQuestions.count, expanded: $showsOtherQuestions) {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(otherQuestions.enumerated()), id: \.offset) { index, question in
-                                if index > 0 { Divider() }
+                                if index > 0 { WorkspaceListDivider() }
                                 ReaderQuestionRow(question: question) { selection = .question(question.id) }
                             }
                         }
@@ -910,7 +910,7 @@ private struct RegionInspectorPanel: View {
                     ReaderDisclosure(title: "候选联系", count: incident.count, expanded: $showsRelations) {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(incident.enumerated()), id: \.offset) { index, relation in
-                                if index > 0 { Divider() }
+                                if index > 0 { WorkspaceListDivider() }
                                 ReaderRelationRow(
                                     relation: relation,
                                     fromTitle: model.questionByID[relation.from]?.title ?? "",
@@ -1030,7 +1030,7 @@ private struct QuestionInspectorPanel: View {
                     ReaderDisclosure(title: "候选联系", count: relations.count, expanded: $showsRelations) {
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(relations.enumerated()), id: \.offset) { index, relation in
-                                if index > 0 { Divider() }
+                                if index > 0 { WorkspaceListDivider() }
                                 ReaderRelationRow(
                                     relation: relation,
                                     fromTitle: model.questionByID[relation.from]?.title ?? "",

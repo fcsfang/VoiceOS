@@ -592,7 +592,7 @@ struct WorkspaceView: View {
     private var mainColumn: some View {
         VStack(spacing:0) {
             header
-            Divider()
+            WorkspaceListDivider()
             workspaceErrorBanner
             Group {
                 if !model.startupIssue.isEmpty {
@@ -1182,7 +1182,7 @@ struct WorkspaceView: View {
             let catalog = recordCatalog
             let expressions = distinctExpressions(reading.sources)
             WorkspaceSection(title:"主题材料",subtitle:"完整原话与资料，按时间延续",icon:"books.vertical",count:reading.sources.count) {
-                ForEach(expressions) { source in sourceRow(source,catalog:catalog);if source.id != expressions.last?.id { Divider() } }
+                ForEach(expressions) { source in sourceRow(source,catalog:catalog);if source.id != expressions.last?.id { WorkspaceListDivider() } }
             }
             DisclosureGroup("关联其他材料") {
                 ForEach(reading.unlinkedSources) { source in
@@ -1219,7 +1219,7 @@ struct WorkspaceView: View {
             let sources=reading.sources.filter { interval.contains($0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt) ?? .distantPast) }
             let catalog=recordCatalog
             let expressions=distinctExpressions(sources)
-            ForEach(expressions) { source in sourceRow(source,catalog:catalog); if source.id != expressions.last?.id { Divider() } }
+            ForEach(expressions) { source in sourceRow(source,catalog:catalog); if source.id != expressions.last?.id { WorkspaceListDivider() } }
             let actionIDs=reading.actionIDs
             let outcomes=(topicFocus?.outcomes ?? []).filter { actionIDs.contains($0.actionID) && ConversationReflectionFocus.date($0.createdAt).map { interval.contains($0) } == true }
             ForEach(outcomes) { outcome in WorkspaceRow(title:outcome.text,subtitle:"实际结果 · " + dateLabel(outcome.createdAt),icon:"leaf") { go(.task(outcome.actionID)) } }
@@ -1595,7 +1595,7 @@ struct WorkspaceView: View {
                 let sources=model.records.filter { !$0.isTrashed }
                 if !sources.isEmpty { sectionTitle("材料与原话 · \(sources.count)") }
                 let catalog=recordCatalog
-                ForEach(sources) { source in sourceRow(source,catalog:catalog); if source.id != sources.last?.id { Divider() } }
+                ForEach(sources) { source in sourceRow(source,catalog:catalog); if source.id != sources.last?.id { WorkspaceListDivider() } }
             } else {
                 searchResults
             }
@@ -1617,7 +1617,7 @@ struct WorkspaceView: View {
                                 .background(searchKeyboardFocus.id == row.id ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                                 .overlay { if searchKeyboardFocus.id == row.id { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
                                 .id(row.id)
-                            if row.id != section.rows.last?.id { Divider() }
+                            if row.id != section.rows.last?.id { WorkspaceListDivider() }
                         }
                     }
                 }
@@ -1752,7 +1752,7 @@ struct WorkspaceView: View {
                     rememberSearch(term)
                     suggestion.open()
                 }
-                if index < suggestions.count - 1 { Divider() }
+                if index < suggestions.count - 1 { WorkspaceListDivider() }
             }
         }
         .background(palette.surface,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
@@ -1978,7 +1978,7 @@ struct WorkspaceView: View {
                                 detail: model.storageUsage.flatMap { $0.backupBytes == nil ? nil : "\($0.backupCount) 份" })
                     storageLine("本地语音模型", storageReadout { $0.localSpeechBytes })
                     storageLine("镜像", storageReadout { $0.mirrorBytes })
-                    Divider().frame(maxWidth:420)
+                    WorkspaceListDivider().frame(maxWidth:420)
                     storageLine("合计", storageReadout { $0.totalBytes }, emphasized:true)
                 }
                 if model.storageScanBusy { ProgressView("正在统计存储…").controlSize(.small) }
@@ -2453,7 +2453,7 @@ struct WorkspaceView: View {
                     VStack(spacing:0) {
                         ForEach(candidates) { entry in
                             planCandidateRow(entry)
-                            if entry.id != candidates.last?.id { Divider() }
+                            if entry.id != candidates.last?.id { WorkspaceListDivider() }
                         }
                     }
                 }.frame(minHeight:160,maxHeight:.infinity)
@@ -2692,7 +2692,7 @@ struct WorkspaceView: View {
                         }
                         Spacer(minLength:8)
                     }.padding(.vertical,8)
-                    if entry.id != model.pendingReminderSyncList.last?.id { Divider() }
+                    if entry.id != model.pendingReminderSyncList.last?.id { WorkspaceListDivider() }
                 }
             }
             if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }

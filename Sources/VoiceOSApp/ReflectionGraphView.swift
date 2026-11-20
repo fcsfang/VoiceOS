@@ -114,7 +114,7 @@ struct ReflectionTimelineView: View {
                     Picker("查看方式",selection:$timeline) { Text("图谱").tag(false);Text("时间线").tag(true) }.labelsHidden().pickerStyle(.segmented).frame(width:140)
                 }.padding(16)
             }
-            Divider().overlay(palette.text.opacity(0.12))
+            WorkspaceListDivider()
             if loading && focus == nil {
                 ProgressView(periodic ? "整理这个周期的关系…" : "连接这个主题的完整脉络…").frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let focus {
@@ -125,7 +125,7 @@ struct ReflectionTimelineView: View {
                         if embeddedTopicID != nil && geometry.size.width < 800 {
                             VStack(spacing:0) {
                                 graph(focus).frame(maxWidth:.infinity,maxHeight:.infinity)
-                                Divider()
+                                WorkspaceListDivider()
                                 inspector(focus).frame(height:240)
                             }
                         } else {
@@ -368,7 +368,7 @@ struct ReflectionTimelineView: View {
                 Button("回到全部") { relatedOnly = false; selection = nil; query = "" }
                     .buttonStyle(.workspaceQuietCompact)
             }.vosFont(WorkspaceText.meta).padding(.horizontal, 24).padding(.bottom, 12)
-            Divider()
+            WorkspaceListDivider()
             if items.isEmpty {
                 ContentUnavailableView("这一页，等待新的连接", systemImage: "point.3.connected.trianglepath.dotted", description: Text(focus.isTopicOverview ? "为这个主题关联资料，或留下现在的认识与实践结果。" : "换一个日、周或月，找回已经留下的表达与成果。"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -479,7 +479,7 @@ struct ReflectionTimelineView: View {
                     nodeDetails(node, focus: focus)
                     let connected = links.filter { $0.from == node.id || $0.to == node.id }
                     if !connected.isEmpty {
-                        Divider()
+                        WorkspaceListDivider()
                         Text("连接").vosFont(WorkspaceText.rowTitle)
                         ForEach(connected) { edge in
                             Button { selection = edge.id } label: { Label(edge.label + " · 查看依据", systemImage: "arrow.triangle.branch") }.buttonStyle(.workspaceQuietCompact)
@@ -502,7 +502,7 @@ struct ReflectionTimelineView: View {
                     metric("表达与材料", focus.isTopicOverview ? focus.expressions.count : focus.expressions.filter(\.isInPeriod).count, color: palette.text)
                     metric(focus.isTopicOverview ? "完成登记" : "周期内完成登记", focus.completions.count, color: palette.action)
                     metric("结果与反思", focus.isTopicOverview ? focus.outcomes.count : focus.outcomes.filter { focus.contains(timestamp: $0.createdAt) }.count, color: palette.outcome)
-                    Divider()
+                    WorkspaceListDivider()
                     Text(focus.isTopicOverview ? "关联资料跨时间展示，任务状态与实际结果分别保留。" : "旧资料以「此前」标记作背景；完成登记按实际记录时间归入周期。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                     Text("AI 使用完整相关原文；先查看并编辑讨论草稿，再确认发送。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 }

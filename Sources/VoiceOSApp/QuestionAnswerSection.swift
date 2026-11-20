@@ -177,7 +177,7 @@ struct QuestionAnswerSection: View {
                             WorkspaceNoticeText(message: message, severity: .danger)
                         }
                     }.padding(.vertical, 12)
-                    if record.id != followups.last?.id { Divider() }
+                    if record.id != followups.last?.id { WorkspaceListDivider() }
                 }
             }.padding(.top, 10)
         } label: {

@@ -49,7 +49,7 @@ struct TextCaptureView: View {
                     .frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading)
                     .frame(maxWidth: .infinity)
             }
-            Divider()
+            WorkspaceListDivider()
             VStack(alignment: .leading, spacing: 12) {
                 if !model.initialized { ProgressView("正在恢复资料库与草稿…").controlSize(.small) }
                 if !draft.error.isEmpty { WorkspaceNoticeText(message: draft.error, severity: .danger) }
@@ -272,7 +272,7 @@ struct TextCaptureView: View {
                                     Button("删除", role: .destructive) { pendingTemplateDelete = template }
                                         .accessibilityLabel("删除模板：" + template.name)
                                 }.padding(.vertical, 10)
-                                if template.id != templates.last?.id { Divider() }
+                                if template.id != templates.last?.id { WorkspaceListDivider() }
                             }
                         }
                     }

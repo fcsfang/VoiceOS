@@ -20,7 +20,7 @@ struct DiscussionHistoryView: View {
                 Spacer()
                 WorkspaceIconButton(systemImage: "xmark", label: "关闭历史讨论") { close() }.keyboardShortcut(.cancelAction)
             }.padding(18)
-            Divider()
+            WorkspaceListDivider()
             Group {
                 if loading {
                     ProgressView("正在读取讨论历史…").frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -47,7 +47,7 @@ struct DiscussionHistoryView: View {
                 }
             }
             if !error.isEmpty {
-                Divider()
+                WorkspaceListDivider()
                 Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger)
                     .textSelection(.enabled).padding(12)
             }

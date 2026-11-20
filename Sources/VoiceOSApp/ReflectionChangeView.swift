@@ -34,7 +34,7 @@ struct ReflectionChangeView: View {
                 Spacer()
                 Button("返回地图", action: closeView).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
             }.padding(24)
-            Divider()
+            WorkspaceListDivider()
             if let selected {
                 HStack(spacing: 0) {
                     if focus.connections.count > 1 {
@@ -93,7 +93,7 @@ struct ReflectionChangeView: View {
             }
             Text("原话中的条件与归属是依据；转写纠错、支持或延续都不代表观点已被验证。")
                 .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-            Divider()
+            WorkspaceListDivider()
             VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                 Text("接着问清楚").vosFont(WorkspaceText.sectionTitle)
                 Text("这个联系成立的条件是什么？有没有相反经历？哪些变化是我明确表达的，哪些只是 AI 的解释？")
@@ -112,7 +112,7 @@ struct ReflectionChangeView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.accent)
                 Text(quote).vosFont(WorkspaceText.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                Divider()
+                WorkspaceListDivider()
                 if sourceIDs.isEmpty { Text("请返回地图核对观点来源").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                 ForEach(sourceIDs, id: \.self) { id in
                     if let source = model.records.first(where: { $0.id == id }) {

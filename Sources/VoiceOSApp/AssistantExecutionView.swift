@@ -120,7 +120,7 @@ struct AssistantExecutionView: View {
                 Spacer()
                 Button("完成", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
             }.padding(24)
-            Divider()
+            WorkspaceListDivider()
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("代办与成果").vosFont(WorkspaceText.rowTitle)
@@ -156,7 +156,7 @@ struct AssistantExecutionView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            Divider()
+            WorkspaceListDivider()
             HStack {
                 if model.assistantBusy { ProgressView().controlSize(.small) }
                 Text(model.assistantStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2)
@@ -206,7 +206,7 @@ struct AssistantExecutionView: View {
                             }.vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         }
                         if !execution.references.isEmpty {
-                            Divider()
+                            WorkspaceListDivider()
                             Text("可核查的来源").vosFont(WorkspaceText.rowTitle)
                             ForEach(Array(execution.references.enumerated()), id: \.offset) { _, reference in
                                 if let url = URL(string: reference.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
@@ -231,7 +231,7 @@ struct AssistantExecutionView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             if execution.state == "completed", execution.validity == "current" {
-                Divider()
+                WorkspaceListDivider()
                 HStack {
                     Picker("接回主题", selection: $questionID) {
                         Text("选择主题").tag("")

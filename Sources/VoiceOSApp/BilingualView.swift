@@ -41,7 +41,7 @@ struct BilingualView: View {
             if excerpt.truncated {
                 Text(Bilingual.truncationNotice).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             }
-            Divider()
+            WorkspaceListDivider()
             content
         }.padding(24).frame(width: WorkspaceMetrics.modalMedium, height: 720)
             .workspaceModalSurface()
@@ -113,7 +113,7 @@ struct BilingualView: View {
                                         }
                                     }
                                 }
-                                if paragraph.id != excerpt.paragraphs.last?.id { Divider() }
+                                if paragraph.id != excerpt.paragraphs.last?.id { WorkspaceListDivider() }
                             }
                         }.padding(.vertical, 4)
                     }

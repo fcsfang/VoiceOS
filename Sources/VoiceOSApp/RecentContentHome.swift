@@ -368,14 +368,14 @@ struct RecentContentHome: View {
             if rows.isEmpty {
                 VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     ForEach(Array(item.excerpts.enumerated()), id: \.offset) { index, excerpt in
-                        if index > 0 { Divider() }
+                        if index > 0 { WorkspaceListDivider() }
                         feedbackExcerpt(excerpt, primary: index == 0)
                     }
                 }
             } else if let first = rows.first {
                 progressRow(first, style: WorkspaceText.pageTitle)
                 ForEach(rows.dropFirst()) { row in
-                    Divider().padding(.top, 4)
+                    WorkspaceListDivider().padding(.top, 4)
                     progressRow(row, style: WorkspaceText.body)
                 }
             }
