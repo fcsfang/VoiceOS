@@ -91,10 +91,18 @@ struct RecentContentHome: View {
     private var homeHeader: some View {
         HStack(spacing: 12) {
             Spacer()
-            Button("每周回顾", systemImage: "calendar.badge.clock") { openWeeklyReview() }
-                .buttonStyle(.plain).vosFont(WorkspaceText.meta.size, weight: .medium)
-                .foregroundStyle(palette.accent)
-                .help("打开每周回顾：完成、待补结果、停滞目标与待确认")
+            Button(action: openWeeklyReview) {
+                HStack(spacing: 4) {
+                    Label("每周回顾", systemImage: "calendar.badge.clock")
+                    if pendingOutcomeCount > 0 {
+                        Text("· \(pendingOutcomeCount)").foregroundStyle(palette.warning)
+                    }
+                }
+            }
+            .buttonStyle(.plain).vosFont(WorkspaceText.meta.size, weight: .medium)
+            .foregroundStyle(palette.accent)
+            .help(weeklyReviewHelp)
+            .accessibilityLabel(weeklyReviewAccessibilityLabel)
         }
         .padding(.horizontal, 18).padding(.vertical, 8)
         .background(palette.canvas)
@@ -103,6 +111,16 @@ struct RecentContentHome: View {
 
     private func openWeeklyReview() {
         model.pendingWorkspaceRoute = .weeklyReview
+    }
+
+    private var weeklyReviewHelp: String {
+        pendingOutcomeCount > 0
+            ? "\(pendingOutcomeCount) 项结果待填，打开每周回顾：完成、待补结果、停滞目标与待确认"
+            : "打开每周回顾：完成、待补结果、停滞目标与待确认"
+    }
+
+    private var weeklyReviewAccessibilityLabel: String {
+        pendingOutcomeCount > 0 ? "\(pendingOutcomeCount) 项结果待填，打开每周回顾" : "打开每周回顾"
     }
 
     private var empty: some View {
@@ -129,8 +147,7 @@ struct RecentContentHome: View {
     }
 
     private var timeline: some View {
-        let pendingOutcomeBadge = outcomeBadge
-        return ScrollViewReader { proxy in
+        ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if !recentThoughts.isEmpty { recentThoughtsEntry(recentThoughts) }
@@ -139,7 +156,7 @@ struct RecentContentHome: View {
                             dayHeader(day)
                             VStack(alignment: .leading, spacing: 8) {
                                 ForEach(day.items) { item in
-                                    Button { selectedID = item.id } label: { row(item, outcomeBadge: pendingOutcomeBadge) }
+                                    Button { selectedID = item.id } label: { row(item) }
                                         .buttonStyle(.plain)
                                         .id(item.id)
                                         .background {
@@ -229,7 +246,7 @@ struct RecentContentHome: View {
         }
     }
 
-    private func row(_ item: RecentContentItem, outcomeBadge: String?) -> some View {
+    private func row(_ item: RecentContentItem) -> some View {
         let isSelected = selected?.id == item.id
         return HStack(alignment: .top, spacing: 10) {
             Image(systemName: rowIcon(item)).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
@@ -242,32 +259,22 @@ struct RecentContentHome: View {
                     .lineLimit(isLargeText ? 2 : 1)
             }
             Spacer(minLength: 6)
-            if let trailing = rowTrailing(item, outcomeBadge: outcomeBadge) {
-                switch trailing {
-                case .badge(let text, let tone):
-                    WorkspaceBadge(text: text, tone: tone).padding(.top, 1)
-                case .text(let text, let color):
-                    Text(text).vosFont(WorkspaceText.meta).foregroundStyle(color).padding(.top, 2)
-                }
+            if let trailing = rowTrailing(item) {
+                WorkspaceBadge(text: trailing, tone: .accent).padding(.top, 1)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .homeCard(isSelected: isSelected)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(rowAccessibilityLabel(item, outcomeBadge: outcomeBadge))
+        .accessibilityLabel(rowAccessibilityLabel(item))
         .accessibilityAddTraits(isSelected ? .isSelected : AccessibilityTraits())
     }
 
-    private func rowAccessibilityLabel(_ item: RecentContentItem, outcomeBadge: String?) -> String {
+    private func rowAccessibilityLabel(_ item: RecentContentItem) -> String {
         var parts = [rowTitle(item)]
         if let note = rowStatusNote(item) { parts.append(note) }
         parts.append(timeLabel(item.date))
-        if let trailing = rowTrailing(item, outcomeBadge: outcomeBadge) {
-            switch trailing {
-            case .badge(let text, _): parts.append(text)
-            case .text(let text, _): parts.append(text)
-            }
-        }
+        if let trailing = rowTrailing(item) { parts.append(trailing) }
         return parts.joined(separator: "，")
     }
 
@@ -283,15 +290,10 @@ struct RecentContentHome: View {
 
     /// The trailing slot carries the value a material produced: its open tasks.
     /// Process states read inline as secondary text instead.
-    private enum RowTrailing {
-        case badge(String, WorkspaceBadge.Tone)
-        case text(String, Color)
-    }
-
-    private func rowTrailing(_ item: RecentContentItem, outcomeBadge: String?) -> RowTrailing? {
-        if item.kind == .feedback { return outcomeBadge.map { .text($0, palette.warning) } }
-        guard let count = model.homeSnapshot.digests[item.id]?.tasks.count, count > 0 else { return nil }
-        return .badge("\(count) 条待办", .accent)
+    private func rowTrailing(_ item: RecentContentItem) -> String? {
+        guard item.kind != .feedback,
+              let count = model.homeSnapshot.digests[item.id]?.tasks.count, count > 0 else { return nil }
+        return "\(count) 条待办"
     }
 
     private func rowStatusNote(_ item: RecentContentItem) -> String? {
@@ -354,19 +356,9 @@ struct RecentContentHome: View {
         return VStack(alignment: .leading, spacing: 16) {
             Text([dateLabel(item.date), timeLabel(item.date)].joined(separator: " · "))
                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text("\(item.title) · \(count) 条")
-                    .vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText)
-                    .accessibilityAddTraits(.isHeader)
-                if let badge = outcomeBadge {
-                    Button(badge) { openWeeklyReview() }
-                        .buttonStyle(.plain)
-                        .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                        .help("打开每周回顾，记录这些结果")
-                        .accessibilityLabel("待补结果，" + badge + "，打开每周回顾")
-                }
-                Spacer(minLength: 0)
-            }
+            Text("\(item.title) · \(count) 条")
+                .vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText)
+                .accessibilityAddTraits(.isHeader)
             if rows.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     ForEach(Array(item.excerpts.enumerated()), id: \.offset) { index, excerpt in
@@ -652,10 +644,7 @@ struct RecentContentHome: View {
         }
     }
 
-    private var outcomeBadge: String? {
-        let pending = model.visibleOutcomeFollowups.count
-        return pending > 0 ? "\(pending) 项结果待填" : nil
-    }
+    private var pendingOutcomeCount: Int { model.visibleOutcomeFollowups.count }
 
     private func recentThoughtsEntry(_ groups: [RecentThoughtDay]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
