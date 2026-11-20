@@ -855,3 +855,7 @@
 - 130-D：已归档/回收站说明仅非空时显示（与空态去重）；搜索空态与周期回顾的分隔线只在行间；主题瓦片网格 16→groupGap；设置页去两条孤立 Divider、快捷键四行合一。
 - 延后：设置页 8 个区块仍夹在扁平 28 间距栈内（组内收紧到 12 的结构重排）留下波。
 - 集成：721 tests 全绿（build_exit=0 / test_exit=0；首轮 2 失败由测试前提错误，已修正）。
+## 波 131：设置页分组节奏、只读库标题同源（2026-11-21，已推送）
+- 131-A 设置页：8 个区块各自包进组（组内 controlPadding 12），组间保持 sectionGap 28；页面标题不入组。控件、顺序、文案零改动（脚本剥壳逐行比对 163 行相等）。
+- 131-B 只读库：`ReadOnlyLibrary.displayTitle` 与应用同漏斗——manual 原样、automatic 过 MaterialTitleText.normalizedGenerated、回退 MaterialNaming.displayName；CLI/agent 不再拿到原始 ISO 名或超长带 markdown 的 AI 标题。新增 4 形态行为测试（经 library.actions 的 sourceTitle 断言）。
+- 集成：722 tests 全绿（build_exit=0 / test_exit=0）。
