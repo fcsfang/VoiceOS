@@ -139,7 +139,7 @@ struct TaskInitiationView: View {
                     Text("先问一个关键问题").tag(TaskInitiationMode.interactive)
                 }.pickerStyle(.segmented)
                 Toggle("允许发送给云端模型", isOn: $allowCloud)
-                Text("生成时会先把这段原话保存为你的材料，只把这段文字发送给模型；不会读取仓库、文件或其他材料，也不会创建任务或提醒。")
+                Text("只发送这段原话给模型；不读取其他材料，也不创建任务或提醒。")
                     .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 if !model.modelConfigured {
                     Text("尚未配置文本模型；请先在设置中连接模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
@@ -502,20 +502,23 @@ struct TaskInitiationView: View {
     }
 
     private var history: some View {
-        WorkspaceSection(title: "启动记录", subtitle: "生成过的材料都在这里；复制只代表已带走，不代表已经执行。", icon: "clock", count: visibleRecords.count) {
+        WorkspaceListSection(title: "启动记录", subtitle: "生成过的材料都在这里。", count: visibleRecords.count) {
             Toggle("查看归档", isOn: $showArchived)
                 .toggleStyle(.switch)
                 .padding(.vertical, 8)
                 .accessibilityIdentifier("initiation.history.archived")
             if visibleRecords.isEmpty {
-                Text(showArchived ? "还没有归档的记录。已确认的启动记录和归档保存的回答会出现在这里。"
-                     : "还没有启动记录。生成过的交接提示词、教程、直接回答或澄清问题会出现在这里。")
-                    .vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 14)
+                WorkspaceEmptyState(
+                    title: showArchived ? "还没有归档的记录" : "还没有启动记录",
+                    systemImage: "clock",
+                    description: showArchived ? "已确认的启动记录和归档保存的回答会出现在这里。" : "生成过的交接提示词、教程、直接回答或澄清问题会出现在这里。"
+                )
+                .padding(.vertical, WorkspaceMetrics.groupGap)
             } else {
                 ForEach(visibleRecords) { record in
                     Button { selectedID = record.id } label: {
                         HStack(alignment: .top, spacing: 14) {
-                            VStack(alignment: .leading, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 3) {
                                 Text(record.proposal.title.isEmpty ? "未命名启动" : record.proposal.title)
                                     .vosFont(WorkspaceText.rowTitle).lineLimit(2)
                                 Text(historySubtitle(record))
@@ -526,7 +529,7 @@ struct TaskInitiationView: View {
                                 Image(systemName: "checkmark.circle.fill").foregroundStyle(palette.accent).accessibilityHidden(true)
                             }
                         }
-                        .padding(.vertical, 18).padding(.horizontal, 10)
+                        .padding(.vertical, 10).padding(.horizontal, 10)
                         .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         .accessibilityElement(children: .combine)
                     }

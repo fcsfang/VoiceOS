@@ -37,10 +37,6 @@ struct ThoughtPanoramaView: View {
             let width = geometry.size.width
             let hasSideReader = width >= 740
             VStack(spacing: 0) {
-                WorkspacePageHeading(title: "思考全景")
-                    .padding(.horizontal, 26)
-                    .padding(.top, 12)
-                    .padding(.bottom, 2)
                 constellationToolbar(width: width)
                 if let readError { readErrorBanner(readError) }
                 WorkspaceListDivider()
@@ -465,11 +461,11 @@ struct ThoughtPanoramaView: View {
         let model = ConstellationModel(snapshot: snapshot, now: .now)
         return ScrollView {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
-                Text("问题与联系列表").vosFont(WorkspaceText.sectionTitle)
+                WorkspaceSectionHeading("问题与联系列表")
                 if hasQuery { outlineSearchResults(model) }
                 ForEach(model.regions) { region in
                     DisclosureGroup {
-                        VStack(alignment: .leading, spacing: 6) {
+                        VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                             Button {
                                 focusedRegionID = region.id
                                 selection = nil
@@ -498,7 +494,7 @@ struct ThoughtPanoramaView: View {
                     }
                 }
                 WorkspaceListDivider()
-                Text("候选联系").vosFont(WorkspaceText.sectionTitle)
+                WorkspaceSectionHeading("候选联系")
                 if snapshot.proposal.relations.isEmpty {
                     Text(snapshot.isPartial ? "跨材料联系尚未核对完成；当前只展示已核对区域。" : "当前没有已核对的跨区域候选联系。")
                         .vosFont(WorkspaceText.meta)
@@ -551,7 +547,7 @@ struct ThoughtPanoramaView: View {
             }
         }
         let hits = regionHits + questionHits
-        return VStack(alignment: .leading, spacing: 6) {
+        return VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
             Text("搜索结果 · \(hits.count)").vosFont(WorkspaceText.rowTitle)
             if hits.isEmpty {
                 Text("没有匹配的区域或问题").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
@@ -581,7 +577,7 @@ struct ThoughtPanoramaView: View {
                                 .lineLimit(1)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 3)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -631,6 +627,22 @@ struct ThoughtPanoramaView: View {
             if case .unverified = self { return "继续核对" }
             return "生成或重试全景"
         }
+
+        var detail: String {
+            switch self {
+            case .loading:
+                return "正在根据材料整理问题与联系。"
+            case .needsModel:
+                return "选择文本模型后，VoiceOS 会整理材料中的问题与联系。"
+            case .unverified(let error):
+                if let error, !error.isEmpty { return error }
+                return "材料有更新或核对未完成；继续核对后会显示结果。"
+            case .needsMaterials:
+                return "先导入或录制材料，再整理成完整单元。"
+            case .settled:
+                return "现有材料里暂时没有持续的关切。"
+            }
+        }
     }
 
     // The discovery headline only belongs to a settled, verified panorama with no
@@ -651,26 +663,21 @@ struct ThoughtPanoramaView: View {
             ZStack {
                 Ellipse().fill(palette.selection).frame(width: 300, height: 190).rotationEffect(.degrees(-15))
                 Ellipse().fill(palette.accent.opacity(0.08)).frame(width: 240, height: 160).offset(x: 110, y: 40)
-                Image(systemName: "point.3.connected.trianglepath.dotted").vosFont(62, weight: .light).foregroundStyle(.secondary)
             }.padding(.bottom, 20)
             if case .loading = mode { ProgressView().controlSize(.regular) }
-            Text(mode.title).vosFont(WorkspaceText.sectionTitle)
-            Text(emptyDetail(mode)).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 480).help(toolbarMessageHelp)
-            HStack {
-                Button("打开材料", action: openMaterials)
-                    .buttonStyle(WorkspaceButtonStyle(emphasis: canRetry ? .secondary : .primary))
-                if canRetry {
-                    Button(mode.retryLabel, action: retry)
-                        .buttonStyle(.workspacePrimary)
-                        .disabled(!modelConfigured || isGenerating || state?.status == "running")
+            WorkspaceEmptyState(title: mode.title, systemImage: "point.3.connected.trianglepath.dotted",
+                                description: mode.detail) {
+                HStack {
+                    Button("打开材料", action: openMaterials)
+                        .buttonStyle(WorkspaceButtonStyle(emphasis: canRetry ? .secondary : .primary))
+                    if canRetry {
+                        Button(mode.retryLabel, action: retry)
+                            .buttonStyle(.workspacePrimary)
+                            .disabled(!modelConfigured || isGenerating || state?.status == "running")
+                    }
                 }
-            }
+            }.help(toolbarMessageHelp)
         }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func emptyDetail(_ mode: PanoramaEmptyMode) -> String {
-        if case .unverified(let error) = mode, let error, !error.isEmpty { return error }
-        return toolbarMessage
     }
 
     private func dependencyCount(_ input: PanoramaInput) -> Int {
@@ -887,7 +894,6 @@ private struct RegionInspectorPanel: View {
                                 .buttonStyle(.workspaceQuietCompact)
                         }
                     }
-                    Text("AI 的推断，不是你的结论").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary)
                 } else {
                     ReaderCappedText(text: region.summary, size: WorkspaceText.body.size)
                 }
@@ -1179,7 +1185,7 @@ private struct ReaderQuoteCard: View {
     var body: some View {
         WorkspaceCard(padding: 12) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(source.transcript.origin == "user" && source.transcript.speaker == "user" ? "我的原话" : "外部 / AI 来源 · 不代表本人认可")
+                Text(source.transcript.origin == "user" && source.transcript.speaker == "user" ? "我的原话" : "外部 / AI 来源")
                     .vosFont(WorkspaceText.meta.size, weight: .medium)
                 Text("“" + item.quote + "”")
                     .vosFont(WorkspaceText.body)
