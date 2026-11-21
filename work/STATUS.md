@@ -1007,3 +1007,6 @@
 - `TaskDetailDerivedCache`（records+secondary 代际 + actionID/version/isQuestion）缓存 sources、executions（过滤后）、correctedClaim、latestAnalysis、nextActions；executions 的未读优先排序保留在读取时计算（deliveryReadAt 不入代际，避免标记已读后顺序僵死）。
 - `ActionDateFormatting` 静态化反馈行与到期判断的日期/ISO 格式器，locale 与格式逐字一致；文件内行渲染路径不再分配格式器。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 160：认知地图缓存（2026-11-22，已推送）
+- `AtlasGraphCache`（records+secondary 代际 + reflectionKey）缓存 nodes/edges/positions；缩放滑杆、滚动平移、点选、只看相连、图谱搜索与检查器切换不再触发三件套重算；nodes/edges/positions 三个纯函数逐字未改；loading 与 focus 为空路径不缓存。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
