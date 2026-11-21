@@ -78,6 +78,16 @@ private struct SourceExtractionReadKey: Hashable {
     let thoughtsCount:Int
 }
 private func sourceTime(_ ms:Int)->String { String(format:"%02d:%02d",ms/60000,ms/1000%60) }
+/// Mirrors `WorkspaceKeySelection.step` in WorkspaceView; share one helper once a third list needs it.
+private func stepSourcePlaybackSelection(_ selection:inout String?,up:Bool,over ids:[String])->Bool {
+    guard !ids.isEmpty else { return false }
+    let current=selection.flatMap { ids.firstIndex(of:$0) }
+    let next:Int
+    if up { next=current.map { max(0,$0 - 1) } ?? ids.count - 1 }
+    else { next=current.map { min(ids.count - 1,$0 + 1) } ?? 0 }
+    selection=ids[next]
+    return true
+}
 struct SourceFoldState: Equatable {
     var original = false
     var fullText = false
@@ -330,6 +340,7 @@ struct WorkspaceSourceView: View {
     @State private var attachmentURL:URL?
     @State private var attachmentMime:String?
     @StateObject private var playback=SourcePlaybackClock()
+    @State private var playbackSelection:String?
     @State private var autoScrolledSpanID:String?
     @State private var selectedText=""
     @State private var selectedRange=NSRange(location:0,length:0)
@@ -843,9 +854,10 @@ struct WorkspaceSourceView: View {
                     VStack(alignment:.leading,spacing:16) {
                         transcriptBody
                         if source.state == "saved" { Button("打开保存的原件",systemImage:"play.circle") { Task { await model.play(source) } }.buttonStyle(.workspaceSecondaryCompact) }
-                        SourceSpanPlaybackList(model:model,source:source,
-                                               spans:source.spans.filter { $0.startMS != nil && $0.endMS != nil },
-                                               clock:playback)
+                        let timedSpans=source.spans.filter { $0.startMS != nil && $0.endMS != nil }
+                        if !timedSpans.isEmpty {
+                            SourceSpanPlaybackList(model:model,source:source,spans:timedSpans,clock:playback,selection:$playbackSelection)
+                        }
                         Text("原文件：" + MaterialNaming.displayName(source.name)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                         if source.transcript != nil {
                             WorkspaceListDivider()
@@ -899,14 +911,14 @@ struct WorkspaceSourceView: View {
                     }
                     if !outlineSections.isEmpty {
                         SourceFold(title:"逐字稿大纲",icon:"list.bullet",count:outlineSections.count,isExpanded:foldExpanded(\.outline)) {
-                            SourceOutlinePlaybackList(sections:outlineSections,clock:playback) { playOutlineSection($0) }
+                            SourceOutlinePlaybackList(sections:outlineSections,clock:playback,selection:$playbackSelection) { playOutlineSection($0) }
                         }
                     }
                     if chapters.isEmpty && chaptersPhase.isLoading { SourceLoadingRow(title:"正在读取章节…") }
                     if let failure=chaptersPhase.failure, chapters.isEmpty { SourceLoadFailureRow(operation:"读取章节",reason:failure) { chaptersRetry+=1 } }
                     if !chapters.isEmpty {
                         SourceFold(title:"章节",icon:"list.number",count:chapters.count,isExpanded:foldExpanded(\.chapters)) {
-                            SourceChapterPlaybackList(chapters:chapters,clock:playback) { playChapter($0) }
+                            SourceChapterPlaybackList(chapters:chapters,clock:playback,selection:$playbackSelection) { playChapter($0) }
                         }
                     }
                     if entities.isEmpty && entitiesPhase.isLoading { SourceLoadingRow(title:"正在读取人名与术语…") }
@@ -1506,20 +1518,71 @@ private struct TranscriptParagraphRow: View, Equatable {
             .accessibilityLabel(text)
     }
 }
+private struct SourcePlaybackKeyList<Content:View>: View {
+    @Binding var selection:String?
+    let ids:[String]
+    let play:(String)->Void
+    @ViewBuilder let content:()->Content
+    @FocusState private var focused:Bool
+    var body:some View {
+        content()
+            .focusable()
+            .focused($focused)
+            .focusEffectDisabled()
+            .onKeyPress { handle($0) }
+            .onAppear { requestFocus() }
+    }
+    private func requestFocus() {
+        guard !ids.isEmpty else { return }
+        Task {
+            try? await Task.sleep(for:.milliseconds(100))
+            // Expanding a fold must not pull focus away from an open text editor.
+            guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return }
+            focused=true
+        }
+    }
+    private func handle(_ press:KeyPress)->KeyPress.Result {
+        guard focused, !ids.isEmpty, press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard stepSourcePlaybackSelection(&selection,up:press.key == .upArrow,over:ids) else { return .ignored }
+            return .handled
+        case .return:
+            guard let id=selection, ids.contains(id) else { return .ignored }
+            play(id)
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+}
 private struct SourceSpanPlaybackList: View {
     let model:ControlCenter
     let source:SourceRecord
     let spans:[TranscriptSpan]
     @ObservedObject var clock:SourcePlaybackClock
+    @Binding var selection:String?
     var body:some View {
-        ForEach(spans) { span in
-            let active=isPlaying(span)
-            Button { Task { _=await model.playSpan(source,milliseconds:span.startMS!,endMilliseconds:span.endMS!) } } label: {
-                SourceSpanPlaybackLabel(startMS:span.startMS!,endMS:span.endMS!,active:active).equatable()
-            }.buttonStyle(.plain).id("source-span-"+span.id)
-                .accessibilityElement(children:.ignore)
-                .accessibilityLabel(sourceTime(span.startMS!) + "—" + sourceTime(span.endMS!) + "，回听这段")
+        SourcePlaybackKeyList(selection:$selection,ids:spans.map { rowID($0) },play:playRow) {
+            ForEach(spans) { span in
+                let active=isPlaying(span)
+                Button { play(span) } label: {
+                    SourceSpanPlaybackLabel(startMS:span.startMS!,endMS:span.endMS!,active:active,highlighted:selection == rowID(span)).equatable()
+                }.buttonStyle(.plain).id("source-span-"+span.id)
+                    .workspaceFocusRing(selection == rowID(span) && !active,radius:WorkspaceMetrics.controlRadius)
+                    .accessibilityElement(children:.ignore)
+                    .accessibilityLabel(sourceTime(span.startMS!) + "—" + sourceTime(span.endMS!) + "，回听这段")
+            }
         }
+    }
+    private func rowID(_ span:TranscriptSpan)->String { "span:"+span.id }
+    private func play(_ span:TranscriptSpan) {
+        Task { _=await model.playSpan(source,milliseconds:span.startMS!,endMilliseconds:span.endMS!) }
+    }
+    private func playRow(_ id:String) {
+        guard let span=spans.first(where: { rowID($0) == id }) else { return }
+        play(span)
     }
     private func isPlaying(_ span:TranscriptSpan)->Bool {
         guard let milliseconds=clock.milliseconds,let start=span.startMS,let end=span.endMS else { return false }
@@ -1531,16 +1594,17 @@ private struct SourceSpanPlaybackLabel: View, Equatable {
     let startMS:Int
     let endMS:Int
     let active:Bool
+    let highlighted:Bool
     @State private var hovered = false
     static func == (lhs:SourceSpanPlaybackLabel,rhs:SourceSpanPlaybackLabel)->Bool {
-        lhs.startMS == rhs.startMS && lhs.endMS == rhs.endMS && lhs.active == rhs.active
+        lhs.startMS == rhs.startMS && lhs.endMS == rhs.endMS && lhs.active == rhs.active && lhs.highlighted == rhs.highlighted
     }
     var body:some View {
         Text(sourceTime(startMS) + "—" + sourceTime(endMS) + " · 回听")
             .vosFont(WorkspaceText.meta.size, weight: active ? .semibold : .regular)
             .padding(.horizontal,8).padding(.vertical,3)
             .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
-            .background(active ? palette.selection : hovered ? palette.hover : .clear, in: RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+            .background(active || highlighted ? palette.selection : hovered ? palette.hover : .clear, in: RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
             .contentShape(Rectangle())
             .onHover { hovered = $0 }
     }
@@ -1548,18 +1612,27 @@ private struct SourceSpanPlaybackLabel: View, Equatable {
 private struct SourceOutlinePlaybackList: View {
     let sections:[SourceOutlineSection]
     @ObservedObject var clock:SourcePlaybackClock
+    @Binding var selection:String?
     let play:(SourceOutlineSection)->Void
     var body:some View {
-        VStack(alignment:.leading,spacing:4) {
-            ForEach(sections) { section in
-                let active=isPlaying(section)
-                Button { play(section) } label: {
-                    SourceTimedPlaybackLabel(startMS:section.startMS,title:section.title,active:active).equatable()
-                }.buttonStyle(.plain)
-                    .accessibilityElement(children:.ignore)
-                    .accessibilityLabel(sourceTime(section.startMS) + "，" + section.title)
+        SourcePlaybackKeyList(selection:$selection,ids:sections.map { rowID($0) },play:playRow) {
+            VStack(alignment:.leading,spacing:4) {
+                ForEach(sections) { section in
+                    let active=isPlaying(section)
+                    Button { play(section) } label: {
+                        SourceTimedPlaybackLabel(startMS:section.startMS,title:section.title,active:active,highlighted:selection == rowID(section)).equatable()
+                    }.buttonStyle(.plain)
+                        .workspaceFocusRing(selection == rowID(section) && !active,radius:WorkspaceMetrics.controlRadius)
+                        .accessibilityElement(children:.ignore)
+                        .accessibilityLabel(sourceTime(section.startMS) + "，" + section.title)
+                }
             }
         }
+    }
+    private func rowID(_ section:SourceOutlineSection)->String { "outline:"+String(section.id) }
+    private func playRow(_ id:String) {
+        guard let section=sections.first(where: { rowID($0) == id }) else { return }
+        play(section)
     }
     private func isPlaying(_ section:SourceOutlineSection)->Bool {
         guard let milliseconds=clock.milliseconds else { return false }
@@ -1569,16 +1642,25 @@ private struct SourceOutlinePlaybackList: View {
 private struct SourceChapterPlaybackList: View {
     let chapters:[SourceChapter]
     @ObservedObject var clock:SourcePlaybackClock
+    @Binding var selection:String?
     let play:(SourceChapter)->Void
     var body:some View {
-        ForEach(chapters,id:\.ordinal) { chapter in
-            let active=isPlaying(chapter)
-            Button { play(chapter) } label: {
-                SourceTimedPlaybackLabel(startMS:chapter.startMS,title:chapter.title,active:active).equatable()
-            }.buttonStyle(.plain)
-                .accessibilityElement(children:.ignore)
-                .accessibilityLabel(sourceTime(chapter.startMS) + "，" + chapter.title)
+        SourcePlaybackKeyList(selection:$selection,ids:chapters.map { rowID($0) },play:playRow) {
+            ForEach(chapters,id:\.ordinal) { chapter in
+                let active=isPlaying(chapter)
+                Button { play(chapter) } label: {
+                    SourceTimedPlaybackLabel(startMS:chapter.startMS,title:chapter.title,active:active,highlighted:selection == rowID(chapter)).equatable()
+                }.buttonStyle(.plain)
+                    .workspaceFocusRing(selection == rowID(chapter) && !active,radius:WorkspaceMetrics.controlRadius)
+                    .accessibilityElement(children:.ignore)
+                    .accessibilityLabel(sourceTime(chapter.startMS) + "，" + chapter.title)
+            }
         }
+    }
+    private func rowID(_ chapter:SourceChapter)->String { "chapter:"+String(chapter.ordinal) }
+    private func playRow(_ id:String) {
+        guard let chapter=chapters.first(where: { rowID($0) == id }) else { return }
+        play(chapter)
     }
     private func isPlaying(_ chapter:SourceChapter)->Bool {
         guard let milliseconds=clock.milliseconds else { return false }
@@ -1591,9 +1673,10 @@ private struct SourceTimedPlaybackLabel: View, Equatable {
     let startMS:Int
     let title:String
     let active:Bool
+    let highlighted:Bool
     @State private var hovered = false
     static func == (lhs:SourceTimedPlaybackLabel,rhs:SourceTimedPlaybackLabel)->Bool {
-        lhs.startMS == rhs.startMS && lhs.title == rhs.title && lhs.active == rhs.active
+        lhs.startMS == rhs.startMS && lhs.title == rhs.title && lhs.active == rhs.active && lhs.highlighted == rhs.highlighted
     }
     var body:some View {
         HStack(alignment:.top,spacing:10) {
@@ -1602,7 +1685,7 @@ private struct SourceTimedPlaybackLabel: View, Equatable {
             Spacer(minLength:0)
         }.padding(.horizontal,8).padding(.vertical,6)
             .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
-            .background(active ? palette.selection : hovered ? palette.hover : .clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
+            .background(active || highlighted ? palette.selection : hovered ? palette.hover : .clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
             .contentShape(Rectangle())
             .onHover { hovered = $0 }
     }
