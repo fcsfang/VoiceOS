@@ -70,6 +70,7 @@ struct QuestionTransitionView: View {
     @State private var answerSource = ""
     @State private var answerQuote = ""
     @State private var commandID = UUID().uuidString
+    @FocusState private var reasonFocused: Bool
     private var allowed: [QuestionStatus] {
         if question.status == .closed || question.status == .resolved { return [.open] }
         return [QuestionStatus.open, .exploring, .resolved, .closed].filter { $0 != question.status }
@@ -82,7 +83,7 @@ struct QuestionTransitionView: View {
             Picker("新状态", selection: $target) {
                 ForEach(allowed, id: \.rawValue) { status in Text(status.displayLabel).tag(status) }
             }
-            TextField("原因或研究进展（必填）", text: $reason)
+            TextField("原因或研究进展（必填）", text: $reason).focused($reasonFocused)
             if target == .resolved {
                 Text("选择一份明确回答这个问题的个人表达，引用连续原话；记录解决不改变未验证状态。").vosFont(WorkspaceText.meta)
                 Picker("答案出处", selection: $answerSource) {
@@ -103,11 +104,12 @@ struct QuestionTransitionView: View {
                         if await model.changeQuestion(question, to: target, reason: reason, answerSourceID: target == .resolved ? answerSource : nil, answerQuote: target == .resolved ? answerQuote : nil, commandID: commandID) { dismiss() }
                         else { commandID = UUID().uuidString }
                     }
-                }.buttonStyle(.workspacePrimary).disabled(model.savingQuestion || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (target == .resolved && (answerSource.isEmpty || answerQuote.isEmpty)))
+                }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(model.savingQuestion || reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (target == .resolved && (answerSource.isEmpty || answerQuote.isEmpty)))
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
         .workspaceModalSurface()
         .onAppear { target = allowed[0] }
+        .task { try? await Task.sleep(for: .milliseconds(100)); reasonFocused = true }
     }
 }
 

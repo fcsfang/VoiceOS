@@ -919,6 +919,7 @@ private struct RecentClueRenameSheet: View {
     let dismiss: () -> Void
     @State private var title: String
     @State private var saving = false
+    @FocusState private var titleFocused: Bool
 
     init(model: ControlCenter, clue: String, title: String, resettable: Bool, dismiss: @escaping () -> Void) {
         self.model = model; self.clue = clue; self.resettable = resettable; self.dismiss = dismiss
@@ -928,7 +929,7 @@ private struct RecentClueRenameSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("修改线索标题").vosFont(WorkspaceText.sectionTitle)
-            TextField("线索标题", text: $title)
+            TextField("线索标题", text: $title).focused($titleFocused)
             Text("只改变这条线索的显示名，原始想法不变。")
                 .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if !model.status.isEmpty {
@@ -941,8 +942,8 @@ private struct RecentClueRenameSheet: View {
                         Task { if await model.renameRecentClue(clue, title: nil) { dismiss() }; saving = false }
                     }
                 }
-                Spacer()
                 Button("取消", action: dismiss).keyboardShortcut(.cancelAction)
+                Spacer()
                 Button("保存") {
                     saving = true
                     let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -954,6 +955,7 @@ private struct RecentClueRenameSheet: View {
             }.disabled(saving)
         }.padding(24).frame(width: 520)
             .workspaceModalSurface()
+            .task { try? await Task.sleep(for: .milliseconds(100)); titleFocused = true }
     }
 }
 
