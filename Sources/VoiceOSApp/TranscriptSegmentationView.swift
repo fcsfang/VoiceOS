@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct TranscriptSegmentationView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
     var body: some View {
@@ -9,7 +10,7 @@ struct TranscriptSegmentationView: View {
             Text("原话分段").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             if let plan = model.segmentationPlan {
                 Text("\(plan.source.origin == "user" && plan.source.speaker == "user" ? "我的表达" : "外部资料 · 说话人待核对") · \(plan.segments.count) 段 · 每段最多 \(plan.scalarBudget) 字符").monospacedDigit()
-                Text("仅在本机预览，保留全部原话；尚未排队发送模型。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                Text("仅在本机预览，保留全部原话；尚未排队发送模型。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                 ScrollView {
                     LazyVStack(alignment:.leading,spacing:14) {
                         ForEach(plan.segments) { segment in
@@ -22,9 +23,9 @@ struct TranscriptSegmentationView: View {
                                         VStack(alignment:.leading,spacing:4) {
                                             Text("原文字符 \(reference.textStart+1)—\(reference.textEnd)").vosFont(WorkspaceText.meta, monospacedDigit: true)
                                             if let start = reference.containingSpanStartMS, let end = reference.containingSpanEndMS {
-                                                Text(String(format:"原片段 %.1f—%.1f 秒；不是当前分段的精确起止",Double(start)/1000,Double(end)/1000)).vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(.secondary)
+                                                Text(String(format:"原片段 %.1f—%.1f 秒；不是当前分段的精确起止",Double(start)/1000,Double(end)/1000)).vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                                                 Button("从原片段开始播放核对") { Task { await model.playSegmentationReference(plan,reference:reference) } }
-                                            } else { Text("时间未确认；文字更正后不沿用原时间。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                                            } else { Text("时间未确认；文字更正后不沿用原时间。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                                         }
                                     }
                                 }
@@ -33,7 +34,7 @@ struct TranscriptSegmentationView: View {
                         }
                     }
                 }
-            } else { Text("原话或授权已变化，请关闭后重新查看分段。").foregroundStyle(.secondary) }
+            } else { Text("原话或授权已变化，请关闭后重新查看分段。").foregroundStyle(palette.secondaryText) }
             if !model.segmentationStatus.isEmpty { WorkspaceNoticeText(message: model.segmentationStatus) }
             HStack { Spacer(); Button("完成",action:dismiss).keyboardShortcut(.cancelAction) }
         }.padding(24).frame(width:680,height:560)

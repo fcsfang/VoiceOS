@@ -41,7 +41,7 @@ struct AssistantDelegationView: View {
         VStack(alignment: .leading, spacing: 16) {
             Label("交给 AI 助理", systemImage: "sparkles").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text(action.title).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
-            Text("写下你想要的结果。应用会调研、比较或起草；可以关闭窗口，稍后回来查看。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("写下你想要的结果。应用会调研、比较或起草；可以关闭窗口，稍后回来查看。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                 Text("交付要求").vosFont(WorkspaceText.rowTitle)
                 TextEditor(text: $instruction).vosFont(WorkspaceText.body).frame(height: 190).workspaceEditorSurface()
@@ -50,7 +50,7 @@ struct AssistantDelegationView: View {
                 Text("暂不关联").tag("")
                 ForEach(questions) { Text($0.title).tag($0.id) }
             }
-            Text("本次使用完整任务原文与交付要求。关联主题用于保存成果；AI 产出、实际任务完成情况和你的认识分别保留。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            Text("本次使用完整任务原文与交付要求。关联主题用于保存成果；AI 产出、实际任务完成情况和你的认识分别保留。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             DisclosureGroup("本次使用的任务原文 · \(taskSources.count) 份") {
                 ScrollView {
                     VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
@@ -77,7 +77,7 @@ struct AssistantDelegationView: View {
                 }.buttonStyle(.workspacePrimary)
                     .disabled(saving || !allowCloud || !model.modelConfigured || instruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            if !model.modelConfigured { Text("先配置模型连接，才能开始代办。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            if !model.modelConfigured { Text("先配置模型连接，才能开始代办。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
             .background(palette.canvas)
             .interactiveDismissDisabled(saving)
@@ -132,7 +132,7 @@ struct AssistantExecutionView: View {
                                     WorkspaceCard(padding: 14, radius: WorkspaceMetrics.panelRadius) {
                                         VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                                             Text(.init(execution.title)).vosFont(WorkspaceText.rowTitle).lineLimit(3)
-                                            Text(assistantExecutionLabel(execution)).vosFont(WorkspaceText.meta).foregroundStyle(execution.state == "failed" ? palette.warning : .secondary)
+                                            Text(assistantExecutionLabel(execution)).vosFont(WorkspaceText.meta).foregroundStyle(execution.state == "failed" ? palette.warning : palette.secondaryText)
                                         }
                                         .background(selected?.id == execution.id ? palette.selection : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                                     }
@@ -157,7 +157,7 @@ struct AssistantExecutionView: View {
             WorkspaceListDivider()
             HStack {
                 if model.assistantBusy { ProgressView().controlSize(.small) }
-                Text(model.assistantStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2)
+                Text(model.assistantStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(2)
                 Spacer()
             }.padding(.horizontal, 24).padding(.vertical, 10)
         }.foregroundStyle(palette.text).background(palette.canvas).frame(width: 1030, height: 730)
@@ -201,7 +201,7 @@ struct AssistantExecutionView: View {
                             DisclosureGroup("查看完整报告原文") {
                                 Text(verbatim: report).vosFont(WorkspaceText.body.size, design: .monospaced).textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading).padding(.top, 8)
-                            }.vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            }.vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         }
                         if !execution.references.isEmpty {
                             WorkspaceListDivider()
@@ -210,7 +210,7 @@ struct AssistantExecutionView: View {
                                 if let url = URL(string: reference.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
                                     VStack(alignment: .leading, spacing: 3) {
                                         Link(reference.title.isEmpty ? reference.url : reference.title, destination: url).tint(palette.accent)
-                                        Text(reference.url).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                                        Text(reference.url).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                                     }
                                 }
                             }
@@ -219,13 +219,13 @@ struct AssistantExecutionView: View {
                         VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                             ProgressView().controlSize(.small)
                             Text(execution.state == "queued" ? "委托已保存，等待应用执行。" : "正在完成交付要求，成果准备好后会保存在这里。")
-                            Text("可以关闭窗口；VoiceOS 需要保持运行。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text("可以关闭窗口；VoiceOS 需要保持运行。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         }.padding(.vertical, 20)
                     }
                     if let message = execution.error, !message.isEmpty {
                         WorkspaceNoticeText(message: InlineFailurePresentation.message(operation: "代办", reason: message), severity: .danger)
                     }
-                    Text("这是 AI 产出。它不会自动成为你的观点，也不会把原任务标为完成；采纳与实际结果可以在后续记录。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                    Text("这是 AI 产出。它不会自动成为你的观点，也不会把原任务标为完成；采纳与实际结果可以在后续记录。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             if execution.state == "completed", execution.validity == "current" {
@@ -251,7 +251,7 @@ struct AssistantExecutionView: View {
                     }.buttonStyle(.workspaceSecondary)
                         .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive || saving)
                 }
-                if execution.questionID != nil { Text("成果已关联主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                if execution.questionID != nil { Text("成果已关联主题。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
         }.padding(22).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

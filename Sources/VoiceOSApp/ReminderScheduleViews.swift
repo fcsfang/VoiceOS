@@ -3,6 +3,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct ActionScheduleEditor: View {
+    @Environment(\.workspacePalette) private var palette
     let action: ActionRecord
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
@@ -64,11 +65,11 @@ struct ActionScheduleEditor: View {
                 if mode != "none" {
                     DatePicker("期限", selection: $date, displayedComponents: mode == "time" ? [.date,.hourAndMinute] : [.date])
                         .environment(\.timeZone, timeZone).disabled(saving)
-                    Text("解释时区：" + timeZone.identifier).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("解释时区：" + timeZone.identifier).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
             }
             WorkspaceListDivider()
-            Text("仅保存在本地；外部改期差异需另行确认。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("仅保存在本地；外部改期差异需另行确认。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
                 Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(saving)
@@ -93,6 +94,7 @@ struct ActionScheduleEditor: View {
 }
 
 struct ReminderScheduleConfirmationView: View {
+    @Environment(\.workspacePalette) private var palette
     let effect: ReminderScheduleEffect
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
@@ -113,16 +115,16 @@ struct ReminderScheduleConfirmationView: View {
                                    tone: effect.before.dueDate == nil ? .warning : .neutral)
                     WorkspaceBadge(text: "拟改为：" + effect.desired.summary)
                 }
-                Text(effect.authority == .userCommitment ? "你的明确期限选择" : "AI 弹性安排，仍非你的明确承诺").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text(effect.authority == .userCommitment ? "你的明确期限选择" : "AI 弹性安排，仍非你的明确承诺").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 DisclosureGroup("本次排期依据") {
                     Text(effect.rawExpression).textSelection(.enabled)
-                    Text("表达时刻：" + effect.anchorSummary).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("表达时刻：" + effect.anchorSummary).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
             }
             WorkspaceListDivider()
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
                 Text("只允许这一项变更，执行前重新核对。").vosFont(WorkspaceText.body)
-                Text("确认不代表任务已完成；撤回后续写入许可不会撤销已派发的变更。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                Text("确认不代表任务已完成；撤回后续写入许可不会撤销已派发的变更。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             }
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {

@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct ReminderSettingsView: View {
+    @Environment(\.workspacePalette) private var palette
     let action: ActionRecord
     let snapshot: ReminderSnapshot
     @ObservedObject var model: ControlCenter
@@ -50,7 +51,7 @@ struct ReminderSettingsView: View {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
                 WorkspaceSectionHeading("日期、提醒与优先级")
                 Text(action.title).vosFont(WorkspaceText.rowTitle)
-                Text("保存前会重新核对提醒事项当前设置。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("保存前会重新核对提醒事项当前设置。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 Toggle("安排日期", isOn: $hasDate)
                 if hasDate {
                     DatePicker("日期", selection: $due, displayedComponents: [.date])
@@ -59,15 +60,15 @@ struct ReminderSettingsView: View {
                 if hasDate {
                     if hasTime { DatePicker("时刻", selection: $due, displayedComponents: [.hourAndMinute]) }
                     if !hasTime {
-                        Text("仅日期任务固定 09:00 提醒（当前不可关闭）").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                        if let text = defaultAlertText { Text("实际通知时间 " + text).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                        Text("仅日期任务固定 09:00 提醒（当前不可关闭）").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        if let text = defaultAlertText { Text("实际通知时间 " + text).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                     }
                 }
                 if hasTime {
                     Toggle("发送通知", isOn: alertToggle).disabled(!hasDate)
                     if hasDate, hasAlert {
                         DatePicker("提醒我", selection: $alert, displayedComponents: [.date, .hourAndMinute])
-                        Text("通知时间独立于安排日期。其他已有通知会保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Text("通知时间独立于安排日期。其他已有通知会保留。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     }
                 }
                 Picker("优先级", selection: $priority) {
@@ -92,7 +93,7 @@ struct ReminderSettingsView: View {
                     Picker("提醒方式", selection: $locationProximity) {
                         Text("到达").tag(ReminderLocation.Proximity.enter); Text("离开").tag(ReminderLocation.Proximity.leave)
                     }.pickerStyle(.segmented)
-                    Text("只按名称解析，不联网、不写坐标。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("只按名称解析，不联网、不写坐标。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
             }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }

@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct RecordingTitleEditor: View {
+    @Environment(\.workspacePalette) private var palette
     let record: SourceRecord
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
@@ -18,10 +19,10 @@ struct RecordingTitleEditor: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("修改录音标题").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             TextField("内容标题", text: $title, prompt: Text("当前显示：\(record.displayTitle)")).focused($titleFocused)
-            Text(record.recordingSubtitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            Text("标题用于资料库；手动标题不会被自动整理覆盖。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text(record.recordingSubtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            Text("标题用于资料库；手动标题不会被自动整理覆盖。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             Text("原文件名：" + MaterialNaming.displayName(record.name)).vosFont(WorkspaceText.meta).textSelection(.enabled)
-            if !model.recordingTitleStatus.isEmpty { Text(model.recordingTitleStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            if !model.recordingTitleStatus.isEmpty { Text(model.recordingTitleStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             HStack {
                 if record.presentation?.manualTitle != nil {
                     Button("恢复自动标题") {

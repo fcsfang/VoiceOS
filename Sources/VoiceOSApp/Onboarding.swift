@@ -43,7 +43,7 @@ struct OnboardingView: View {
                             if !current.detail.isEmpty {
                                 Text(current.detail)
                                     .vosFont(WorkspaceText.body)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(palette.secondaryText)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
@@ -98,7 +98,7 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 0) {
                 WorkspaceSectionHeading("开始前检查")
                 Text("未完成的项不影响开始使用；之后可以在设置中补齐。")
-                    .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                    .vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                     .padding(.top, 3)
                     .padding(.bottom, 10)
                 WorkspaceListDivider()
@@ -231,7 +231,7 @@ private struct OnboardingCheckRow: View {
                 Text(title).vosFont(WorkspaceText.rowTitle)
                 Text(detail)
                     .vosFont(WorkspaceText.meta)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)
