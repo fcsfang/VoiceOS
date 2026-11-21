@@ -33,7 +33,7 @@ struct WorkspacePalette {
     var canvas: Color {
         switch theme {
         case .graphite: adaptive(0xFAFAF9, 0x1E1E1E)
-        case .snow: adaptive(0xFBFBFC, 0x1D1D1F)
+        case .snow: adaptive(0xFFFFFF, 0x1D1D1F)
         case .sage: adaptive(0xF9FAF5, 0x1B1F1D)
         }
     }
@@ -75,7 +75,7 @@ struct WorkspacePalette {
     var selection: Color {
         switch theme {
         case .graphite: adaptive(0xEFEFEC, 0x333333)
-        case .snow: adaptive(0xEDEDEF, 0x323234)
+        case .snow: adaptive(0xECECEF, 0x323234)
         case .sage: adaptive(0xEDF1E6, 0x303F33)
         }
     }
@@ -84,7 +84,7 @@ struct WorkspacePalette {
         case .graphite:
             increasesContrast ? adaptive(0xAFAFB0, 0x6C6C6C) : adaptive(0xE4E4DF, 0x4A4A4A)
         case .snow:
-            increasesContrast ? adaptive(0xAFAFB2, 0x6C6C70) : adaptive(0xE3E3E6, 0x47474A)
+            increasesContrast ? adaptive(0xAEAEB2, 0x6C6C70) : adaptive(0xE2E2E6, 0x47474A)
         case .sage:
             increasesContrast ? adaptive(0xA5B2A2, 0x6C7F72) : adaptive(0xE1E6D8, 0x4A5A4E)
         }
