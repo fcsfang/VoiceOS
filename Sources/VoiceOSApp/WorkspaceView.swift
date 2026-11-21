@@ -549,6 +549,7 @@ struct WorkspaceView: View {
                     onRecord:{ action in showingOutcome=false;go(.task(action.id)) },
                     onOpen:{ action in showingOutcome=false;go(.task(action.id)) },
                     onSkip:{ model.skipOutcome($0) },
+                    onOpenActions:{ go(.actions) },
                     onDone:{ showingOutcome=false })
             }
             .sheet(isPresented:$showingWeeklyReview) {
