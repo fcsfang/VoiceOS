@@ -664,91 +664,7 @@ struct WorkspaceTaskView: View {
                 if action.kind == "task", current, draft.expanded {
                     feedbackDraftEditor.padding(18).background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 }
-                feedbackProgressCard
-                if let feedbackError {
-                    HStack(spacing:10) {
-                        WorkspaceNoticeText(message:feedbackError,severity:.danger)
-                        Button("重试") { Task { await loadFeedback() } }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("重试读取反馈历史")
-                    }
-                }
-                if action.kind != "task", !isQuestion || !nextActions.isEmpty { nextActionSection }
-                if action.kind == "task" || recurrence != nil {
-                    WorkspaceCard {
-                        VStack(alignment:.leading,spacing:12) {
-                            WorkspaceSectionHeading("重复")
-                            Text(recurrence.map { "完成后按「" + $0.display + "」生成下一次行动。" } ?? "这次完成后不再生成新的行动。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
-                            WorkspaceListDivider()
-                            HStack(spacing: 14) {
-                                Picker("重复", selection: recurrenceSelection) {
-                                    Text("不重复").tag(RecurrencePeriod?.none)
-                                    ForEach(RecurrencePeriod.allCases, id: \.self) { period in Text(period.display).tag(Optional(period)) }
-                                }.pickerStyle(.menu).labelsHidden().fixedSize().disabled(recurrenceBusy || !recurrenceEditable)
-                                if !hasDue { Text("先设置日期").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
-                                else if action.state != "open" { Text("仅未完成的任务可调整重复。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
-                                if recurrenceBusy { ProgressView().controlSize(.small) }
-                            }
-                        }
-                    }
-                }
-                if !isQuestion, current || !subtasks.isEmpty {
-                    WorkspaceCard {
-                        VStack(alignment:.leading,spacing:12) {
-                            WorkspaceSectionHeading(title:"子任务") {
-                                if let count = subtasks.isEmpty ? nil : subtasks.count { WorkspaceBadge(text:"\(count)", tone:.neutral) }
-                            }
-                            Text(subtaskSummary).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
-                            WorkspaceListDivider()
-                        ForEach(subtasks, id: \.id) { subtask in
-                            let editable = current && !planBusy
-                            HStack(spacing: 12) {
-                                Button { toggleSubtask(subtask) } label: {
-                                    Image(systemName: subtask.done ? "checkmark.circle.fill" : "circle")
-                                        .vosFont(WorkspaceText.sectionTitle.size).foregroundStyle(editable ? (subtask.done ? palette.accent : palette.secondaryText) : palette.disabledText)
-                                        .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
-                                        .background(editable && hoveredSubtaskToggleID == subtask.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
-                                        .contentShape(Rectangle())
-                                }.buttonStyle(.plain).disabled(!editable)
-                                    .onHover { inside in hoveredSubtaskToggleID = inside && editable ? subtask.id : (hoveredSubtaskToggleID == subtask.id ? nil : hoveredSubtaskToggleID) }
-                                    .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hoveredSubtaskToggleID)
-                                    .accessibilityLabel(subtask.done ? "标为未完成" : "标为已完成")
-                                Text(subtask.title).vosFont(WorkspaceText.body).lineSpacing(3).textSelection(.enabled)
-                                    .strikethrough(subtask.done).foregroundStyle(subtask.done ? palette.secondaryText : palette.text)
-                                Spacer(minLength: 8)
-                                if current {
-                                    Button { deleteSubtask(subtask) } label: {
-                                        Image(systemName:"trash").vosFont(WorkspaceText.meta.size)
-                                            .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
-                                            .background(!planBusy && hoveredSubtaskDeleteID == subtask.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
-                                            .contentShape(Rectangle())
-                                    }
-                                        .buttonStyle(.borderless).foregroundStyle(palette.secondaryText)
-                                        .onHover { inside in hoveredSubtaskDeleteID = inside && !planBusy ? subtask.id : (hoveredSubtaskDeleteID == subtask.id ? nil : hoveredSubtaskDeleteID) }
-                                        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hoveredSubtaskDeleteID)
-                                        .accessibilityLabel("删除子任务").disabled(planBusy)
-                                }
-                            }.padding(.vertical, 10).padding(.horizontal, 4)
-                            if subtask.id != subtasks.last?.id { WorkspaceListDivider() }
-                        }
-                        if current {
-                            HStack(spacing: 10) {
-                                TextField("添加子任务", text: $subtaskTitle).workspaceFieldSurface()
-                                    .onSubmit { addSubtask() }
-                                Button("添加") { addSubtask() }.buttonStyle(.workspaceSecondaryCompact)
-                                    .disabled(planBusy || subtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            }.padding(.top, 12)
-                        }
-                        }
-                    }
-                }
-                if !isQuestion, !action.note.isEmpty {
-                    WorkspaceCard {
-                        VStack(alignment:.leading,spacing:12) {
-                            WorkspaceSectionHeading("任务说明")
-                            WorkspaceListDivider()
-                            WorkspaceExpandableText(text:action.note,label:"完整说明",size:WorkspaceText.body.size)
-                        }
-                    }
-                }
+                if showsTaskCard { taskCard }
                 if delegating {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("让 AI 推进这件事").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
@@ -768,10 +684,9 @@ struct WorkspaceTaskView: View {
                     }.padding(18).background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                 }
                 if !executions.isEmpty {
-                    WorkspaceCard {
-                        VStack(alignment:.leading,spacing:12) {
-                            WorkspaceSectionHeading(title:"AI 的工作与交付") { WorkspaceBadge(text:"\(executions.count)", tone:.neutral) }
-                            WorkspaceListDivider()
+                    WorkspaceSettingsCard(title: "AI 的工作与交付",
+                                          subtitle: "共 \(executions.count) 份结果，点开查看全文与进度") {
+                        VStack(alignment: .leading, spacing: 0) {
                             ForEach(executions) { execution in
                                 let unread = model.isDeliveryUnread(execution)
                                 WorkspaceRow(title: execution.title,
@@ -780,20 +695,19 @@ struct WorkspaceTaskView: View {
                                              iconTint: unread ? palette.accent : nil,
                                              trailing: unread ? "未读 · 阅读结果" : (execution.state == "completed" ? "阅读结果" : "查看进度"),
                                              trailingStyle: unread ? .status(palette.accent) : .link) { openDelivery(execution.id) }
-                                if execution.id != executions.last?.id { WorkspaceListDivider() }
+                                if execution.id != executions.last?.id { WorkspaceListDivider().padding(.horizontal, 20) }
                             }
                         }
+                        .padding(.horizontal, 10).padding(.vertical, 10)
                     }
                 }
-                WorkspaceCard {
-                    VStack(alignment:.leading,spacing:12) {
-                        WorkspaceSectionHeading("记录与依据")
-                        WorkspaceListDivider()
+                WorkspaceSettingsCard(title: "记录与依据", subtitle: "原话、处理记录与变更历史") {
+                    VStack(alignment: .leading, spacing: 0) {
                         if current, !isQuestion, action.kind != "task" {
                             DisclosureGroup(action.state == "completed" ? "记录这次的结果或收获" : "记录实际进展", isExpanded: $draft.expanded) {
                                 feedbackDraftEditor.padding(.top, 12)
-                            }.padding(.vertical,16)
-                            WorkspaceListDivider()
+                            }.padding(.horizontal, 20).padding(.vertical, 14)
+                            WorkspaceListDivider().padding(.horizontal, 20)
                         }
                         DisclosureGroup("原话依据与安排") {
                             VStack(alignment: .leading, spacing: 14) {
@@ -804,14 +718,21 @@ struct WorkspaceTaskView: View {
                                     if let player = model.player { NativePlayerView(player: player).frame(height: 65) }
                                 }
                             }.padding(.top, 10)
-                        }.padding(.vertical,16)
+                        }.padding(.horizontal, 20).padding(.vertical, 14)
                         if action.kind == "task" {
-                            WorkspaceListDivider()
+                            WorkspaceListDivider().padding(.horizontal, 20)
                             DisclosureGroup("处理记录与高级") {
                                 VStack(alignment: .leading, spacing: 14) { scheduleSection }.padding(.top, 10)
-                            }.padding(.vertical,16)
+                            }.padding(.horizontal, 20).padding(.vertical, 14)
                         }
-                        ActionRevisionHistoryView(revisions: revisions, loadError: revisionsError, retry: { Task { await loadRevisions() } })
+                        ActionRevisionHistoryView(revisions: revisions, loadError: revisionsError, retry: { Task { await loadRevisions() } }).padding(.horizontal, 20)
+                    }
+                }
+                feedbackProgressCard
+                if let feedbackError {
+                    HStack(spacing:10) {
+                        WorkspaceNoticeText(message:feedbackError,severity:.danger)
+                        Button("重试") { Task { await loadFeedback() } }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("重试读取反馈历史")
                     }
                 }
                 if !error.isEmpty {
@@ -824,7 +745,7 @@ struct WorkspaceTaskView: View {
                         }
                     }
                 }
-            }.frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
+            }.frame(maxWidth: 760, alignment: .leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth: .infinity, alignment: .top)
         }
         .help("快捷键：x 或空格完成，s 改期，f 记结果；在输入框里打字时不生效。")
         .task(id: action.id + String(action.version) + action.validity + sources.map { $0.id + String($0.policyVersion) + $0.state }.joined()) {
@@ -942,45 +863,141 @@ struct WorkspaceTaskView: View {
             }
         }
     }
-    @ViewBuilder private var nextActionSection: some View {
-        WorkspaceCard {
-            VStack(alignment:.leading,spacing:12) {
-                WorkspaceSectionHeading(title: isQuestion ? "我自己做" : "下一步") {
-                    if let count = nextActions.isEmpty ? nil : nextActions.count { WorkspaceBadge(text:"\(count)", tone:.neutral) }
+    @ViewBuilder private var taskCard: some View {
+        WorkspaceSettingsCard(title: "任务", subtitle: "任务说明、子任务、下一步与重复设置") {
+            VStack(alignment: .leading, spacing: 0) {
+                if hasTaskNote {
+                    VStack(alignment: .leading, spacing: 12) {
+                        WorkspaceSectionHeading("任务说明")
+                        WorkspaceListDivider()
+                        WorkspaceExpandableText(text: action.note, label: "完整说明", size: WorkspaceText.body.size)
+                    }
+                    .padding(.horizontal, 20).padding(.vertical, 12)
                 }
-                Text(openNextActions.isEmpty ? (isQuestion ? "还没有要自己做的事。" : "这个目标还没有下一步。") : (isQuestion ? "还有 \(openNextActions.count) 项未完成。" : "还有 \(openNextActions.count) 个下一步未完成。")).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
-                WorkspaceListDivider()
-                ForEach(nextActions) { child in
-                    let editable = !model.savingAction && child.state != "dismissed"
-                    HStack(spacing: 12) {
-                        Button { toggleNextAction(child) } label: {
-                            Image(systemName: child.state == "completed" ? "checkmark.circle.fill" : "circle")
-                                .vosFont(WorkspaceText.sectionTitle.size)
-                                .foregroundStyle(editable ? (child.state == "completed" ? palette.accent : palette.secondaryText) : palette.disabledText)
-                                .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
-                                .background(editable && hoveredNextActionToggleID == child.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
-                                .contentShape(Rectangle())
-                        }.buttonStyle(.plain).disabled(!editable)
-                            .onHover { inside in hoveredNextActionToggleID = inside && editable ? child.id : (hoveredNextActionToggleID == child.id ? nil : hoveredNextActionToggleID) }
-                            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hoveredNextActionToggleID)
-                            .accessibilityLabel(child.state == "completed" ? "重新打开下一步：" + child.title : "完成下一步：" + child.title)
-                        Text(child.title).vosFont(WorkspaceText.body).lineSpacing(3).textSelection(.enabled)
-                            .strikethrough(child.state == "completed").foregroundStyle(child.state == "completed" ? palette.secondaryText : palette.text)
-                        Spacer(minLength: 8)
-                        Button("摘除") { detachNextAction(child) }
-                            .buttonStyle(.workspaceQuietCompact)
-                            .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
-                            .disabled(model.savingAction)
-                            .accessibilityLabel("摘除下一步：" + child.title)
-                    }.padding(.vertical, 10).padding(.horizontal, 4)
-                    if child.id != nextActions.last?.id { WorkspaceListDivider() }
+                if showsSubtaskGroup {
+                    if hasTaskNote { WorkspaceListDivider().padding(.horizontal, 20) }
+                    subtaskGroup
                 }
-                if !nextActionNotice.isEmpty {
-                    Label(nextActionNotice, systemImage: "checkmark.circle").vosFont(WorkspaceText.meta)
-                        .foregroundStyle(palette.success)
+                if showsNextActionGroup {
+                    if hasTaskNote || showsSubtaskGroup { WorkspaceListDivider().padding(.horizontal, 20) }
+                    nextActionGroup
+                }
+                if showsRecurrenceGroup {
+                    if hasTaskNote || showsSubtaskGroup || showsNextActionGroup { WorkspaceListDivider().padding(.horizontal, 20) }
+                    recurrenceGroup
                 }
             }
         }
+    }
+    private var hasTaskNote: Bool { !isQuestion && !action.note.isEmpty }
+    private var showsSubtaskGroup: Bool { !isQuestion && (current || !subtasks.isEmpty) }
+    private var showsNextActionGroup: Bool { action.kind != "task" && (!isQuestion || !nextActions.isEmpty) }
+    private var showsRecurrenceGroup: Bool { action.kind == "task" || recurrence != nil }
+    private var showsTaskCard: Bool { hasTaskNote || showsSubtaskGroup || showsNextActionGroup || showsRecurrenceGroup }
+    private var subtaskGroup: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WorkspaceSectionHeading(title: "子任务") {
+                if let count = subtasks.isEmpty ? nil : subtasks.count { WorkspaceBadge(text: "\(count)", tone: .neutral) }
+            }
+            Text(subtaskSummary).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+            WorkspaceListDivider()
+            ForEach(subtasks, id: \.id) { subtask in
+                let editable = current && !planBusy
+                HStack(spacing: 12) {
+                    Button { toggleSubtask(subtask) } label: {
+                        Image(systemName: subtask.done ? "checkmark.circle.fill" : "circle")
+                            .vosFont(WorkspaceText.sectionTitle.size).foregroundStyle(editable ? (subtask.done ? palette.accent : palette.secondaryText) : palette.disabledText)
+                            .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                            .background(editable && hoveredSubtaskToggleID == subtask.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(!editable)
+                        .onHover { inside in hoveredSubtaskToggleID = inside && editable ? subtask.id : (hoveredSubtaskToggleID == subtask.id ? nil : hoveredSubtaskToggleID) }
+                        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hoveredSubtaskToggleID)
+                        .accessibilityLabel(subtask.done ? "标为未完成" : "标为已完成")
+                    Text(subtask.title).vosFont(WorkspaceText.body).lineSpacing(3).textSelection(.enabled)
+                        .strikethrough(subtask.done).foregroundStyle(subtask.done ? palette.secondaryText : palette.text)
+                    Spacer(minLength: 8)
+                    if current {
+                        Button { deleteSubtask(subtask) } label: {
+                            Image(systemName:"trash").vosFont(WorkspaceText.meta.size)
+                                .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                                .background(!planBusy && hoveredSubtaskDeleteID == subtask.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
+                                .contentShape(Rectangle())
+                        }
+                            .buttonStyle(.borderless).foregroundStyle(palette.secondaryText)
+                            .onHover { inside in hoveredSubtaskDeleteID = inside && !planBusy ? subtask.id : (hoveredSubtaskDeleteID == subtask.id ? nil : hoveredSubtaskDeleteID) }
+                            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hoveredSubtaskDeleteID)
+                            .accessibilityLabel("删除子任务").disabled(planBusy)
+                    }
+                }.padding(.vertical, 10).padding(.horizontal, 4)
+                if subtask.id != subtasks.last?.id { WorkspaceListDivider() }
+            }
+            if current {
+                HStack(spacing: 10) {
+                    TextField("添加子任务", text: $subtaskTitle).workspaceFieldSurface()
+                        .onSubmit { addSubtask() }
+                    Button("添加") { addSubtask() }.buttonStyle(.workspaceSecondaryCompact)
+                        .disabled(planBusy || subtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }.padding(.top, 12)
+            }
+        }
+        .padding(.horizontal, 20).padding(.vertical, 12)
+    }
+    @ViewBuilder private var nextActionGroup: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WorkspaceSectionHeading(title: isQuestion ? "我自己做" : "下一步") {
+                if let count = nextActions.isEmpty ? nil : nextActions.count { WorkspaceBadge(text: "\(count)", tone: .neutral) }
+            }
+            Text(openNextActions.isEmpty ? (isQuestion ? "还没有要自己做的事。" : "这个目标还没有下一步。") : (isQuestion ? "还有 \(openNextActions.count) 项未完成。" : "还有 \(openNextActions.count) 个下一步未完成。")).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+            WorkspaceListDivider()
+            ForEach(nextActions) { child in
+                let editable = !model.savingAction && child.state != "dismissed"
+                HStack(spacing: 12) {
+                    Button { toggleNextAction(child) } label: {
+                        Image(systemName: child.state == "completed" ? "checkmark.circle.fill" : "circle")
+                            .vosFont(WorkspaceText.sectionTitle.size)
+                            .foregroundStyle(editable ? (child.state == "completed" ? palette.accent : palette.secondaryText) : palette.disabledText)
+                            .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
+                            .background(editable && hoveredNextActionToggleID == child.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
+                            .contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(!editable)
+                        .onHover { inside in hoveredNextActionToggleID = inside && editable ? child.id : (hoveredNextActionToggleID == child.id ? nil : hoveredNextActionToggleID) }
+                        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hoveredNextActionToggleID)
+                        .accessibilityLabel(child.state == "completed" ? "重新打开下一步：" + child.title : "完成下一步：" + child.title)
+                    Text(child.title).vosFont(WorkspaceText.body).lineSpacing(3).textSelection(.enabled)
+                        .strikethrough(child.state == "completed").foregroundStyle(child.state == "completed" ? palette.secondaryText : palette.text)
+                    Spacer(minLength: 8)
+                    Button("摘除") { detachNextAction(child) }
+                        .buttonStyle(.workspaceQuietCompact)
+                        .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
+                        .disabled(model.savingAction)
+                        .accessibilityLabel("摘除下一步：" + child.title)
+                }.padding(.vertical, 10).padding(.horizontal, 4)
+                if child.id != nextActions.last?.id { WorkspaceListDivider() }
+            }
+            if !nextActionNotice.isEmpty {
+                Label(nextActionNotice, systemImage: "checkmark.circle").vosFont(WorkspaceText.meta)
+                    .foregroundStyle(palette.success)
+            }
+        }
+        .padding(.horizontal, 20).padding(.vertical, 12)
+    }
+    @ViewBuilder private var recurrenceGroup: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            WorkspaceSectionHeading("重复")
+            Text(recurrence.map { "完成后按「" + $0.display + "」生成下一次行动。" } ?? "这次完成后不再生成新的行动。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
+            WorkspaceListDivider()
+            HStack(spacing: 14) {
+                Picker("重复", selection: recurrenceSelection) {
+                    Text("不重复").tag(RecurrencePeriod?.none)
+                    ForEach(RecurrencePeriod.allCases, id: \.self) { period in Text(period.display).tag(Optional(period)) }
+                }.pickerStyle(.menu).labelsHidden().fixedSize().disabled(recurrenceBusy || !recurrenceEditable)
+                if !hasDue { Text("先设置日期").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
+                else if action.state != "open" { Text("仅未完成的任务可调整重复。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
+                if recurrenceBusy { ProgressView().controlSize(.small) }
+            }
+        }
+        .padding(.horizontal, 20).padding(.vertical, 12)
     }
     @ViewBuilder private var questionActions: some View {
         if action.state == "open" {
@@ -1009,12 +1026,9 @@ struct WorkspaceTaskView: View {
         TaskFeedbackEditor(model: model, draft: $draft, onDictate: { showingFeedback = true }, onSave: saveFeedback)
     }
     @ViewBuilder private var feedbackProgressCard: some View {
-        WorkspaceCard {
-            VStack(alignment:.leading,spacing:12) {
-                WorkspaceSectionHeading(title:"实际进展与收获") {
-                    if !feedbackHistory.isEmpty { WorkspaceBadge(text:"\(feedbackHistory.count)", tone:.neutral) }
-                }
-                WorkspaceListDivider()
+        WorkspaceSettingsCard(title: "实际进展与收获",
+                              subtitle: feedbackHistory.isEmpty ? "记录这次行动的结果与收获" : "共 \(feedbackHistory.count) 条记录，最新在上") {
+            VStack(alignment: .leading, spacing: 0) {
                 if feedbackHistory.isEmpty {
                     if feedbackPlaceholderVisible {
                         HStack(spacing: 10) {
@@ -1032,6 +1046,7 @@ struct WorkspaceTaskView: View {
                     }
                 }
             }
+            .padding(.horizontal, 20).padding(.vertical, 12)
         }
         .id("progress-timeline")
     }
