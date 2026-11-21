@@ -308,6 +308,23 @@ private final class ActionPageCache {
     var nextStepCounts: [String: Int] = [:]
 }
 
+// Rebuilt only when the records or topics generations change; survives body
+// re-evaluation, so search keystrokes and topic-page renders reuse it.
+private final class TopicListingCache {
+    struct Key: Equatable { let records: Int; let topics: Int }
+    var key: Key?
+    var listings: [TopicListing] = []
+    var byID: [String: TopicListing] = [:]
+}
+
+// Rebuilt only when the records/secondary generations or the cited action set
+// change; keeps `currentActionKeys` from rescanning every action per body pass.
+private final class TopicActionKeysCache {
+    struct Key: Equatable { let records: Int; let secondary: Int; let actionIDs: Set<String> }
+    var key: Key?
+    var actionKeys: [String] = []
+}
+
 struct WorkspaceView: View {
     @ObservedObject var model: ControlCenter
     @AppStorage("voiceos.workspaceTheme") private var theme = WorkspaceTheme.graphite
@@ -369,6 +386,8 @@ struct WorkspaceView: View {
     @State private var readingStatesRevision = 0
     @State private var materialPageCache = MaterialPageCache()
     @State private var actionPageCache = ActionPageCache()
+    @State private var topicListingCache = TopicListingCache()
+    @State private var topicActionKeysCache = TopicActionKeysCache()
     @State private var readingPlans: [IncrementalPlan] = []
     @State private var selectingActions = false
     @State private var selectedActionIDs: Set<String> = []
@@ -715,7 +734,7 @@ struct WorkspaceView: View {
         let actionIDs = Set(topic?.organization?.sections?.flatMap(\.actionIDs) ?? [])
         return TopicLoadKey(topicID: id, updatedAt: topic?.updatedAt,
                             recentOutcomeCount: model.recentOutcomes.count,
-                            actionKeys: model.sourcePageIndex.currentActionKeys(for: actionIDs),
+                            actionKeys: topicActionKeys(for: actionIDs),
                             token: topicLoadToken)
     }
     private var sidebar: some View {
@@ -1172,13 +1191,8 @@ struct WorkspaceView: View {
                                 actions: model.actionRecords)
     }
     private var visibleTopicListings: [TopicListing] {
-        let catalog = recordCatalog
         let filter = topicQuery.trimmingCharacters(in:.whitespacesAndNewlines)
-        let listings = model.workspaceTopics.map { topicListing($0, catalog: catalog) }
-            .sorted { left, right in
-                if left.latestActivity != right.latestActivity { return left.latestActivity > right.latestActivity }
-                return left.topic.title.localizedStandardCompare(right.topic.title) == .orderedAscending
-            }
+        let listings = topicListingsSnapshot().listings
         guard !filter.isEmpty else { return listings }
         return listings.filter {
             $0.topic.title.localizedCaseInsensitiveContains(filter) || ($0.topic.organization?.summary ?? "").localizedCaseInsensitiveContains(filter)
@@ -1199,7 +1213,7 @@ struct WorkspaceView: View {
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             if let topic, let reading {
                 HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil };creatingTopic=false;newTopicTitle="";editingTopicID=nil };Spacer(); Menu("调整主题") {
-                    if topicListing(topic, catalog: catalog).level == .clue { Button("升为主题") { Task { await promoteTopic(topic) } } }
+                    if cachedTopicLevel(for: topic, catalog: catalog) == .clue { Button("升为主题") { Task { await promoteTopic(topic) } } }
                     Button("修改主题名称") { newTopicTitle=topic.title;editingTopicID=topic.id;creatingTopic=true }
                     Button("合并到其他主题…") { beginMergingTopic(topic) }
                     Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) }
@@ -1336,6 +1350,36 @@ struct WorkspaceView: View {
         }
         return TopicListing(topic: topic, materialCount: ids.count, distinctDays: days.count, latestMaterialDate: latest)
     }
+    /// One build per records/topics generation. The sort is exactly the one
+    /// `visibleTopicListings` used before caching: latest activity descending,
+    /// then title.
+    private func topicListingsSnapshot() -> TopicListingCache {
+        let key = TopicListingCache.Key(records: model.recordsRevision, topics: model.topicsRevision)
+        if topicListingCache.key != key {
+            let catalog = recordCatalog
+            let listings = model.workspaceTopics.map { topicListing($0, catalog: catalog) }
+                .sorted { left, right in
+                    if left.latestActivity != right.latestActivity { return left.latestActivity > right.latestActivity }
+                    return left.topic.title.localizedStandardCompare(right.topic.title) == .orderedAscending
+                }
+            topicListingCache.key = key
+            topicListingCache.listings = listings
+            topicListingCache.byID = Dictionary(listings.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        }
+        return topicListingCache
+    }
+    private func cachedTopicLevel(for topic: ReflectionQuestion, catalog: [String: SourceRecord]) -> TopicLevel {
+        if let listing = topicListingsSnapshot().byID[topic.id] { return listing.level }
+        return topicListing(topic, catalog: catalog).level
+    }
+    private func topicActionKeys(for actionIDs: Set<String>) -> [String] {
+        let key = TopicActionKeysCache.Key(records: model.recordsRevision, secondary: model.secondaryRevision, actionIDs: actionIDs)
+        if topicActionKeysCache.key != key {
+            topicActionKeysCache.key = key
+            topicActionKeysCache.actionKeys = model.sourcePageIndex.currentActionKeys(for: actionIDs)
+        }
+        return topicActionKeysCache.actionKeys
+    }
     private func clueDateLabel(_ date: Date?) -> String {
         guard let date else { return "暂无日期" }
         return date.formatted(date: .abbreviated, time: .omitted)
@@ -1382,7 +1426,7 @@ struct WorkspaceView: View {
         }
     }
     private func topicReading(_ topic:ReflectionQuestion,mode:String,reading:TopicReadingData) -> some View {
-        let level = topicListing(topic, catalog: recordCatalog).level
+        let level = cachedTopicLevel(for: topic, catalog: recordCatalog)
         return WorkspaceTopicReadingView(model:model,topic:topic,mode:mode,focus:topicFocus,reading:reading,level:level,
             openSource:{ go(.source($0)) },openTopic:{ selectTopic($0) },openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },
             discuss:{ prompt in Task { await toggleDiscussion(force:true,prompt:prompt) } },showActions:{ topicTab="行动与结果" },
