@@ -77,6 +77,15 @@ private struct SourceExtractionReadKey: Hashable {
     let expressionState:String
     let thoughtsCount:Int
 }
+private struct SourcePageReadKey: Hashable {
+    let pause:SourcePauseReadKey
+    let discussions:SourceDiscussionReadKey
+    let context:SourceContextReadKey
+    let sourceID:String
+    let transcript:SourceTranscriptReadKey
+    let chapters:SourceChapterReadKey
+    let extraction:SourceExtractionReadKey
+}
 private func sourceTime(_ ms:Int)->String { String(format:"%02d:%02d",ms/60000,ms/1000%60) }
 /// Mirrors `WorkspaceKeySelection.step` in WorkspaceView; share one helper once a third list needs it.
 private func stepSourcePlaybackSelection(_ selection:inout String?,up:Bool,over ids:[String])->Bool {
@@ -1055,99 +1064,17 @@ struct WorkspaceSourceView: View {
         } message: { _ in
             Text("确定后，这份理解将不再用于当前阅读与行动。原文与处理历史会保留。")
         }
-        .task(id: pauseReadKey) {
-            guard !pausedThoughts.isEmpty,let store=model.store else { return }
-            do { pauseExplanation = try await store.understandingPause(sourceID:source.id).summary }
-            catch { pauseExplanation = "暂时无法读取暂停原因：" + error.localizedDescription }
-        }
-        .task(id: discussionReadKey) {
-            discussionsPhase = .loading
-            guard let store = model.store else { discussionsPhase = .idle; return }
-            do {
-                let discussions = try await store.conversationsForSource(sourceID: source.id)
-                try Task.checkCancellation()
-                loadedDiscussions = discussions
-                discussionsPhase = .idle
-            } catch is CancellationError { discussionsPhase = .idle }
-            catch {
-                self.error = error.localizedDescription
-                discussionsPhase = .failed(error.localizedDescription)
-            }
-        }
-        .task(id:contextReadKey) {
-            programPairs=[]
-            contextLinks=[]
-            contextPhase = .loading
-            guard let store=model.store else { contextPhase = .idle; return }
-            let ids=expressionIDs
-            programPairs=model.records.filter { ids.contains($0.id) }.compactMap { $0.presentation?.recordingContext }
-            do {
-                let links=try await store.recordingContextLinks(sourceIDs:ids.sorted(),catalog:catalog)
-                try Task.checkCancellation()
-                contextLinks=links.filter { pairingIsCurrent($0.pairing) }
-                contextPhase = .idle
-            } catch is CancellationError { contextPhase = .idle }
-            catch { contextPhase = .failed(error.localizedDescription) }
-        }
-        .task(id: source.id) {
-            attachmentURL=nil;attachmentMime=nil
-            captureInfo=try? await model.sourceCaptureMetadata(sourceID:source.id)
-            do {
-                let attachment=try await model.sourceAttachmentURL(sourceID:source.id)
-                attachmentURL=attachment?.url;attachmentMime=attachment?.mime
-            }
-            catch { self.error="原件读取失败：" + error.localizedDescription }
-        }
-        .task(id: SourceTranscriptReadKey(sourceID:source.id,transcriptVersionID:source.transcriptVersionID,retry:entitiesRetry)) {
-            entities=[]
-            entitiesPhase = .loading
-            guard source.transcript != nil,let store=model.store else { entitiesPhase = .idle; return }
-            do {
-                let loaded=try await store.entities(sourceID:source.id)
-                entities=loaded
-                let spanIDs=Set(source.spans.map(\.id))
-                let stale = !loaded.isEmpty && loaded.allSatisfy { $0.sentenceIDs.allSatisfy { !spanIDs.contains($0) } }
-                if loaded.isEmpty || stale {
-                    _=try? await store.refreshEntities(sourceID:source.id)
-                    if !Task.isCancelled { entities=(try? await store.entities(sourceID:source.id)) ?? [] }
-                }
-                entitiesPhase = .idle
-            } catch {
-                entitiesPhase = .failed(error.localizedDescription)
-            }
-        }
-        .task(id: SourceChapterReadKey(sourceID:source.id,kind:source.kind,retry:chaptersRetry)) {
-            chapters=[]
-            chaptersPhase = .loading
-            guard ["audio","video"].contains(source.kind),let store=model.store else { chaptersPhase = .idle; return }
-            do {
-                chapters=try await store.chapters(sourceID:source.id)
-                if chapters.isEmpty,let url=try? await store.playableURL(sourceID:source.id) {
-                    let found=await MediaChapters.read(url)
-                    if !found.isEmpty {
-                        try await store.replaceChapters(sourceID:source.id,entries:found.map { (title:$0.title,startMS:$0.startMS) })
-                        chapters=try await store.chapters(sourceID:source.id)
-                    }
-                }
-                chaptersPhase = .idle
-            } catch {
-                chapters=[]
-                chaptersPhase = .failed(error.localizedDescription)
-            }
-        }
-        .task(id: source.id) {
-            guard let store=model.store else { return }
-            do {
-                let loaded=try await store.claimNotes(claimIDs:thoughts.map(\.id))
-                try Task.checkCancellation()
-                claimNotes=loaded
-            } catch is CancellationError {}
-            catch { self.error="旁注读取失败：" + error.localizedDescription }
-        }
-        .task(id: extractionFlagRefreshKey) {
-            extractionFlag=nil
-            guard let store=model.store else { return }
-            extractionFlag=try? await store.sourceExtractionFlag(sourceID:source.id)
+        .task(id: combinedReadKey) {
+            let key=combinedReadKey
+            async let pauseRead = await readSourcePause(key:key)
+            async let discussionsRead = await readSourceDiscussions(key:key)
+            async let contextRead = await readSourceContext(key:key)
+            async let attachmentRead = await readSourceAttachment(key:key)
+            async let entitiesRead = await readSourceEntities(key:key)
+            async let chaptersRead = await readSourceChapters(key:key)
+            async let claimNotesRead = await readSourceClaimNotes(key:key)
+            async let extractionRead = await readSourceExtractionFlag(key:key)
+            _=await (pauseRead,discussionsRead,contextRead,attachmentRead,entitiesRead,chaptersRead,claimNotesRead,extractionRead)
         }
         .onChange(of:folds.fullText) { _,_ in if !folds.fullText { clearSelection() } }
         .onChange(of:source.transcript) { _,_ in clearSelection();resetBilingual() }
@@ -1172,6 +1099,157 @@ struct WorkspaceSourceView: View {
     private var extractionFlagRefreshKey:SourceExtractionReadKey {
         .init(sourceID:source.id,transcriptVersionID:source.transcriptVersionID,
               expressionState:expression?.state ?? "",thoughtsCount:thoughts.count)
+    }
+    private var combinedReadKey:SourcePageReadKey {
+        .init(pause:pauseReadKey,discussions:discussionReadKey,context:contextReadKey,sourceID:source.id,
+              transcript:.init(sourceID:source.id,transcriptVersionID:source.transcriptVersionID,retry:entitiesRetry),
+              chapters:.init(sourceID:source.id,kind:source.kind,retry:chaptersRetry),
+              extraction:extractionFlagRefreshKey)
+    }
+    // 只有发起时的 key 仍是当前 key 且任务未被取消，才允许写回状态，避免旧结果串到新 key。
+    private func readKeyIsCurrent(_ key:SourcePageReadKey)->Bool { !Task.isCancelled && key == combinedReadKey }
+    @MainActor private func readSourcePause(key:SourcePageReadKey) async {
+        guard readKeyIsCurrent(key),!pausedThoughts.isEmpty,let store=model.store else { return }
+        do {
+            let summary=try await store.understandingPause(sourceID:source.id).summary
+            guard readKeyIsCurrent(key) else { return }
+            pauseExplanation=summary
+        } catch {
+            guard readKeyIsCurrent(key) else { return }
+            pauseExplanation = "暂时无法读取暂停原因：" + error.localizedDescription
+        }
+    }
+    @MainActor private func readSourceDiscussions(key:SourcePageReadKey) async {
+        guard readKeyIsCurrent(key) else { return }
+        discussionsPhase = .loading
+        guard let store = model.store else { discussionsPhase = .idle; return }
+        do {
+            let discussions = try await store.conversationsForSource(sourceID: source.id)
+            try Task.checkCancellation()
+            guard readKeyIsCurrent(key) else { return }
+            loadedDiscussions = discussions
+            discussionsPhase = .idle
+        } catch is CancellationError {
+            guard readKeyIsCurrent(key) else { return }
+            discussionsPhase = .idle
+        } catch {
+            guard readKeyIsCurrent(key) else { return }
+            self.error = error.localizedDescription
+            discussionsPhase = .failed(error.localizedDescription)
+        }
+    }
+    @MainActor private func readSourceContext(key:SourcePageReadKey) async {
+        guard readKeyIsCurrent(key) else { return }
+        programPairs=[]
+        contextLinks=[]
+        contextPhase = .loading
+        guard let store=model.store else { contextPhase = .idle; return }
+        let ids=expressionIDs
+        programPairs=model.records.filter { ids.contains($0.id) }.compactMap { $0.presentation?.recordingContext }
+        do {
+            let links=try await store.recordingContextLinks(sourceIDs:ids.sorted(),catalog:catalog)
+            try Task.checkCancellation()
+            guard readKeyIsCurrent(key) else { return }
+            contextLinks=links.filter { pairingIsCurrent($0.pairing) }
+            contextPhase = .idle
+        } catch is CancellationError {
+            guard readKeyIsCurrent(key) else { return }
+            contextPhase = .idle
+        } catch {
+            guard readKeyIsCurrent(key) else { return }
+            contextPhase = .failed(error.localizedDescription)
+        }
+    }
+    @MainActor private func readSourceAttachment(key:SourcePageReadKey) async {
+        guard readKeyIsCurrent(key) else { return }
+        attachmentURL=nil;attachmentMime=nil
+        let captured=try? await model.sourceCaptureMetadata(sourceID:source.id)
+        guard readKeyIsCurrent(key) else { return }
+        captureInfo=captured
+        do {
+            let attachment=try await model.sourceAttachmentURL(sourceID:source.id)
+            guard readKeyIsCurrent(key) else { return }
+            attachmentURL=attachment?.url;attachmentMime=attachment?.mime
+        }
+        catch {
+            guard readKeyIsCurrent(key) else { return }
+            self.error="原件读取失败：" + error.localizedDescription
+        }
+    }
+    @MainActor private func readSourceEntities(key:SourcePageReadKey) async {
+        guard readKeyIsCurrent(key) else { return }
+        entities=[]
+        entitiesPhase = .loading
+        guard source.transcript != nil,let store=model.store else { entitiesPhase = .idle; return }
+        do {
+            let loaded=try await store.entities(sourceID:source.id)
+            guard readKeyIsCurrent(key) else { return }
+            entities=loaded
+            let spanIDs=Set(source.spans.map(\.id))
+            let stale = !loaded.isEmpty && loaded.allSatisfy { $0.sentenceIDs.allSatisfy { !spanIDs.contains($0) } }
+            if loaded.isEmpty || stale {
+                _=try? await store.refreshEntities(sourceID:source.id)
+                if !Task.isCancelled {
+                    let refreshed=try? await store.entities(sourceID:source.id)
+                    guard readKeyIsCurrent(key) else { return }
+                    entities=refreshed ?? []
+                }
+            }
+            guard readKeyIsCurrent(key) else { return }
+            entitiesPhase = .idle
+        } catch {
+            guard readKeyIsCurrent(key) else { return }
+            entitiesPhase = .failed(error.localizedDescription)
+        }
+    }
+    @MainActor private func readSourceChapters(key:SourcePageReadKey) async {
+        guard readKeyIsCurrent(key) else { return }
+        chapters=[]
+        chaptersPhase = .loading
+        guard ["audio","video"].contains(source.kind),let store=model.store else { chaptersPhase = .idle; return }
+        do {
+            let loaded=try await store.chapters(sourceID:source.id)
+            guard readKeyIsCurrent(key) else { return }
+            chapters=loaded
+            if chapters.isEmpty,let url=try? await store.playableURL(sourceID:source.id) {
+                let found=await MediaChapters.read(url)
+                guard readKeyIsCurrent(key) else { return }
+                if !found.isEmpty {
+                    try await store.replaceChapters(sourceID:source.id,entries:found.map { (title:$0.title,startMS:$0.startMS) })
+                    let reloaded=try await store.chapters(sourceID:source.id)
+                    guard readKeyIsCurrent(key) else { return }
+                    chapters=reloaded
+                }
+            }
+            guard readKeyIsCurrent(key) else { return }
+            chaptersPhase = .idle
+        } catch {
+            guard readKeyIsCurrent(key) else { return }
+            chapters=[]
+            chaptersPhase = .failed(error.localizedDescription)
+        }
+    }
+    @MainActor private func readSourceClaimNotes(key:SourcePageReadKey) async {
+        guard readKeyIsCurrent(key) else { return }
+        guard let store=model.store else { return }
+        do {
+            let loaded=try await store.claimNotes(claimIDs:thoughts.map(\.id))
+            try Task.checkCancellation()
+            guard readKeyIsCurrent(key) else { return }
+            claimNotes=loaded
+        } catch is CancellationError {}
+        catch {
+            guard readKeyIsCurrent(key) else { return }
+            self.error="旁注读取失败：" + error.localizedDescription
+        }
+    }
+    @MainActor private func readSourceExtractionFlag(key:SourcePageReadKey) async {
+        guard readKeyIsCurrent(key) else { return }
+        extractionFlag=nil
+        guard let store=model.store else { return }
+        let flag=try? await store.sourceExtractionFlag(sourceID:source.id)
+        guard readKeyIsCurrent(key) else { return }
+        extractionFlag=flag
     }
     @ViewBuilder private var playbackBar:some View {
         if playbackAvailable { SourcePlaybackBar(model:model,source:source,clock:playback) }
