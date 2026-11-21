@@ -874,3 +874,10 @@
 - 134-B：WorkspaceIconButton 读 isEnabled、禁用 0.4 且无 hover（组件级，10 调用点受益）；子任务/下一步完成圈与删除补 hover、禁用转 disabledText；主题 tile hover 改背景 + WorkspaceRowChevron；问题卡补键盘焦点环；反思问题菜单命中区 24pt、禁用行文字 disabledText；全景工具栏图标 22→24pt；费曼/速记错误改 WorkspaceNoticeText（速记注入 palette）。
 - 风险记录：完成圈禁用时点击是否穿透整行未真机验证；搜索键盘集合变更；chip 宽度 +10pt。
 - 集成：722 tests 全绿（build_exit=0 / test_exit=0）。
+## 波 135：代码评审 15 条发现的修复（2026-11-21，已推送）
+- 评审：5+ 角度并行（逐行、删除行为、跨文件、包装、复用/效率、高度）+ 逐条验证 + 补漏扫描；15 条发现经报告面板归档（13 确认、2 可能）。
+- 135-A 核心：`MaterialTitleText.normalizedGenerated` 幂等（先剥旧…再截断补回）、正文内 #/_ 保留（C#、snake_case）、markdown 只清行首与成对符号；`generateRecordingTitles` 返回真实保存数（纯标点提案不再虚报成功）；`contentTitle` 收紧 + manual trim；新增 `MaterialDisplayTitle` 单一漏斗（SourceRecord 与搜索索引共用，接入分组标题），索引重建不再全表 sources() 解码（重复 transcription job 崩溃点随之消除）；只读库校验 transcriptVersionID，过期自动标题回退人间化名；MaterialNaming 格式化器/正则静态缓存。
+- 135-B 界面：unavailable 支持按文案给出路（材料→回到主题）；离开主题页清错误与无效重试；检索重试用 generation 防并发覆盖；搜索建议与材料行标题同源；WorkspaceEmptyState 支持 danger/可选中；全景错误横幅关闭不再吞掉 readFailed 与重试，空态补工具栏详情；阅读器非用户来源恢复「不代表本人认可」；标题编辑器预填收紧标题；hover 禁用复位；问题列表用稳定 offset 作 id；HomeCard 自带 hover、首页手写分隔线替换。
+- searchIndexShape 升 v2-grouped，存量库首次搜索自动重建。
+- 构建插曲：首轮两处编译失败均为 `Optional.flatMap` 与 Sequence 重载歧义（RecordingPresentation.swift:156），改 guard 取值后通过。
+- 集成：730 tests 全绿（build_exit=0 / test_exit=0）。
