@@ -998,3 +998,8 @@
 - `ActionPageCache`（key = recordsRevision + secondaryRevision + 分钟桶 + 筛选）缓存：myTodoActions、ActionRowReads、nextStepCounts、ActionTimeSurface；键盘路径（planCandidates / actionKeyboardOrder）在输入为同一 todoActions 时复用缓存 surface，其余筛选回落重算。
 - 已知边界（按设计）：`isOverdue` 对瞬时截止的秒级判断按分钟桶复用，逾期状态最多延迟到下一分钟刷新；分组与排序不受影响。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 158：主题清单与搜索建议缓存（2026-11-22，已推送）
+- 158-A：`topicsRevision` 在 workspacetopics/topicSources 装配后自增；`TopicListingCache`（records+topics 代际）复用全部 TopicListing 与 byID，主题阅读取 level、升为主题判断走缓存；主题行动键 `TopicActionKeysCache` 以 (records, secondary, actionIDs) 为键缓存 currentActionKeys 扫描结果。
+- 158-B：`SearchSuggestionCache`（records+secondary 代际）在构建期完成标题派生与四桶过滤（材料/主题/任务/观点），每次击键只做前缀匹配；结果区观点成员检查改为构建期 id 集查询。四桶轮转顺序与点击动作逐字等价（有意偏离任务书草图以保持顺序）。
+- 合并插曲：两路在同文件相邻位置添加声明冲突，手工保留双方并补类闭合后 parse 通过。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
