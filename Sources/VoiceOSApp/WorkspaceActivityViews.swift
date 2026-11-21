@@ -10,6 +10,54 @@ private struct InlineActionFailure {
     var retry: () -> Void
 }
 
+// Rebuilt only when the records/secondary generations or the action change;
+// survives body re-evaluation.
+private final class TaskDetailDerivedCache {
+    struct Key: Equatable { let records: Int; let secondary: Int; let actionID: String; let actionVersion: Int; let isQuestion: Bool }
+    var key: Key?
+    var sources: [SourceRecord] = []
+    var executions: [AssistantExecutionRecord] = []
+    var correctedClaim: CandidateClaim?
+    var latestAnalysis: AssistantExecutionRecord?
+    var nextActions: [ActionRecord] = []
+}
+
+private enum ActionDateFormatting {
+    static let dayCurrentYear: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日"
+        return formatter
+    }()
+    static let dayOtherYear: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年M月d日"
+        return formatter
+    }()
+    static let time: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+    static let dayOnly: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+    static let iso8601Fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    static let iso8601: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+}
+
 struct WorkspaceDeliveryView: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
@@ -320,23 +368,35 @@ struct WorkspaceTaskView: View {
     @State private var recurrenceBusy = false
     @State private var locationLabel: String?
     @State private var goalProgress: GoalProgress?
+    @State private var derivedCache = TaskDetailDerivedCache()
     @FocusState private var pageFocused: Bool
-    private var correctedClaim: CandidateClaim? {
-        model.claims.first { $0.id == action.claimID && $0.validity == "current" && $0.reviewState != "rejected" && $0.reviewVersion > action.claimReviewVersion }
-    }
-    private var sources: [SourceRecord] {
+    /// One build per records/secondary generation or action change. Predicates
+    /// stay verbatim; the delivery sort runs on read because the unread mark
+    /// moves without a revision bump.
+    private func derivedSnapshot() -> TaskDetailDerivedCache {
+        let key = TaskDetailDerivedCache.Key(records: model.recordsRevision, secondary: model.secondaryRevision,
+                                             actionID: action.id, actionVersion: action.version, isQuestion: isQuestion)
+        guard derivedCache.key != key else { return derivedCache }
         let ids = Set(model.claims.first { $0.id == action.claimID }?.references.map(\.sourceID) ?? [])
-        return model.records.filter { ids.contains($0.id) }
+        derivedCache.sources = model.records.filter { ids.contains($0.id) }
+        derivedCache.executions = model.assistantExecutions.filter { $0.actionID == action.id && !(isQuestion && $0.mode == .analysis) }
+        derivedCache.correctedClaim = model.claims.first { $0.id == action.claimID && $0.validity == "current" && $0.reviewState != "rejected" && $0.reviewVersion > action.claimReviewVersion }
+        derivedCache.latestAnalysis = model.assistantExecutions.first { $0.actionID == action.id && $0.mode == .analysis && $0.instruction.isEmpty }
+        derivedCache.nextActions = model.actionRecords.filter { $0.parentID == action.id }
+        derivedCache.key = key
+        return derivedCache
     }
+    private var correctedClaim: CandidateClaim? { derivedSnapshot().correctedClaim }
+    private var sources: [SourceRecord] { derivedSnapshot().sources }
     private var executions: [AssistantExecutionRecord] {
         // A question's analysis answers live at the apex exactly once.
-        model.sortedAssistantDeliveries(model.assistantExecutions.filter { $0.actionID == action.id && !(isQuestion && $0.mode == .analysis) })
+        model.sortedAssistantDeliveries(derivedSnapshot().executions)
     }
     private var current: Bool { action.validity == "current" && action.state != "dismissed" }
     private var isQuestion: Bool { action.nature == "question" }
     private var latestAnalysis: AssistantExecutionRecord? {
         // Follow-ups live under the answer; the eyebrow still describes the answer itself.
-        model.assistantExecutions.first { $0.actionID == action.id && $0.mode == .analysis && $0.instruction.isEmpty }
+        derivedSnapshot().latestAnalysis
     }
     /// The same semantic the row status and the answer section use: a completed
     /// answer wins, a closed question without one is "thought through", and a
@@ -368,7 +428,7 @@ struct WorkspaceTaskView: View {
         return true
     }
     private var reviewPairs: [ActionReviewPair] { model.actionReviewPairs(for: action) }
-    private var nextActions: [ActionRecord] { model.actionRecords.filter { $0.parentID == action.id } }
+    private var nextActions: [ActionRecord] { derivedSnapshot().nextActions }
     private var openNextActions: [ActionRecord] { nextActions.filter { $0.state == "open" } }
     private var subtaskSummary: String {
         guard !subtasks.isEmpty else { return "把任务拆成可勾选的小步。" }
@@ -1085,16 +1145,11 @@ struct WorkspaceTaskView: View {
         let calendar = Calendar.current
         if calendar.isDateInToday(date) { return "今天" }
         if calendar.isDateInYesterday(date) { return "昨天" }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = calendar.isDate(date, equalTo: Date(), toGranularity: .year) ? "M月d日" : "yyyy年M月d日"
+        let formatter = calendar.isDate(date, equalTo: Date(), toGranularity: .year) ? ActionDateFormatting.dayCurrentYear : ActionDateFormatting.dayOtherYear
         return formatter.string(from: date)
     }
     private func feedbackTimeLabel(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        ActionDateFormatting.time.string(from: date)
     }
     private func completeOutcome() {
         mainActionFailure = nil
@@ -1410,19 +1465,15 @@ struct WorkspaceTaskView: View {
         switch due {
         case .none: return false
         case let .instant(utc, _):
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = formatter.date(from: utc) { return date < Date() }
-            formatter.formatOptions = [.withInternetDateTime]
-            guard let date = formatter.date(from: utc) else { return false }
+            if let date = ActionDateFormatting.iso8601Fractional.date(from: utc) { return date < Date() }
+            guard let date = ActionDateFormatting.iso8601.date(from: utc) else { return false }
             return date < Date()
         case let .dateOnly(localDate, zone):
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = zone.flatMap(TimeZone.init(identifier:)) ?? .current
-            let formatter = DateFormatter()
+            let formatter = ActionDateFormatting.dayOnly
             formatter.calendar = calendar
             formatter.timeZone = calendar.timeZone
-            formatter.dateFormat = "yyyy-MM-dd"
             return localDate < formatter.string(from: Date())
         }
     }
