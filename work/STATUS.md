@@ -929,3 +929,12 @@
 - 143-D 主应用：VoiceOSApp 11 处弹层页脚按钮补词表样式（导入结果、创建行动、行动反馈、恢复包、备份恢复、只读 sheet），编辑器表面对齐；静修/回顾两处原始 ISO 时间戳本地化；DiscussionView「AI分析与建议」「AI回复」补中英间距；线索改名取消按钮补样式。
 - 真机验证记录：滚动位置保留只对指针滚动生效——键盘程序化 scrollTo 不写回 ScrollPosition，返回列表视口回顶（待 144 修复：出现时按保留的选中行 scrollTo）。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 144：动效词表、跨页保留与无障碍语义（2026-11-21，已推送）
+- 发现：三路只读发现者（动效、无障碍、滚动/焦点保留）共 22 条候选，取 17 条进本波；副文本双机制与 44 处区块标题语义留波 145。
+- 144-A WorkspaceView：材料/行动之外的四个列表（主题/搜索/主题材料/主题回顾）onAppear 也按保留的键盘选中行恢复视口；搜索词变化把该页滚动位置重置到顶部；scrollKey 在未打开主题时归一化 tab/mode（从主题返回列表不再回顶）；行动页「保存视图/提醒设置/结果反馈」三个弹层关闭后恢复列表焦点；搜索空词浏览列表补齐键盘可见的材料管理菜单（阅读状态/拆分/重新判断）。
+- 144-B 动效词表：WorkspaceDesign 新增 `WorkspaceMotion`（hover 0.12 / selection 0.12 / expand 0.16 / transient 0.2 / scroll 0.18，均 easeOut）；WorkspaceHoverHighlight、WorkspaceButtonBody、WorkspaceIconButton、WorkspaceListRow 接入 hover 动效；toast 进场由 spring 统一为 transient。
+- 144-C：WorkspaceListSection 与 WorkspaceExpandableText 展开用 expand 词表；引用悬停预览补 opacity 过渡（进出都经 hover 词表）；首页「跳到列表」与「最近想法」按用途归入 scroll/expand；最近想法披露按钮补展开/收起无障碍值；区块头部装饰图标无障碍隐藏；首页时间线在项目数变化时重锚到跟踪中的顶部行（删除一次性恢复守卫）。
+- 144-D：「讨论」页加入 followTail 护栏——距底 <48pt 才跟随刷新，输入草稿时暂停，发送后恢复跟随；三种时长归一到 scroll 词表；周回顾撤销条与结果展开接入 transient/expand 且补 reduceMotion 门控。
+- 144-E：主题阅读过滤词非空时优先展示匹配项（选中项不再把列表压成空态）；更正弹层关闭恢复卡片焦点；问题行/概览/TopicTile 装饰图标无障碍隐藏；保存原文更正不再强制收起「原文与回听」折叠。
+- 144-F：Onboarding 行按有无操作区分合成语义（带按钮行可被 VoiceOver 到达）；认知地图节点与关系按钮补 `.isSelected` 与「此前背景」值。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
