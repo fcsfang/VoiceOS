@@ -56,21 +56,26 @@ struct ActionScheduleEditor: View {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
                 WorkspaceSectionHeading("设置本地期限选择")
                 Text(action.title).vosFont(WorkspaceText.rowTitle)
-            }
+            }.padding(.horizontal, 24)
             WorkspaceListDivider()
-            VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
-                Picker("期限类型", selection: $mode) {
-                    Text("仅日期").tag("date"); Text("日期与时间").tag("time"); Text("移除期限").tag("none")
-                }.pickerStyle(.segmented).disabled(saving)
+            VStack(alignment: .leading, spacing: 0) {
+                WorkspaceSettingsRow(title: "期限类型", showsDivider: false) {
+                    Picker("期限类型", selection: $mode) {
+                        Text("仅日期").tag("date"); Text("日期与时间").tag("time"); Text("移除期限").tag("none")
+                    }.pickerStyle(.segmented).labelsHidden().frame(width: 220).disabled(saving)
+                }
                 if mode != "none" {
-                    DatePicker("期限", selection: $date, displayedComponents: mode == "time" ? [.date,.hourAndMinute] : [.date])
-                        .environment(\.timeZone, timeZone).disabled(saving)
-                    Text("解释时区：" + timeZone.identifier).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    WorkspaceSettingsRow(title: "期限", subtitle: "解释时区：" + timeZone.identifier) {
+                        DatePicker("期限", selection: $date, displayedComponents: mode == "time" ? [.date,.hourAndMinute] : [.date])
+                            .labelsHidden().datePickerStyle(.field)
+                            .environment(\.timeZone, timeZone).disabled(saving)
+                    }
                 }
             }
             WorkspaceListDivider()
             Text("仅保存在本地；外部改期差异需另行确认。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
+                .padding(.horizontal, 24)
+            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger).padding(.horizontal, 24) }
             HStack {
                 Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(saving)
                 Spacer()
@@ -87,8 +92,8 @@ struct ActionScheduleEditor: View {
                         }
                     } catch { errorText = error.localizedDescription }
                 }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(saving || model.savingAction)
-            }
-        }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
+            }.padding(.horizontal, 24)
+        }.padding(.vertical, 24).frame(width: WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()
     }
 }
