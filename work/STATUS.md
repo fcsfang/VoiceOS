@@ -962,3 +962,12 @@
 - 149-A 首页行呈现单次计算：新增 `HomeRowPresentation`，每次渲染每行只做一次 `WorkspaceTitleFit.present` 与一次状态/时间读取，标题、元数据、无障碍朗读、图标共享同一结果；`HomeDateFormatting` 三个静态格式化器替换每行 1-2 次 DateFormatter 分配。行为逐字一致。
 - 149-B 播放时钟作用域：`SourcePlaybackClock` 由 `@StateObject` 改 `@State`（页面体不读 milliseconds，仅订阅与写回；子视图各自 @ObservedObject），300ms tick 不再让整页重算，只有回听标签与播放条随 tick 更新。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 150：材料页按代际缓存（2026-11-21，已推送）
+- `ControlCenter.recordsRevision` 在 applyCoreSnapshot 中随 records 赋值自增；WorkspaceView 维护 `readingStatesRevision`（覆盖全部 4 处写入）；`MaterialPageCache` 按 (records, states) 键缓存五个筛选的 `MaterialReadingPage`，键变清空；body 与键盘处理器共用缓存。行为不变。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 151：设置页信息层级重构（2026-11-22，已推送）
+- 用户反馈设置页信息杂糅、无分块、间距无美学；调研 NN/g 邻近原则与表单留白法、Apple HIG 设置原则、Microsoft Fluent 间距刻度后重构。
+- 设计系统新增：`WorkspaceSettingsCard`（每类信息一张卡）、`WorkspaceSettingsRow`（标签列+右对齐控件、行间发丝线、minHeight 46、水平 20、间距 16）、`WorkspaceSettingsNavRow`（整行可点 + hover + chevron）、`WorkspaceSettingsValueRow`（标签/细节/等宽数字）。
+- 设置页重排为 11 张卡：模型与服务 / 数据与隐私 / 连接与自动入口 / 系统权限 / 外观 / 导出与备份 / 资料库 / 存储 / 回顾与查找 / 键盘快捷键 / 其他工作与维护；页头补副标题；内容列限宽 680；卡间距 28、卡头到首行 12。全部原动作与绑定保留，控件形态统一（导航 chevron、状态行 compact 按钮）。
+- 用户真机确认：「比之前效果强得多得多得多」。推广至处理情况、行动详情、消息监测等页面列入 152。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
