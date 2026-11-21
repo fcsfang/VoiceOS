@@ -883,3 +883,13 @@
 - 集成：730 tests 全绿（build_exit=0 / test_exit=0）。
 ## 视觉复核（2026-11-21，125–135 波后）
 截图通道恢复后逐屏复核新构建（730 tests 版本）：首页（标题单行+元数据行、无行尾全局徽标、头部「每周回顾 · 84」）、搜索（材料/观点/行动三区，材料标题为显示链产物）、设置（组内 12/组间 28）、主题（瓦片 hover/chevron 与摘要层级）、材料（日期分组、卡片行壳、尾部待办/在读一致，反馈类材料不再出现 ISO 名）、周回顾（副标题去重、行结构统一）、记录想法（标题/正文/0 字/保存选项节奏）、行动列表与详情（hover、承诺面板、进展空态）。结论：与设计词表一致，未发现新的层级或密度问题；深色模式本轮未复核（色值未动）。
+## 波 136：浅色底色的两次校准（2026-11-21，已推送）
+- 用户先反馈「底色太灰、不现代」，第一版仅抬 4 个色阶（0xF2F2F3→0xF6F6F4）被判定「没变化」——教训：低于 8 级的色阶调整用户不可感知。
+- 最终版为决定性改动：canvas 0xFAFAF9 纸白、surface 纯白 0xFFFFFF + 1px 边框 0xE4E4DF、sidebar 0xF4F4F2、selection 0xEFEFEC、text 0x1F1F1D（16.5:1）；sage 同步（0xF9FAF5 / FFFFFF / F2F4ED / EDF1E6 / E1E6D8）。深色四值未动。
+- 实机截图确认从「灰底软件」变为浅白界面。
+
+## 波 137：补漏扫描的 8 条修复（2026-11-21，已推送）
+- Core：分组标题采用前复刻成员有效性校验（recordingExpression(in:)，失效则回退成员标题）；正文仅在 saved/reference_only 参与标题派生（body 仍可搜）；双 transcription job 时标题取 presentation 指定版本而非字典序 MAX；16 个 Core 文件的 sources 派生字典改 uniquing（generateRecordingTitles / prepareRecordingTitles / detach / failure 留存等崩溃路径消除）；只读库 audio/video 回退「录音 · 日期」与应用同源。
+- UI：结果跟进「去行动页」改走本窗口注入的 go(.actions)（独立资料库窗口不再串窗或失效）；录音标题编辑器只预填真实 contentTitle，派生标题改 placeholder 展示，空文本保存禁用——不再冻结自动命名。
+- 构建插曲：SearchIndex 两处 Optional.flatMap 泛型推断失败，改为显式分支后通过。
+- 集成：735 tests 全绿（build_exit=0 / test_exit=0），dist 已安装（白底版运行中）。
