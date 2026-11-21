@@ -867,6 +867,9 @@ struct WorkspaceMonitorView: View {
                     qqSettings
                 }
             }
+            if !model.monitorStatus.isEmpty {
+                Text(model.monitorStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
+            }
         }
     }
 
