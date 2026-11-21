@@ -50,24 +50,37 @@ struct RecordingFollowupView: View {
                 WorkspaceHeading(eyebrow: "工具 · 思想与下一步", title: "思想与下一步")
                 if !embedded { Button("完成", action: dismiss).buttonStyle(.workspaceQuiet) }
             }
-            VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
-                Picker("查看", selection: $tab) {
-                    Text("思想变化").tag("thoughts"); Text("目标下一步").tag("goals"); Text("英语练习").tag("english")
-                }.pickerStyle(.segmented)
-                HStack {
-                    Picker("来源", selection: $sourceID) {
-                        Text("全部录音").tag("all")
-                        ForEach(eligible) { source in Text(source.displayTitle).tag(source.id) }
+            WorkspaceSettingsCard(title: "生成与筛选", subtitle: "选择来源、生成跟进、切换查看范围") {
+                VStack(alignment: .leading, spacing: 0) {
+                    WorkspaceSettingsRow(title: "查看", showsDivider: false) {
+                        Picker("查看", selection: $tab) {
+                            Text("思想变化").tag("thoughts"); Text("目标下一步").tag("goals"); Text("英语练习").tag("english")
+                        }.pickerStyle(.segmented).labelsHidden()
                     }
-                    Button(sourceID == "all" ? "更新下一步" : "生成或重试跟进") {
-                        if let id = sourceID == "all" ? nil : sourceID { model.refreshFollowup(id) }
-                    }.buttonStyle(.workspacePrimary)
-                        .disabled(model.followupBusy || model.fullRecordingBusy || eligible.isEmpty || sourceID == "all")
-                    if model.followupBusy { ProgressView().controlSize(.small) }
-                    if sourceID == "all", !eligible.isEmpty { Text("先选择来源录音，再生成跟进。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
+                    WorkspaceSettingsRow(title: "来源", subtitle: sourceID == "all" && !eligible.isEmpty ? "先选择来源录音，再生成跟进。" : nil) {
+                        Picker("来源", selection: $sourceID) {
+                            Text("全部录音").tag("all")
+                            ForEach(eligible) { source in Text(source.displayTitle).tag(source.id) }
+                        }.labelsHidden().fixedSize()
+                    }
+                    WorkspaceSettingsRow(title: "操作") {
+                        HStack(spacing: 8) {
+                            Button(sourceID == "all" ? "更新下一步" : "生成或重试跟进") {
+                                if let id = sourceID == "all" ? nil : sourceID { model.refreshFollowup(id) }
+                            }.buttonStyle(.workspacePrimary)
+                                .disabled(model.followupBusy || model.fullRecordingBusy || eligible.isEmpty || sourceID == "all")
+                            if model.followupBusy { ProgressView().controlSize(.small) }
+                        }
+                    }
+                    WorkspaceSettingsRow(title: "显示历史版本") {
+                        Toggle("显示历史版本", isOn: $includeHistory)
+                            .toggleStyle(.switch).labelsHidden().vosFont(WorkspaceText.meta)
+                    }
+                    WorkspaceListDivider().padding(.horizontal, 20)
+                    Text(model.followupStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        .padding(.horizontal, 20).padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text(model.followupStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                Toggle("显示历史版本", isOn: $includeHistory).vosFont(WorkspaceText.meta)
             }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
@@ -98,7 +111,7 @@ struct RecordingFollowupView: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
             }
-        }.padding(24).frame(width: embedded ? nil : 820, height: embedded ? nil : 700)
+        }.frame(maxWidth: 760, alignment: .leading).padding(24).frame(width: embedded ? nil : 820, height: embedded ? nil : 700)
     }
     private func receiptHeader(_ receipt: RecordingFollowupReceipt) -> some View {
         HStack {
