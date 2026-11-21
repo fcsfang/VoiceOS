@@ -406,6 +406,20 @@ private struct WorkspaceEditorSurface: ViewModifier {
     }
 }
 
+private struct WorkspaceFocusRing: ViewModifier {
+    @Environment(\.workspacePalette) private var palette
+    let isFocused: Bool
+    let radius: CGFloat
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if isFocused {
+                RoundedRectangle(cornerRadius: radius).strokeBorder(palette.focusRing, lineWidth: 1)
+            }
+        }
+    }
+}
+
 extension View {
     func workspaceHoverHighlight(cornerRadius: CGFloat = WorkspaceMetrics.controlRadius) -> some View {
         modifier(WorkspaceHoverHighlight(cornerRadius: cornerRadius))
@@ -417,6 +431,19 @@ extension View {
 
     func workspaceEditorSurface(radius: CGFloat = WorkspaceMetrics.controlRadius) -> some View {
         modifier(WorkspaceEditorSurface(radius: radius))
+    }
+
+    func workspaceFocusRing(_ isFocused: Bool, radius: CGFloat) -> some View {
+        modifier(WorkspaceFocusRing(isFocused: isFocused, radius: radius))
+    }
+
+    /// Shows the caller's slow-load placeholder only after 150ms, so fast loads never flash one.
+    func workspaceSlowLoading(_ isLoading: Bool, into visible: Binding<Bool>) -> some View {
+        self.task(id: isLoading) {
+            guard isLoading else { visible.wrappedValue = false; return }
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
+            if isLoading { visible.wrappedValue = true }
+        }
     }
 
     func workspaceToast(_ message: Binding<String?>) -> some View {

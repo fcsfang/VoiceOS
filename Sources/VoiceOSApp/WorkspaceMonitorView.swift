@@ -102,11 +102,7 @@ struct WorkspaceMonitorView: View {
             guard wasChecking, !isChecking else { return }
             announceMonitorCheckCompletion()
         }
-        .task(id: monitorLoadState) {
-            guard monitorLoadState == .loading else { showSlowLoad = false; return }
-            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
-            if monitorLoadState == .loading { showSlowLoad = true }
-        }
+        .workspaceSlowLoading(monitorLoadState == .loading, into: $showSlowLoad)
         .alert("删除监测来源？", isPresented: Binding(
             get: { pendingSourceRemoval != nil },
             set: { if !$0 { pendingSourceRemoval = nil } })) {

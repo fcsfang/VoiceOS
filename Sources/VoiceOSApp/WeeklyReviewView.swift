@@ -145,11 +145,7 @@ struct WeeklyReviewView: View {
                 guard state == .loaded, previous != .loaded else { return }
                 AccessibilityNotification.Announcement("本周行动已载入").post()
             }
-            .task(id: loadState) {
-                guard loadState == .loading else { return }
-                do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
-                if loadState == .loading { showSlowLoad = true }
-            }
+            .workspaceSlowLoading(loadState == .loading, into: $showSlowLoad)
             .task(id: undoEntry?.id) {
                 guard let id = undoEntry?.id else { return }
                 do { try await Task.sleep(for: .seconds(8)) } catch { return }

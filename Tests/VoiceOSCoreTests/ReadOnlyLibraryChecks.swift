@@ -342,4 +342,26 @@ final class ReadOnlyLibraryChecks: XCTestCase {
         XCTAssertThrowsError(try library.query("CREATE TABLE probe_write(x TEXT)"))
         XCTAssertEqual(try library.query("SELECT COUNT(*) AS n FROM sources").first?["n"], "1")
     }
+
+    func testDisplayTitleFunnelSharesExplicitTitleContract() throws {
+        func row(manual: String? = nil, automatic: String? = nil,
+                 presentationVersion: String?, transcriptVersion: String?) throws -> [String: String] {
+            let presentation = RecordingPresentation(
+                manualTitle: manual,
+                automatic: automatic.map {
+                    RecordingTitleProposal(sourceID: "source", title: $0, summary: "s", quotes: [])
+                },
+                transcriptVersionID: presentationVersion)
+            return ["name": "原始名字", "kind": "user_text",
+                    "created_at": "2026-11-01T00:00:00Z", "timezone": "Asia/Shanghai",
+                    "transcript_version_id": transcriptVersion ?? "",
+                    "presentation_json": try json(presentation)]
+        }
+        XCTAssertEqual(try ReadOnlyLibrary.displayTitle(row(manual: "  人工标题  ", presentationVersion: "t-old",
+                                                            transcriptVersion: "t-new")), "人工标题")
+        XCTAssertEqual(try ReadOnlyLibrary.displayTitle(row(automatic: "**周会结论**。", presentationVersion: "t-1",
+                                                            transcriptVersion: "t-1")), "周会结论")
+        XCTAssertEqual(try ReadOnlyLibrary.displayTitle(row(automatic: "过期标题", presentationVersion: "t-old",
+                                                            transcriptVersion: "t-new")), "原始名字")
+    }
 }

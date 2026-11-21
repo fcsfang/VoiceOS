@@ -62,6 +62,7 @@ struct RecentContentHome: View {
                 } else {
                     HStack(spacing: 0) {
                         timeline.frame(width: timelineWidth)
+                        // Vertical seam between timeline and reader; WorkspaceListDivider is horizontal-only.
                         Rectangle().fill(palette.border).frame(width: 1)
                         reader
                     }.onAppear { StartupTrace.mark("home.appear items=\(items.count)") }
@@ -106,7 +107,7 @@ struct RecentContentHome: View {
         }
         .padding(.horizontal, 18).padding(.vertical, 8)
         .background(palette.canvas)
-        .overlay(alignment: .bottom) { Rectangle().fill(palette.border).frame(height: 1) }
+        .overlay(alignment: .bottom) { WorkspaceListDivider() }
     }
 
     private func openWeeklyReview() {
@@ -708,7 +709,7 @@ struct RecentContentHome: View {
                     }
                 }
             }
-            Rectangle().fill(palette.border).frame(height: 1).padding(.top, 8)
+            WorkspaceListDivider().padding(.top, 8)
         }
     }
 

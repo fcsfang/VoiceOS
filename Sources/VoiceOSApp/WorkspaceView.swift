@@ -659,11 +659,7 @@ struct WorkspaceView: View {
                 WorkspaceProcessingBar(model: model) { go(.tool("处理情况")) }
             }
         }.frame(minWidth:440)
-            .task(id:workspaceStarting) {
-                guard workspaceStarting else { showStartupProgress=false; return }
-                do { try await Task.sleep(for:.milliseconds(150)) } catch { return }
-                if workspaceStarting { showStartupProgress=true }
-            }
+            .workspaceSlowLoading(workspaceStarting, into: $showStartupProgress)
     }
     private var workspaceStarting: Bool { !model.initialized || !model.workspaceLoaded }
     @ViewBuilder private var workspaceErrorBanner: some View {
@@ -1343,7 +1339,7 @@ struct WorkspaceView: View {
                 }.buttonStyle(.plain)
                     .focused($summaryPendingFocus).focusEffectDisabled()
                     .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.controlRadius)
-                    .overlay { if summaryPendingFocus { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+                    .workspaceFocusRing(summaryPendingFocus, radius: WorkspaceMetrics.controlRadius)
                     .accessibilityLabel("本地完成待同步 \(model.pendingReminderSyncs.count) 项，打开核对")
             }
             if actionFilter == "全部", let surface = timeSurface {
@@ -1358,7 +1354,7 @@ struct WorkspaceView: View {
                 }.buttonStyle(.plain)
                     .focused($summaryTodayFocus).focusEffectDisabled()
                     .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.controlRadius)
-                    .overlay { if summaryTodayFocus { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+                    .workspaceFocusRing(summaryTodayFocus, radius: WorkspaceMetrics.controlRadius)
                     .accessibilityLabel("今天 \(surface.today.count - overdue) 项，逾期 \(overdue) 项")
                     .accessibilityHint("切到我的待办")
                     .help("切到我的待办")
@@ -1659,7 +1655,7 @@ struct WorkspaceView: View {
                     let rowID="material:" + source.id
                     sourceRow(source,catalog:catalog)
                         .background(searchKeyboardFocus.id == rowID ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-                        .overlay { if searchKeyboardFocus.id == rowID { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+                        .workspaceFocusRing(searchKeyboardFocus.id == rowID, radius: WorkspaceMetrics.panelRadius)
                         .id(rowID)
                     if source.id != sources.last?.id { WorkspaceListDivider() }
                 }
@@ -1688,7 +1684,7 @@ struct WorkspaceView: View {
                         ForEach(section.rows) { row in
                             SearchResultRow(title:row.title,subtitle:row.subtitle,icon:row.icon) { row.open() }
                                 .background(searchKeyboardFocus.id == row.id ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-                                .overlay { if searchKeyboardFocus.id == row.id { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+                                .workspaceFocusRing(searchKeyboardFocus.id == row.id, radius: WorkspaceMetrics.panelRadius)
                                 .id(row.id)
                             if row.id != section.rows.last?.id { WorkspaceListDivider() }
                         }
@@ -1831,7 +1827,7 @@ struct WorkspaceView: View {
                     suggestion.open()
                 }
                 .background(searchKeyboardFocus.id == suggestion.id ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-                .overlay { if searchKeyboardFocus.id == suggestion.id { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).strokeBorder(palette.focusRing,lineWidth:1) } }
+                .workspaceFocusRing(searchKeyboardFocus.id == suggestion.id, radius: WorkspaceMetrics.panelRadius)
                 .id(suggestion.id)
                 if index < suggestions.count - 1 { WorkspaceListDivider() }
             }
