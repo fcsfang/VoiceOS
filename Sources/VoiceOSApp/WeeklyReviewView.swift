@@ -29,6 +29,8 @@ struct WeeklyReviewView: View {
     @State private var loadError = ""
     @State private var loadState: LoadState = .idle
     @State private var showSlowLoad = false
+    @FocusState private var reviewListFocused: Bool
+    @State private var keyboardSelection = ReviewKeySelection()
 
     private enum ReviewFilter: String {
         case todo = "我的待办", review = "待核对", completed = "已完成"
@@ -145,6 +147,15 @@ struct WeeklyReviewView: View {
                 guard state == .loaded, previous != .loaded else { return }
                 AccessibilityNotification.Announcement("本周行动已载入").post()
             }
+            .focusable()
+            .focused($reviewListFocused)
+            .focusEffectDisabled()
+            .onKeyPress { handleReviewKey($0) }
+            .onChange(of: keyboardSelection.id) { _, id in
+                guard let id else { return }
+                proxy.scrollTo(id, anchor: .center)
+            }
+            .onAppear { requestReviewFocus() }
             .workspaceSlowLoading(loadState == .loading, into: $showSlowLoad)
             .task(id: undoEntry?.id) {
                 guard let id = undoEntry?.id else { return }
@@ -278,7 +289,9 @@ struct WeeklyReviewView: View {
             if !todayRows.isEmpty {
                 ForEach(Array(todayRows.enumerated()), id: \.element.id) { index, entry in
                     if index > 0 { WorkspaceListDivider() }
-                    dailyRow(entry, overdue: false)
+                    dailyRow(entry, overdue: false,
+                             highlighted: isReviewHighlighted("today", entry.action.id))
+                        .id(reviewRowID("today", entry.action.id))
                 }
             }
             if review.today.count > todayRows.count { allButton(review.today.count, .todo) }
@@ -288,7 +301,9 @@ struct WeeklyReviewView: View {
                     .padding(.top, WorkspaceMetrics.groupGap).padding(.bottom, 2)
                 ForEach(Array(overdueRows.enumerated()), id: \.element.id) { index, entry in
                     if index > 0 { WorkspaceListDivider() }
-                    dailyRow(entry, overdue: true)
+                    dailyRow(entry, overdue: true,
+                             highlighted: isReviewHighlighted("overdue", entry.action.id))
+                        .id(reviewRowID("overdue", entry.action.id))
                 }
             }
             if review.overdue.count > overdueRows.count { allButton(review.overdue.count, .todo) }
@@ -308,7 +323,7 @@ struct WeeklyReviewView: View {
         }
     }
 
-    private func dailyRow(_ entry: ActionTimeEntry, overdue: Bool) -> some View {
+    private func dailyRow(_ entry: ActionTimeEntry, overdue: Bool, highlighted: Bool) -> some View {
         let subtitle = dailySubtitle(entry)
         return HStack(alignment: .top, spacing: 12) {
             Button { openTask(entry.action.id) } label: {
@@ -342,7 +357,10 @@ struct WeeklyReviewView: View {
                 .accessibilityLabel("不再跟进：" + entry.action.title)
         }
         .padding(.vertical, 10).padding(.horizontal, 10)
+        .background(highlighted ? palette.selection.opacity(0.5) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
         .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
+        .workspaceFocusRing(highlighted, radius: WorkspaceMetrics.panelRadius)
     }
 
     private func apply(_ entry: ActionTimeEntry, _ state: LocalActionState) {
@@ -454,7 +472,8 @@ struct WeeklyReviewView: View {
             }
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, entry in
                 if index > 0 { WorkspaceListDivider() }
-                nextWeekRow(entry)
+                nextWeekRow(entry, highlighted: isReviewHighlighted("nextWeek", entry.action.id))
+                    .id(reviewRowID("nextWeek", entry.action.id))
             }
             if candidates.count > rows.count { allButton(candidates.count, .todo) }
             HStack(spacing: 10) {
@@ -477,23 +496,12 @@ struct WeeklyReviewView: View {
         }
     }
 
-    private func nextWeekRow(_ entry: ActionTimeEntry) -> some View {
+    private func nextWeekRow(_ entry: ActionTimeEntry, highlighted: Bool) -> some View {
         let focused = focusedIDs.contains(entry.action.id)
         let selected = selectedFocusIDs.contains(entry.action.id)
         let subtitle = dueLabel(entry)
         return Button {
-            guard focusLoaded, !focused, !focusSaving else { return }
-            if selected {
-                selectedFocusIDs.remove(entry.action.id)
-                focusError = ""
-            } else if focusSlots == 0 {
-                focusError = "已有 3 条专注，先到行动页移出"
-            } else if selectedFocusIDs.count >= focusSlots {
-                focusError = "最多还能加入 \(focusSlots) 条"
-            } else {
-                selectedFocusIDs.insert(entry.action.id)
-                focusError = ""
-            }
+            toggleNextWeekSelection(entry)
         } label: {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: focused ? "pin.fill" : selected ? "checkmark.circle.fill" : "circle").vosFont(WorkspaceText.rowTitle.size)
@@ -516,7 +524,25 @@ struct WeeklyReviewView: View {
         }.buttonStyle(.plain)
         .accessibilityValue(focused ? "已专注" : selected ? "已选" : "未选")
         .padding(.vertical, 10).padding(.horizontal, 10)
+        .background(highlighted ? palette.selection.opacity(0.5) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
         .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
+        .workspaceFocusRing(highlighted, radius: WorkspaceMetrics.panelRadius)
+    }
+
+    private func toggleNextWeekSelection(_ entry: ActionTimeEntry) {
+        guard focusLoaded, !focusedIDs.contains(entry.action.id), !focusSaving else { return }
+        if selectedFocusIDs.contains(entry.action.id) {
+            selectedFocusIDs.remove(entry.action.id)
+            focusError = ""
+        } else if focusSlots == 0 {
+            focusError = "已有 3 条专注，先到行动页移出"
+        } else if selectedFocusIDs.count >= focusSlots {
+            focusError = "最多还能加入 \(focusSlots) 条"
+        } else {
+            selectedFocusIDs.insert(entry.action.id)
+            focusError = ""
+        }
     }
 
     private func applyNextWeekFocus() {
@@ -544,7 +570,9 @@ struct WeeklyReviewView: View {
         return WorkspaceSection(title: "长期未动", subtitle: "创建超过 14 天，仍是未完成状态。", icon: "hourglass", count: staleTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { WorkspaceListDivider() }
-                reviewRow(title: action.title, subtitle: staleLabel(action), trailing: "搁置", icon: "hourglass") { openTask(action.id) }
+                reviewRow(title: action.title, subtitle: staleLabel(action), trailing: "搁置", icon: "hourglass",
+                          highlighted: isReviewHighlighted("stale", action.id)) { openTask(action.id) }
+                    .id(reviewRowID("stale", action.id))
             }
             if staleTasks.count > rows.count { allButton(staleTasks.count, .todo) }
         }
@@ -554,7 +582,9 @@ struct WeeklyReviewView: View {
         return WorkspaceSection(title: "待确认", subtitle: "最近 14 天抽取，尚未确认类型。", icon: "questionmark.circle", count: unclarifiedTasks.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { WorkspaceListDivider() }
-                reviewRow(title: action.title, trailing: "待确认", icon: "questionmark.circle") { openTask(action.id) }
+                reviewRow(title: action.title, trailing: "待确认", icon: "questionmark.circle",
+                          highlighted: isReviewHighlighted("unclarified", action.id)) { openTask(action.id) }
+                    .id(reviewRowID("unclarified", action.id))
             }
             if unclarifiedTasks.count > rows.count { linkButton("到待核对查看", .review).padding(.top, 10) }
         }
@@ -566,9 +596,12 @@ struct WeeklyReviewView: View {
                 if index > 0 { WorkspaceListDivider() }
                 if row.isTaskAvailable {
                     reviewRow(title: row.taskTitle, subtitle: row.relationLabel, detail: row.text,
-                              trailing: dayLabel(row.date)) { openTask(row.actionID) }
+                              trailing: dayLabel(row.date),
+                              highlighted: isReviewHighlighted("progress", row.id)) { openTask(row.actionID) }
+                        .id(reviewRowID("progress", row.id))
                 } else {
-                    unavailableProgressRow(row)
+                    unavailableProgressRow(row, highlighted: isReviewHighlighted("progress", row.id))
+                        .id(reviewRowID("progress", row.id))
                 }
             }
             if weekProgress.count > rows.count {
@@ -576,8 +609,8 @@ struct WeeklyReviewView: View {
             }
         }
     }
-    private func unavailableProgressRow(_ row: RecentContentProgressRow) -> some View {
-        let hasMaterial = model.records.contains(where: { $0.id == row.id })
+    private func unavailableProgressRow(_ row: RecentContentProgressRow, highlighted: Bool) -> some View {
+        let hasMaterial = progressRowHasMaterial(row)
         return HStack(alignment: .top, spacing: 14) {
             Image(systemName: "circle").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
                 .frame(width: 34, height: 34)
@@ -598,6 +631,13 @@ struct WeeklyReviewView: View {
             }
         }
         .padding(.vertical, 10).padding(.horizontal, 10)
+        .background(highlighted ? palette.selection.opacity(0.5) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
+        .workspaceFocusRing(highlighted, radius: WorkspaceMetrics.panelRadius)
+    }
+
+    private func progressRowHasMaterial(_ row: RecentContentProgressRow) -> Bool {
+        model.records.contains(where: { $0.id == row.id })
     }
 
     private func progressUnavailableReason(_ row: RecentContentProgressRow) -> String {
@@ -609,7 +649,8 @@ struct WeeklyReviewView: View {
         WorkspaceSection(title: "本周完成", subtitle: "最近 7 天完成的行动。", icon: "checkmark.circle", count: weekCompleted.count) {
             ForEach(Array(weekCompleted.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { WorkspaceListDivider() }
-                weekCompletedRow(action).id("review.pending." + action.id)
+                weekCompletedRow(action, highlighted: isReviewHighlighted("completed", action.id))
+                    .id(reviewRowID("completed", action.id))
             }
             HStack(spacing: 8) {
                 Spacer(minLength: 0)
@@ -618,7 +659,7 @@ struct WeeklyReviewView: View {
         }
     }
 
-    private func weekCompletedRow(_ action: ActionRecord) -> some View {
+    private func weekCompletedRow(_ action: ActionRecord, highlighted: Bool) -> some View {
         let subtitle = completedDate(action).map { "完成于 " + dayLabel($0) } ?? "完成时间未知"
         let pending = model.visibleOutcomeFollowups.contains { $0.id == action.id }
         let expanded = expandedOutcomeID == action.id
@@ -664,7 +705,10 @@ struct WeeklyReviewView: View {
             }
         }
         .padding(.vertical, 10).padding(.horizontal, 10)
+        .background(highlighted ? palette.selection.opacity(0.5) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
         .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
+        .workspaceFocusRing(highlighted, radius: WorkspaceMetrics.panelRadius)
     }
 
     private func outcomeDraft(_ id: String) -> Binding<TaskFeedbackDraft> {
@@ -696,7 +740,9 @@ struct WeeklyReviewView: View {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, action in
                 if index > 0 { WorkspaceListDivider() }
                 reviewRow(title: action.title, subtitle: model.workspaceActionStatus(action),
-                          trailing: "待核对", icon: "pause.circle") { openTask(action.id) }
+                          trailing: "待核对", icon: "pause.circle",
+                          highlighted: isReviewHighlighted("paused", action.id)) { openTask(action.id) }
+                    .id(reviewRowID("paused", action.id))
             }
             if pausedTasks.count > rows.count { linkButton("到待核对查看", .review).padding(.top, 10) }
         }
@@ -708,7 +754,8 @@ struct WeeklyReviewView: View {
                                 actionTitle: "逐个澄清", action: { showingClarifyQueue = true }) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
                 if index > 0 { WorkspaceListDivider() }
-                stalledGoalRow(goal)
+                stalledGoalRow(goal, highlighted: isReviewHighlighted("stalled", goal.id))
+                    .id(reviewRowID("stalled", goal.id))
             }
             if stalledGoals.count > rows.count {
                 Text("还有 \(stalledGoals.count - rows.count) 个目标，到问题与目标页查看。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
@@ -719,7 +766,7 @@ struct WeeklyReviewView: View {
         }
     }
 
-    private func stalledGoalRow(_ goal: ActionRecord) -> some View {
+    private func stalledGoalRow(_ goal: ActionRecord, highlighted: Bool) -> some View {
         let title = StatementTagParser.split(goal.title).text
         return HStack(alignment: .top, spacing: 12) {
             Button { openTask(goal.id) } label: {
@@ -746,7 +793,10 @@ struct WeeklyReviewView: View {
                 .accessibilityLabel("加下一步：" + title)
         }
         .padding(.vertical, 10).padding(.horizontal, 10)
+        .background(highlighted ? palette.selection.opacity(0.5) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
         .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
+        .workspaceFocusRing(highlighted, radius: WorkspaceMetrics.panelRadius)
     }
 
     private var somedaySection: some View {
@@ -754,7 +804,8 @@ struct WeeklyReviewView: View {
         return WorkspaceSection(title: "留到以后的问题与目标", subtitle: "超过 60 天没有回看。", icon: "tray", count: somedayRows.count) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
                 if index > 0 { WorkspaceListDivider() }
-                somedayRow(goal)
+                somedayRow(goal, highlighted: isReviewHighlighted("someday", goal.id))
+                    .id(reviewRowID("someday", goal.id))
             }
             if somedayRows.count > rows.count {
                 Text("还有 \(somedayRows.count - rows.count) 个目标，回看一批后再处理。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
@@ -765,7 +816,7 @@ struct WeeklyReviewView: View {
         }
     }
 
-    private func somedayRow(_ goal: ActionRecord) -> some View {
+    private func somedayRow(_ goal: ActionRecord, highlighted: Bool) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Button { openTask(goal.id) } label: {
                 HStack(alignment: .top, spacing: 14) {
@@ -795,7 +846,10 @@ struct WeeklyReviewView: View {
                 .accessibilityLabel("放弃：" + goal.title)
         }
         .padding(.vertical, 10).padding(.horizontal, 10)
+        .background(highlighted ? palette.selection.opacity(0.5) : Color.clear,
+                    in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
         .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
+        .workspaceFocusRing(highlighted, radius: WorkspaceMetrics.panelRadius)
     }
 
     private func applySomeday(_ goal: ActionRecord, _ decision: SomedayReviewDecision) {
@@ -812,7 +866,7 @@ struct WeeklyReviewView: View {
     }
     private func reviewRow(title: String, subtitle: String = "", detail: String = "", trailing: String = "",
                            icon: String = "circle", accessibilityLabel: String? = nil,
-                           open: @escaping () -> Void) -> some View {
+                           highlighted: Bool, open: @escaping () -> Void) -> some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 14) {
                 Image(systemName: icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
@@ -839,8 +893,77 @@ struct WeeklyReviewView: View {
             .accessibilityElement(children: .combine)
         }.buttonStyle(.plain)
             .accessibilityLabelIfPresent(accessibilityLabel)
+            .background(highlighted ? palette.selection.opacity(0.5) : Color.clear,
+                        in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.panelRadius)
+            .workspaceFocusRing(highlighted, radius: WorkspaceMetrics.panelRadius)
     }
+    private struct ReviewNavigationRow {
+        let id: String
+        let open: () -> Void
+    }
+
+    // Completed rows reuse the review.pending anchor the summary links already scroll to.
+    private func reviewRowID(_ section: String, _ id: String) -> String {
+        section == "completed" ? "review.pending." + id : "review.nav.\(section).\(id)"
+    }
+
+    private func isReviewHighlighted(_ section: String, _ id: String) -> Bool {
+        keyboardSelection.id == reviewRowID(section, id)
+    }
+
+    private var reviewNavigationRows: [ReviewNavigationRow] {
+        var rows: [ReviewNavigationRow] = []
+        func add(_ section: String, _ id: String, _ open: @escaping () -> Void) {
+            rows.append(ReviewNavigationRow(id: reviewRowID(section, id), open: open))
+        }
+        for entry in dailyReview.today.prefix(5) { add("today", entry.action.id) { openTask(entry.action.id) } }
+        for entry in dailyReview.overdue.prefix(5) { add("overdue", entry.action.id) { openTask(entry.action.id) } }
+        for entry in nextWeekCandidates.prefix(5) { add("nextWeek", entry.action.id) { toggleNextWeekSelection(entry) } }
+        for action in staleTasks.prefix(5) { add("stale", action.id) { openTask(action.id) } }
+        for action in unclarifiedTasks.prefix(5) { add("unclarified", action.id) { openTask(action.id) } }
+        for goal in stalledGoals.prefix(5) { add("stalled", goal.id) { openTask(goal.id) } }
+        for goal in somedayRows.prefix(5) { add("someday", goal.id) { openTask(goal.id) } }
+        for action in weekCompleted { add("completed", action.id) { openTask(action.id) } }
+        for row in weekProgress.prefix(5) {
+            if row.isTaskAvailable {
+                add("progress", row.id) { openTask(row.actionID) }
+            } else if progressRowHasMaterial(row) {
+                add("progress", row.id) {
+                    model.requestWorkspaceSource(row.id)
+                    dismiss()
+                }
+            }
+        }
+        for action in pausedTasks.prefix(5) { add("paused", action.id) { openTask(action.id) } }
+        return rows
+    }
+
+    private func handleReviewKey(_ press: KeyPress) -> KeyPress.Result {
+        guard reviewListFocused,
+              press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let rows = reviewNavigationRows
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard keyboardSelection.step(up: press.key == .upArrow, over: rows.map(\.id)) else { return .ignored }
+            return .handled
+        case .return:
+            guard let row = rows.first(where: { $0.id == keyboardSelection.id }) else { return .ignored }
+            row.open()
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+
+    private func requestReviewFocus() {
+        Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            reviewListFocused = true
+        }
+    }
+
     private func dueLabel(_ entry: ActionTimeEntry) -> String {
         var parts: [String] = []
         if let due = entry.due { parts.append(due.summary) }
@@ -859,6 +982,19 @@ struct WeeklyReviewView: View {
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "M月d日"
         return formatter.string(from: date)
+    }
+}
+// Copy of WorkspaceView's private step helper; hoist to a shared helper when a third caller needs it.
+private struct ReviewKeySelection {
+    var id: String?
+    mutating func step(up: Bool, over ids: [String]) -> Bool {
+        guard !ids.isEmpty else { return false }
+        let current = id.flatMap { ids.firstIndex(of: $0) }
+        let next: Int
+        if up { next = current.map { max(0, $0 - 1) } ?? ids.count - 1 }
+        else { next = current.map { min(ids.count - 1, $0 + 1) } ?? 0 }
+        id = ids[next]
+        return true
     }
 }
 private extension View {
