@@ -234,7 +234,7 @@ extension VoiceOSStore {
         }
         let claims = try candidateClaims(), byID = Dictionary(uniqueKeysWithValues: claims.map { ($0.id, $0) })
         let latest = try latestCandidateClaimsBySource()
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let actions = try actions(includeHistory: true)
         let selectedAction = actions.first { $0.id == actionID }
         let goal = selectedAction?.intent?.goalID.flatMap { goalID in actions.first { $0.id == goalID && $0.validity == "current" && $0.state != "dismissed" } }
@@ -288,7 +288,7 @@ extension VoiceOSStore {
     func validateConversationThoughtFocus(_ focus: ConversationThoughtFocus) throws {
         let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
         let latest = try latestCandidateClaimsBySource()
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let actions = Dictionary(uniqueKeysWithValues: try actions(includeHistory: true).map { ($0.id, $0) })
         var durableClaims = Set<String>()
         if let actionID = focus.selectedActionID {
@@ -437,7 +437,7 @@ extension VoiceOSStore {
     }
     func completeConversationSourceIDs(_ sourceIDs: [String]) throws -> [String] {
         let expressions = try recordingExpressions()
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var ids = sourceIDs
         for id in sourceIDs {
             let expression = expressions.first(where: { $0.sourceIDs.contains(id) })

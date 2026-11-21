@@ -274,12 +274,13 @@ extension VoiceOSStore {
 
     private func buildTopicOrganizationInput() throws -> TopicOrganizationInput? {
         let withdrawn=Set(try db.query("SELECT source_id FROM reflection_question_entries WHERE state='inactive'").compactMap { $0["source_id"] })
-        let catalog = try sources().filter { !withdrawn.contains($0.id) && !$0.localOnly && !$0.needsTranscriptionReview && ($0.presentation?.automaticInput == nil || $0.recordingExpression?.state == "completed") && ["saved","reference_only"].contains($0.state) && !($0.transcript ?? "").isEmpty }
+        var seen: Set<String> = []
+        let catalog = try sources().filter { !withdrawn.contains($0.id) && !$0.localOnly && !$0.needsTranscriptionReview && ($0.presentation?.automaticInput == nil || $0.recordingExpression?.state == "completed") && ["saved","reference_only"].contains($0.state) && !($0.transcript ?? "").isEmpty }.filter { seen.insert($0.id).inserted }
         guard !catalog.isEmpty else { return nil }
         let ids = catalog.map(\.id).sorted(), allowed = Set(ids)
         let budget = max(1, catalog.reduce(0) { $0 + ($1.transcript?.unicodeScalars.count ?? 0) })
         let context = try prepareLocalTranscriptContext(sourceIDs: ids, scalarBudget: budget)
-        let policies = Dictionary(uniqueKeysWithValues: catalog.map { ($0.id,$0.policyVersion) })
+        let policies = Dictionary(catalog.map { ($0.id,$0.policyVersion) }, uniquingKeysWith: { first, _ in first })
         let questions = try reflectionQuestions(includeSummaries: false)
         let links = try reflectionQuestionSources()
         let topics = questions.filter { allowed.contains($0.sourceID) }.map { question in
@@ -305,7 +306,7 @@ extension VoiceOSStore {
         // AI labels and their own link updates must not wake another identical request.
         let manual = topics.filter { item in questions.contains { $0.id == item.id && $0.isAIOrganized != true } }
         let digest = Self.relevanceHash(Data(try Self.relevanceJSON(["topic-reading-v3",context.contentDigest,Self.relevanceJSON(policies),Self.relevanceJSON(knowledge),Self.relevanceJSON(tasks),Self.relevanceJSON(replies),Self.relevanceJSON(manual)]).utf8))
-        return .init(context: context, policyVersions: policies, sourceDates:Dictionary(uniqueKeysWithValues: catalog.map { ($0.id,$0.expressedDate?.ISO8601Format() ?? $0.createdAt) }), topics: topics, tasks: tasks, discussionReplies:replies, digest: digest,knowledge:knowledge)
+        return .init(context: context, policyVersions: policies, sourceDates:Dictionary(catalog.map { ($0.id,$0.expressedDate?.ISO8601Format() ?? $0.createdAt) }, uniquingKeysWith: { first, _ in first }), topics: topics, tasks: tasks, discussionReplies:replies, digest: digest,knowledge:knowledge)
     }
 
     func topicSummaryIsCurrent(_ summary: TopicOrganizationSummary, catalog: [String: SourceRecord], linked: Set<String>) throws -> Bool {
@@ -329,7 +330,7 @@ extension VoiceOSStore {
 
     func topicOrganizationsAreCurrent(input: TopicOrganizationInput) throws -> Bool {
         guard try workspaceBriefing()?.digest == input.digest else { return false }
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) })
+        let catalog = Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first })
         let links = try reflectionQuestionSources()
         var assigned = Set<String>()
         for row in try db.query("SELECT id,organization_json FROM reflection_questions WHERE organization_json IS NOT NULL") {

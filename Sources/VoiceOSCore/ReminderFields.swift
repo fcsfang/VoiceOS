@@ -144,7 +144,7 @@ extension VoiceOSStore {
     public func prepareReminderFields(actionIDs: Set<String>? = nil) throws -> ReminderFieldInput {
         let linked = Set(try reminderLinks().map(\.actionID))
         let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var entries: [ReminderFieldInput.Task] = [], sourceIDs = Set<String>()
         for action in try actions() where action.kind == "task" && (actionIDs.map { $0.contains(action.id) } ?? !linked.contains(action.id)) && action.intent?.reminderFields?.desired == nil {
             guard let claim = claims[action.claimID], try reminderSourceAllowed(action), try reminderCognitionIsLatest(action) else { continue }

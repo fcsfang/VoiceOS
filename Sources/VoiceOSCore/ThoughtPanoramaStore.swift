@@ -34,7 +34,7 @@ public enum PanoramaFailureAdvice {
 extension VoiceOSStore {
     public func panoramaInput() throws -> PanoramaInput {
         guard ready else { throw VoiceOSError("资料库尚未恢复") }
-        let catalog=try sources(), byID=Dictionary(uniqueKeysWithValues: catalog.map { ($0.id, $0) })
+        let catalog=try sources(), byID=Dictionary(catalog.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let expressions=try recordingExpressions()
         let completed=try db.query("SELECT a.*,x.snapshot_json FROM model_attempts a JOIN contexts x ON x.id=a.context_id WHERE a.state='completed' AND x.state='current' ORDER BY a.producer_sequence DESC")
         var units: [PanoramaUnit]=[], selected=Set<String>(), exclusions: [PanoramaExclusion]=[], assigned=Set<String>()

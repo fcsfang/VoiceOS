@@ -86,7 +86,7 @@ extension VoiceOSStore {
         """) where latestAttempt[row["source_id"]!] == nil { latestAttempt[row["source_id"]!] = row["id"]! }
         let claimAttempts = Dictionary(uniqueKeysWithValues: try db.query("SELECT id,attempt_id FROM claims").map { ($0["id"]!, $0["attempt_id"]!) })
         let sources = try sources().filter { ["saved", "reference_only"].contains($0.state) && !($0.transcript ?? "").isEmpty }
-        let catalog = Dictionary(uniqueKeysWithValues: sources.map { ($0.id, $0) })
+        let catalog = Dictionary(sources.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         func inPeriod(_ date: Date) -> Bool { date >= start && date < end }
         func expressionDate(_ source: SourceRecord) -> Date { source.expressedDate ?? ConversationReflectionFocus.date(source.createdAt) ?? .distantPast }
         let selected = sources.filter { selectedSourceIDs?.contains($0.id) ?? inPeriod(expressionDate($0)) }
@@ -219,7 +219,7 @@ extension VoiceOSStore {
         if let question = focus.question { try validateReflectionQuestionContext(question) }
         guard focus.start < focus.end, TimeZone(identifier: focus.timeZoneID) != nil else { throw VoiceOSError("回顾周期无效") }
         let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let actions = Dictionary(uniqueKeysWithValues: try actions(includeHistory: true).map { ($0.id, $0) })
         for expression in focus.expressions {
             guard let source = catalog[expression.id], source.displayTitle == expression.title,

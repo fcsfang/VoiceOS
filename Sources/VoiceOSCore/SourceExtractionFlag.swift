@@ -67,7 +67,7 @@ extension VoiceOSStore {
     /// A material that now has references is resolved and loses the row.
     func evaluateSourceExtractionFlags(sourceIDs: Set<String>) throws {
         guard !sourceIDs.isEmpty else { return }
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().filter { sourceIDs.contains($0.id) }.map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().filter { sourceIDs.contains($0.id) }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let existing = try sourceExtractionFlags()
         for id in sourceIDs.sorted() {
             guard let source = catalog[id] else { continue }

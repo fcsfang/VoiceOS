@@ -111,7 +111,7 @@ extension VoiceOSStore {
         try requireReflectionQuestionsReady()
         let rows = try db.query("SELECT * FROM reflection_questions ORDER BY updated_at DESC,id")
         guard !rows.isEmpty else { return [] }
-        let catalog: [String: SourceRecord] = includeSummaries ? Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) }) : [:]
+        let catalog: [String: SourceRecord] = includeSummaries ? Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first }) : [:]
         let links = includeSummaries ? try reflectionQuestionSources() : [:]
         return rows.map { reflectionQuestionRecord($0, catalog: catalog, linkedSourceIDs: links[$0["id"]!] ?? []) }
     }
@@ -197,7 +197,7 @@ extension VoiceOSStore {
 
     public func reflectionQuestionEntries(questionID: String) throws -> [ReflectionQuestionEntry] {
         _ = try reflectionQuestionRow(questionID)
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) })
+        let catalog = Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first })
         let withdrawn = Set(try db.query("SELECT source_id FROM reflection_question_entries WHERE question_id=? AND state='inactive'", [questionID]).map { $0["source_id"]! })
         return try db.query("SELECT * FROM reflection_question_entries WHERE question_id=? AND state='active' ORDER BY sequence,id", [questionID]).map { row in
             let ids = try JSONDecoder().decode([String].self, from: Data(row["source_ids_json"]!.utf8)), sourceID = row["source_id"]!
@@ -217,13 +217,13 @@ extension VoiceOSStore {
         _ = try reflectionQuestionRow(questionID)
         guard Set(sourceIDs).count == sourceIDs.count else { throw VoiceOSError("证据来源不能重复") }
         if !sourceIDs.isEmpty {
-            let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) })
+            let catalog = Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first })
             let budget = max(1, sourceIDs.reduce(0) { $0 + (catalog[$1]?.transcript?.unicodeScalars.count ?? 0) })
             _ = try prepareLocalTranscriptContext(sourceIDs: sourceIDs, scalarBudget: budget)
         }
         let sourceID = try recordUserExpression(text), id = UUID().uuidString
         let json = String(decoding: try JSONEncoder().encode(sourceIDs), as: UTF8.self)
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) })
+        let catalog = Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first })
         guard let noteVersion = catalog[sourceID]?.transcriptVersionID else { throw VoiceOSError("问题记录缺少文字版本") }
         let evidenceVersions = Dictionary(uniqueKeysWithValues: sourceIDs.map { ($0,catalog[$0]!.transcriptVersionID!) })
         let evidenceJSON = String(decoding: try JSONEncoder().encode(evidenceVersions), as: UTF8.self)
@@ -304,7 +304,7 @@ extension VoiceOSStore {
     private func linkTopicEvidence(questionID: String, references: [ClaimReference]) throws {
         let ids = Set(references.map(\.sourceID)).sorted()
         guard !ids.isEmpty else { throw VoiceOSError("这张卡片还没有可关联的原话依据") }
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) })
+        let catalog = Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first })
         for reference in references {
             guard let source = catalog[reference.sourceID], source.transcriptVersionID == reference.transcriptVersionID,
                   source.spans.contains(where: { $0.id == reference.spanID }) else { throw VoiceOSError("卡片的原话依据已变化，请重新核对") }
@@ -341,7 +341,7 @@ extension VoiceOSStore {
 
     public func reflectionForQuestion(questionID: String, start: Date, end: Date, timeZoneID: String) throws -> ConversationReflectionFocus {
         let row = try reflectionQuestionRow(questionID)
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) })
+        let catalog = Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first })
         guard row["ai_named"] == "1" || catalog[row["title_source_id"]!]?.transcript == row["title"] else { throw VoiceOSError("问题标题来源已变化，请重新保存标题") }
         // Missing evidence remains visible on the local journal but is never sent
         // as if it were still usable. Every transmitted note has its own source.

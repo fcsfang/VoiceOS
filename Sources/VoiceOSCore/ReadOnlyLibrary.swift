@@ -356,7 +356,7 @@ public struct ReadOnlyLibrary {
               let references = try? JSONDecoder().decode([ClaimReference].self, from: Data(refsJSON.utf8)),
               let sourceID = references.first?.sourceID,
               let row = try connection.query("""
-              SELECT s.id,s.name,s.kind,s.state,s.created_at,s.presentation_json,
+              SELECT s.id,s.name,s.kind,s.state,s.created_at,s.timezone,s.presentation_json,
                      (SELECT t.current_version_id FROM transcripts t WHERE t.source_id=s.id ORDER BY t.created_at DESC LIMIT 1) AS transcript_version_id
               FROM sources s WHERE s.id=?
               """, [sourceID]).first else {
@@ -374,16 +374,20 @@ public struct ReadOnlyLibrary {
         let name = row["name"] ?? ""
         // The read-only door never loads a transcript, so the app's
         // content-derived fallback is replaced by the humanized name.
-        guard let json = row["presentation_json"],
-              let presentation = try? JSONDecoder().decode(RecordingPresentation.self, from: Data(json.utf8)) else {
-            return MaterialNaming.displayName(name)
+        let presentation = row["presentation_json"].flatMap {
+            try? JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8))
         }
-        let manual = presentation.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let manual, !manual.isEmpty { return manual }
-        if presentation.transcriptVersionID == row["transcript_version_id"],
-           let automatic = presentation.automatic?.title,
-           let title = MaterialTitleText.normalizedGenerated(automatic) { return title }
-        return MaterialNaming.displayName(name)
+        if let presentation {
+            let manual = presentation.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let manual, !manual.isEmpty { return manual }
+            if presentation.transcriptVersionID == row["transcript_version_id"],
+               let automatic = presentation.automatic?.title,
+               let title = MaterialTitleText.normalizedGenerated(automatic) { return title }
+        }
+        guard ["audio", "video"].contains(row["kind"]) else { return MaterialNaming.displayName(name) }
+        return MaterialDisplayTitle.recordingFallbackTitle(
+            name: name, kind: row["kind"] ?? "", createdAt: row["created_at"] ?? "",
+            timeZone: row["timezone"] ?? TimeZone.current.identifier)
     }
 
     static func dueValue(json: String?, source: String, now: Date) -> ReadOnlyDue? {

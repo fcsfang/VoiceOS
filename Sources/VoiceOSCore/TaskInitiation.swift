@@ -494,7 +494,7 @@ extension VoiceOSStore {
     public func taskInitiations(includeArchived: Bool = false, limit: Int = 200) throws -> [TaskInitiationRecord] {
         guard ready else { throw VoiceOSError("资料库尚未完成恢复") }
         guard limit > 0 else { return [] }
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var records: [TaskInitiationRecord] = []
         for row in try db.query("SELECT * FROM task_initiations ORDER BY created_at DESC, id DESC") {
             let record = try Self.decodeTaskInitiation(row, sources: catalog)
@@ -509,7 +509,7 @@ extension VoiceOSStore {
         guard let row = try db.query("SELECT * FROM task_initiations WHERE id=?", [id]).first else {
             throw VoiceOSError("启动包不存在")
         }
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return try Self.decodeTaskInitiation(row, sources: catalog)
     }
 

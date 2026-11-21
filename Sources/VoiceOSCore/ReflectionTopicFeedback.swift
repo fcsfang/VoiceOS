@@ -53,7 +53,7 @@ extension VoiceOSStore {
         let globalMode = try cognitiveFeedbackPreference().mode
         guard globalMode != .paused else { return [] }
         let feedback = Dictionary(uniqueKeysWithValues: try reflectionTopicFeedback().map { ($0.id,$0) })
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) })
+        let catalog = Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first })
         func usable(_ id: String) -> Bool {
             guard let source = catalog[id] else { return false }
             return ["saved","reference_only"].contains(source.state) && source.transcript?.isEmpty == false

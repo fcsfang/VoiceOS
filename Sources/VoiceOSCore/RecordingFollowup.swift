@@ -243,7 +243,7 @@ extension VoiceOSStore {
     }
 
     public func prepareRecordingFollowup(sourceID: String) throws -> RecordingFollowupInput {
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let scalarsCache = FollowupTranscriptScalars()
         guard let source = catalog[sourceID], !source.localOnly, source.origin == "user", source.speaker == "user", let text = source.transcript else { throw VoiceOSError("请先完成本人原话并允许文本模型处理") }
         try requireReviewedTranscriptions(sourceIDs:[sourceID],destination:.cloud)
@@ -307,7 +307,7 @@ extension VoiceOSStore {
     public func enqueueActionFollowups(actionIDs: Set<String>) throws -> [RecordingFollowupReceipt] {
         let actions = Dictionary(uniqueKeysWithValues: try actions(includeHistory: true).map { ($0.id, $0) })
         let claims = Dictionary(uniqueKeysWithValues: try candidateClaims().map { ($0.id, $0) })
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var sourceIDs = Set<String>()
         for id in actionIDs.sorted() {
             guard let action = actions[id], action.validity == "current" else { continue }
@@ -515,7 +515,7 @@ extension VoiceOSStore {
         let actionRows: [ActionRecord]
         if let preloadedActions { actionRows = preloadedActions }
         else { actionRows = try StartupTrace.measure("validity.actions") { try self.actions(includeHistory: true) } }
-        let catalog: [String: SourceRecord] = Dictionary(uniqueKeysWithValues: catalogRows.map { ($0.id, $0) })
+        let catalog: [String: SourceRecord] = Dictionary(catalogRows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let claims: [String: CandidateClaim] = Dictionary(uniqueKeysWithValues: claimRows.map { ($0.id, $0) })
         let latest: [String: Set<String>]
         if let preloadedLatest {
@@ -527,7 +527,7 @@ extension VoiceOSStore {
             latest = try StartupTrace.measure("validity.latest") { try latestCandidateClaimsBySource() }.mapValues { Set($0.map(\.id)) }
         }
         let actions: [String: ActionRecord] = Dictionary(uniqueKeysWithValues: actionRows.map { ($0.id, $0) })
-        let policies = Dictionary(uniqueKeysWithValues: catalogRows.map { ($0.id, $0.policyVersion) })
+        let policies = Dictionary(catalogRows.map { ($0.id, $0.policyVersion) }, uniquingKeysWith: { first, _ in first })
         let feedback = try StartupTrace.measure("validity.feedback") { try followupFeedback(actions: actionRows, claims: claims, catalog: catalog) }
         let expressions = try StartupTrace.measure("validity.expressions") { try recordingExpressions() }
         let scalarsCache = FollowupTranscriptScalars()

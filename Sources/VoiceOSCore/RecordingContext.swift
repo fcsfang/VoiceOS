@@ -277,7 +277,7 @@ public struct SourcePageIndex: Sendable {
 
 extension VoiceOSStore {
     public func attachRecordingContext(personalSourceID: String, externalSourceID: String, sessionID: String, offsetMS: Int = 0) throws {
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         guard let personal=catalog[personalSourceID],let external=catalog[externalSourceID],
               personal.origin == "user",personal.speaker == "user",external.origin == "external",external.speaker != "user",
               !personal.localOnly,!external.localOnly,!sessionID.isEmpty,
@@ -291,7 +291,7 @@ extension VoiceOSStore {
         try saveExpressionPresentation(presentation,sourceID:personalSourceID)
     }
     public func recordingContext(sourceID: String) throws -> RecordingContext? {
-        try recordingContext(sourceID: sourceID, catalog: Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) }))
+        try recordingContext(sourceID: sourceID, catalog: Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first }))
     }
     public func recordingContext(sourceID: String, catalog:[String:SourceRecord]) throws -> RecordingContext? {
         guard let personal=catalog[sourceID],let pairing=personal.presentation?.recordingContext else { return nil }
@@ -303,7 +303,7 @@ extension VoiceOSStore {
         return pairing
     }
     public func recordingContextSourceIDs(sourceIDs: [String]) throws -> [String] {
-        try recordingContextSourceIDs(sourceIDs: sourceIDs, catalog: Dictionary(uniqueKeysWithValues: try sources().map { ($0.id,$0) }))
+        try recordingContextSourceIDs(sourceIDs: sourceIDs, catalog: Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith: { first, _ in first }))
     }
     public func recordingContextSourceIDs(sourceIDs: [String], catalog:[String:SourceRecord]) throws -> [String] {
         var result=sourceIDs,seen=Set(sourceIDs)

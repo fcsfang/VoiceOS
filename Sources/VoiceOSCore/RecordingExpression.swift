@@ -72,7 +72,7 @@ extension VoiceOSStore {
     /// Preloaded catalog and expressions keep per-receipt validation off the
     /// full-library read path.
     func continuousRecordingContext(sourceID:String, catalog:[SourceRecord], expressions:[RecordingExpression]) throws -> ContinuousRecordingContext? {
-        let byID = Dictionary(uniqueKeysWithValues: catalog.map { ($0.id, $0) })
+        let byID = Dictionary(catalog.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         guard let source = byID[sourceID] else { return nil }
         let expression=expressions.first(where: { $0.sourceIDs.contains(sourceID) })
         if let expression,expression.state != "completed" { throw VoiceOSError("连续表达仍在整体理解，后续跟进稍后继续") }
@@ -132,7 +132,7 @@ extension VoiceOSStore {
         try db.execute("UPDATE sources SET presentation_json=? WHERE id=?",[try Self.relevanceJSON(presentation),sourceID])
     }
     public func recordingExpressions() throws -> [RecordingExpression] {
-        let catalog=Dictionary(uniqueKeysWithValues:try sources().map { ($0.id,$0) })
+        let catalog=Dictionary(try sources().map { ($0.id,$0) }, uniquingKeysWith:{ first,_ in first })
         var seen=Set<String>()
         return catalog.values.compactMap { source in
             guard let expression=source.presentation?.expression,seen.insert(expression.id).inserted else { return nil }
@@ -170,7 +170,7 @@ extension VoiceOSStore {
             if !groups.contains(where: { Set($0) == Set(ids) }) { groups.append(ids) }
         }
         guard correctedGroups.allSatisfy({ Set($0).isSubset(of: allowed) }) else { throw VoiceOSError("同一次更正的完整录音尚未全部核对完成，暂不处理其中片段") }
-        return .init(context:context,policies:Dictionary(uniqueKeysWithValues:catalog.map { ($0.id,$0.policyVersion) }),newSourceIDs:pending,existing:existing,dates:Dictionary(uniqueKeysWithValues:catalog.map { ($0.id,$0.presentation!.automaticInput!) }),names:Dictionary(uniqueKeysWithValues:catalog.map { ($0.id,$0.name) }),recordingContexts:try ordered.compactMap { try prepareRecordingContext(sourceID:$0.id) },correctedSourceGroups:correctedGroups)
+        return .init(context:context,policies:Dictionary(catalog.map { ($0.id,$0.policyVersion) }, uniquingKeysWith:{ first,_ in first }),newSourceIDs:pending,existing:existing,dates:Dictionary(catalog.map { ($0.id,$0.presentation!.automaticInput!) }, uniquingKeysWith:{ first,_ in first }),names:Dictionary(catalog.map { ($0.id,$0.name) }, uniquingKeysWith:{ first,_ in first }),recordingContexts:try ordered.compactMap { try prepareRecordingContext(sourceID:$0.id) },correctedSourceGroups:correctedGroups)
     }
     public static func validateRecordingExpressions(_ proposals:[RecordingExpressionProposal],input:RecordingExpressionInput) throws {
         let sources=Dictionary(uniqueKeysWithValues:input.context.sources.map { ($0.sourceID,$0) })
@@ -220,7 +220,7 @@ extension VoiceOSStore {
         guard receipts.count >= 2,Set(receipts).count == receipts.count else { throw VoiceOSError("连续表达缺少独立核对回执") }
         try Self.validateRecordingExpressions(proposals,input:input)
         let allActions=try actions(includeHistory:true),claims=Dictionary(uniqueKeysWithValues:try candidateClaims(includeFrozen:true).map { ($0.id,$0) })
-        let correctionActions=Dictionary(uniqueKeysWithValues:try sources().map { ($0.id,Set($0.presentation?.correctedActionIDs ?? [])) })
+        let correctionActions=Dictionary(try sources().map { ($0.id,Set($0.presentation?.correctedActionIDs ?? [])) }, uniquingKeysWith:{ first,_ in first })
         return try db.transaction {
             var result:[RecordingExpression]=[]
             for proposal in proposals {
