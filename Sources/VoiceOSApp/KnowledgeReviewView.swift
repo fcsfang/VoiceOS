@@ -30,12 +30,12 @@ struct KnowledgeReviewSection: View {
             WorkspaceSectionHeading(title: "知识核查") {
                 if model.knowledgeReviewBusy { ProgressView().controlSize(.small).accessibilityLabel("正在核查知识") }
             }
-            Text("对照原话检查事实、推断与适用条件；建议是否采纳由你决定。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text("对照原话检查事实、推断与适用条件；建议是否采纳由你决定。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             ForEach(sources) { source in
                 sourceReview(source)
             }
             if !model.knowledgeReviewStatus.isEmpty {
-                Text(model.knowledgeReviewStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(model.knowledgeReviewStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
             }
         }
     }
@@ -63,12 +63,12 @@ struct KnowledgeReviewSection: View {
                     }
                 case "failed":
                     Label("本次核查未完成", systemImage: "exclamationmark.circle").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                    if let error = record.error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled) }
+                    if let error = record.error { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled) }
                     Button("重试知识核查") { Task { await model.reviewKnowledge(sourceID: source.id, retry: true) } }.buttonStyle(.workspaceSecondary)
                         .disabled(!canReview(source))
                 case "frozen":
                     Label("历史核查 · 原话或授权已变化", systemImage: "pause.circle").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-                    Text("这份核查保留供追溯，当前不能据此判断这条认识。可以针对现有原文重新核查。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("这份核查保留供追溯，当前不能据此判断这条认识。可以针对现有原文重新核查。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     let issues = record.issues.filter { matches($0, source: source) }
                     if !issues.isEmpty {
                         DisclosureGroup("查看历史核查建议") {
@@ -79,25 +79,25 @@ struct KnowledgeReviewSection: View {
                 case "completed":
                     let issues = record.issues.filter { matches($0, source: source) }
                     if record.issues.isEmpty {
-                        Text("本次未提出需要纠偏的知识判断；这不代表全文正确，核查可能仍有遗漏。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                        Text("本次未提出需要纠偏的知识判断；这不代表全文正确，核查可能仍有遗漏。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                     } else if issues.isEmpty {
-                        Text("本条思考暂无可按连续原话定位的核查建议；其他判断的核查见资料详情。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                        Text("本条思考暂无可按连续原话定位的核查建议；其他判断的核查见资料详情。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                     } else {
                         issueList(record, issues: issues)
                     }
                 default:
-                    Text("核查状态：" + record.state).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("核查状态：" + record.state).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
             } else {
-                Text("检查这份资料中可能的事实错误、缺失条件或推断跳跃，并保留查证来源。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                Text("检查这份资料中可能的事实错误、缺失条件或推断跳跃，并保留查证来源。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                 Button("核查知识理解") { Task { await model.reviewKnowledge(sourceID: source.id) } }.buttonStyle(.workspacePrimary).disabled(!canReview(source))
             }
             if source.localOnly {
-                Text("这份原文仅本地。先在资料详情允许云端处理，再发起核查。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("这份原文仅本地。先在资料详情允许云端处理，再发起核查。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             } else if !model.modelConfigured {
-                Text("配置模型连接后可发起核查。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("配置模型连接后可发起核查。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             } else if (model.currentClaimsBySource[source.id] ?? []).isEmpty {
-                Text("先完成这份原话的理解，再核查其中的知识判断。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("先完成这份原话的理解，再核查其中的知识判断。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
         }
         .onChange(of: record?.state) { previous, state in
@@ -137,7 +137,7 @@ struct KnowledgeReviewSection: View {
         VStack(alignment: .leading, spacing: 12) {
             Text(kindLabel(issue.kind.rawValue)).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.accent)
             VStack(alignment: .leading, spacing: 5) {
-                Text("原话").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("原话").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 Text(issue.quote).vosFont(WorkspaceText.body).textSelection(.enabled)
             }.padding(10).frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
@@ -147,11 +147,11 @@ struct KnowledgeReviewSection: View {
             field("反例", issue.counterexample)
             if !issue.references.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("核查来源").vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
+                    Text("核查来源").vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.secondaryText)
                     ForEach(Array(issue.references.enumerated()), id: \.offset) { _, reference in
                         if let url = URL(string: reference.url), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil {
                             Link(reference.title.isEmpty ? reference.url : reference.title, destination: url).vosFont(WorkspaceText.body).tint(palette.accent)
-                            Text(reference.url).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                            Text(reference.url).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                         }
                     }
                 }
@@ -164,7 +164,7 @@ struct KnowledgeReviewSection: View {
     @ViewBuilder private func field(_ title: String, _ text: String) -> some View {
         if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(.secondary)
+                Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.secondaryText)
                 Text(text).vosFont(WorkspaceText.body).textSelection(.enabled)
             }
         }
@@ -184,13 +184,14 @@ struct KnowledgeReviewSection: View {
 /// Shared by the full issue card and the source summary, so both lists offer
 /// the same reading record without duplicating the state rules.
 struct KnowledgeReviewIssueStatusControls: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let record: KnowledgeReviewRecord
     let issue: KnowledgeReviewIssue
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("状态：" + stateLabel(record.issueState(issue.id))).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text("状态：" + stateLabel(record.issueState(issue.id))).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             Spacer(minLength: 8)
             ForEach(KnowledgeReviewIssueState.allCases, id: \.self) { state in
                 Button(actionLabel(state)) {

@@ -540,7 +540,7 @@ struct WorkspaceView: View {
                 VStack(alignment:.leading,spacing:16) {
                     Text("选择提醒事项清单").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                     ForEach(model.reminderCalendars) { calendar in Button(calendar.title) { Task { model.proposedReminderCalendarID=calendar.id; await model.saveReminderConnection() } }.disabled(model.remindersBusy) }
-                    if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                    if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                     HStack {
                         Button("取消") { model.choosingReminderCalendar=false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                         Spacer()
@@ -610,7 +610,7 @@ struct WorkspaceView: View {
     private var saveViewSheet: some View {
         VStack(alignment:.leading,spacing:16) {
             Text("保存当前视图").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text(saveViewPage == .materials ? "材料 · " + saveViewFilter : "行动 · " + saveViewFilter).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text(saveViewPage == .materials ? "材料 · " + saveViewFilter : "行动 · " + saveViewFilter).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             TextField("视图名称",text:$newViewName).workspaceFieldSurface()
                 .onChange(of:newViewName) { _, value in if value.count > ControlCenter.savedViewNameLimit { newViewName = String(value.prefix(ControlCenter.savedViewNameLimit)) } }
             if savedViews.count >= ControlCenter.savedViewsLimit {
@@ -716,7 +716,7 @@ struct WorkspaceView: View {
             }
             if !savedViews.isEmpty {
                 VStack(alignment:.leading,spacing:8) {
-                    Text("视图").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.horizontal,9).accessibilityAddTraits(.isHeader)
+                    Text("视图").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText).padding(.horizontal,9).accessibilityAddTraits(.isHeader)
                     VStack(spacing:2) {
                         ForEach(savedViews) { view in
                             let selected=(view.page == .materials && page == .materials && materialFilter == view.filter) || (view.page == .actions && page == .actions && actionFilter == view.filter)
@@ -745,13 +745,13 @@ struct WorkspaceView: View {
                             .accessibilityHidden(model.organizingTopics)
                             .accessibilityLabel("正在处理")
                     }
-                    if model.organizingTopics { Text("AI 正在连接主题").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                    if model.organizingTopics { Text("AI 正在连接主题").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                 }
                 if page != .tool("处理情况") {
                     WorkspaceAttentionDot(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
                 }
                 Button { go(.settings);showingDiscussion=false } label: {
-                    Label("设置",systemImage:"slider.horizontal.3").foregroundStyle(.secondary)
+                    Label("设置",systemImage:"slider.horizontal.3").foregroundStyle(palette.secondaryText)
                         .frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,12).padding(.vertical,11)
                         .background(page == .settings ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .contentShape(Rectangle())
@@ -805,14 +805,14 @@ struct WorkspaceView: View {
                         .background(palette.selection.opacity(0.5),in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("返回").help("返回上一页")
-                if showsBreadcrumb { Text(breadcrumb).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(1) }
+                if showsBreadcrumb { Text(breadcrumb).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1) }
             }
             Spacer()
             Button { if page == .search { searchFocused = true } else { go(.search) } } label: {
                 HStack(spacing:6) {
                     Image(systemName:"magnifyingglass").vosFont(WorkspaceText.meta.size, weight: .medium)
                     Text("搜索").vosFont(WorkspaceText.meta)
-                }.foregroundStyle(.secondary).padding(.horizontal,10).frame(height: WorkspaceMetrics.fieldHeight)
+                }.foregroundStyle(palette.secondaryText).padding(.horizontal,10).frame(height: WorkspaceMetrics.fieldHeight)
                     .background(searchHovered ? palette.hover : palette.surface,in:Capsule())
                     .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
                     .contentShape(Capsule())
@@ -1220,9 +1220,9 @@ struct WorkspaceView: View {
                     HStack(spacing:8) {
                         if model.organizingTopics { ProgressView().controlSize(.small).accessibilityHidden(true) }
                         Text(model.organizingTopics ? "AI 正在按内容连接主题…" : "授权材料会自动归组。也可以先建立一个你关心的问题。")
-                    }.foregroundStyle(.secondary)
+                    }.foregroundStyle(palette.secondaryText)
                 } else if filter.isEmpty && themeListings.isEmpty {
-                    Text("还没有达到主题判据的关切。线索会随材料积累成为主题。").foregroundStyle(.secondary)
+                    Text("还没有达到主题判据的关切。线索会随材料积累成为主题。").foregroundStyle(palette.secondaryText)
                 }
                 if !clueListings.isEmpty {
                     VStack(alignment:.leading,spacing:8) {
@@ -1249,7 +1249,7 @@ struct WorkspaceView: View {
                         }
                     }
                 }
-                if !filter.isEmpty && visibleListings.isEmpty { Text("没有匹配的主题").foregroundStyle(.secondary) }
+                if !filter.isEmpty && visibleListings.isEmpty { Text("没有匹配的主题").foregroundStyle(palette.secondaryText) }
                 let linked=Set(model.workspaceTopicSources.values.flatMap { $0 })
                 let unlinked=activeMaterials.filter { !linked.contains($0.id) }
                 if !unlinked.isEmpty {
@@ -1391,7 +1391,7 @@ struct WorkspaceView: View {
             let actionIDs=reading.actionIDs
             let outcomes=(topicFocus?.outcomes ?? []).filter { actionIDs.contains($0.actionID) && ConversationReflectionFocus.date($0.createdAt).map { interval.contains($0) } == true }
             ForEach(outcomes) { outcome in WorkspaceRow(title:outcome.text,subtitle:"实际结果 · " + dateLabel(outcome.createdAt),icon:"leaf") { go(.task(outcome.actionID)) } }
-            if sources.isEmpty && outcomes.isEmpty { Text("这段时间还没有新增材料或结果。这个主题的历史脉络仍保留在概览中。").foregroundStyle(.secondary) }
+            if sources.isEmpty && outcomes.isEmpty { Text("这段时间还没有新增材料或结果。这个主题的历史脉络仍保留在概览中。").foregroundStyle(palette.secondaryText) }
             Button("让 AI 一起回顾这个周期",systemImage:"sparkles") { Task { do { let focus=try await model.loadQuestionReflection(topic.id,interval:interval,period:reviewPeriod);_ = await openReflection(focus,prompt:reviewPeriod.reviewPrompt(dateLabel:interval.start.formatted(date:.abbreviated,time:.omitted),questionTitle:topic.title)) } catch { self.error=error.localizedDescription } } }.buttonStyle(.workspacePrimary)
         }
     }
@@ -2133,7 +2133,7 @@ struct WorkspaceView: View {
                     Text("任务详情：x 或空格 完成 · s 改期 · f 记结果")
                     Text("⌥⌘Z 撤销 · 仅本次运行")
                     Text("口述、剪贴板、速记、导入与页面切换在菜单栏的「记录」与「显示」菜单。")
-                }.vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                }.vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                 if model.dictationHotKeyConflict {
                     Text("快捷键 ⌥⌘D 被其它应用占用；口述仍可从菜单栏开始。请在系统设置 › 键盘 › 键盘快捷键中查看冲突，或退出占用它的应用后重启 VoiceOS。")
                         .vosFont(WorkspaceText.caption).foregroundStyle(palette.warning)
@@ -2148,7 +2148,7 @@ struct WorkspaceView: View {
                     if model.exporting { ProgressView("正在导出…").controlSize(.small) }
                 }.disabled(model.exporting)
                 HStack(spacing:12) {
-                    Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     Button(model.backupRunning ? "正在备份…" : "重试备份") { model.retryBackup() }
                         .buttonStyle(.workspaceSecondaryCompact)
                         .disabled(model.backupRunning || model.libraryRoot == nil)
@@ -2217,7 +2217,7 @@ struct WorkspaceView: View {
                                 .disabled(model.organizingTopics)
                             if model.organizingTopics { ProgressView().controlSize(.mini).accessibilityHidden(true) }
                         }
-                        Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                     }.padding(.top,16)
                 }
             }
@@ -2237,7 +2237,7 @@ struct WorkspaceView: View {
         let catalog=recordCatalog
         ForEach(model.assistantAssessmentIssues) { issue in
             VStack(alignment:.leading,spacing:8) {
-                Text(issue.title);Text(issue.error).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text(issue.title);Text(issue.error).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 HStack(spacing:8) {
                     Button(model.assistantBusy ? "正在重新识别…" : "重新识别 AI 委托") { Task { await model.retryAssistantAssessment(issue) } }
                         .buttonStyle(.workspaceSecondaryCompact)
@@ -2262,7 +2262,7 @@ struct WorkspaceView: View {
         }
         ForEach(activeMaterials.filter { ["failed","blocked"].contains($0.jobState ?? "") }) { source in sourceRow(source,catalog:catalog) }
         ForEach(model.processingIntents.filter { [.blocked,.unknown].contains($0.state) }) { intent in
-            Text("表达处理：" + workspaceStateLabel(intent.state.rawValue)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text("表达处理：" + workspaceStateLabel(intent.state.rawValue)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
         }
         ReverifyControls(model:model)
     }
@@ -2637,25 +2637,25 @@ struct WorkspaceView: View {
             HStack(alignment:.top,spacing:12) {
                 VStack(alignment:.leading,spacing:6) {
                     Text("安排今天").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-                    Text("从即将与随时里挑选，最多 3 条进入专注。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("从即将与随时里挑选，最多 3 条进入专注。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
                 Spacer(minLength:8)
                 Button("取消") { showingPlanToday=false }.buttonStyle(.workspaceSecondary)
             }
             if !focusedActions.isEmpty {
-                Text("已在专注").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
+                Text("已在专注").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
                 ForEach(focusedActions) { action in
                     HStack(spacing:10) {
                         Image(systemName:"pin").foregroundStyle(palette.accent).frame(width:22,alignment:.leading)
                         Text(action.title).vosFont(WorkspaceText.rowTitle).lineLimit(2)
                         Spacer(minLength:8)
-                        Text("已专注").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Text("已专注").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     }.padding(.vertical,5)
                 }
             }
-            Text("即将与随时").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
+            Text("即将与随时").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
             if candidates.isEmpty {
-                Text("没有可安排的任务。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                Text("没有可安排的任务。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             } else {
                 ScrollView {
                     VStack(spacing:0) {
@@ -2669,7 +2669,7 @@ struct WorkspaceView: View {
             if planRemainingSlots == 0 { WorkspaceNoticeText(message:"专注已有 3 条，先移出一条再安排。",severity:.warning) }
             else if !planLimitHint.isEmpty { WorkspaceNoticeText(message:planLimitHint,severity:.warning) }
             HStack {
-                Text("已选 \(planSelection.count) 条").vosFont(WorkspaceText.caption, monospacedDigit: true).foregroundStyle(.secondary)
+                Text("已选 \(planSelection.count) 条").vosFont(WorkspaceText.caption, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                 Spacer()
                 Button(planningToday ? "正在安排…" : "加入专注") { Task { await confirmPlanToday() } }
                     .buttonStyle(.workspacePrimary)
@@ -2686,7 +2686,7 @@ struct WorkspaceView: View {
                     .vosFont(WorkspaceText.rowTitle.size).foregroundStyle(selected ? palette.accent : Color.secondary).padding(.top,2).accessibilityHidden(true)
                 VStack(alignment:.leading,spacing:4) {
                     Text(entry.action.title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
-                    if let due=entry.due { Text(due.summary).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                    if let due=entry.due { Text(due.summary).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                 }
                 Spacer(minLength:8)
             }.padding(.vertical,9).contentShape(Rectangle())
@@ -3037,23 +3037,23 @@ struct WorkspaceView: View {
     private var pendingReminderSyncSheet: some View {
         VStack(alignment:.leading,spacing:16) {
             Text("本地完成待同步").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("这些变更只保存在 VoiceOS；恢复提醒事项连接并授权后自动写入并回读。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("这些变更只保存在 VoiceOS；恢复提醒事项连接并授权后自动写入并回读。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             if model.pendingReminderSyncList.isEmpty {
-                Text("没有待同步的本地变更。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                Text("没有待同步的本地变更。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             } else {
                 ForEach(model.pendingReminderSyncList) { entry in
                     HStack(alignment:.top,spacing:10) {
                         Image(systemName:"clock.arrow.circlepath").foregroundStyle(palette.warning).accessibilityHidden(true)
                         VStack(alignment:.leading,spacing:4) {
                             Text(entry.title).vosFont(WorkspaceText.rowTitle).lineLimit(2)
-                            Text(entry.desiredState == LocalActionState.completed.rawValue ? "已在 VoiceOS 完成" : "已在 VoiceOS 撤销完成").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(entry.desiredState == LocalActionState.completed.rawValue ? "已在 VoiceOS 完成" : "已在 VoiceOS 撤销完成").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         }
                         Spacer(minLength:8)
                     }.padding(.vertical,8)
                     if entry.id != model.pendingReminderSyncList.last?.id { WorkspaceListDivider() }
                 }
             }
-            if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             HStack {
                 Button("关闭") { showingPendingReminderSyncs=false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()

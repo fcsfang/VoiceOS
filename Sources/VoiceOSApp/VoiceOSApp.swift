@@ -74,7 +74,7 @@ struct ImportBatchReportView: View {
             Text(report.failureCount == 0
                 ? "\(report.results.count) 份都已保存。"
                 : "成功 \(report.results.count - report.failureCount) 份，失败 \(report.failureCount) 份。")
-                .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     ForEach(report.results) { result in
@@ -83,7 +83,7 @@ struct ImportBatchReportView: View {
                                 .foregroundStyle(result.succeeded ? palette.success : palette.warning)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(result.fileName).vosFont(WorkspaceText.body)
-                                Text(result.message).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                                Text(result.message).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                             }
                             Spacer(minLength: 0)
                         }
@@ -4641,6 +4641,7 @@ extension View {
 }
 
 struct ActionCreationView: View {
+    @Environment(\.workspacePalette) private var palette
     let claim: CandidateClaim
     @ObservedObject var model: ControlCenter
     let close: () -> Void
@@ -4652,7 +4653,7 @@ struct ActionCreationView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("记录行动意图").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("认可观点不等于承诺任务。选择明确任务，或先放入机会池；尚未写入提醒事项。").foregroundStyle(.secondary)
+            Text("认可观点不等于承诺任务。选择明确任务，或先放入机会池；尚未写入提醒事项。").foregroundStyle(palette.secondaryText)
             Text("依据：" + claim.statement).lineLimit(4)
             Picker("意图", selection: $kind) {
                 Text("探索意图 · 机会池").tag(ActionKind.opportunity)
@@ -4660,7 +4661,7 @@ struct ActionCreationView: View {
             }.pickerStyle(.segmented)
             TextField("要做什么", text: $title)
             TextField("补充说明（可选）", text: $note)
-            if !feedback.isEmpty { Text(feedback).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            if !feedback.isEmpty { Text(feedback).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             HStack {
                 Button("取消", action: close).disabled(model.savingAction).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
@@ -4698,25 +4699,25 @@ struct ActionFeedbackView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("记录结果或反思").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("关联：" + action.title + " · 第 \(action.version) 版").foregroundStyle(.secondary)
+            Text("关联：" + action.title + " · 第 \(action.version) 版").foregroundStyle(palette.secondaryText)
             Picker("类型", selection: $kind) { Text("实际结果").tag("outcome"); Text("我的反思").tag("reflection") }.pickerStyle(.segmented).disabled(saving)
             HStack {
                 if recordingID != nil, model.dictationActive {
                     Button("停止并转写") { model.stopDictation() }.disabled(model.dictationBusy)
-                    Text("正在录制这条任务的结果…").foregroundStyle(.secondary)
+                    Text("正在录制这条任务的结果…").foregroundStyle(palette.secondaryText)
                 } else if waitingForVoice {
-                    ProgressView().controlSize(.small); Text("Qwen 正在本机转写…").foregroundStyle(.secondary)
+                    ProgressView().controlSize(.small); Text("Qwen 正在本机转写…").foregroundStyle(palette.secondaryText)
                 } else if recordingID == nil {
                     Button("口述进展或结果", systemImage: "mic") {
                         Task { recordingID = await model.startFeedbackDictation(); if recordingID == nil { errorText = model.status } }
                     }.disabled(saving || model.dictationBusy || model.dictationActive)
                 } else {
                     Text(appliedRecording ? "口述已填入下方，可核对修改。原始录音保留。" : "转写未完成，录音已保留；也可以直接写下结果。")
-                        .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                        .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                 }
             }
             TextEditor(text: $text).frame(minHeight: 180).workspaceEditorSurface().disabled(saving || waitingForVoice)
-            Text("可选记录，原话与原行动保持关联。开启下方选项后会自动核对思想变化与目标下一步；反馈不会当成已验证事实。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text("可选记录，原话与原行动保持关联。开启下方选项后会自动核对思想变化与目标下一步；反馈不会当成已验证事实。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             if !errorText.isEmpty { Text(errorText).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             Toggle("将反馈文字用于整理知识、更新思想与目标", isOn: $allowFollowup).vosFont(WorkspaceText.meta).disabled(saving)
             HStack {
@@ -4775,7 +4776,7 @@ struct PackageRestoreView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:16) {
             Text("从迁移包恢复").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("恢复到一个新资料库，保留当前资料库。完成后可在新窗口打开；提醒事项需要重新连接。").foregroundStyle(.secondary)
+            Text("恢复到一个新资料库，保留当前资料库。完成后可在新窗口打开；提醒事项需要重新连接。").foregroundStyle(palette.secondaryText)
             Button("选择迁移包文件夹…",action:choosePackage).disabled(restoring || restored != nil)
             if let package, let summary {
                 Text(package.path).vosFont(WorkspaceText.meta).textSelection(.enabled)
@@ -4840,9 +4841,9 @@ struct BackupLibraryRestoreView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:16) {
             Text("从最近备份新建资料库").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("取最近一份备份的数据库，加上当前资料库的原件副本，建立一个独立的新资料库；当前资料库不会被改动。完成后可在新窗口打开。").foregroundStyle(.secondary)
+            Text("取最近一份备份的数据库，加上当前资料库的原件副本，建立一个独立的新资料库；当前资料库不会被改动。完成后可在新窗口打开。").foregroundStyle(palette.secondaryText)
             if let summary = backupSummary {
-                Text(DatabaseBackup.successText(at: summary.date, count: summary.count)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text(DatabaseBackup.successText(at: summary.date, count: summary.count)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             } else {
                 WorkspaceNoticeText(message: "还没有可用于恢复的备份。先完成一次备份再试（\(backupDirectory?.path ?? "备份目录不可用")）。", severity: .warning)
             }
@@ -4899,13 +4900,13 @@ struct CognitiveFeedbackView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
             Text("静默回顾").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("可以直接关闭。这里显示已接纳的关联提案和相关原文。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("可以直接关闭。这里显示已接纳的关联提案和相关原文。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             Picker("显示方式",selection:Binding(get:{ model.quietMode },set:{ mode in Task { await model.changeQuietMode(mode) } })) {
                 Text("正常显示").tag(CognitiveFeedbackMode.normal)
                 Text("减少显示 · 一次一条").tag(CognitiveFeedbackMode.reduced)
                 Text("暂停显示").tag(CognitiveFeedbackMode.paused)
             }.pickerStyle(.segmented)
-            Text(model.quietStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text(model.quietStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             ScrollView {
                 VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                     if model.quietFeedback.isEmpty && model.associationFeedback.isEmpty {
@@ -4914,12 +4915,12 @@ struct CognitiveFeedbackView: View {
                     ForEach(model.associationFeedback) { item in
                         VStack(alignment: .leading, spacing: 8) {
                             Text("与这次表达有关 · AI 关系提案").vosFont(WorkspaceText.rowTitle)
-                            Text(item.proposal.relation.displayName).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(item.proposal.relation.displayName).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             AssociationQuestionsView(item: item, model: model)
                             Text("为何现在相关：" + item.proposal.reason).textSelection(.enabled)
                             Text("这次原话：" + item.proposal.current.quote).textSelection(.enabled)
                             Text("历史原话：" + item.proposal.historicalQuote).textSelection(.enabled)
-                            Text(MaterialNaming.displayName(item.historical.document.name) + " · " + (ConversationReflectionFocus.date(item.historical.document.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? item.historical.document.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(MaterialNaming.displayName(item.historical.document.name) + " · " + (ConversationReflectionFocus.date(item.historical.document.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? item.historical.document.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             HStack {
                                 Button("查看这次原话") { Task { if await model.openAssociation(item, historical: false) { dismiss() } } }
                                 Button("查看历史出处") { Task { if await model.openAssociation(item, historical: true) { dismiss() } } }
@@ -4930,9 +4931,9 @@ struct CognitiveFeedbackView: View {
                     ForEach(model.quietFeedback) { item in
                         VStack(alignment:.leading,spacing:8) {
                             Text("你查找的是：\(item.query)").vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
-                            Text("模型选中的相关原文 · \(item.hit.document.origin == "user" ? "用户表达" : "外部资料")").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text("模型选中的相关原文 · \(item.hit.document.origin == "user" ? "用户表达" : "外部资料")").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             Text(item.hit.document.text).textSelection(.enabled)
-                            Text(MaterialNaming.displayName(item.hit.document.name) + " · " + (ConversationReflectionFocus.date(item.hit.document.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? item.hit.document.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(MaterialNaming.displayName(item.hit.document.name) + " · " + (ConversationReflectionFocus.date(item.hit.document.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? item.hit.document.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             HStack {
                                 Button("查看原文与出处") { Task { if await model.openQuietFeedback(item) { dismiss() } } }
                                 Button("忽略这条") { Task { await model.ignoreQuietFeedback(item) } }
@@ -4947,6 +4948,7 @@ struct CognitiveFeedbackView: View {
 }
 
 struct HistorySearchView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     var embedded = false
     let dismiss: () -> Void
@@ -4960,7 +4962,7 @@ struct HistorySearchView: View {
             Text("查找历史文字").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             TextField(semantic ? "输入想找回的问题或想法" : "先输入原文关键词",text:$query).onSubmit { model.searchHistory(query:query,semantic:semantic) }
             Toggle("按意思找原文（本机）",isOn:$semantic).disabled(!model.semanticAvailable)
-            Text(model.semanticAvailable ? "查找仅在本机进行；按意思找到的只是候选。选中原文后，可单独让文本模型判断与你的问题是否直接相关。" : "关键词查找在本机进行。这个构建尚未包含本地语义资源；选中原文后仍可单独判断相关性。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            Text(model.semanticAvailable ? "查找仅在本机进行；按意思找到的只是候选。选中原文后，可单独让文本模型判断与你的问题是否直接相关。" : "关键词查找在本机进行。这个构建尚未包含本地语义资源；选中原文后仍可单独判断相关性。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             HStack {
                 Button(model.searchingHistory ? "正在查找…" : "查找") { model.searchHistory(query:query,semantic:semantic) }.disabled(model.searchingHistory || query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || query.unicodeScalars.count > 512)
                 if model.searchingHistory { Button("停止查找") { model.cancelHistorySearch() } }
@@ -4970,16 +4972,16 @@ struct HistorySearchView: View {
             RelevanceSearchPanel(model:model,coordinator:model.relevance,question:$question,candidates:candidates,dismiss:dismiss)
             ScrollView {
                 if let result = model.retrievalResult {
-                    if result.hits.isEmpty { Text("未找到候选；可以换个说法或关键词。").foregroundStyle(.secondary) }
+                    if result.hits.isEmpty { Text("未找到候选；可以换个说法或关键词。").foregroundStyle(palette.secondaryText) }
                     ForEach(result.hits) { hit in
                         VStack(alignment:.leading,spacing:6) {
                             Text(model.records.first(where: { $0.id == hit.document.sourceID })?.displayTitle ?? MaterialNaming.displayName(hit.document.name)).vosFont(WorkspaceText.rowTitle)
                             Toggle("加入相关性判断",isOn:Binding(get:{ selectedIDs.contains(hit.id) },set:{ value in
                                 if value { selectedIDs.insert(hit.id) } else { selectedIDs.remove(hit.id) }
                             })).disabled(!selectedIDs.contains(hit.id) && selectedIDs.count >= 8)
-                            Text("\(hit.method == "exact" ? "文字匹配" : "语义候选 · 待核对") · \(hit.document.origin == "user" ? "用户原文" : "外部原文 · 说话人待核对") · \(hit.document.localOnly ? "仅本地" : "文本可用于云端")").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text("\(hit.method == "exact" ? "文字匹配" : "语义候选 · 待核对") · \(hit.document.origin == "user" ? "用户原文" : "外部原文 · 说话人待核对") · \(hit.document.localOnly ? "仅本地" : "文本可用于云端")").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             Text(hit.document.text).textSelection(.enabled)
-                            Text(ConversationReflectionFocus.date(hit.document.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(ConversationReflectionFocus.date(hit.document.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             Button("查看原文与出处") { Task { if await model.openRetrievalHit(hit) { dismiss() } } }
                             WorkspaceListDivider()
                         }.frame(maxWidth:.infinity,alignment:.leading)
@@ -5008,7 +5010,7 @@ struct RelevanceSearchPanel: View {
         VStack(alignment:.leading,spacing:8) {
             TextField("想找回的问题或想法",text:$question)
             Text("已选 \(candidates.count)/8 份原文 · 问题与原文共 \(scalars)/4000 字符").vosFont(WorkspaceText.caption)
-            Text("判断时发送本次问题与所选原文，不发送音视频。仅本地资料需先到出处页面授权；相关不表示支持或已验证，也不创建行动。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            Text("判断时发送本次问题与所选原文，不发送音视频。仅本地资料需先到出处页面授权；相关不表示支持或已验证，也不创建行动。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             HStack {
                 Button("准备所选原文") { Task { await model.prepareRelevance(query:question,candidates:candidates) } }
                     .disabled(coordinator.busy || candidates.isEmpty || question.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || question.unicodeScalars.count > 512 || scalars > 4000)

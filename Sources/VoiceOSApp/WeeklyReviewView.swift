@@ -235,7 +235,7 @@ struct WeeklyReviewView: View {
 
     private var emptyReviewState: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("这一周没有需要回顾的行动。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("这一周没有需要回顾的行动。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             HStack(spacing: 8) {
                 Button("打开行动页") { jump(.todo) }
                     .buttonStyle(.workspaceQuiet)
@@ -289,7 +289,7 @@ struct WeeklyReviewView: View {
         let overdueRows = Array(review.overdue.prefix(5))
         return WorkspaceSection(title: "今天收尾", icon: "checkmark.circle", count: review.remainingCount) {
             if review.isClear {
-                Text("今天没有未收尾的行动").vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 10)
+                Text("今天没有未收尾的行动").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).padding(.vertical, 10)
             }
             if !todayRows.isEmpty {
                 ForEach(Array(todayRows.enumerated()), id: \.element.id) { index, entry in
@@ -314,7 +314,7 @@ struct WeeklyReviewView: View {
             if review.overdue.count > overdueRows.count { allButton(review.overdue.count, .todo) }
             if review.completedCount + review.dismissedCount > 0 {
                 Text("已完成 \(review.completedCount) 条，已放下 \(review.dismissedCount) 条。")
-                    .vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.top, 10)
             }
             if review.remainingCount > 0 {
                 Button("到行动页查看 →") { jump(.todo) }
@@ -341,7 +341,7 @@ struct WeeklyReviewView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(entry.action.title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
                         if !subtitle.isEmpty {
-                            Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                            Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(2).multilineTextAlignment(.leading)
                         }
                     }
                     Spacer(minLength: 8)
@@ -485,7 +485,7 @@ struct WeeklyReviewView: View {
             if candidates.count > rows.count { allButton(candidates.count, .todo) }
             HStack(spacing: 10) {
                 Text(selectedFocusIDs.isEmpty ? "最多还能加入 \(focusSlots) 条" : "已选 \(selectedFocusIDs.count) 条")
-                    .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                    .vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                 Spacer()
                 Button("加入专注") { applyNextWeekFocus() }
                     .buttonStyle(.workspacePrimary)
@@ -518,7 +518,7 @@ struct WeeklyReviewView: View {
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(entry.action.title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
-                    Text(subtitle.isEmpty ? "随时" : subtitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                    Text(subtitle.isEmpty ? "随时" : subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(2).multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 8)
                 if focused {
@@ -612,7 +612,7 @@ struct WeeklyReviewView: View {
                 }
             }
             if weekProgress.count > rows.count {
-                Text("还有 \(weekProgress.count - rows.count) 条结果，到对应任务详情查看。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
+                Text("还有 \(weekProgress.count - rows.count) 条结果，到对应任务详情查看。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.top, 10)
             }
         }
     }
@@ -625,12 +625,12 @@ struct WeeklyReviewView: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
                 Text(StatementTagParser.split(row.taskTitle).text).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
-                Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                Text(row.relationLabel).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(2).multilineTextAlignment(.leading)
                 Text(row.text).vosFont(WorkspaceText.body).lineSpacing(3).lineLimit(3).multilineTextAlignment(.leading)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 6) {
-                Text(progressUnavailableReason(row)).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
+                Text(progressUnavailableReason(row)).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText).padding(.top, 3)
                 if hasMaterial {
                     Button("查看材料") { model.requestWorkspaceSource(row.id); dismiss() }
                         .buttonStyle(.workspaceQuietCompact)
@@ -680,13 +680,13 @@ struct WeeklyReviewView: View {
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 6) {
                             Text(StatementTagParser.split(action.title).text).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
-                            Text(subtitle + " · " + actionSourceLabel(action)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                            Text(subtitle + " · " + actionSourceLabel(action)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(2).multilineTextAlignment(.leading)
                         }
                         Spacer(minLength: 8)
                         if pending {
                             WorkspaceBadge(text: "待补结果", tone: .warning).padding(.top, 3)
                         }
-                        Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
+                        Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText).padding(.top, 3).accessibilityHidden(true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -765,10 +765,10 @@ struct WeeklyReviewView: View {
                     .id(reviewRowID("stalled", goal.id))
             }
             if stalledGoals.count > rows.count {
-                Text("还有 \(stalledGoals.count - rows.count) 个目标，到问题与目标页查看。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
+                Text("还有 \(stalledGoals.count - rows.count) 个目标，到问题与目标页查看。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.top, 10)
             }
             if !nextStepNotice.isEmpty {
-                Text(nextStepNotice).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
+                Text(nextStepNotice).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.top, 10)
             }
         }
     }
@@ -784,11 +784,11 @@ struct WeeklyReviewView: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 6) {
                         Text(title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
-                        Text("还没有下一步").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                        Text("还没有下一步").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(2).multilineTextAlignment(.leading)
                     }
                     Spacer(minLength: 8)
                     WorkspaceBadge(text: "停滞", tone: .neutral).padding(.top, 3)
-                    Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
+                    Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText).padding(.top, 3).accessibilityHidden(true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -815,7 +815,7 @@ struct WeeklyReviewView: View {
                     .id(reviewRowID("someday", goal.id))
             }
             if somedayRows.count > rows.count {
-                Text("还有 \(somedayRows.count - rows.count) 个目标，回看一批后再处理。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary).padding(.top, 10)
+                Text("还有 \(somedayRows.count - rows.count) 个目标，回看一批后再处理。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.top, 10)
             }
             if !actionError.isEmpty {
                 Text(actionError).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning).padding(.top, 10)
@@ -833,7 +833,7 @@ struct WeeklyReviewView: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 6) {
                         Text(goal.title).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
-                        Text("将来也许 · 留到以后").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Text("将来也许 · 留到以后").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     }
                     Spacer(minLength: 8)
                     WorkspaceRowChevron().padding(.top, 3)
@@ -883,7 +883,7 @@ struct WeeklyReviewView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(StatementTagParser.split(title).text).vosFont(WorkspaceText.rowTitle).lineLimit(2).multilineTextAlignment(.leading)
                     if !subtitle.isEmpty {
-                        Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                        Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(2).multilineTextAlignment(.leading)
                     }
                     if !detail.isEmpty {
                         Text(detail).vosFont(WorkspaceText.body).lineSpacing(3).lineLimit(3).multilineTextAlignment(.leading)
@@ -891,9 +891,9 @@ struct WeeklyReviewView: View {
                 }
                 Spacer(minLength: 8)
                 if !trailing.isEmpty {
-                    Text(trailing).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 3)
+                    Text(trailing).vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText).padding(.top, 3)
                 }
-                Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(.tertiary).padding(.top, 3).accessibilityHidden(true)
+                Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText).padding(.top, 3).accessibilityHidden(true)
             }
             .padding(.vertical, 10).padding(.horizontal, 10)
             .contentShape(Rectangle())
