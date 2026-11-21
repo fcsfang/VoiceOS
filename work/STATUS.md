@@ -938,3 +938,8 @@
 - 144-E：主题阅读过滤词非空时优先展示匹配项（选中项不再把列表压成空态）；更正弹层关闭恢复卡片焦点；问题行/概览/TopicTile 装饰图标无障碍隐藏；保存原文更正不再强制收起「原文与回听」折叠。
 - 144-F：Onboarding 行按有无操作区分合成语义（带按钮行可被 VoiceOver 到达）；认知地图节点与关系按钮补 `.isSelected` 与「此前背景」值。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 145：行/表面/页签动效收口（2026-11-21，已推送）
+- 145-A：WorkspaceRow 两分支、SearchResultRow、WorkspaceSelectionHighlight 补 hover/selection 动效；MaterialMenuRow/WorkspaceActionRowChrome/RecentSearchChip 手写 0.12 换 WorkspaceMotion.hover；WorkspaceFilterTabs 选中切换走 selection 词表；WorkspaceTabs 与 WorkspaceFilterTabs 指标对齐（下划线 1→2pt、间距 3→4、选中文字 palette.text、字重随选中切换），chip 选中补动效。
+- 145-B：HomeCard、WorkspaceTopicTile、回听标签（时间片/时间标签）、行动子任务与下一步图标补 hover/selection 动效；readingCard 焦点环切换走 selection 词表；依赖 WorkspaceHoverHighlight 的行经核实已自带动作，跳过并留证。
+- 145-C：周回顾摘要跳转接入 WorkspaceMotion.scroll；主应用五处用户可见中英间距补齐（文件名与全角括号按证据跳过）。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
