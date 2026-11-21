@@ -124,4 +124,17 @@ final class MaterialTitleTextChecks: XCTestCase {
             transcriptVersionID: "t-old")
         XCTAssertNil(source(id: "s3", transcript: "原文", presentation: stale).contentTitle)
     }
+
+    func testExplicitTitleSharesManualAndVersionCheckedAutomaticContract() {
+        let presentation = RecordingPresentation(
+            manualTitle: "  ",
+            automatic: RecordingTitleProposal(sourceID: "s", title: "**周会结论**。", summary: "s", quotes: []),
+            transcriptVersionID: "t-1")
+        XCTAssertEqual(MaterialDisplayTitle.explicitTitle(presentation: presentation, transcriptVersionID: "t-1"), "周会结论")
+        XCTAssertNil(MaterialDisplayTitle.explicitTitle(presentation: presentation, transcriptVersionID: "t-2"))
+
+        let manual = RecordingPresentation(manualTitle: "  我的标题。 ", transcriptVersionID: "t-old")
+        XCTAssertEqual(MaterialDisplayTitle.explicitTitle(presentation: manual, transcriptVersionID: "t-new"), "我的标题。")
+        XCTAssertNil(MaterialDisplayTitle.explicitTitle(presentation: nil, transcriptVersionID: nil))
+    }
 }

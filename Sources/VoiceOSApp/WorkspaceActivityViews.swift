@@ -825,11 +825,7 @@ struct WorkspaceTaskView: View {
             pauseReasons = reasons
         }
         .task(id: action.id + String(action.version) + String(model.recentOutcomes.count)) { await loadFeedback() }
-        .task(id: feedbackLoading) {
-            guard feedbackLoading else { feedbackPlaceholderVisible = false; return }
-            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
-            if feedbackLoading { feedbackPlaceholderVisible = true }
-        }
+        .workspaceSlowLoading(feedbackLoading, into: $feedbackPlaceholderVisible)
         .task(id: action.id + String(action.version)) { await loadPlan() }
         .task(id: action.id + String(action.version)) {
             recurrence = await model.actionRecurrence(action.id)

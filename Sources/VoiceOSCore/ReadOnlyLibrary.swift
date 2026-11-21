@@ -377,12 +377,9 @@ public struct ReadOnlyLibrary {
         let presentation = row["presentation_json"].flatMap {
             try? JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8))
         }
-        if let presentation {
-            let manual = presentation.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let manual, !manual.isEmpty { return manual }
-            if presentation.transcriptVersionID == row["transcript_version_id"],
-               let automatic = presentation.automatic?.title,
-               let title = MaterialTitleText.normalizedGenerated(automatic) { return title }
+        if let title = MaterialDisplayTitle.explicitTitle(
+            presentation: presentation, transcriptVersionID: row["transcript_version_id"]) {
+            return title
         }
         guard ["audio", "video"].contains(row["kind"]) else { return MaterialNaming.displayName(name) }
         return MaterialDisplayTitle.recordingFallbackTitle(

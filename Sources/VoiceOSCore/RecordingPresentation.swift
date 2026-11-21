@@ -80,13 +80,20 @@ public protocol RecordingTitlePort: Sendable {
 /// version-checked automatic title, recording date, transcript fallback, then
 /// the unnamed kind label.
 public enum MaterialDisplayTitle {
+    /// The explicit title saved on a presentation: manual outranks automatic,
+    /// and automatic only counts for the transcript version it was generated
+    /// from. Nil when neither applies.
+    static func explicitTitle(presentation: RecordingPresentation?, transcriptVersionID: String?) -> String? {
+        if let manual = presentation?.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !manual.isEmpty { return manual }
+        guard presentation?.transcriptVersionID == transcriptVersionID,
+              let automatic = presentation?.automatic?.title else { return nil }
+        return MaterialTitleText.normalizedGenerated(automatic)
+    }
+
     public static func title(name: String, kind: String, createdAt: String, timeZone: String,
                              presentation: RecordingPresentation?, transcript: String?,
                              transcriptVersionID: String?) -> String {
-        if let manual = presentation?.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !manual.isEmpty { return manual }
-        if presentation?.transcriptVersionID == transcriptVersionID,
-           let automatic = presentation?.automatic?.title,
-           let title = MaterialTitleText.normalizedGenerated(automatic) { return title }
+        if let explicit = explicitTitle(presentation: presentation, transcriptVersionID: transcriptVersionID) { return explicit }
         if ["audio", "video"].contains(kind) {
             return recordingFallbackTitle(name: name, kind: kind, createdAt: createdAt, timeZone: timeZone)
         }
@@ -158,10 +165,7 @@ public extension SourceRecord {
         return presentation?.transcriptionReview
     }
     var contentTitle: String? {
-        if let manual = presentation?.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !manual.isEmpty { return manual }
-        guard presentation?.transcriptVersionID == transcriptVersionID else { return nil }
-        guard let automatic = presentation?.automatic else { return nil }
-        return MaterialTitleText.normalizedGenerated(automatic.title)
+        MaterialDisplayTitle.explicitTitle(presentation: presentation, transcriptVersionID: transcriptVersionID)
     }
     var contentSummary: String? {
         guard !needsTranscriptionReview,presentation?.transcriptVersionID == transcriptVersionID, let summary = presentation?.automatic?.summary else { return nil }

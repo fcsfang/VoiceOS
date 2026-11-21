@@ -169,11 +169,7 @@ struct ReflectionTimelineView: View {
         }
         .foregroundStyle(palette.text).background(palette.canvas)
         .frame(width: embeddedTopicID == nil ? 1100 : nil, height: embeddedTopicID == nil ? 760 : 720)
-        .task(id: loading) {
-            guard loading else { showSlowLoad = false; return }
-            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
-            if loading { showSlowLoad = true }
-        }
+        .workspaceSlowLoading(loading, into: $showSlowLoad)
     }
     private var header: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
