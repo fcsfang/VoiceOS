@@ -4,6 +4,7 @@ import VoiceOSCore
 struct WorkspaceTopicReadingView: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var scale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: ControlCenter
     let topic: ReflectionQuestion
     let mode: String
@@ -270,6 +271,7 @@ struct WorkspaceTopicReadingView: View {
                         readingCard(section)
                             .id(section.id)
                             .workspaceFocusRing(keyboardCardFocus.id == section.id, radius: WorkspaceMetrics.sectionRadius)
+                            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: keyboardCardFocus.id)
                     }
                 }
                 .focusable()
@@ -647,6 +649,7 @@ private struct TopicReadingKeySelection {
 struct WorkspaceTopicTile: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var scale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered = false
     let topic: ReflectionQuestion
     let sourceCount: Int
@@ -681,5 +684,7 @@ struct WorkspaceTopicTile: View {
                 .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(highlighted ? palette.focusRing : palette.border,lineWidth:1) }
                 .contentShape(RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
         }.buttonStyle(.plain).onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
+            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: highlighted)
     }
 }

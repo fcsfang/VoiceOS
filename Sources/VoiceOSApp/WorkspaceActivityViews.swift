@@ -707,6 +707,7 @@ struct WorkspaceTaskView: View {
                                         .contentShape(Rectangle())
                                 }.buttonStyle(.plain).disabled(!editable)
                                     .onHover { inside in hoveredSubtaskToggleID = inside && editable ? subtask.id : (hoveredSubtaskToggleID == subtask.id ? nil : hoveredSubtaskToggleID) }
+                                    .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hoveredSubtaskToggleID)
                                     .accessibilityLabel(subtask.done ? "标为未完成" : "标为已完成")
                                 Text(subtask.title).vosFont(WorkspaceText.body).lineSpacing(3).textSelection(.enabled)
                                     .strikethrough(subtask.done).foregroundStyle(subtask.done ? palette.secondaryText : palette.text)
@@ -720,6 +721,7 @@ struct WorkspaceTaskView: View {
                                     }
                                         .buttonStyle(.borderless).foregroundStyle(palette.secondaryText)
                                         .onHover { inside in hoveredSubtaskDeleteID = inside && !planBusy ? subtask.id : (hoveredSubtaskDeleteID == subtask.id ? nil : hoveredSubtaskDeleteID) }
+                                        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hoveredSubtaskDeleteID)
                                         .accessibilityLabel("删除子任务").disabled(planBusy)
                                 }
                             }.padding(.vertical, 10).padding(.horizontal, 4)
@@ -958,6 +960,7 @@ struct WorkspaceTaskView: View {
                                 .contentShape(Rectangle())
                         }.buttonStyle(.plain).disabled(!editable)
                             .onHover { inside in hoveredNextActionToggleID = inside && editable ? child.id : (hoveredNextActionToggleID == child.id ? nil : hoveredNextActionToggleID) }
+                            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hoveredNextActionToggleID)
                             .accessibilityLabel(child.state == "completed" ? "重新打开下一步：" + child.title : "完成下一步：" + child.title)
                         Text(child.title).vosFont(WorkspaceText.body).lineSpacing(3).textSelection(.enabled)
                             .strikethrough(child.state == "completed").foregroundStyle(child.state == "completed" ? palette.secondaryText : palette.text)

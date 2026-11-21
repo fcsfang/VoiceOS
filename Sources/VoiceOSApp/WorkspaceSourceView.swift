@@ -1603,6 +1603,7 @@ private struct SourceSpanPlaybackLabel: View, Equatable {
     let endMS:Int
     let active:Bool
     let highlighted:Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered = false
     static func == (lhs:SourceSpanPlaybackLabel,rhs:SourceSpanPlaybackLabel)->Bool {
         lhs.startMS == rhs.startMS && lhs.endMS == rhs.endMS && lhs.active == rhs.active && lhs.highlighted == rhs.highlighted
@@ -1615,6 +1616,8 @@ private struct SourceSpanPlaybackLabel: View, Equatable {
             .background(active || highlighted ? palette.selection : hovered ? palette.hover : .clear, in: RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
             .contentShape(Rectangle())
             .onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
+            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: highlighted)
     }
 }
 private struct SourceOutlinePlaybackList: View {
@@ -1682,6 +1685,7 @@ private struct SourceTimedPlaybackLabel: View, Equatable {
     let title:String
     let active:Bool
     let highlighted:Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered = false
     static func == (lhs:SourceTimedPlaybackLabel,rhs:SourceTimedPlaybackLabel)->Bool {
         lhs.startMS == rhs.startMS && lhs.title == rhs.title && lhs.active == rhs.active && lhs.highlighted == rhs.highlighted
@@ -1696,6 +1700,8 @@ private struct SourceTimedPlaybackLabel: View, Equatable {
             .background(active || highlighted ? palette.selection : hovered ? palette.hover : .clear,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.controlRadius))
             .contentShape(Rectangle())
             .onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
+            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: highlighted)
     }
 }
 struct WorkspaceTranscriptEditor:View {
