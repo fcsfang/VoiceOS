@@ -922,3 +922,10 @@
 - 142-C：回听三个列表方向键选中经既有 ScrollPosition 代理滚动到可见（时间片锚点统一为 `source-span-`）；增量阅读/讨论历史/原文版本三处读取加 150ms 门控（loading 分支内嵌，避免门控期落入空态）；建立主题 sheet「完成」改 cancelAction。
 - 142-D：首页点击条目不再强制滚动居中夺焦（仅键盘选择滚动）；`WorkspaceButtonBody` 禁用时无 hover 底色；`WorkspacePalette.textNSColor` 与 SelectableText 参数化（全文选读跟随主题文字色）；速记浮窗套 palette 画布/文字色；空态「知识库」→「资料库」。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 143：设计系统收敛第二批（2026-11-21，已推送）
+- 143-A 弹层按钮词表：8 个文件 11 处页脚按钮补 `.workspaceSecondary`（返回/完成/关闭/取消/暂不补偿），与同层主按钮成套；三处 xmark 与 DiscussionHistory 关闭已是自定义图标按钮，按证据跳过。
+- 143-B 页头三合一：`WorkspaceHero`、`WorkspaceHeading` 改为 `WorkspacePageHeading` 的薄包装（统一 eyebrow tracking 1.4、副标题 palette.secondaryText、行距 3、间距 6，标题保留 textSelection），15 个调用点签名零改动；`WorkspaceFieldSurface` 从 TextCaptureView 私有提升为 WorkspaceDesign 的 `workspaceFieldSurface()`（internal API）；WorkspaceView 两个 TextField 换字段表面、一个 TextEditor 换编辑器表面、三处页脚按钮补样式。
+- 143-C 落地：10 个文件的 `.roundedBorder` 字段换 `workspaceFieldSurface()`（提醒设置、监测设置三处、材料活动两处、主题资料、澄清队列、回答区、速记）；AssistantExecutionView 与 QuickNote 的编辑器换 `workspaceEditorSurface()`；监测报告日期由 `yyyy-MM-dd` 改为本地化显示（解析失败兜底原文）；四处全大写英文页眉改中文（助理 · 协作 / 主题 · 问题 / 主题 · 认识对照 / 主题 · 认知地图）。
+- 143-D 主应用：VoiceOSApp 11 处弹层页脚按钮补词表样式（导入结果、创建行动、行动反馈、恢复包、备份恢复、只读 sheet），编辑器表面对齐；静修/回顾两处原始 ISO 时间戳本地化；DiscussionView「AI分析与建议」「AI回复」补中英间距；线索改名取消按钮补样式。
+- 真机验证记录：滚动位置保留只对指针滚动生效——键盘程序化 scrollTo 不写回 ScrollPosition，返回列表视口回顶（待 144 修复：出现时按保留的选中行 scrollTo）。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
