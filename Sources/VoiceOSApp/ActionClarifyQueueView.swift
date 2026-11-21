@@ -72,7 +72,7 @@ struct ActionClarifyQueueView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(StatementTagParser.split(current.title).text).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader).textSelection(.enabled)
                         if nature(current) == .unknown {
-                            Text("系统整理的建议 · 未归类").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text("系统整理的建议 · 未归类").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             HStack(spacing: 10) {
                                 Button("归为问题") { triage(current, .question) }.buttonStyle(.workspaceSecondary)
                                 Button("归为目标") { triage(current, .goal) }.buttonStyle(.workspaceSecondary)
@@ -83,7 +83,7 @@ struct ActionClarifyQueueView: View {
                             nextStep(current)
                             if !model.modelConfigured {
                                 HStack(spacing: 8) {
-                                    Text("未配置文本模型，暂时不能试答；配置后可用。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                    Text("未配置文本模型，暂时不能试答；配置后可用。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                     Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceSecondary)
                                 }
                             }
@@ -97,7 +97,7 @@ struct ActionClarifyQueueView: View {
                     }
                 }
             } else {
-                Text(emptyText).vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                Text(emptyText).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                 Button("完成") { dismiss() }.buttonStyle(.workspacePrimary)
             }
             Spacer(minLength: 0)

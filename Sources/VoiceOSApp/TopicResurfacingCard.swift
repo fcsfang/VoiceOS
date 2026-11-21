@@ -4,6 +4,7 @@ import VoiceOSCore
 /// Quiet, optional resurfacing. The quoted thought belongs to the user;
 /// the reason describes available records, never a judgment of progress.
 struct TopicResurfacingCard: View {
+    @Environment(\.workspacePalette) private var palette
     let item: ReflectionTopicResurfacing
     let busy: Bool
     let open: () -> Void
@@ -15,7 +16,7 @@ struct TopicResurfacingCard: View {
                 WorkspaceBadge(text: "可以再看一眼", tone: .accent)
                 Text(item.title).vosFont(WorkspaceText.rowTitle).lineLimit(3)
                 Text(item.quote).vosFont(WorkspaceText.body).lineLimit(4).textSelection(.enabled)
-                Text(item.reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(item.reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Button("接着探索", action: open).buttonStyle(.workspacePrimary)
                     Spacer(minLength: 0)

@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct ConfirmTaskView: View {
+    @Environment(\.workspacePalette) private var palette
     let action: ActionRecord
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
@@ -13,7 +14,7 @@ struct ConfirmTaskView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("核对为明确待办").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("确认这是你仍需跟进的事情，并把标题改成实际要做的动作。保存后会同步到已连接的提醒事项清单。")
-                .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             TextField("需要跟进什么", text: $title).focused($titleFocused).disabled(model.savingAction)
             ScrollView { Text(action.note).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 160)
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }

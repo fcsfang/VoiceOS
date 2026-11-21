@@ -1083,7 +1083,7 @@ private struct RegionCard: View {
                     HStack(spacing: 4) {
                         Text("\(region.questionIDs.count) 个问题 · \(region.evidenceCount) 处原话")
                             .vosFont(WorkspaceText.caption.size)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(palette.secondaryText)
                             .lineLimit(1)
                         Spacer(minLength: 0)
                         if recent {

@@ -58,8 +58,8 @@ struct ClaimNoteRow:View {
                 }
                 if let note {
                     HStack(alignment:.top,spacing:10) {
-                        Text("旁注").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
-                        Text(note.body).vosFont(WorkspaceText.body).foregroundStyle(.secondary).lineSpacing(3).textSelection(.enabled)
+                        Text("旁注").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText)
+                        Text(note.body).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).lineSpacing(3).textSelection(.enabled)
                         Spacer(minLength:8)
                         Button("编辑",systemImage:"pencil") { draft=note.body;editing=true;errorText="" }.vosFont(WorkspaceText.meta)
                     }

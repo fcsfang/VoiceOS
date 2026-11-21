@@ -225,7 +225,7 @@ struct QuestionAnswerSection: View {
                     Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuiet)
                 }
                 if answer?.validity != "current" {
-                    Text("依据已变化，旧回答不能重试；可在操作区重新回答。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("依据已变化，旧回答不能重试；可在操作区重新回答。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
             }
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }

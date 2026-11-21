@@ -50,7 +50,7 @@ struct QuoteHoverPreview<Content: View>: View {
     private var panel: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(sourceTitle).vosFont(WorkspaceText.meta.size, weight: .semibold).lineLimit(2)
-            Text(snippet).vosFont(WorkspaceText.body).foregroundStyle(.secondary).lineLimit(6)
+            Text(snippet).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).lineLimit(6)
             Button("打开材料") { withAnimation(reduceMotion ? nil : WorkspaceMotion.hover) { revealed = false }; open() }.vosFont(WorkspaceText.meta)
         }
         .padding(12)

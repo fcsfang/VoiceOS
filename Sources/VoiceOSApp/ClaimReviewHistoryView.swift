@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct ClaimReviewHistoryView: View {
+    @Environment(\.workspacePalette) private var palette
     let revisions: [ClaimReviewVersion]
     let dismiss: () -> Void
 
@@ -25,13 +26,13 @@ struct ClaimReviewHistoryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("认知审阅历史").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("认可不等于已验证；更正不代表真实观点变化。").foregroundStyle(.secondary)
+            Text("认可不等于已验证；更正不代表真实观点变化。").foregroundStyle(palette.secondaryText)
             ScrollView {
                 ForEach(revisions) { revision in
                     VStack(alignment: .leading, spacing: 8) {
                         Text("第 \(revision.version) 版 · " + reason(revision.reason)).vosFont(WorkspaceText.rowTitle)
                         Text(revision.statement).textSelection(.enabled)
-                        Text(owner(revision.ownership) + " · " + (revision.decision == "endorsed" ? "已认可" : revision.decision == "rejected" ? "已停止使用" : "待核对")).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Text(owner(revision.ownership) + " · " + (revision.decision == "endorsed" ? "已认可" : revision.decision == "rejected" ? "已停止使用" : "待核对")).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         if !revision.note.isEmpty { Text("原因：" + revision.note).vosFont(WorkspaceText.body) }
                         WorkspaceListDivider()
                     }

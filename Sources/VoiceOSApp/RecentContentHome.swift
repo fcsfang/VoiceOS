@@ -956,6 +956,7 @@ private struct ClueHeaderMenu: View {
 }
 
 private struct RecentClueRenameSheet: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let clue: String
     let resettable: Bool
@@ -974,9 +975,9 @@ private struct RecentClueRenameSheet: View {
             Text("修改线索标题").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             TextField("线索标题", text: $title).focused($titleFocused)
             Text("只改变这条线索的显示名，原始想法不变。")
-                .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             if !model.status.isEmpty {
-                Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
             }
             HStack {
                 if resettable {
