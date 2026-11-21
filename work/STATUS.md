@@ -947,3 +947,8 @@
 - 两组共 28 个文件、46 处裸 `Text(...).vosFont(WorkspaceText.sectionTitle)` 补 `.accessibilityAddTraits(.isHeader)`（A 组 26 处、B 组 20 处），VoiceOver 标题导航现在能到达各页与弹层的区块标题。
 - 跳过 11 处均有证据：已带 trait 的组件内文本、段落续文、条件字号链、图标字号（`.size` 变体）与行内计数。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 147：副文本机制统一（2026-11-21，已推送）
+- 四组共 50 个文件、377 处 `.foregroundStyle(.secondary/.tertiary)` 换为 `palette.secondaryText/tertiaryText`，并为 33 个缺环境的子结构体补 `@Environment(\.workspacePalette)`；同角色的次要/三级文字从此只有一种颜色来源。
+- 按语义跳过：系统材质胶囊上的层次色（ConstellationLegend）、三元组合表达式（ClaimNoteViews 警告/次要对）、三元中已含 palette 的分支（TaskInitiation 超限提示）。
+- 真机前后对比（首页/材料）：附注与元数据行颜色略加深、同屏一致，无观感回归；材料页样例含「日期 · 来源 · 仅本地/条待办」整行。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
