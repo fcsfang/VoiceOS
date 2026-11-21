@@ -297,6 +297,17 @@ private final class MaterialPageCache {
     var pages: [String: MaterialReadingPage] = [:]
 }
 
+// Rebuilt only when records, secondary data, the minute or the filter change;
+// survives body re-evaluation.
+private final class ActionPageCache {
+    struct Key: Equatable { let records: Int; let secondary: Int; let minute: Int; let filter: String }
+    var key: Key?
+    var todoActions: [ActionRecord] = []
+    var timeSurface: ActionTimeSurface?
+    var rowReads: ActionRowReads?
+    var nextStepCounts: [String: Int] = [:]
+}
+
 struct WorkspaceView: View {
     @ObservedObject var model: ControlCenter
     @AppStorage("voiceos.workspaceTheme") private var theme = WorkspaceTheme.graphite
@@ -357,6 +368,7 @@ struct WorkspaceView: View {
     @State private var readingStates: [String: SourceReadingState] = [:]
     @State private var readingStatesRevision = 0
     @State private var materialPageCache = MaterialPageCache()
+    @State private var actionPageCache = ActionPageCache()
     @State private var readingPlans: [IncrementalPlan] = []
     @State private var selectingActions = false
     @State private var selectedActionIDs: Set<String> = []
@@ -1416,15 +1428,47 @@ struct WorkspaceView: View {
     }
     @State private var showingClarifyQueue = false
     @State private var clarifyScope: ClarifyQueueScope = .questions
+    private var actionPageKey: ActionPageCache.Key {
+        ActionPageCache.Key(records: model.recordsRevision, secondary: model.secondaryRevision,
+                            minute: Int(Date().timeIntervalSince1970/60), filter: actionFilter)
+    }
+    private func actionPageRowReads() -> ActionRowReads {
+        if let reads = actionPageCache.rowReads { return reads }
+        let reads=ActionRowReads(reminderLinks:model.reminderLinks,executions:model.assistantExecutions)
+        actionPageCache.rowReads = reads
+        return reads
+    }
+    private func actionPageTimeSurface(_ todoActions: [ActionRecord]) -> ActionTimeSurface? {
+        guard ["全部","我的待办"].contains(actionFilter) else { return nil }
+        if let surface = actionPageCache.timeSurface { return surface }
+        let surface = ActionTimeSurface.build(actions: todoActions, schedules: model.scheduleIntents,
+                                              links: model.reminderLinks, now: Date(), calendar: .current)
+        actionPageCache.timeSurface = surface
+        return surface
+    }
+    /// The body already built this surface from `myTodoActions` in this minute.
+    /// Both keyboard call sites use `visibleActions`, which is that same list
+    /// under the filters that build a surface; every other filter caches nil.
+    private func cachedActionTimeSurface() -> ActionTimeSurface? {
+        guard ["全部","我的待办"].contains(actionFilter), actionPageCache.key == actionPageKey else { return nil }
+        return actionPageCache.timeSurface
+    }
     private var actions: some View {
-        let nextStepCounts = model.sourcePageIndex.nextStepCounts
-        let rowReads=ActionRowReads(reminderLinks:model.reminderLinks,executions:model.assistantExecutions)
+        let key = actionPageKey
+        if actionPageCache.key != key {
+            actionPageCache.key = key
+            actionPageCache.todoActions = []
+            actionPageCache.timeSurface = nil
+            actionPageCache.rowReads = nil
+            actionPageCache.nextStepCounts = [:]
+        }
+        if actionPageCache.todoActions.isEmpty { actionPageCache.todoActions = myTodoActions }
+        let todoActions = actionPageCache.todoActions
+        let rowReads = actionPageRowReads()
+        if actionPageCache.nextStepCounts.isEmpty { actionPageCache.nextStepCounts = model.sourcePageIndex.nextStepCounts }
+        let nextStepCounts = actionPageCache.nextStepCounts
         let listGroup:ActionRowGroup=actionFilter == "已完成" ? .completed : actionFilter == "历史记录" ? .history : actionFilter == "待核对" ? .needsReview : .active
-        let todoActions = myTodoActions
-        let timeSurface: ActionTimeSurface? = ["全部","我的待办"].contains(actionFilter)
-            ? ActionTimeSurface.build(actions: todoActions, schedules: model.scheduleIntents,
-                                      links: model.reminderLinks, now: Date(), calendar: .current)
-            : nil
+        let timeSurface = actionPageTimeSurface(todoActions)
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(title:"行动") {
                 HStack(spacing:8) {
@@ -2697,7 +2741,7 @@ struct WorkspaceView: View {
     }
     private var planRemainingSlots: Int { max(0,3 - focusedActions.count) }
     private var planCandidates: [ActionTimeEntry] {
-        let surface=ActionTimeSurface.build(actions:visibleActions,schedules:model.scheduleIntents,links:model.reminderLinks,now:Date(),calendar:.current)
+        let surface=cachedActionTimeSurface() ?? ActionTimeSurface.build(actions:visibleActions,schedules:model.scheduleIntents,links:model.reminderLinks,now:Date(),calendar:.current)
         let focused=Set(focusedActions.map(\.id))
         return (surface.soon + surface.anytime).filter { !focused.contains($0.action.id) }
     }
@@ -2796,7 +2840,7 @@ struct WorkspaceView: View {
         }
         if ["全部","我的待办"].contains(actionFilter) { add(focusedActions) }
         if actionFilter == "我的待办" {
-            let surface=ActionTimeSurface.build(actions:visibleActions,schedules:model.scheduleIntents,links:model.reminderLinks,now:Date(),calendar:.current)
+            let surface=cachedActionTimeSurface() ?? ActionTimeSurface.build(actions:visibleActions,schedules:model.scheduleIntents,links:model.reminderLinks,now:Date(),calendar:.current)
             add(surface.today.map(\.action))
             add(surface.soon.map(\.action))
             add(surface.anytime.map(\.action))
