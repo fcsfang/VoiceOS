@@ -27,6 +27,10 @@ struct WorkspaceTopicReadingView: View {
     @State private var hoveredQuestion: Int?
     @State private var localFilter = ""
     @State private var keyboardSectionID: String?
+    @State private var keyboardCardFocus = TopicReadingKeySelection()
+    @FocusState private var cardListFocused: Bool
+    @State private var keyboardQuestionFocus = TopicReadingKeySelection()
+    @FocusState private var questionListFocused: Bool
     @FocusState private var structureFocused: Bool
     @FocusState private var focusedQuestion: Int?
 
@@ -259,8 +263,19 @@ struct WorkspaceTopicReadingView: View {
         if displayedSections.isEmpty && !filterTerm.isEmpty {
             Text("没有匹配的小主题。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
         } else {
-            LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:WorkspaceMetrics.groupGap)],alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
-                ForEach(displayedSections) { section in readingCard(section) }
+            ScrollViewReader { proxy in
+                LazyVGrid(columns:[GridItem(.adaptive(minimum:290 * min(max(scale,1),1.25)),spacing:WorkspaceMetrics.groupGap)],alignment:.leading,spacing:WorkspaceMetrics.rowGap) {
+                    ForEach(displayedSections) { section in
+                        readingCard(section)
+                            .id(section.id)
+                            .workspaceFocusRing(keyboardCardFocus.id == section.id, radius: WorkspaceMetrics.sectionRadius)
+                    }
+                }
+                .focusable()
+                .focused($cardListFocused)
+                .focusEffectDisabled()
+                .onKeyPress { handleReadingCardKey($0) }
+                .onChange(of:keyboardCardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
             }
         }
     }
@@ -374,21 +389,29 @@ struct WorkspaceTopicReadingView: View {
     @ViewBuilder private var questions: some View {
         let questions=topic.organization?.questions ?? []
         if !questions.isEmpty {
-            WorkspaceSection(title:"值得继续的问题",icon:"questionmark.bubble",count:questions.count) {
-                ForEach(Array(questions.enumerated()),id:\.offset) { index,question in
-                    Button { discuss(question) } label: {
-                        HStack(alignment:.top,spacing:12) {
-                            Image(systemName:"questionmark.bubble").foregroundStyle(palette.action)
-                            Text(question).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
-                            Spacer(minLength:4)
-                            Image(systemName:"arrow.up.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-                        }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(hoveredQuestion == index ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)).overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(focusedQuestion == index ? palette.focusRing : palette.border,lineWidth:1) }.contentShape(Rectangle())
-                    }.buttonStyle(.plain).help("带上当前主题继续讨论")
-                        .focusable()
-                        .focused($focusedQuestion, equals: index)
-                        .focusEffectDisabled()
-                        .onHover { inside in hoveredQuestion = inside ? index : (hoveredQuestion == index ? nil : hoveredQuestion) }
+            ScrollViewReader { proxy in
+                WorkspaceSection(title:"值得继续的问题",icon:"questionmark.bubble",count:questions.count) {
+                    ForEach(Array(questions.enumerated()),id:\.offset) { index,question in
+                        Button { discuss(question) } label: {
+                            HStack(alignment:.top,spacing:12) {
+                                Image(systemName:"questionmark.bubble").foregroundStyle(palette.action)
+                                Text(question).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
+                                Spacer(minLength:4)
+                                Image(systemName:"arrow.up.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                            }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(keyboardQuestionFocus.id == String(index) ? palette.selection : hoveredQuestion == index ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)).overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(focusedQuestion == index || keyboardQuestionFocus.id == String(index) ? palette.focusRing : palette.border,lineWidth:1) }.contentShape(Rectangle())
+                        }.buttonStyle(.plain).help("带上当前主题继续讨论")
+                            .id(String(index))
+                            .focusable()
+                            .focused($focusedQuestion, equals: index)
+                            .focusEffectDisabled()
+                            .onHover { inside in hoveredQuestion = inside ? index : (hoveredQuestion == index ? nil : hoveredQuestion) }
+                    }
                 }
+                .focusable()
+                .focused($questionListFocused)
+                .focusEffectDisabled()
+                .onKeyPress { handleQuestionListKey($0) }
+                .onChange(of:keyboardQuestionFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
             }
         }
     }
@@ -553,6 +576,46 @@ struct WorkspaceTopicReadingView: View {
             return .ignored
         }
     }
+    private func handleReadingCardKey(_ press:KeyPress) -> KeyPress.Result {
+        guard cardListFocused, press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let ids=displayedSections.map(\.id)
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard keyboardCardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
+            return .handled
+        case .return:
+            guard let id=keyboardCardFocus.id, ids.contains(id) else { return .ignored }
+            selectedSection = selectedSection == id ? nil : id
+            requestCardListFocus()
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+    private func requestCardListFocus() {
+        Task {
+            try? await Task.sleep(for:.milliseconds(100))
+            cardListFocused=true
+        }
+    }
+    private func handleQuestionListKey(_ press:KeyPress) -> KeyPress.Result {
+        guard questionListFocused, press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let questions=topic.organization?.questions ?? []
+        let ids=questions.indices.map { String($0) }
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard keyboardQuestionFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
+            return .handled
+        case .return:
+            guard let id=keyboardQuestionFocus.id, let index=Int(id), questions.indices.contains(index) else { return .ignored }
+            discuss(questions[index])
+            return .handled
+        default:
+            return .ignored
+        }
+    }
     private func ownership(_ claim:CandidateClaim) -> String {
         switch claim.ownership { case "user_tentative": "我的表达中提取"; case "external": "资料中的观点"; case "ai_candidate": "AI 分析与建议"; default: "内容归属待核对" }
     }
@@ -565,12 +628,28 @@ struct TopicStaleBanner: View {
     }
 }
 
+/// Mirrors WorkspaceView's file-private WorkspaceKeySelection; promote both to a
+/// shared workspace helper when a third keyboard list needs the same stepping.
+private struct TopicReadingKeySelection {
+    var id: String?
+    mutating func step(up: Bool, over ids: [String]) -> Bool {
+        guard !ids.isEmpty else { return false }
+        let current = id.flatMap { ids.firstIndex(of: $0) }
+        let next: Int
+        if up { next = current.map { max(0,$0 - 1) } ?? ids.count - 1 }
+        else { next = current.map { min(ids.count - 1,$0 + 1) } ?? 0 }
+        id = ids[next]
+        return true
+    }
+}
+
 struct WorkspaceTopicTile: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var scale
     @State private var hovered = false
     let topic: ReflectionQuestion
     let sourceCount: Int
+    var highlighted: Bool = false
     let open: () -> Void
     var body: some View {
         Button(action:open) {
@@ -597,8 +676,8 @@ struct WorkspaceTopicTile: View {
                 }.vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
             }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
                 .padding(20)
-                .background(hovered ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
-                .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
+                .background(highlighted ? palette.selection : hovered ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+                .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(highlighted ? palette.focusRing : palette.border,lineWidth:1) }
                 .contentShape(RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
         }.buttonStyle(.plain).onHover { hovered = $0 }
     }

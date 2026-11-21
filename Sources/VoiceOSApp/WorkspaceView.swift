@@ -340,6 +340,16 @@ struct WorkspaceView: View {
     @FocusState private var actionListFocused: Bool
     @State private var materialKeyboardFocus = WorkspaceKeySelection()
     @FocusState private var materialListFocused: Bool
+    @State private var themeKeyboardFocus = WorkspaceKeySelection()
+    @FocusState private var themeListFocused: Bool
+    @State private var clueKeyboardFocus = WorkspaceKeySelection()
+    @FocusState private var clueListFocused: Bool
+    @State private var unlinkedKeyboardFocus = WorkspaceKeySelection()
+    @FocusState private var unlinkedListFocused: Bool
+    @State private var topicMaterialKeyboardFocus = WorkspaceKeySelection()
+    @FocusState private var topicMaterialListFocused: Bool
+    @State private var topicReviewKeyboardFocus = WorkspaceKeySelection()
+    @FocusState private var topicReviewListFocused: Bool
     @State private var readingStates: [String: SourceReadingState] = [:]
     @State private var readingPlans: [IncrementalPlan] = []
     @State private var selectingActions = false
@@ -856,7 +866,10 @@ struct WorkspaceView: View {
                     }, openTask: { go(.task($0)) }, capture: { go(.capture) })
                 }
             }
-        case .themes: scrolled { themes }.id(navigationEntry)
+        case .themes:
+            ScrollViewReader { proxy in
+                scrolled { themes(proxy: proxy) }.id(navigationEntry)
+            }
         case .materials:
             ScrollViewReader { proxy in
                 scrolled { materials }
@@ -1092,14 +1105,37 @@ struct WorkspaceView: View {
             }
         }.task { await loadReadingPlans() }
     }
-    private var themes: some View {
+    private var currentTopicReading: TopicReadingData? {
+        guard let topic else { return nil }
+        return TopicReadingData(topic: topic, sourceIDs: sourceIDs,
+                                records: model.records, claims: model.claims,
+                                actions: model.actionRecords)
+    }
+    private var visibleTopicListings: [TopicListing] {
         let catalog = recordCatalog
-        let topicSourceIDs = sourceIDs
-        let reading = topic.map {
-            TopicReadingData(topic: $0, sourceIDs: topicSourceIDs,
-                             records: model.records, claims: model.claims,
-                             actions: model.actionRecords)
+        let filter = topicQuery.trimmingCharacters(in:.whitespacesAndNewlines)
+        let listings = model.workspaceTopics.map { topicListing($0, catalog: catalog) }
+            .sorted { left, right in
+                if left.latestActivity != right.latestActivity { return left.latestActivity > right.latestActivity }
+                return left.topic.title.localizedStandardCompare(right.topic.title) == .orderedAscending
+            }
+        guard !filter.isEmpty else { return listings }
+        return listings.filter {
+            $0.topic.title.localizedCaseInsensitiveContains(filter) || ($0.topic.organization?.summary ?? "").localizedCaseInsensitiveContains(filter)
         }
+    }
+    private var unlinkedTopicMaterials: [SourceRecord] {
+        let linked = Set(model.workspaceTopicSources.values.flatMap { $0 })
+        return distinctExpressions(activeMaterials.filter { !linked.contains($0.id) })
+    }
+    private var reviewInterval: DateInterval { reviewPeriod.interval(containing: reviewAnchor) }
+    private func reviewSources(for reading: TopicReadingData) -> [SourceRecord] {
+        let interval = reviewInterval
+        return reading.sources.filter { interval.contains($0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt) ?? .distantPast) }
+    }
+    private func themes(proxy: ScrollViewProxy) -> some View {
+        let catalog = recordCatalog
+        let reading = currentTopicReading
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             if let topic, let reading {
                 HStack { Button("所有主题",systemImage:"arrow.left") { if path.last?.page == .themes && path.last?.topicID == nil { back() } else { topicID=nil;topicFocus=nil };creatingTopic=false;newTopicTitle="";editingTopicID=nil };Spacer(); Menu("调整主题") {
@@ -1120,51 +1156,59 @@ struct WorkspaceView: View {
                         .accessibilityLabel("标题取自《" + displayTitle(titleSource.displayTitle) + "》，打开来源材料")
                 }
                 WorkspaceTabs(selection:$topicTab,titles:["概览","认识与问题","行动与结果","材料"])
-                topicContent(topic, reading: reading)
+                topicContent(topic, reading: reading, proxy: proxy)
             } else {
                 let filter = topicQuery.trimmingCharacters(in:.whitespacesAndNewlines)
-                let listings = model.workspaceTopics.map { topicListing($0, catalog: catalog) }
-                    .sorted { left, right in
-                        if left.latestActivity != right.latestActivity { return left.latestActivity > right.latestActivity }
-                        return left.topic.title.localizedStandardCompare(right.topic.title) == .orderedAscending
-                    }
-                let visibleListings = filter.isEmpty ? listings : listings.filter {
-                    $0.topic.title.localizedCaseInsensitiveContains(filter) || ($0.topic.organization?.summary ?? "").localizedCaseInsensitiveContains(filter)
-                }
-                let themes = visibleListings.filter { $0.level == .theme }
-                let clues = visibleListings.filter { $0.level == .clue }
+                let visibleListings = visibleTopicListings
+                let themeListings = visibleListings.filter { $0.level == .theme }
+                let clueListings = visibleListings.filter { $0.level == .clue }
                 HStack { WorkspaceHeading(eyebrow:"",title:"主题")
                     Spacer();Button("新建主题") { newTopicTitle="";editingTopicID=nil;creatingTopic=true }
                 }
                 WorkspaceSearchField(text:$topicQuery,placeholder:"搜索主题标题或摘要")
                     .accessibilityIdentifier("topics.search")
-                if !themes.isEmpty {
+                if !themeListings.isEmpty {
                     LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing: WorkspaceMetrics.groupGap)],alignment:.leading,spacing: WorkspaceMetrics.groupGap) {
-                        ForEach(themes) { listing in
-                            WorkspaceTopicTile(topic:listing.topic,sourceCount:listing.materialCount) { selectTopic(listing.topic.id) }
+                        ForEach(themeListings) { listing in
+                            WorkspaceTopicTile(topic:listing.topic,sourceCount:listing.materialCount,highlighted:themeKeyboardFocus.id == listing.id) { selectTopic(listing.topic.id) }
+                                .id(listing.id)
                         }
                     }
+                    .focusable()
+                    .focused($themeListFocused)
+                    .focusEffectDisabled()
+                    .onKeyPress { handleThemeListKey($0) }
+                    .onChange(of:themeKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
+                    .onAppear { requestThemeListFocus() }
                 }
                 if filter.isEmpty && model.workspaceTopics.isEmpty {
                     HStack(spacing:8) {
                         if model.organizingTopics { ProgressView().controlSize(.small).accessibilityHidden(true) }
                         Text(model.organizingTopics ? "AI 正在按内容连接主题…" : "授权材料会自动归组。也可以先建立一个你关心的问题。")
                     }.foregroundStyle(.secondary)
-                } else if filter.isEmpty && themes.isEmpty {
+                } else if filter.isEmpty && themeListings.isEmpty {
                     Text("还没有达到主题判据的关切。线索会随材料积累成为主题。").foregroundStyle(.secondary)
                 }
-                if !clues.isEmpty {
+                if !clueListings.isEmpty {
                     VStack(alignment:.leading,spacing:8) {
                         DisclosureGroup(isExpanded: Binding(get: { showingClues || !filter.isEmpty }, set: { showingClues = $0 })) {
                             VStack(alignment:.leading,spacing:0) {
-                                ForEach(clues) { listing in
+                                ForEach(clueListings) { listing in
                                     WorkspaceRow(title:listing.topic.title,subtitle:"\(listing.materialCount) 份材料 · 最近 " + clueDateLabel(listing.latestMaterialDate),icon:"circle.dotted",trailing:"查看") { selectTopic(listing.topic.id) }
-                                    if listing.id != clues.last?.id { WorkspaceListDivider() }
+                                        .workspaceSelectionHighlight(clueKeyboardFocus.id == listing.id)
+                                        .id(listing.id)
+                                    if listing.id != clueListings.last?.id { WorkspaceListDivider() }
                                 }
-                            }.padding(.top,8)
+                            }
+                            .padding(.top,8)
+                            .focusable()
+                            .focused($clueListFocused)
+                            .focusEffectDisabled()
+                            .onKeyPress { handleClueListKey($0) }
+                            .onChange(of:clueKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
                         } label: {
                             VStack(alignment:.leading,spacing:0) {
-                                WorkspaceSectionHeading("线索", count:"\(clues.count)").padding(.bottom,16)
+                                WorkspaceSectionHeading("线索", count:"\(clueListings.count)").padding(.bottom,16)
                                 WorkspaceListDivider()
                             }.contentShape(Rectangle())
                         }
@@ -1174,15 +1218,23 @@ struct WorkspaceView: View {
                 let linked=Set(model.workspaceTopicSources.values.flatMap { $0 })
                 let unlinked=activeMaterials.filter { !linked.contains($0.id) }
                 if !unlinked.isEmpty {
-                    let expressions=distinctExpressions(unlinked)
+                    let expressions=unlinkedTopicMaterials
                     VStack(alignment:.leading,spacing:8) {
                         DisclosureGroup {
                             VStack(alignment:.leading,spacing:0) {
                                 ForEach(expressions) { source in
                                     sourceRow(source,catalog:catalog,reason:source.topicAssignmentReason(in:catalog))
+                                        .workspaceSelectionHighlight(unlinkedKeyboardFocus.id == source.id)
+                                        .id(source.id)
                                     if source.id != expressions.last?.id { WorkspaceListDivider() }
                                 }
-                            }.padding(.top,8)
+                            }
+                            .padding(.top,8)
+                            .focusable()
+                            .focused($unlinkedListFocused)
+                            .focusEffectDisabled()
+                            .onKeyPress { handleUnlinkedListKey($0) }
+                            .onChange(of:unlinkedKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
                         } label: {
                             VStack(alignment:.leading,spacing:0) {
                                 WorkspaceSectionHeading(title:"尚未归入主题的材料", count:"\(expressions.count)") {
@@ -1225,13 +1277,26 @@ struct WorkspaceView: View {
         guard let date else { return "暂无日期" }
         return date.formatted(date: .abbreviated, time: .omitted)
     }
-    @ViewBuilder private func topicContent(_ topic:ReflectionQuestion, reading:TopicReadingData) -> some View {
+    @ViewBuilder private func topicContent(_ topic:ReflectionQuestion, reading:TopicReadingData, proxy:ScrollViewProxy) -> some View {
         switch topicTab {
         case "材料":
             let catalog = recordCatalog
             let expressions = distinctExpressions(reading.sources)
             WorkspaceSection(title:"主题材料",subtitle:"完整原话与资料，按时间延续",icon:"books.vertical",count:reading.sources.count) {
-                ForEach(expressions) { source in sourceRow(source,catalog:catalog);if source.id != expressions.last?.id { WorkspaceListDivider() } }
+                VStack(spacing:0) {
+                    ForEach(expressions) { source in
+                        sourceRow(source,catalog:catalog)
+                            .workspaceSelectionHighlight(topicMaterialKeyboardFocus.id == source.id)
+                            .id(source.id)
+                        if source.id != expressions.last?.id { WorkspaceListDivider() }
+                    }
+                }
+                .focusable()
+                .focused($topicMaterialListFocused)
+                .focusEffectDisabled()
+                .onKeyPress { handleTopicMaterialListKey($0) }
+                .onChange(of:topicMaterialKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
+                .onAppear { requestTopicMaterialListFocus() }
             }
             DisclosureGroup("关联其他材料") {
                 ForEach(reading.unlinkedSources) { source in
@@ -1242,7 +1307,7 @@ struct WorkspaceView: View {
             Picker("阅读方式",selection:$topicReadingMode) { Text("小主题卡片").tag("卡片");Text("材料图谱").tag("图谱");Text("周期回顾").tag("回顾") }.pickerStyle(.segmented)
             if topicReadingMode == "图谱" {
                 ReflectionTimelineView(model:model,embeddedTopicID:topic.id,openSource:{ go(.source($0)) },dismiss:{},discuss:{ claim in discussClaim(claim) },reflect:{ focus,prompt in await openReflection(focus,prompt:prompt) }).frame(minHeight:620)
-            } else if topicReadingMode == "回顾" { review(topic, reading: reading) }
+            } else if topicReadingMode == "回顾" { review(topic, reading: reading, proxy: proxy) }
             else {
                 topicReading(topic,mode:"认识与问题",reading:reading)
                 WorkspaceTopicEntry(model:model,topic:topic,sourceIDs:Array(reading.sourceIDs))
@@ -1258,17 +1323,30 @@ struct WorkspaceView: View {
             showUnderstanding:{ topicTab="认识与问题";topicReadingMode="卡片" })
             .id(topic.id + mode)
     }
-    private func review(_ topic:ReflectionQuestion, reading:TopicReadingData) -> some View {
+    private func review(_ topic:ReflectionQuestion, reading:TopicReadingData, proxy:ScrollViewProxy) -> some View {
         VStack(alignment:.leading,spacing: WorkspaceMetrics.groupGap) {
             HStack {
                 Picker("回顾周期",selection:$reviewPeriod) { ForEach(ReflectionPeriod.allCases,id:\.self) { Text($0.label).tag($0) } }.pickerStyle(.segmented).frame(maxWidth:210)
                 DatePicker("日期",selection:$reviewAnchor,displayedComponents:.date).labelsHidden()
             }
-            let interval=reviewPeriod.interval(containing:reviewAnchor)
-            let sources=reading.sources.filter { interval.contains($0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt) ?? .distantPast) }
+            let interval=reviewInterval
+            let sources=reviewSources(for: reading)
             let catalog=recordCatalog
             let expressions=distinctExpressions(sources)
-            ForEach(expressions) { source in sourceRow(source,catalog:catalog); if source.id != expressions.last?.id { WorkspaceListDivider() } }
+            VStack(spacing:0) {
+                ForEach(expressions) { source in
+                    sourceRow(source,catalog:catalog)
+                        .workspaceSelectionHighlight(topicReviewKeyboardFocus.id == source.id)
+                        .id(source.id)
+                    if source.id != expressions.last?.id { WorkspaceListDivider() }
+                }
+            }
+            .focusable()
+            .focused($topicReviewListFocused)
+            .focusEffectDisabled()
+            .onKeyPress { handleTopicReviewListKey($0) }
+            .onChange(of:topicReviewKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
+            .onAppear { requestTopicReviewListFocus() }
             let actionIDs=reading.actionIDs
             let outcomes=(topicFocus?.outcomes ?? []).filter { actionIDs.contains($0.actionID) && ConversationReflectionFocus.date($0.createdAt).map { interval.contains($0) } == true }
             ForEach(outcomes) { outcome in WorkspaceRow(title:outcome.text,subtitle:"实际结果 · " + dateLabel(outcome.createdAt),icon:"leaf") { go(.task(outcome.actionID)) } }
@@ -2652,6 +2730,112 @@ struct WorkspaceView: View {
             return .ignored
         }
     }
+    private func requestThemeListFocus() {
+        Task {
+            try? await Task.sleep(for:.milliseconds(100))
+            guard page == .themes, topic == nil else { return }
+            themeListFocused=true
+        }
+    }
+    private func requestTopicMaterialListFocus() {
+        Task {
+            try? await Task.sleep(for:.milliseconds(100))
+            guard page == .themes, topic != nil, topicTab == "材料" else { return }
+            topicMaterialListFocused=true
+        }
+    }
+    private func requestTopicReviewListFocus() {
+        Task {
+            try? await Task.sleep(for:.milliseconds(100))
+            guard page == .themes, topic != nil, topicTab == "认识与问题", topicReadingMode == "回顾" else { return }
+            topicReviewListFocused=true
+        }
+    }
+    private func handleThemeListKey(_ press:KeyPress) -> KeyPress.Result {
+        guard page == .themes, topic == nil, themeListFocused,
+              press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let ids=visibleTopicListings.filter { $0.level == .theme }.map(\.id)
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard themeKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
+            return .handled
+        case .return:
+            guard let id=themeKeyboardFocus.id, ids.contains(id) else { return .ignored }
+            selectTopic(id)
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+    private func handleClueListKey(_ press:KeyPress) -> KeyPress.Result {
+        guard page == .themes, topic == nil, clueListFocused,
+              press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let ids=visibleTopicListings.filter { $0.level == .clue }.map(\.id)
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard clueKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
+            return .handled
+        case .return:
+            guard let id=clueKeyboardFocus.id, ids.contains(id) else { return .ignored }
+            selectTopic(id)
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+    private func handleUnlinkedListKey(_ press:KeyPress) -> KeyPress.Result {
+        guard page == .themes, topic == nil, unlinkedListFocused,
+              press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let ids=unlinkedTopicMaterials.map(\.id)
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard unlinkedKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
+            return .handled
+        case .return:
+            guard let id=unlinkedKeyboardFocus.id, ids.contains(id) else { return .ignored }
+            go(.source(id))
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+    private func handleTopicMaterialListKey(_ press:KeyPress) -> KeyPress.Result {
+        guard page == .themes, topic != nil, topicTab == "材料", topicMaterialListFocused,
+              press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let ids=currentTopicReading.map { distinctExpressions($0.sources).map(\.id) } ?? []
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard topicMaterialKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
+            return .handled
+        case .return:
+            guard let id=topicMaterialKeyboardFocus.id, ids.contains(id) else { return .ignored }
+            go(.source(id))
+            return .handled
+        default:
+            return .ignored
+        }
+    }
+    private func handleTopicReviewListKey(_ press:KeyPress) -> KeyPress.Result {
+        guard page == .themes, topic != nil, topicTab == "认识与问题", topicReadingMode == "回顾", topicReviewListFocused,
+              press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        let ids=currentTopicReading.map { distinctExpressions(reviewSources(for: $0)).map(\.id) } ?? []
+        switch press.key {
+        case .downArrow, .upArrow:
+            guard topicReviewKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
+            return .handled
+        case .return:
+            guard let id=topicReviewKeyboardFocus.id, ids.contains(id) else { return .ignored }
+            go(.source(id))
+            return .handled
+        default:
+            return .ignored
+        }
+    }
     /// The rows arrow keys walk: suggestions above the results, and the
     /// material list while the query is empty.
     private var searchKeyboardRows: [(id:String, open:()->Void)] {
@@ -3347,6 +3531,23 @@ private struct MaterialCard: ViewModifier {
 
 private extension View {
     func materialCard(highlighted: Bool) -> some View { modifier(MaterialCard(highlighted: highlighted)) }
+}
+
+private struct WorkspaceSelectionHighlight: ViewModifier {
+    @Environment(\.workspacePalette) private var palette
+    let highlighted: Bool
+    let radius: CGFloat
+    func body(content: Content) -> some View {
+        content
+            .background(highlighted ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: radius))
+            .workspaceFocusRing(highlighted, radius: radius)
+    }
+}
+
+private extension View {
+    func workspaceSelectionHighlight(_ highlighted: Bool, radius: CGFloat = WorkspaceMetrics.panelRadius) -> some View {
+        modifier(WorkspaceSelectionHighlight(highlighted: highlighted, radius: radius))
+    }
 }
 
 /// A material row's compact menu stays hidden until hover or keyboard reveal.
