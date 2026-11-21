@@ -1477,7 +1477,7 @@ struct WorkspaceView: View {
                 let overdue = surface.today.filter(\.isOverdue)
                 let dueToday = surface.today.filter { !$0.isOverdue }
                 if !overdue.isEmpty {
-                    WorkspaceListSection(title:"逾期",subtitle:"已过期限。改天需要提醒事项链接。",count:overdue.count) {
+                    WorkspaceListSection(title:"逾期",subtitle:"已过期限。改期需要提醒事项链接。",count:overdue.count) {
                         ActionCardList {
                             ForEach(overdue) { entry in actionRow(entry.action,timeEntry:entry,nextStepCounts:nextStepCounts,reads:rowReads) }
                         }
