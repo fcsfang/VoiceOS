@@ -4948,13 +4948,21 @@ struct CognitiveFeedbackView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
             Text("静默回顾").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("可以直接关闭。这里显示已接纳的关联提案和相关原文。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-            Picker("显示方式",selection:Binding(get:{ model.quietMode },set:{ mode in Task { await model.changeQuietMode(mode) } })) {
-                Text("正常显示").tag(CognitiveFeedbackMode.normal)
-                Text("减少显示 · 一次一条").tag(CognitiveFeedbackMode.reduced)
-                Text("暂停显示").tag(CognitiveFeedbackMode.paused)
-            }.pickerStyle(.segmented)
-            Text(model.quietStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            WorkspaceSettingsCard(title: "显示方式", subtitle: "可以直接关闭。这里显示已接纳的关联提案和相关原文。") {
+                VStack(alignment: .leading, spacing: 0) {
+                    WorkspaceSettingsRow(title: "模式", showsDivider: false) {
+                        Picker("显示方式",selection:Binding(get:{ model.quietMode },set:{ mode in Task { await model.changeQuietMode(mode) } })) {
+                            Text("正常显示").tag(CognitiveFeedbackMode.normal)
+                            Text("减少显示 · 一次一条").tag(CognitiveFeedbackMode.reduced)
+                            Text("暂停显示").tag(CognitiveFeedbackMode.paused)
+                        }.pickerStyle(.segmented).labelsHidden()
+                    }
+                    WorkspaceListDivider().padding(.horizontal, 20)
+                    Text(model.quietStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        .padding(.horizontal, 20).padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
             ScrollView {
                 VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                     if model.quietFeedback.isEmpty && model.associationFeedback.isEmpty {
@@ -4991,7 +4999,7 @@ struct CognitiveFeedbackView: View {
                 }.frame(maxWidth:.infinity,alignment:.leading)
             }
             HStack { Spacer(); if !embedded { Button("完成",action:dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction) } }
-        }.padding(24).frame(width: embedded ? nil : 720, height: embedded ? nil : 560).task { await model.refreshQuietFeedback() }
+        }.frame(maxWidth: 760, alignment: .leading).padding(24).frame(width: embedded ? nil : 820, height: embedded ? nil : 560).task { await model.refreshQuietFeedback() }
     }
 }
 
@@ -5008,15 +5016,27 @@ struct HistorySearchView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
             Text("查找历史文字").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            TextField(semantic ? "输入想找回的问题或想法" : "先输入原文关键词",text:$query).onSubmit { model.searchHistory(query:query,semantic:semantic) }
-            Toggle("按意思找原文（本机）",isOn:$semantic).disabled(!model.semanticAvailable)
-            Text(model.semanticAvailable ? "查找仅在本机进行；按意思找到的只是候选。选中原文后，可单独让文本模型判断与你的问题是否直接相关。" : "关键词查找在本机进行。这个构建尚未包含本地语义资源；选中原文后仍可单独判断相关性。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-            HStack {
-                Button(model.searchingHistory ? "正在查找…" : "查找") { model.searchHistory(query:query,semantic:semantic) }.disabled(model.searchingHistory || query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || query.unicodeScalars.count > 512)
-                if model.searchingHistory { Button("停止查找") { model.cancelHistorySearch() } }
-                Text("\(query.unicodeScalars.count)/512").vosFont(WorkspaceText.caption)
+            WorkspaceSettingsCard(title: "查找", subtitle: model.semanticAvailable ? "查找仅在本机进行；按意思找到的只是候选。选中原文后，可单独让文本模型判断与你的问题是否直接相关。" : "关键词查找在本机进行。这个构建尚未包含本地语义资源；选中原文后仍可单独判断相关性。") {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField(semantic ? "输入想找回的问题或想法" : "先输入原文关键词",text:$query).workspaceFieldSurface().onSubmit { model.searchHistory(query:query,semantic:semantic) }
+                    }.padding(.horizontal, 20).padding(.vertical, 12)
+                    WorkspaceSettingsRow(title: "按意思找原文（本机）") {
+                        Toggle("按意思找原文（本机）",isOn:$semantic).toggleStyle(.switch).labelsHidden().disabled(!model.semanticAvailable)
+                    }
+                    WorkspaceSettingsRow(title: "操作") {
+                        HStack(spacing: 8) {
+                            Button(model.searchingHistory ? "正在查找…" : "查找") { model.searchHistory(query:query,semantic:semantic) }.buttonStyle(.workspacePrimary).disabled(model.searchingHistory || query.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || query.unicodeScalars.count > 512)
+                            if model.searchingHistory { Button("停止查找") { model.cancelHistorySearch() }.buttonStyle(.workspaceSecondary) }
+                            Text("\(query.unicodeScalars.count)/512").vosFont(WorkspaceText.caption)
+                        }
+                    }
+                    WorkspaceListDivider().padding(.horizontal, 20)
+                    Text(model.retrievalStatus).vosFont(WorkspaceText.meta)
+                        .padding(.horizontal, 20).padding(.vertical, 12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            Text(model.retrievalStatus).vosFont(WorkspaceText.meta)
             RelevanceSearchPanel(model:model,coordinator:model.relevance,question:$question,candidates:candidates,dismiss:dismiss)
             ScrollView {
                 if let result = model.retrievalResult {
@@ -5037,7 +5057,7 @@ struct HistorySearchView: View {
                 }
             }
             if !embedded { Button("完成",action:dismiss) }
-        }.padding(24).frame(width: embedded ? nil : 720, height: embedded ? nil : 740)
+        }.frame(maxWidth: 760, alignment: .leading).padding(24).frame(width: embedded ? nil : 820, height: embedded ? nil : 740)
         .onChange(of:query) { selectedIDs = []; model.cancelHistorySearch() }
         .onChange(of:selectedIDs) { model.relevance.cancel() }
         .onChange(of:question) { model.relevance.cancel() }
