@@ -153,7 +153,7 @@ public extension SourceRecord {
     var contentTitle: String? {
         if let manual = presentation?.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !manual.isEmpty { return manual }
         guard presentation?.transcriptVersionID == transcriptVersionID else { return nil }
-        return presentation?.automatic?.title.flatMap(MaterialTitleText.normalizedGenerated)
+        return presentation?.automatic?.title.flatMap { MaterialTitleText.normalizedGenerated($0) }
     }
     var contentSummary: String? {
         guard !needsTranscriptionReview,presentation?.transcriptVersionID == transcriptVersionID, let summary = presentation?.automatic?.summary else { return nil }
