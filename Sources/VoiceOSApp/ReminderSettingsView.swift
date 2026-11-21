@@ -108,7 +108,7 @@ struct ReminderSettingsView: View {
             }
             WorkspaceListDivider()
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
-                WorkspaceSectionHeading("地点提醒").padding(.horizontal, 24)
+                WorkspaceSectionHeading("地点").padding(.horizontal, 24)
                 VStack(alignment: .leading, spacing: 0) {
                     WorkspaceSettingsRow(title: "地点提醒", showsDivider: false) {
                         Toggle("地点提醒", isOn: $hasLocation).toggleStyle(.switch).labelsHidden()

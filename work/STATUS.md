@@ -976,3 +976,7 @@
 - 152-B 行动详情页：任务说明/子任务/下一步/重复并入「任务」卡；AI 的工作与交付、记录与依据、实际进展与收获各自成卡并补说明行；列宽 760；全部条件分支收敛为 hasTaskNote/showsSubtaskGroup/showsNextActionGroup/showsRecurrenceGroup 原表达式。
 - 152-C 消息监测页：今日报告四分支与历史报告改卡（计数入副标题）；来源状态改为行原语（名称+类型/开关+删除、起始时间行）；设置标签保持已卡片化结构；列宽 680；文案与可访问性标识集合逐项比对一致。
 - 真机复核：三页与改造前截图对比，分组、行对齐与层级符合设置页语言；737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 153：表单弹层行对齐（2026-11-22，已推送）
+- 153-A 提醒设置与排期面板：Toggle/DatePicker/Picker 全部改 `WorkspaceSettingsRow` 行对齐（日期与通知、稍后提醒、地点三组），字段换 `workspaceFieldSurface()`；弹层左右留白由行原语提供；所有 alert、disabled、快捷键、时区环境与文案逐字保留。真机复核通过；「地点提醒」组标题与开关同名，顺手改为「地点」。
+- 153-B 主应用四个弹层：ActionCreationView 意图行+两个字段表面、ActionFeedbackView 类型行/口述状态行/Toggle 行与编辑器表面、PackageRestoreView 选择按钮行+字段表面、BackupLibraryRestoreView 摘要/选择/字段表面；页脚、守卫与所有模型调用原样。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
