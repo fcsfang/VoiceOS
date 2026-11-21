@@ -166,6 +166,7 @@ struct WorkspaceRow: View {
     }
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered = false
     let title: String
     let subtitle: String
@@ -206,6 +207,7 @@ struct WorkspaceRow: View {
             }
             .background(hovered ? palette.hover : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             .onHover { hovered=$0 }
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
         } else {
             Button(action:open) {
                 HStack(alignment:.top,spacing:14) {
@@ -219,6 +221,7 @@ struct WorkspaceRow: View {
                     .accessibilityElement(children:.combine)
             }.buttonStyle(.plain).onHover { hovered=$0 }
                 .accessibilityLabel(accessibilityText)
+                .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
         }
     }
     private var accessibilityText: String {
@@ -3543,7 +3546,7 @@ private struct RecentSearchChip: View {
         .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
         .onHover { hovered=$0 }
         .contextMenu { Button("删除这条最近搜索",role:.destructive,action:remove) }
-        .animation(reduceMotion ? nil : .easeOut(duration:0.12),value:hovered || removeFocused)
+        .animation(reduceMotion ? nil : WorkspaceMotion.hover,value:hovered || removeFocused)
     }
 }
 
@@ -3567,6 +3570,7 @@ private struct WorkspaceSearchSection: Identifiable {
 
 private struct SearchResultRow: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered = false
     let title: AttributedString
     let subtitle: AttributedString
@@ -3593,6 +3597,7 @@ private struct SearchResultRow: View {
                 .accessibilityElement(children:.combine)
         }.buttonStyle(.plain).onHover { hovered=$0 }
             .accessibilityLabel(subtitleText.isEmpty ? titleText : titleText + " · " + subtitleText)
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
     }
 }
 
@@ -3613,12 +3618,14 @@ private extension View {
 
 private struct WorkspaceSelectionHighlight: ViewModifier {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let highlighted: Bool
     let radius: CGFloat
     func body(content: Content) -> some View {
         content
             .background(highlighted ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: radius))
             .workspaceFocusRing(highlighted, radius: radius)
+            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: highlighted)
     }
 }
 
@@ -3656,7 +3663,7 @@ private struct MaterialMenuRow<Row: View, MenuContent: View>: View {
             }
             .onPreferenceChange(MaterialRowFailurePreferenceKey.self) { menuContentNeedsAttention = $0 }
             .onHover { hovered=$0 }
-            .animation(reduceMotion ? nil : .easeOut(duration:0.12),value:menuVisible)
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover,value:menuVisible)
     }
 }
 
@@ -3712,7 +3719,7 @@ private struct WorkspaceActionRowChrome<Row: View, MenuItems: View>: View {
                 }
             }
             .onHover { hovered=$0 }
-            .animation(reduceMotion ? nil : .easeOut(duration:0.12),value:menuVisible)
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover,value:menuVisible)
     }
 }
 
@@ -3730,6 +3737,7 @@ private struct WorkspaceFilterTabItem: Identifiable {
 private struct WorkspaceFilterTabs: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let items: [WorkspaceFilterTabItem]
     let selection: String
     let onSelect: (String) -> Void
@@ -3768,5 +3776,6 @@ private struct WorkspaceFilterTabs: View {
             .accessibilityAddTraits(selected ? [.isSelected] : [])
             .help(item.help)
             .accessibilityIdentifier("workspace.tab." + item.label)
+            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: selection)
     }
 }
