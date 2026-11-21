@@ -299,19 +299,22 @@ extension VoiceOSStore {
                 let row = group.row
                 guard let id = row["id"] else { continue }
                 let presentation = decodePresentation(row)
-                let groupTitle = presentation?.expression.flatMap { expression in
-                    guard expression.sourceIDs.count > 1,
-                          let source = catalog[id],
-                          let valid = source.recordingExpression(in: catalog) else { return nil }
-                    return valid.leadingDisplayTitle
+                var groupTitle: String?
+                if let expression = presentation?.expression,
+                   expression.sourceIDs.count > 1,
+                   let source = catalog[id],
+                   let valid = source.recordingExpression(in: catalog) {
+                    groupTitle = valid.leadingDisplayTitle
                 }
                 // The stored name stays in the body so a file name or ISO
                 // timestamp still finds the material after a rename.
                 let storedName = row["stored_name"] ?? ""
                 let body = group.transcripts.compactMap { $0.text }.joined(separator: " ")
-                let selected = presentation?.transcriptVersionID.flatMap { version in
-                    group.transcripts.last(where: { $0.versionID == version })
-                } ?? group.transcripts.last
+                var selected = group.transcripts.last
+                if let version = presentation?.transcriptVersionID,
+                   let match = group.transcripts.last(where: { $0.versionID == version }) {
+                    selected = match
+                }
                 // sources() exposes a transcript only for saved and reference-only
                 // materials, so the title reads the same text the library row shows.
                 var titleTranscript = ["saved", "reference_only"].contains(row["state"] ?? "") ? selected?.text : nil
