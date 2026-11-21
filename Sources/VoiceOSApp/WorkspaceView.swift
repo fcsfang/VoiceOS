@@ -887,7 +887,10 @@ struct WorkspaceView: View {
                     .focusEffectDisabled()
                     .onKeyPress { handleMaterialListKey($0) }
                     .onChange(of:materialKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
-                    .onAppear { requestMaterialListFocus() }
+                    .onAppear {
+                        requestMaterialListFocus()
+                        restoreKeyboardScroll(proxy: proxy, id: materialKeyboardFocus.id)
+                    }
             }
         case .actions:
             ScrollViewReader { proxy in
@@ -898,7 +901,13 @@ struct WorkspaceView: View {
                     .onKeyPress { handleActionListKey($0) }
                     .onChange(of:actionKeyboardHighlightID) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
                     .onChange(of:showingPlanToday) { _, shown in if !shown { requestActionListFocus() } }
-                    .onAppear { requestActionListFocus() }
+                    .onChange(of:showingSaveView) { _, shown in if !shown { requestActionListFocus() } }
+                    .onChange(of:reminderSettingsTarget?.id) { _, id in if id == nil { requestActionListFocus() } }
+                    .onChange(of:resultFeedbackTarget?.id) { _, id in if id == nil { requestActionListFocus() } }
+                    .onAppear {
+                        requestActionListFocus()
+                        restoreKeyboardScroll(proxy: proxy, id: actionKeyboardHighlightID)
+                    }
                     .task(id:actionUndo?.token) {
                         guard actionUndo != nil else { return }
                         do { try await Task.sleep(for:.seconds(8)) } catch { return }
@@ -975,7 +984,10 @@ struct WorkspaceView: View {
                     .focusEffectDisabled()
                     .onKeyPress { handleSearchListKey($0) }
                     .onChange(of:searchKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
-                    .onAppear { installSearchArrowMonitor() }
+                    .onAppear {
+                        installSearchArrowMonitor()
+                        restoreKeyboardScroll(proxy: proxy, id: searchKeyboardFocus.id)
+                    }
                     .onDisappear { removeSearchArrowMonitor() }
             }
         case .tool(let name): tool(name)
@@ -990,7 +1002,12 @@ struct WorkspaceView: View {
     }
     private var scrollKey: WorkspaceNavigationEntry {
         // A filter switches the visible list, so it must not inherit another list's offset.
-        var entry = navigationEntry
+        // With no topic open the themes list must not inherit a topic's tab or mode.
+        let browsingTopics = page == .themes && topicID == nil
+        var entry = WorkspaceNavigationEntry(
+            page: page, topicID: topicID,
+            topicTab: browsingTopics ? "" : topicTab,
+            topicReadingMode: browsingTopics ? "" : topicReadingMode)
         switch page {
         case .materials: entry.listFilter = materialFilter
         case .actions: entry.listFilter = actionFilter
@@ -1191,7 +1208,10 @@ struct WorkspaceView: View {
                     .focusEffectDisabled()
                     .onKeyPress { handleThemeListKey($0) }
                     .onChange(of:themeKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
-                    .onAppear { requestThemeListFocus() }
+                    .onAppear {
+                        requestThemeListFocus()
+                        restoreKeyboardScroll(proxy: proxy, id: themeKeyboardFocus.id)
+                    }
                 }
                 if filter.isEmpty && model.workspaceTopics.isEmpty {
                     HStack(spacing:8) {
@@ -1308,7 +1328,10 @@ struct WorkspaceView: View {
                 .focusEffectDisabled()
                 .onKeyPress { handleTopicMaterialListKey($0) }
                 .onChange(of:topicMaterialKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
-                .onAppear { requestTopicMaterialListFocus() }
+                .onAppear {
+                    requestTopicMaterialListFocus()
+                    restoreKeyboardScroll(proxy: proxy, id: topicMaterialKeyboardFocus.id)
+                }
             }
             DisclosureGroup("关联其他材料") {
                 ForEach(reading.unlinkedSources) { source in
@@ -1358,7 +1381,10 @@ struct WorkspaceView: View {
             .focusEffectDisabled()
             .onKeyPress { handleTopicReviewListKey($0) }
             .onChange(of:topicReviewKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
-            .onAppear { requestTopicReviewListFocus() }
+            .onAppear {
+                requestTopicReviewListFocus()
+                restoreKeyboardScroll(proxy: proxy, id: topicReviewKeyboardFocus.id)
+            }
             let actionIDs=reading.actionIDs
             let outcomes=(topicFocus?.outcomes ?? []).filter { actionIDs.contains($0.actionID) && ConversationReflectionFocus.date($0.createdAt).map { interval.contains($0) } == true }
             ForEach(outcomes) { outcome in WorkspaceRow(title:outcome.text,subtitle:"实际结果 · " + dateLabel(outcome.createdAt),icon:"leaf") { go(.task(outcome.actionID)) } }
@@ -1743,7 +1769,14 @@ struct WorkspaceView: View {
                 let catalog=recordCatalog
                 ForEach(sources) { source in
                     let rowID="material:" + source.id
-                    sourceRow(source,catalog:catalog)
+                    MaterialMenuRow(revealed: searchKeyboardFocus.id == rowID) {
+                        MaterialManagementControls(model:model,source:source,style:.compact,
+                            onSetReadingState:{ setMaterialReading(source.id,$0) },
+                            onSplitExpression:{ splitMaterialExpression(model.sourcePageIndex.expression(for: source.id)?.sourceIDs ?? [source.id]) },
+                            onRejudgeExpressions:{ rejudgeMaterialExpressions(source.presentation?.expression?.sourceIDs ?? [source.id]) })
+                    } row: {
+                        sourceRow(source,catalog:catalog,trailingGutter: WorkspaceRowChrome.materialGutter)
+                    }
                         .background(searchKeyboardFocus.id == rowID ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                         .workspaceFocusRing(searchKeyboardFocus.id == rowID, radius: WorkspaceMetrics.panelRadius)
                         .id(rowID)
@@ -1754,7 +1787,11 @@ struct WorkspaceView: View {
             }
         }
         .task(id: term) { await loadSearchHits(term) }
-        .onChange(of:term) { _, _ in searchKeyboardFocus.id=nil;searchExpandedKinds=[] }
+        .onChange(of:term) { _, _ in
+            searchKeyboardFocus.id=nil;searchExpandedKinds=[]
+            // A new query lists new rows; the old viewport would point into them.
+            scrollPositions[scrollKey] = ScrollPosition(edge: .top)
+        }
         .workspaceSlowLoading(searchBusy && searchHits.isEmpty, into: $showSlowSearch)
     }
     @ViewBuilder private var searchResults: some View {
@@ -2720,6 +2757,16 @@ struct WorkspaceView: View {
             return .handled
         default:
             return .ignored
+        }
+    }
+    /// Keyboard-driven scrollTo never writes back through the ScrollPosition
+/// binding, so a list re-entered after navigation restores its viewport from
+/// the kept keyboard selection instead of jumping to the top.
+    private func restoreKeyboardScroll(proxy: ScrollViewProxy, id: String?) {
+        guard let id else { return }
+        Task { @MainActor in
+            await Task.yield()
+            proxy.scrollTo(id, anchor: .center)
         }
     }
     private func requestActionListFocus() {
