@@ -952,3 +952,9 @@
 - 按语义跳过：系统材质胶囊上的层次色（ConstellationLegend）、三元组合表达式（ClaimNoteViews 警告/次要对）、三元中已含 palette 的分支（TaskInitiation 超限提示）。
 - 真机前后对比（首页/材料）：附注与元数据行颜色略加深、同屏一致，无观感回归；材料页样例含「日期 · 来源 · 仅本地/条待办」整行。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 148：性能第一批（2026-11-21，已推送）
+- 148-A 主题阅读状态跨页保留：`TopicReadingUIState`（选中卡片/筛选词/结构展开/键盘卡片环）按 topic+mode 键存到 WorkspaceView，返回时重建选中环并 scrollTo 到原卡片；筛选输入改经 Binding。
+- 148-B 轮询与快照收窄：材料页播放位置轮询自适应（播放中 300ms、其余 1500ms，空闲唤醒约 1/5）；`evaluatePausedActionIDs` 改用 `.coreSecondary` 快照（evaluate 只读 core 段五个字段，已核）。
+- 148-C 全景输入缓存：`panoramaInput()` 按 8 张表（sources 全文含 presentation_json/当前字幕版本、transcript_versions、model_attempts、contexts、context_inputs、claims、claim_reviews、segmented commits）SHA256 指纹做进程内单条目缓存，生成期间 1s 轮询不再重读解码全库；指纹异常回退重建。已知缺口：磁盘原件校验不参与指纹（表不变而文件损坏时缓存会掩盖抛错），记录待后续。
+- 性能发现另确认五个大热点（行动/材料/主题页体计算、首页行格式化、播放时钟整页失效）——首页与播放时钟已由 149 处理，材料/行动/主题页快照化排后续。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
