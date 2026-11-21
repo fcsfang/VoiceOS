@@ -60,7 +60,7 @@ struct WorkspaceDeliveryView: View {
                             VStack(alignment:.leading,spacing:12) {
                                 WorkspaceSectionHeading(title:"参考与来源") { WorkspaceBadge(text:"\(execution.references.count)", tone:.neutral) }
                                 WorkspaceListDivider()
-                                DisclosureGroup("参考来源") {
+                                DisclosureGroup("查看全部") {
                                     VStack(alignment: .leading, spacing: 12) {
                                         ForEach(Array(execution.references.enumerated()), id: \.offset) { _, ref in
                                             if let url = URL(string: ref.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
@@ -414,6 +414,13 @@ struct WorkspaceTaskView: View {
         reminderLink?.state == "linked" && model.reminderAccess?.enabled == true
             && model.reminderAccess?.calendarID == reminderLink?.calendarID
     }
+    /// Why 日期与提醒 is disabled while the link is live, so the control never
+    /// reads as silently broken.
+    private var reminderEditDisabledHint: String? {
+        guard !canEditReminderSettings else { return nil }
+        if model.reminderAccess?.enabled != true { return "提醒事项连接已暂停 · 恢复连接后可改日期。" }
+        return "提醒事项清单已变化 · 重新连接后可改日期。"
+    }
     private var recurrenceSelection: Binding<RecurrencePeriod?> {
         Binding(get: { self.recurrence }, set: { value in
             let previous = self.recurrence
@@ -484,6 +491,7 @@ struct WorkspaceTaskView: View {
                             Button("日期与提醒", systemImage: "calendar") { openReminderSettings() }
                                 .buttonStyle(.workspaceSecondary)
                                 .disabled(model.savingAction || model.remindersBusy || !canEditReminderSettings)
+                                .help(reminderEditDisabledHint ?? "设置日期与提醒")
                             if model.reminderAccess?.enabled == true {
                                 Text(model.reminderSyncStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                                 Button("核对提醒同步") { Task { await model.refreshTaskReminders() } }.buttonStyle(.workspaceSecondaryCompact).disabled(model.remindersBusy || model.reminderFieldsPending)
@@ -497,7 +505,7 @@ struct WorkspaceTaskView: View {
                                 Text("提醒事项连接已暂停 · 恢复连接后再核对。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             }
                         case .notConnected:
-                            Text("未连接 Apple 提醒事项 · 任务只保存在 VoiceOS；到「处理」页的「模型与提醒事项」连接后即可同步。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text("未连接 Apple 提醒事项 · 任务只保存在 VoiceOS；到「处理情况」页的「模型与提醒事项」连接后即可同步。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         case .fieldsPending:
                             Text("正在后台核对日期与优先级 · 完成后即可写入所选清单。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         case .fieldsUnchecked(let reason):

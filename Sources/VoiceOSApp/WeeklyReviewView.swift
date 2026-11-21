@@ -167,6 +167,11 @@ struct WeeklyReviewView: View {
                 NextActionFormSheet(model: model, outcome: goal, onAdded: { _ in nextStepNotice = "已添加下一步" })
             }
             .sheet(isPresented: $showingReflectionMap) { reflectionMapSheet }
+            // A dismissed sheet leaves the sheet's window with first responder;
+            // re-request the list focus so arrows/Return keep working.
+            .onChange(of: showingClarifyQueue) { _, shown in if !shown { requestReviewFocus() } }
+            .onChange(of: nextStepGoal?.id) { _, id in if id == nil { requestReviewFocus() } }
+            .onChange(of: showingReflectionMap) { _, shown in if !shown { requestReviewFocus() } }
         }
         .workspaceModalSurface()
     }
@@ -451,8 +456,10 @@ struct WeeklyReviewView: View {
         if let title = actionSourceTitle(action) {
             return "来自『\(shortenedSourceName(title))』"
         }
-        let fallback = model.claims.first { $0.id == action.claimID }?.references.first?.sourceID ?? action.claimID
-        return "来自『\(fallback.prefix(8))』"
+        if model.claims.first(where: { $0.id == action.claimID })?.references.isEmpty == false {
+            return "来自『相关材料』"
+        }
+        return "来自行动记录"
     }
 
     private func completedDate(_ action: ActionRecord) -> Date? {
