@@ -21,12 +21,13 @@ final class ReadOnlyLibraryChecks: XCTestCase {
     }
 
     @discardableResult
-    private func insertSource(_ id: String, name: String, presentation: RecordingPresentation? = nil, transcript: String? = nil) throws -> String? {
+    private func insertSource(_ id: String, name: String, kind: String = "user_text",
+                              presentation: RecordingPresentation? = nil, transcript: String? = nil) throws -> String? {
         let presentationJSON: String? = try presentation.map { try json($0) }
         try database.execute("""
         INSERT INTO sources(id,command_id,input_fingerprint,asset_id,version_id,name,kind,state,created_at,timezone,expected_bytes,expected_hash,relative_path,presentation_json)
-        VALUES(?,?,?,?,?,?,'user_text','saved',?,'Asia/Shanghai','0',?,?,?)
-        """, [id, "command-" + id, "fingerprint-" + id, "asset-" + id, "version-" + id, name,
+        VALUES(?,?,?,?,?,?,?,'saved',?,'Asia/Shanghai','0',?,?,?)
+        """, [id, "command-" + id, "fingerprint-" + id, "asset-" + id, "version-" + id, name, kind,
               "2026-11-01T00:00:00Z", "hash-" + id, "relative/" + id, presentationJSON])
         guard let transcript else { return nil }
         try database.execute("""
@@ -225,6 +226,19 @@ final class ReadOnlyLibraryChecks: XCTestCase {
         XCTAssertEqual(byID["action-current"]?.sourceTitle, "当前版本标题")
         XCTAssertEqual(byID["action-stale"]?.sourceTitle, "过期版本原名")
         XCTAssertEqual(byID["action-manual"]?.sourceTitle, "人工标题")
+    }
+
+    func testUnnamedAudioUsesRecordingDateInsteadOfStoredName() throws {
+        let storedName = "我的口述 · 2026-11-01T00:00:00Z"
+        try insertSource("source-voice", name: storedName, kind: "audio")
+        try insertClaim("claim-voice", sourceID: "source-voice", statement: "语音材料")
+        try insertAction("action-voice", claimID: "claim-voice", title: "语音材料",
+                         createdAt: "2026-11-02T00:00:00Z")
+
+        let rows = try ReadOnlyLibrary(root: base).actions(limit: 100, offset: 0)
+        XCTAssertEqual(rows.first?.sourceTitle, "录音 · 11月1日 08:00")
+        let humanized = MaterialNaming.displayName(storedName, timeZone: TimeZone(identifier: "Asia/Shanghai")!)
+        XCTAssertNotEqual(rows.first?.sourceTitle, humanized)
     }
 
     func testDuePrefersLocalScheduleAndMirrorsTimeSurface() throws {

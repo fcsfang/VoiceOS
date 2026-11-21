@@ -247,41 +247,80 @@ extension VoiceOSStore {
 
     public func rebuildSearchIndex() throws {
         let fingerprint = try searchFingerprint()
-        // Titles come from the same funnel as the library row, decoded from this
-        // row instead of loading every source and transcript twice.
+        // Titles come from the same funnel as the library row, decoded from these
+        // rows instead of loading every source and transcript twice. One row per
+        // transcript keeps each job's text; grouping below picks the version the
+        // saved presentation names.
         let materials = try db.query("""
         SELECT s.id AS id, s.name AS stored_name, s.kind AS kind, s.created_at AS created_at,
-               s.timezone AS timezone, s.presentation_json AS presentation_json,
-               MAX(t.current_version_id) AS transcript_version_id,
-               COALESCE(GROUP_CONCAT(v.text, ' '), '') AS body
+               s.timezone AS timezone, s.presentation_json AS presentation_json, s.state AS state,
+               t.current_version_id AS transcript_version_id, v.text AS transcript_text
         FROM sources s
         LEFT JOIN transcripts t ON t.source_id = s.id
         LEFT JOIN transcript_versions v ON v.id = t.current_version_id
         WHERE s.state != 'trashed'
-        GROUP BY s.id
+        ORDER BY s.id, t.rowid
         """)
+        struct MaterialGroup {
+            let row: [String: String]
+            var transcripts: [(versionID: String?, text: String?)]
+        }
+        func decodePresentation(_ row: [String: String]) -> RecordingPresentation? {
+            row["presentation_json"].flatMap {
+                try? JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8))
+            }
+        }
+        var groups: [MaterialGroup] = []
+        for row in materials {
+            let transcript = (versionID: row["transcript_version_id"], text: row["transcript_text"])
+            if let last = groups.last, last.row["id"] == row["id"] {
+                groups[groups.count - 1].transcripts.append(transcript)
+            } else {
+                groups.append(MaterialGroup(row: row, transcripts: [transcript]))
+            }
+        }
+        var memberIDs: Set<String> = []
+        for group in groups {
+            guard let expression = decodePresentation(group.row)?.expression,
+                  expression.sourceIDs.count > 1 else { continue }
+            memberIDs.formUnion(expression.sourceIDs)
+        }
+        // The same member and permission check the library list runs, loaded only
+        // for members of a saved multi-part expression.
+        let catalog: [String: SourceRecord] = memberIDs.isEmpty ? [:] : Dictionary(
+            try sourceRecords(ids: Array(memberIDs)).map { ($0.id, $0) },
+            uniquingKeysWith: { first, _ in first })
         let claims = try db.query("SELECT id, statement AS title, statement AS body FROM claims")
         let actions = try db.query("SELECT id, title, note AS body FROM actions")
         let topics = try db.query("SELECT id, title, title AS body FROM reflection_questions")
         try db.transaction {
             try db.execute("DELETE FROM search_index")
-            for row in materials {
+            for group in groups {
+                let row = group.row
                 guard let id = row["id"] else { continue }
+                let presentation = decodePresentation(row)
+                let groupTitle = presentation?.expression.flatMap { expression in
+                    guard expression.sourceIDs.count > 1,
+                          let source = catalog[id],
+                          let valid = source.recordingExpression(in: catalog) else { return nil }
+                    return valid.leadingDisplayTitle
+                }
                 // The stored name stays in the body so a file name or ISO
                 // timestamp still finds the material after a rename.
                 let storedName = row["stored_name"] ?? ""
-                let body = row["body"] ?? ""
-                let presentation = row["presentation_json"].flatMap {
-                    try? JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8))
-                }
-                let groupTitle = presentation?.expression.flatMap { expression in
-                    expression.sourceIDs.count > 1 ? expression.leadingDisplayTitle : nil
-                }
+                let body = group.transcripts.compactMap { $0.text }.joined(separator: " ")
+                let selected = presentation?.transcriptVersionID.flatMap { version in
+                    group.transcripts.last(where: { $0.versionID == version })
+                } ?? group.transcripts.last
+                // sources() exposes a transcript only for saved and reference-only
+                // materials, so the title reads the same text the library row shows.
+                var titleTranscript = ["saved", "reference_only"].contains(row["state"] ?? "") ? selected?.text : nil
+                if titleTranscript?.isEmpty == true { titleTranscript = nil }
                 let title = groupTitle ?? MaterialDisplayTitle.title(
                     name: storedName, kind: row["kind"] ?? "", createdAt: row["created_at"] ?? "",
                     timeZone: row["timezone"] ?? TimeZone.current.identifier,
-                    presentation: presentation, transcript: body.isEmpty ? nil : body,
-                    transcriptVersionID: row["transcript_version_id"])
+                    presentation: presentation, transcript: titleTranscript,
+                    transcriptVersionID: selected?.versionID)
                 let indexTitle = MaterialNaming.displayName(MarkdownDocument.plainTitle(title))
                 try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('material', ?, ?, ?)",
                                [id, searchSpaced(indexTitle), searchSpaced(storedName + " " + body)])

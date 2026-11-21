@@ -24,7 +24,7 @@ extension VoiceOSStore {
     }
 
     private func queueRecordingUnderstanding(sourceID: String, previousActionIDs: [String], transcriptionCorrection: Bool) throws -> [String] {
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         guard let corrected = catalog[sourceID], ["audio", "video"].contains(corrected.kind),
               corrected.transcriptVersionID != nil, !corrected.localOnly, corrected.state == "saved" else {
             throw VoiceOSError("当前录音或现有文字处理权限不可用，未继续处理")
@@ -129,7 +129,7 @@ extension VoiceOSStore {
     /// After the ordinary full-text checks finish, update saved physical pair
     /// versions. It cannot enrol sources or authorize an unavailable companion.
     public func refreshCorrectedRecordingContexts(sourceIDs: [String]) throws {
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var pairs: [RecordingContext] = []
         for id in Set(sourceIDs) {
             guard let personal = catalog[id], personal.presentation?.correctedSourceIDs != nil,

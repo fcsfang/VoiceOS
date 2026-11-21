@@ -87,7 +87,9 @@ public enum MaterialDisplayTitle {
         if presentation?.transcriptVersionID == transcriptVersionID,
            let automatic = presentation?.automatic?.title,
            let title = MaterialTitleText.normalizedGenerated(automatic) { return title }
-        if ["audio", "video"].contains(kind) { return "录音 · " + recordingDateLabel(name: name, kind: kind, createdAt: createdAt, timeZone: timeZone) }
+        if ["audio", "video"].contains(kind) {
+            return recordingFallbackTitle(name: name, kind: kind, createdAt: createdAt, timeZone: timeZone)
+        }
         if let text = transcript {
             let firstLine = String(text.drop(while: { $0 == "\n" }).prefix(while: { $0 != "\n" }))
                 .trimmingCharacters(in: .whitespaces)
@@ -107,6 +109,11 @@ public enum MaterialDisplayTitle {
         case "ai_text": return "未命名 AI 资料"
         default: return name
         }
+    }
+
+    /// The unnamed recording label shared by library rows and the read-only door.
+    static func recordingFallbackTitle(name: String, kind: String, createdAt: String, timeZone: String) -> String {
+        "录音 · " + recordingDateLabel(name: name, kind: kind, createdAt: createdAt, timeZone: timeZone)
     }
 
     static func expressedDate(name: String, kind: String, createdAt: String, timeZone: String) -> Date? {
@@ -223,10 +230,14 @@ extension VoiceOSStore {
         try db.execute("UPDATE sources SET presentation_json=? WHERE id=?", [String(decoding: try JSONEncoder().encode(value), as: UTF8.self), sourceID])
     }
     public func prepareRecordingTitles(sourceIDs: Set<String>? = nil) throws -> RecordingTitleInput? {
-        let chosen = try sources().filter { !$0.needsTranscriptionReview && $0.needsContentTitle && (sourceIDs?.contains($0.id) ?? true) }
+        // A second transcription job shows the same source once per job; titles
+        // are generated once per source.
+        var seen: Set<String> = []
+        let unique = try sources().filter { seen.insert($0.id).inserted }
+        let chosen = unique.filter { !$0.needsTranscriptionReview && $0.needsContentTitle && (sourceIDs?.contains($0.id) ?? true) }
         guard !chosen.isEmpty else { return nil }
         let context = try prepareLocalTranscriptContext(sourceIDs: chosen.map(\.id), scalarBudget: max(1, chosen.reduce(0) { $0 + ($1.transcript?.unicodeScalars.count ?? 0) }))
-        return .init(context: context, policies: Dictionary(uniqueKeysWithValues: chosen.map { ($0.id, $0.policyVersion) }))
+        return .init(context: context, policies: Dictionary(chosen.map { ($0.id, $0.policyVersion) }, uniquingKeysWith: { first, _ in first }))
     }
     public static func validateRecordingTitles(_ proposals: [RecordingTitleProposal], input: RecordingTitleInput) throws {
         guard proposals.count == input.context.sources.count, Set(proposals.map(\.sourceID)) == Set(input.context.sources.map(\.sourceID)) else { throw VoiceOSError("内容命名未覆盖全部录音") }
@@ -245,7 +256,7 @@ extension VoiceOSStore {
         try Self.validateRecordingTitles(proposals, input: input)
         try requireReviewedTranscriptions(sourceIDs:input.context.sources.map(\.sourceID),destination:.cloud)
         try validateLocalTranscriptContext(input.context)
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var savedCount = 0
         try db.transaction {
             for proposal in proposals {
@@ -328,7 +339,7 @@ extension VoiceOSStore {
     @discardableResult
     public func detachRecordingsFromExpressions(sourceIDs: Set<String>) throws -> Int {
         guard !sourceIDs.isEmpty else { return 0 }
-        let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let expressionIDs = Set(sourceIDs.compactMap { catalog[$0]?.presentation?.expression?.id })
         guard !expressionIDs.isEmpty else { return 0 }
         let detached = catalog.values.filter { source in
@@ -394,10 +405,10 @@ extension VoiceOSStore {
     /// Failures still matching their material's current transcript and policy
     /// version, keyed exactly as the in-memory review dictionary.
     public func storedTranscriptionReviewFailures() throws -> [String: String] {
-        Dictionary(uniqueKeysWithValues: try sources().compactMap { source in
+        Dictionary(try sources().compactMap { source in
             guard let failure = source.transcriptionReviewFailure else { return nil }
             return (source.id + ":" + failure.transcriptVersionID + ":" + String(failure.policyVersion), failure.reason)
-        })
+        }, uniquingKeysWith: { first, _ in first })
     }
 }
 
