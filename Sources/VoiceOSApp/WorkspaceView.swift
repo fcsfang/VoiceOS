@@ -357,6 +357,7 @@ struct WorkspaceView: View {
     @State private var searchExpandedKinds: Set<SearchHit.Kind> = []
     @State private var searchFailed = false
     @State private var searchBusy = false
+    @State private var searchGeneration = 0
     @State private var lastSearchAnnouncement = ""
     @State private var searchHovered = false
     @State private var recentSearches: [String] = UserDefaults.standard.stringArray(forKey: recentSearchDefaultsKey) ?? []
@@ -467,7 +468,15 @@ struct WorkspaceView: View {
             .task(id:model.initialized) { if model.initialized { savedViews = await model.savedWorkspaceViews() } }
             .task { await model.setPanoramaVisible(page == .home && homeShowsPanorama) }
             .task(id:topicLoadKey) {
-                guard page == .themes, let id=topicID else { topicFocus=nil;topicFocusTopicID=nil; return }
+                guard page == .themes, let id=topicID else {
+                    topicFocus=nil;topicFocusTopicID=nil
+                    if !topicLoadError.isEmpty {
+                        if error == topicLoadError { error="" }
+                        if errorRetry?.message == topicLoadError { errorRetry=nil }
+                    }
+                    topicLoadError=""
+                    return
+                }
                 do {
                     let focus=try await model.loadTopicReflection(id)
                     guard topicID == id, !Task.isCancelled else { return }
@@ -903,7 +912,7 @@ struct WorkspaceView: View {
                             },openFollowups:{ go(.tool("思想与下一步")) },scroll:sourceScrollBinding(id),folds:sourceFoldBinding(id,transcript:source.transcript))
                                 .id(id)
                         }
-                    } else { unavailable("这份材料暂时不可用",description:"可以搜索其他材料，或回到主题。") }
+                    } else { unavailable("这份材料暂时不可用",description:"可以搜索其他材料，或回到主题。",actionTitle:"回到主题") { go(.themes) } }
                 }.frame(maxWidth:.infinity,maxHeight:.infinity)
             }
         case .delivery(let id):
@@ -976,9 +985,9 @@ struct WorkspaceView: View {
     private func sourceFoldBinding(_ id:String,transcript:String?) -> Binding<SourceFoldState> {
         Binding(get: { sourceFoldStates[id] ?? SourceFoldState.initial(transcript:transcript) }, set: { sourceFoldStates[id] = $0 })
     }
-    private func unavailable(_ title:String,description:String) -> some View {
+    private func unavailable(_ title:String,description:String,actionTitle:String = "回到行动",action: (() -> Void)? = nil) -> some View {
         WorkspaceEmptyState(title:title,systemImage:"leaf",description:description) {
-            Button("回到行动") { go(.actions) }.buttonStyle(.workspacePrimary)
+            Button(actionTitle) { if let action { action() } else { go(.actions) } }.buttonStyle(.workspacePrimary)
         }.frame(maxWidth:.infinity)
     }
     private func distinctExpressions(_ sources:[SourceRecord]) -> [SourceRecord] {
@@ -1737,17 +1746,19 @@ struct WorkspaceView: View {
         return sections
     }
     private func loadSearchHits(_ term:String) async {
+        searchGeneration += 1
+        let generation = searchGeneration
         guard !term.isEmpty else {
             searchHits=[];searchTotals=[:];searchFailed=false;searchBusy=false;searchKeyboardFocus.id=nil;searchExpandedKinds=[]
             lastSearchAnnouncement=""
             return
         }
         searchBusy=true
-        defer { searchBusy=false }
+        defer { if generation == searchGeneration { searchBusy=false } }
         do { try await Task.sleep(for:.milliseconds(180)) } catch { return }
-        guard !Task.isCancelled else { return }
+        guard generation == searchGeneration, !Task.isCancelled else { return }
         let results=await model.searchAll(term, perKindLimit: searchExpandedKinds.isEmpty ? 20 : 200)
-        guard term == query.trimmingCharacters(in:.whitespacesAndNewlines) else { return }
+        guard generation == searchGeneration, term == query.trimmingCharacters(in:.whitespacesAndNewlines) else { return }
         if let results {
             searchHits=cappedSearchHits(results.hits);searchTotals=results.totals;searchFailed=false
             let total = results.totals.values.reduce(0, +)
@@ -1782,8 +1793,11 @@ struct WorkspaceView: View {
         guard term.count >= 2 else { return [] }
         let key = term.lowercased()
         func prefixed(_ text: String) -> Bool { !text.isEmpty && text.lowercased().hasPrefix(key) }
-        let materials = model.records.filter { !$0.isTrashed && prefixed(displayTitle($0.name)) }.map { source in
-            WorkspaceSearchSuggestion(id:"suggestion:material:" + source.id,title:displayTitle(source.name),subtitle:"材料",icon:"doc.text") { go(.source(source.id)) }
+        let materials = model.records.compactMap { source -> WorkspaceSearchSuggestion? in
+            guard !source.isTrashed else { return nil }
+            let title = displayTitle(source.displayTitle)
+            guard prefixed(title) else { return nil }
+            return WorkspaceSearchSuggestion(id:"suggestion:material:" + source.id,title:title,subtitle:"材料",icon:"doc.text") { go(.source(source.id)) }
         }
         let topics = model.workspaceTopics.filter { prefixed($0.title) }.map { topic in
             WorkspaceSearchSuggestion(id:"suggestion:topic:" + topic.id,title:topic.title,subtitle:"主题",icon:"circle.hexagongrid") { selectTopic(topic.id) }

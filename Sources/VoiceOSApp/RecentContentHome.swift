@@ -26,7 +26,6 @@ struct RecentContentHome: View {
     @SceneStorage("recentHome.timelineAnchor") private var storedTimelineAnchor = ""
     @State private var timelineRestored = false
     @State private var readingStates: [String: SourceReadingState] = [:]
-    @State private var hoveredTimelineID: String?
     @State private var clueRename: ClueRenameRequest?
     @State private var clueFailureText = ""
     @State private var clueFailureTitle = "操作未完成"
@@ -127,7 +126,8 @@ struct RecentContentHome: View {
     private var empty: some View {
         Group {
             if let message = model.workspaceLastError {
-                WorkspaceEmptyState(title: "资料库读取失败", systemImage: "tray", description: message) {
+                WorkspaceEmptyState(title: "资料库读取失败", systemImage: "tray", description: message,
+                                    severity: .danger, selectableMessage: true) {
                     if model.workspaceLastErrorRetry != nil {
                         Button("重试") { model.retryWorkspaceError() }.buttonStyle(.workspacePrimary)
                     }
@@ -158,9 +158,8 @@ struct RecentContentHome: View {
                             dayHeader(day)
                             VStack(alignment: .leading, spacing: 8) {
                                 ForEach(day.items) { item in
-                                    Button { selectedID = item.id } label: { row(item, hovered: hoveredTimelineID == item.id) }
+                                    Button { selectedID = item.id } label: { row(item) }
                                         .buttonStyle(.plain)
-                                        .onHover { hoveredTimelineID = $0 ? item.id : (hoveredTimelineID == item.id ? nil : hoveredTimelineID) }
                                         .id(item.id)
                                         .background {
                                             GeometryReader { geometry in
@@ -249,7 +248,7 @@ struct RecentContentHome: View {
         }
     }
 
-    private func row(_ item: RecentContentItem, hovered: Bool) -> some View {
+    private func row(_ item: RecentContentItem) -> some View {
         let isSelected = selected?.id == item.id
         return HStack(alignment: .top, spacing: 10) {
             Image(systemName: rowIcon(item)).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
@@ -273,7 +272,7 @@ struct RecentContentHome: View {
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .homeCard(isSelected: isSelected, hovered: hovered)
+        .homeCard(isSelected: isSelected)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(rowAccessibilityLabel(item))
         .accessibilityAddTraits(isSelected ? .isSelected : AccessibilityTraits())
@@ -536,7 +535,7 @@ struct RecentContentHome: View {
     private func threadSection(_ thread: RecentContentThread, siblings: [RecentContentThread]) -> some View {
         let notes = thread.thoughts.filter { $0.kind != .goal }
         return VStack(alignment: .leading, spacing: 0) {
-            Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, WorkspaceMetrics.groupGap)
+            WorkspaceListDivider().padding(.bottom, WorkspaceMetrics.groupGap)
             HStack(alignment: .center, spacing: 14) {
                 Text(thread.title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
@@ -610,7 +609,7 @@ struct RecentContentHome: View {
     @ViewBuilder private func tasksSummary(_ tasks: [RecentContentTask]) -> some View {
         if !tasks.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
-                Rectangle().fill(palette.border).frame(height: 1).padding(.bottom, WorkspaceMetrics.groupGap)
+                WorkspaceListDivider().padding(.bottom, WorkspaceMetrics.groupGap)
                 Text("这条材料带出了 \(tasks.count) 条待办").vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                 VStack(spacing: 0) {
                     ForEach(tasks) { task in
@@ -989,21 +988,23 @@ private struct ThoughtLine: View {
 
 private struct HomeCard: ViewModifier {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.isEnabled) private var isEnabled
     let isSelected: Bool
-    var hovered: Bool = false
+    @State private var hovered = false
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius)
         content
             .padding(.horizontal, 12).padding(.vertical, 10)
-            .background(isSelected ? palette.selection : hovered ? palette.hover : palette.surface, in: shape)
+            .background(isSelected ? palette.selection : hovered && isEnabled ? palette.hover : palette.surface, in: shape)
             .overlay { shape.strokeBorder(isSelected ? palette.focusRing : palette.border, lineWidth: 1) }
             .contentShape(shape)
+            .onHover { hovered = $0 && isEnabled }
     }
 }
 
 private extension View {
-    func homeCard(isSelected: Bool, hovered: Bool = false) -> some View {
-        modifier(HomeCard(isSelected: isSelected, hovered: hovered))
+    func homeCard(isSelected: Bool) -> some View {
+        modifier(HomeCard(isSelected: isSelected))
     }
 }

@@ -88,25 +88,54 @@ struct WorkspaceSearchField: View {
 }
 
 struct WorkspaceEmptyState<Actions: View>: View {
+    @Environment(\.workspacePalette) private var palette
     let title: String
     var systemImage: String = "leaf"
     var description: String = ""
+    /// A failed read keeps the danger tone and lets the reader copy the detail.
+    var severity: WorkspaceNoticeText.Severity? = nil
+    var selectableMessage: Bool = false
     @ViewBuilder let actions: () -> Actions
 
     var body: some View {
         ContentUnavailableView {
             Label(title, systemImage: systemImage)
         } description: {
-            if !description.isEmpty { Text(description) }
+            if !description.isEmpty {
+                if selectableMessage {
+                    descriptionText.textSelection(.enabled)
+                } else {
+                    descriptionText
+                }
+            }
         } actions: {
             actions()
         }.frame(maxWidth: .infinity)
     }
+
+    @ViewBuilder private var descriptionText: some View {
+        if let severity {
+            Text(description).foregroundStyle(tint(severity))
+        } else {
+            Text(description)
+        }
+    }
+
+    private func tint(_ severity: WorkspaceNoticeText.Severity) -> Color {
+        switch severity {
+        case .danger: palette.danger
+        case .warning: palette.warning
+        case .info: palette.accent
+        case .success: palette.success
+        }
+    }
 }
 
 extension WorkspaceEmptyState where Actions == EmptyView {
-    init(title: String, systemImage: String = "leaf", description: String = "") {
-        self.init(title: title, systemImage: systemImage, description: description) { EmptyView() }
+    init(title: String, systemImage: String = "leaf", description: String = "",
+         severity: WorkspaceNoticeText.Severity? = nil, selectableMessage: Bool = false) {
+        self.init(title: title, systemImage: systemImage, description: description,
+                  severity: severity, selectableMessage: selectableMessage) { EmptyView() }
     }
 }
 

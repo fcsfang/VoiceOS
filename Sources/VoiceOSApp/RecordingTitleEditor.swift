@@ -9,7 +9,13 @@ struct RecordingTitleEditor: View {
     @State private var saving = false
     init(record: SourceRecord, model: ControlCenter, dismiss: @escaping () -> Void) {
         self.record = record; self.model = model; self.dismiss = dismiss
-        _title = State(initialValue: record.contentTitle ?? "")
+        let stored = record.contentTitle ?? ""
+        // The list already normalizes automatic titles; a stored title that is
+        // the list title is manual or already tightened, so keep it verbatim.
+        let initial = stored.isEmpty || stored == record.displayTitle
+            ? record.displayTitle
+            : (MaterialTitleText.normalizedGenerated(stored) ?? record.displayTitle)
+        _title = State(initialValue: initial)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
