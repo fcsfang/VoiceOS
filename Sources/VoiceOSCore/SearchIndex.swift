@@ -247,11 +247,13 @@ extension VoiceOSStore {
 
     public func rebuildSearchIndex() throws {
         let fingerprint = try searchFingerprint()
-        // The title column holds what the library renders, so generated titles,
-        // humanized stored names, and recording dates are searchable as shown.
-        let titles = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, Self.materialSearchTitle($0)) })
+        // Titles come from the same funnel as the library row, decoded from this
+        // row instead of loading every source and transcript twice.
         let materials = try db.query("""
-        SELECT s.id AS id, s.name AS stored_name, COALESCE(GROUP_CONCAT(v.text, ' '), '') AS body
+        SELECT s.id AS id, s.name AS stored_name, s.kind AS kind, s.created_at AS created_at,
+               s.timezone AS timezone, s.presentation_json AS presentation_json,
+               MAX(t.current_version_id) AS transcript_version_id,
+               COALESCE(GROUP_CONCAT(v.text, ' '), '') AS body
         FROM sources s
         LEFT JOIN transcripts t ON t.source_id = s.id
         LEFT JOIN transcript_versions v ON v.id = t.current_version_id
@@ -268,9 +270,21 @@ extension VoiceOSStore {
                 // The stored name stays in the body so a file name or ISO
                 // timestamp still finds the material after a rename.
                 let storedName = row["stored_name"] ?? ""
-                let title = titles[id] ?? MaterialNaming.displayName(storedName)
+                let body = row["body"] ?? ""
+                let presentation = row["presentation_json"].flatMap {
+                    try? JSONDecoder().decode(RecordingPresentation.self, from: Data($0.utf8))
+                }
+                let groupTitle = presentation?.expression.flatMap { expression in
+                    expression.sourceIDs.count > 1 ? expression.leadingDisplayTitle : nil
+                }
+                let title = groupTitle ?? MaterialDisplayTitle.title(
+                    name: storedName, kind: row["kind"] ?? "", createdAt: row["created_at"] ?? "",
+                    timeZone: row["timezone"] ?? TimeZone.current.identifier,
+                    presentation: presentation, transcript: body.isEmpty ? nil : body,
+                    transcriptVersionID: row["transcript_version_id"])
+                let indexTitle = MaterialNaming.displayName(MarkdownDocument.plainTitle(title))
                 try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('material', ?, ?, ?)",
-                               [id, searchSpaced(title), searchSpaced(storedName + " " + (row["body"] ?? ""))])
+                               [id, searchSpaced(indexTitle), searchSpaced(storedName + " " + body)])
             }
             for row in claims {
                 try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('claim', ?, ?, ?)",
@@ -288,12 +302,6 @@ extension VoiceOSStore {
             try db.execute("INSERT OR REPLACE INTO search_index_meta(key, value) VALUES('shape', ?)", [searchIndexShape])
             try db.execute("DELETE FROM search_index_meta WHERE key='dirty'")
         }
-    }
-
-    /// Mirrors WorkspaceView's row title: markdown markers stripped, stored
-    /// timestamps humanized in the current time zone.
-    private static func materialSearchTitle(_ source: SourceRecord) -> String {
-        MaterialNaming.displayName(MarkdownDocument.plainTitle(source.displayTitle))
     }
 
     private func searchFingerprint() throws -> String {

@@ -18,12 +18,16 @@ final class SearchIndexChecks: XCTestCase {
 
     private func now() -> String { ISO8601DateFormatter().string(from: Date()) }
 
-    private func insertSource(_ db: Database, name: String, transcript: String? = nil, createdAt: String = "2026-11-14T00:00:00Z") throws -> String {
+    private func insertSource(_ db: Database, name: String, transcript: String? = nil,
+                              kind: String = "external_text", localOnly: Bool = true,
+                              state: String = "saved",
+                              createdAt: String = "2026-11-14T00:00:00Z") throws -> String {
         let id = UUID().uuidString
         try db.execute("""
-        INSERT INTO sources(id,command_id,input_fingerprint,asset_id,version_id,name,kind,speaker,origin,state,created_at,timezone,expected_bytes,expected_hash,relative_path)
-        VALUES(?,?,?,?,?,?, 'external_text','unknown','external','saved',?,?, '0','0',?)
-        """, [id, "source:" + id, "fixture:" + id, "asset:" + id, "version:" + id, name, createdAt, TimeZone.current.identifier, "assets/" + id])
+        INSERT INTO sources(id,command_id,input_fingerprint,asset_id,version_id,name,kind,speaker,origin,state,created_at,timezone,expected_bytes,expected_hash,relative_path,local_only)
+        VALUES(?,?,?,?,?,?,?,'unknown','external',?,?,?, '0','0',?,?)
+        """, [id, "source:" + id, "fixture:" + id, "asset:" + id, "version:" + id, name, kind,
+              state, createdAt, TimeZone.current.identifier, "assets/" + id, localOnly ? "1" : "0"])
         if let transcript {
             let assetID = UUID().uuidString, jobID = UUID().uuidString, transcriptID = UUID().uuidString, versionID = UUID().uuidString
             try db.execute("INSERT INTO assets(id,source_id,relative_path,bytes,sha256,role) VALUES(?,?,?,?,'0','original')", [assetID, id, "assets/" + id, "0"])
@@ -71,6 +75,12 @@ final class SearchIndexChecks: XCTestCase {
 
     private func transcriptVersionID(_ db: Database, sourceID: String) throws -> String? {
         try db.query("SELECT current_version_id AS id FROM transcripts WHERE source_id=?", [sourceID]).first?["id"]
+    }
+
+    private func setSpans(_ db: Database, sourceID: String, text: String) throws {
+        let spans = [TranscriptSpan(textStart: 0, textEnd: text.unicodeScalars.count)]
+        try db.execute("UPDATE transcript_versions SET spans_json=? WHERE transcript_id IN (SELECT id FROM transcripts WHERE source_id=?)",
+                       [String(decoding: try JSONEncoder().encode(spans), as: UTF8.self), sourceID])
     }
 
     func testMigrationCreatesSearchIndex() async throws {
@@ -469,5 +479,86 @@ final class SearchIndexChecks: XCTestCase {
         let hits = try await store.search(query: "新名字")
         XCTAssertEqual(hits.map(\.refID), [material])
         XCTAssertEqual(hits.first?.title, "新名字材料")
+    }
+
+    func testMaterialRowTitlePrefersGroupTitle() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let first = try insertSource(db, name: "第一段原名", transcript: "第一段正文里的独特措辞")
+        let second = try insertSource(db, name: "第二段原名", transcript: "第二段正文里的独特措辞")
+        let firstVersion = try XCTUnwrap(try transcriptVersionID(db, sourceID: first))
+        let secondVersion = try XCTUnwrap(try transcriptVersionID(db, sourceID: second))
+        let expression = RecordingExpression(id: "expression-group", sourceIDs: [first, second],
+                                             title: "连续讨论的分组标题", summary: "摘要", reason: "同一段表达",
+                                             responseIDs: ["expression-response"],
+                                             versions: [first: firstVersion, second: secondVersion],
+                                             policies: [first: 1, second: 1], state: "completed",
+                                             previousActionIDs: [])
+        for id in [first, second] {
+            var presentation = RecordingPresentation()
+            presentation.expression = expression
+            try setPresentation(db, sourceID: id, presentation)
+        }
+        try await store.rebuildSearchIndex()
+
+        let hits = try await store.search(query: "连续讨论")
+        XCTAssertEqual(Set(hits.map(\.refID)), Set([first, second]))
+        XCTAssertTrue(hits.allSatisfy { $0.title == "连续讨论的分组标题" })
+    }
+
+    func testDuplicateTranscriptionJobsDoNotBreakRebuild() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let material = try insertSource(db, name: "重复转写材料", transcript: "第一次转写正文")
+        let assetID = try XCTUnwrap(try db.query("SELECT id FROM assets WHERE source_id=?", [material]).first?["id"])
+        let jobID = UUID().uuidString, transcriptID = UUID().uuidString, versionID = UUID().uuidString
+        try db.execute("""
+        INSERT INTO jobs(id,source_id,input_version_id,stage,config,state)
+        VALUES(?,?,?,'transcription','second','completed')
+        """, [jobID, material, "version:" + material])
+        try db.execute("""
+        INSERT INTO transcripts(id,source_id,input_asset_id,input_version_id,job_id,kind,text,locale,backend,created_at)
+        VALUES(?,?,?,?,?,'verbatim','第二次转写正文','zh_CN','fixture','2026-11-14T00:00:00Z')
+        """, [transcriptID, material, assetID, "version:" + material, jobID])
+        try db.execute("""
+        INSERT INTO transcript_versions(id,transcript_id,version_no,text,spans_json,reason,actor,created_at)
+        VALUES(?,?,1,'第二次转写正文','[]','original','system','2026-11-14T00:00:00Z')
+        """, [versionID, transcriptID])
+        try db.execute("UPDATE transcripts SET current_version_id=? WHERE id=?", [versionID, transcriptID])
+
+        try await store.rebuildSearchIndex()
+        let hits = try await store.search(query: "重复转写材料")
+        XCTAssertEqual(hits.map(\.refID), [material])
+    }
+
+    func testGeneratedTitlesCountOnlySavedProposals() async throws {
+        let store = try await openStore()
+        let db = await store.db
+        let firstText = "这是第一段完整的录音正文。"
+        let secondText = "这是第二段完整的录音正文。"
+        let valid = try insertSource(db, name: "录音一", transcript: firstText,
+                                     kind: "audio", localOnly: false, state: "reference_only")
+        let invalid = try insertSource(db, name: "录音二", transcript: secondText,
+                                       kind: "audio", localOnly: false, state: "reference_only")
+        try setSpans(db, sourceID: valid, text: firstText)
+        try setSpans(db, sourceID: invalid, text: secondText)
+
+        let saved = try await store.generateRecordingTitles(using: SplitTitlePort(validSourceID: valid))
+        XCTAssertEqual(saved, 1)
+        let records = try await store.sources()
+        XCTAssertEqual(records.filter { $0.presentation?.automatic != nil }.map(\.id), [valid])
+        XCTAssertNil(records.first { $0.id == invalid }?.presentation?.automatic)
+        XCTAssertEqual(records.first { $0.id == valid }?.presentation?.automatic?.title, "有效标题")
+    }
+}
+
+private struct SplitTitlePort: RecordingTitlePort {
+    let validSourceID: String
+    func generate(_ input: RecordingTitleInput) async throws -> ([RecordingTitleProposal], [String]) {
+        (input.context.sources.map { source in
+            RecordingTitleProposal(sourceID: source.sourceID,
+                                   title: source.sourceID == validSourceID ? "有效标题" : "。。。",
+                                   summary: "摘要", quotes: [source.text])
+        }, ["split-title-result"])
     }
 }

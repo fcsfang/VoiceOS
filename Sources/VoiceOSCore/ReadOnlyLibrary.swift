@@ -355,7 +355,11 @@ public struct ReadOnlyLibrary {
         guard let refsJSON,
               let references = try? JSONDecoder().decode([ClaimReference].self, from: Data(refsJSON.utf8)),
               let sourceID = references.first?.sourceID,
-              let row = try connection.query("SELECT id,name,kind,state,created_at,presentation_json FROM sources WHERE id=?", [sourceID]).first else {
+              let row = try connection.query("""
+              SELECT s.id,s.name,s.kind,s.state,s.created_at,s.presentation_json,
+                     (SELECT t.current_version_id FROM transcripts t WHERE t.source_id=s.id ORDER BY t.created_at DESC LIMIT 1) AS transcript_version_id
+              FROM sources s WHERE s.id=?
+              """, [sourceID]).first else {
             return nil
         }
         return ReadOnlySource(id: row["id"] ?? sourceID,
@@ -376,7 +380,8 @@ public struct ReadOnlyLibrary {
         }
         let manual = presentation.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let manual, !manual.isEmpty { return manual }
-        if let automatic = presentation.automatic?.title,
+        if presentation.transcriptVersionID == row["transcript_version_id"],
+           let automatic = presentation.automatic?.title,
            let title = MaterialTitleText.normalizedGenerated(automatic) { return title }
         return MaterialNaming.displayName(name)
     }

@@ -16,27 +16,68 @@ public enum MaterialTitleText {
         return title
     }
 
-    /// AI 生成标题的收紧，存量与新增都用：去 markdown 与句末标点，上限 24 个 Character。
+    /// AI 生成标题的收紧，存量与新增都用：只去行首 markdown 标记与成对强调符，
+    /// 保留词内 `#`、`_`（C#、snake_case），上限 24 个 Character，并保证幂等。
     public static func normalizedGenerated(_ title: String) -> String? {
-        var clean = collapsed(title.filter { !markdownCharacters.contains($0) })
-        if clean.hasPrefix("- ") { clean = String(clean.dropFirst(2)) }
-        clean = clean.trimmingCharacters(in: .whitespaces)
-        while let last = clean.last, trailingPunctuation.contains(last) { clean.removeLast() }
-        clean = clean.trimmingCharacters(in: .whitespaces)
+        var clean = collapsed(markdownCleaned(title))
+        var truncated = false
+        while let last = clean.last, trailingPunctuation.contains(last) {
+            if last == "…" { truncated = true }
+            clean.removeLast()
+            clean = clean.trimmingCharacters(in: .whitespaces)
+        }
         guard containsReadableText(clean) else { return nil }
-        guard clean.count > 24 else { return clean }
-        return String(clean.prefix(24)).trimmingCharacters(in: .whitespaces) + "…"
+        if clean.count > 24 {
+            return String(clean.prefix(24)).trimmingCharacters(in: .whitespaces) + "…"
+        }
+        return truncated ? clean + "…" : clean
     }
 
     private static let openingFillers = ["我觉得", "我想说", "然后", "就是", "反正", "其实", "所以", "那个", "这个", "嗯", "啊", "哦", "呃"]
     private static let pronouns: Set<Character> = ["我", "你", "他", "她", "它"]
     private static let clauseSeparators: Set<Character> = ["。", "！", "？", "；", "，", "、"]
     private static let truncationPauses = clauseSeparators.union(["…"])
-    private static let markdownCharacters: Set<Character> = ["#", "*", "`", "~", "_", ">"]
     private static let trailingPunctuation: Set<Character> = ["。", "！", "？", "；", "，", "、", "…", ".", "!", "?", ",", ";", ":", "："]
 
     private static func collapsed(_ text: String) -> String {
         text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+
+    /// 行首标记只在一行开头剥；词中的符号不属于 markdown。
+    private static func markdownCleaned(_ text: String) -> String {
+        let lines = text.components(separatedBy: .newlines).map { rawLine -> String in
+            var line = rawLine.trimmingCharacters(in: .whitespaces)
+            while line.hasPrefix("#") { line.removeFirst() }
+            if line.hasPrefix(" ") { line.removeFirst() }
+            while line.hasPrefix(">") { line.removeFirst() }
+            if line.hasPrefix(" ") { line.removeFirst() }
+            for marker in ["- ", "* ", "+ "] where line.hasPrefix(marker) {
+                line.removeFirst(2)
+                break
+            }
+            if let range = line.range(of: #"^\d+[.)]\s+"#, options: .regularExpression) {
+                line.removeSubrange(range)
+            }
+            return line
+        }
+        var inline = lines.joined(separator: " ")
+        for delimiter in ["**", "~~", "`"] {
+            inline = removingPairs(of: delimiter, from: inline)
+        }
+        return inline
+    }
+
+    /// 只去掉成对出现的定界符；落单的定界符保持原样。
+    private static func removingPairs(of delimiter: String, from text: String) -> String {
+        let parts = text.components(separatedBy: delimiter)
+        guard parts.count > 2 else { return text }
+        var result = parts[0]
+        let pairs = (parts.count - 1) / 2
+        for index in 0..<pairs {
+            result += parts[index * 2 + 1] + parts[index * 2 + 2]
+        }
+        if parts.count % 2 == 0, let last = parts.last { result += delimiter + last }
+        return result
     }
 
     /// 只在句首剥语气词，最多两轮；剥掉后顺带清掉紧跟的标点。

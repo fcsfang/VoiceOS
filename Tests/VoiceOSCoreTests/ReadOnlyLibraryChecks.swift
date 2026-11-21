@@ -197,6 +197,36 @@ final class ReadOnlyLibraryChecks: XCTestCase {
         XCTAssertEqual(byID["action-plain"]?.sourceTitle, "普通来源")
     }
 
+    func testAutomaticTitleRequiresMatchingTranscriptVersion() throws {
+        var current = RecordingPresentation(automatic: RecordingTitleProposal(
+            sourceID: "source-current", title: "**当前版本标题**。", summary: "s", quotes: []))
+        current.transcriptVersionID = "transcript-version-source-current"
+        try insertSource("source-current", name: "当前版本原名", presentation: current, transcript: "当前正文")
+
+        var stale = RecordingPresentation(automatic: RecordingTitleProposal(
+            sourceID: "source-stale", title: "过期版本标题", summary: "s", quotes: []))
+        stale.transcriptVersionID = "transcript-version-old"
+        try insertSource("source-stale", name: "过期版本原名", presentation: stale, transcript: "过期正文")
+
+        var manual = RecordingPresentation(manualTitle: "  人工标题  ")
+        manual.automatic = RecordingTitleProposal(sourceID: "source-manual", title: "不应采用的自动标题",
+                                                  summary: "s", quotes: [])
+        manual.transcriptVersionID = "transcript-version-old"
+        try insertSource("source-manual", name: "人工版本原名", presentation: manual, transcript: "人工正文")
+
+        for suffix in ["current", "stale", "manual"] {
+            try insertClaim("claim-" + suffix, sourceID: "source-" + suffix, statement: "语句-" + suffix)
+            try insertAction("action-" + suffix, claimID: "claim-" + suffix,
+                             title: "标题-" + suffix, createdAt: "2026-11-02T00:00:00Z")
+        }
+
+        let rows = try ReadOnlyLibrary(root: base).actions(limit: 100, offset: 0)
+        let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        XCTAssertEqual(byID["action-current"]?.sourceTitle, "当前版本标题")
+        XCTAssertEqual(byID["action-stale"]?.sourceTitle, "过期版本原名")
+        XCTAssertEqual(byID["action-manual"]?.sourceTitle, "人工标题")
+    }
+
     func testDuePrefersLocalScheduleAndMirrorsTimeSurface() throws {
         try insertSource("source-a", name: "来源")
         try insertClaim("claim-a", sourceID: "source-a", statement: "排期依据")
