@@ -887,7 +887,10 @@ struct WorkspaceView: View {
                     .focusEffectDisabled()
                     .onKeyPress { handleMaterialListKey($0) }
                     .onChange(of:materialKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
-                    .onAppear { requestMaterialListFocus() }
+                    .onAppear {
+                        requestMaterialListFocus()
+                        restoreKeyboardScroll(proxy: proxy, id: materialKeyboardFocus.id)
+                    }
             }
         case .actions:
             ScrollViewReader { proxy in
@@ -898,7 +901,10 @@ struct WorkspaceView: View {
                     .onKeyPress { handleActionListKey($0) }
                     .onChange(of:actionKeyboardHighlightID) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
                     .onChange(of:showingPlanToday) { _, shown in if !shown { requestActionListFocus() } }
-                    .onAppear { requestActionListFocus() }
+                    .onAppear {
+                        requestActionListFocus()
+                        restoreKeyboardScroll(proxy: proxy, id: actionKeyboardHighlightID)
+                    }
                     .task(id:actionUndo?.token) {
                         guard actionUndo != nil else { return }
                         do { try await Task.sleep(for:.seconds(8)) } catch { return }
@@ -2720,6 +2726,16 @@ struct WorkspaceView: View {
             return .handled
         default:
             return .ignored
+        }
+    }
+    /// Keyboard-driven scrollTo never writes back through the ScrollPosition
+/// binding, so a list re-entered after navigation restores its viewport from
+/// the kept keyboard selection instead of jumping to the top.
+    private func restoreKeyboardScroll(proxy: ScrollViewProxy, id: String?) {
+        guard let id else { return }
+        Task { @MainActor in
+            await Task.yield()
+            proxy.scrollTo(id, anchor: .center)
         }
     }
     private func requestActionListFocus() {
