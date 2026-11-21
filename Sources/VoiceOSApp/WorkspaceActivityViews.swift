@@ -727,7 +727,7 @@ struct WorkspaceTaskView: View {
                         }
                         if current {
                             HStack(spacing: 10) {
-                                TextField("添加子任务", text: $subtaskTitle).textFieldStyle(.roundedBorder)
+                                TextField("添加子任务", text: $subtaskTitle).workspaceFieldSurface()
                                     .onSubmit { addSubtask() }
                                 Button("添加") { addSubtask() }.buttonStyle(.workspaceSecondaryCompact)
                                     .disabled(planBusy || subtaskTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -1506,7 +1506,7 @@ struct NextActionFormSheet: View {
             Text("添加下一步").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
             Text("下一步会挂在这个目标下，目标本身保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             TextField("下一步要做的事", text: $title)
-                .textFieldStyle(.roundedBorder)
+                .workspaceFieldSurface()
                 .focused($titleFocused)
                 .onSubmit { submit() }
                 .disabled(busy || createdActionID != nil)

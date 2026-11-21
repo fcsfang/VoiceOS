@@ -30,7 +30,7 @@ struct ReflectionChangeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
-                WorkspaceHero(eyebrow: "THOUGHTS IN CONTEXT", title: "认识对照", subtitle: "从前后原话出发，看看什么延续了，什么仍需核对。")
+                WorkspaceHero(eyebrow: "主题 · 认识对照", title: "认识对照", subtitle: "从前后原话出发，看看什么延续了，什么仍需核对。")
                 Spacer()
                 Button("返回地图", action: closeView).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
             }.padding(24)
