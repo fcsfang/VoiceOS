@@ -529,7 +529,7 @@ struct RecentContentHome: View {
             }
             if !digest.tasks.isEmpty {
                 Button {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(tasksAnchor, anchor: .top) }
+                    withAnimation(reduceMotion ? nil : WorkspaceMotion.scroll) { proxy.scrollTo(tasksAnchor, anchor: .top) }
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "checklist")
@@ -692,7 +692,7 @@ struct RecentContentHome: View {
     private var pendingOutcomeCount: Int { model.visibleOutcomeFollowups.count }
 
     private func toggleRecentThoughts() {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { recentThoughtsExpanded.toggle() }
+        withAnimation(reduceMotion ? nil : WorkspaceMotion.expand) { recentThoughtsExpanded.toggle() }
     }
 
     private func recentThoughtsEntry(_ groups: [RecentThoughtDay]) -> some View {
@@ -950,7 +950,7 @@ private struct ClueHeaderMenu: View {
         .opacity(visible ? 1 : 0)
         .allowsHitTesting(visible)
         .onHover { hovered = $0 }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: visible)
+        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: visible)
     }
 }
 

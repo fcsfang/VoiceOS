@@ -2,6 +2,7 @@ import SwiftUI
 
 struct QuoteHoverPreview<Content: View>: View {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let sourceTitle: String
     let snippet: String
     let open: () -> Void
@@ -26,18 +27,18 @@ struct QuoteHoverPreview<Content: View>: View {
                     guard !revealed else { return }
                     showTask = Task {
                         do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
-                        revealed = true
+                        withAnimation(reduceMotion ? nil : WorkspaceMotion.hover) { revealed = true }
                     }
                 } else {
                     hideTask = Task {
                         do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-                        revealed = false
+                        withAnimation(reduceMotion ? nil : WorkspaceMotion.hover) { revealed = false }
                     }
                 }
             }
             .overlay(alignment: .topLeading) {
                 GeometryReader { geo in
-                    if revealed { panel.offset(y: geo.size.height + 6) }
+                    if revealed { panel.offset(y: geo.size.height + 6).transition(.opacity) }
                 }
             }
             .zIndex(revealed ? 1 : 0)
@@ -50,7 +51,7 @@ struct QuoteHoverPreview<Content: View>: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(sourceTitle).vosFont(WorkspaceText.meta.size, weight: .semibold).lineLimit(2)
             Text(snippet).vosFont(WorkspaceText.body).foregroundStyle(.secondary).lineLimit(6)
-            Button("打开材料") { revealed = false; open() }.vosFont(WorkspaceText.meta)
+            Button("打开材料") { withAnimation(reduceMotion ? nil : WorkspaceMotion.hover) { revealed = false }; open() }.vosFont(WorkspaceText.meta)
         }
         .padding(12)
         .frame(width: 280, alignment: .leading)
@@ -59,7 +60,7 @@ struct QuoteHoverPreview<Content: View>: View {
         .shadow(color: .black.opacity(0.16), radius: 14, y: 6)
         .onHover { inside in
             hideTask?.cancel(); hideTask = nil
-            if !inside { revealed = false }
+            if !inside { withAnimation(reduceMotion ? nil : WorkspaceMotion.hover) { revealed = false } }
         }
     }
 }

@@ -127,7 +127,7 @@ struct WorkspaceListSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if collapsible {
-                Button { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.16)) { userExpanded = !expanded } } label: { header }
+                Button { withAnimation(reduceMotion ? nil : WorkspaceMotion.expand) { userExpanded = !expanded } } label: { header }
                     .buttonStyle(.plain)
                     .workspaceHoverHighlight()
                     .accessibilityValue(expanded ? "已展开" : "已收起")
@@ -211,6 +211,7 @@ struct WorkspaceSection<Content: View>: View {
 }
 
 struct WorkspaceExpandableText: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let text: String
     var label = "完整内容"
     var lines = 4
@@ -223,7 +224,9 @@ struct WorkspaceExpandableText: View {
             Text(text).vosFont(size).lineSpacing(6).textSelection(.enabled)
                 .lineLimit(canCollapse && !expanded ? lines : nil).fixedSize(horizontal: false, vertical: true)
             if canCollapse {
-                Button(expanded ? "收起" + label : "展开" + label, systemImage: expanded ? "chevron.up" : "chevron.down") { expanded.toggle() }
+                Button(expanded ? "收起" + label : "展开" + label, systemImage: expanded ? "chevron.up" : "chevron.down") {
+                    withAnimation(reduceMotion ? nil : WorkspaceMotion.expand) { expanded.toggle() }
+                }
                     .vosFont(WorkspaceText.meta.size, weight: .medium).buttonStyle(.borderless)
                     .accessibilityValue(expanded ? "已展开" : "已收起")
             }
