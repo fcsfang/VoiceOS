@@ -1149,7 +1149,7 @@ struct WorkspaceSourceView: View {
             extractionFlag=try? await store.sourceExtractionFlag(sourceID:source.id)
         }
         .onChange(of:folds.fullText) { _,_ in if !folds.fullText { clearSelection() } }
-        .onChange(of:source.transcript) { _,_ in clearSelection();resetBilingual();folds.original=SourceFoldState.initial(transcript:source.transcript).original }
+        .onChange(of:source.transcript) { _,_ in clearSelection();resetBilingual() }
         .onChange(of:playbackSelection) { _,id in guard let id,let scroll else { return };scroll.wrappedValue.scrollTo(id:id,anchor:.center) }
         .onReceive(playback.$milliseconds) { followPlaybackHighlight($0) }
         .task {
