@@ -75,49 +75,19 @@ public struct TranscriptionReview: Codable, Sendable {
 public protocol RecordingTitlePort: Sendable {
     func generate(_ input: RecordingTitleInput) async throws -> ([RecordingTitleProposal], [String])
 }
-public extension SourceRecord {
-    var recordingExpression: RecordingExpression? {
-        guard let value=presentation?.expression,!localOnly,!needsTranscriptionReview,
-              value.versions[id] == transcriptVersionID,value.policies[id] == policyVersion else { return nil }
-        return value
-    }
-    var needsTranscriptionReview: Bool {
-        ["audio", "video"].contains(kind) && transcriptionBackend?.hasPrefix("Qwen3-ASR") == true &&
-        !(transcript ?? "").isEmpty && !spans.isEmpty && spans.allSatisfy { $0.startMS != nil && $0.endMS != nil } &&
-        transcriptionReview?.isCompleteFullTextReview != true
-    }
-    var transcriptionReview: TranscriptionReview? {
-        guard presentation?.transcriptionReview?.transcriptVersionID == transcriptVersionID else { return nil }
-        return presentation?.transcriptionReview
-    }
-    var contentTitle: String? {
-        if let manual = presentation?.manualTitle { return manual }
-        guard presentation?.transcriptVersionID == transcriptVersionID else { return nil }
-        return presentation?.automatic?.title
-    }
-    var contentSummary: String? {
-        guard !needsTranscriptionReview,presentation?.transcriptVersionID == transcriptVersionID, let summary = presentation?.automatic?.summary else { return nil }
-        return (transcriptionReview?.unresolved_issues?.isEmpty == false ? "部分转写待核对。" : "") + summary
-    }
-    var expressedDate: Date? {
-        let formats: [(String, Date.FormatString)] = [
-            ("^\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}-\\d{2}", "\(year: .padded(4))-\(month: .twoDigits)-\(day: .twoDigits)_\(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased))-\(minute: .twoDigits)-\(second: .twoDigits)"),
-            ("^\\d{8} \\d{6}", "\(year: .padded(4))\(month: .twoDigits)\(day: .twoDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased))\(minute: .twoDigits)\(second: .twoDigits)")
-        ]
-        for (pattern, format) in formats {
-            if let range = name.range(of: pattern, options: .regularExpression) {
-                return try? Date.ParseStrategy(format: format, locale: Locale(identifier: "en_US_POSIX"),
-                    timeZone: TimeZone(identifier: timeZone) ?? .current, isLenient: false).parse(String(name[range]))
-            }
-        }
-        return name.hasPrefix("我的口述") || ["user_text", "external_text", "ai_text"].contains(kind) ? ConversationReflectionFocus.date(createdAt) : nil
-    }
-    var displayTitle: String {
+
+/// The one title funnel for library rows and the search index: manual title,
+/// version-checked automatic title, recording date, transcript fallback, then
+/// the unnamed kind label.
+public enum MaterialDisplayTitle {
+    public static func title(name: String, kind: String, createdAt: String, timeZone: String,
+                             presentation: RecordingPresentation?, transcript: String?,
+                             transcriptVersionID: String?) -> String {
         if let manual = presentation?.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !manual.isEmpty { return manual }
         if presentation?.transcriptVersionID == transcriptVersionID,
            let automatic = presentation?.automatic?.title,
            let title = MaterialTitleText.normalizedGenerated(automatic) { return title }
-        if ["audio", "video"].contains(kind) { return "录音 · " + recordingDateLabel }
+        if ["audio", "video"].contains(kind) { return "录音 · " + recordingDateLabel(name: name, kind: kind, createdAt: createdAt, timeZone: timeZone) }
         if let text = transcript {
             let firstLine = String(text.drop(while: { $0 == "\n" }).prefix(while: { $0 != "\n" }))
                 .trimmingCharacters(in: .whitespaces)
@@ -138,8 +108,23 @@ public extension SourceRecord {
         default: return name
         }
     }
-    var recordingDateLabel: String {
-        let expressed = expressedDate
+
+    static func expressedDate(name: String, kind: String, createdAt: String, timeZone: String) -> Date? {
+        let formats: [(String, Date.FormatString)] = [
+            ("^\\d{4}-\\d{2}-\\d{2}_\\d{2}-\\d{2}-\\d{2}", "\(year: .padded(4))-\(month: .twoDigits)-\(day: .twoDigits)_\(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased))-\(minute: .twoDigits)-\(second: .twoDigits)"),
+            ("^\\d{8} \\d{6}", "\(year: .padded(4))\(month: .twoDigits)\(day: .twoDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased))\(minute: .twoDigits)\(second: .twoDigits)")
+        ]
+        for (pattern, format) in formats {
+            if let range = name.range(of: pattern, options: .regularExpression) {
+                return try? Date.ParseStrategy(format: format, locale: Locale(identifier: "en_US_POSIX"),
+                    timeZone: TimeZone(identifier: timeZone) ?? .current, isLenient: false).parse(String(name[range]))
+            }
+        }
+        return name.hasPrefix("我的口述") || ["user_text", "external_text", "ai_text"].contains(kind) ? ConversationReflectionFocus.date(createdAt) : nil
+    }
+
+    static func recordingDateLabel(name: String, kind: String, createdAt: String, timeZone: String) -> String {
+        let expressed = expressedDate(name: name, kind: kind, createdAt: createdAt, timeZone: timeZone)
         let date = expressed ?? ConversationReflectionFocus.date(createdAt)
         guard let date else { return "时间待核对" }
         let style = Date.VerbatimFormatStyle(
@@ -147,6 +132,43 @@ public extension SourceRecord {
             locale: Locale(identifier: "zh_CN"), timeZone: TimeZone(identifier: timeZone) ?? .current,
             calendar: Calendar(identifier: .gregorian))
         return (expressed == nil ? "导入于 " : "") + date.formatted(style)
+    }
+}
+
+public extension SourceRecord {
+    var recordingExpression: RecordingExpression? {
+        guard let value=presentation?.expression,!localOnly,!needsTranscriptionReview,
+              value.versions[id] == transcriptVersionID,value.policies[id] == policyVersion else { return nil }
+        return value
+    }
+    var needsTranscriptionReview: Bool {
+        ["audio", "video"].contains(kind) && transcriptionBackend?.hasPrefix("Qwen3-ASR") == true &&
+        !(transcript ?? "").isEmpty && !spans.isEmpty && spans.allSatisfy { $0.startMS != nil && $0.endMS != nil } &&
+        transcriptionReview?.isCompleteFullTextReview != true
+    }
+    var transcriptionReview: TranscriptionReview? {
+        guard presentation?.transcriptionReview?.transcriptVersionID == transcriptVersionID else { return nil }
+        return presentation?.transcriptionReview
+    }
+    var contentTitle: String? {
+        if let manual = presentation?.manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !manual.isEmpty { return manual }
+        guard presentation?.transcriptVersionID == transcriptVersionID else { return nil }
+        return presentation?.automatic?.title.flatMap(MaterialTitleText.normalizedGenerated)
+    }
+    var contentSummary: String? {
+        guard !needsTranscriptionReview,presentation?.transcriptVersionID == transcriptVersionID, let summary = presentation?.automatic?.summary else { return nil }
+        return (transcriptionReview?.unresolved_issues?.isEmpty == false ? "部分转写待核对。" : "") + summary
+    }
+    var expressedDate: Date? {
+        MaterialDisplayTitle.expressedDate(name: name, kind: kind, createdAt: createdAt, timeZone: timeZone)
+    }
+    var displayTitle: String {
+        MaterialDisplayTitle.title(name: name, kind: kind, createdAt: createdAt, timeZone: timeZone,
+                                   presentation: presentation, transcript: transcript,
+                                   transcriptVersionID: transcriptVersionID)
+    }
+    var recordingDateLabel: String {
+        MaterialDisplayTitle.recordingDateLabel(name: name, kind: kind, createdAt: createdAt, timeZone: timeZone)
     }
     var recordingSubtitle: String {
         guard let duration, duration > 0 else { return recordingDateLabel }
@@ -223,6 +245,7 @@ extension VoiceOSStore {
         try requireReviewedTranscriptions(sourceIDs:input.context.sources.map(\.sourceID),destination:.cloud)
         try validateLocalTranscriptContext(input.context)
         let catalog = Dictionary(uniqueKeysWithValues: try sources().map { ($0.id, $0) })
+        var savedCount = 0
         try db.transaction {
             for proposal in proposals {
                 guard let source = catalog[proposal.sourceID], !source.localOnly, source.policyVersion == input.policies[source.id] else { throw VoiceOSError("命名期间录音授权已变化") }
@@ -231,18 +254,24 @@ extension VoiceOSStore {
                 saved.automatic = RecordingTitleProposal(sourceID: proposal.sourceID, title: title, summary: proposal.summary, quotes: proposal.quotes)
                 saved.transcriptVersionID = source.transcriptVersionID; saved.responseIDs = ids
                 try savePresentation(saved, sourceID: source.id)
+                savedCount += 1
             }
         }
-        return proposals.count
+        return savedCount
     }
 }
 
 public extension RecordingExpression {
-    /// A saved manual group title outranks the automatic title and member titles.
-    func displayTitle(in catalog: [String: SourceRecord]) -> String {
+    /// The saved group title that outranks member titles, when one is set.
+    var leadingDisplayTitle: String? {
         if let manual = manualTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !manual.isEmpty { return manual }
         let automatic = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !automatic.isEmpty { return automatic }
+        return automatic.isEmpty ? nil : automatic
+    }
+
+    /// A saved manual group title outranks the automatic title and member titles.
+    func displayTitle(in catalog: [String: SourceRecord]) -> String {
+        if let leading = leadingDisplayTitle { return leading }
         for id in sourceIDs {
             guard let member = catalog[id] else { continue }
             let memberTitle = member.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)

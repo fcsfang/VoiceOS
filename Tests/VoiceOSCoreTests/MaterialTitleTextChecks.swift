@@ -82,4 +82,46 @@ final class MaterialTitleTextChecks: XCTestCase {
         XCTAssertEqual(MaterialTitleText.normalizedGenerated(String(repeating: family, count: 30)),
                        String(repeating: family, count: 24) + "…")
     }
+
+    func testGeneratedTitleNormalizationIsIdempotent() {
+        let inputs = ["**周会结论**。", String(repeating: "题", count: 30), "标题…。",
+                      "## 预算安排\n第二行", "好的……"]
+        for input in inputs {
+            let once = MaterialTitleText.normalizedGenerated(input)
+            XCTAssertEqual(once.flatMap(MaterialTitleText.normalizedGenerated), once, input)
+        }
+    }
+
+    func testGeneratedTitleKeepsInWordSymbols() {
+        XCTAssertEqual(MaterialTitleText.normalizedGenerated("用 C# 写 snake_case 工具"),
+                       "用 C# 写 snake_case 工具")
+        XCTAssertEqual(MaterialTitleText.normalizedGenerated("- 用 C# 写 snake_case 工具"),
+                       "用 C# 写 snake_case 工具")
+    }
+
+    func testTruncationEllipsisIsStable() {
+        let long = String(repeating: "题", count: 30)
+        XCTAssertEqual(MaterialTitleText.normalizedGenerated(long), String(repeating: "题", count: 24) + "…")
+        XCTAssertEqual(MaterialTitleText.normalizedGenerated(String(repeating: "题", count: 24) + "…"),
+                       String(repeating: "题", count: 24) + "…")
+        XCTAssertEqual(MaterialTitleText.normalizedGenerated("标题…。"), "标题…")
+    }
+
+    func testContentTitleTrimsManualAndNormalizesAutomatic() {
+        let manual = RecordingPresentation(
+            manualTitle: "  我的标题。 ",
+            automatic: RecordingTitleProposal(sourceID: "s1", title: "**自动标题**。", summary: "s", quotes: []),
+            transcriptVersionID: "t-s1")
+        XCTAssertEqual(source(id: "s1", transcript: "原文", presentation: manual).contentTitle, "我的标题。")
+
+        let automatic = RecordingPresentation(
+            automatic: RecordingTitleProposal(sourceID: "s2", title: "**周会结论**。", summary: "s", quotes: []),
+            transcriptVersionID: "t-s2")
+        XCTAssertEqual(source(id: "s2", transcript: "原文", presentation: automatic).contentTitle, "周会结论")
+
+        let stale = RecordingPresentation(
+            automatic: RecordingTitleProposal(sourceID: "s3", title: "过期标题", summary: "s", quotes: []),
+            transcriptVersionID: "t-old")
+        XCTAssertNil(source(id: "s3", transcript: "原文", presentation: stale).contentTitle)
+    }
 }
