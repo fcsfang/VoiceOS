@@ -145,7 +145,7 @@ struct RecentContentHome: View {
                     Button("导入录音") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
                 }
             } else {
-                WorkspaceEmptyState(title: "知识库里还没有材料", systemImage: "tray",
+                WorkspaceEmptyState(title: "资料库里还没有材料", systemImage: "tray",
                                     description: "录一段、导入一段录音，或写几句。") {
                     Button("记录想法") { capture() }.buttonStyle(.workspacePrimary)
                     Button("导入录音") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
