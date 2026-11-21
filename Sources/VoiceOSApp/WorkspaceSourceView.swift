@@ -340,7 +340,8 @@ struct WorkspaceSourceView: View {
     @State private var captureInfo:CaptureMetadata?
     @State private var attachmentURL:URL?
     @State private var attachmentMime:String?
-    @StateObject private var playback=SourcePlaybackClock()
+    // 页面体不读 milliseconds，回听标签与播放条各自 @ObservedObject 订阅；@State 持有避免每 tick 重算整页
+    @State private var playback=SourcePlaybackClock()
     @State private var playbackSelection:String?
     @State private var autoScrolledSpanID:String?
     @State private var selectedText=""
