@@ -4654,16 +4654,25 @@ struct ActionCreationView: View {
     @State private var feedback = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("记录行动意图").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("认可观点不等于承诺任务。选择明确任务，或先放入机会池；尚未写入提醒事项。").foregroundStyle(palette.secondaryText)
-            Text("依据：" + claim.statement).lineLimit(4)
-            Picker("意图", selection: $kind) {
-                Text("探索意图 · 机会池").tag(ActionKind.opportunity)
-                Text("明确任务").tag(ActionKind.task)
-            }.pickerStyle(.segmented)
-            TextField("要做什么", text: $title)
-            TextField("补充说明（可选）", text: $note)
-            if !feedback.isEmpty { Text(feedback).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("记录行动意图").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
+                Text("认可观点不等于承诺任务。选择明确任务，或先放入机会池；尚未写入提醒事项。").foregroundStyle(palette.secondaryText)
+                Text("依据：" + claim.statement).lineLimit(4)
+            }.padding(.horizontal, 24)
+            VStack(alignment: .leading, spacing: 0) {
+                WorkspaceSettingsRow(title: "意图", showsDivider: false) {
+                    Picker("意图", selection: $kind) {
+                        Text("探索意图 · 机会池").tag(ActionKind.opportunity)
+                        Text("明确任务").tag(ActionKind.task)
+                    }.pickerStyle(.segmented).labelsHidden().frame(width: 260)
+                }
+                WorkspaceListDivider().padding(.horizontal, 20)
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("要做什么", text: $title).workspaceFieldSurface()
+                    TextField("补充说明（可选）", text: $note).workspaceFieldSurface()
+                }.padding(.horizontal, 20).padding(.vertical, 12)
+            }
+            if !feedback.isEmpty { Text(feedback).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.horizontal, 24) }
             HStack {
                 Button("取消", action: close).disabled(model.savingAction).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
@@ -4672,8 +4681,8 @@ struct ActionCreationView: View {
                     Task { if await model.createAction(claim, title: title, kind: kind, note: note, commandID: commandID) { close() } else { feedback = model.status } }
                 }
                     .disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
-            }
-        }.padding(24).frame(width: 600)
+            }.padding(.horizontal, 24)
+        }.padding(.vertical, 24).frame(width: 600)
             .workspaceModalSurface()
     }
 }
@@ -4700,28 +4709,41 @@ struct ActionFeedbackView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("记录结果或反思").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("关联：" + action.title + " · 第 \(action.version) 版").foregroundStyle(palette.secondaryText)
-            Picker("类型", selection: $kind) { Text("实际结果").tag("outcome"); Text("我的反思").tag("reflection") }.pickerStyle(.segmented).disabled(saving)
-            HStack {
-                if recordingID != nil, model.dictationActive {
-                    Button("停止并转写") { model.stopDictation() }.disabled(model.dictationBusy)
-                    Text("正在录制这条任务的结果…").foregroundStyle(palette.secondaryText)
-                } else if waitingForVoice {
-                    ProgressView().controlSize(.small); Text("Qwen 正在本机转写…").foregroundStyle(palette.secondaryText)
-                } else if recordingID == nil {
-                    Button("口述进展或结果", systemImage: "mic") {
-                        Task { recordingID = await model.startFeedbackDictation(); if recordingID == nil { errorText = model.status } }
-                    }.disabled(saving || model.dictationBusy || model.dictationActive)
-                } else {
-                    Text(appliedRecording ? "口述已填入下方，可核对修改。原始录音保留。" : "转写未完成，录音已保留；也可以直接写下结果。")
-                        .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("记录结果或反思").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
+                Text("关联：" + action.title + " · 第 \(action.version) 版").foregroundStyle(palette.secondaryText)
+            }.padding(.horizontal, 24)
+            VStack(alignment: .leading, spacing: 0) {
+                WorkspaceSettingsRow(title: "类型", showsDivider: false) {
+                    Picker("类型", selection: $kind) { Text("实际结果").tag("outcome"); Text("我的反思").tag("reflection") }
+                        .pickerStyle(.segmented).labelsHidden().frame(width: 220).disabled(saving)
                 }
+                WorkspaceListDivider().padding(.horizontal, 20)
+                HStack {
+                    if recordingID != nil, model.dictationActive {
+                        Button("停止并转写") { model.stopDictation() }.disabled(model.dictationBusy)
+                        Text("正在录制这条任务的结果…").foregroundStyle(palette.secondaryText)
+                    } else if waitingForVoice {
+                        ProgressView().controlSize(.small); Text("Qwen 正在本机转写…").foregroundStyle(palette.secondaryText)
+                    } else if recordingID == nil {
+                        Button("口述进展或结果", systemImage: "mic") {
+                            Task { recordingID = await model.startFeedbackDictation(); if recordingID == nil { errorText = model.status } }
+                        }.disabled(saving || model.dictationBusy || model.dictationActive)
+                    } else {
+                        Text(appliedRecording ? "口述已填入下方，可核对修改。原始录音保留。" : "转写未完成，录音已保留；也可以直接写下结果。")
+                            .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                    }
+                }
+                    .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 46)
+                WorkspaceListDivider().padding(.horizontal, 20)
+                TextEditor(text: $text).frame(minHeight: 180).workspaceEditorSurface().disabled(saving || waitingForVoice)
+                    .padding(.horizontal, 20).padding(.vertical, 12)
             }
-            TextEditor(text: $text).frame(minHeight: 180).workspaceEditorSurface().disabled(saving || waitingForVoice)
-            Text("可选记录，原话与原行动保持关联。开启下方选项后会自动核对思想变化与目标下一步；反馈不会当成已验证事实。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-            if !errorText.isEmpty { Text(errorText).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
-            Toggle("将反馈文字用于整理知识、更新思想与目标", isOn: $allowFollowup).vosFont(WorkspaceText.meta).disabled(saving)
+            Text("可选记录，原话与原行动保持关联。开启下方选项后会自动核对思想变化与目标下一步；反馈不会当成已验证事实。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.horizontal, 24)
+            if !errorText.isEmpty { Text(errorText).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger).padding(.horizontal, 24) }
+            WorkspaceSettingsRow(title: "将反馈文字用于整理知识、更新思想与目标") {
+                Toggle("将反馈文字用于整理知识、更新思想与目标", isOn: $allowFollowup).toggleStyle(.switch).labelsHidden().disabled(saving)
+            }
             HStack {
                 Button("取消", action:dismiss).disabled(saving || (recordingID != nil && (model.dictationActive || model.dictationBusy))).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer(); Text("\(text.unicodeScalars.count)/4000").vosFont(WorkspaceText.caption)
@@ -4734,8 +4756,8 @@ struct ActionFeedbackView: View {
                         saving = false
                     }
                 }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(saving || waitingForVoice || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
-            }
-        }.padding(24).frame(width:620)
+            }.padding(.horizontal, 24)
+        }.padding(.vertical, 24).frame(width:620)
             .workspaceModalSurface()
             .onChange(of: recording?.transcriptVersionID) { _, _ in applyTranscription() }
             .interactiveDismissDisabled(saving || (recordingID != nil && model.dictationActive))
@@ -4777,19 +4799,35 @@ struct PackageRestoreView: View {
     }
     var body: some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("从迁移包恢复").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("恢复到一个新资料库，保留当前资料库。完成后可在新窗口打开；提醒事项需要重新连接。").foregroundStyle(palette.secondaryText)
-            Button("选择迁移包文件夹…",action:choosePackage).disabled(restoring || restored != nil)
-            if let package, let summary {
-                Text(package.path).vosFont(WorkspaceText.meta).textSelection(.enabled)
-                Text("包版本 \(summary.version) · \(summary.sourceCount) 份资料 · \(summary.mediaIncluded ? "包含原件" : "结构化记录")")
-                Text(summary.omittedAssetCount > 0 ? "\(summary.omittedAssetCount) 份原件未打包：恢复后可读文字与历史，无法播放缺失原件。" : "清单中没有省略的原件。恢复时仍会核对文件与关联完整性。").vosFont(WorkspaceText.body)
+            VStack(alignment:.leading,spacing:8) {
+                Text("从迁移包恢复").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
+                Text("恢复到一个新资料库，保留当前资料库。完成后可在新窗口打开；提醒事项需要重新连接。").foregroundStyle(palette.secondaryText)
+            }.padding(.horizontal, 24)
+            VStack(alignment:.leading,spacing:0) {
+                Button("选择迁移包文件夹…",action:choosePackage).disabled(restoring || restored != nil)
+                    .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 46)
+                if let package, let summary {
+                    VStack(alignment:.leading,spacing:6) {
+                        Text(package.path).vosFont(WorkspaceText.meta).textSelection(.enabled)
+                        Text("包版本 \(summary.version) · \(summary.sourceCount) 份资料 · \(summary.mediaIncluded ? "包含原件" : "结构化记录")")
+                        Text(summary.omittedAssetCount > 0 ? "\(summary.omittedAssetCount) 份原件未打包：恢复后可读文字与历史，无法播放缺失原件。" : "清单中没有省略的原件。恢复时仍会核对文件与关联完整性。").vosFont(WorkspaceText.body)
+                    }.frame(maxWidth:.infinity,alignment:.leading)
+                        .padding(.horizontal, 20).padding(.vertical, 12)
+                }
+                WorkspaceListDivider().padding(.horizontal, 20)
+                Button("选择保存位置…",action:chooseParent).disabled(restoring || restored != nil)
+                    .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 46)
+                TextField("新资料库文件夹名称",text:$folderName).workspaceFieldSurface().disabled(restoring || restored != nil)
+                    .padding(.horizontal, 20).padding(.vertical, 12)
+                if let destination { Text(destination.path).vosFont(WorkspaceText.meta).textSelection(.enabled).padding(.horizontal, 20) }
             }
-            Button("选择保存位置…",action:chooseParent).disabled(restoring || restored != nil)
-            TextField("新资料库文件夹名称",text:$folderName).disabled(restoring || restored != nil)
-            if let destination { Text(destination.path).vosFont(WorkspaceText.meta).textSelection(.enabled) }
-            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
-            if let restored { Text("恢复完成 · 当前库保留，外部连接未启用").foregroundStyle(palette.success); Button("打开恢复的资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() } }
+            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger).padding(.horizontal, 24) }
+            if let restored {
+                VStack(alignment:.leading,spacing:8) {
+                    Text("恢复完成 · 当前库保留，外部连接未启用").foregroundStyle(palette.success)
+                    Button("打开恢复的资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() }
+                }.padding(.horizontal, 24)
+            }
             HStack {
                 Button(restored == nil ? "取消" : "完成",action:dismiss).disabled(restoring).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
@@ -4805,8 +4843,8 @@ struct PackageRestoreView: View {
                         }
                     }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(restoring || package == nil || destination == nil)
                 }
-            }
-        }.padding(24).frame(width:640)
+            }.padding(.horizontal, 24)
+        }.padding(.vertical, 24).frame(width:640)
             .workspaceModalSurface()
     }
 }
@@ -4842,24 +4880,32 @@ struct BackupLibraryRestoreView: View {
     }
     var body: some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("从最近备份新建资料库").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("取最近一份备份的数据库，加上当前资料库的原件副本，建立一个独立的新资料库；当前资料库不会被改动。完成后可在新窗口打开。").foregroundStyle(palette.secondaryText)
+            VStack(alignment:.leading,spacing:8) {
+                Text("从最近备份新建资料库").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
+                Text("取最近一份备份的数据库，加上当前资料库的原件副本，建立一个独立的新资料库；当前资料库不会被改动。完成后可在新窗口打开。").foregroundStyle(palette.secondaryText)
+            }.padding(.horizontal, 24)
             if let summary = backupSummary {
-                Text(DatabaseBackup.successText(at: summary.date, count: summary.count)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Text(DatabaseBackup.successText(at: summary.date, count: summary.count)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).padding(.horizontal, 24)
             } else {
-                WorkspaceNoticeText(message: "还没有可用于恢复的备份。先完成一次备份再试（\(backupDirectory?.path ?? "备份目录不可用")）。", severity: .warning)
+                WorkspaceNoticeText(message: "还没有可用于恢复的备份。先完成一次备份再试（\(backupDirectory?.path ?? "备份目录不可用")）。", severity: .warning).padding(.horizontal, 24)
             }
-            Button("选择保存位置…", action: chooseParent).disabled(restoring || restored != nil)
-            TextField("新资料库文件夹名称", text: $folderName).disabled(restoring || restored != nil)
-            if let destination { Text(destination.path).vosFont(WorkspaceText.meta).textSelection(.enabled) }
-            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
+            VStack(alignment:.leading,spacing:0) {
+                Button("选择保存位置…", action: chooseParent).disabled(restoring || restored != nil)
+                    .padding(.horizontal, 20).padding(.vertical, 12).frame(minHeight: 46)
+                TextField("新资料库文件夹名称", text: $folderName).workspaceFieldSurface().disabled(restoring || restored != nil)
+                    .padding(.horizontal, 20).padding(.vertical, 12)
+                if let destination { Text(destination.path).vosFont(WorkspaceText.meta).textSelection(.enabled).padding(.horizontal, 20) }
+            }
+            if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger).padding(.horizontal, 24) }
             if let restored {
-                Text("已从最近备份建立新资料库 · 当前库未改动").foregroundStyle(palette.success)
-                Text(restored.path).vosFont(WorkspaceText.meta).textSelection(.enabled)
-                HStack {
-                    Button("打开新资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() }
-                    Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([restored]) }
-                }
+                VStack(alignment:.leading,spacing:8) {
+                    Text("已从最近备份建立新资料库 · 当前库未改动").foregroundStyle(palette.success)
+                    Text(restored.path).vosFont(WorkspaceText.meta).textSelection(.enabled)
+                    HStack {
+                        Button("打开新资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() }
+                        Button("在访达中显示") { NSWorkspace.shared.activateFileViewerSelecting([restored]) }
+                    }
+                }.padding(.horizontal, 24)
             }
             HStack {
                 Button(restored == nil ? "取消" : "完成", action: dismiss).disabled(restoring)
@@ -4880,8 +4926,8 @@ struct BackupLibraryRestoreView: View {
                         }
                     }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(restoring || currentRoot == nil || destination == nil || backupSummary == nil)
                 }
-            }
-        }.padding(24).frame(width:640)
+            }.padding(.horizontal, 24)
+        }.padding(.vertical, 24).frame(width:640)
             .workspaceModalSurface()
     }
 }
