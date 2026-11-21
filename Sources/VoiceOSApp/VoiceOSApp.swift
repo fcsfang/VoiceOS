@@ -4952,7 +4952,7 @@ struct CognitiveFeedbackView: View {
     var embedded = false
     let dismiss: () -> Void
     var body: some View {
-        VStack(alignment:.leading,spacing:14) {
+        VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             Text("静默回顾").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             WorkspaceSettingsCard(title: "显示方式", subtitle: "可以直接关闭。这里显示已接纳的关联提案和相关原文。") {
                 VStack(alignment: .leading, spacing: 0) {
@@ -5020,7 +5020,7 @@ struct HistorySearchView: View {
     @State private var semantic = false
     private var candidates: [RetrievalHit] { (model.retrievalResult?.hits ?? []).filter { selectedIDs.contains($0.id) } }
     var body: some View {
-        VStack(alignment:.leading,spacing:14) {
+        VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             Text("查找历史文字").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             WorkspaceSettingsCard(title: "查找", subtitle: model.semanticAvailable ? "查找仅在本机进行；按意思找到的只是候选。选中原文后，可单独让文本模型判断与你的问题是否直接相关。" : "关键词查找在本机进行。这个构建尚未包含本地语义资源；选中原文后仍可单独判断相关性。") {
                 VStack(alignment: .leading, spacing: 0) {

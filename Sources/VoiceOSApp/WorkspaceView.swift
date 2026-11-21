@@ -2215,16 +2215,16 @@ struct WorkspaceView: View {
     private var settingsModelsCard: some View {
         WorkspaceSettingsCard(title:"模型与服务", subtitle:"本机转写，以及用来理解与核对材料的文本模型") {
             WorkspaceSettingsRow(title:"语音转文字", subtitle:model.speechSummary, showsDivider:false) {
-                Button("更改") { model.chooseLocalSpeech() }.buttonStyle(.workspaceSecondaryCompact)
+                Button("更改") { model.chooseLocalSpeech() }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("更改语音转文字")
             }
             WorkspaceSettingsRow(title:"理解、核对与 AI 助理",
                                  subtitle:model.textModelConfigured ? model.modelSummary : "尚未配置文本模型") {
                 HStack(spacing:8) {
                     if model.modelConfigured {
-                        Button("清除") { model.clearTextModel() }.buttonStyle(.workspaceQuietCompact)
+                        Button("清除") { model.clearTextModel() }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("清除文本模型配置")
                             .help("只停止后续调用；已有理解与标题保留")
                     }
-                    Button("更改") { model.chooseTextModel() }.buttonStyle(.workspaceSecondaryCompact)
+                    Button("更改") { model.chooseTextModel() }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("更改文本模型配置")
                 }
             }
             .help(model.modelConfigurationPath ?? "选择本地的 .env 或模型 JSON 配置文件；配置后这里显示文件名")
@@ -2325,12 +2325,12 @@ struct WorkspaceView: View {
     private var settingsExportBackupCard: some View {
         WorkspaceSettingsCard(title:"导出与备份", subtitle:"整库导出、自动备份与保留份数") {
             WorkspaceSettingsRow(title:"导出结构化资料", subtitle:"不含录音与视频原件", showsDivider:false) {
-                Button("导出") { model.export(includeMedia:false) }.buttonStyle(.workspaceSecondaryCompact).disabled(model.exporting)
+                Button("导出") { model.export(includeMedia:false) }.buttonStyle(.workspaceSecondaryCompact).disabled(model.exporting).accessibilityLabel("导出结构化资料")
             }
             WorkspaceSettingsRow(title:"导出资料与原件", subtitle:"包含录音、视频与附件") {
                 HStack(spacing:8) {
                     if model.exporting { ProgressView().controlSize(.mini).accessibilityHidden(true) }
-                    Button("导出") { model.export(includeMedia:true) }.buttonStyle(.workspaceSecondaryCompact).disabled(model.exporting)
+                    Button("导出") { model.export(includeMedia:true) }.buttonStyle(.workspaceSecondaryCompact).disabled(model.exporting).accessibilityLabel("导出资料与原件")
                 }
             }
             WorkspaceSettingsRow(title:"自动备份", subtitle:model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText) {
@@ -2339,7 +2339,7 @@ struct WorkspaceView: View {
                     Button(model.backupRunning ? "正在备份…" : "立即备份") { model.retryBackup() }
                         .buttonStyle(.workspaceSecondaryCompact)
                         .disabled(model.backupRunning || model.libraryRoot == nil)
-                    Button("在访达中显示") { model.revealBackups() }.buttonStyle(.workspaceQuietCompact)
+                    Button("在访达中显示") { model.revealBackups() }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("在访达中显示备份")
                 }
             }
             WorkspaceSettingsRow(title:"保留份数",
@@ -2396,7 +2396,7 @@ struct WorkspaceView: View {
             }
             WorkspaceSettingsRow(title:"管理", subtitle:"在访达中查看资料库，或删除本地语音模型") {
                 HStack(spacing:8) {
-                    Button("在访达中显示") { model.revealLibraryRoot() }.buttonStyle(.workspaceQuietCompact)
+                    Button("在访达中显示") { model.revealLibraryRoot() }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("在访达中显示资料库")
                     Button(model.localSpeechDeleting ? "正在删除…" : "删除本地语音模型") { confirmingLocalSpeechDelete = true }
                         .buttonStyle(.workspaceDestructive)
                         .disabled(model.localSpeechDeleting || model.speechModelBusy || (model.storageUsage?.localSpeechBytes ?? 0) == 0)

@@ -313,7 +313,7 @@ struct WorkspaceMonitorView: View {
     }
 
     private var historyCountText: String? {
-        monitorLoadState == .loaded || !earlierReports.isEmpty ? "\(earlierReports.count)" : nil
+        monitorLoadState == .loaded || !earlierReports.isEmpty ? "共 \(earlierReports.count) 次，最新在上" : nil
     }
 
     private func reportCardContent(report: MonitorReport, isLatest: Bool) -> some View {
@@ -713,7 +713,7 @@ struct WorkspaceMonitorView: View {
     }
 
     private var sourceStatusSection: some View {
-        WorkspaceSettingsCard(title: "来源状态", subtitle: "显示本地库最新消息时间；失败会单独标出。") {
+        WorkspaceSettingsCard(title: "来源状态", subtitle: "显示本地库最新消息时间；失败会单独标出") {
             if monitorLoadState == .loading {
                 if showSlowLoad {
                     monitorLoadingRow("正在读取来源状态…")
@@ -838,28 +838,18 @@ struct WorkspaceMonitorView: View {
             if model.monitorSettingsDecodeFailed || model.monitorQQSettingsDecodeFailed {
                 WorkspaceNoticeText(message: "设置无法读取，已使用默认值，请重新保存", severity: .warning)
             }
-            WorkspaceCard(padding: 20) {
+            WorkspaceSettingsCard(title: "检查计划") {
                 VStack(alignment: .leading, spacing: 14) {
-                    WorkspaceSectionHeading("检查计划")
-                    WorkspaceListDivider()
                     scheduleSettings
                     WorkspaceListDivider()
                     authorizationSettings
                 }
             }
-            WorkspaceCard(padding: 20) {
-                VStack(alignment: .leading, spacing: 14) {
-                    WorkspaceSectionHeading("微信推送")
-                    WorkspaceListDivider()
-                    pushSettings
-                }
+            WorkspaceSettingsCard(title: "微信推送") {
+                VStack(alignment: .leading, spacing: 14) { pushSettings }
             }
-            WorkspaceCard(padding: 20) {
-                VStack(alignment: .leading, spacing: 14) {
-                    WorkspaceSectionHeading("QQ 群读取")
-                    WorkspaceListDivider()
-                    qqSettings
-                }
+            WorkspaceSettingsCard(title: "QQ 群读取") {
+                VStack(alignment: .leading, spacing: 14) { qqSettings }
             }
             if !model.monitorStatus.isEmpty {
                 Text(model.monitorStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)

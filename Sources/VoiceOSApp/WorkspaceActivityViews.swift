@@ -766,7 +766,7 @@ struct WorkspaceTaskView: View {
                         if current, !isQuestion, action.kind != "task" {
                             DisclosureGroup(action.state == "completed" ? "记录这次的结果或收获" : "记录实际进展", isExpanded: $draft.expanded) {
                                 feedbackDraftEditor.padding(.top, 12)
-                            }.padding(.horizontal, 20).padding(.vertical, 14)
+                            }.padding(.horizontal, 20).padding(.vertical, 12)
                             WorkspaceListDivider().padding(.horizontal, 20)
                         }
                         DisclosureGroup("原话依据与安排") {
@@ -778,12 +778,12 @@ struct WorkspaceTaskView: View {
                                     if let player = model.player { NativePlayerView(player: player).frame(height: 65) }
                                 }
                             }.padding(.top, 10)
-                        }.padding(.horizontal, 20).padding(.vertical, 14)
+                        }.padding(.horizontal, 20).padding(.vertical, 12)
                         if action.kind == "task" {
                             WorkspaceListDivider().padding(.horizontal, 20)
                             DisclosureGroup("处理记录与高级") {
                                 VStack(alignment: .leading, spacing: 14) { scheduleSection }.padding(.top, 10)
-                            }.padding(.horizontal, 20).padding(.vertical, 14)
+                            }.padding(.horizontal, 20).padding(.vertical, 12)
                         }
                         ActionRevisionHistoryView(revisions: revisions, loadError: revisionsError, retry: { Task { await loadRevisions() } }).padding(.horizontal, 20)
                     }
@@ -1126,8 +1126,7 @@ struct WorkspaceTaskView: View {
         .padding(.horizontal, 8)
         .background(feedbackHighlightID == record.id ? palette.selection : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: feedbackHighlightID)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(stamp + "，" + type + "，" + record.text)
+        .accessibilityElement(children: .contain)
     }
     private func timelineDot(latest: Bool) -> some View {
         ZStack(alignment: .top) {

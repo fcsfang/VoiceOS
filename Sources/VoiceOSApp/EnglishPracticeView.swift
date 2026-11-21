@@ -74,7 +74,7 @@ struct EnglishPracticeView: View {
                             }
                         }
                         VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
-                            Text("可选旧练习（最多 2 份）").vosFont(WorkspaceText.rowTitle)
+                            WorkspaceSectionHeading("可选旧练习（最多 2 份）")
                             ScrollView {
                                 ForEach(priorCandidates) { source in
                                     Toggle(isOn: Binding(get: { priorIDs.contains(source.id) }, set: { value in

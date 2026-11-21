@@ -480,8 +480,8 @@ struct RecordingInboxView: View {
                         Text(RecordingMediaInfo.personalRecordingLayout).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                     }.padding(.top, 8)
                 }
-                .vosFont(WorkspaceText.meta)
-                .padding(.horizontal, 20).padding(.bottom, 14)
+                .vosFont(WorkspaceText.body)
+                .padding(.horizontal, 20).padding(.vertical, 12)
             }
             WorkspaceSettingsCard(title: "接收位置", subtitle: "VoiceOS 收件箱与语音备忘录") {
                 HStack {

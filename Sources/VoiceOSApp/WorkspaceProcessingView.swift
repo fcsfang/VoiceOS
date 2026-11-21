@@ -318,7 +318,7 @@ struct WorkspaceProcessingView: View {
                             WorkspaceSectionHeading(title)
                             WorkspaceListDivider()
                             if let id=model.workspaceProcessingSourceID,let source=model.sourcePageIndex.recordsByID[id] {
-                                WorkspaceRow(title:source.displayTitle,subtitle:"当前正在处理这份完整材料",trailing:"查看原文") { openSource(id) }
+                                WorkspaceRow(title:source.displayTitle,subtitle:"当前正在处理这份完整材料",trailing:"查看原文") { openSource(id) }.processingRowInset()
                             }
                             Text(model.transcriptReviewSourceID != nil ? model.transcriptReviewStatus : model.status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                             if !model.fullRecordingDetail.isEmpty,model.fullRecordingDetail != model.fullRecordingStatus {
@@ -752,7 +752,7 @@ struct WorkspaceProcessingView: View {
                         WorkspaceSectionHeading(title:"最近完成") { WorkspaceBadge(text:"\(model.recentCompletions.count)", tone:.neutral) }
                         WorkspaceListDivider()
                         ForEach(model.recentCompletions) { item in
-                            WorkspaceRow(title:item.title,subtitle:item.category + " · " + item.date.formatted(date:.abbreviated,time:.shortened),trailing:"查看材料") { openSource(item.sourceID) }
+                            WorkspaceRow(title:item.title,subtitle:item.category + " · " + item.date.formatted(date:.abbreviated,time:.shortened),trailing:"查看材料") { openSource(item.sourceID) }.processingRowInset()
                         }
                     }
                 } }

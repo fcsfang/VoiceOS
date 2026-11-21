@@ -1010,3 +1010,7 @@
 ## 波 160：认知地图缓存（2026-11-22，已推送）
 - `AtlasGraphCache`（records+secondary 代际 + reflectionKey）缓存 nodes/edges/positions；缩放滑杆、滚动平移、点选、只看相连、图谱搜索与检查器切换不再触发三件套重算；nodes/edges/positions 三个纯函数逐字未改；loading 与 focus 为空路径不缓存。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 161：卡片家族审计修复（2026-11-22，已推送）
+- 只读审计两路 12 条，全部修复：监测设置三卡改 WorkspaceSettingsCard；处理页两处裸 WorkspaceRow 补 processingRowInset；行动详情记录卡三处 DisclosureGroup 行 14→12；自动入口折叠行 meta→body + 20/12；两个工具页容器间距 14→28；监测历史副标题改「共 N 次，最新在上」；来源状态副标题去句号；英文页子分组标题改 WorkspaceSectionHeading。
+- 可达性：行动详情进展行 combine→contain（恢复「展开完整记录」「查看结果原话」可聚焦）；导出/更改/清除/在访达中显示等重名按钮补区分性无障碍名。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
