@@ -1296,6 +1296,7 @@ struct WorkspaceView: View {
                             .focusEffectDisabled()
                             .onKeyPress { handleClueListKey($0) }
                             .onChange(of:clueKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
+                            .onAppear { restoreKeyboardScroll(proxy: proxy, id: clueKeyboardFocus.id) }
                         } label: {
                             VStack(alignment:.leading,spacing:0) {
                                 WorkspaceSectionHeading("线索", count:"\(clueListings.count)").padding(.bottom,16)
@@ -1325,6 +1326,7 @@ struct WorkspaceView: View {
                             .focusEffectDisabled()
                             .onKeyPress { handleUnlinkedListKey($0) }
                             .onChange(of:unlinkedKeyboardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
+                            .onAppear { restoreKeyboardScroll(proxy: proxy, id: unlinkedKeyboardFocus.id) }
                         } label: {
                             VStack(alignment:.leading,spacing:0) {
                                 WorkspaceSectionHeading(title:"尚未归入主题的材料", count:"\(expressions.count)") {
