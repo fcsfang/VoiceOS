@@ -864,7 +864,7 @@ struct WorkspaceSourceView: View {
                             DisclosureGroup("全文选读",isExpanded:foldExpanded(\.fullText)) {
                                 VStack(alignment:.leading,spacing:12) {
                                     SelectionActions(selection:selectedText,canPlay:selectedSpan != nil,onSave:saveSelectionAsQuestion,onCopy:copySelectedText,onPlay:playSelectedSpan)
-                                    SelectableText(text:source.transcript!) { text, range in
+                                    SelectableText(text:source.transcript!,textColor:palette.textNSColor) { text, range in
                                         selectedText=text
                                         selectedRange=range
                                     }.frame(minHeight:240)

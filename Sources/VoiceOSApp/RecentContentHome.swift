@@ -37,6 +37,9 @@ struct RecentContentHome: View {
     @State private var recentThoughtsHighlighted = false
     @State private var frozenViewpointsItemID: String?
     @FocusState private var timelineFocused: Bool
+    /// Arrow-key moves both select and scroll; a mouse click selects but must
+    /// leave the timeline where the reader put it.
+    @State private var keyboardDrivenSelection = false
     private let topAnchor = "home.top"
     private let timelineSpace = "home.timeline"
     private let tasksAnchor = "home.tasks.summary"
@@ -161,7 +164,7 @@ struct RecentContentHome: View {
                             dayHeader(day)
                             VStack(alignment: .leading, spacing: 8) {
                                 ForEach(day.items) { item in
-                                    Button { recentThoughtsHighlighted = false; selectedID = item.id } label: { row(item) }
+                                    Button { keyboardDrivenSelection = false; recentThoughtsHighlighted = false; selectedID = item.id } label: { row(item) }
                                         .buttonStyle(.plain)
                                         .id(item.id)
                                         .background {
@@ -183,6 +186,8 @@ struct RecentContentHome: View {
             .onChange(of: selectedID) { _, id in
                 guard let id else { return }
                 timelineFocused = true
+                guard keyboardDrivenSelection else { return }
+                keyboardDrivenSelection = false
                 Task { @MainActor in
                     await Task.yield()
                     proxy.scrollTo(id, anchor: .center)
@@ -260,6 +265,7 @@ struct RecentContentHome: View {
                 recentThoughtsHighlighted = true
             } else {
                 recentThoughtsHighlighted = false
+                keyboardDrivenSelection = true
                 selectedID = ids[next]
             }
             return .handled

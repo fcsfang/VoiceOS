@@ -54,11 +54,15 @@ struct WorkspacePalette {
         case .sage: adaptive(0xF2F4ED, 0x171C18)
         }
     }
-    var text: Color {
+    var text: Color { adaptive(textValues.light, textValues.dark) }
+    /// The AppKit text view behind `SelectableText` cannot take a SwiftUI
+    /// `Color`, so the dynamic text color is exposed as its NSColor twin.
+    var textNSColor: NSColor { dynamicColor(textValues.light, textValues.dark) }
+    private var textValues: (light: UInt32, dark: UInt32) {
         switch theme {
-        case .graphite: adaptive(0x1F1F1D, 0xECECEC)
-        case .snow: adaptive(0x1A1A1C, 0xEDEDEF)
-        case .sage: adaptive(0x242F26, 0xE5EBE4)
+        case .graphite: (0x1F1F1D, 0xECECEC)
+        case .snow: (0x1A1A1C, 0xEDEDEF)
+        case .sage: (0x242F26, 0xE5EBE4)
         }
     }
     /// Secondary toolbar and metadata copy; one step quieter than `text`.
@@ -106,11 +110,15 @@ struct WorkspacePalette {
     func graphColor(_ lane: Int) -> Color { [text, accent, action, outcome][lane] }
 
     private func adaptive(_ light: UInt32, _ dark: UInt32) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
+        Color(nsColor: dynamicColor(light, dark))
+    }
+
+    private func dynamicColor(_ light: UInt32, _ dark: UInt32) -> NSColor {
+        NSColor(name: nil) { appearance in
             let value = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
             return NSColor(srgbRed: Double(value >> 16 & 255) / 255,
                 green: Double(value >> 8 & 255) / 255, blue: Double(value & 255) / 255, alpha: 1)
-        })
+        }
     }
 }
 
