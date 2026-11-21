@@ -29,22 +29,12 @@ enum WorkspaceMetrics {
 // The editorial surfaces (capture, assistant, reflection) keep their serif
 // motif; the rest of the app reads in the system face.
 struct WorkspaceHero: View {
-    @Environment(\.workspacePalette) private var palette
     let eyebrow: String
     let title: String
     var subtitle: String = ""
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if !eyebrow.isEmpty {
-                Text(eyebrow).vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced).tracking(2)
-                    .textCase(.uppercase).foregroundStyle(palette.accent)
-            }
-            Text(title).vosFont(WorkspaceText.pageTitle).textSelection(.enabled)
-                .accessibilityAddTraits(.isHeader)
-            if !subtitle.isEmpty {
-                Text(subtitle).vosFont(WorkspaceText.body).foregroundStyle(.secondary).lineSpacing(4)
-            }
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        WorkspacePageHeading(eyebrow: eyebrow, title: title, subtitle: subtitle)
+            .textSelection(.enabled)
     }
 }
 
@@ -394,6 +384,18 @@ private struct WorkspaceModalSurface: ViewModifier {
     }
 }
 
+struct WorkspaceFieldSurface: ViewModifier {
+    @Environment(\.workspacePalette) private var palette
+
+    func body(content: Content) -> some View {
+        content.textFieldStyle(.plain)
+            .padding(.horizontal, 12)
+            .frame(minHeight: WorkspaceMetrics.fieldHeight)
+            .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border, lineWidth: 1) }
+    }
+}
+
 private struct WorkspaceEditorSurface: ViewModifier {
     @Environment(\.workspacePalette) private var palette
     let radius: CGFloat
@@ -427,6 +429,10 @@ extension View {
 
     func workspaceModalSurface() -> some View {
         modifier(WorkspaceModalSurface())
+    }
+
+    func workspaceFieldSurface() -> some View {
+        modifier(WorkspaceFieldSurface())
     }
 
     func workspaceEditorSurface(radius: CGFloat = WorkspaceMetrics.controlRadius) -> some View {

@@ -119,20 +119,12 @@ extension ControlCenter {
     }
 }
 struct WorkspaceHeading: View {
-    @Environment(\.workspacePalette) private var palette
     let eyebrow: String
     let title: String
     var subtitle: String = ""
     var body: some View {
-        VStack(alignment:.leading,spacing:8) {
-            if !eyebrow.isEmpty {
-                Text(eyebrow)
-                    .vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced)
-                    .tracking(1.4).textCase(.uppercase).foregroundStyle(palette.accent)
-            }
-            Text(title).vosFont(WorkspaceText.pageTitle).textSelection(.enabled).accessibilityAddTraits(.isHeader)
-            if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.body).foregroundStyle(.secondary).lineSpacing(4) }
-        }.frame(maxWidth:.infinity,alignment:.leading)
+        WorkspacePageHeading(eyebrow: eyebrow, title: title, subtitle: subtitle)
+            .textSelection(.enabled)
     }
 }
 func workspaceStateLabel(_ value:String) -> String {
@@ -547,7 +539,7 @@ struct WorkspaceView: View {
                     ForEach(model.reminderCalendars) { calendar in Button(calendar.title) { Task { model.proposedReminderCalendarID=calendar.id; await model.saveReminderConnection() } }.disabled(model.remindersBusy) }
                     if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                     HStack {
-                        Button("取消") { model.choosingReminderCalendar=false }.keyboardShortcut(.cancelAction)
+                        Button("取消") { model.choosingReminderCalendar=false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                         Spacer()
                     }
                 }.padding(24)
@@ -616,7 +608,7 @@ struct WorkspaceView: View {
         VStack(alignment:.leading,spacing:16) {
             Text("保存当前视图").vosFont(WorkspaceText.sectionTitle)
             Text(saveViewPage == .materials ? "材料 · " + saveViewFilter : "行动 · " + saveViewFilter).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            TextField("视图名称",text:$newViewName).textFieldStyle(.roundedBorder)
+            TextField("视图名称",text:$newViewName).workspaceFieldSurface()
                 .onChange(of:newViewName) { _, value in if value.count > ControlCenter.savedViewNameLimit { newViewName = String(value.prefix(ControlCenter.savedViewNameLimit)) } }
             if savedViews.count >= ControlCenter.savedViewsLimit {
                 Text("最多保存 \(ControlCenter.savedViewsLimit) 个视图，可先删除一个。").vosFont(WorkspaceText.meta).foregroundStyle(palette.danger)
@@ -1273,7 +1265,7 @@ struct WorkspaceView: View {
             }
             if creatingTopic {
                 VStack(alignment:.leading,spacing:14) {
-                    TextField("你持续关心的主题或问题",text:$newTopicTitle).textFieldStyle(.roundedBorder)
+                    TextField("你持续关心的主题或问题",text:$newTopicTitle).workspaceFieldSurface()
                     HStack {
                         Button("取消") { creatingTopic=false;editingTopicID=nil }.buttonStyle(.workspaceSecondary)
                         Button("保存主题") { Task { await saveTopic() } }.buttonStyle(.workspacePrimary).disabled(newTopicTitle.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || savingTopic)
@@ -3013,9 +3005,10 @@ struct WorkspaceView: View {
             }
             if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             HStack {
-                Button("关闭") { showingPendingReminderSyncs=false }.keyboardShortcut(.cancelAction)
+                Button("关闭") { showingPendingReminderSyncs=false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("现在核对") { Task { await model.retryPendingReminderSyncs() } }
+                    .buttonStyle(.workspacePrimary)
                     .disabled(model.remindersBusy || model.pendingReminderSyncs.isEmpty)
             }
         }.padding(24).frame(minWidth:520)
@@ -3433,7 +3426,7 @@ private struct WorkspaceTopicEntry: View {
         DisclosureGroup("留下认识、实践或结果") {
             VStack(alignment:.leading,spacing:13) {
                 Picker("记录类型",selection:$kind) { ForEach(ReflectionQuestionEntryKind.allCases,id:\.self) { Text($0.label).tag($0) } }.pickerStyle(.menu)
-                TextEditor(text:$text).frame(minHeight:100).padding(8).background(palette.selection,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                TextEditor(text:$text).frame(minHeight:100).workspaceEditorSurface()
                 Button("保存并接回主题") { saving=true;Task { do { try await model.saveReflectionQuestionEntry(questionID:topic.id,kind:kind,text:text,sourceIDs:sourceIDs,allowCloud:true);text="";error="" } catch { self.error=error.localizedDescription };saving=false } }.disabled(saving || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
                 if !error.isEmpty { Text(error).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             }.padding(.top,12)

@@ -62,7 +62,7 @@ struct TextCaptureView: View {
                 if linkImporting { ProgressView("正在抓取网页正文…").controlSize(.small) }
                 Text(saveExplanation).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 HStack {
-                    Button("稍后继续", action: dismiss).keyboardShortcut(.cancelAction).disabled(draft.saving)
+                    Button("稍后继续", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(draft.saving)
                     Spacer()
                     if draft.saving { ProgressView().controlSize(.small) }
                     Button("保存") { save() }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
@@ -386,21 +386,6 @@ struct TextCaptureView: View {
             draft.saving = false
         }
     }
-}
-
-private struct WorkspaceFieldSurface: ViewModifier {
-    @Environment(\.workspacePalette) private var palette
-    func body(content: Content) -> some View {
-        content.textFieldStyle(.plain)
-            .padding(.horizontal, 12)
-            .frame(minHeight: WorkspaceMetrics.fieldHeight)
-            .background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border, lineWidth: 1) }
-    }
-}
-
-private extension View {
-    func workspaceFieldSurface() -> some View { modifier(WorkspaceFieldSurface()) }
 }
 
 private extension ControlCenter {
