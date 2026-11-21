@@ -1749,7 +1749,14 @@ struct WorkspaceView: View {
                 let catalog=recordCatalog
                 ForEach(sources) { source in
                     let rowID="material:" + source.id
-                    sourceRow(source,catalog:catalog)
+                    MaterialMenuRow(revealed: searchKeyboardFocus.id == rowID) {
+                        MaterialManagementControls(model:model,source:source,style:.compact,
+                            onSetReadingState:{ setMaterialReading(source.id,$0) },
+                            onSplitExpression:{ splitMaterialExpression(model.sourcePageIndex.expression(for: source.id)?.sourceIDs ?? [source.id]) },
+                            onRejudgeExpressions:{ rejudgeMaterialExpressions(source.presentation?.expression?.sourceIDs ?? [source.id]) })
+                    } row: {
+                        sourceRow(source,catalog:catalog,trailingGutter: WorkspaceRowChrome.materialGutter)
+                    }
                         .background(searchKeyboardFocus.id == rowID ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
                         .workspaceFocusRing(searchKeyboardFocus.id == rowID, radius: WorkspaceMetrics.panelRadius)
                         .id(rowID)
