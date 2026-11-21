@@ -50,16 +50,19 @@ struct WorkspaceMonitorView: View {
                 .frame(width: 172)
                 .accessibilityIdentifier("monitor.page")
             }
-            if showsSettings {
-                settingsSection
-            } else {
-                runBar
-                pushNotConfiguredBanner
-                monitorLoadFailureNotice
-                todayReportSection
-                historySection
-                sourceStatusSection
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+                if showsSettings {
+                    settingsSection
+                } else {
+                    runBar
+                    pushNotConfiguredBanner
+                    monitorLoadFailureNotice
+                    todayReportSection
+                    historySection
+                    sourceStatusSection
+                }
             }
+            .frame(maxWidth: 680, alignment: .leading)
         }
         .onAppear {
             model.markMonitorAttentionSeen()
@@ -231,41 +234,42 @@ struct WorkspaceMonitorView: View {
     }
 
     @ViewBuilder private var todayReportSection: some View {
-        if monitorLoadState == .loading {
-            if showSlowLoad {
-                WorkspaceCard(padding: 20) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        WorkspaceSectionHeading("今日报告")
-                        WorkspaceListDivider()
-                        monitorLoadingRow("正在读取今日报告…")
-                    }
-                }
-            }
-        } else if let report = model.monitorLatestReport, report.reportDate == todayKey {
-            reportSection(title: "今日报告", report: report, isLatest: true)
-        } else if monitorLoadState == .failed {
-            WorkspaceCard(padding: 20) {
-                VStack(alignment: .leading, spacing: 12) {
-                    WorkspaceSectionHeading("今日报告")
-                    WorkspaceListDivider()
+        if monitorLoadState == .loading, !showSlowLoad {
+            EmptyView()
+        } else {
+            WorkspaceSettingsCard(title: "今日报告", subtitle: todayReportSubtitle) {
+                if monitorLoadState == .loading {
+                    monitorLoadingRow("正在读取今日报告…")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 4)
+                } else if let report = model.monitorLatestReport, report.reportDate == todayKey {
+                    reportCardContent(report: report, isLatest: true)
+                } else if monitorLoadState == .failed {
                     Text("暂时无法读取今日报告。修复后点「重新读取」。")
                         .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                }
-            }
-        } else {
-            WorkspaceCard(padding: 20) {
-                VStack(alignment: .leading, spacing: 12) {
-                    WorkspaceSectionHeading("今日报告")
-                    Text(model.monitorLatestReport.map { "最近一次报告是 " + $0.reportDate + "；今天还没有检查。" }
-                         ?? "还没有报告；点击「立即检查」开始第一次检查。")
-                        .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    WorkspaceListDivider()
-                    Text("检查会先从已启用的来源采集，再按授权情况交给模型分析。云端分析未授权时不会发送任何原文。")
-                        .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
-                    earlierOpenItemsHint
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(model.monitorLatestReport.map { "最近一次报告是 " + $0.reportDate + "；今天还没有检查。" }
+                             ?? "还没有报告；点击「立即检查」开始第一次检查。")
+                            .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        WorkspaceListDivider()
+                        Text("检查会先从已启用的来源采集，再按授权情况交给模型分析。云端分析未授权时不会发送任何原文。")
+                            .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                        earlierOpenItemsHint
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
                 }
             }
         }
+    }
+
+    private var todayReportSubtitle: String? {
+        guard monitorLoadState != .loading,
+              let report = model.monitorLatestReport, report.reportDate == todayKey else { return nil }
+        return localizedReportDate(report.reportDate) + " · " + ControlCenter.monitorStateText(report.state)
     }
 
     private var earlierReports: [MonitorReport] {
@@ -273,11 +277,8 @@ struct WorkspaceMonitorView: View {
     }
 
     private var historySection: some View {
-        WorkspaceCard(padding: 20) {
+        WorkspaceSettingsCard(title: "历史报告", subtitle: historyCountText) {
             VStack(alignment: .leading, spacing: 12) {
-                WorkspaceSectionHeading("历史报告", count: monitorLoadState == .loaded || !earlierReports.isEmpty
-                                        ? "\(earlierReports.count)" : nil)
-                WorkspaceListDivider()
                 if monitorLoadState == .loading {
                     if showSlowLoad { monitorLoadingRow("正在读取历史报告…") }
                 } else if earlierReports.isEmpty {
@@ -307,76 +308,76 @@ struct WorkspaceMonitorView: View {
                         .accessibilityIdentifier("monitor.history.loadMore")
                 }
             }
+            .padding(.horizontal, 20)
         }
     }
 
-    private func reportSection(title: String, report: MonitorReport, isLatest: Bool) -> some View {
-        WorkspaceCard(padding: 20) {
-            VStack(alignment: .leading, spacing: 12) {
-                WorkspaceSectionHeading(title)
-                HStack(spacing: 10) {
-                    Text(localizedReportDate(report.reportDate) + " · " + ControlCenter.monitorStateText(report.state))
-                        .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                    if let generated = ControlCenter.monitorGeneratedText(report) {
-                        Text(generated).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
-                    }
-                    Spacer(minLength: 0)
+    private var historyCountText: String? {
+        monitorLoadState == .loaded || !earlierReports.isEmpty ? "\(earlierReports.count)" : nil
+    }
+
+    private func reportCardContent(report: MonitorReport, isLatest: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let generated = ControlCenter.monitorGeneratedText(report) {
+                Text(generated).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+            }
+            WorkspaceListDivider()
+            VStack(alignment: .leading, spacing: 10) {
+                Text(report.headline.isEmpty ? "没有标题" : report.headline).vosFont(WorkspaceText.rowTitle)
+                if !report.summary.isEmpty {
+                    Text(report.summary).vosFont(WorkspaceText.body)
+                        .foregroundStyle(palette.secondaryText).lineSpacing(4)
                 }
-                WorkspaceListDivider()
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(report.headline.isEmpty ? "没有标题" : report.headline).vosFont(WorkspaceText.rowTitle)
-                    if !report.summary.isEmpty {
-                        Text(report.summary).vosFont(WorkspaceText.body)
-                            .foregroundStyle(palette.secondaryText).lineSpacing(4)
-                    }
-                    HStack(spacing: 16) {
-                        Text(itemCountText(report)).vosFont(WorkspaceText.meta)
-                            .foregroundStyle(palette.secondaryText)
-                        Text(ControlCenter.monitorDeliveryText(report)).vosFont(WorkspaceText.meta)
-                            .foregroundStyle(report.deliveryState == "failed" ? palette.warning : palette.secondaryText)
-                        Spacer()
-                        if isLatest {
-                            if report.state == .failed {
-                                Button("去设置") { showsSettings = true }
-                                    .buttonStyle(.workspaceQuietCompact)
-                                    .accessibilityIdentifier("monitor.report.settings")
-                                Button("重新检查") {
-                                    Task {
-                                        await model.runMonitorCheck()
-                                        markLatestItemsFailure()
-                                        await refreshEarlierOpenSummary()
-                                    }
+                HStack(spacing: 16) {
+                    Text(itemCountText(report)).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.secondaryText)
+                    Text(ControlCenter.monitorDeliveryText(report)).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(report.deliveryState == "failed" ? palette.warning : palette.secondaryText)
+                    Spacer()
+                    if isLatest {
+                        if report.state == .failed {
+                            Button("去设置") { showsSettings = true }
+                                .buttonStyle(.workspaceQuietCompact)
+                                .accessibilityIdentifier("monitor.report.settings")
+                            Button("重新检查") {
+                                Task {
+                                    await model.runMonitorCheck()
+                                    markLatestItemsFailure()
+                                    await refreshEarlierOpenSummary()
                                 }
-                                    .buttonStyle(.workspaceSecondaryCompact)
-                                    .disabled(model.monitorChecking)
-                                    .accessibilityIdentifier("monitor.report.recheck")
-                            } else if model.monitorPushConfigured {
-                                Button { Task { await model.pushLatestMonitorReport() } } label: {
-                                    HStack(spacing: 7) {
-                                        if operations.push == .report { ProgressView().controlSize(.small) }
-                                        Text(operations.push == .report ? "正在推送…" : "立即推送今日报告")
-                                    }
-                                }
-                                    .buttonStyle(.workspaceSecondaryCompact)
-                                    .disabled(operations.push != nil || model.monitorChecking)
-                                    .accessibilityIdentifier("monitor.report.push")
-                            } else {
-                                Button("配置推送") { showsSettings = true }
-                                    .buttonStyle(.workspaceQuietCompact)
-                                    .accessibilityIdentifier("monitor.report.pushConfigure")
                             }
+                                .buttonStyle(.workspaceSecondaryCompact)
+                                .disabled(model.monitorChecking)
+                                .accessibilityIdentifier("monitor.report.recheck")
+                        } else if model.monitorPushConfigured {
+                            Button { Task { await model.pushLatestMonitorReport() } } label: {
+                                HStack(spacing: 7) {
+                                    if operations.push == .report { ProgressView().controlSize(.small) }
+                                    Text(operations.push == .report ? "正在推送…" : "立即推送今日报告")
+                                }
+                            }
+                                .buttonStyle(.workspaceSecondaryCompact)
+                                .disabled(operations.push != nil || model.monitorChecking)
+                                .accessibilityIdentifier("monitor.report.push")
+                        } else {
+                            Button("配置推送") { showsSettings = true }
+                                .buttonStyle(.workspaceQuietCompact)
+                                .accessibilityIdentifier("monitor.report.pushConfigure")
                         }
                     }
-                    if isLatest, !model.monitorPushStatus.isEmpty {
-                        Text(model.monitorPushStatus).vosFont(WorkspaceText.meta)
-                            .foregroundStyle(palette.secondaryText).textSelection(.enabled)
-                    }
-                    sourceFailureReasons(report)
-                    itemsView(report: report)
-                    if isLatest { earlierOpenItemsHint }
                 }
+                if isLatest, !model.monitorPushStatus.isEmpty {
+                    Text(model.monitorPushStatus).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.secondaryText).textSelection(.enabled)
+                }
+                sourceFailureReasons(report)
+                WorkspaceListDivider()
+                itemsView(report: report)
+                if isLatest { earlierOpenItemsHint }
             }
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
     }
 
     @ViewBuilder private func reportBody(report: MonitorReport) -> some View {
@@ -712,41 +713,37 @@ struct WorkspaceMonitorView: View {
     }
 
     private var sourceStatusSection: some View {
-        WorkspaceCard(padding: 20) {
-            VStack(alignment: .leading, spacing: 12) {
-                WorkspaceSectionHeading("来源状态")
-                Text("显示本地库最新消息时间；失败会单独标出。")
-                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
-                WorkspaceListDivider()
-                if monitorLoadState == .loading {
-                    if showSlowLoad { monitorLoadingRow("正在读取来源状态…") }
-                } else if monitorLoadState == .failed, model.monitorSources.isEmpty {
-                    Text("暂时无法读取来源状态。").vosFont(WorkspaceText.meta)
-                        .foregroundStyle(palette.secondaryText).padding(.vertical, 10)
-                } else if monitorLoaded, !model.monitorSources.contains(where: { $0.kind == .qqGroup }) {
-                    HStack(spacing: 12) {
-                        Text("未添加 QQ 群来源").vosFont(WorkspaceText.body)
-                        Button("去设置") { showsSettings = true }
-                            .buttonStyle(.workspaceQuietCompact)
-                            .accessibilityIdentifier("monitor.sources.settings")
-                        Spacer()
-                    }.padding(.vertical, 8)
+        WorkspaceSettingsCard(title: "来源状态", subtitle: "显示本地库最新消息时间；失败会单独标出。") {
+            if monitorLoadState == .loading {
+                if showSlowLoad {
+                    monitorLoadingRow("正在读取来源状态…")
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 4)
                 }
-                ForEach(model.monitorSources) { source in
-                    sourceRow(source)
+            } else if monitorLoadState == .failed, model.monitorSources.isEmpty {
+                Text("暂时无法读取来源状态。").vosFont(WorkspaceText.meta)
+                    .foregroundStyle(palette.secondaryText)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+            } else if monitorLoaded, !model.monitorSources.contains(where: { $0.kind == .qqGroup }) {
+                WorkspaceSettingsRow(title: "未添加 QQ 群来源", showsDivider: false) {
+                    Button("去设置") { showsSettings = true }
+                        .buttonStyle(.workspaceQuietCompact)
+                        .accessibilityIdentifier("monitor.sources.settings")
                 }
-                ForEach(ControlCenter.monitorBuiltinWebsites) { item in
-                    if monitorLoaded, model.monitorSource(forBuiltinURL: item.url) == nil {
-                        HStack(spacing: 12) {
-                            Text("内置栏目未添加：\(item.name)").vosFont(WorkspaceText.body)
-                            Button("添加内置来源") {
-                                Task { await model.ensureBuiltinMonitorSources(restoreMissing: true) }
-                            }
-                                .buttonStyle(.workspaceSecondaryCompact)
-                                .disabled(operations.addingBuiltinSources)
-                                .accessibilityIdentifier("monitor.sources.addBuiltin")
-                            Spacer()
-                        }.padding(.vertical, 8)
+            }
+            ForEach(model.monitorSources) { source in
+                sourceRow(source)
+            }
+            ForEach(ControlCenter.monitorBuiltinWebsites) { item in
+                if monitorLoaded, model.monitorSource(forBuiltinURL: item.url) == nil {
+                    WorkspaceSettingsRow(title: "内置栏目未添加：\(item.name)") {
+                        Button("添加内置来源") {
+                            Task { await model.ensureBuiltinMonitorSources(restoreMissing: true) }
+                        }
+                            .buttonStyle(.workspaceSecondaryCompact)
+                            .disabled(operations.addingBuiltinSources)
+                            .accessibilityIdentifier("monitor.sources.addBuiltin")
                     }
                 }
             }
@@ -755,14 +752,8 @@ struct WorkspaceMonitorView: View {
 
     @ViewBuilder private func sourceRow(_ source: MonitorSource) -> some View {
         let stat = model.monitorSourceStats[source.id]
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: source.kind == .qqGroup ? "bubble.left.and.bubble.right" : "globe")
-                    .foregroundStyle(palette.secondaryText)
-                Text(source.displayName).vosFont(WorkspaceText.rowTitle)
-                Text(source.kind == .qqGroup ? "QQ 群" : "官网栏目").vosFont(WorkspaceText.meta)
-                    .foregroundStyle(palette.tertiaryText)
-                Spacer()
+        WorkspaceSettingsRow(title: source.displayName, subtitle: sourceSubtitle(source)) {
+            HStack(spacing: 10) {
                 Toggle("启用", isOn: Binding(
                     get: { source.enabled },
                     set: { value in Task { await model.setMonitorSourceEnabled(source, enabled: value) } }))
@@ -774,31 +765,29 @@ struct WorkspaceMonitorView: View {
                     .buttonStyle(.workspaceDestructive)
                     .accessibilityIdentifier("monitor.source." + source.id + ".delete")
             }
-            if !source.enabled {
-                Text("已停用，不参与每日检查；历史消息保留。").vosFont(WorkspaceText.meta)
-                    .foregroundStyle(palette.secondaryText)
-            }
-            Text(sourceStatText(source, stat)).vosFont(WorkspaceText.meta)
-                .foregroundStyle(stat?.lastError == nil ? palette.secondaryText : palette.warning)
-                .textSelection(.enabled)
-            HStack(spacing: 12) {
-                Text("从这里开始读取").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                DatePicker("", selection: Binding(
-                    get: { model.monitorSourceStartDate(source) ?? Date() },
-                    set: { date in Task { await setStart(source, date) } }),
-                    displayedComponents: source.kind == .qqGroup ? [.date, .hourAndMinute] : [.date])
-                    .labelsHidden().datePickerStyle(.field)
-                    .frame(minWidth: source.kind == .qqGroup ? 190 : 130)
-                    .disabled(operations.sourceBusy.contains(source.id))
-                    .accessibilityLabel("来源起始时间：" + source.displayName)
-                    .accessibilityIdentifier("monitor.source." + source.id + ".start")
-                Text(startNote(source)).vosFont(WorkspaceText.caption)
-                    .foregroundStyle(palette.tertiaryText)
-                Spacer()
-            }
         }
-        .padding(.vertical, 10)
-        WorkspaceListDivider()
+        Text(sourceStatText(source, stat)).vosFont(WorkspaceText.meta)
+            .foregroundStyle(stat?.lastError == nil ? palette.secondaryText : palette.warning)
+            .textSelection(.enabled)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
+        WorkspaceSettingsRow(title: "从这里开始读取", subtitle: startNote(source), showsDivider: false) {
+            DatePicker("", selection: Binding(
+                get: { model.monitorSourceStartDate(source) ?? Date() },
+                set: { date in Task { await setStart(source, date) } }),
+                displayedComponents: source.kind == .qqGroup ? [.date, .hourAndMinute] : [.date])
+                .labelsHidden().datePickerStyle(.field)
+                .frame(minWidth: source.kind == .qqGroup ? 190 : 130)
+                .disabled(operations.sourceBusy.contains(source.id))
+                .accessibilityLabel("来源起始时间：" + source.displayName)
+                .accessibilityIdentifier("monitor.source." + source.id + ".start")
+        }
+    }
+
+    private func sourceSubtitle(_ source: MonitorSource) -> String {
+        let kind = source.kind == .qqGroup ? "QQ 群" : "官网栏目"
+        guard !source.enabled else { return kind }
+        return [kind, "已停用，不参与每日检查；历史消息保留。"].joined(separator: " · ")
     }
 
     private func setStart(_ source: MonitorSource, _ date: Date) async {
