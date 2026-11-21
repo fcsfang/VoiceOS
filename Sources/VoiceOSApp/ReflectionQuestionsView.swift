@@ -311,7 +311,7 @@ struct ReflectionQuestionsView: View {
             HStack {
                 Text("这个主题的资料").vosFont(WorkspaceText.sectionTitle)
                 Spacer()
-                Button("完成") { managingSources = false }.buttonStyle(.workspaceSecondary).disabled(busy).keyboardShortcut(.defaultAction)
+                Button("完成") { managingSources = false }.buttonStyle(.workspaceSecondary).disabled(busy).keyboardShortcut(.cancelAction)
             }
             Text("从原文、已有知识或任务接回主题；关联保留原话与归属，不代表认可。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             Picker("关联内容", selection: $sourceMode) {
