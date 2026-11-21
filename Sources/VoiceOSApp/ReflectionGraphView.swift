@@ -422,6 +422,7 @@ struct ReflectionTimelineView: View {
                                     Text(edge.label).vosFont(WorkspaceText.caption.size, weight: .medium).padding(4)
                                         .background(palette.canvas, in: Capsule())
                                 }.buttonStyle(.plain).help("查看关系与原话依据")
+                                    .accessibilityAddTraits(selection == edge.id ? [.isSelected] : [])
                                     .position(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
                             }
                         }
@@ -487,6 +488,8 @@ struct ReflectionTimelineView: View {
                 .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius).stroke(selection == node.id ? palette.graphColor(node.lane) : palette.text.opacity(0.12), lineWidth: selection == node.id ? 2 : 1) }
                 .shadow(color: palette.text.opacity(0.04), radius: 7, y: 3)
         }.buttonStyle(.plain).accessibilityLabel(node.label + "，" + node.title)
+            .accessibilityValue(node.context ? "此前背景" : "")
+            .accessibilityAddTraits(selection == node.id ? [.isSelected] : [])
     }
     private func inspector(_ focus: ConversationReflectionFocus) -> some View {
         let items = nodes(focus), links = edges(focus, nodes: items)
