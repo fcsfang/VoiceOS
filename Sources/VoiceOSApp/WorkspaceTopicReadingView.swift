@@ -24,11 +24,11 @@ struct WorkspaceTopicReadingView: View {
     @State private var pendingRejection: CandidateClaim?
     @State private var confirmingRejection = false
     @State private var hoveredSectionID: String?
-    @State private var hoveredQuestion: String?
+    @State private var hoveredQuestion: Int?
     @State private var localFilter = ""
     @State private var keyboardSectionID: String?
     @FocusState private var structureFocused: Bool
-    @FocusState private var focusedQuestion: String?
+    @FocusState private var focusedQuestion: Int?
 
     private var sections: [TopicReadingSection] { topic.organization?.sections ?? [] }
     private var bodyPending: Bool { topic.organization?.bodyPending == true }
@@ -375,19 +375,19 @@ struct WorkspaceTopicReadingView: View {
         let questions=topic.organization?.questions ?? []
         if !questions.isEmpty {
             WorkspaceSection(title:"值得继续的问题",icon:"questionmark.bubble",count:questions.count) {
-                ForEach(questions,id:\.self) { question in
+                ForEach(Array(questions.enumerated()),id:\.offset) { index,question in
                     Button { discuss(question) } label: {
                         HStack(alignment:.top,spacing:12) {
                             Image(systemName:"questionmark.bubble").foregroundStyle(palette.action)
                             Text(question).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
                             Spacer(minLength:4)
                             Image(systemName:"arrow.up.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
-                        }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(hoveredQuestion == question ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)).overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(focusedQuestion == question ? palette.focusRing : palette.border,lineWidth:1) }.contentShape(Rectangle())
+                        }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(hoveredQuestion == index ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)).overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(focusedQuestion == index ? palette.focusRing : palette.border,lineWidth:1) }.contentShape(Rectangle())
                     }.buttonStyle(.plain).help("带上当前主题继续讨论")
                         .focusable()
-                        .focused($focusedQuestion, equals: question)
+                        .focused($focusedQuestion, equals: index)
                         .focusEffectDisabled()
-                        .onHover { inside in hoveredQuestion = inside ? question : (hoveredQuestion == question ? nil : hoveredQuestion) }
+                        .onHover { inside in hoveredQuestion = inside ? index : (hoveredQuestion == index ? nil : hoveredQuestion) }
                 }
             }
         }

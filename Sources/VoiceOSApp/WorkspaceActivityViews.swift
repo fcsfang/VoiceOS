@@ -695,7 +695,7 @@ struct WorkspaceTaskView: View {
                                     Image(systemName: subtask.done ? "checkmark.circle.fill" : "circle")
                                         .vosFont(WorkspaceText.sectionTitle.size).foregroundStyle(editable ? (subtask.done ? palette.accent : palette.secondaryText) : palette.disabledText)
                                         .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
-                                        .background(hoveredSubtaskToggleID == subtask.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
+                                        .background(editable && hoveredSubtaskToggleID == subtask.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
                                         .contentShape(Rectangle())
                                 }.buttonStyle(.plain).disabled(!editable)
                                     .onHover { inside in hoveredSubtaskToggleID = inside && editable ? subtask.id : (hoveredSubtaskToggleID == subtask.id ? nil : hoveredSubtaskToggleID) }
@@ -707,7 +707,7 @@ struct WorkspaceTaskView: View {
                                     Button { deleteSubtask(subtask) } label: {
                                         Image(systemName:"trash").vosFont(WorkspaceText.meta.size)
                                             .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
-                                            .background(hoveredSubtaskDeleteID == subtask.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
+                                            .background(!planBusy && hoveredSubtaskDeleteID == subtask.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
                                             .contentShape(Rectangle())
                                     }
                                         .buttonStyle(.borderless).foregroundStyle(palette.secondaryText)
@@ -950,7 +950,7 @@ struct WorkspaceTaskView: View {
                                 .vosFont(WorkspaceText.sectionTitle.size)
                                 .foregroundStyle(editable ? (child.state == "completed" ? palette.accent : palette.secondaryText) : palette.disabledText)
                                 .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
-                                .background(hoveredNextActionToggleID == child.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
+                                .background(editable && hoveredNextActionToggleID == child.id ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
                                 .contentShape(Rectangle())
                         }.buttonStyle(.plain).disabled(!editable)
                             .onHover { inside in hoveredNextActionToggleID = inside && editable ? child.id : (hoveredNextActionToggleID == child.id ? nil : hoveredNextActionToggleID) }

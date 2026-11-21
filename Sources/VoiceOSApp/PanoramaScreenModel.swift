@@ -6,6 +6,9 @@ final class PanoramaScreenModel: ObservableObject {
     @Published private(set) var state: PanoramaState?
     @Published private(set) var message = "正在核对完整材料与使用许可"
     @Published private(set) var readError: String?
+    /// Hiding the banner must not erase the failure; the empty state keeps it
+    /// and its retry entry until a read succeeds.
+    @Published private(set) var readErrorBannerDismissed = false
     @Published var selection: PanoramaSelection?
     @Published private(set) var isGenerating = false
     @Published private(set) var modelConfigured = false
@@ -36,19 +39,21 @@ final class PanoramaScreenModel: ObservableObject {
             }
             state = current
             readError = nil
+            readErrorBannerDismissed = false
             message = statusMessage(current, configured: port != nil)
             guard worker == nil, current.canGenerate, let port else { return }
             generate(store: store, port: port, retry: false)
         } catch {
             guard version == refreshVersion else { return }
             readError = error.localizedDescription
+            readErrorBannerDismissed = false
         }
     }
     func retryRefresh() {
         Task { await refresh(store: lastStore, port: lastPort) }
     }
     func dismissReadError() {
-        readError = nil
+        readErrorBannerDismissed = true
     }
     func retry(store: VoiceOSStore?, port: (any PanoramaModelPort)?) {
         guard worker == nil, let store, let port else { return }

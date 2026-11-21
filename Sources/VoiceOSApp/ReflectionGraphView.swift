@@ -154,7 +154,9 @@ struct ReflectionTimelineView: View {
                         .buttonStyle(.workspacePrimary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                WorkspaceEmptyState(title: "暂时无法打开回顾", systemImage: "arrow.triangle.branch", description: error ?? "请刷新资料") {
+                WorkspaceEmptyState(title: "暂时无法打开回顾", systemImage: "arrow.triangle.branch",
+                                    description: error ?? "请刷新资料",
+                                    severity: .danger, selectableMessage: true) {
                     Button("重试") { Task { await refresh() } }.buttonStyle(.workspacePrimary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }

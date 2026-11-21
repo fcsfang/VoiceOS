@@ -7,6 +7,7 @@ struct ThoughtPanoramaView: View {
     let isGenerating: Bool
     let modelConfigured: Bool
     let readError: String?
+    let readErrorDismissed: Bool
     @Binding var selection: PanoramaSelection?
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var scale
@@ -38,7 +39,7 @@ struct ThoughtPanoramaView: View {
             let hasSideReader = width >= 740
             VStack(spacing: 0) {
                 constellationToolbar(width: width)
-                if let readError { readErrorBanner(readError) }
+                if let readError, !readErrorDismissed { readErrorBanner(readError) }
                 WorkspaceListDivider()
                 HStack(spacing: 0) {
                     panorama(state?.snapshot)
@@ -670,6 +671,11 @@ struct ThoughtPanoramaView: View {
         let canRetry = state?.snapshot == nil && state?.input.units.isEmpty == false
         var readFailed = false
         if case .readFailed = mode { readFailed = true }
+        // Narrow windows drop the toolbar status text; the empty state carries it
+        // back as a second line so progress and blockers stay visible.
+        let detail = toolbarMessage.isEmpty || toolbarMessage == mode.detail
+            ? mode.detail
+            : mode.detail + "\n" + toolbarMessage
         return VStack(spacing: WorkspaceMetrics.groupGap) {
             ZStack {
                 Ellipse().fill(palette.selection).frame(width: 300, height: 190).rotationEffect(.degrees(-15))
@@ -677,7 +683,7 @@ struct ThoughtPanoramaView: View {
             }.padding(.bottom, 20)
             if case .loading = mode { ProgressView().controlSize(.regular) }
             WorkspaceEmptyState(title: mode.title, systemImage: "point.3.connected.trianglepath.dotted",
-                                description: mode.detail) {
+                                description: detail) {
                 HStack {
                     Button("打开材料", action: openMaterials)
                         .buttonStyle(WorkspaceButtonStyle(emphasis: canRetry || readFailed ? .secondary : .primary))
@@ -1201,7 +1207,7 @@ private struct ReaderQuoteCard: View {
     var body: some View {
         WorkspaceCard(padding: 12) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(source.transcript.origin == "user" && source.transcript.speaker == "user" ? "我的原话" : "外部 / AI 来源")
+                Text(source.transcript.origin == "user" && source.transcript.speaker == "user" ? "我的原话" : "外部 / AI 来源 · 不代表本人认可")
                     .vosFont(WorkspaceText.meta.size, weight: .medium)
                 Text("“" + item.quote + "”")
                     .vosFont(WorkspaceText.body)
@@ -1455,6 +1461,6 @@ struct PanoramaHome: View {
     let openTopic: (String) -> Void
     let themeReply: (PanoramaThemeBriefing) async throws -> String
     var body: some View {
-        ThoughtPanoramaView(state: screen.state, message: screen.message, isGenerating: screen.isGenerating, modelConfigured: screen.modelConfigured, readError: screen.readError, selection: $screen.selection, retry: retry, draft: draft, retryRefresh: { screen.retryRefresh() }, dismissReadError: { screen.dismissReadError() }, chooseTextModel: chooseTextModel, openMaterials: openMaterials, openSource: openSource, correctSource: correctSource, correctClaim: correctClaim, discuss: discuss, topicLinks: topicLinks, openTopic: openTopic, themeReply: themeReply)
+        ThoughtPanoramaView(state: screen.state, message: screen.message, isGenerating: screen.isGenerating, modelConfigured: screen.modelConfigured, readError: screen.readError, readErrorDismissed: screen.readErrorBannerDismissed, selection: $screen.selection, retry: retry, draft: draft, retryRefresh: { screen.retryRefresh() }, dismissReadError: { screen.dismissReadError() }, chooseTextModel: chooseTextModel, openMaterials: openMaterials, openSource: openSource, correctSource: correctSource, correctClaim: correctClaim, discuss: discuss, topicLinks: topicLinks, openTopic: openTopic, themeReply: themeReply)
     }
 }
