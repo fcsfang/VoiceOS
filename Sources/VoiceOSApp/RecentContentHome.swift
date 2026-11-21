@@ -1035,6 +1035,7 @@ private struct ThoughtLine: View {
 private struct HomeCard: ViewModifier {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let isSelected: Bool
     @State private var hovered = false
 
@@ -1046,6 +1047,7 @@ private struct HomeCard: ViewModifier {
             .overlay { shape.strokeBorder(isSelected ? palette.focusRing : palette.border, lineWidth: 1) }
             .contentShape(shape)
             .onHover { hovered = $0 && isEnabled }
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
     }
 }
 
