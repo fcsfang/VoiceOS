@@ -24,7 +24,7 @@ struct ClaimReviewHistoryView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("认知审阅历史").vosFont(WorkspaceText.sectionTitle)
+            Text("认知审阅历史").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("认可不等于已验证；更正不代表真实观点变化。").foregroundStyle(.secondary)
             ScrollView {
                 ForEach(revisions) { revision in

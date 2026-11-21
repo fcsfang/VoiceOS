@@ -16,7 +16,7 @@ struct RecordingTitleEditor: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("修改录音标题").vosFont(WorkspaceText.sectionTitle)
+            Text("修改录音标题").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             TextField("内容标题", text: $title, prompt: Text("当前显示：\(record.displayTitle)")).focused($titleFocused)
             Text(record.recordingSubtitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             Text("标题用于资料库；手动标题不会被自动整理覆盖。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)

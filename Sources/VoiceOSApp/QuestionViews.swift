@@ -45,7 +45,7 @@ struct QuestionStateView: View {
             }
         }.sheet(item: $answerHistory) { revision in
             VStack(alignment: .leading, spacing: 12) {
-                Text("当时登记的答案依据").vosFont(WorkspaceText.sectionTitle)
+                Text("当时登记的答案依据").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 Text("历史版本。原话更正后仍保留原依据；当前状态可能已冻结。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 if let evidence = revision.input.resolution,
                    let source = revision.input.resolutionContext?.sources.first(where: { $0.sourceID == evidence.reference.sourceID }) {
@@ -77,7 +77,7 @@ struct QuestionTransitionView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("登记问题状态").vosFont(WorkspaceText.sectionTitle)
+            Text("登记问题状态").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text(question.seed.statement).textSelection(.enabled)
             Text("当前：" + question.status.displayLabel).foregroundStyle(.secondary)
             Picker("新状态", selection: $target) {

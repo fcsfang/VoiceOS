@@ -6,7 +6,7 @@ struct EnglishInputPreview: View {
     let dismiss: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("待发送的英文练习文字").vosFont(WorkspaceText.sectionTitle)
+            Text("待发送的英文练习文字").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("以下是完整选定文字；关闭此窗口不会发送。发送时会再次核对版本与授权，原始音频不上传。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             ScrollView {
                 VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {

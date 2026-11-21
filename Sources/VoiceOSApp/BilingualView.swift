@@ -32,7 +32,7 @@ struct BilingualView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             HStack {
-                Text("译文对照").vosFont(WorkspaceText.sectionTitle)
+                Text("译文对照").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 Spacer()
                 Button("关闭", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
             }

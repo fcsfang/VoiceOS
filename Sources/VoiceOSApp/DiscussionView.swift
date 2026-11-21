@@ -14,7 +14,7 @@ struct DiscussionView: View {
     var body: some View {
         VStack(alignment:.leading,spacing:WorkspaceMetrics.groupGap) {
             HStack {
-                Text(model.discussionReflection == nil ? "继续讨论" : "一起回顾 · 认知与行动").vosFont(WorkspaceText.sectionTitle)
+                Text(model.discussionReflection == nil ? "继续讨论" : "一起回顾 · 认知与行动").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 Spacer()
                 Button("关闭",action:dismiss).buttonStyle(.workspaceQuiet).keyboardShortcut(.cancelAction)
             }
@@ -193,7 +193,7 @@ struct DiscussionView: View {
         }
         .sheet(item:$referencePreview) { preview in
             VStack(alignment:.leading,spacing:12) {
-                Text("当时引用的原文版本").vosFont(WorkspaceText.sectionTitle)
+                Text("当时引用的原文版本").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 Text(preview.version).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 ScrollView { Text(preview.text).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
                 HStack { Spacer();Button("完成") { referencePreview=nil }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction) }

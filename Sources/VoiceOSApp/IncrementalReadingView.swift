@@ -24,7 +24,7 @@ struct IncrementalReadingView: View {
     }
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
-            Text("按天读").vosFont(WorkspaceText.sectionTitle)
+            Text("按天读").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             if !loaded {
                 if showSlowLoad { ProgressView("正在读取阅读进度…") }
             } else if let plan {

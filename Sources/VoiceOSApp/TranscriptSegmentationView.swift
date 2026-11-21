@@ -6,7 +6,7 @@ struct TranscriptSegmentationView: View {
     let dismiss: () -> Void
     var body: some View {
         VStack(alignment:.leading,spacing:12) {
-            Text("原话分段").vosFont(WorkspaceText.sectionTitle)
+            Text("原话分段").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             if let plan = model.segmentationPlan {
                 Text("\(plan.source.origin == "user" && plan.source.speaker == "user" ? "我的表达" : "外部资料 · 说话人待核对") · \(plan.segments.count) 段 · 每段最多 \(plan.scalarBudget) 字符").monospacedDigit()
                 Text("仅在本机预览，保留全部原话；尚未排队发送模型。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
