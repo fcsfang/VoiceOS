@@ -152,6 +152,7 @@ final class ControlCenter: ObservableObject {
     }
     @Published var records: [SourceRecord] = []
     @Published private(set) var recordsRevision = 0
+    @Published private(set) var secondaryRevision = 0
     @Published var recordingTitleStatus = ""
     @Published var generatingRecordingTitles = false
     private var recordingTitleModel: ResponsesRecordingTitlePort?
@@ -1573,6 +1574,7 @@ final class ControlCenter: ObservableObject {
         segmentedCognitiveCounts = snapshot.segmentedCognitiveCounts
         segmentedAssociationStates = snapshot.segmentedAssociationStates
         StartupTrace.mark("core.records=\(records.count) claims=\(claims.count) actions=\(actionRecords.count)")
+        secondaryRevision &+= 1
     }
     private func applySecondarySnapshot(_ snapshot: WorkspaceSnapshot) {
         outcomeFollowups = snapshot.outcomeFollowups
@@ -1584,11 +1586,13 @@ final class ControlCenter: ObservableObject {
         workspaceBriefing = snapshot.briefing
         recordingFollowups = snapshot.recordingFollowups
         StartupTrace.mark("secondary.followups=\(recordingFollowups.count)")
+        secondaryRevision &+= 1
     }
     private func applyAssistantSnapshot(_ snapshot: WorkspaceSnapshot) {
         assistantExecutions = snapshot.assistantExecutions
         assistantAssessmentIssues = snapshot.assistantAssessmentIssues
         StartupTrace.mark("secondary.assistant=\(assistantExecutions.count) issues=\(assistantAssessmentIssues.count)")
+        secondaryRevision &+= 1
     }
     @discardableResult
     private func reloadWorkspace(_ plan: RefreshPlan) async -> Bool {
