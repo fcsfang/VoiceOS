@@ -308,6 +308,18 @@ private final class ActionPageCache {
     var nextStepCounts: [String: Int] = [:]
 }
 
+// Rebuilt only when records or secondary data change; survives body re-evaluation.
+private final class SearchSuggestionCache {
+    struct Key: Equatable { let records: Int; let claims: Int }
+    struct Entry { let id: String; let title: String; let open: () -> Void }
+    var key: Key?
+    var materials: [Entry] = []
+    var topics: [Entry] = []
+    var tasks: [Entry] = []
+    var claims: [Entry] = []
+    var eligibleClaimIDs: Set<String> = []
+}
+
 struct WorkspaceView: View {
     @ObservedObject var model: ControlCenter
     @AppStorage("voiceos.workspaceTheme") private var theme = WorkspaceTheme.graphite
@@ -369,6 +381,7 @@ struct WorkspaceView: View {
     @State private var readingStatesRevision = 0
     @State private var materialPageCache = MaterialPageCache()
     @State private var actionPageCache = ActionPageCache()
+    @State private var searchSuggestionCache = SearchSuggestionCache()
     @State private var readingPlans: [IncrementalPlan] = []
     @State private var selectingActions = false
     @State private var selectedActionIDs: Set<String> = []
@@ -1909,8 +1922,9 @@ struct WorkspaceView: View {
         }.map { hit in
             row("material:" + hit.refID,hit.title,hit.snippet,"doc.text") { go(.source(hit.refID)) }
         }
+        let claimIDs = searchClaimIndex
         let claims = searchHits.filter { hit in
-            hit.kind == .claim && model.claims.contains { $0.id == hit.refID && $0.validity == "current" && $0.reviewState != "rejected" }
+            hit.kind == .claim && claimIDs.contains(hit.refID)
         }.map { hit in
             row("claim:" + hit.refID,hit.title,hit.snippet,"lightbulb") {
                 guard let claim=model.sourcePageIndex.claim(for: hit.refID) else { return }
@@ -1979,25 +1993,49 @@ struct WorkspaceView: View {
             return counts[hit.kind, default: 0] <= 20
         }
     }
+    private var searchSuggestionCacheKey: SearchSuggestionCache.Key {
+        SearchSuggestionCache.Key(records: model.recordsRevision, claims: model.secondaryRevision)
+    }
+    private func rebuildSearchSuggestionCacheIfNeeded() {
+        let key = searchSuggestionCacheKey
+        guard searchSuggestionCache.key != key else { return }
+        searchSuggestionCache.key = key
+        searchSuggestionCache.materials = model.records.filter { !$0.isTrashed }.map { source in
+            SearchSuggestionCache.Entry(id:"suggestion:material:" + source.id,title:displayTitle(source.displayTitle)) { go(.source(source.id)) }
+        }
+        searchSuggestionCache.topics = model.workspaceTopics.map { topic in
+            SearchSuggestionCache.Entry(id:"suggestion:topic:" + topic.id,title:topic.title) { selectTopic(topic.id) }
+        }
+        searchSuggestionCache.tasks = model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" }.map { action in
+            SearchSuggestionCache.Entry(id:"suggestion:task:" + action.id,title:action.title) { go(.task(action.id)) }
+        }
+        let claims = model.claims.filter { $0.validity == "current" && $0.reviewState != "rejected" }
+        searchSuggestionCache.claims = claims.map { claim in
+            SearchSuggestionCache.Entry(id:"suggestion:claim:" + claim.id,title:claim.statement) { openClaimSource(claim) }
+        }
+        searchSuggestionCache.eligibleClaimIDs = Set(claims.map(\.id))
+    }
+    private var searchClaimIndex: Set<String> {
+        rebuildSearchSuggestionCacheIfNeeded()
+        return searchSuggestionCache.eligibleClaimIDs
+    }
     private var searchSuggestions: [WorkspaceSearchSuggestion] {
         let term = query.trimmingCharacters(in:.whitespacesAndNewlines)
         guard term.count >= 2 else { return [] }
+        rebuildSearchSuggestionCacheIfNeeded()
         let key = term.lowercased()
         func prefixed(_ text: String) -> Bool { !text.isEmpty && text.lowercased().hasPrefix(key) }
-        let materials = model.records.compactMap { source -> WorkspaceSearchSuggestion? in
-            guard !source.isTrashed else { return nil }
-            let title = displayTitle(source.displayTitle)
-            guard prefixed(title) else { return nil }
-            return WorkspaceSearchSuggestion(id:"suggestion:material:" + source.id,title:title,subtitle:"材料",icon:"doc.text") { go(.source(source.id)) }
+        let materials = searchSuggestionCache.materials.filter { prefixed($0.title) }.map { entry in
+            WorkspaceSearchSuggestion(id:entry.id,title:entry.title,subtitle:"材料",icon:"doc.text",open:entry.open)
         }
-        let topics = model.workspaceTopics.filter { prefixed($0.title) }.map { topic in
-            WorkspaceSearchSuggestion(id:"suggestion:topic:" + topic.id,title:topic.title,subtitle:"主题",icon:"circle.hexagongrid") { selectTopic(topic.id) }
+        let topics = searchSuggestionCache.topics.filter { prefixed($0.title) }.map { entry in
+            WorkspaceSearchSuggestion(id:entry.id,title:entry.title,subtitle:"主题",icon:"circle.hexagongrid",open:entry.open)
         }
-        let tasks = model.actionRecords.filter { $0.kind == "task" && $0.state == "open" && $0.validity == "current" && prefixed($0.title) }.map { action in
-            WorkspaceSearchSuggestion(id:"suggestion:task:" + action.id,title:action.title,subtitle:"开放任务",icon:"checkmark.circle") { go(.task(action.id)) }
+        let tasks = searchSuggestionCache.tasks.filter { prefixed($0.title) }.map { entry in
+            WorkspaceSearchSuggestion(id:entry.id,title:entry.title,subtitle:"开放任务",icon:"checkmark.circle",open:entry.open)
         }
-        let claims = model.claims.filter { $0.validity == "current" && $0.reviewState != "rejected" && prefixed($0.statement) }.map { claim in
-            WorkspaceSearchSuggestion(id:"suggestion:claim:" + claim.id,title:claim.statement,subtitle:"观点",icon:"lightbulb") { openClaimSource(claim) }
+        let claims = searchSuggestionCache.claims.filter { prefixed($0.title) }.map { entry in
+            WorkspaceSearchSuggestion(id:entry.id,title:entry.title,subtitle:"观点",icon:"lightbulb",open:entry.open)
         }
         var picked:[WorkspaceSearchSuggestion] = []
         var depth = 0
