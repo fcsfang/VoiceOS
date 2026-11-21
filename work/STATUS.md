@@ -958,3 +958,7 @@
 - 148-C 全景输入缓存：`panoramaInput()` 按 8 张表（sources 全文含 presentation_json/当前字幕版本、transcript_versions、model_attempts、contexts、context_inputs、claims、claim_reviews、segmented commits）SHA256 指纹做进程内单条目缓存，生成期间 1s 轮询不再重读解码全库；指纹异常回退重建。已知缺口：磁盘原件校验不参与指纹（表不变而文件损坏时缓存会掩盖抛错），记录待后续。
 - 性能发现另确认五个大热点（行动/材料/主题页体计算、首页行格式化、播放时钟整页失效）——首页与播放时钟已由 149 处理，材料/行动/主题页快照化排后续。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 149：性能第二批（2026-11-21，已推送）
+- 149-A 首页行呈现单次计算：新增 `HomeRowPresentation`，每次渲染每行只做一次 `WorkspaceTitleFit.present` 与一次状态/时间读取，标题、元数据、无障碍朗读、图标共享同一结果；`HomeDateFormatting` 三个静态格式化器替换每行 1-2 次 DateFormatter 分配。行为逐字一致。
+- 149-B 播放时钟作用域：`SourcePlaybackClock` 由 `@StateObject` 改 `@State`（页面体不读 milliseconds，仅订阅与写回；子视图各自 @ObservedObject），300ms tick 不再让整页重算，只有回听标签与播放条随 tick 更新。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
