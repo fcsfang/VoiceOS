@@ -367,6 +367,7 @@ struct WorkspaceView: View {
     @State private var searchExpandedKinds: Set<SearchHit.Kind> = []
     @State private var searchFailed = false
     @State private var searchBusy = false
+    @State private var showSlowSearch = false
     @State private var searchGeneration = 0
     @State private var lastSearchAnnouncement = ""
     @State private var searchHovered = false
@@ -723,17 +724,20 @@ struct WorkspaceView: View {
                     Text("视图").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.horizontal,9).accessibilityAddTraits(.isHeader)
                     VStack(spacing:2) {
                         ForEach(savedViews) { view in
+                            let selected=(view.page == .materials && page == .materials && materialFilter == view.filter) || (view.page == .actions && page == .actions && actionFilter == view.filter)
                             Button { openSavedView(view) } label: {
                                 Label(view.name,systemImage:view.page == .materials ? "books.vertical" : "checkmark.circle")
                                     .vosFont(WorkspaceText.body).lineLimit(textScale >= 1.3 ? 2 : 1)
                                     .frame(maxWidth:.infinity,alignment:.leading)
                                     .padding(.horizontal,9).padding(.vertical,7)
+                                    .background(selected ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                                     .contentShape(Rectangle())
                             }.buttonStyle(.plain)
                                 .help(view.page == .materials ? "材料：" + view.filter : "行动：" + view.filter)
                                 .contextMenu { Button("删除视图",role:.destructive) { pendingDeleteView = view } }
                                 .accessibilityLabel("打开视图：" + view.name)
                                 .accessibilityIdentifier("workspace.savedView." + view.name)
+                                .accessibilityAddTraits(selected ? .isSelected : [])
                         }
                     }
                 }
@@ -751,8 +755,14 @@ struct WorkspaceView: View {
                 if page != .tool("处理情况") {
                     WorkspaceAttentionDot(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
                 }
-                Button { go(.settings);showingDiscussion=false } label: { Label("设置",systemImage:"slider.horizontal.3").foregroundStyle(.secondary) }.buttonStyle(.plain)
+                Button { go(.settings);showingDiscussion=false } label: {
+                    Label("设置",systemImage:"slider.horizontal.3").foregroundStyle(.secondary)
+                        .padding(.horizontal, page == .settings ? 12 : 0).padding(.vertical, page == .settings ? 11 : 0)
+                        .frame(maxWidth: page == .settings ? .infinity : nil,alignment:.leading)
+                        .background(page == .settings ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                }.buttonStyle(.plain)
                     .accessibilityIdentifier("nav.settings")
+                    .accessibilityAddTraits(page == .settings ? .isSelected : [])
             }.padding(.horizontal,8)
                 .onChange(of:model.pendingWorkspacePageRequest) { _, request in
                     guard let request else { return }
@@ -1100,7 +1110,10 @@ struct WorkspaceView: View {
                             VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                                 ForEach(group.sources) { source in
                                     MaterialMenuRow(revealed: materialKeyboardFocus.id == source.id) {
-                                        MaterialManagementControls(model:model,source:source,style:.compact)
+                                        MaterialManagementControls(model:model,source:source,style:.compact,
+                                            onSetReadingState:{ setMaterialReading(source.id,$0) },
+                                            onSplitExpression:{ splitMaterialExpression(model.sourcePageIndex.expression(for: source.id)?.sourceIDs ?? [source.id]) },
+                                            onRejudgeExpressions:{ rejudgeMaterialExpressions(source.presentation?.expression?.sourceIDs ?? [source.id]) })
                                     } row: {
                                         sourceRow(source,catalog:catalog,trailingGutter: source.isArchived || source.isTrashed ? WorkspaceRowChrome.materialWideGutter : WorkspaceRowChrome.materialGutter).frame(maxWidth:.infinity,alignment:.leading).materialCard(highlighted: materialKeyboardFocus.id == source.id)
                                     }.id(source.id)
@@ -1733,7 +1746,7 @@ struct WorkspaceView: View {
                         recentSearchChips
                     }
                 }
-                let sources=model.records.filter { !$0.isTrashed }
+                let sources=distinctExpressions(model.records.filter { !$0.isTrashed })
                 if !sources.isEmpty { sectionTitle("材料与原话 · \(sources.count)") }
                 let catalog=recordCatalog
                 ForEach(sources) { source in
@@ -1750,9 +1763,10 @@ struct WorkspaceView: View {
         }
         .task(id: term) { await loadSearchHits(term) }
         .onChange(of:term) { _, _ in searchKeyboardFocus.id=nil;searchExpandedKinds=[] }
+        .workspaceSlowLoading(searchBusy && searchHits.isEmpty, into: $showSlowSearch)
     }
     @ViewBuilder private var searchResults: some View {
-        if searchBusy && searchHits.isEmpty { ProgressView("正在检索…").controlSize(.small) }
+        if showSlowSearch { ProgressView("正在检索…").controlSize(.small) }
         if searchFailed {
             let term=query.trimmingCharacters(in:.whitespacesAndNewlines)
             HStack(alignment:.top,spacing:10) {
@@ -2864,7 +2878,7 @@ struct WorkspaceView: View {
     private var searchKeyboardRows: [(id:String, open:()->Void)] {
         let term=query.trimmingCharacters(in:.whitespacesAndNewlines)
         if term.isEmpty {
-            return model.records.filter { !$0.isTrashed }.map { source in
+            return distinctExpressions(model.records.filter { !$0.isTrashed }).map { source in
                 (id: "material:" + source.id, open: { go(.source(source.id)) })
             }
         }
@@ -3011,7 +3025,7 @@ struct WorkspaceView: View {
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
     private var navigationEntry: WorkspaceNavigationEntry { .init(page:page,topicID:topicID,topicTab:topicTab,topicReadingMode:topicReadingMode) }
     private func go(_ next:WorkspacePage) {
-        if page != next { path.append(navigationEntry);if next.isTopLevel { scrollPositions.removeAll() };page=next }
+        if page != next { path.append(navigationEntry);page=next }
         error=""
         if case .source(let id)=next { markSourceOpened(id) }
     }
@@ -3189,7 +3203,6 @@ struct WorkspaceView: View {
     }
     private func openSavedView(_ view:SavedWorkspaceView) {
         path=[]
-        scrollPositions.removeAll()
         switch view.page {
         case .materials: materialFilter=view.filter;page = .materials
         case .actions: actionFilter=view.filter;page = .actions
@@ -3468,6 +3481,7 @@ private struct RecentSearchChip: View {
     let open: () -> Void
     let remove: () -> Void
     @State private var hovered = false
+    @FocusState private var removeFocused: Bool
     var body: some View {
         HStack(spacing:4) {
             Button(action:open) {
@@ -3480,15 +3494,16 @@ private struct RecentSearchChip: View {
                     .foregroundStyle(palette.secondaryText)
                     .frame(width:WorkspaceMetrics.rowActionMinHeight,height:WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle())
             }.buttonStyle(.plain)
+                .focused($removeFocused)
                 .help("删除这条最近搜索").accessibilityLabel("删除最近搜索：" + term)
-                .opacity(hovered ? 1 : 0).allowsHitTesting(hovered)
+                .opacity(hovered || removeFocused ? 1 : 0).allowsHitTesting(hovered || removeFocused)
         }
         .padding(.horizontal,10).frame(height:WorkspaceMetrics.fieldHeight)
         .background(palette.surface,in:Capsule())
         .overlay { Capsule().strokeBorder(palette.border,lineWidth:1) }
         .onHover { hovered=$0 }
         .contextMenu { Button("删除这条最近搜索",role:.destructive,action:remove) }
-        .animation(reduceMotion ? nil : .easeOut(duration:0.12),value:hovered)
+        .animation(reduceMotion ? nil : .easeOut(duration:0.12),value:hovered || removeFocused)
     }
 }
 

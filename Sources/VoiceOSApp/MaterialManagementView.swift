@@ -7,6 +7,9 @@ struct MaterialManagementControls: View {
     @ObservedObject var model: ControlCenter
     let source: SourceRecord
     var style: Style = .full
+    var onSetReadingState: ((SourceReadingState) -> Void)? = nil
+    var onSplitExpression: (() -> Void)? = nil
+    var onRejudgeExpressions: (() -> Void)? = nil
     @State private var confirmingTrash = false
     @State private var busy = false
     @State private var failure: Failure?
@@ -51,6 +54,20 @@ struct MaterialManagementControls: View {
                     Button("取消归档",systemImage:"archivebox") { update(.active) }
                 }
                 Menu {
+                    if let onSetReadingState {
+                        Section("阅读状态") {
+                            Button("标为未读") { onSetReadingState(.unread) }
+                            Button("标为在读") { onSetReadingState(.reading) }
+                            Button("标为已读") { onSetReadingState(.read) }
+                        }
+                    }
+                    if count > 1 {
+                        if let onSplitExpression { Button("拆为独立录音", action: onSplitExpression) }
+                        if let onRejudgeExpressions {
+                            Button("重新判断连续表达") { onRejudgeExpressions() }
+                                .disabled(model.fullRecordingBusy || model.understandingSource != nil)
+                        }
+                    }
                     if !source.isArchived { Button("归档",systemImage:"archivebox") { update(.archived) } }
                     Button("移入回收站",systemImage:"trash",role:.destructive) { confirmingTrash=true }
                 } label: {
