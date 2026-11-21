@@ -12,7 +12,10 @@ struct WorkspaceDiscussionView: View {
     @FocusState private var editorFocused: Bool
     @State private var confirmingEnd = false
     @State private var showingHistory = false
+    @State private var followTail = true
+    @State private var scrollMetricsKnown = false
     private var busy: Bool { model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive }
+    private var composing: Bool { editorFocused && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var canSend: Bool {
         model.discussionWritable && model.modelConfigured && !busy && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.discussionCanSend || model.discussionRecordingID != nil)
     }
@@ -119,8 +122,16 @@ struct WorkspaceDiscussionView: View {
                         Color.clear.frame(height: 1).id("discussion-end")
                     }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onChange(of: model.discussionReplies.count) { _, _ in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { reader.scrollTo("discussion-end", anchor: .bottom) } }
-                .onChange(of: model.discussionTurns.count) { _, _ in withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { reader.scrollTo("discussion-end", anchor: .bottom) } }
+                .onChange(of: model.discussionReplies.count) { _, _ in followLatest(reader) }
+                .onChange(of: model.discussionTurns.count) { _, _ in followLatest(reader) }
+                .onScrollGeometryChange(for: DiscussionScrollMetrics.self) { geometry in
+                    DiscussionScrollMetrics(contentHeight: geometry.contentSize.height,
+                                            distanceToBottom: geometry.contentSize.height - geometry.visibleRect.maxY)
+                } action: { oldValue, newValue in
+                    guard !scrollMetricsKnown || newValue.contentHeight == oldValue.contentHeight else { return }
+                    scrollMetricsKnown = true
+                    followTail = newValue.distanceToBottom < 48
+                }
             }
             WorkspaceListDivider()
             VStack(alignment: .leading, spacing: 10) {
@@ -177,12 +188,24 @@ struct WorkspaceDiscussionView: View {
             .onExitCommand { close() }
             .onDisappear { editorFocused = false }
     }
+    private func followLatest(_ reader: ScrollViewProxy) {
+        guard followTail, !composing else { return }
+        withAnimation(reduceMotion ? nil : WorkspaceMotion.scroll) {
+            reader.scrollTo("discussion-end", anchor: .bottom)
+        }
+    }
     private func send() async {
         if model.discussionRecordingID != nil, !(await model.attachDiscussionRecording(allowCloud: true)) { return }
         if !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             guard await model.saveDiscussionText(draft, allowCloud: true) else { return }
             draft = ""
         }
+        followTail = true
         await model.sendDiscussion()
     }
+}
+
+private struct DiscussionScrollMetrics: Equatable {
+    let contentHeight: CGFloat
+    let distanceToBottom: CGFloat
 }
