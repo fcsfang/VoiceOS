@@ -54,7 +54,7 @@ struct WorkspaceTopicReadingView: View {
         return sections.filter { sectionMatches($0,term:filterTerm) }
     }
     private var displayedSections: [TopicReadingSection] {
-        if let selectedSection { return filteredSections.filter { $0.id == selectedSection } }
+        if let selectedSection, filterTerm.isEmpty { return filteredSections.filter { $0.id == selectedSection } }
         return filteredSections
     }
     private var listedSections: [TopicReadingSection] {
@@ -144,6 +144,7 @@ struct WorkspaceTopicReadingView: View {
         }
         .onChange(of: sections.map(\.id)) { _,ids in if let selectedSection,!ids.contains(selectedSection) { self.selectedSection=nil } }
         .sheet(item:$correctingClaim) { claim in ClaimCorrectionView(claim:claim,model:model) { correctingClaim=nil } }
+        .onChange(of: correctingClaim?.id) { _, id in if id == nil { requestCardListFocus() } }
         .alert("停止使用这条理解？", isPresented:$confirmingRejection, presenting:pendingRejection) { claim in
             Button("取消", role:.cancel) {}
             Button("停止使用", role:.destructive) { Task { _=await model.review(claim, action:.reject) } }
@@ -374,7 +375,7 @@ struct WorkspaceTopicReadingView: View {
             Button { showActions() } label: {
                 HStack(spacing:8) {
                     Text("查看 \(open.count) 条开放行动")
-                    Image(systemName:"chevron.right").vosFont(WorkspaceText.caption)
+                    Image(systemName:"chevron.right").vosFont(WorkspaceText.caption).accessibilityHidden(true)
                 }.vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.accent).contentShape(Rectangle())
             }.buttonStyle(.plain)
         }
@@ -394,10 +395,10 @@ struct WorkspaceTopicReadingView: View {
                     ForEach(Array(questions.enumerated()),id:\.offset) { index,question in
                         Button { discuss(question) } label: {
                             HStack(alignment:.top,spacing:12) {
-                                Image(systemName:"questionmark.bubble").foregroundStyle(palette.action)
+                                Image(systemName:"questionmark.bubble").foregroundStyle(palette.action).accessibilityHidden(true)
                                 Text(question).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading)
                                 Spacer(minLength:4)
-                                Image(systemName:"arrow.up.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                                Image(systemName:"arrow.up.right").vosFont(WorkspaceText.caption).foregroundStyle(.secondary).accessibilityHidden(true)
                             }.padding(20).frame(maxWidth:.infinity,alignment:.leading).background(keyboardQuestionFocus.id == String(index) ? palette.selection : hoveredQuestion == index ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius)).overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(focusedQuestion == index || keyboardQuestionFocus.id == String(index) ? palette.focusRing : palette.border,lineWidth:1) }.contentShape(Rectangle())
                         }.buttonStyle(.plain).help("带上当前主题继续讨论")
                             .id(String(index))
@@ -655,7 +656,7 @@ struct WorkspaceTopicTile: View {
         Button(action:open) {
             VStack(alignment:.leading,spacing:12) {
                 HStack {
-                    Image(systemName:"circle.hexagongrid").vosFont(18).foregroundStyle(palette.action)
+                    Image(systemName:"circle.hexagongrid").vosFont(18).foregroundStyle(palette.action).accessibilityHidden(true)
                     Spacer()
                     WorkspaceRowChevron()
                 }
