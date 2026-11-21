@@ -34,11 +34,13 @@ struct RecentContentHome: View {
     @State private var organizeToast: String?
     @State private var organizeToastSourceID: String?
     @AppStorage("voiceos.home.recentThoughts.expanded") private var recentThoughtsExpanded = false
+    @State private var recentThoughtsHighlighted = false
     @State private var frozenViewpointsItemID: String?
     @FocusState private var timelineFocused: Bool
     private let topAnchor = "home.top"
     private let timelineSpace = "home.timeline"
     private let tasksAnchor = "home.tasks.summary"
+    private let recentThoughtsRowID = "home.recentThoughts"
 
     // Only 特大 (1.45) crosses 1.3; 大 (1.28) keeps the single-line rows.
     private var isLargeText: Bool { textScale >= 1.3 }
@@ -153,13 +155,13 @@ struct RecentContentHome: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
-                    if !recentThoughts.isEmpty { recentThoughtsEntry(recentThoughts) }
+                    if !recentThoughts.isEmpty { recentThoughtsEntry(recentThoughts).id(recentThoughtsRowID) }
                     ForEach(days) { day in
                         VStack(alignment: .leading, spacing: 6) {
                             dayHeader(day)
                             VStack(alignment: .leading, spacing: 8) {
                                 ForEach(day.items) { item in
-                                    Button { selectedID = item.id } label: { row(item) }
+                                    Button { recentThoughtsHighlighted = false; selectedID = item.id } label: { row(item) }
                                         .buttonStyle(.plain)
                                         .id(item.id)
                                         .background {
@@ -184,6 +186,14 @@ struct RecentContentHome: View {
                 Task { @MainActor in
                     await Task.yield()
                     proxy.scrollTo(id, anchor: .center)
+                }
+            }
+            .onChange(of: recentThoughtsHighlighted) { _, highlighted in
+                guard highlighted else { return }
+                timelineFocused = true
+                Task { @MainActor in
+                    await Task.yield()
+                    proxy.scrollTo(recentThoughtsRowID, anchor: .top)
                 }
             }
             .focusable()
@@ -230,18 +240,38 @@ struct RecentContentHome: View {
     private func handleTimelineKey(_ press: KeyPress) -> KeyPress.Result {
         guard timelineFocused, press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
         if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
-        let ids = items.map(\.id)
+        let showsRecentThoughts = !recentThoughts.isEmpty
+        let ids = (showsRecentThoughts ? [recentThoughtsRowID] : []) + items.map(\.id)
         switch press.key {
         case .downArrow, .upArrow:
             guard !ids.isEmpty else { return .ignored }
-            let current = selected.flatMap { item in ids.firstIndex(of: item.id) }
+            let current: Int?
+            if recentThoughtsHighlighted, showsRecentThoughts {
+                current = 0
+            } else if let item = selected, let index = items.firstIndex(where: { $0.id == item.id }) {
+                current = index + (showsRecentThoughts ? 1 : 0)
+            } else {
+                current = nil
+            }
             let next: Int
             if press.key == .upArrow { next = current.map { max(0, $0 - 1) } ?? ids.count - 1 }
             else { next = current.map { min(ids.count - 1, $0 + 1) } ?? 0 }
-            selectedID = ids[next]
+            if showsRecentThoughts, next == 0 {
+                recentThoughtsHighlighted = true
+            } else {
+                recentThoughtsHighlighted = false
+                selectedID = ids[next]
+            }
             return .handled
-        case .return:
-            guard let item = selected, item.kind == .material, let sourceID = item.sourceIDs.first else { return .ignored }
+        case .return, .space:
+            if press.key == .space, !recentThoughtsHighlighted { return .ignored }
+            if recentThoughtsHighlighted, showsRecentThoughts {
+                toggleRecentThoughts()
+                return .handled
+            }
+            guard let item = selected else { return .ignored }
+            guard item.kind == .material else { return .handled }
+            guard let sourceID = item.sourceIDs.first else { return .ignored }
             openSource(sourceID)
             return .handled
         default:
@@ -655,10 +685,14 @@ struct RecentContentHome: View {
 
     private var pendingOutcomeCount: Int { model.visibleOutcomeFollowups.count }
 
+    private func toggleRecentThoughts() {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { recentThoughtsExpanded.toggle() }
+    }
+
     private func recentThoughtsEntry(_ groups: [RecentThoughtDay]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { recentThoughtsExpanded.toggle() }
+                toggleRecentThoughts()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.right")
@@ -674,6 +708,8 @@ struct RecentContentHome: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 10)
+                .background(recentThoughtsHighlighted ? palette.selection : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                .workspaceFocusRing(recentThoughtsHighlighted, radius: WorkspaceMetrics.controlRadius)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
