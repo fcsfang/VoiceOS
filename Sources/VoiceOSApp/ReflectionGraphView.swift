@@ -21,6 +21,14 @@ private struct AtlasEdge: Identifiable {
     var id: String { from + ":" + to + ":" + (connection?.id ?? label) }
 }
 
+private final class AtlasGraphCache {
+    struct Key: Equatable { let records: Int; let secondary: Int; let reflection: String }
+    var key: Key?
+    var nodes: [AtlasNode] = []
+    var edges: [AtlasEdge] = []
+    var positions: [String: CGPoint] = [:]
+}
+
 struct ReflectionTimelineView: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -50,6 +58,7 @@ struct ReflectionTimelineView: View {
     @State private var showsQuestions = false
     @State private var showsChanges = false
     @State private var changeID: String?
+    @State private var graphCache = AtlasGraphCache()
     init(model: ControlCenter, embeddedTopicID: String? = nil, startPeriodic: Bool = false,
          openSource: ((String) -> Void)? = nil, dismiss: @escaping () -> Void,
          discuss: @escaping (CandidateClaim) -> Void,
@@ -346,9 +355,25 @@ struct ReflectionTimelineView: View {
         }
         return result
     }
+    /// One build per records/secondary generation or reflection target. Layout
+    /// depends only on the focus and its nodes, not on zoom or the viewport.
+    private func graphData(_ focus: ConversationReflectionFocus) -> (nodes: [AtlasNode], edges: [AtlasEdge], positions: [String: CGPoint]) {
+        let key = AtlasGraphCache.Key(records: model.recordsRevision, secondary: model.secondaryRevision, reflection: reflectionKey)
+        if !loading, graphCache.key == key { return (graphCache.nodes, graphCache.edges, graphCache.positions) }
+        let items = nodes(focus), links = edges(focus, nodes: items), layout = positions(focus, nodes: items)
+        // A reload in flight can replace the focus under the same key; render it
+        // fresh and leave the previous generation cached.
+        if !loading {
+            graphCache.key = key
+            graphCache.nodes = items
+            graphCache.edges = links
+            graphCache.positions = layout
+        }
+        return (items, links, layout)
+    }
     private func graph(_ focus: ConversationReflectionFocus) -> some View {
-        let items = nodes(focus), links = edges(focus, nodes: items)
-        let layout = positions(focus, nodes: items)
+        let data = graphData(focus)
+        let items = data.nodes, links = data.edges, layout = data.positions
         let visible = relatedNodeIDs(items: items, links: links)
         let visibleItems = items.filter { visible.contains($0.id) }
         let visibleLinks = links.filter { visible.contains($0.from) && visible.contains($0.to) }
@@ -492,7 +517,8 @@ struct ReflectionTimelineView: View {
             .accessibilityAddTraits(selection == node.id ? [.isSelected] : [])
     }
     private func inspector(_ focus: ConversationReflectionFocus) -> some View {
-        let items = nodes(focus), links = edges(focus, nodes: items)
+        let data = graphData(focus)
+        let items = data.nodes, links = data.edges
         return ScrollView {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
                 Text(selection == nil ? (focus.isTopicOverview ? "这个主题的脉络" : "这个周期的线索") : "关系与依据").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
