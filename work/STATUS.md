@@ -899,3 +899,8 @@
 - 新主题 snow「雪白」：纯白画布 0xFFFFFF、纯白卡片、冷灰侧栏 0xF3F3F5、selection 0xECECEF、border 0xE2E2E6、text 0x1A1A1C、accent 0x3B4654；深色冷调（0x1D1D1F / 0x262628 / 0x151517 / 0x323234 / 0x47474A）。调色板属性全部改为按主题 switch。
 - 主题选择仍为 @AppStorage("voiceos.workspaceTheme")，设置页三张预览卡自动出现。当前实例已切到雪白预览。
 - 验证：snow 主题波次构建通过、735 tests 全绿（build_exit=0 / test_exit=0）；随后把 snow 画布从 0xFBFBFC 提到纯白的 3 个色值改动仅重新编译（build_exit=0），未再跑测试（纯常量变更）。
+## 波 139：设计系统收敛与键盘导航补齐（2026-11-21，已推送）
+- 139-A 收敛：新增 `workspaceSlowLoading`（五处 150ms 门控合一，顺带修复 WeeklyReview 离开 loading 后陈旧占位符不复位）；新增 `workspaceFocusRing(_:radius:)`（替换 5 处纯焦点环 overlay，两档圆角随行型）；首页两处手写横向发丝线改 WorkspaceListDivider（竖向分栏保留并注明）；`MaterialDisplayTitle.explicitTitle` 成为 manual→automatic 唯一入口（mediaTitle/contentTitle/ReadOnlyLibrary 共用）。
+- 139-B 键盘导航：周回顾 sheet 十个区块拼成扁平导航序（↑↓/↵/选中滚动）；主题页瓦片、线索、未归组材料、主题详情「材料/回顾」页签、阅读卡片与问题列表全部支持容器级 ↑↓/↵（Tab 可达保持）；材料详情原文时间片/大纲/章节三个回听列表支持 ↑↓ 选择 + ↵ 播放（播放中 selection 优先于焦点环，空列表不渲染容器）。
+- 缺口记录：四份方向键步进实现仍为文件内私有（Home/Materials/Actions/TopicReading 各一份），后续可提升为共享 KeyboardList；「今日阅读」快捷行仅视觉与主列表统一，未并入键盘序。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0）。
