@@ -167,7 +167,7 @@ struct ReflectionQuestionsView: View {
             }
             if let feedback = topicFeedback.first(where: { $0.id == question.id }), feedback.mode != .normal || feedback.snoozedUntil != nil {
                 Text(feedback.mode == .paused ? "此主题的静默提示已暂停，可从提示设置恢复。" : feedback.mode == .reduced ? "此主题已减少提示；不会据此判断你失去兴趣。" : "此主题已选择稍后提示。")
-                    .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             HStack {
                 Picker("探索范围", selection: $periodicReview) {
@@ -182,8 +182,8 @@ struct ReflectionQuestionsView: View {
                 }
                 Spacer()
             }
-            if periodicReview { Text(reviewPeriod.reviewTitle + " · " + dateLabel).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
-            Text(periodicReview ? "回顾这个周期；下方记录仍显示整个主题。" : "沿整个主题探索，不按日历截断。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            if periodicReview { Text(reviewPeriod.reviewTitle + " · " + dateLabel).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
+            Text(periodicReview ? "回顾这个周期；下方记录仍显示整个主题。" : "沿整个主题探索，不按日历截断。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             Picker("记录视角", selection: $entryFilter) {
                 Text("全部记录").tag("all")
                 Text("认识变化").tag(ReflectionQuestionEntryKind.change.rawValue)
@@ -192,7 +192,7 @@ struct ReflectionQuestionsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     if entries.isEmpty {
-                        Text("先关联一份材料，或留下你现在的理解。").vosFont(WorkspaceText.body).foregroundStyle(.secondary).padding(.vertical, 16)
+                        Text("先关联一份材料，或留下你现在的理解。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).padding(.vertical, 16)
                     }
                     ForEach(entryFilter == "practice" ? entries.filter { $0.kind == .experiment || $0.kind == .result } : visibleEntries) { entry in
                         entryCard(entry)
@@ -209,7 +209,7 @@ struct ReflectionQuestionsView: View {
                 HStack {
                     Label(entry.kind.label, systemImage: icon(entry.kind)).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                     Spacer()
-                    Text(date(entry.createdAt) + " · 我的记录").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text(date(entry.createdAt) + " · 我的记录").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
                 Text(entry.text).vosFont(WorkspaceText.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 if !entry.unavailableSourceIDs.isEmpty {
@@ -254,7 +254,7 @@ struct ReflectionQuestionsView: View {
                     }
                 }
             }
-            Text(prompt(kind)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text(prompt(kind)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             TextEditor(text: $text).vosFont(WorkspaceText.body).scrollContentBackground(.hidden)
                 .frame(height: 78).workspaceEditorSurface()
             HStack {
@@ -275,9 +275,9 @@ struct ReflectionQuestionsView: View {
     private var createSheet: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             Text(editingQuestion == nil ? "你想持续探索什么？" : "重新表述主题或问题").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("可以写一个主题，也可以写一个具体问题；资料、想法与实践以后逐渐加入。").foregroundStyle(.secondary)
+            Text("可以写一个主题，也可以写一个具体问题；资料、想法与实践以后逐渐加入。").foregroundStyle(palette.secondaryText)
             TextField("例如：Agent 记忆，或如何评估记忆效果？", text: $title).workspaceFieldSurface().focused($titleFocused)
-            Text("\(title.unicodeScalars.count) / 200").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            Text("\(title.unicodeScalars.count) / 200").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             Toggle("允许标题用于云端讨论", isOn: $titleCloud).vosFont(WorkspaceText.body)
             HStack {
                 Button("取消") { creating = false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
@@ -313,7 +313,7 @@ struct ReflectionQuestionsView: View {
                 Spacer()
                 Button("完成") { managingSources = false }.buttonStyle(.workspaceSecondary).disabled(busy).keyboardShortcut(.cancelAction)
             }
-            Text("从原文、已有知识或任务接回主题；关联保留原话与归属，不代表认可。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("从原文、已有知识或任务接回主题；关联保留原话与归属，不代表认可。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             Picker("关联内容", selection: $sourceMode) {
                 Text("表达与资料").tag("sources")
                 Text("已有知识").tag("knowledge")
@@ -327,10 +327,10 @@ struct ReflectionQuestionsView: View {
                 LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     if sourceMode == "knowledge" {
                         ForEach(availableKnowledge) { claim in knowledgeLinkCard(claim) }
-                        if availableKnowledge.isEmpty { Text("没有符合条件的当前知识卡片。").foregroundStyle(.secondary).padding() }
+                        if availableKnowledge.isEmpty { Text("没有符合条件的当前知识卡片。").foregroundStyle(palette.secondaryText).padding() }
                     } else if sourceMode == "tasks" {
                         ForEach(availableTasks) { action in taskLinkCard(action) }
-                        if availableTasks.isEmpty { Text("没有符合条件的当前任务或目标。").foregroundStyle(.secondary).padding() }
+                        if availableTasks.isEmpty { Text("没有符合条件的当前任务或目标。").foregroundStyle(palette.secondaryText).padding() }
                     } else {
                     ForEach(visibleSources) { source in
                         WorkspaceCard(padding: 12) {
@@ -343,7 +343,7 @@ struct ReflectionQuestionsView: View {
                                         Text(source.displayTitle).vosFont(WorkspaceText.rowTitle).lineLimit(3)
                                     }.disabled(busy || protectedSourceIDs.contains(source.id))
                                     Spacer()
-                                    Text(source.localOnly ? "仅本地" : "文字可云端回顾").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                    Text(source.localOnly ? "仅本地" : "文字可云端回顾").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                 }
                                 DisclosureGroup("查看完整原文") { Text(source.transcript ?? "").vosFont(WorkspaceText.body).textSelection(.enabled) }
                                 if source.localOnly {
@@ -352,7 +352,7 @@ struct ReflectionQuestionsView: View {
                             }
                         }
                     }
-                    if visibleSources.isEmpty { Text("没有符合条件的文字资料。").foregroundStyle(.secondary).padding() }
+                    if visibleSources.isEmpty { Text("没有符合条件的文字资料。").foregroundStyle(palette.secondaryText).padding() }
                     }
                 }
             }
@@ -364,7 +364,7 @@ struct ReflectionQuestionsView: View {
         return WorkspaceCard(padding: 12) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(claim.statement).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
-                Text(claim.ownership == "ai_candidate" ? "AI 建议 · 关联不代表认可" : claim.ownership == "external" ? "外部主张 · 保留原有归属" : "个人表达的整理 · 仍可核对原话").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text(claim.ownership == "ai_candidate" ? "AI 建议 · 关联不代表认可" : claim.ownership == "external" ? "外部主张 · 保留原有归属" : "个人表达的整理 · 仍可核对原话").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 HStack {
                     Menu("原话依据 · \(ids.count)") {
                         ForEach(ids.sorted(), id: \.self) { id in Button(sourceTitle(id)) { openSource(id) } }

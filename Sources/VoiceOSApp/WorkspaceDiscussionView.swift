@@ -30,7 +30,7 @@ struct WorkspaceDiscussionView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
                     Label("一起思考", systemImage: "sparkles").vosFont(WorkspaceText.rowTitle)
-                    Text(contextTitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(2)
+                    Text(contextTitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(2)
                 }
                 Spacer()
                 Button("历史讨论", systemImage: "clock.arrow.circlepath") { showingHistory = true }
@@ -47,7 +47,7 @@ struct WorkspaceDiscussionView: View {
                             ForEach(model.discussionHistory, id: \.sourceID) { source in
                                 Button { openSource(source.sourceID) } label: {
                                     VStack(alignment: .leading, spacing: 5) {
-                                        Text(source.origin == "user" ? "我的表达" : source.origin == "ai" ? "AI 交付" : "外部资料").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                        Text(source.origin == "user" ? "我的表达" : source.origin == "ai" ? "AI 交付" : "外部资料").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                         Text(source.text).lineLimit(3)
                                         if source.localOnly { Text("仅本地 · 发送前需在材料详情授权").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
                                     }.padding(.vertical, 4)
@@ -56,28 +56,28 @@ struct WorkspaceDiscussionView: View {
                         }.vosFont(WorkspaceText.meta)
                         ForEach(model.discussionTurns) { turn in
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("我").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                Text("我").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                 Text(turn.text).textSelection(.enabled).padding(12).frame(maxWidth: .infinity, alignment: .leading).background(palette.selection, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                                 Button("整理为观点与行动") { model.understandDiscussionTurn(turn) }
                                     .buttonStyle(.workspaceSecondaryCompact)
                                     .disabled(!model.canUnderstandDiscussionTurn(turn))
-                                Text("整理会发送本轮个人原话，提取待核对观点与明确行动；行动遵循已保存的提醒清单授权。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                Text("整理会发送本轮个人原话，提取待核对观点与明确行动；行动遵循已保存的提醒清单授权。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                 ForEach(model.discussionReplies.filter { $0.replyToTurnID == turn.id }) { reply in
-                                    Text(reply.validity == "current" ? "VoiceOS" : "VoiceOS · 历史依据").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                    Text(reply.validity == "current" ? "VoiceOS" : "VoiceOS · 历史依据").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                     if reply.parts.isEmpty {
                                         if reply.state == "reserved" {
-                                            Text("正在思考…").foregroundStyle(.secondary)
+                                            Text("正在思考…").foregroundStyle(palette.secondaryText)
                                         } else {
                                             WorkspaceNoticeText(message: "这次回复未完成：" + (reply.error ?? "原因未登记"), severity: .danger)
                                             if model.discussionWritable {
                                                 Button("重新提问") { editorFocused = true }.buttonStyle(.workspaceQuietCompact)
-                                                Text("失败记录已保留在本轮；写下新的提问会作为下一轮发送。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                                Text("失败记录已保留在本轮；写下新的提问会作为下一轮发送。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                             }
                                         }
                                     }
                                     ForEach(Array(reply.parts.enumerated()), id: \.offset) { index, part in
                                         VStack(alignment: .leading, spacing: 8) {
-                                            Text(part.kind == .quotation ? "原文引用" : "AI 分析与建议").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                            Text(part.kind == .quotation ? "原文引用" : "AI 分析与建议").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                             Text(.init(part.text)).textSelection(.enabled).lineSpacing(4)
                                             if part.kind == .aiSuggestion {
                                                 let kept = model.discussionDerivations.first { $0.discussionAttemptID == reply.id && $0.partIndex == index }
@@ -89,7 +89,7 @@ struct WorkspaceDiscussionView: View {
                                                     }.buttonStyle(.workspaceSecondaryCompact)
                                                         .disabled(reply.validity != "current" || model.discussionSession?.validity != "current" || busy)
                                                 }
-                                                Text("待核对、未验证；保留不表示认可，也不创建行动。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                                Text("待核对、未验证；保留不表示认可，也不创建行动。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                             }
                                             if !part.references.isEmpty {
                                                 DisclosureGroup("原文依据") {
@@ -153,11 +153,11 @@ struct WorkspaceDiscussionView: View {
                             Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceQuietCompact)
                         }
                     }
-                    Text("发送即允许本轮文字用于 AI 讨论，音频保留本机。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                    Text("发送即允许本轮文字用于 AI 讨论，音频保留本机。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                 } else {
-                    Text(model.discussionSession?.state == "ended" ? "这段讨论已结束，历史仍可回看。" : "这段讨论的依据已变化，只能回看；结束它不会改变历史。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text(model.discussionSession?.state == "ended" ? "这段讨论已结束，历史仍可回看。" : "这段讨论的依据已变化，只能回看；结束它不会改变历史。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
-                if !model.discussionStatus.isEmpty { Text(model.discussionStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(4) }
+                if !model.discussionStatus.isEmpty { Text(model.discussionStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled).lineLimit(4) }
                 if model.discussionWritable {
                     Button("结束并整理讨论") { confirmingEnd = true }.buttonStyle(.workspaceQuietCompact).disabled(busy)
                 } else if model.discussionSession?.state == "active" {

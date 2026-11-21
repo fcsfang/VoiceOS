@@ -56,11 +56,11 @@ struct TextCaptureView: View {
                 if !model.initialized { ProgressView("正在恢复资料库与草稿…").controlSize(.small) }
                 if !draft.error.isEmpty { WorkspaceNoticeText(message: draft.error, severity: .danger) }
                 if !model.textCaptureDraftIssue.isEmpty { WorkspaceNoticeText(message: model.textCaptureDraftIssue) }
-                Text("草稿保存在本机，切页或重开可继续；保存后清空。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                if let validationIssue { Text(validationIssue).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                Text("草稿保存在本机，切页或重开可继续；保存后清空。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                if let validationIssue { Text(validationIssue).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                 if importing { ProgressView("正在读取文字、PDF 或识别图片…").controlSize(.small) }
                 if linkImporting { ProgressView("正在抓取网页正文…").controlSize(.small) }
-                Text(saveExplanation).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text(saveExplanation).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 HStack {
                     Button("稍后继续", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(draft.saving)
                     Spacer()
@@ -127,8 +127,8 @@ struct TextCaptureView: View {
                     HStack {
                         Text("完整原文").vosFont(WorkspaceText.rowTitle)
                         Spacer()
-                        if let fileName = draft.fileName { Text(fileName).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).lineLimit(1) }
-                        Text("\(draft.text.unicodeScalars.count) 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary)
+                        if let fileName = draft.fileName { Text(fileName).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1) }
+                        Text("\(draft.text.unicodeScalars.count) 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                     }
                     TextEditor(text: $draft.text).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight:240)
                         .workspaceEditorSurface().focused($focus, equals: .text).disabled(draft.saving)
@@ -142,7 +142,7 @@ struct TextCaptureView: View {
                             Text("外部资料").tag(TextCaptureOwnership.external)
                         }.pickerStyle(.segmented).disabled(draft.saving)
                         Toggle("允许云端理解全文", isOn: $draft.allowCloud).disabled(draft.saving)
-                        Text("手打默认我的表达；导入文字或图片默认外部资料并仅本地。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                        Text("手打默认我的表达；导入文字或图片默认外部资料并仅本地。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                     }.padding(.top, 8)
                 } label: {
                     Text("保存选项 · \(draft.ownership == .personal ? "我的表达" : "外部资料") · \(draft.allowCloud ? "允许云端" : "仅本地")")
@@ -231,7 +231,7 @@ struct TextCaptureView: View {
     private var templateNameSheet: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             WorkspaceSectionHeading("保存为模板")
-            Text("之后可从「模板」菜单一键填入草稿。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("之后可从「模板」菜单一键填入草稿。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             WorkspaceCard(padding: 16) {
                 VStack(alignment: .leading, spacing: 12) {
                     TextField("模板名称", text: $templateName).workspaceFieldSurface()
@@ -261,7 +261,7 @@ struct TextCaptureView: View {
             }
             if !templateError.isEmpty { WorkspaceNoticeText(message: templateError, severity: .danger) }
             if templates.isEmpty {
-                Text("还没有模板；写好正文后从「模板」菜单保存。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                Text("还没有模板；写好正文后从「模板」菜单保存。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             } else {
                 ScrollView {
                     WorkspaceCard(padding: 12) {
@@ -270,7 +270,7 @@ struct TextCaptureView: View {
                                 HStack(alignment: .top, spacing: 12) {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(template.name).vosFont(WorkspaceText.rowTitle)
-                                        Text(template.body).vosFont(WorkspaceText.caption).foregroundStyle(.secondary).lineLimit(2)
+                                        Text(template.body).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText).lineLimit(2)
                                     }
                                     Spacer(minLength: 8)
                                     Button("删除", role: .destructive) { pendingTemplateDelete = template }
@@ -288,7 +288,7 @@ struct TextCaptureView: View {
     private var linkImportSheet: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             WorkspaceSectionHeading("从链接导入正文")
-            Text("支持 http 或 https 链接；草稿不为空时会先确认替换。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("支持 http 或 https 链接；草稿不为空时会先确认替换。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             TextField("https://…", text: $linkText).workspaceFieldSurface().focused($sheetFocus, equals: .link).accessibilityLabel("网页链接")
             HStack {
                 Button("取消") { showingLinkPrompt = false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
