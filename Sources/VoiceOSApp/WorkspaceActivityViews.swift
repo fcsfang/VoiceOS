@@ -638,8 +638,8 @@ struct WorkspaceTaskView: View {
                         }
                     }
                 }.alert(isQuestion ? "放下这个问题？" : (action.kind == "task" ? "不再跟进这项任务？" : "不再跟进这个目标？"), isPresented: $confirmingDismiss) {
-                    Button(isQuestion ? "放下" : "不再跟进", role: .destructive) { stopFollowing() }
                     Button("取消", role: .cancel) {}
+                    Button(isQuestion ? "放下" : "不再跟进", role: .destructive) { stopFollowing() }
                 } message: {
                     Text(isQuestion ? "会移到历史记录，之后仍可找回；VoiceOS 的回答和讨论都会保留。" : (action.kind == "task" ? "会移入历史记录，之后仍可找回。Apple 提醒事项中的提醒需单独处理。" : "会移到历史记录，之后仍可找回；已经添加的下一步仍会保留。"))
                 }

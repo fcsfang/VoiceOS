@@ -501,8 +501,8 @@ struct RecordingInboxView: View {
                 }
             }
             .alert("移除这个自动入口？", isPresented: Binding(get: { folderPendingRemoval != nil }, set: { if !$0 { folderPendingRemoval = nil } }), presenting: folderPendingRemoval) { folder in
-                Button("移除入口", role: .destructive) { inbox.removeFolder(folder); folderPendingRemoval = nil }
                 Button("保留", role: .cancel) { folderPendingRemoval = nil }
+                Button("移除入口", role: .destructive) { inbox.removeFolder(folder); folderPendingRemoval = nil }
             } message: { _ in
                 Text("移除入口不会删除原文件，只是不再自动接收这个文件夹的新录音。")
             }
@@ -535,8 +535,8 @@ struct RecordingInboxView: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .alert("不再处理这份素材？", isPresented: Binding(get: { itemPendingIgnore != nil }, set: { if !$0 { itemPendingIgnore = nil } }), presenting: itemPendingIgnore) { item in
-                    Button("不再处理", role: .destructive) { inbox.ignore(item.id); itemPendingIgnore = nil }
                     Button("保留", role: .cancel) { itemPendingIgnore = nil }
+                    Button("不再处理", role: .destructive) { inbox.ignore(item.id); itemPendingIgnore = nil }
                 } message: { item in
                     Text("“\(URL(fileURLWithPath: item.path).lastPathComponent)”不会再自动处理；原件保留在原处。")
                 }

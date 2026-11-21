@@ -34,7 +34,7 @@ struct BilingualView: View {
             HStack {
                 Text("译文对照").vosFont(WorkspaceText.sectionTitle)
                 Spacer()
-                Button("关闭", action: dismiss).buttonStyle(.workspaceSecondary)
+                Button("关闭", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
             }
             Label("AI 译文，仅供参考", systemImage: "exclamationmark.triangle")
                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)

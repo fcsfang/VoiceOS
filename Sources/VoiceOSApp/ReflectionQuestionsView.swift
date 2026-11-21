@@ -26,6 +26,7 @@ struct ReflectionQuestionsView: View {
     @State private var editingQuestion: ReflectionQuestion?
     @State private var title = ""
     @State private var titleCloud = false
+    @FocusState private var titleFocused: Bool
     @State private var text = ""
     @State private var kind = ReflectionQuestionEntryKind.observation
     @State private var allowCloud = false
@@ -275,7 +276,7 @@ struct ReflectionQuestionsView: View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             Text(editingQuestion == nil ? "你想持续探索什么？" : "重新表述主题或问题").vosFont(WorkspaceText.sectionTitle)
             Text("可以写一个主题，也可以写一个具体问题；资料、想法与实践以后逐渐加入。").foregroundStyle(.secondary)
-            TextField("例如：Agent 记忆，或如何评估记忆效果？", text: $title).textFieldStyle(.roundedBorder)
+            TextField("例如：Agent 记忆，或如何评估记忆效果？", text: $title).textFieldStyle(.roundedBorder).focused($titleFocused)
             Text("\(title.unicodeScalars.count) / 200").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Toggle("允许标题用于云端讨论", isOn: $titleCloud).vosFont(WorkspaceText.body)
             HStack {
@@ -303,13 +304,14 @@ struct ReflectionQuestionsView: View {
                     .disabled(busy || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.unicodeScalars.count > 200)
             }
         }.padding(24).frame(width: 560).background(palette.canvas)
+            .onAppear { DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { titleFocused = true } }
     }
     private var sourcesSheet: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             HStack {
                 Text("这个主题的资料").vosFont(WorkspaceText.sectionTitle)
                 Spacer()
-                Button("完成") { managingSources = false }.buttonStyle(.workspaceSecondary).disabled(busy).keyboardShortcut(.cancelAction)
+                Button("完成") { managingSources = false }.buttonStyle(.workspaceSecondary).disabled(busy).keyboardShortcut(.defaultAction)
             }
             Text("从原文、已有知识或任务接回主题；关联保留原话与归属，不代表认可。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             Picker("关联内容", selection: $sourceMode) {

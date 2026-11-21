@@ -37,7 +37,7 @@ struct ClaimReviewHistoryView: View {
                     }
                 }
             }
-            HStack { Spacer(); Button("完成", action: dismiss).keyboardShortcut(.defaultAction) }
+            HStack { Spacer(); Button("完成", action: dismiss).keyboardShortcut(.cancelAction) }
         }.padding(24).frame(width: 660, height: 440)
     }
 }

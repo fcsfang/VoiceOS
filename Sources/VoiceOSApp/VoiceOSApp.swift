@@ -92,7 +92,7 @@ struct ImportBatchReportView: View {
             }.frame(maxHeight: 340)
             HStack {
                 Spacer()
-                Button("完成", action: dismiss).keyboardShortcut(.defaultAction).keyboardShortcut(.cancelAction)
+                Button("完成", action: dismiss).keyboardShortcut(.cancelAction)
             }
         }
         .padding(24)
@@ -4661,7 +4661,7 @@ struct ActionCreationView: View {
             TextField("补充说明（可选）", text: $note)
             if !feedback.isEmpty { Text(feedback).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             HStack {
-                Button("取消", action: close).disabled(model.savingAction)
+                Button("取消", action: close).disabled(model.savingAction).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("保存意图") {
                     feedback = "正在保存意图…"
@@ -4719,7 +4719,7 @@ struct ActionFeedbackView: View {
             if !errorText.isEmpty { Text(errorText).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             Toggle("将反馈文字用于整理知识、更新思想与目标", isOn: $allowFollowup).vosFont(WorkspaceText.meta).disabled(saving)
             HStack {
-                Button("取消", action:dismiss).disabled(saving || (recordingID != nil && (model.dictationActive || model.dictationBusy)))
+                Button("取消", action:dismiss).disabled(saving || (recordingID != nil && (model.dictationActive || model.dictationBusy))).keyboardShortcut(.cancelAction)
                 Spacer(); Text("\(text.unicodeScalars.count)/4000").vosFont(WorkspaceText.caption)
                 Button(saving ? "正在保存…" : "保存反馈") {
                     saving = true; errorText = ""
@@ -4787,7 +4787,7 @@ struct PackageRestoreView: View {
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             if let restored { Text("恢复完成 · 当前库保留，外部连接未启用").foregroundStyle(palette.success); Button("打开恢复的资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() } }
             HStack {
-                Button(restored == nil ? "取消" : "完成",action:dismiss).disabled(restoring)
+                Button(restored == nil ? "取消" : "完成",action:dismiss).disabled(restoring).keyboardShortcut(.cancelAction)
                 Spacer()
                 if restored == nil {
                     Button(restoring ? "正在校验与恢复…" : "校验并恢复") {

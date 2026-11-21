@@ -867,6 +867,7 @@ private struct RegionInspectorPanel: View {
                     )
                     Spacer(minLength: 0)
                     WorkspaceIconButton(systemImage: "xmark", label: "关闭主题") { focusedRegionID = nil }
+                        .keyboardShortcut(.cancelAction)
                 }
                 Text(region.title).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
                 Text(themeMetaLine(briefing, questions: questions, relations: incident.count))
@@ -1040,6 +1041,7 @@ private struct QuestionInspectorPanel: View {
                         selection = nil
                         focusedRegionID = nil
                     }
+                    .keyboardShortcut(.cancelAction)
                 }
                 Text(question.title).vosFont(WorkspaceText.sectionTitle)
                 WorkspaceBadge(text: "\(question.evidence.count) 处原话")
@@ -1112,6 +1114,7 @@ private struct RelationInspectorPanel: View {
                         selection = nil
                         focusedRegionID = nil
                     }
+                    .keyboardShortcut(.cancelAction)
                 }
                 ReaderKicker(
                     dot: area.map { RegionIdentity.color(index: $0.identityIndex, scheme: colorScheme) } ?? palette.accent,
