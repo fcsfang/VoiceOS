@@ -464,7 +464,10 @@ struct WorkspaceView: View {
             .onExitCommand {
                 if discussionIsPresented { showingDiscussion = false }
                 else if selectingActions { exitActionSelection() }
-                else if page == .search, !query.isEmpty { query="";searchFocused=true;searchKeyboardFocus.id=nil }
+                else if page == .search {
+                    if !query.isEmpty { query="";searchFocused=true;searchKeyboardFocus.id=nil }
+                    else { back() }
+                }
                 else if !path.isEmpty { back() }
             }
             .workspaceToast($toastMessage)
@@ -759,6 +762,7 @@ struct WorkspaceView: View {
                     case .themes: path=[];page = .themes;topicID=nil;topicFocus=nil;error=""
                     case .materials: path=[];page = .materials;error=""
                     case .actions: path=[];page = .actions;error=""
+                    case .monitor: path=[];page = .monitor;error=""
                     case .initiate: path=[];page = .initiate;error=""
                     case .processing: path=[];page = .tool("处理情况");error=""
                     case .back: back()
@@ -2665,10 +2669,15 @@ struct WorkspaceView: View {
         }
         return rows
     }
+    private func cycledFilter(_ current:String, over filters:[String], forward:Bool) -> String {
+        guard !filters.isEmpty, let index=filters.firstIndex(of: current) else { return filters.first ?? current }
+        return filters[(index + (forward ? 1 : -1) + filters.count) % filters.count]
+    }
     private func handleActionListKey(_ press:KeyPress) -> KeyPress.Result {
         guard page == .actions, actionListFocused, !selectingActions,
               press.modifiers.isDisjoint(with: [.command,.option,.control]) else { return .ignored }
-        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow,
+           press.key != .leftArrow, press.key != .rightArrow { return .ignored }
         let order=actionKeyboardOrder
         switch press.key {
         case .downArrow, .upArrow:
@@ -2678,6 +2687,11 @@ struct WorkspaceView: View {
             if press.key == .upArrow { next=current.map { max(0,$0 - 1) } ?? order.count - 1 }
             else { next=current.map { min(order.count - 1,$0 + 1) } ?? 0 }
             actionKeyboardHighlightID=order[next].id
+            return .handled
+        case .leftArrow, .rightArrow:
+            let next=cycledFilter(actionFilter, over: SavedViewPage.actions.filters, forward: press.key == .rightArrow)
+            guard next != actionFilter else { return .ignored }
+            actionFilter=next
             return .handled
         case .return:
             guard let id=actionKeyboardHighlightID,order.contains(where: { $0.id == id }) else { return .ignored }
@@ -2719,11 +2733,17 @@ struct WorkspaceView: View {
     private func handleMaterialListKey(_ press:KeyPress) -> KeyPress.Result {
         guard page == .materials, materialListFocused,
               press.modifiers.isDisjoint(with: [.command,.option,.control]) else { return .ignored }
-        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
+        if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow,
+           press.key != .leftArrow, press.key != .rightArrow { return .ignored }
         let ids=readingMaterials.map(\.id)
         switch press.key {
         case .downArrow, .upArrow:
             guard materialKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }
+            return .handled
+        case .leftArrow, .rightArrow:
+            let next=cycledFilter(materialFilter, over: SavedViewPage.materials.filters, forward: press.key == .rightArrow)
+            guard next != materialFilter else { return .ignored }
+            materialFilter=next
             return .handled
         case .return:
             guard let id=materialKeyboardFocus.id, ids.contains(id) else { return .ignored }

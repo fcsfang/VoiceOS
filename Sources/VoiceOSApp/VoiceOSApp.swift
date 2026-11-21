@@ -17,7 +17,7 @@ enum WorkspaceRoute: Equatable {
 }
 
 enum WorkspacePageRequest: Equatable {
-    case home, themes, materials, actions, initiate, back, processing
+    case home, themes, materials, actions, monitor, initiate, back, processing
 }
 
 /// Which workspace segments one refresh publishes. Interactive keeps the fast
@@ -4610,6 +4610,7 @@ struct VoiceOSApp: App {
                     Button("材料") { delegate.openWorkspacePage(.materials) }.keyboardShortcut("3")
                     Button("行动") { delegate.openWorkspacePage(.actions) }.keyboardShortcut("4")
                     Button("启动") { delegate.openWorkspacePage(.initiate) }.keyboardShortcut("5")
+                    Button("消息监测") { delegate.openWorkspacePage(.monitor) }.keyboardShortcut("6")
                     Button("返回") { delegate.openWorkspacePage(.back) }.keyboardShortcut("[")
                     Divider()
                     Button("每周回顾") { delegate.openWeeklyReview() }.keyboardShortcut("e", modifiers: [.command, .shift])
