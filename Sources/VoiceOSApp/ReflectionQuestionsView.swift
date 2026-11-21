@@ -105,7 +105,7 @@ struct ReflectionQuestionsView: View {
     private var questionList: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             HStack {
-                Text("长期探索").vosFont(WorkspaceText.sectionTitle)
+                Text("长期探索").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 Spacer()
                 WorkspaceIconButton(systemImage: "plus", label: "新增主题或问题") { beginCreating() }.disabled(busy)
             }
@@ -141,7 +141,7 @@ struct ReflectionQuestionsView: View {
     }
     private func detail(_ question: ReflectionQuestion) -> some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
-            Text(question.title).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
+            Text(question.title).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader).textSelection(.enabled)
             HStack {
                 Button("关联资料 · \(sourceIDs.count)") { managingSources = true }.buttonStyle(.workspaceSecondaryCompact).disabled(busy)
                 Button("查看标题原文") { openSource(question.sourceID) }.buttonStyle(.workspaceSecondaryCompact).disabled(busy)
@@ -274,7 +274,7 @@ struct ReflectionQuestionsView: View {
     }
     private var createSheet: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
-            Text(editingQuestion == nil ? "你想持续探索什么？" : "重新表述主题或问题").vosFont(WorkspaceText.sectionTitle)
+            Text(editingQuestion == nil ? "你想持续探索什么？" : "重新表述主题或问题").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("可以写一个主题，也可以写一个具体问题；资料、想法与实践以后逐渐加入。").foregroundStyle(.secondary)
             TextField("例如：Agent 记忆，或如何评估记忆效果？", text: $title).workspaceFieldSurface().focused($titleFocused)
             Text("\(title.unicodeScalars.count) / 200").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
@@ -309,7 +309,7 @@ struct ReflectionQuestionsView: View {
     private var sourcesSheet: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             HStack {
-                Text("这个主题的资料").vosFont(WorkspaceText.sectionTitle)
+                Text("这个主题的资料").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 Spacer()
                 Button("完成") { managingSources = false }.buttonStyle(.workspaceSecondary).disabled(busy).keyboardShortcut(.cancelAction)
             }

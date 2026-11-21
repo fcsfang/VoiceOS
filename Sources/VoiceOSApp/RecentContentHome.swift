@@ -971,7 +971,7 @@ private struct RecentClueRenameSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("修改线索标题").vosFont(WorkspaceText.sectionTitle)
+            Text("修改线索标题").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             TextField("线索标题", text: $title).focused($titleFocused)
             Text("只改变这条线索的显示名，原始想法不变。")
                 .vosFont(WorkspaceText.body).foregroundStyle(.secondary)

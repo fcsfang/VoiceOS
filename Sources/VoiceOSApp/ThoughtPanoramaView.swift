@@ -712,7 +712,7 @@ struct ThoughtPanoramaView: View {
 
     private var coverage: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
-            HStack { Text("完整材料与覆盖情况").vosFont(WorkspaceText.sectionTitle); Spacer(); Button("关闭") { showCoverage = false }.buttonStyle(.workspaceQuietCompact).keyboardShortcut(.cancelAction) }
+            HStack { Text("完整材料与覆盖情况").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader); Spacer(); Button("关闭") { showCoverage = false }.buttonStyle(.workspaceQuietCompact).keyboardShortcut(.cancelAction) }
             if let state {
                 Text("\(state.input.units.count) 个完整单元 · \(state.input.sources.count) 份来源 · \(dependencyCount(state.input)) 份节目依赖 · \(state.input.claims.count) 条当前认识").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             } else {
@@ -869,7 +869,7 @@ private struct RegionInspectorPanel: View {
                     WorkspaceIconButton(systemImage: "xmark", label: "关闭主题") { focusedRegionID = nil }
                         .keyboardShortcut(.cancelAction)
                 }
-                Text(region.title).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
+                Text(region.title).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader).textSelection(.enabled)
                 Text(themeMetaLine(briefing, questions: questions, relations: incident.count))
                     .vosFont(WorkspaceText.meta)
                     .foregroundStyle(.secondary)
@@ -1043,7 +1043,7 @@ private struct QuestionInspectorPanel: View {
                     }
                     .keyboardShortcut(.cancelAction)
                 }
-                Text(question.title).vosFont(WorkspaceText.sectionTitle)
+                Text(question.title).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 WorkspaceBadge(text: "\(question.evidence.count) 处原话")
                 ReaderCappedText(text: question.summary, size: WorkspaceText.body.size)
                 ReaderEvidenceBlock(
@@ -1120,7 +1120,7 @@ private struct RelationInspectorPanel: View {
                     dot: area.map { RegionIdentity.color(index: $0.identityIndex, scheme: colorScheme) } ?? palette.accent,
                     text: area.map { "大区 · " + $0.title } ?? "候选联系"
                 )
-                Text(relation.label).vosFont(WorkspaceText.sectionTitle)
+                Text(relation.label).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 WorkspaceBadge(text: "AI 候选解释 · 尚待核对", tone: .warning)
                 Text(relation.explanation).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
                 ReaderEvidenceBlock(
