@@ -1,6 +1,15 @@
 import SwiftUI
 import VoiceOSCore
 
+/// Kept per topic + mode in WorkspaceView so leaving the page (to a source or
+/// task) and coming back restores the selected card, filter and expansion.
+struct TopicReadingUIState: Equatable {
+    var selectedSection: String?
+    var showingAllSections = false
+    var localFilter = ""
+    var keyboardCardID: String?
+}
+
 struct WorkspaceTopicReadingView: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.vosTextScale) private var scale
@@ -18,15 +27,15 @@ struct WorkspaceTopicReadingView: View {
     let discuss: (String) -> Void
     let showActions: () -> Void
     let showUnderstanding: () -> Void
-    @State private var selectedSection: String?
-    @State private var showingAllSections = false
+    /// Selection/filter/expansion survive page switches; the parent keys one
+    /// state per topic + mode.
+    @Binding var uiState: TopicReadingUIState
     @State private var showingStructure = false
     @State private var correctingClaim: CandidateClaim?
     @State private var pendingRejection: CandidateClaim?
     @State private var confirmingRejection = false
     @State private var hoveredSectionID: String?
     @State private var hoveredQuestion: Int?
-    @State private var localFilter = ""
     @State private var keyboardSectionID: String?
     @State private var keyboardCardFocus = TopicReadingKeySelection()
     @FocusState private var cardListFocused: Bool
@@ -34,6 +43,22 @@ struct WorkspaceTopicReadingView: View {
     @FocusState private var questionListFocused: Bool
     @FocusState private var structureFocused: Bool
     @FocusState private var focusedQuestion: Int?
+
+    private var selectedSection: String? {
+        get { uiState.selectedSection }
+        nonmutating set { uiState.selectedSection = newValue }
+    }
+    private var showingAllSections: Bool {
+        get { uiState.showingAllSections }
+        nonmutating set { uiState.showingAllSections = newValue }
+    }
+    private var localFilter: String {
+        get { uiState.localFilter }
+        nonmutating set { uiState.localFilter = newValue }
+    }
+    private var filterBinding: Binding<String> {
+        Binding(get: { uiState.localFilter }, set: { uiState.localFilter = $0 })
+    }
 
     private var sections: [TopicReadingSection] { topic.organization?.sections ?? [] }
     private var bodyPending: Bool { topic.organization?.bodyPending == true }
@@ -70,7 +95,7 @@ struct WorkspaceTopicReadingView: View {
     }
     private var topicFilter: some View {
         HStack(spacing:12) {
-            WorkspaceSearchField(text:$localFilter,placeholder:"筛选小主题、观点与原话")
+            WorkspaceSearchField(text:filterBinding,placeholder:"筛选小主题、观点与原话")
                 .frame(maxWidth:360)
             if !filterTerm.isEmpty {
                 Text("\(filteredSections.count) / \(sections.count) 个小主题").vosFont(WorkspaceText.meta.size, monospacedDigit: true).foregroundStyle(palette.secondaryText)
@@ -278,7 +303,19 @@ struct WorkspaceTopicReadingView: View {
                 .focused($cardListFocused)
                 .focusEffectDisabled()
                 .onKeyPress { handleReadingCardKey($0) }
-                .onChange(of:keyboardCardFocus.id) { _, id in guard let id else { return };proxy.scrollTo(id,anchor:.center) }
+                .onChange(of:keyboardCardFocus.id) { _, id in
+                    uiState.keyboardCardID = id
+                    guard let id else { return }
+                    proxy.scrollTo(id,anchor:.center)
+                }
+                .onAppear {
+                    guard let id = uiState.keyboardCardID else { return }
+                    keyboardCardFocus = TopicReadingKeySelection(id: id)
+                    Task { @MainActor in
+                        await Task.yield()
+                        proxy.scrollTo(id, anchor: .center)
+                    }
+                }
             }
         }
     }

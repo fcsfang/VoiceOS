@@ -344,6 +344,7 @@ struct WorkspaceView: View {
     @State private var topicMaterialKeyboardFocus = WorkspaceKeySelection()
     @FocusState private var topicMaterialListFocused: Bool
     @State private var topicReviewKeyboardFocus = WorkspaceKeySelection()
+    @State private var topicReadingStates: [String: TopicReadingUIState] = [:]
     @FocusState private var topicReviewListFocused: Bool
     @State private var readingStates: [String: SourceReadingState] = [:]
     @State private var readingPlans: [IncrementalPlan] = []
@@ -1358,7 +1359,10 @@ struct WorkspaceView: View {
         return WorkspaceTopicReadingView(model:model,topic:topic,mode:mode,focus:topicFocus,reading:reading,level:level,
             openSource:{ go(.source($0)) },openTopic:{ selectTopic($0) },openTask:{ go(.task($0)) },openDelivery:{ go(.delivery($0)) },
             discuss:{ prompt in Task { await toggleDiscussion(force:true,prompt:prompt) } },showActions:{ topicTab="行动与结果" },
-            showUnderstanding:{ topicTab="认识与问题";topicReadingMode="卡片" })
+            showUnderstanding:{ topicTab="认识与问题";topicReadingMode="卡片" },
+            uiState: Binding(
+                get: { topicReadingStates[topic.id + mode] ?? TopicReadingUIState() },
+                set: { topicReadingStates[topic.id + mode] = $0 }))
             .id(topic.id + mode)
     }
     private func review(_ topic:ReflectionQuestion, reading:TopicReadingData, proxy:ScrollViewProxy) -> some View {
