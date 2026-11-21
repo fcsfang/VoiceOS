@@ -289,6 +289,14 @@ private struct WorkspaceAttentionDot: View {
         }
     }
 }
+
+// Rebuilt only when records or reading states change; survives body re-evaluation.
+private final class MaterialPageCache {
+    struct Key: Equatable { let records: Int; let states: Int }
+    var key: Key?
+    var pages: [String: MaterialReadingPage] = [:]
+}
+
 struct WorkspaceView: View {
     @ObservedObject var model: ControlCenter
     @AppStorage("voiceos.workspaceTheme") private var theme = WorkspaceTheme.graphite
@@ -347,6 +355,8 @@ struct WorkspaceView: View {
     @State private var topicReadingStates: [String: TopicReadingUIState] = [:]
     @FocusState private var topicReviewListFocused: Bool
     @State private var readingStates: [String: SourceReadingState] = [:]
+    @State private var readingStatesRevision = 0
+    @State private var materialPageCache = MaterialPageCache()
     @State private var readingPlans: [IncrementalPlan] = []
     @State private var selectingActions = false
     @State private var selectedActionIDs: Set<String> = []
@@ -474,7 +484,7 @@ struct WorkspaceView: View {
     private var lifecycleContent: some View {
         styledContent
             .task { await model.start() }
-            .task(id:model.initialized) { if model.initialized { readingStates = await model.readingStates() } }
+            .task(id:model.initialized) { if model.initialized { readingStates = await model.readingStates(); readingStatesRevision &+= 1 } }
             .task(id:model.initialized) { if model.initialized { savedViews = await model.savedWorkspaceViews() } }
             .task { await model.setPanoramaVisible(page == .home && homeShowsPanorama) }
             .task(id:topicLoadKey) {
@@ -1045,10 +1055,15 @@ struct WorkspaceView: View {
     }
     private var readingMaterials: [SourceRecord] { materialPage.rows }
     private var materialPage: MaterialReadingPage {
-        MaterialReadingPage(records: model.records, filter: materialFilter,
-                            filters: SavedViewPage.materials.filters,
-                            readingStates: readingStates, catalog: recordCatalog,
-                            expressions: model.sourcePageIndex.expressionsBySourceID)
+        let key = MaterialPageCache.Key(records: model.recordsRevision, states: readingStatesRevision)
+        if materialPageCache.key != key { materialPageCache.key = key; materialPageCache.pages.removeAll() }
+        if let page = materialPageCache.pages[materialFilter] { return page }
+        let page = MaterialReadingPage(records: model.records, filter: materialFilter,
+                                       filters: SavedViewPage.materials.filters,
+                                       readingStates: readingStates, catalog: recordCatalog,
+                                       expressions: model.sourcePageIndex.expressionsBySourceID)
+        materialPageCache.pages[materialFilter] = page
+        return page
     }
     private func materialDayGroups(_ sources: [SourceRecord]) -> [MaterialDayGroup] {
         let calendar = Calendar.current
@@ -2394,7 +2409,7 @@ struct WorkspaceView: View {
     }
     private func setMaterialReading(_ id:String,_ state:SourceReadingState) {
         Task {
-            if await model.setReadingState(sourceID:id,state:state) { readingStates[id]=state }
+            if await model.setReadingState(sourceID:id,state:state) { readingStates[id]=state; readingStatesRevision &+= 1 }
             else { error=model.status }
         }
     }
@@ -3081,8 +3096,9 @@ struct WorkspaceView: View {
             let states=await model.readingStates()
             let current=states[id] ?? .unread
             readingStates[id]=current
+            readingStatesRevision &+= 1
             guard current == .unread else { return }
-            if await model.setReadingState(sourceID:id,state:.reading) { readingStates[id] = .reading }
+            if await model.setReadingState(sourceID:id,state:.reading) { readingStates[id] = .reading; readingStatesRevision &+= 1 }
             else { error=model.status }
         }
     }
