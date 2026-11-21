@@ -2,12 +2,13 @@ import SwiftUI
 import VoiceOSCore
 
 struct EnglishInputPreview: View {
+    @Environment(\.workspacePalette) private var palette
     let snapshot: EnglishPracticeSnapshot
     let dismiss: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("待发送的英文练习文字").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("以下是完整选定文字；关闭此窗口不会发送。发送时会再次核对版本与授权，原始音频不上传。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("以下是完整选定文字；关闭此窗口不会发送。发送时会再次核对版本与授权，原始音频不上传。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             ScrollView {
                 VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                     ForEach(Array(snapshot.context.sources.enumerated()), id: \.element.sourceID) { index, source in
@@ -75,7 +76,7 @@ struct EnglishPracticeView: View {
                                 else { priorIDs.remove(source.id) }
                                 model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
                             })) {
-                                VStack(alignment: .leading) { Text(source.displayTitle); Text(source.transcript ?? "").lineLimit(2).vosFont(WorkspaceText.caption).foregroundStyle(.secondary) }
+                                VStack(alignment: .leading) { Text(source.displayTitle); Text(source.transcript ?? "").lineLimit(2).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText) }
                             }.disabled(model.englishBusy || (!priorIDs.contains(source.id) && priorIDs.count >= 2))
                         }
                     }.frame(maxHeight: model.englishAttempts.isEmpty ? 210 : 110)
@@ -83,7 +84,7 @@ struct EnglishPracticeView: View {
                 if englishStatusIsError {
                     WorkspaceNoticeText(message: model.englishStatus, severity: .danger)
                 } else {
-                    Text(model.englishStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text(model.englishStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
                 HStack {
                     Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)) } } }
@@ -96,7 +97,7 @@ struct EnglishPracticeView: View {
                     if model.englishSnapshot != nil { Button("查看待发送文字…") { showingInput = true } }
                     Spacer(); if !embedded { Button("完成", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary) }
                 }
-                if let hint = sendHint { Text(hint).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                if let hint = sendHint { Text(hint).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             }
             if !model.englishAttempts.isEmpty {
                 WorkspaceListDivider(); Text("反馈历史（\(model.englishAttempts.count)）").vosFont(WorkspaceText.rowTitle.size, weight: .semibold, monospacedDigit: true)
@@ -104,7 +105,7 @@ struct EnglishPracticeView: View {
                 ForEach(model.englishAttempts) { attempt in
                     VStack(alignment: .leading, spacing: 6) {
                         Text("\(attempt.state == "completed" ? "已保存" : attempt.state == "reserved" ? "等待结果" : "未完成 · 不自动重发") · \(ConversationReflectionFocus.date(attempt.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知")").vosFont(WorkspaceText.meta)
-                        if let reason = attempt.error { Text(reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                        if let reason = attempt.error { Text(reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                         if attempt.validity == "frozen" { Text("历史反馈 · 依据或授权已变化，暂停当前使用").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
                         if let result = attempt.result {
                             ForEach(Array(result.suggestions.enumerated()), id: \.offset) { index, suggestion in
@@ -112,7 +113,7 @@ struct EnglishPracticeView: View {
                                     Text("建议 \(index + 1) · \(suggestionKindLabel(suggestion.kind))").vosFont(WorkspaceText.rowTitle)
                                     Text("原句：\(suggestion.original.quote)").textSelection(.enabled)
                                     Text("建议：\(suggestion.suggestedText)").textSelection(.enabled)
-                                    Text(suggestion.explanation).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                    Text(suggestion.explanation).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                     if suggestion.possibleTranscriptIssue { Text("可能是转写问题，需人工核对").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
                                 }.padding(8).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                             }
@@ -120,10 +121,10 @@ struct EnglishPracticeView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("本次：\(comparison.current.quote)").textSelection(.enabled)
                                     Text("旧练习：\(comparison.prior.quote)").textSelection(.enabled)
-                                    Text("比较：\(comparison.explanation)").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                    Text("比较：\(comparison.explanation)").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                 }
                             }
-                            Text("文字建议不代表发音、熟练度或学习效果判断。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                            Text("文字建议不代表发音、熟练度或学习效果判断。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                         }
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     }

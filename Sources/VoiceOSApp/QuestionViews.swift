@@ -21,9 +21,9 @@ struct QuestionStateView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("问题第 \(question.version) 版 · \(question.status.displayLabel)").vosFont(WorkspaceText.meta)
-            if question.seed.ownership == "ai_candidate" { Text("AI 提出的问题 · 不代表我的疑问").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            if question.seed.ownership == "ai_candidate" { Text("AI 提出的问题 · 不代表我的疑问").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             if question.validity == "frozen" { Text("历史状态 · 原话、归属或答案依据已变化，暂停当前使用").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
-            if question.canReopen { Text("答案依据已变化；可重开，旧答案仍保留在历史中。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            if question.canReopen { Text("答案依据已变化；可重开，旧答案仍保留在历史中。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             Button(question.canReopen ? "重新打开并保留历史…" : "登记问题状态…") { changing = true }.disabled((question.validity != "current" && !question.canReopen) || model.savingQuestion)
             if let revisions = model.questionRevisions[question.id], !revisions.isEmpty {
                 DisclosureGroup("问题状态历史（\(revisions.count)）") {
@@ -38,7 +38,7 @@ struct QuestionStateView: View {
                                     Button("查看答案来源当前页") { model.requestWorkspaceSource(evidence.reference.sourceID); dismiss() }.buttonStyle(.workspaceQuietCompact)
                                 }
                             }
-                            Text(ConversationReflectionFocus.date(revision.createdAt)?.formatted(date: .abbreviated, time: .shortened) ?? revision.createdAt).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(ConversationReflectionFocus.date(revision.createdAt)?.formatted(date: .abbreviated, time: .shortened) ?? revision.createdAt).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         }.padding(.vertical, 4)
                     }
                 }
@@ -46,7 +46,7 @@ struct QuestionStateView: View {
         }.sheet(item: $answerHistory) { revision in
             VStack(alignment: .leading, spacing: 12) {
                 Text("当时登记的答案依据").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-                Text("历史版本。原话更正后仍保留原依据；当前状态可能已冻结。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("历史版本。原话更正后仍保留原依据；当前状态可能已冻结。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 if let evidence = revision.input.resolution,
                    let source = revision.input.resolutionContext?.sources.first(where: { $0.sourceID == evidence.reference.sourceID }) {
                     Text("逐字稿版本：" + source.transcriptVersionID).vosFont(WorkspaceText.meta)
@@ -62,6 +62,7 @@ struct QuestionStateView: View {
     }
 }
 struct QuestionTransitionView: View {
+    @Environment(\.workspacePalette) private var palette
     let question: QuestionRecord
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
@@ -79,7 +80,7 @@ struct QuestionTransitionView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("登记问题状态").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text(question.seed.statement).textSelection(.enabled)
-            Text("当前：" + question.status.displayLabel).foregroundStyle(.secondary)
+            Text("当前：" + question.status.displayLabel).foregroundStyle(palette.secondaryText)
             Picker("新状态", selection: $target) {
                 ForEach(allowed, id: \.rawValue) { status in Text(status.displayLabel).tag(status) }
             }
@@ -95,7 +96,7 @@ struct QuestionTransitionView: View {
                 }
                 TextField("连续答案原话（必填）", text: $answerQuote)
             }
-            Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             HStack {
                 Button("取消", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary)
                 Spacer()
@@ -115,18 +116,19 @@ struct QuestionTransitionView: View {
 
 /// Citation context only. AI relation proposals never become question lifecycle commands.
 struct AssociationQuestionsView: View {
+    @Environment(\.workspacePalette) private var palette
     let item: ExpressionAssociationFeedback
     @ObservedObject var model: ControlCenter
     var body: some View {
         if !item.historicalQuestions.isEmpty {
             DisclosureGroup("此历史出处登记的问题（\(item.historicalQuestions.count)）") {
-                Text("出处中的问题记录；AI 关联提案不确认两次表达是同一问题，也不改变解决状态。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("出处中的问题记录；AI 关联提案不确认两次表达是同一问题，也不改变解决状态。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 ForEach(item.historicalQuestions) { saved in
                     // Prefer the current local projection after an explicit state operation.
                     let question = model.questionRecords.first(where: { $0.id == saved.id }) ?? saved
                     VStack(alignment: .leading, spacing: 5) {
                         Text(question.seed.statement).textSelection(.enabled)
-                        Text(question.seed.ownership == "user_tentative" ? "我的暂定问题 · 未验证" : question.seed.ownership == "ai_candidate" ? "AI 候选问题 · 未验证" : "来源问题 · 归属保持").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Text(question.seed.ownership == "user_tentative" ? "我的暂定问题 · 未验证" : question.seed.ownership == "ai_candidate" ? "AI 候选问题 · 未验证" : "来源问题 · 归属保持").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         QuestionStateView(question: question, model: model)
                     }.padding(.vertical, 5)
                 }

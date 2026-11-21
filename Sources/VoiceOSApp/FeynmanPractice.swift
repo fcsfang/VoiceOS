@@ -20,19 +20,19 @@ struct FeynmanPractice: View {
                     .tracking(1.4).textCase(.uppercase).foregroundStyle(palette.accent)
                 Text("复述一遍").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             }
-            Text("不看原话，用自己的话讲一遍。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("不看原话，用自己的话讲一遍。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             if let feedback {
                 result(feedback)
             } else {
                 TextEditor(text: $response).frame(minHeight: 200).workspaceEditorSurface().accessibilityLabel("复述内容")
                 HStack {
-                    Text("\(trimmed.count) 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary)
+                    Text("\(trimmed.count) 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(palette.secondaryText)
                     Button("取消", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary)
                     Spacer()
                     Button("对照原话") { submit() }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(!claimReady || trimmed.isEmpty)
                 }.vosFont(WorkspaceText.meta)
             }
-            Text("只对照词面，不判断语义，也不保存复述。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+            Text("只对照词面，不判断语义，也不保存复述。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
         }
         .padding(24)
@@ -54,9 +54,9 @@ struct FeynmanPractice: View {
                     }
                     Text("还没讲到的").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
                     if report.missed.isEmpty {
-                        Text("原话里的词都讲到了。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                        Text("原话里的词都讲到了。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                     } else {
-                        Text(report.missed.joined(separator: "、")).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
+                        Text(report.missed.joined(separator: "、")).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                     }
                     if let vague = report.vague { WorkspaceNoticeText(message: vague, severity: .warning) }
                     DisclosureGroup("展开原话核对", isExpanded: $showsOriginal) {

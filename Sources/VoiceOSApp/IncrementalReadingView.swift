@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct IncrementalReadingView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let source: SourceRecord
     let dismiss: () -> Void
@@ -30,7 +31,7 @@ struct IncrementalReadingView: View {
             } else if let plan {
                 Text("第 \(index + 1)/\(chunks.count) 块 · 每块约 \(plan.chunkSize) 字").vosFont(WorkspaceText.meta.size, monospacedDigit: true)
                 if chunks.isEmpty {
-                    Text(source.transcript == nil ? "转写尚未完成，完成后可以开始按天读。" : "当前转写没有可读文字。").foregroundStyle(.secondary)
+                    Text(source.transcript == nil ? "转写尚未完成，完成后可以开始按天读。" : "当前转写没有可读文字。").foregroundStyle(palette.secondaryText)
                 } else {
                     ScrollView {
                         Text(text).vosFont(WorkspaceText.body).lineSpacing(6).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading)
@@ -44,11 +45,11 @@ struct IncrementalReadingView: View {
                     }
                 }
             } else {
-                Text(source.transcript == nil ? "转写尚未完成，完成后可以开始按天读。" : "把这份材料切成小块，每天读一块。进度只记当前位置，原文变化后按最新转写重算。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                Text(source.transcript == nil ? "转写尚未完成，完成后可以开始按天读。" : "把这份材料切成小块，每天读一块。进度只记当前位置，原文变化后按最新转写重算。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                 Picker("每块字数", selection:$chunkSize) { ForEach(sizes,id:\.self) { Text(String($0)).tag($0) } }.pickerStyle(.segmented)
                 Button("开始按天读") { start() }.buttonStyle(.workspacePrimary).disabled(busy || source.transcript == nil)
             }
-            if !notice.isEmpty { Text(notice).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            if !notice.isEmpty { Text(notice).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
             HStack { Spacer(); Button("关闭",action:dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary) }
         }.padding(24).frame(width:680,height:560)

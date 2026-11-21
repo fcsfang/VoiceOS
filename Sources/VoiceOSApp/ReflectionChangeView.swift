@@ -59,7 +59,7 @@ struct ReflectionChangeView: View {
     private var connectionList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 8) {
-                Text("\(focus.connections.count) 条关联候选").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary).padding(.bottom, 6)
+                Text("\(focus.connections.count) 条关联候选").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(palette.secondaryText).padding(.bottom, 6)
                 ForEach(focus.connections) { connection in
                     Button { selectedID = connection.id } label: {
                         VStack(alignment: .leading, spacing: 6) {
@@ -92,7 +92,7 @@ struct ReflectionChangeView: View {
                 Text(update.reason).vosFont(WorkspaceText.body).textSelection(.enabled)
             }
             Text("原话中的条件与归属是依据；转写纠错、支持或延续都不代表观点已被验证。")
-                .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             WorkspaceListDivider()
             VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                 Text("接着问清楚").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
@@ -103,7 +103,7 @@ struct ReflectionChangeView: View {
                 } label: { Label("带着原话继续讨论", systemImage: "bubble.left.and.bubble.right") }
                     .buttonStyle(.workspacePrimary)
                     .disabled(model.discussionSaving || model.discussionSending || model.discussionExtracting || model.dictationActive)
-                Text("先编辑问题并确认发送；关联仍作为候选保留。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                Text("先编辑问题并确认发送；关联仍作为候选保留。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -113,12 +113,12 @@ struct ReflectionChangeView: View {
                 Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).foregroundStyle(palette.accent)
                 Text(quote).vosFont(WorkspaceText.body).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 WorkspaceListDivider()
-                if sourceIDs.isEmpty { Text("请返回地图核对观点来源").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                if sourceIDs.isEmpty { Text("请返回地图核对观点来源").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                 ForEach(sourceIDs, id: \.self) { id in
                     if let source = model.records.first(where: { $0.id == id }) {
                         Text(source.displayTitle).vosFont(WorkspaceText.meta.size, weight: .medium).textSelection(.enabled)
-                        Text(source.origin == "user" ? "个人表达" : source.origin == "ai" ? "AI 材料" : "外部资料 · 不代表我的观点").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-                        if let date = source.expressedDate { Text(date.formatted(date: .abbreviated, time: .shortened)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+                        Text(source.origin == "user" ? "个人表达" : source.origin == "ai" ? "AI 材料" : "外部资料 · 不代表我的观点").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        if let date = source.expressedDate { Text(date.formatted(date: .abbreviated, time: .shortened)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                     }
                     Button("查看来源全文") {
                         if let openSource { openSource(id) }
