@@ -184,6 +184,7 @@ struct WorkspaceSection<Content: View>: View {
                 if !icon.isEmpty {
                     Image(systemName: icon).vosFont(19, weight: .medium).frame(width: 26, height: 28)
                         .foregroundStyle(palette.accent)
+                        .accessibilityHidden(true)
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(spacing: 9) {
