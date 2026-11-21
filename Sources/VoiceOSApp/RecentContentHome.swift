@@ -226,8 +226,8 @@ struct RecentContentHome: View {
     }
 
     private func restoreTimeline(_ proxy: ScrollViewProxy) {
-        guard !timelineRestored else { return }
         if storedTimelineAnchor.isEmpty || !items.isEmpty { timelineRestored = true }
+        // Re-anchoring on every appear and item-count change keeps live inserts from moving the reader's top row; scrolling to the tracked anchor reports the same id back, so this settles instead of looping.
         guard !storedTimelineAnchor.isEmpty, items.contains(where: { $0.id == storedTimelineAnchor }) else { return }
         Task { @MainActor in
             await Task.yield()
@@ -529,7 +529,7 @@ struct RecentContentHome: View {
             }
             if !digest.tasks.isEmpty {
                 Button {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(tasksAnchor, anchor: .top) }
+                    withAnimation(reduceMotion ? nil : WorkspaceMotion.scroll) { proxy.scrollTo(tasksAnchor, anchor: .top) }
                 } label: {
                     HStack(spacing: 7) {
                         Image(systemName: "checklist")
@@ -692,7 +692,7 @@ struct RecentContentHome: View {
     private var pendingOutcomeCount: Int { model.visibleOutcomeFollowups.count }
 
     private func toggleRecentThoughts() {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { recentThoughtsExpanded.toggle() }
+        withAnimation(reduceMotion ? nil : WorkspaceMotion.expand) { recentThoughtsExpanded.toggle() }
     }
 
     private func recentThoughtsEntry(_ groups: [RecentThoughtDay]) -> some View {
@@ -721,6 +721,7 @@ struct RecentContentHome: View {
             .buttonStyle(.plain)
             .help(recentThoughtsExpanded ? "收起最近想法" : "展开最近想法，查看近 14 天的观点")
             .accessibilityIdentifier("home.recentThoughts.toggle")
+            .accessibilityValue(recentThoughtsExpanded ? "已展开" : "已收起")
             if recentThoughtsExpanded {
                 ForEach(groups) { group in
                     VStack(alignment: .leading, spacing: 6) {
@@ -950,7 +951,7 @@ private struct ClueHeaderMenu: View {
         .opacity(visible ? 1 : 0)
         .allowsHitTesting(visible)
         .onHover { hovered = $0 }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: visible)
+        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: visible)
     }
 }
 
