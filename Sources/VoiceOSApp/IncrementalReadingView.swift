@@ -11,6 +11,7 @@ struct IncrementalReadingView: View {
     @State private var busy = false
     @State private var notice = ""
     @State private var error = ""
+    @State private var showSlowLoad = false
     private let sizes = [400, 800, 1200, 2000, 4000]
     private var chunks: [ReadingChunk] {
         guard let plan, let transcript = source.transcript else { return [] }
@@ -25,7 +26,7 @@ struct IncrementalReadingView: View {
         VStack(alignment:.leading,spacing:14) {
             Text("按天读").vosFont(WorkspaceText.sectionTitle)
             if !loaded {
-                ProgressView("正在读取阅读进度…")
+                if showSlowLoad { ProgressView("正在读取阅读进度…") }
             } else if let plan {
                 Text("第 \(index + 1)/\(chunks.count) 块 · 每块约 \(plan.chunkSize) 字").vosFont(WorkspaceText.meta.size, monospacedDigit: true)
                 if chunks.isEmpty {
@@ -52,6 +53,7 @@ struct IncrementalReadingView: View {
             HStack { Spacer(); Button("关闭",action:dismiss).keyboardShortcut(.cancelAction) }
         }.padding(24).frame(width:680,height:560)
         .workspaceModalSurface()
+        .workspaceSlowLoading(!loaded, into:$showSlowLoad)
         .task(id:source.id) { await reload() }
     }
     private func slice(_ text:String,start:Int,end:Int) -> String {

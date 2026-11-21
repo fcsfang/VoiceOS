@@ -326,6 +326,7 @@ struct WorkspaceSourceView: View {
     @State private var showAllThoughts=false
     @State private var historyState = SourceHistoryState.idle
     @State private var historyTask: Task<Void, Never>?
+    @State private var showSlowLoad=false
     @State private var savingQuestion = false
     @State private var historyClaimID: String?
     @State private var loadedClaimHistory: [ClaimReviewVersion] = []
@@ -373,10 +374,15 @@ struct WorkspaceSourceView: View {
     private var transcriptionFailed: Bool {
         source.transcript == nil && ["failed","blocked"].contains(source.jobState ?? "")
     }
+    private var historyLoading:Bool {
+        if case .loading=historyState { return true }
+        return false
+    }
     @ViewBuilder private var historyVersions: some View {
         switch historyState {
         case .idle: EmptyView()
-        case .loading: ProgressView("正在读取原文版本…")
+        case .loading:
+            if showSlowLoad { ProgressView("正在读取原文版本…") }
         case .loaded(let versions):
             if versions.isEmpty { Text("尚无原文版本。请先完成转写；原始录音仍已保存。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             ForEach(versions) { version in
@@ -955,6 +961,7 @@ struct WorkspaceSourceView: View {
                                 }
                                 Button("查看全部原文版本", action:loadHistory).buttonStyle(.workspaceQuietCompact)
                                 historyVersions
+                                    .workspaceSlowLoading(historyLoading, into: $showSlowLoad)
                                 if source.transcript != nil { Button("查看原话分段") { Task { showingSegmentation = await model.previewSegmentation(source) } }.buttonStyle(.workspaceQuietCompact) }
                                 ForEach(model.attempts[source.id] ?? []) { attempt in
                                     Text((attempt.state == "completed" ? "理解已完成" : "理解：" + workspaceStateLabel(attempt.state)) + (attempt.contextState == "stale" ? " · 历史依据已变化" : "")).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
@@ -1143,6 +1150,7 @@ struct WorkspaceSourceView: View {
         }
         .onChange(of:folds.fullText) { _,_ in if !folds.fullText { clearSelection() } }
         .onChange(of:source.transcript) { _,_ in clearSelection();resetBilingual();folds.original=SourceFoldState.initial(transcript:source.transcript).original }
+        .onChange(of:playbackSelection) { _,id in guard let id,let scroll else { return };scroll.wrappedValue.scrollTo(id:id,anchor:.center) }
         .onReceive(playback.$milliseconds) { followPlaybackHighlight($0) }
         .task {
             while !Task.isCancelled {
@@ -1576,7 +1584,7 @@ private struct SourceSpanPlaybackList: View {
             }
         }
     }
-    private func rowID(_ span:TranscriptSpan)->String { "span:"+span.id }
+    private func rowID(_ span:TranscriptSpan)->String { "source-span-"+span.id }
     private func play(_ span:TranscriptSpan) {
         Task { _=await model.playSpan(source,milliseconds:span.startMS!,endMilliseconds:span.endMS!) }
     }
@@ -1621,7 +1629,7 @@ private struct SourceOutlinePlaybackList: View {
                     let active=isPlaying(section)
                     Button { play(section) } label: {
                         SourceTimedPlaybackLabel(startMS:section.startMS,title:section.title,active:active,highlighted:selection == rowID(section)).equatable()
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.plain).id(rowID(section))
                         .workspaceFocusRing(selection == rowID(section) && !active,radius:WorkspaceMetrics.controlRadius)
                         .accessibilityElement(children:.ignore)
                         .accessibilityLabel(sourceTime(section.startMS) + "，" + section.title)
@@ -1650,7 +1658,7 @@ private struct SourceChapterPlaybackList: View {
                 let active=isPlaying(chapter)
                 Button { play(chapter) } label: {
                     SourceTimedPlaybackLabel(startMS:chapter.startMS,title:chapter.title,active:active,highlighted:selection == rowID(chapter)).equatable()
-                }.buttonStyle(.plain)
+                }.buttonStyle(.plain).id(rowID(chapter))
                     .workspaceFocusRing(selection == rowID(chapter) && !active,radius:WorkspaceMetrics.controlRadius)
                     .accessibilityElement(children:.ignore)
                     .accessibilityLabel(sourceTime(chapter.startMS) + "，" + chapter.title)

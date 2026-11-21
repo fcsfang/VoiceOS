@@ -9,6 +9,7 @@ struct DiscussionHistoryView: View {
     @State private var loading = true
     @State private var loadError = ""
     @State private var error = ""
+    @State private var showSlowLoad = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -23,7 +24,7 @@ struct DiscussionHistoryView: View {
             WorkspaceListDivider()
             Group {
                 if loading {
-                    ProgressView("正在读取讨论历史…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if showSlowLoad { ProgressView("正在读取讨论历史…").frame(maxWidth: .infinity, maxHeight: .infinity) }
                 } else if !loadError.isEmpty {
                     WorkspaceEmptyState(title: InlineFailurePresentation.message(operation: "读取讨论历史", reason: loadError),
                                         systemImage: "exclamationmark.triangle",
@@ -55,6 +56,7 @@ struct DiscussionHistoryView: View {
         }
         .frame(width: 560, height: 520)
         .background(palette.sidebar)
+        .workspaceSlowLoading(loading, into: $showSlowLoad)
         .task { await load() }
     }
 
