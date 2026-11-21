@@ -2,11 +2,23 @@ import AppKit
 import SwiftUI
 
 enum WorkspaceTheme: String, CaseIterable, Identifiable {
-    case graphite, sage
+    case graphite, snow, sage
 
     var id: String { rawValue }
-    var title: String { self == .graphite ? "石墨" : "鼠尾草" }
-    var subtitle: String { self == .graphite ? "中性灰阶，专注内容" : "柔和绿调，轻盈自然" }
+    var title: String {
+        switch self {
+        case .graphite: "石墨"
+        case .snow: "雪白"
+        case .sage: "鼠尾草"
+        }
+    }
+    var subtitle: String {
+        switch self {
+        case .graphite: "纸白暖调，柔和专注"
+        case .snow: "纯中性白，更亮更冷"
+        case .sage: "柔和绿调，轻盈自然"
+        }
+    }
 }
 
 struct WorkspacePalette {
@@ -18,23 +30,64 @@ struct WorkspacePalette {
         increasesContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
     }
 
-    var canvas: Color { theme == .graphite ? adaptive(0xFAFAF9, 0x1E1E1E) : adaptive(0xF9FAF5, 0x1B1F1D) }
+    var canvas: Color {
+        switch theme {
+        case .graphite: adaptive(0xFAFAF9, 0x1E1E1E)
+        case .snow: adaptive(0xFBFBFC, 0x1D1D1F)
+        case .sage: adaptive(0xF9FAF5, 0x1B1F1D)
+        }
+    }
     /// Cards sit two steps above the canvas. The border carries the grouping, so
     /// nothing reads as a white slab dropped onto a gray page.
-    var surface: Color { theme == .graphite ? adaptive(0xFFFFFF, 0x272727) : adaptive(0xFFFFFF, 0x242925) }
+    var surface: Color {
+        switch theme {
+        case .graphite: adaptive(0xFFFFFF, 0x272727)
+        case .snow: adaptive(0xFFFFFF, 0x262628)
+        case .sage: adaptive(0xFFFFFF, 0x242925)
+        }
+    }
     /// The sidebar is a half step below the canvas, not a separate slab.
-    var sidebar: Color { theme == .graphite ? adaptive(0xF4F4F2, 0x161616) : adaptive(0xF2F4ED, 0x171C18) }
-    var text: Color { theme == .graphite ? adaptive(0x1F1F1D, 0xECECEC) : adaptive(0x242F26, 0xE5EBE4) }
+    var sidebar: Color {
+        switch theme {
+        case .graphite: adaptive(0xF4F4F2, 0x161616)
+        case .snow: adaptive(0xF3F3F5, 0x151517)
+        case .sage: adaptive(0xF2F4ED, 0x171C18)
+        }
+    }
+    var text: Color {
+        switch theme {
+        case .graphite: adaptive(0x1F1F1D, 0xECECEC)
+        case .snow: adaptive(0x1A1A1C, 0xEDEDEF)
+        case .sage: adaptive(0x242F26, 0xE5EBE4)
+        }
+    }
     /// Secondary toolbar and metadata copy; one step quieter than `text`.
     var secondaryText: Color { text.opacity(increasesContrast ? 0.85 : 0.72) }
     /// Counts, footers and third-level facts. One step quieter than `secondaryText`.
     var tertiaryText: Color { text.opacity(increasesContrast ? 0.80 : 0.70) }
-    var accent: Color { theme == .graphite ? adaptive(0x3A4A5C, 0xAEC3D6) : adaptive(0x315F49, 0xB8D9BF) }
-    var selection: Color { theme == .graphite ? adaptive(0xEFEFEC, 0x333333) : adaptive(0xEDF1E6, 0x303F33) }
+    var accent: Color {
+        switch theme {
+        case .graphite: adaptive(0x3A4A5C, 0xAEC3D6)
+        case .snow: adaptive(0x3B4654, 0xB6C2D2)
+        case .sage: adaptive(0x315F49, 0xB8D9BF)
+        }
+    }
+    var selection: Color {
+        switch theme {
+        case .graphite: adaptive(0xEFEFEC, 0x333333)
+        case .snow: adaptive(0xEDEDEF, 0x323234)
+        case .sage: adaptive(0xEDF1E6, 0x303F33)
+        }
+    }
     var border: Color {
-        theme == .graphite
-            ? (increasesContrast ? adaptive(0xAFAFB0, 0x6C6C6C) : adaptive(0xE4E4DF, 0x4A4A4A))
-            : (increasesContrast ? adaptive(0xA5B2A2, 0x6C7F72) : adaptive(0xE1E6D8, 0x4A5A4E))
+        switch theme {
+        case .graphite:
+            increasesContrast ? adaptive(0xAFAFB0, 0x6C6C6C) : adaptive(0xE4E4DF, 0x4A4A4A)
+        case .snow:
+            increasesContrast ? adaptive(0xAFAFB2, 0x6C6C70) : adaptive(0xE3E3E6, 0x47474A)
+        case .sage:
+            increasesContrast ? adaptive(0xA5B2A2, 0x6C7F72) : adaptive(0xE1E6D8, 0x4A5A4E)
+        }
     }
     var hover: Color { selection.opacity(0.55) }
     var pressed: Color { selection.opacity(0.9) }
