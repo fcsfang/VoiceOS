@@ -205,7 +205,7 @@ struct WeeklyReviewView: View {
         let label = Text("\(title) \(count)")
         if isLink {
             Button {
-                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { proxy.scrollTo(target, anchor: .top) }
+                withAnimation(reduceMotion ? nil : WorkspaceMotion.scroll) { proxy.scrollTo(target, anchor: .top) }
             } label: {
                 label
             }
