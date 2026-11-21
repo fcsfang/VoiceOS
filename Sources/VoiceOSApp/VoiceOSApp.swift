@@ -2754,7 +2754,7 @@ final class ControlCenter: ObservableObject {
     private func evaluatePausedActionIDs(_ actionIDs: [String]) async -> (resolved: [String], remaining: [String], reasons: [String: WorkspaceActionPauseReason]) {
         guard !actionIDs.isEmpty else { return ([], [], [:]) }
         guard let store else { return ([], actionIDs, [:]) }
-        guard let snapshot = try? await store.workspaceSnapshot() else { return ([], actionIDs, [:]) }
+        guard let snapshot = try? await store.workspaceSnapshot(.coreSecondary) else { return ([], actionIDs, [:]) }
         return WorkspaceActionPause.evaluate(actionIDs: actionIDs, sources: snapshot.sources, claims: snapshot.claims,
                                              currentClaimsBySource: snapshot.currentClaimsBySource, actions: snapshot.actions,
                                              ledgers: snapshot.actionReviewLedgers)
