@@ -18,23 +18,23 @@ struct WorkspacePalette {
         increasesContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
     }
 
-    var canvas: Color { theme == .graphite ? adaptive(0xF2F2F3, 0x1E1E1E) : adaptive(0xF1F3EE, 0x1B1F1D) }
+    var canvas: Color { theme == .graphite ? adaptive(0xF6F6F4, 0x1E1E1E) : adaptive(0xF5F7F0, 0x1B1F1D) }
     /// Cards sit two steps above the canvas. The border carries the grouping, so
     /// nothing reads as a white slab dropped onto a gray page.
-    var surface: Color { theme == .graphite ? adaptive(0xF4F4F5, 0x272727) : adaptive(0xF3F5F0, 0x242925) }
+    var surface: Color { theme == .graphite ? adaptive(0xF9F9F7, 0x272727) : adaptive(0xF8FAF4, 0x242925) }
     /// The sidebar is a half step below the canvas, not a separate slab.
-    var sidebar: Color { theme == .graphite ? adaptive(0xEFEFF1, 0x161616) : adaptive(0xEDF0EA, 0x171C18) }
+    var sidebar: Color { theme == .graphite ? adaptive(0xEFEFEC, 0x161616) : adaptive(0xEEF1E7, 0x171C18) }
     var text: Color { theme == .graphite ? adaptive(0x202020, 0xECECEC) : adaptive(0x26352D, 0xE5EBE4) }
     /// Secondary toolbar and metadata copy; one step quieter than `text`.
     var secondaryText: Color { text.opacity(increasesContrast ? 0.85 : 0.72) }
     /// Counts, footers and third-level facts. One step quieter than `secondaryText`.
     var tertiaryText: Color { text.opacity(increasesContrast ? 0.80 : 0.70) }
     var accent: Color { theme == .graphite ? adaptive(0x3A4A5C, 0xAEC3D6) : adaptive(0x315F49, 0xB8D9BF) }
-    var selection: Color { theme == .graphite ? adaptive(0xE7E7E7, 0x333333) : adaptive(0xE6EEE5, 0x303F33) }
+    var selection: Color { theme == .graphite ? adaptive(0xE9E9E5, 0x333333) : adaptive(0xE7ECDD, 0x303F33) }
     var border: Color {
         theme == .graphite
-            ? (increasesContrast ? adaptive(0xB0B0B6, 0x6C6C6C) : adaptive(0xD5D5D8, 0x4A4A4A))
-            : (increasesContrast ? adaptive(0xA7B5A5, 0x6C7F72) : adaptive(0xCCD6CA, 0x4A5A4E))
+            ? (increasesContrast ? adaptive(0xADADB0, 0x6C6C6C) : adaptive(0xDCDCD6, 0x4A4A4A))
+            : (increasesContrast ? adaptive(0xA3B0A0, 0x6C7F72) : adaptive(0xD8DFCE, 0x4A5A4E))
     }
     var hover: Color { selection.opacity(0.55) }
     var pressed: Color { selection.opacity(0.9) }
