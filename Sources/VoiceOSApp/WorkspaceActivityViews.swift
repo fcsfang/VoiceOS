@@ -60,7 +60,7 @@ struct WorkspaceDeliveryView: View {
                             VStack(alignment:.leading,spacing:12) {
                                 WorkspaceSectionHeading(title:"参考与来源") { WorkspaceBadge(text:"\(execution.references.count)", tone:.neutral) }
                                 WorkspaceListDivider()
-                                DisclosureGroup("参考来源") {
+                                DisclosureGroup("查看全部") {
                                     VStack(alignment: .leading, spacing: 12) {
                                         ForEach(Array(execution.references.enumerated()), id: \.offset) { _, ref in
                                             if let url = URL(string: ref.url), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
@@ -414,6 +414,13 @@ struct WorkspaceTaskView: View {
         reminderLink?.state == "linked" && model.reminderAccess?.enabled == true
             && model.reminderAccess?.calendarID == reminderLink?.calendarID
     }
+    /// Why 日期与提醒 is disabled while the link is live, so the control never
+    /// reads as silently broken.
+    private var reminderEditDisabledHint: String? {
+        guard !canEditReminderSettings else { return nil }
+        if model.reminderAccess?.enabled != true { return "提醒事项连接已暂停 · 恢复连接后可改日期。" }
+        return "提醒事项清单已变化 · 重新连接后可改日期。"
+    }
     private var recurrenceSelection: Binding<RecurrencePeriod?> {
         Binding(get: { self.recurrence }, set: { value in
             let previous = self.recurrence
@@ -484,6 +491,7 @@ struct WorkspaceTaskView: View {
                             Button("日期与提醒", systemImage: "calendar") { openReminderSettings() }
                                 .buttonStyle(.workspaceSecondary)
                                 .disabled(model.savingAction || model.remindersBusy || !canEditReminderSettings)
+                                .help(reminderEditDisabledHint ?? "设置日期与提醒")
                             if model.reminderAccess?.enabled == true {
                                 Text(model.reminderSyncStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
                                 Button("核对提醒同步") { Task { await model.refreshTaskReminders() } }.buttonStyle(.workspaceSecondaryCompact).disabled(model.remindersBusy || model.reminderFieldsPending)
@@ -497,7 +505,7 @@ struct WorkspaceTaskView: View {
                                 Text("提醒事项连接已暂停 · 恢复连接后再核对。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             }
                         case .notConnected:
-                            Text("未连接 Apple 提醒事项 · 任务只保存在 VoiceOS；到「处理」页的「模型与提醒事项」连接后即可同步。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text("未连接 Apple 提醒事项 · 任务只保存在 VoiceOS；到「处理情况」页的「模型与提醒事项」连接后即可同步。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         case .fieldsPending:
                             Text("正在后台核对日期与优先级 · 完成后即可写入所选清单。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                         case .fieldsUnchecked(let reason):
@@ -1486,6 +1494,7 @@ struct NextActionFormSheet: View {
     @State private var createdActionID: String?
     @State private var error = ""
     @State private var busy = false
+    @FocusState private var titleFocused: Bool
 
     private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var sessionCommandID: String {
@@ -1498,6 +1507,7 @@ struct NextActionFormSheet: View {
             Text("下一步会挂在这个目标下，目标本身保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             TextField("下一步要做的事", text: $title)
                 .textFieldStyle(.roundedBorder)
+                .focused($titleFocused)
                 .onSubmit { submit() }
                 .disabled(busy || createdActionID != nil)
                 .accessibilityLabel("下一步标题")
@@ -1507,18 +1517,25 @@ struct NextActionFormSheet: View {
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {
                 Button("取消") { dismiss() }.buttonStyle(.workspaceSecondary).disabled(busy)
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 if createdActionID != nil {
                     Button("重试挂接") { retryAttach() }.buttonStyle(.workspacePrimary).disabled(busy)
+                        .keyboardShortcut(.defaultAction)
                         .accessibilityLabel("重试挂接下一步")
                 } else {
                     Button("添加") { submit() }.buttonStyle(.workspacePrimary)
+                        .keyboardShortcut(.defaultAction)
                         .disabled(busy || trimmedTitle.isEmpty)
                         .accessibilityLabel("确认添加下一步")
                 }
             }
         }.padding(24).frame(width: 420)
             .workspaceModalSurface()
+            .task {
+                try? await Task.sleep(for: .milliseconds(100))
+                titleFocused = true
+            }
     }
 
     private func submit() {
