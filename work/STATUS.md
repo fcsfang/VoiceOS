@@ -905,3 +905,13 @@
 - 缺口记录：四份方向键步进实现仍为文件内私有（Home/Materials/Actions/TopicReading 各一份），后续可提升为共享 KeyboardList；「今日阅读」快捷行仅视觉与主列表统一，未并入键盘序。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0）。
 - 139 真机键盘验证：周回顾 sheet 内 ↓ 选中第一行后再 ↓×2 正确移动到第三行并自动滚动；主题页瓦片 ↓ 选中首张（需窗口为 key window，后台 AX 导航后的首次↓可能因焦点请求竞争被忽略——记为已知时序行为）。两处选中视觉=selection 背景+焦点环。
+## 波 140：高频表单与弹层键盘语义（2026-11-21，已推送）
+- 140-A 表单约定：主按钮 `.defaultAction`、取消 `.cancelAction`、一个按钮一个快捷键；输入型 sheet 100ms 后聚焦首个输入框；破坏性 alert 取消声明在前。落地 14 处：记录想法 composer（保存 default / 稍后继续 cancel / 初始焦点标题）、保存为模板、从链接导入、标题编辑器、线索改名、更正原文/理解、分组改名、ConfirmTaskView、提醒设置、问题状态、费曼对照原话；应用模板 alert 改为取消在前。
+- 140-B 只读与危险弹层：五个纯阅读 sheet（双语/增量阅读/转写分段/主张历史/更正影响）关闭按钮改 cancelAction；全景阅读器三处关闭补 Esc；导入结果去重为单个 cancelAction；ActionCreation/ActionFeedback/PackageRestore/保存视图/合并主题/提醒清单六处表单取消补 Esc 并统一「取消左 — Spacer — 主按钮右」；合并主题与三处危险 alert 破坏按钮不再作为 Enter 默认。
+- 遗留：`NextActionFormSheet`（WorkspaceActivityViews:1479）Esc 与按钮布局未处理，记入后续波。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0）。
+## 波 141：导航小项补全（2026-11-21，已推送）
+- 行动页/材料页 ←→ 循环切换筛选（共享 `cycledFilter`），筛选变更沿既有 onChange 清理高亮与多选。
+- 首页「最近想法」并入时间线键盘序（合成行 `home.recentThoughts`，selection 背景+焦点环+自动滚动，Enter/空格切换展开；点击其它行清除高亮，避免双重选中）。
+- 首页反馈行 Enter 显式消费（`.handled` 空操作），不再逃逸；「显示」菜单新增「消息监测」⌘6，经 `WorkspacePageRequest.monitor` 落到侧栏同一页面；搜索页 query 为空时 Esc 也返回。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
