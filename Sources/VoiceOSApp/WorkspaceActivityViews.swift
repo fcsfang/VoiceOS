@@ -1486,6 +1486,7 @@ struct NextActionFormSheet: View {
     @State private var createdActionID: String?
     @State private var error = ""
     @State private var busy = false
+    @FocusState private var titleFocused: Bool
 
     private var trimmedTitle: String { title.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var sessionCommandID: String {
@@ -1498,6 +1499,7 @@ struct NextActionFormSheet: View {
             Text("下一步会挂在这个目标下，目标本身保留。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             TextField("下一步要做的事", text: $title)
                 .textFieldStyle(.roundedBorder)
+                .focused($titleFocused)
                 .onSubmit { submit() }
                 .disabled(busy || createdActionID != nil)
                 .accessibilityLabel("下一步标题")
@@ -1507,18 +1509,25 @@ struct NextActionFormSheet: View {
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {
                 Button("取消") { dismiss() }.buttonStyle(.workspaceSecondary).disabled(busy)
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 if createdActionID != nil {
                     Button("重试挂接") { retryAttach() }.buttonStyle(.workspacePrimary).disabled(busy)
+                        .keyboardShortcut(.defaultAction)
                         .accessibilityLabel("重试挂接下一步")
                 } else {
                     Button("添加") { submit() }.buttonStyle(.workspacePrimary)
+                        .keyboardShortcut(.defaultAction)
                         .disabled(busy || trimmedTitle.isEmpty)
                         .accessibilityLabel("确认添加下一步")
                 }
             }
         }.padding(24).frame(width: 420)
             .workspaceModalSurface()
+            .task {
+                try? await Task.sleep(for: .milliseconds(100))
+                titleFocused = true
+            }
     }
 
     private func submit() {
