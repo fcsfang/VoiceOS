@@ -1014,3 +1014,7 @@
 - 只读审计两路 12 条，全部修复：监测设置三卡改 WorkspaceSettingsCard；处理页两处裸 WorkspaceRow 补 processingRowInset；行动详情记录卡三处 DisclosureGroup 行 14→12；自动入口折叠行 meta→body + 20/12；两个工具页容器间距 14→28；监测历史副标题改「共 N 次，最新在上」；来源状态副标题去句号；英文页子分组标题改 WorkspaceSectionHeading。
 - 可达性：行动详情进展行 combine→contain（恢复「展开完整记录」「查看结果原话」可聚焦）；导出/更改/清除/在访达中显示等重名按钮补区分性无障碍名。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 162：材料读取合并与线索视口（2026-11-22，已推送）
+- 162-A：材料详情页 8 个 `.task(id:)` 合并为一个 `SourcePageReadKey` 组合任务（async let 并发、每读一 helper），赋值/错误/loading/重试语义逐字保留；组合 key 取并集，任一输入变化触发全部读取；每个 helper 在入口与每个 await 后校验 key 与取消状态，旧 key 结果不写回。
+- 162-B：主题页「线索」「尚未归入主题的材料」两个列表补 onAppear 视口恢复（复用 restoreKeyboardScroll）。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
