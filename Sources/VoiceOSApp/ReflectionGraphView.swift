@@ -495,7 +495,7 @@ struct ReflectionTimelineView: View {
         let items = nodes(focus), links = edges(focus, nodes: items)
         return ScrollView {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
-                Text(selection == nil ? (focus.isTopicOverview ? "这个主题的脉络" : "这个周期的线索") : "关系与依据").vosFont(WorkspaceText.sectionTitle)
+                Text(selection == nil ? (focus.isTopicOverview ? "这个主题的脉络" : "这个周期的线索") : "关系与依据").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 if let node = items.first(where: { $0.id == selection }) {
                     nodeDetails(node, focus: focus)
                     let connected = links.filter { $0.from == node.id || $0.to == node.id }

@@ -11,7 +11,7 @@ struct ConfirmTaskView: View {
     @FocusState private var titleFocused: Bool
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("核对为明确待办").vosFont(WorkspaceText.sectionTitle)
+            Text("核对为明确待办").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("确认这是你仍需跟进的事情，并把标题改成实际要做的动作。保存后会同步到已连接的提醒事项清单。")
                 .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             TextField("需要跟进什么", text: $title).focused($titleFocused).disabled(model.savingAction)

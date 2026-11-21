@@ -167,7 +167,7 @@ struct TaskInitiationView: View {
                     VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                         Text(taskInitiationRouteLabel(record.route)).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                         Text(record.proposal.title.isEmpty ? "尚未命名这次启动" : record.proposal.title)
-                            .vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
+                            .vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader).textSelection(.enabled)
                     }
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: WorkspaceMetrics.rowGap) {
@@ -209,7 +209,7 @@ struct TaskInitiationView: View {
 
     private func clarify(_ record: TaskInitiationRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(record.proposal.clarifyQuestion).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
+            Text(record.proposal.clarifyQuestion).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader).textSelection(.enabled)
             Text("回答会更准确；也可以跳过，按假设给出草稿。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             TextEditor(text: $answer).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 100)
                 .workspaceEditorSurface().accessibilityLabel("澄清回答")

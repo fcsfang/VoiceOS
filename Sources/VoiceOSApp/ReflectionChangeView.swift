@@ -82,7 +82,7 @@ struct ReflectionChangeView: View {
                 Spacer()
                 WorkspaceBadge(text: "AI 关系候选 · 待你核对", tone: .warning)
             }
-            Text(update.understanding).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
+            Text(update.understanding).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader).textSelection(.enabled)
             HStack(alignment: .top, spacing: 14) {
                 evidenceCard("此前原话", quote: update.historicalQuote, sourceIDs: historicalSources)
                 evidenceCard("这次原话", quote: update.currentQuote, sourceIDs: [connection.sourceID])
@@ -95,7 +95,7 @@ struct ReflectionChangeView: View {
                 .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             WorkspaceListDivider()
             VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
-                Text("接着问清楚").vosFont(WorkspaceText.sectionTitle)
+                Text("接着问清楚").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 Text("这个联系成立的条件是什么？有没有相反经历？哪些变化是我明确表达的，哪些只是 AI 的解释？")
                     .vosFont(WorkspaceText.body)
                 Button {

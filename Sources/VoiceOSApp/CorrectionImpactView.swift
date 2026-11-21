@@ -8,7 +8,7 @@ struct CorrectionImpactView: View {
     let dismiss: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("更正后的处理情况").vosFont(WorkspaceText.sectionTitle)
+            Text("更正后的处理情况").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("更正后的内容用于后续理解。下面保留依赖更正前内容的任务；完成记录和反馈不会丢失，提醒事项也不会因一次更正被删除。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             ScrollView {
                 VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
@@ -125,7 +125,7 @@ private struct CompensationConfirmationView: View {
     @State private var errorText = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("确认这一次期限补偿").vosFont(WorkspaceText.sectionTitle)
+            Text("确认这一次期限补偿").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text(plan.before.title).vosFont(WorkspaceText.rowTitle)
             Text("清单：" + plan.calendarTitle)
             Text("上次回读期限：" + (plan.before.dueDate?.summary ?? "未核对"))

@@ -70,7 +70,7 @@ struct ActionClarifyQueueView: View {
                 WorkspaceBadge(text: "剩余 \(remaining.count) 条")
                 WorkspaceCard(padding: 16) {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text(StatementTagParser.split(current.title).text).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
+                        Text(StatementTagParser.split(current.title).text).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader).textSelection(.enabled)
                         if nature(current) == .unknown {
                             Text("系统整理的建议 · 未归类").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             HStack(spacing: 10) {

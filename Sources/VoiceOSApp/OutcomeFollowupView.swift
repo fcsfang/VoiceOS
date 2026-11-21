@@ -14,7 +14,7 @@ struct OutcomeFollowupView: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("完成后的结果与收获").vosFont(WorkspaceText.sectionTitle)
+                    Text("完成后的结果与收获").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 }
                 Spacer()
                 Text("\(actions.count) 项").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary)
