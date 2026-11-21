@@ -118,6 +118,11 @@ struct WorkspaceMonitorView: View {
 
     private var todayKey: String { MonitorSourceConfigParser.dayString(Date()) }
 
+    private func localizedReportDate(_ key: String) -> String {
+        guard let date = ActionTimeFormatting.dayKey.date(from: key) else { return key }
+        return date.formatted(date: .abbreviated, time: .omitted)
+    }
+
     private var headingSubtitle: String {
         "每天检查一次 QQ 班级群与学院官网；需要行动的事项在这里跟进。"
     }
@@ -283,7 +288,7 @@ struct WorkspaceMonitorView: View {
                     ForEach(earlierReports) { report in
                         WorkspaceRow(
                             title: report.headline.isEmpty ? "未命名报告" : report.headline,
-                            subtitle: report.reportDate + " · " + ControlCenter.monitorStateText(report.state)
+                            subtitle: localizedReportDate(report.reportDate) + " · " + ControlCenter.monitorStateText(report.state)
                                 + " · " + ControlCenter.monitorDeliveryText(report),
                             icon: report.reportDate == todayKey ? "doc.text" : "doc.text.magnifyingglass",
                             trailing: selectedReportID == report.id ? "收起" : "查看",
@@ -310,7 +315,7 @@ struct WorkspaceMonitorView: View {
             VStack(alignment: .leading, spacing: 12) {
                 WorkspaceSectionHeading(title)
                 HStack(spacing: 10) {
-                    Text(report.reportDate + " · " + ControlCenter.monitorStateText(report.state))
+                    Text(localizedReportDate(report.reportDate) + " · " + ControlCenter.monitorStateText(report.state))
                         .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     if let generated = ControlCenter.monitorGeneratedText(report) {
                         Text(generated).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
@@ -922,7 +927,7 @@ struct WorkspaceMonitorView: View {
             }
             HStack(spacing: 10) {
                 SecureField("推送地址", text: $webhookDraft)
-                    .textFieldStyle(.roundedBorder).frame(maxWidth: 420)
+                    .workspaceFieldSurface().frame(maxWidth: 420)
                     .accessibilityLabel("推送地址")
                     .accessibilityIdentifier("monitor.settings.push.webhook")
                 Button("保存地址") {
@@ -1004,7 +1009,7 @@ struct WorkspaceMonitorView: View {
                 Text("账号").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     .frame(minWidth: 90, alignment: .leading).fixedSize(horizontal: true, vertical: false)
                 TextField("可选，留空自动选择", text: $qqAccount)
-                    .textFieldStyle(.roundedBorder).frame(maxWidth: 360)
+                    .workspaceFieldSurface().frame(maxWidth: 360)
             }
             DisclosureGroup("高级") {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1136,7 +1141,7 @@ struct WorkspaceMonitorView: View {
                 Text(label).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     .frame(minWidth: 90, alignment: .leading).fixedSize(horizontal: true, vertical: false)
                 TextField(label, text: text)
-                    .textFieldStyle(.roundedBorder).frame(maxWidth: 360)
+                    .workspaceFieldSurface().frame(maxWidth: 360)
                 Button("选择…", action: choose).buttonStyle(.workspaceQuietCompact)
             }
             if let check {

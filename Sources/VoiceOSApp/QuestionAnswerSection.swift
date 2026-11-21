@@ -124,7 +124,7 @@ struct QuestionAnswerSection: View {
                 Text("接着追问").vosFont(WorkspaceText.rowTitle).accessibilityAddTraits(.isHeader)
                 HStack(spacing: 10) {
                     TextField("对这份回答继续追问…", text: $followup)
-                        .textFieldStyle(.roundedBorder)
+                        .workspaceFieldSurface()
                         .onSubmit { sendFollowup() }
                         .disabled(!modelReady || followupSending)
                         .accessibilityLabel("追问内容")

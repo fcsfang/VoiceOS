@@ -44,9 +44,7 @@ struct AssistantDelegationView: View {
             Text("写下你想要的结果。应用会调研、比较或起草；可以关闭窗口，稍后回来查看。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                 Text("交付要求").vosFont(WorkspaceText.rowTitle)
-                TextEditor(text: $instruction).vosFont(WorkspaceText.body).frame(height: 190)
-                    .padding(8).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                    .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).stroke(palette.accent.opacity(0.2)) }
+                TextEditor(text: $instruction).vosFont(WorkspaceText.body).frame(height: 190).workspaceEditorSurface()
             }
             Picker("关联主题", selection: $questionID) {
                 Text("暂不关联").tag("")
@@ -116,7 +114,7 @@ struct AssistantExecutionView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
-                WorkspaceHero(eyebrow: "YOUR ASSISTANT", title: "把事情，推进到有结果", subtitle: "明确委托，查看成果，再带回自己的主题与行动。")
+                WorkspaceHero(eyebrow: "助理 · 协作", title: "把事情，推进到有结果", subtitle: "明确委托，查看成果，再带回自己的主题与行动。")
                 Spacer()
                 Button("完成", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
             }.padding(24)

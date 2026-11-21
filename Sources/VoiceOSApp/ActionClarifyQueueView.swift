@@ -130,7 +130,7 @@ struct ActionClarifyQueueView: View {
 
     private func nextStep(_ action: ActionRecord) -> some View {
         HStack(spacing: 8) {
-            TextField("下一步要做的事", text: $nextTitle).textFieldStyle(.roundedBorder)
+            TextField("下一步要做的事", text: $nextTitle).workspaceFieldSurface()
             Button("加下一步") { applyNext(action) }
                 .buttonStyle(.workspaceSecondary)
                 .disabled(busy || nextTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

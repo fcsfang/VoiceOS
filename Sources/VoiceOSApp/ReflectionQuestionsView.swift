@@ -79,7 +79,7 @@ struct ReflectionQuestionsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top) {
-                WorkspaceHero(eyebrow: "TOPICS IN PROGRESS", title: "主题与问题", subtitle: "把跨越时间的材料、认识、尝试与结果接到同一个主题。")
+                WorkspaceHero(eyebrow: "主题 · 问题", title: "主题与问题", subtitle: "把跨越时间的材料、认识、尝试与结果接到同一个主题。")
                 Spacer()
                 Button("返回地图") { dismiss() }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction).disabled(busy)
             }.padding(24)
@@ -276,7 +276,7 @@ struct ReflectionQuestionsView: View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             Text(editingQuestion == nil ? "你想持续探索什么？" : "重新表述主题或问题").vosFont(WorkspaceText.sectionTitle)
             Text("可以写一个主题，也可以写一个具体问题；资料、想法与实践以后逐渐加入。").foregroundStyle(.secondary)
-            TextField("例如：Agent 记忆，或如何评估记忆效果？", text: $title).textFieldStyle(.roundedBorder).focused($titleFocused)
+            TextField("例如：Agent 记忆，或如何评估记忆效果？", text: $title).workspaceFieldSurface().focused($titleFocused)
             Text("\(title.unicodeScalars.count) / 200").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
             Toggle("允许标题用于云端讨论", isOn: $titleCloud).vosFont(WorkspaceText.body)
             HStack {

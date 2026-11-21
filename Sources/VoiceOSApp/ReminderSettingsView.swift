@@ -88,7 +88,7 @@ struct ReminderSettingsView: View {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
                 Toggle("地点提醒", isOn: $hasLocation)
                 if hasLocation {
-                    TextField("地点名称", text: $locationName).textFieldStyle(.roundedBorder)
+                    TextField("地点名称", text: $locationName).workspaceFieldSurface()
                     Picker("提醒方式", selection: $locationProximity) {
                         Text("到达").tag(ReminderLocation.Proximity.enter); Text("离开").tag(ReminderLocation.Proximity.leave)
                     }.pickerStyle(.segmented)

@@ -174,7 +174,7 @@ struct ReflectionTimelineView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             HStack(alignment: .top) {
-                WorkspaceHero(eyebrow: "REFLECTION ATLAS", title: "认知地图", subtitle: periodPurpose)
+                WorkspaceHero(eyebrow: "主题 · 认知地图", title: "认知地图", subtitle: periodPurpose)
                 Spacer()
                 Button { showsQuestions = true } label: { Label("主题与问题", systemImage: "square.stack") }.buttonStyle(.workspaceSecondary)
                 Button { changeID = nil; showsChanges = true } label: { Label("认识对照", systemImage: "rectangle.split.2x1") }
