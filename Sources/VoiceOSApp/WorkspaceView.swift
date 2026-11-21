@@ -757,9 +757,9 @@ struct WorkspaceView: View {
                 }
                 Button { go(.settings);showingDiscussion=false } label: {
                     Label("设置",systemImage:"slider.horizontal.3").foregroundStyle(.secondary)
-                        .padding(.horizontal, page == .settings ? 12 : 0).padding(.vertical, page == .settings ? 11 : 0)
-                        .frame(maxWidth: page == .settings ? .infinity : nil,alignment:.leading)
+                        .frame(maxWidth:.infinity,alignment:.leading).padding(.horizontal,12).padding(.vertical,11)
                         .background(page == .settings ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                        .contentShape(Rectangle())
                 }.buttonStyle(.plain)
                     .accessibilityIdentifier("nav.settings")
                     .accessibilityAddTraits(page == .settings ? .isSelected : [])
