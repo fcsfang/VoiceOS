@@ -39,7 +39,7 @@ struct AssistantDelegationView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("交给 AI 助理", systemImage: "sparkles").vosFont(WorkspaceText.sectionTitle)
+            Label("交给 AI 助理", systemImage: "sparkles").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text(action.title).vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
             Text("写下你想要的结果。应用会调研、比较或起草；可以关闭窗口，稍后回来查看。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
@@ -172,7 +172,7 @@ struct AssistantExecutionView: View {
     }
     private func detail(_ execution: AssistantExecutionRecord) -> some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(.init(execution.title)).vosFont(WorkspaceText.sectionTitle).textSelection(.enabled)
+            Text(.init(execution.title)).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader).textSelection(.enabled)
             HStack {
                 Label(assistantExecutionLabel(execution), systemImage: execution.state == "completed" ? "doc.text" : execution.state == "failed" ? "exclamationmark.circle" : "hourglass")
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)

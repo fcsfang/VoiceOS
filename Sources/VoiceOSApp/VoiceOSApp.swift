@@ -70,7 +70,7 @@ struct ImportBatchReportView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("导入结果").vosFont(WorkspaceText.sectionTitle)
+            Text("导入结果").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text(report.failureCount == 0
                 ? "\(report.results.count) 份都已保存。"
                 : "成功 \(report.results.count - report.failureCount) 份，失败 \(report.failureCount) 份。")
@@ -4651,7 +4651,7 @@ struct ActionCreationView: View {
     @State private var feedback = ""
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("记录行动意图").vosFont(WorkspaceText.sectionTitle)
+            Text("记录行动意图").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("认可观点不等于承诺任务。选择明确任务，或先放入机会池；尚未写入提醒事项。").foregroundStyle(.secondary)
             Text("依据：" + claim.statement).lineLimit(4)
             Picker("意图", selection: $kind) {
@@ -4697,7 +4697,7 @@ struct ActionFeedbackView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("记录结果或反思").vosFont(WorkspaceText.sectionTitle)
+            Text("记录结果或反思").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("关联：" + action.title + " · 第 \(action.version) 版").foregroundStyle(.secondary)
             Picker("类型", selection: $kind) { Text("实际结果").tag("outcome"); Text("我的反思").tag("reflection") }.pickerStyle(.segmented).disabled(saving)
             HStack {
@@ -4774,7 +4774,7 @@ struct PackageRestoreView: View {
     }
     var body: some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("从迁移包恢复").vosFont(WorkspaceText.sectionTitle)
+            Text("从迁移包恢复").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("恢复到一个新资料库，保留当前资料库。完成后可在新窗口打开；提醒事项需要重新连接。").foregroundStyle(.secondary)
             Button("选择迁移包文件夹…",action:choosePackage).disabled(restoring || restored != nil)
             if let package, let summary {
@@ -4839,7 +4839,7 @@ struct BackupLibraryRestoreView: View {
     }
     var body: some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("从最近备份新建资料库").vosFont(WorkspaceText.sectionTitle)
+            Text("从最近备份新建资料库").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("取最近一份备份的数据库，加上当前资料库的原件副本，建立一个独立的新资料库；当前资料库不会被改动。完成后可在新窗口打开。").foregroundStyle(.secondary)
             if let summary = backupSummary {
                 Text(DatabaseBackup.successText(at: summary.date, count: summary.count)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
@@ -4898,7 +4898,7 @@ struct CognitiveFeedbackView: View {
     let dismiss: () -> Void
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
-            Text("静默回顾").vosFont(WorkspaceText.sectionTitle)
+            Text("静默回顾").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("可以直接关闭。这里显示已接纳的关联提案和相关原文。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             Picker("显示方式",selection:Binding(get:{ model.quietMode },set:{ mode in Task { await model.changeQuietMode(mode) } })) {
                 Text("正常显示").tag(CognitiveFeedbackMode.normal)
@@ -4957,7 +4957,7 @@ struct HistorySearchView: View {
     private var candidates: [RetrievalHit] { (model.retrievalResult?.hits ?? []).filter { selectedIDs.contains($0.id) } }
     var body: some View {
         VStack(alignment:.leading,spacing:14) {
-            Text("查找历史文字").vosFont(WorkspaceText.sectionTitle)
+            Text("查找历史文字").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             TextField(semantic ? "输入想找回的问题或想法" : "先输入原文关键词",text:$query).onSubmit { model.searchHistory(query:query,semantic:semantic) }
             Toggle("按意思找原文（本机）",isOn:$semantic).disabled(!model.semanticAvailable)
             Text(model.semanticAvailable ? "查找仅在本机进行；按意思找到的只是候选。选中原文后，可单独让文本模型判断与你的问题是否直接相关。" : "关键词查找在本机进行。这个构建尚未包含本地语义资源；选中原文后仍可单独判断相关性。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)

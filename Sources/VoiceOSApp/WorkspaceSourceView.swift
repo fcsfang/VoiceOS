@@ -1716,7 +1716,7 @@ struct WorkspaceTranscriptEditor:View {
     @FocusState private var textFocused:Bool
     var body:some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("更正原文").vosFont(WorkspaceText.sectionTitle)
+            Text("更正原文").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text(source.localOnly ? "这份材料仅本机保存。更正后保留原话历史，旧理解暂停使用；允许云端处理后可重新整理。" : "保存后会自动更新完整理解；原话历史、真实完成与结果保留。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             TextEditor(text:$text).frame(minHeight:300).workspaceEditorSurface().focused($textFocused)
             if !failure.isEmpty { Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
@@ -1760,7 +1760,7 @@ struct ClaimCorrectionView:View {
     }
     var body:some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("更正当前理解").vosFont(WorkspaceText.sectionTitle)
+            Text("更正当前理解").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("更正不会改写原话，历史与相关行动依据会分别保留。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             TextEditor(text:$text).frame(minHeight:180).workspaceEditorSurface().focused($textFocused)
             Picker("内容归属",selection:$ownership) {
@@ -1806,7 +1806,7 @@ struct RecordingExpressionTitleEditor:View {
     }
     var body:some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("修改分组标题").vosFont(WorkspaceText.sectionTitle)
+            Text("修改分组标题").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             TextField("分组标题",text:$title).focused($titleFocused)
             Text("\(expression.sourceIDs.count) 段录音同属一段连续表达。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             if !model.recordingTitleStatus.isEmpty { Text(model.recordingTitleStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }

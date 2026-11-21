@@ -538,7 +538,7 @@ struct WorkspaceView: View {
         lifecycleContent
             .sheet(isPresented:$model.choosingReminderCalendar) {
                 VStack(alignment:.leading,spacing:16) {
-                    Text("选择提醒事项清单").vosFont(WorkspaceText.sectionTitle)
+                    Text("选择提醒事项清单").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                     ForEach(model.reminderCalendars) { calendar in Button(calendar.title) { Task { model.proposedReminderCalendarID=calendar.id; await model.saveReminderConnection() } }.disabled(model.remindersBusy) }
                     if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
                     HStack {
@@ -609,7 +609,7 @@ struct WorkspaceView: View {
     }
     private var saveViewSheet: some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("保存当前视图").vosFont(WorkspaceText.sectionTitle)
+            Text("保存当前视图").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text(saveViewPage == .materials ? "材料 · " + saveViewFilter : "行动 · " + saveViewFilter).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             TextField("视图名称",text:$newViewName).workspaceFieldSurface()
                 .onChange(of:newViewName) { _, value in if value.count > ControlCenter.savedViewNameLimit { newViewName = String(value.prefix(ControlCenter.savedViewNameLimit)) } }
@@ -2636,7 +2636,7 @@ struct WorkspaceView: View {
         return VStack(alignment:.leading,spacing:16) {
             HStack(alignment:.top,spacing:12) {
                 VStack(alignment:.leading,spacing:6) {
-                    Text("安排今天").vosFont(WorkspaceText.sectionTitle)
+                    Text("安排今天").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                     Text("从即将与随时里挑选，最多 3 条进入专注。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 }
                 Spacer(minLength:8)
@@ -3036,7 +3036,7 @@ struct WorkspaceView: View {
     }
     private var pendingReminderSyncSheet: some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("本地完成待同步").vosFont(WorkspaceText.sectionTitle)
+            Text("本地完成待同步").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
             Text("这些变更只保存在 VoiceOS；恢复提醒事项连接并授权后自动写入并回读。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if model.pendingReminderSyncList.isEmpty {
                 Text("没有待同步的本地变更。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
@@ -3193,7 +3193,7 @@ struct WorkspaceView: View {
         let selected = options.first { $0.topic.id == mergeTargetID }?.topic
         return VStack(alignment:.leading,spacing:16) {
             if let source {
-                Text("合并主题").vosFont(WorkspaceText.sectionTitle)
+                Text("合并主题").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
                 if options.isEmpty { Text("还没有其他主题可合并。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
                 ForEach(options) { option in
                     Button { mergeTargetID = option.topic.id } label: {
