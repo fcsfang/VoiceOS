@@ -141,7 +141,7 @@ struct WeeklyReviewView: View {
             }
             .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 560)
             .overlay(alignment: .bottom) { undoBar }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: undoEntry?.id)
+            .animation(reduceMotion ? nil : WorkspaceMotion.transient, value: undoEntry?.id)
             .task { await load() }
             .onChange(of: loadState) { previous, state in
                 guard state == .loaded, previous != .loaded else { return }
@@ -160,7 +160,7 @@ struct WeeklyReviewView: View {
             .task(id: undoEntry?.id) {
                 guard let id = undoEntry?.id else { return }
                 do { try await Task.sleep(for: .seconds(8)) } catch { return }
-                if undoEntry?.id == id { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { undoEntry = nil } }
+                if undoEntry?.id == id { withAnimation(reduceMotion ? nil : WorkspaceMotion.transient) { undoEntry = nil } }
             }
             .sheet(isPresented: $showingClarifyQueue) { ActionClarifyQueueView(model: model, scope: .goals) }
             .sheet(item: $nextStepGoal) { goal in
@@ -377,7 +377,7 @@ struct WeeklyReviewView: View {
                 return
             }
             actionError = ""
-            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
+            withAnimation(reduceMotion ? nil : WorkspaceMotion.transient) {
                 undoEntry = UndoEntry(actionID: entry.action.id,
                                       label: state == .completed ? "已完成" : "不再跟进")
             }
@@ -389,7 +389,7 @@ struct WeeklyReviewView: View {
         Task {
             if await model.undoActionState(actionID: entry.actionID) {
                 actionError = ""
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { undoEntry = nil }
+                withAnimation(reduceMotion ? nil : WorkspaceMotion.transient) { undoEntry = nil }
             } else {
                 actionError = model.status.isEmpty ? "撤销未能完成，请到任务页核对" : model.status
             }
@@ -424,7 +424,7 @@ struct WeeklyReviewView: View {
                 }.buttonStyle(.plain)
                     .accessibilityLabel("撤销：\(undoEntry.label)")
                     .padding(.horizontal, 24).padding(.bottom, 20)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(reduceMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
             }
         }
     }
@@ -695,7 +695,7 @@ struct WeeklyReviewView: View {
                 if pending {
                     Button(expanded ? "收起" : "记录结果") {
                         outcomeError = ""
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { expandedOutcomeID = expanded ? nil : action.id }
+                        withAnimation(reduceMotion ? nil : WorkspaceMotion.expand) { expandedOutcomeID = expanded ? nil : action.id }
                     }
                     .buttonStyle(expanded ? WorkspaceButtonStyle.workspaceQuietCompact : WorkspaceButtonStyle.workspaceSecondaryCompact)
                     .disabled(model.savingFeedback)
@@ -729,7 +729,7 @@ struct WeeklyReviewView: View {
             if await model.saveFeedback(action, kind: input.kind, text: input.text, commandID: input.commandID) {
                 outcomeDrafts[action.id] = TaskFeedbackDraft()
                 outcomeError = ""
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { expandedOutcomeID = nil }
+                withAnimation(reduceMotion ? nil : WorkspaceMotion.expand) { expandedOutcomeID = nil }
             } else {
                 outcomeError = model.status.isEmpty ? "结果未能保存，请稍后重试" : model.status
             }
