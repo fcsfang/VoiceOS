@@ -27,7 +27,7 @@ struct FeynmanPractice: View {
                 TextEditor(text: $response).frame(minHeight: 200).workspaceEditorSurface().accessibilityLabel("复述内容")
                 HStack {
                     Text("\(trimmed.count) 字").vosFont(WorkspaceText.caption.size, monospacedDigit: true).foregroundStyle(.secondary)
-                    Button("取消", action: dismiss).keyboardShortcut(.cancelAction)
+                    Button("取消", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary)
                     Spacer()
                     Button("对照原话") { submit() }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(!claimReady || trimmed.isEmpty)
                 }.vosFont(WorkspaceText.meta)
@@ -69,7 +69,7 @@ struct FeynmanPractice: View {
         HStack {
             Button("再试一次") { response = ""; feedback = nil; showsOriginal = false }
             Spacer()
-            Button("完成", action: dismiss).keyboardShortcut(.cancelAction)
+            Button("完成", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary)
         }
     }
     private func submit() {

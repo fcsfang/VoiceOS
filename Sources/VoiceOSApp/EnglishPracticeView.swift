@@ -18,7 +18,7 @@ struct EnglishInputPreview: View {
                     }
                 }
             }
-            HStack { Spacer(); Button("返回", action: dismiss).keyboardShortcut(.cancelAction) }
+            HStack { Spacer(); Button("返回", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary) }
         }.padding(24).frame(width: 640, height: 480)
             .workspaceModalSurface()
     }
@@ -94,7 +94,7 @@ struct EnglishPracticeView: View {
                         .disabled(model.englishSnapshot == nil || model.englishBusy || !model.modelConfigured)
                     if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
                     if model.englishSnapshot != nil { Button("查看待发送文字…") { showingInput = true } }
-                    Spacer(); if !embedded { Button("完成", action: dismiss).keyboardShortcut(.cancelAction) }
+                    Spacer(); if !embedded { Button("完成", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary) }
                 }
                 if let hint = sendHint { Text(hint).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             }

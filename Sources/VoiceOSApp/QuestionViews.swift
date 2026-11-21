@@ -53,7 +53,7 @@ struct QuestionStateView: View {
                     Text("引用：" + evidence.quote).textSelection(.enabled)
                     ScrollView { Text(source.text).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 260)
                 }
-                HStack { Spacer(); Button("完成") { answerHistory = nil }.keyboardShortcut(.cancelAction) }
+                HStack { Spacer(); Button("完成") { answerHistory = nil }.keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary) }
             }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
                 .workspaceModalSurface()
         }.sheet(isPresented: $changing) {
