@@ -943,3 +943,7 @@
 - 145-B：HomeCard、WorkspaceTopicTile、回听标签（时间片/时间标签）、行动子任务与下一步图标补 hover/selection 动效；readingCard 焦点环切换走 selection 词表；依赖 WorkspaceHoverHighlight 的行经核实已自带动作，跳过并留证。
 - 145-C：周回顾摘要跳转接入 WorkspaceMotion.scroll；主应用五处用户可见中英间距补齐（文件名与全角括号按证据跳过）。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 146：区块标题无障碍语义（2026-11-21，已推送）
+- 两组共 28 个文件、46 处裸 `Text(...).vosFont(WorkspaceText.sectionTitle)` 补 `.accessibilityAddTraits(.isHeader)`（A 组 26 处、B 组 20 处），VoiceOver 标题导航现在能到达各页与弹层的区块标题。
+- 跳过 11 处均有证据：已带 trait 的组件内文本、段落续文、条件字号链、图标字号（`.size` 变体）与行内计数。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
