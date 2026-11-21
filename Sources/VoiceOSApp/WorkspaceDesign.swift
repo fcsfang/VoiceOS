@@ -63,7 +63,7 @@ struct WorkspaceSearchField: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Image(systemName: "magnifyingglass").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary)
+            Image(systemName: "magnifyingglass").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText)
                 .accessibilityHidden(true)
             field
             if !text.isEmpty {
@@ -71,7 +71,7 @@ struct WorkspaceSearchField: View {
                     text = ""
                     focus?.wrappedValue = true
                 } label: {
-                    Image(systemName: "xmark.circle.fill").vosFont(WorkspaceText.meta.size).foregroundStyle(.tertiary)
+                    Image(systemName: "xmark.circle.fill").vosFont(WorkspaceText.meta.size).foregroundStyle(palette.tertiaryText)
                         .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityLabel("清空搜索")

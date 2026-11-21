@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct TopicUnlinkedReferencesSection: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     let topic: ReflectionQuestion
     @State private var confirmedIDs: [String] = []
@@ -24,7 +25,7 @@ struct TopicUnlinkedReferencesSection: View {
                     row(claim,actionTitle:"确认关联") { confirm(claim) }
                 }
                 if !confirmed.isEmpty {
-                    Text("已确认").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(.secondary).padding(.top, 14)
+                    Text("已确认").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText).padding(.top, 14)
                     ForEach(confirmed) { claim in
                         row(claim,actionTitle:"取消关联",style:.workspaceQuietCompact) { unconfirm(claim) }
                     }
@@ -38,7 +39,7 @@ struct TopicUnlinkedReferencesSection: View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(claim.statement).vosFont(WorkspaceText.body).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                Text(sourceTitle(claim)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(sourceTitle(claim)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
             }
             Spacer(minLength: 12)
             Button(actionTitle,action:action).buttonStyle(style).disabled(busyClaimID != nil)

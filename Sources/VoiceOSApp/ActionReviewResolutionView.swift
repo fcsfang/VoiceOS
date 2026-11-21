@@ -16,7 +16,7 @@ struct ActionReviewResolutionControl: View {
                 Text("这次识别：" + pair.newTitle).vosFont(WorkspaceText.body)
             }
             if !pair.quote.isEmpty {
-                Text("依据原话：" + pair.quote).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("依据原话：" + pair.quote).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     .lineLimit(3).textSelection(.enabled)
             }
             HStack(spacing: 10) {

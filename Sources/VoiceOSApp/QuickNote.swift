@@ -71,7 +71,7 @@ private struct QuickNoteView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if let context { Text("来自 " + context).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            if let context { Text("来自 " + context).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             TextField("标题 · 可留空", text: $title).workspaceFieldSurface().disabled(saving).accessibilityLabel("标题")
             TextEditor(text: $text).vosFont(WorkspaceText.body).frame(minHeight: 180).workspaceEditorSurface().focused($editing).disabled(saving).accessibilityLabel("正文")
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }

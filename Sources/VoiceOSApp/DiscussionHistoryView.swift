@@ -16,7 +16,7 @@ struct DiscussionHistoryView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
                     Label("历史讨论", systemImage: "clock.arrow.circlepath").vosFont(WorkspaceText.rowTitle)
-                    Text("按最近更新排列；打开后沿用当时的依据与许可。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("按最近更新排列；打开后沿用当时的依据与许可。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
                 Spacer()
                 WorkspaceIconButton(systemImage: "xmark", label: "关闭历史讨论") { close() }.keyboardShortcut(.cancelAction)
