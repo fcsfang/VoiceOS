@@ -108,7 +108,7 @@ struct ReminderSettingsView: View {
                             else { error = model.status.isEmpty ? "提醒设置未保存" : model.status }
                         } catch { self.error = error.localizedDescription }
                     }
-                }.buttonStyle(.workspacePrimary).disabled(model.remindersBusy || model.reminderFieldEditing)
+                }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(model.remindersBusy || model.reminderFieldEditing)
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall).environment(\.timeZone, zone)
             .workspaceModalSurface()
@@ -117,8 +117,8 @@ struct ReminderSettingsView: View {
             if !on { hasAlert = false; alert = Date().addingTimeInterval(3600) }
         }
         .alert("关闭发送通知？", isPresented: $confirmingAlertRemoval) {
-            Button("关闭并清空通知", role: .destructive) { hasAlert = false; alert = Date().addingTimeInterval(3600) }
             Button("保留通知", role: .cancel) {}
+            Button("关闭并清空通知", role: .destructive) { hasAlert = false; alert = Date().addingTimeInterval(3600) }
         } message: { Text("这会移除这条任务现有的非默认通知。") }
     }
     private func load() {

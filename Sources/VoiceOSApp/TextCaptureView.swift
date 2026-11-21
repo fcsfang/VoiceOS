@@ -29,6 +29,8 @@ struct TextCaptureView: View {
     @State private var pendingTemplateDelete: CaptureTemplate?
     @State private var pendingTemplateApply: CaptureTemplate?
     @State private var templateApplyAlertPresented = false
+    @FocusState private var sheetFocus: SheetField?
+    private enum SheetField: Hashable { case templateName, link }
     private var validationIssue: String? {
         if draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "填写完整原文后即可保存。" }
         let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -60,10 +62,10 @@ struct TextCaptureView: View {
                 if linkImporting { ProgressView("正在抓取网页正文…").controlSize(.small) }
                 Text(saveExplanation).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                 HStack {
-                    Button("稍后继续", action: dismiss).disabled(draft.saving)
+                    Button("稍后继续", action: dismiss).keyboardShortcut(.cancelAction).disabled(draft.saving)
                     Spacer()
                     if draft.saving { ProgressView().controlSize(.small) }
-                    Button("保存") { save() }.buttonStyle(.workspacePrimary)
+                    Button("保存") { save() }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
                         .disabled(draft.saving || !valid)
                 }
             }.padding(20).background(palette.canvas)
@@ -84,7 +86,7 @@ struct TextCaptureView: View {
                       focus == nil, !(NSApp.keyWindow?.firstResponder is NSText) else { return }
                 do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
                 guard !Task.isCancelled, focus == nil, !(NSApp.keyWindow?.firstResponder is NSText) else { return }
-                focus = .text
+                focus = .title
             }
             .onDisappear { importWorker?.cancel(); importing = false; linkImporting = false; showingLinkPrompt = false; model.flushTextCaptureDraft(); focus = nil }
             .alert("替换当前文字草稿？", isPresented: $confirmingReplacement) {
@@ -97,8 +99,8 @@ struct TextCaptureView: View {
             .sheet(isPresented: $showingTemplateName) { templateNameSheet }
             .sheet(isPresented: $showingManageTemplates) { manageTemplatesSheet }
             .alert("替换当前草稿？", isPresented: $templateApplyAlertPresented) {
-                Button("替换", role: .destructive) { if let template = pendingTemplateApply { fillTemplate(template) }; pendingTemplateApply = nil }
                 Button("取消", role: .cancel) { pendingTemplateApply = nil }
+                Button("替换", role: .destructive) { if let template = pendingTemplateApply { fillTemplate(template) }; pendingTemplateApply = nil }
             } message: { Text(pendingTemplateApply.map { "应用「\($0.name)」会覆盖草稿里已有的 \(draft.text.count) 字。" } ?? "") }
             .alert("删除模板？", isPresented: templateDeleteAlertPresented) {
                 Button("取消", role: .cancel) { pendingTemplateDelete = nil }
@@ -233,6 +235,7 @@ struct TextCaptureView: View {
             WorkspaceCard(padding: 16) {
                 VStack(alignment: .leading, spacing: 12) {
                     TextField("模板名称", text: $templateName).workspaceFieldSurface()
+                        .focused($sheetFocus, equals: .templateName)
                         .onChange(of: templateName) { _, value in
                             if value.unicodeScalars.count > 40 { templateName = String(value.unicodeScalars.prefix(40)) }
                         }
@@ -240,20 +243,21 @@ struct TextCaptureView: View {
                 }
             }
             HStack {
-                Spacer()
                 Button("取消") { showingTemplateName = false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
+                Spacer()
                 Button(templateSaving ? "正在保存…" : "保存") { Task { await saveTemplate() } }
-                    .buttonStyle(.workspacePrimary)
+                    .buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
                     .disabled(templateSaving || templateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityLabel("保存为模板")
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()
+            .task { try? await Task.sleep(for: .milliseconds(100)); sheetFocus = .templateName }
     }
     private var manageTemplatesSheet: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             WorkspaceSectionHeading(title: "管理模板") {
-                Button("完成") { showingManageTemplates = false }.buttonStyle(.workspaceQuiet)
+                Button("完成") { showingManageTemplates = false }.buttonStyle(.workspaceQuiet).keyboardShortcut(.cancelAction)
             }
             if !templateError.isEmpty { WorkspaceNoticeText(message: templateError, severity: .danger) }
             if templates.isEmpty {
@@ -285,14 +289,15 @@ struct TextCaptureView: View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
             WorkspaceSectionHeading("从链接导入正文")
             Text("支持 http 或 https 链接；草稿不为空时会先确认替换。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
-            TextField("https://…", text: $linkText).workspaceFieldSurface().accessibilityLabel("网页链接")
+            TextField("https://…", text: $linkText).workspaceFieldSurface().focused($sheetFocus, equals: .link).accessibilityLabel("网页链接")
             HStack {
                 Button("取消") { showingLinkPrompt = false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("抓取正文") { importLink() }.buttonStyle(.workspacePrimary)
+                Button("抓取正文") { importLink() }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()
+            .task { try? await Task.sleep(for: .milliseconds(100)); sheetFocus = .link }
     }
     private func importLink() {
         let trimmed = linkText.trimmingCharacters(in: .whitespacesAndNewlines)

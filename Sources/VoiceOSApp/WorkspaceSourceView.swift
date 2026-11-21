@@ -1699,21 +1699,23 @@ struct WorkspaceTranscriptEditor:View {
     @State private var text=""
     @State private var failure=""
     @State private var saving=false
+    @FocusState private var textFocused:Bool
     var body:some View {
         VStack(alignment:.leading,spacing:16) {
             Text("更正原文").vosFont(WorkspaceText.sectionTitle)
             Text(source.localOnly ? "这份材料仅本机保存。更正后保留原话历史，旧理解暂停使用；允许云端处理后可重新整理。" : "保存后会自动更新完整理解；原话历史、真实完成与结果保留。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-            TextEditor(text:$text).frame(minHeight:300).workspaceEditorSurface()
+            TextEditor(text:$text).frame(minHeight:300).workspaceEditorSurface().focused($textFocused)
             if !failure.isEmpty { Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             HStack {
                 Button("取消",action:close).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(saving ? "正在保存…" : "保存更正") { save() }
-                    .buttonStyle(.workspacePrimary)
+                    .buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
                     .disabled(saving || text == source.transcript || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
             }
         }.padding(24).frame(width:650).onAppear { text=source.transcript ?? "" }
             .workspaceModalSurface()
+            .task { try? await Task.sleep(for:.milliseconds(100)); textFocused=true }
     }
     private func save() {
         guard !saving else { return }
@@ -1737,6 +1739,7 @@ struct ClaimCorrectionView:View {
     @State private var note=""
     @State private var failure=""
     @State private var saving=false
+    @FocusState private var textFocused:Bool
     init(claim:CandidateClaim,model:ControlCenter,onSaved:@escaping()->Void = {},dismiss:@escaping()->Void) {
         self.claim=claim;self.model=model;self.onSaved=onSaved;self.dismiss=dismiss
         _text=State(initialValue:claim.statement);_ownership=State(initialValue:claim.ownership)
@@ -1745,7 +1748,7 @@ struct ClaimCorrectionView:View {
         VStack(alignment:.leading,spacing:16) {
             Text("更正当前理解").vosFont(WorkspaceText.sectionTitle)
             Text("更正不会改写原话，历史与相关行动依据会分别保留。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-            TextEditor(text:$text).frame(minHeight:180).workspaceEditorSurface()
+            TextEditor(text:$text).frame(minHeight:180).workspaceEditorSurface().focused($textFocused)
             Picker("内容归属",selection:$ownership) {
                 Text("我的暂定表达").tag("user_tentative");Text("外部观点").tag("external");Text("AI 建议").tag("ai_candidate");Text("归属待核对").tag("unresolved")
             }
@@ -1755,11 +1758,12 @@ struct ClaimCorrectionView:View {
                 Button("取消",action:dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button(saving ? "正在更新…" : "更新理解") { save() }
-                    .buttonStyle(.workspacePrimary)
+                    .buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
                     .disabled(saving || model.reviewingClaim || (text == claim.statement && ownership == claim.ownership) || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || note.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
             }
         }.padding(24).frame(width:WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()
+            .task { try? await Task.sleep(for:.milliseconds(100)); textFocused=true }
     }
     private func save() {
         guard !saving else { return }
@@ -1781,6 +1785,7 @@ struct RecordingExpressionTitleEditor:View {
     let dismiss:()->Void
     @State private var title:String
     @State private var saving=false
+    @FocusState private var titleFocused:Bool
     init(record:SourceRecord,expression:RecordingExpression,model:ControlCenter,dismiss:@escaping()->Void) {
         self.record=record;self.expression=expression;self.model=model;self.dismiss=dismiss
         _title=State(initialValue:expression.manualTitle ?? expression.title)
@@ -1788,18 +1793,19 @@ struct RecordingExpressionTitleEditor:View {
     var body:some View {
         VStack(alignment:.leading,spacing:16) {
             Text("修改分组标题").vosFont(WorkspaceText.sectionTitle)
-            TextField("分组标题",text:$title)
+            TextField("分组标题",text:$title).focused($titleFocused)
             Text("\(expression.sourceIDs.count) 段录音同属一段连续表达。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             if !model.recordingTitleStatus.isEmpty { Text(model.recordingTitleStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             HStack {
                 if expression.manualTitle != nil { Button("恢复自动标题") { save(nil) }.buttonStyle(.workspaceQuiet).disabled(saving) }
-                Spacer()
                 Button("取消",action:dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
+                Spacer()
                 Button("保存") { save(title) }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
                     .disabled(saving || title.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || title.count > 100)
             }
         }.padding(24).frame(width:600)
             .workspaceModalSurface()
+            .task { try? await Task.sleep(for:.milliseconds(100)); titleFocused=true }
     }
     private func save(_ value:String?) {
         guard !saving else { return }
