@@ -980,3 +980,7 @@
 - 153-A 提醒设置与排期面板：Toggle/DatePicker/Picker 全部改 `WorkspaceSettingsRow` 行对齐（日期与通知、稍后提醒、地点三组），字段换 `workspaceFieldSurface()`；弹层左右留白由行原语提供；所有 alert、disabled、快捷键、时区环境与文案逐字保留。真机复核通过；「地点提醒」组标题与开关同名，顺手改为「地点」。
 - 153-B 主应用四个弹层：ActionCreationView 意图行+两个字段表面、ActionFeedbackView 类型行/口述状态行/Toggle 行与编辑器表面、PackageRestoreView 选择按钮行+字段表面、BackupLibraryRestoreView 摘要/选择/字段表面；页脚、守卫与所有模型调用原样。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 154：工具页分组（2026-11-22，已推送）
+- 154-A 自动入口页：拆成四张卡——工作方式（三条机制规则折叠，默认收起）、接收位置（主按钮行 + 每个文件夹一行：名称/路径/开关+打开+移除）、需要处理（失败与待确认素材，行内保留徽标/说明/暂停提示/动作，仅非空渲染）、手动检查（检查新素材/重试未完成/扫描/系统隐私/完成）。文案 CJK 字符串零删除，Button 17、alert 2、Toggle 1、ProgressView 2 与原文件一致；文件夹 Toggle 的可见标签由行标题承载并保留同名 accessibilityLabel。
+- 154-B 思想与下一步：顶部控件簇改「生成与筛选」卡四行（查看/来源/操作/显示历史版本 + 状态说明行），列表区逐字未动；列宽 760。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
