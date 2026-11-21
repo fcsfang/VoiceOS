@@ -26,6 +26,22 @@ enum WorkspaceMetrics {
     static let modalLarge: CGFloat = 1020
 }
 
+// Motion is defined once, here, and taken by interaction category instead of
+// being restated per view. Call sites still gate it with
+// `reduceMotion ? nil : ...` so the system setting wins.
+enum WorkspaceMotion {
+    /// Pointer hover and press: responds at once without flicker.
+    static let hover = Animation.easeOut(duration: 0.12)
+    /// Selection and active-state changes.
+    static let selection = Animation.easeOut(duration: 0.12)
+    /// Expand and collapse.
+    static let expand = Animation.easeOut(duration: 0.16)
+    /// Transient overlays entering and leaving: toasts, undo bars.
+    static let transient = Animation.easeOut(duration: 0.2)
+    /// Section jumps and viewport restoration.
+    static let scroll = Animation.easeOut(duration: 0.18)
+}
+
 // The editorial surfaces (capture, assistant, reflection) keep their serif
 // motif; the rest of the app reads in the system face.
 struct WorkspaceHero: View {
@@ -132,6 +148,7 @@ extension WorkspaceEmptyState where Actions == EmptyView {
 struct WorkspaceIconButton: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let systemImage: String
     let label: String
     var action: () -> Void
@@ -144,6 +161,7 @@ struct WorkspaceIconButton: View {
                 .background(hovered && isEnabled ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.chipRadius))
                 .contentShape(Rectangle())
         }.buttonStyle(.plain).onHover { hovered = $0 && isEnabled }
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
             .help(label).accessibilityLabel(label)
             .opacity(isEnabled ? 1 : 0.4)
     }
@@ -226,14 +244,14 @@ private struct WorkspaceToastModifier: ViewModifier {
             .overlay(alignment: .bottom) {
                 if let text = message {
                     WorkspaceToast(message: text) {
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { message = nil }
+                        withAnimation(reduceMotion ? nil : WorkspaceMotion.transient) { message = nil }
                     }
                     .padding(.bottom, 18)
                     .transition(reduceMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
                     .onHover { setHovered($0) }
                 }
             }
-            .animation(reduceMotion ? nil : .spring(duration: 0.26), value: message)
+            .animation(reduceMotion ? nil : WorkspaceMotion.transient, value: message)
             .onChange(of: message) { _, text in
                 guard let text else { deadline = nil; return }
                 remaining = Self.visibleFor
@@ -268,7 +286,7 @@ private struct WorkspaceToastModifier: ViewModifier {
         let wait = deadline.timeIntervalSinceNow
         if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
         guard message != nil, !hovered, self.deadline == deadline else { return }
-        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { message = nil }
+        withAnimation(reduceMotion ? nil : WorkspaceMotion.transient) { message = nil }
         self.deadline = nil
     }
 }
@@ -336,7 +354,7 @@ struct WorkspaceListRow<Trailing: View>: View {
         .frame(minHeight: density == .comfortable ? 52 : 44, alignment: .leading)
         .background(rowBackground, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
         .contentShape(RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovered)
+        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
     }
 
     private var iconBackground: Color {
@@ -366,12 +384,14 @@ extension WorkspaceListRow where Trailing == WorkspaceRowChevron {
 
 private struct WorkspaceHoverHighlight: ViewModifier {
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let cornerRadius: CGFloat
     @State private var hovered = false
 
     func body(content: Content) -> some View {
         content.background(hovered ? palette.hover : .clear, in: RoundedRectangle(cornerRadius: cornerRadius))
             .onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
     }
 }
 
@@ -535,6 +555,7 @@ struct WorkspaceButtonStyle: ButtonStyle {
 private struct WorkspaceButtonBody: View {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let configuration: ButtonStyle.Configuration
     let emphasis: WorkspaceButtonStyle.Emphasis
     let compact: Bool
@@ -560,6 +581,7 @@ private struct WorkspaceButtonBody: View {
             .contentShape(RoundedRectangle(cornerRadius: radius))
             .opacity(opacity)
             .onHover { hovered = $0 }
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
             .onChange(of: isEnabled) { _, enabled in
                 if !enabled { hovered = false }
             }
