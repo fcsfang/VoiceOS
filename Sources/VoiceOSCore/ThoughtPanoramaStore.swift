@@ -32,8 +32,20 @@ public enum PanoramaFailureAdvice {
 }
 
 extension VoiceOSStore {
+    // VoiceOSStore is an actor, so this extension cannot add an instance
+    // property; one memo entry keyed by store root and input fingerprint stands
+    // in for an actor field.
+    private static let panoramaInputMemo=PanoramaInputMemo()
     public func panoramaInput() throws -> PanoramaInput {
         guard ready else { throw VoiceOSError("资料库尚未恢复") }
+        guard let fingerprint=try? panoramaInputFingerprint() else { return try buildPanoramaInput() }
+        let location=root.standardizedFileURL.path
+        if let cached=Self.panoramaInputMemo.input(location: location, fingerprint: fingerprint) { return cached }
+        let input=try buildPanoramaInput()
+        Self.panoramaInputMemo.store(input, location: location, fingerprint: fingerprint)
+        return input
+    }
+    private func buildPanoramaInput() throws -> PanoramaInput {
         let catalog=try sources(), byID=Dictionary(catalog.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let expressions=try recordingExpressions()
         let completed=try db.query("SELECT a.*,x.snapshot_json FROM model_attempts a JOIN contexts x ON x.id=a.context_id WHERE a.state='completed' AND x.state='current' ORDER BY a.producer_sequence DESC")
@@ -95,6 +107,47 @@ extension VoiceOSStore {
         units.sort { $0.id < $1.id }
         let digest=Self.relevanceHash(Data(try Self.relevanceJSON(PanoramaDigestInput(units: units, sources: sourceValues, claims: claims)).utf8))
         return .init(manifest: .init(digest: digest, sourceIDs: ids, claimIDs: claims.map(\.id), unitIDs: units.map(\.id)), units: units, sources: sourceValues, claims: claims, exclusions: exclusions.filter { !selected.contains($0.id) })
+    }
+    /// Cheap change detector for `panoramaInput()`. Every table the build reads
+    /// contributes here, because a stale hit would serve a manifest that no
+    /// longer matches the library. Values that change in place (source metadata,
+    /// context state, claim review state) contribute content or state counts,
+    /// not only row timestamps.
+    private func panoramaInputFingerprint() throws -> String {
+        let sourceRows=try db.query("""
+            SELECT s.id,s.name,s.state,s.origin,s.speaker,s.local_only,s.policy_version,
+                   COALESCE(s.presentation_json,'') AS presentation_json,
+                   COALESCE(t.current_version_id,'') AS transcript_version_id
+            FROM sources s LEFT JOIN jobs j ON j.source_id=s.id AND j.stage='transcription'
+            LEFT JOIN transcripts t ON t.job_id=j.id ORDER BY s.id
+            """)
+        let totals=try db.query("""
+            SELECT
+              (SELECT COUNT(*) FROM transcript_versions) AS transcriptVersions,
+              (SELECT COALESCE(MAX(version_no),0) FROM transcript_versions) AS transcriptVersionMax,
+              (SELECT COUNT(*) FROM model_attempts) AS attempts,
+              (SELECT COALESCE(MAX(created_at),'') FROM model_attempts) AS attemptsAt,
+              (SELECT COALESCE(SUM(CASE WHEN state='completed' THEN 1 ELSE 0 END),0) FROM model_attempts) AS completedAttempts,
+              (SELECT COALESCE(SUM(CASE WHEN state='completed' THEN LENGTH(COALESCE(result_digest,'')) ELSE 0 END),0) FROM model_attempts) AS completedDigestBytes,
+              (SELECT COALESCE(SUM(COALESCE(producer_sequence,0)),0) FROM model_attempts) AS producerSequenceSum,
+              (SELECT COUNT(*) FROM contexts) AS contexts,
+              (SELECT COALESCE(SUM(CASE WHEN state='current' THEN 1 ELSE 0 END),0) FROM contexts) AS currentContexts,
+              (SELECT COALESCE(MAX(created_at),'') FROM contexts) AS contextsAt,
+              (SELECT COUNT(*) FROM context_inputs) AS contextInputs,
+              (SELECT COUNT(*) FROM claims) AS claims,
+              (SELECT COALESCE(SUM(review_version),0) FROM claims) AS claimReviewSum,
+              (SELECT COALESCE(SUM(CASE WHEN validity='current' THEN 1 ELSE 0 END),0) FROM claims) AS currentClaims,
+              (SELECT COALESCE(MAX(created_at),'') FROM claims) AS claimsAt,
+              (SELECT COUNT(*) FROM claim_reviews) AS claimReviews,
+              (SELECT COALESCE(MAX(created_at),'') FROM claim_reviews) AS claimReviewsAt,
+              (SELECT COUNT(*) FROM segmented_cognitive_commits) AS segmentedCommits,
+              (SELECT COALESCE(MAX(created_at),'') FROM segmented_cognitive_commits) AS segmentedCommitsAt
+            """).first ?? [:]
+        let fields=["id","name","state","origin","speaker","local_only","policy_version","presentation_json","transcript_version_id"]
+        let keys=["transcriptVersions","transcriptVersionMax","attempts","attemptsAt","completedAttempts","completedDigestBytes","producerSequenceSum","contexts","currentContexts","contextsAt","contextInputs","claims","claimReviewSum","currentClaims","claimsAt","claimReviews","claimReviewsAt","segmentedCommits","segmentedCommitsAt"]
+        var parts=sourceRows.map { row in fields.map { row[$0] ?? "" }.joined(separator: "\u{1F}") }
+        parts.append(contentsOf: keys.map { totals[$0] ?? "" })
+        return Self.relevanceHash(Data(parts.joined(separator: "\u{1E}").utf8))
     }
     public func panoramaState() throws -> PanoramaState {
         let input=try panoramaInput()
@@ -741,4 +794,17 @@ private struct PanoramaDigestInput: Codable {
     let units: [PanoramaUnit]
     let sources: [PanoramaSource]
     let claims: [PanoramaClaim]
+}
+private final class PanoramaInputMemo: @unchecked Sendable {
+    private let lock=NSLock()
+    private var entry: (location: String, fingerprint: String, input: PanoramaInput)?
+    func input(location: String, fingerprint: String) -> PanoramaInput? {
+        lock.lock(); defer { lock.unlock() }
+        guard entry?.location == location, entry?.fingerprint == fingerprint else { return nil }
+        return entry?.input
+    }
+    func store(_ input: PanoramaInput, location: String, fingerprint: String) {
+        lock.lock(); defer { lock.unlock() }
+        entry=(location, fingerprint, input)
+    }
 }
