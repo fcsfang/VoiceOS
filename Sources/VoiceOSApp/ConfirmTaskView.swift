@@ -18,7 +18,7 @@ struct ConfirmTaskView: View {
             ScrollView { Text(action.note).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(maxHeight: 160)
             if !error.isEmpty { WorkspaceNoticeText(message: error, severity: .danger) }
             HStack {
-                Button("取消", action: dismiss).keyboardShortcut(.cancelAction).disabled(model.savingAction)
+                Button("取消", action: dismiss).keyboardShortcut(.cancelAction).disabled(model.savingAction).buttonStyle(.workspaceSecondary)
                 Spacer()
                 Button("确认为待办") {
                     Task {

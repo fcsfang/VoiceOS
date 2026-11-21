@@ -73,7 +73,7 @@ struct CorrectionImpactView: View {
                 Text("此前 AI 改过期限的，可查看恢复方案；恢复会保留任务的真实完成状态。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             }
             Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
-            if !embedded { HStack { Spacer(); Button("完成", action: dismiss).keyboardShortcut(.cancelAction) } }
+            if !embedded { HStack { Spacer(); Button("完成", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary) } }
         }.padding(24).frame(width: embedded ? nil : WorkspaceMetrics.modalMedium, height: embedded ? nil : 620)
             .workspaceModalSurface()
             .sheet(item: $model.pendingCompensation) { plan in
@@ -134,7 +134,7 @@ private struct CompensationConfirmationView: View {
             Text("只改期限，保留当前任务标题和完成状态。执行前重新核对；变化后停止旧方案。旧行动与认知保持暂停，不把补偿当成真实行动结果。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
-                Button("暂不补偿",action: dismiss).disabled(saving).keyboardShortcut(.cancelAction)
+                Button("暂不补偿",action: dismiss).disabled(saving).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary)
                 Spacer()
                 Button(saving ? "正在处理…" : "确认并执行这一次期限补偿") {
                     saving = true

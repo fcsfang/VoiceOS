@@ -53,7 +53,7 @@ struct OutcomeFollowupView: View {
             HStack {
                 Text("完成状态会保留；这里不会替你生成结果。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("完成", action: onDone).keyboardShortcut(.cancelAction)
+                Button("完成", action: onDone).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary)
             }
         }.padding(24).frame(minWidth: 680, idealWidth: 820, minHeight: 540, maxHeight: .infinity)
             .workspaceResizableSheet()
