@@ -893,3 +893,9 @@
 - UI：结果跟进「去行动页」改走本窗口注入的 go(.actions)（独立资料库窗口不再串窗或失效）；录音标题编辑器只预填真实 contentTitle，派生标题改 placeholder 展示，空文本保存禁用——不再冻结自动命名。
 - 构建插曲：SearchIndex 两处 Optional.flatMap 泛型推断失败，改为显式分支后通过。
 - 集成：735 tests 全绿（build_exit=0 / test_exit=0），dist 已安装（白底版运行中）。
+## 波 138：第三主题「雪白」（2026-11-21，已推送）
+- 用户：现有纸白保存为主题，另加一个更白、无暖色的主题。
+- 石墨（默认）保持纸白暖调，副标题改为「纸白暖调，柔和专注」；鼠尾草不动。
+- 新主题 snow「雪白」：纯白画布 0xFFFFFF、纯白卡片、冷灰侧栏 0xF3F3F5、selection 0xECECEF、border 0xE2E2E6、text 0x1A1A1C、accent 0x3B4654；深色冷调（0x1D1D1F / 0x262628 / 0x151517 / 0x323234 / 0x47474A）。调色板属性全部改为按主题 switch。
+- 主题选择仍为 @AppStorage("voiceos.workspaceTheme")，设置页三张预览卡自动出现。当前实例已切到雪白预览。
+- 验证：snow 主题波次构建通过、735 tests 全绿（build_exit=0 / test_exit=0）；随后把 snow 画布从 0xFBFBFC 提到纯白的 3 个色值改动仅重新编译（build_exit=0），未再跑测试（纯常量变更）。
