@@ -92,7 +92,7 @@ struct ImportBatchReportView: View {
             }.frame(maxHeight: 340)
             HStack {
                 Spacer()
-                Button("完成", action: dismiss).keyboardShortcut(.cancelAction)
+                Button("完成", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
             }
         }
         .padding(24)
@@ -4662,13 +4662,13 @@ struct ActionCreationView: View {
             TextField("补充说明（可选）", text: $note)
             if !feedback.isEmpty { Text(feedback).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             HStack {
-                Button("取消", action: close).disabled(model.savingAction).keyboardShortcut(.cancelAction)
+                Button("取消", action: close).disabled(model.savingAction).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("保存意图") {
                     feedback = "正在保存意图…"
                     Task { if await model.createAction(claim, title: title, kind: kind, note: note, commandID: commandID) { close() } else { feedback = model.status } }
                 }
-                    .disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).keyboardShortcut(.defaultAction)
+                    .disabled(model.savingAction || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
             }
         }.padding(24).frame(width: 600)
             .workspaceModalSurface()
@@ -4715,12 +4715,12 @@ struct ActionFeedbackView: View {
                         .vosFont(WorkspaceText.body).foregroundStyle(.secondary)
                 }
             }
-            TextEditor(text: $text).frame(minHeight: 180).border(.secondary.opacity(0.2)).disabled(saving || waitingForVoice)
+            TextEditor(text: $text).frame(minHeight: 180).workspaceEditorSurface().disabled(saving || waitingForVoice)
             Text("可选记录，原话与原行动保持关联。开启下方选项后会自动核对思想变化与目标下一步；反馈不会当成已验证事实。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             if !errorText.isEmpty { Text(errorText).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             Toggle("将反馈文字用于整理知识、更新思想与目标", isOn: $allowFollowup).vosFont(WorkspaceText.meta).disabled(saving)
             HStack {
-                Button("取消", action:dismiss).disabled(saving || (recordingID != nil && (model.dictationActive || model.dictationBusy))).keyboardShortcut(.cancelAction)
+                Button("取消", action:dismiss).disabled(saving || (recordingID != nil && (model.dictationActive || model.dictationBusy))).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer(); Text("\(text.unicodeScalars.count)/4000").vosFont(WorkspaceText.caption)
                 Button(saving ? "正在保存…" : "保存反馈") {
                     saving = true; errorText = ""
@@ -4730,7 +4730,7 @@ struct ActionFeedbackView: View {
                         else { errorText = model.status }
                         saving = false
                     }
-                }.keyboardShortcut(.defaultAction).disabled(saving || waitingForVoice || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
+                }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(saving || waitingForVoice || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || text.unicodeScalars.count > 4000)
             }
         }.padding(24).frame(width:620)
             .workspaceModalSurface()
@@ -4788,7 +4788,7 @@ struct PackageRestoreView: View {
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             if let restored { Text("恢复完成 · 当前库保留，外部连接未启用").foregroundStyle(palette.success); Button("打开恢复的资料库") { openWindow(id:"restored-library",value:restored.path); dismiss() } }
             HStack {
-                Button(restored == nil ? "取消" : "完成",action:dismiss).disabled(restoring).keyboardShortcut(.cancelAction)
+                Button(restored == nil ? "取消" : "完成",action:dismiss).disabled(restoring).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
                 if restored == nil {
                     Button(restoring ? "正在校验与恢复…" : "校验并恢复") {
@@ -4800,7 +4800,7 @@ struct PackageRestoreView: View {
                             catch { errorText = error.localizedDescription }
                             restoring = false
                         }
-                    }.keyboardShortcut(.defaultAction).disabled(restoring || package == nil || destination == nil)
+                    }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(restoring || package == nil || destination == nil)
                 }
             }
         }.padding(24).frame(width:640)
@@ -4860,6 +4860,7 @@ struct BackupLibraryRestoreView: View {
             }
             HStack {
                 Button(restored == nil ? "取消" : "完成", action: dismiss).disabled(restoring)
+                    .buttonStyle(.workspaceSecondary)
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 if restored == nil {
@@ -4874,7 +4875,7 @@ struct BackupLibraryRestoreView: View {
                             } catch { errorText = error.localizedDescription }
                             restoring = false
                         }
-                    }.keyboardShortcut(.defaultAction).disabled(restoring || currentRoot == nil || destination == nil || backupSummary == nil)
+                    }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(restoring || currentRoot == nil || destination == nil || backupSummary == nil)
                 }
             }
         }.padding(24).frame(width:640)
@@ -4918,7 +4919,7 @@ struct CognitiveFeedbackView: View {
                             Text("为何现在相关：" + item.proposal.reason).textSelection(.enabled)
                             Text("这次原话：" + item.proposal.current.quote).textSelection(.enabled)
                             Text("历史原话：" + item.proposal.historicalQuote).textSelection(.enabled)
-                            Text(MaterialNaming.displayName(item.historical.document.name) + " · " + item.historical.document.createdAt).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(MaterialNaming.displayName(item.historical.document.name) + " · " + (ConversationReflectionFocus.date(item.historical.document.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? item.historical.document.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             HStack {
                                 Button("查看这次原话") { Task { if await model.openAssociation(item, historical: false) { dismiss() } } }
                                 Button("查看历史出处") { Task { if await model.openAssociation(item, historical: true) { dismiss() } } }
@@ -4931,7 +4932,7 @@ struct CognitiveFeedbackView: View {
                             Text("你查找的是：\(item.query)").vosFont(WorkspaceText.rowTitle).textSelection(.enabled)
                             Text("模型选中的相关原文 · \(item.hit.document.origin == "user" ? "用户表达" : "外部资料")").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             Text(item.hit.document.text).textSelection(.enabled)
-                            Text(MaterialNaming.displayName(item.hit.document.name) + " · " + item.hit.document.createdAt).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(MaterialNaming.displayName(item.hit.document.name) + " · " + (ConversationReflectionFocus.date(item.hit.document.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? item.hit.document.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             HStack {
                                 Button("查看原文与出处") { Task { if await model.openQuietFeedback(item) { dismiss() } } }
                                 Button("忽略这条") { Task { await model.ignoreQuietFeedback(item) } }
@@ -4940,7 +4941,7 @@ struct CognitiveFeedbackView: View {
                     }
                 }.frame(maxWidth:.infinity,alignment:.leading)
             }
-            HStack { Spacer(); if !embedded { Button("完成",action:dismiss).keyboardShortcut(.cancelAction) } }
+            HStack { Spacer(); if !embedded { Button("完成",action:dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction) } }
         }.padding(24).frame(width: embedded ? nil : 720, height: embedded ? nil : 560).task { await model.refreshQuietFeedback() }
     }
 }

@@ -984,7 +984,7 @@ private struct RecentClueRenameSheet: View {
                         Task { if await model.renameRecentClue(clue, title: nil) { dismiss() }; saving = false }
                     }
                 }
-                Button("取消", action: dismiss).keyboardShortcut(.cancelAction)
+                Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("保存") {
                     saving = true
