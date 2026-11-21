@@ -287,19 +287,20 @@ struct RecentContentHome: View {
 
     private func row(_ item: RecentContentItem) -> some View {
         let isSelected = selected?.id == item.id
+        let presentation = rowPresentation(item)
         return HStack(alignment: .top, spacing: 10) {
-            Image(systemName: rowIcon(item)).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+            Image(systemName: presentation.icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
                 .frame(width: 28, height: 28).background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 // The title line belongs to the title alone. Every row reads one
                 // title line plus one metadata line, so density stays uniform.
-                Text(rowTitle(item)).vosFont(WorkspaceText.rowTitle)
+                Text(presentation.title).vosFont(WorkspaceText.rowTitle)
                     .foregroundStyle(palette.text).lineLimit(isLargeText ? 2 : 1).multilineTextAlignment(.leading)
                 HStack(spacing: 4) {
-                    Text(rowMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    Text(presentation.meta).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         .lineLimit(1)
-                    if let trailing = rowTrailing(item) {
+                    if let trailing = presentation.trailing {
                         Text("·").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         Text(trailing).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                             .lineLimit(1)
@@ -311,21 +312,42 @@ struct RecentContentHome: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .homeCard(isSelected: isSelected)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(rowAccessibilityLabel(item))
+        .accessibilityLabel(presentation.accessibilityLabel)
         .accessibilityAddTraits(isSelected ? .isSelected : AccessibilityTraits())
     }
 
-    private func rowAccessibilityLabel(_ item: RecentContentItem) -> String {
-        var parts = [rowTitle(item)]
-        if let note = rowStatusNote(item) { parts.append(note) }
-        parts.append(timeLabel(item.date))
-        if let trailing = rowTrailing(item) { parts.append(trailing) }
-        return parts.joined(separator: "，")
+    private struct HomeRowPresentation {
+        let title: String
+        let meta: String
+        let trailing: String?
+        let accessibilityLabel: String
+        let icon: String
     }
 
-    private func rowIcon(_ item: RecentContentItem) -> String {
-        model.homeSnapshot.rows[item.id]?.icon
-            ?? (item.kind == .feedback ? "arrow.triangle.2.circlepath" : "waveform")
+    /// One title fit and one status read per row; title, meta, trailing, spoken
+    /// label and icon all read from this result.
+    private func rowPresentation(_ item: RecentContentItem) -> HomeRowPresentation {
+        let fit = WorkspaceTitleFit.present(item.title)
+        let title = item.kind == .feedback ? fit.title + " · \(progressCount(item)) 条" : fit.title
+        let note = rowStatusNote(item)
+        let time = timeLabel(item.date)
+        let trailing = rowTrailing(item)
+        var metaParts: [String] = []
+        if let source = fit.source { metaParts.append(source) }
+        metaParts.append(time)
+        if let note { metaParts.append(note) }
+        var spokenParts = [title]
+        if let note { spokenParts.append(note) }
+        spokenParts.append(time)
+        if let trailing { spokenParts.append(trailing) }
+        return HomeRowPresentation(
+            title: title,
+            meta: metaParts.joined(separator: " · "),
+            trailing: trailing,
+            accessibilityLabel: spokenParts.joined(separator: "，"),
+            icon: model.homeSnapshot.rows[item.id]?.icon
+                ?? (item.kind == .feedback ? "arrow.triangle.2.circlepath" : "waveform")
+        )
     }
 
     private func materialSource(_ item: RecentContentItem) -> SourceRecord? {
@@ -353,21 +375,8 @@ struct RecentContentHome: View {
         return "在读"
     }
 
-    private func rowTitle(_ item: RecentContentItem) -> String {
-        let fit = WorkspaceTitleFit.present(item.title)
-        return item.kind == .feedback ? fit.title + " · \(progressCount(item)) 条" : fit.title
-    }
-
     private func progressCount(_ item: RecentContentItem) -> Int {
         model.homeSnapshot.rows[item.id]?.count ?? item.excerpts.count
-    }
-
-    private func rowMeta(_ item: RecentContentItem) -> String {
-        var parts: [String] = []
-        if let source = WorkspaceTitleFit.present(item.title).source { parts.append(source) }
-        parts.append(timeLabel(item.date))
-        if let note = rowStatusNote(item) { parts.append(note) }
-        return parts.joined(separator: " · ")
     }
 
     private var reader: some View {
@@ -878,20 +887,38 @@ struct RecentContentHome: View {
         let calendar = Calendar.current
         if calendar.isDateInToday(date) { return "今天" }
         if calendar.isDateInYesterday(date) { return "昨天" }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = calendar.isDate(date, equalTo: Date(), toGranularity: .year) ? "M月d日" : "yyyy年M月d日"
+        let formatter = calendar.isDate(date, equalTo: Date(), toGranularity: .year)
+            ? HomeDateFormatting.dayCurrentYear
+            : HomeDateFormatting.dayOtherYear
         return formatter.string(from: date)
     }
 
     private func dateLabel(_ date: Date) -> String { dayLabel(date) }
 
     private func timeLabel(_ date: Date) -> String {
+        HomeDateFormatting.time.string(from: date)
+    }
+}
+
+private enum HomeDateFormatting {
+    static let time: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "zh_CN")
         formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
-    }
+        return formatter
+    }()
+    static let dayCurrentYear: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "M月d日"
+        return formatter
+    }()
+    static let dayOtherYear: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年M月d日"
+        return formatter
+    }()
 }
 
 private struct ClueRenameRequest: Identifiable {
