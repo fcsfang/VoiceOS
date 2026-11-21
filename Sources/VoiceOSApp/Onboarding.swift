@@ -239,7 +239,7 @@ private struct OnboardingCheckRow: View {
                 Button(action, action: perform).buttonStyle(.workspaceQuietCompact)
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: action == nil ? .combine : .contain)
     }
 }
 
