@@ -993,3 +993,8 @@
 - 「本次练习」卡：原话 Picker 行（labelsHidden、最小宽 320）、旧练习子分组（保留最多 2 份规则与列表高度三元）、准备与发送四按钮右对齐行、状态（danger/meta 两态）与 sendHint 作为卡内说明；「反馈历史」成卡（共 N 次副标题，条目逐字保留）；页脚「完成」保留原条件；列宽 760，窗口 720×600 未动。
 - 至此设置卡片语言已覆盖：设置、处理情况、行动详情、消息监测、提醒设置/排期、主应用四个表单弹层、自动入口、思想与下一步、查找历史文字、静默回顾、英文表达反馈。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 157：行动页计算缓存（2026-11-22，已推送）
+- `ControlCenter.secondaryRevision` 在 applyCoreSnapshot / applySecondarySnapshot / applyAssistantSnapshot 三处装配末尾自增（grep 证据覆盖 claims/actionRecords/reminderLinks/scheduleIntents/assistantExecutions 的全部模型字段写入）。
+- `ActionPageCache`（key = recordsRevision + secondaryRevision + 分钟桶 + 筛选）缓存：myTodoActions、ActionRowReads、nextStepCounts、ActionTimeSurface；键盘路径（planCandidates / actionKeyboardOrder）在输入为同一 todoActions 时复用缓存 surface，其余筛选回落重算。
+- 已知边界（按设计）：`isOverdue` 对瞬时截止的秒级判断按分钟桶复用，逾期状态最多延迟到下一分钟刷新；分组与排序不受影响。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
