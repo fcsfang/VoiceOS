@@ -39,7 +39,7 @@ struct BilingualView: View {
             Label("AI 译文，仅供参考", systemImage: "exclamationmark.triangle")
                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
             if excerpt.truncated {
-                Text(Bilingual.truncationNotice).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text(Bilingual.truncationNotice).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             WorkspaceListDivider()
             content
@@ -51,18 +51,18 @@ struct BilingualView: View {
     @ViewBuilder private var content: some View {
         if !model.modelConfigured {
             VStack(alignment: .leading, spacing: 12) {
-                Text("先在设置中选择文本模型").foregroundStyle(.secondary)
+                Text("先在设置中选择文本模型").foregroundStyle(palette.secondaryText)
                 Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceSecondary)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else if currentSource.localOnly {
             VStack(alignment: .leading, spacing: 12) {
-                Text("这份材料仅本机保存；允许云端处理后才能生成译文。").foregroundStyle(.secondary)
+                Text("这份材料仅本机保存；允许云端处理后才能生成译文。").foregroundStyle(palette.secondaryText)
                 Button("允许云端处理", action: allowCloud).buttonStyle(.workspacePrimary).disabled(model.changingPolicy)
-                Text("只改变这份文字的处理许可，原始录音仍仅本机。").vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                Text("只改变这份文字的处理许可，原始录音仍仅本机。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else if currentSource.needsTranscriptionReview {
             VStack(alignment: .leading, spacing: 12) {
-                Text("请先完成全文转写校正，再生成译文。").foregroundStyle(.secondary)
+                Text("请先完成全文转写校正，再生成译文。").foregroundStyle(palette.secondaryText)
                 Button("去更正转写", action: correctTranscript).buttonStyle(.workspaceSecondary)
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
@@ -71,14 +71,14 @@ struct BilingualView: View {
             case .idle:
                 VStack(alignment: .leading, spacing: 12) {
                     Text("按需把原文分段翻译成中文；原文、资料库与其他内容不会改变。")
-                        .foregroundStyle(.secondary)
-                    Text(sendPreview(plan)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        .foregroundStyle(palette.secondaryText)
+                    Text(sendPreview(plan)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     Button("生成译文", action: generate).buttonStyle(.workspacePrimary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             case .loading:
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text("正在生成译文…").foregroundStyle(.secondary)
+                    Text("正在生成译文…").foregroundStyle(palette.secondaryText)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             case .failed(let message):
                 VStack(alignment: .leading, spacing: 12) {
@@ -88,7 +88,7 @@ struct BilingualView: View {
             case .ready:
                 VStack(alignment: .leading, spacing: 12) {
                     if excerpt.truncated {
-                        Text(sendPreview(excerpt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                        Text(sendPreview(excerpt)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         Button("继续下一批", action: continueBatch).buttonStyle(.workspacePrimary)
                     }
                     ScrollView {
@@ -96,13 +96,13 @@ struct BilingualView: View {
                             ForEach(excerpt.paragraphs) { paragraph in
                                 let translated = translations.indices.contains(paragraph.id) ? translations[paragraph.id] : nil
                                 VStack(alignment: .leading, spacing: 8) {
-                                    Text(paragraph.text).vosFont(WorkspaceText.body).foregroundStyle(.secondary).textSelection(.enabled)
+                                    Text(paragraph.text).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                                         .fixedSize(horizontal: false, vertical: true)
                                     if let translated {
                                         Text(translated).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
                                             .fixedSize(horizontal: false, vertical: true)
                                     } else {
-                                        Text("这段没有返回译文。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+                                        Text("这段没有返回译文。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                                         HStack(spacing: 10) {
                                             Button(retrying.contains(paragraph.id) ? "正在重试…" : "重试这一段") { retry(paragraph) }
                                                 .buttonStyle(.workspaceQuietCompact)

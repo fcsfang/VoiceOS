@@ -111,13 +111,13 @@ struct TaskInitiationView: View {
                         .accessibilityIdentifier("initiation.input")
                     if model.initiationText.isEmpty {
                         Text("例如：什么是 Git Hook？或者：老师让我做一份 PPT，我不会，也不知道怎么开始。").vosFont(WorkspaceText.body)
-                            .foregroundStyle(.tertiary).padding(.horizontal, 15).padding(.vertical, 16).allowsHitTesting(false)
+                            .foregroundStyle(palette.tertiaryText).padding(.horizontal, 15).padding(.vertical, 16).allowsHitTesting(false)
                     }
                 }
                 HStack(spacing: 12) {
                     if materialSources.isEmpty {
                         Text("还没有可带入的个人原话；先录制或保存一段你说出的材料。")
-                            .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     } else {
                         Menu {
                             ForEach(materialSources.prefix(20)) { source in
@@ -140,7 +140,7 @@ struct TaskInitiationView: View {
                 }.pickerStyle(.segmented)
                 Toggle("允许发送给云端模型", isOn: $allowCloud)
                 Text("只发送这段原话给模型；不读取其他材料，也不创建任务或提醒。")
-                    .vosFont(WorkspaceText.caption).foregroundStyle(.secondary)
+                    .vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                 if !model.modelConfigured {
                     Text("尚未配置文本模型；请先在设置中连接模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                 }
@@ -153,7 +153,7 @@ struct TaskInitiationView: View {
                     Spacer()
                 }
                 if !model.initiationStatus.isEmpty {
-                    Text(model.initiationStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(model.initiationStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                 }
             }
         }
@@ -210,7 +210,7 @@ struct TaskInitiationView: View {
     private func clarify(_ record: TaskInitiationRecord) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(record.proposal.clarifyQuestion).vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader).textSelection(.enabled)
-            Text("回答会更准确；也可以跳过，按假设给出草稿。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("回答会更准确；也可以跳过，按假设给出草稿。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             TextEditor(text: $answer).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 100)
                 .workspaceEditorSurface().accessibilityLabel("澄清回答")
             HStack(spacing: 12) {
@@ -252,7 +252,7 @@ struct TaskInitiationView: View {
                     .disabled(model.initiationBusy || record.proposal.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .accessibilityIdentifier("initiation.answer.copy")
                 if record.isConfirmed {
-                    Text("已保存 · 仅作为回答记录").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("已保存 · 仅作为回答记录").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     if record.isArchived { statusChip("已归档") }
                 } else {
                     Button("归档保存") { saveAnswer(record) }
@@ -285,7 +285,7 @@ struct TaskInitiationView: View {
                     .disabled(model.initiationBusy || !model.modelConfigured || !allowCloud)
                     .accessibilityIdentifier("initiation.answer")
                 Text("直接要一份回答，不创建任务或提醒。")
-                    .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 Spacer()
             }
             if let reply = directAnswers[record.id] {
@@ -328,7 +328,7 @@ struct TaskInitiationView: View {
             }.pickerStyle(.segmented).frame(maxWidth: 300)
                 .disabled(model.initiationBusy || record.editedArtifact != nil || record.isConfirmed)
             if record.editedArtifact != nil {
-                Text("已手动编辑，偏好不再自动调整。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("已手动编辑，偏好不再自动调整。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
             TextEditor(text: $artifactDraft).vosFont(WorkspaceText.body).frame(minHeight: 360)
                 .workspaceEditorSurface().accessibilityLabel("启动材料")
@@ -346,7 +346,7 @@ struct TaskInitiationView: View {
                 .disabled(model.initiationBusy || record.isConfirmed || artifactDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("initiation.confirm")
                 if record.isConfirmed {
-                    Text("已确认 · 尚未执行").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                    Text("已确认 · 尚未执行").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                     if record.isArchived {
                         statusChip("已归档")
                     } else {
@@ -384,7 +384,7 @@ struct TaskInitiationView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("记下这一步").vosFont(WorkspaceText.rowTitle)
             Text("复制之后做了什么、卡在哪里，记一句。会存为你的原话；允许云端时继续整理成观点与待办。")
-                .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             TextEditor(text: $stepDraft).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 90)
                 .workspaceEditorSurface().accessibilityLabel("这一步的记录").disabled(stepSaving)
             HStack(spacing: 12) {
@@ -395,7 +395,7 @@ struct TaskInitiationView: View {
                 Spacer()
             }
             if !stepStatus.isEmpty {
-                Text(stepStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(stepStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
             }
         }
     }
@@ -437,7 +437,7 @@ struct TaskInitiationView: View {
                     HStack(alignment: .top, spacing: 10) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(step.title).vosFont(WorkspaceText.body).lineLimit(2)
-                            Text(dateLabel(step.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text(dateLabel(step.createdAt)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         }
                         Spacer(minLength: 8)
                         Image(systemName: "arrow.up.forward.square").foregroundStyle(palette.accent).accessibilityHidden(true)
@@ -497,7 +497,7 @@ struct TaskInitiationView: View {
 
     @ViewBuilder private var statusText: some View {
         if !model.initiationStatus.isEmpty {
-            Text(model.initiationStatus).vosFont(WorkspaceText.meta).foregroundStyle(.secondary).textSelection(.enabled)
+            Text(model.initiationStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
         }
     }
 
@@ -522,7 +522,7 @@ struct TaskInitiationView: View {
                                 Text(record.proposal.title.isEmpty ? "未命名启动" : record.proposal.title)
                                     .vosFont(WorkspaceText.rowTitle).lineLimit(2)
                                 Text(historySubtitle(record))
-                                    .vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             }
                             Spacer(minLength: 8)
                             if record.id == selected?.id {

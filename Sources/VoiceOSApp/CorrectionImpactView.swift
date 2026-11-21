@@ -2,6 +2,7 @@ import SwiftUI
 import VoiceOSCore
 
 struct CorrectionImpactView: View {
+    @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
     var embedded = false
     @State private var policyFreezes: [PolicyFreezeImpact] = []
@@ -9,7 +10,7 @@ struct CorrectionImpactView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("更正后的处理情况").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("更正后的内容用于后续理解。下面保留依赖更正前内容的任务；完成记录和反馈不会丢失，提醒事项也不会因一次更正被删除。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("更正后的内容用于后续理解。下面保留依赖更正前内容的任务；完成记录和反馈不会丢失，提醒事项也不会因一次更正被删除。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             ScrollView {
                 VStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
                     ForEach(model.correctionImpacts) { impact in
@@ -24,13 +25,13 @@ struct CorrectionImpactView: View {
                             Text(impact.summary).vosFont(WorkspaceText.body)
                             DisclosureGroup("为什么保留这项历史任务") {
                                 ForEach(impact.roots) { root in
-                                    Text(root.summary).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                    Text(root.summary).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                 }
                             }
                             if let link = impact.link {
                                 Text("上次外部标题：" + (link.remoteTitle ?? "尚未核对")).vosFont(WorkspaceText.meta)
                                 Text("上次外部期限：" + (link.remoteDueDate?.summary ?? "未能核对")).vosFont(WorkspaceText.meta)
-                                Text("保存的观测；回读只核对现状，不取消、不改写、不补偿。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                Text("保存的观测；回读只核对现状，不取消、不改写、不补偿。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                 Button("回读外部现状") { Task { await model.readReminder(link) } }
                                     .disabled(model.remindersBusy || model.reminderAccess?.enabled != true || model.reminderCalendarID != link.calendarID)
                                 if !impact.scheduleEffects.isEmpty {
@@ -45,7 +46,7 @@ struct CorrectionImpactView: View {
                                 DisclosureGroup("受影响行动的改期历史") {
                                     ForEach(impact.scheduleEffects) { effect in
                                         Text((effect.before?.summary ?? "未知期限") + " → " + effect.desired.summary).vosFont(WorkspaceText.meta)
-                                        Text(ReminderScheduleOperationState(rawValue: effect.state)?.summary ?? "改期效果待核对").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                        Text(ReminderScheduleOperationState(rawValue: effect.state)?.summary ?? "改期效果待核对").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                                     }
                                 }
                             }
@@ -55,7 +56,7 @@ struct CorrectionImpactView: View {
                     if !policyFreezes.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("许可变更后暂停的理解").vosFont(WorkspaceText.rowTitle)
-                            Text("以下暂停来自云端使用许可调整，不是对文字错误的更正判定；完成记录与任务历史保持独立。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                            Text("以下暂停来自云端使用许可调整，不是对文字错误的更正判定；完成记录与任务历史保持独立。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                             ForEach(policyFreezes) { freeze in
                                 VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                                     Text(freeze.sourceName).vosFont(WorkspaceText.body)
@@ -66,13 +67,13 @@ struct CorrectionImpactView: View {
                         }
                         WorkspaceListDivider()
                     }
-                    if model.correctionImpacts.isEmpty && policyFreezes.isEmpty { Text("目前没有因明确更正或许可调整而暂停的任务。").foregroundStyle(.secondary) }
+                    if model.correctionImpacts.isEmpty && policyFreezes.isEmpty { Text("目前没有因明确更正或许可调整而暂停的任务。").foregroundStyle(palette.secondaryText) }
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             if model.correctionImpacts.contains(where: { !$0.scheduleEffects.isEmpty }) {
-                Text("此前 AI 改过期限的，可查看恢复方案；恢复会保留任务的真实完成状态。").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text("此前 AI 改过期限的，可查看恢复方案；恢复会保留任务的真实完成状态。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
-            Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+            Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             if !embedded { HStack { Spacer(); Button("完成", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary) } }
         }.padding(24).frame(width: embedded ? nil : WorkspaceMetrics.modalMedium, height: embedded ? nil : 620)
             .workspaceModalSurface()
@@ -87,22 +88,23 @@ struct CorrectionImpactView: View {
 }
 
 private struct CompensationHistoryRow: View {
+    @Environment(\.workspacePalette) private var palette
     let plan: ReminderCompensationPlan
     @ObservedObject var model: ControlCenter
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
             Text("期限补偿方案：" + (plan.before.dueDate?.summary ?? "未知") + " → " + plan.desired.summary).vosFont(WorkspaceText.meta)
-            if plan.validity == "frozen" { Text("迁移补偿仅作历史保留").vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
+            if plan.validity == "frozen" { Text("迁移补偿仅作历史保留").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
             if let operation = model.compensationOperations.first(where: { $0.planID == plan.id }) {
                 Text(operation.state.summary).vosFont(WorkspaceText.meta)
-                Text(operation.reason).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text(operation.reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 if operation.validity == "current", operation.attempted, [.unknown,.conflict].contains(operation.state) {
                     Button("只读核对补偿效果") { Task { await model.reconcileCompensation(operation) } }
                         .disabled(model.remindersBusy || model.reminderAccess?.enabled != true)
                 }
             }
             if let grant = model.compensationGrants.first(where: { $0.planID == plan.id }) {
-                Text(grant.revoked ? "补偿确认已撤回" : "本次具体补偿已确认").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                Text(grant.revoked ? "补偿确认已撤回" : "本次具体补偿已确认").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 if grant.eligibleForExecution {
                     Button("执行已确认期限补偿") { Task { await model.executeCompensation(plan,grant: grant) } }.disabled(model.remindersBusy)
                 }
@@ -117,6 +119,7 @@ private struct CompensationHistoryRow: View {
 }
 
 private struct CompensationConfirmationView: View {
+    @Environment(\.workspacePalette) private var palette
     let plan: ReminderCompensationPlan
     @ObservedObject var model: ControlCenter
     let dismiss: () -> Void
@@ -131,7 +134,7 @@ private struct CompensationConfirmationView: View {
             Text("上次回读期限：" + (plan.before.dueDate?.summary ?? "未核对"))
             Text("恢复为：" + plan.desired.summary).vosFont(WorkspaceText.rowTitle)
             Text("依据\(plan.rootIDs.count)条明确纠错和\(plan.operationIDs.count)次可追溯AI排期，拟恢复这段排期链之前的期限。受影响不等于任务必然错误，请确认这项效果符合你的意图。").vosFont(WorkspaceText.body)
-            Text("只改期限，保留当前任务标题和完成状态。执行前重新核对；变化后停止旧方案。旧行动与认知保持暂停，不把补偿当成真实行动结果。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
+            Text("只改期限，保留当前任务标题和完成状态。执行前重新核对；变化后停止旧方案。旧行动与认知保持暂停，不把补偿当成真实行动结果。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             if !errorText.isEmpty { WorkspaceNoticeText(message: errorText, severity: .danger) }
             HStack {
                 Button("暂不补偿",action: dismiss).disabled(saving).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary)
