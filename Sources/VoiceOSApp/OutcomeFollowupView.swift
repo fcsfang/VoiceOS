@@ -7,6 +7,7 @@ struct OutcomeFollowupView: View {
     let onRecord: (ActionRecord) -> Void
     let onOpen: (ActionRecord) -> Void
     let onSkip: (ActionRecord) -> Void
+    let onOpenActions: () -> Void
     let onDone: () -> Void
 
     var body: some View {
@@ -24,7 +25,7 @@ struct OutcomeFollowupView: View {
                         WorkspaceEmptyState(title: "还没有待记录的结果", systemImage: "checkmark.circle",
                                             description: "在行动页完成事项后，会在这里请你记录结果或跳过；记录或跳过的事项会从这里收起。") {
                             Button("去行动页") {
-                                ControlCenter.primary?.pendingWorkspaceRoute = .actions
+                                onOpenActions()
                                 onDone()
                             }.buttonStyle(.workspaceSecondary)
                         }

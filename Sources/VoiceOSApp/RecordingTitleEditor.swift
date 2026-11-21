@@ -9,18 +9,14 @@ struct RecordingTitleEditor: View {
     @State private var saving = false
     init(record: SourceRecord, model: ControlCenter, dismiss: @escaping () -> Void) {
         self.record = record; self.model = model; self.dismiss = dismiss
-        let stored = record.contentTitle ?? ""
-        // The list already normalizes automatic titles; a stored title that is
-        // the list title is manual or already tightened, so keep it verbatim.
-        let initial = stored.isEmpty || stored == record.displayTitle
-            ? record.displayTitle
-            : (MaterialTitleText.normalizedGenerated(stored) ?? record.displayTitle)
-        _title = State(initialValue: initial)
+        // Only a real content title may prefill; saving the derived displayTitle
+        // would freeze an automatic name as manual.
+        _title = State(initialValue: record.contentTitle ?? "")
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("修改录音标题").vosFont(WorkspaceText.sectionTitle)
-            TextField("内容标题", text: $title)
+            TextField("内容标题", text: $title, prompt: Text("当前显示：\(record.displayTitle)"))
             Text(record.recordingSubtitle).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
             Text("标题用于资料库；手动标题不会被自动整理覆盖。").vosFont(WorkspaceText.body).foregroundStyle(.secondary)
             Text("原文件名：" + MaterialNaming.displayName(record.name)).vosFont(WorkspaceText.meta).textSelection(.enabled)
