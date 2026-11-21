@@ -4,6 +4,7 @@ import SwiftUI
 struct WorkspaceTabs: View {
     enum Style { case chips, filters }
     @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var selection: String
     let titles: [String]
     var style: Style = .chips
@@ -50,15 +51,16 @@ struct WorkspaceTabs: View {
         }.buttonStyle(.plain)
             .accessibilityAddTraits(selection == title ? [.isSelected] : [])
             .accessibilityIdentifier("workspace.tab." + title)
+            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: selection)
     }
 
     private func filterTab(_ title: String, fill: Bool = false) -> some View {
         let selected = selection == title
         return Button { selection = title } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).lineLimit(1)
-                    .foregroundStyle(selected ? palette.accent : palette.secondaryText)
-                Rectangle().fill(selected ? palette.accent : Color.clear).frame(height: 1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).vosFont(WorkspaceText.meta.size, weight: selected ? .semibold : .regular).lineLimit(1)
+                    .foregroundStyle(selected ? palette.text : palette.secondaryText)
+                Rectangle().fill(selected ? palette.accent : Color.clear).frame(height: 2)
             }
             .frame(maxWidth: fill ? .infinity : nil, alignment: .leading)
             .padding(.vertical, 3)
@@ -66,6 +68,7 @@ struct WorkspaceTabs: View {
         }.buttonStyle(.plain)
             .accessibilityAddTraits(selected ? [.isSelected] : [])
             .accessibilityIdentifier("workspace.tab." + title)
+            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: selection)
     }
 }
 
