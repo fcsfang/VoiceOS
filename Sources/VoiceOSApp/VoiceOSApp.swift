@@ -151,6 +151,7 @@ final class ControlCenter: ObservableObject {
         catch { textCaptureDraftIssue = "草稿暂未自动保存：" + error.localizedDescription + "；请先保存当前草稿。" }
     }
     @Published var records: [SourceRecord] = []
+    @Published private(set) var recordsRevision = 0
     @Published var recordingTitleStatus = ""
     @Published var generatingRecordingTitles = false
     private var recordingTitleModel: ResponsesRecordingTitlePort?
@@ -1537,6 +1538,7 @@ final class ControlCenter: ObservableObject {
     }
     private func applyCoreSnapshot(_ snapshot: WorkspaceSnapshot, reminderAnomalies: ReminderSyncAnomalySummary = .empty) {
         records = snapshot.sources
+        recordsRevision &+= 1
         claims = snapshot.claims
         currentClaimsBySource = snapshot.currentClaimsBySource
         questionRecords = snapshot.questions
