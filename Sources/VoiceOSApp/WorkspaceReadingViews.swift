@@ -58,7 +58,7 @@ struct WorkspaceTabs: View {
         let selected = selection == title
         return Button { selection = title } label: {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold).lineLimit(1)
+                Text(title).vosFont(WorkspaceText.meta.size, weight: selected ? .semibold : .regular).lineLimit(1)
                     .foregroundStyle(selected ? palette.text : palette.secondaryText)
                 Rectangle().fill(selected ? palette.accent : Color.clear).frame(height: 2)
             }
