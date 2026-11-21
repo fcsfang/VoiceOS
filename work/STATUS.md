@@ -1003,3 +1003,7 @@
 - 158-B：`SearchSuggestionCache`（records+secondary 代际）在构建期完成标题派生与四桶过滤（材料/主题/任务/观点），每次击键只做前缀匹配；结果区观点成员检查改为构建期 id 集查询。四桶轮转顺序与点击动作逐字等价（有意偏离任务书草图以保持顺序）。
 - 合并插曲：两路在同文件相邻位置添加声明冲突，手工保留双方并补类闭合后 parse 通过。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 159：行动详情派生缓存（2026-11-22，已推送）
+- `TaskDetailDerivedCache`（records+secondary 代际 + actionID/version/isQuestion）缓存 sources、executions（过滤后）、correctedClaim、latestAnalysis、nextActions；executions 的未读优先排序保留在读取时计算（deliveryReadAt 不入代际，避免标记已读后顺序僵死）。
+- `ActionDateFormatting` 静态化反馈行与到期判断的日期/ISO 格式器，locale 与格式逐字一致；文件内行渲染路径不再分配格式器。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
