@@ -84,6 +84,8 @@ private struct QuickNoteView: View {
         }
         .padding(20)
         .frame(width: 480, height: 340)
+        .foregroundStyle(palette.text)
+        .background(palette.canvas)
         .vosTextEnvironment(model.textSize)
         .environment(\.workspacePalette, palette)
         .task {

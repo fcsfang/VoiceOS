@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SelectableText: NSViewRepresentable {
     let text: String
+    var textColor: NSColor = .labelColor
     let onSelectionChange: (String, NSRange) -> Void
     @Environment(\.vosTextScale) private var textScale
 
@@ -22,7 +23,7 @@ struct SelectableText: NSViewRepresentable {
         textView.isSelectable = true
         textView.isRichText = false
         textView.drawsBackground = false
-        textView.textColor = .labelColor
+        textView.textColor = textColor
         textView.font = .systemFont(ofSize: WorkspaceText.body.size * textScale)
         textView.textContainerInset = NSSize(width: 0, height: 8)
         textView.isVerticallyResizable = true
@@ -50,7 +51,7 @@ struct SelectableText: NSViewRepresentable {
         }
         let font = NSFont.systemFont(ofSize: WorkspaceText.body.size * textScale)
         if textView.font?.pointSize != font.pointSize { textView.font = font }
-        if textView.textColor?.isEqual(NSColor.labelColor) != true { textView.textColor = .labelColor }
+        if textView.textColor?.isEqual(textColor) != true { textView.textColor = textColor }
     }
 
     static func scalarOffset(ofUTF16Offset offset: Int, in text: String) -> Int? {

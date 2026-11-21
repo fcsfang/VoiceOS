@@ -554,6 +554,9 @@ private struct WorkspaceButtonBody: View {
             .contentShape(RoundedRectangle(cornerRadius: radius))
             .opacity(opacity)
             .onHover { hovered = $0 }
+            .onChange(of: isEnabled) { _, enabled in
+                if !enabled { hovered = false }
+            }
     }
 
     private var foreground: Color {
@@ -568,8 +571,8 @@ private struct WorkspaceButtonBody: View {
     private var background: Color {
         switch emphasis {
         case .primary: palette.text
-        case .secondary: hovered ? palette.hover : palette.surface
-        case .quiet, .destructive: hovered ? palette.hover : .clear
+        case .secondary: hovered && isEnabled ? palette.hover : palette.surface
+        case .quiet, .destructive: hovered && isEnabled ? palette.hover : .clear
         }
     }
 
