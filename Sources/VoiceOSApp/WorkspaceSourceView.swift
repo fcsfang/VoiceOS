@@ -1155,7 +1155,8 @@ struct WorkspaceSourceView: View {
         .task {
             while !Task.isCancelled {
                 refreshPlaybackPosition()
-                do { try await Task.sleep(for:.milliseconds(300)) } catch { return }
+                let interval=model.player?.timeControlStatus == .playing ? 300 : 1500
+                do { try await Task.sleep(for:.milliseconds(interval)) } catch { return }
             }
         }
     }
