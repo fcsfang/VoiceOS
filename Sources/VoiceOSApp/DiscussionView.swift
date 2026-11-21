@@ -59,7 +59,7 @@ struct DiscussionView: View {
                                         Text(replyLabel(reply)).vosFont(WorkspaceText.rowTitle)
                                         ForEach(Array(reply.parts.enumerated()),id:\.offset) { index,part in
                                             VStack(alignment:.leading,spacing:6) {
-                                                Text(part.kind == .quotation ? "原文引用" : "AI分析与建议").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
+                                                Text(part.kind == .quotation ? "原文引用" : "AI 分析与建议").vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                                                 Text(part.text).textSelection(.enabled)
                                                 if part.kind == .aiSuggestion {
                                                     let kept=model.discussionDerivations.first { $0.discussionAttemptID == reply.id && $0.partIndex == index }
@@ -244,7 +244,7 @@ struct DiscussionView: View {
         referencePreview=ReferencePreview(text:reply.parts[evidence.partIndex].text,version:"AI 回复第 \(evidence.partIndex+1) 段")
     }
     private func replyLabel(_ reply:DiscussionAttemptRecord)->String {
-        let state=reply.state == "completed" ? "AI回复" : (reply.state == "unknown" ? "调用结果未知 · 不自动重发" : (reply.state == "reserved" ? "正在等待结果" : "结果未接纳 · 不自动重发"))
+        let state=reply.state == "completed" ? "AI 回复" : (reply.state == "unknown" ? "调用结果未知 · 不自动重发" : (reply.state == "reserved" ? "正在等待结果" : "结果未接纳 · 不自动重发"))
         return state+(reply.validity == "frozen" ? " · 历史依据已冻结" : "")
     }
 }
