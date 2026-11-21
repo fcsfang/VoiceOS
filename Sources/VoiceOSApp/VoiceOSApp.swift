@@ -332,7 +332,7 @@ final class ControlCenter: ObservableObject {
             quietFeedback = quietAssociationSourceID == nil ? try await store.cognitiveFeedback() : []
             associationFeedback = try await store.expressionAssociationFeedback(currentSourceID: quietAssociationSourceID)
             await refreshAssociationSelection()
-            quietStatus = "关联属于AI提案；问题状态来自单独登记的历史，不因关联判断而改变，无需回应。"
+            quietStatus = "关联属于 AI 提案；问题状态来自单独登记的历史，不因关联判断而改变，无需回应。"
         } catch { quietFeedback = []; associationFeedback = []; quietStatus = error.localizedDescription }
     }
     func refreshAssociationSelection() async {
@@ -374,7 +374,7 @@ final class ControlCenter: ObservableObject {
             case .inFlight: associationStatuses[id] = "关联已有在途预留；不会重复发送。"
             case .unknown: associationStatuses[id] = "关联结果未知；已保留尝试和已知用量，不自动重发。"
             case .frozen: associationStatuses[id] = "旧关联依据已变化，已暂停使用；保留历史，不自动重发。"
-            case .completed: associationStatuses[id] = result.attempt?.proposals.isEmpty == true ? "关联判断已完成，没有直接相关提案。" : "历史关联已保存；关系属于AI提案，未改变观点或行动。"
+            case .completed: associationStatuses[id] = result.attempt?.proposals.isEmpty == true ? "关联判断已完成，没有直接相关提案。" : "历史关联已保存；关系属于 AI 提案，未改变观点或行动。"
             }
         } catch { associationStatuses[id] = "关联未完成：" + error.localizedDescription }
         await refreshQuietFeedback()
@@ -4913,7 +4913,7 @@ struct CognitiveFeedbackView: View {
                     }
                     ForEach(model.associationFeedback) { item in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("与这次表达有关 · AI关系提案").vosFont(WorkspaceText.rowTitle)
+                            Text("与这次表达有关 · AI 关系提案").vosFont(WorkspaceText.rowTitle)
                             Text(item.proposal.relation.displayName).vosFont(WorkspaceText.meta).foregroundStyle(.secondary)
                             AssociationQuestionsView(item: item, model: model)
                             Text("为何现在相关：" + item.proposal.reason).textSelection(.enabled)
@@ -5413,7 +5413,7 @@ extension ControlCenter {
         do {
             let input=try await store.prepareConversationInput(id:session.id,expectedVersion:session.version,destination:.cloud)
             _=try await store.performConversationReply(input,using:port)
-            discussionStatus="AI回复已保存；分析不表示你已认可或决定行动。"
+            discussionStatus="AI 回复已保存；分析不表示你已认可或决定行动。"
         } catch { discussionStatus=error.localizedDescription }
         await refreshDiscussion()
         queueTopicOrganization()
@@ -5454,7 +5454,7 @@ extension ControlCenter {
     }
     func endDiscussion() async {
         guard let store,let session=discussionSession,session.state == "active",!discussionSaving,!dictationActive else { return }
-        do { try await store.endConversation(id:session.id,expectedVersion:session.version);discussionStatus="讨论已结束，历史保留；不表示认可AI内容。" }
+        do { try await store.endConversation(id:session.id,expectedVersion:session.version);discussionStatus="讨论已结束，历史保留；不表示认可 AI 内容。" }
         catch { discussionStatus=error.localizedDescription }
         await refreshDiscussion()
     }
