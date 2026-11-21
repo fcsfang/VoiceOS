@@ -754,3 +754,113 @@ struct WorkspaceCard<Content: View>: View {
             }
     }
 }
+
+/// One card per class of settings. The header sits closer to its first row
+/// than to the previous card, so proximity binds it to what it labels.
+struct WorkspaceSettingsCard<Content: View>: View {
+    @Environment(\.workspacePalette) private var palette
+    let title: String
+    var subtitle: String? = nil
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).vosFont(WorkspaceText.rowTitle).foregroundStyle(palette.text)
+                    .accessibilityAddTraits(.isHeader)
+                if let subtitle {
+                    Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 12)
+            content()
+        }
+        .padding(.bottom, 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius)
+                .strokeBorder(palette.border, lineWidth: 1)
+        }
+    }
+}
+
+/// Label column plus one right-aligned control; every settings row shares it.
+struct WorkspaceSettingsRow<Trailing: View>: View {
+    @Environment(\.workspacePalette) private var palette
+    let title: String
+    var subtitle: String? = nil
+    var showsDivider = true
+    @ViewBuilder var trailing: () -> Trailing
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if showsDivider { WorkspaceListDivider().padding(.horizontal, 20) }
+            HStack(alignment: .center, spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).vosFont(WorkspaceText.body).foregroundStyle(palette.text)
+                    if let subtitle {
+                        Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 12)
+                trailing()
+            }
+            .padding(.horizontal, 20).padding(.vertical, 12)
+            .frame(minHeight: 46)
+        }
+    }
+}
+
+struct WorkspaceSettingsNavRow: View {
+    @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let title: String
+    var subtitle: String? = nil
+    var showsDivider = true
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            WorkspaceSettingsRow(title: title, subtitle: subtitle, showsDivider: showsDivider) {
+                WorkspaceRowChevron()
+            }
+            .background(hovered ? palette.hover : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
+    }
+}
+
+struct WorkspaceSettingsValueRow: View {
+    @Environment(\.workspacePalette) private var palette
+    let label: String
+    var detail: String? = nil
+    let value: String
+    var emphasized = false
+    var showsDivider = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if showsDivider { WorkspaceListDivider().padding(.horizontal, 20) }
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
+                Text(label).vosFont(emphasized ? WorkspaceText.body.size + 0.5 : WorkspaceText.body.size,
+                                     weight: emphasized ? .semibold : .regular)
+                    .foregroundStyle(palette.text)
+                if let detail {
+                    Text(detail).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
+                }
+                Spacer(minLength: 12)
+                Text(value).vosFont(WorkspaceText.body, monospacedDigit: true)
+                    .foregroundStyle(emphasized ? palette.text : palette.secondaryText)
+            }
+            .padding(.horizontal, 20).padding(.vertical, 10)
+            .frame(minHeight: 38)
+        }
+    }
+}
