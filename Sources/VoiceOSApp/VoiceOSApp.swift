@@ -974,6 +974,7 @@ final class ControlCenter: ObservableObject {
     var store: VoiceOSStore?
     @Published var workspaceTopics: [ReflectionQuestion] = []
     @Published var workspaceTopicSources: [String: [String]] = [:]
+    @Published private(set) var topicsRevision = 0
     @Published var workspaceBriefing: WorkspaceBriefing?
     @Published var organizingTopics = false
     @Published var topicOrganizationStatus = ""
@@ -1567,6 +1568,7 @@ final class ControlCenter: ObservableObject {
         if reminderAccess?.enabled == false { reminderSyncStatus = "提醒事项连接已暂停 · 外部任务和历史保留" }
         workspaceTopics = snapshot.topics
         workspaceTopicSources = snapshot.topicSources
+        topicsRevision &+= 1
         attempts = snapshot.attempts
         processingIntents = snapshot.processingIntents
         recordingRequests = snapshot.recordingRequests
