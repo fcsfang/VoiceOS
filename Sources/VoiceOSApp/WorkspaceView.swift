@@ -542,7 +542,10 @@ struct WorkspaceView: View {
                     Text("选择提醒事项清单").vosFont(WorkspaceText.sectionTitle)
                     ForEach(model.reminderCalendars) { calendar in Button(calendar.title) { Task { model.proposedReminderCalendarID=calendar.id; await model.saveReminderConnection() } }.disabled(model.remindersBusy) }
                     if !model.status.isEmpty { Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
-                    Button("取消") { model.choosingReminderCalendar=false }
+                    HStack {
+                        Button("取消") { model.choosingReminderCalendar=false }.keyboardShortcut(.cancelAction)
+                        Spacer()
+                    }
                 }.padding(24)
                     .frame(minWidth:440,idealWidth:440,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
                     .workspaceModalSurface()
@@ -617,9 +620,9 @@ struct WorkspaceView: View {
                 Text("已有同名视图，请换一个名称。").vosFont(WorkspaceText.meta).foregroundStyle(palette.danger)
             }
             HStack {
+                Button("取消") { showingSaveView=false }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("取消") { showingSaveView=false }.buttonStyle(.workspaceSecondary)
-                Button("保存") { Task { await saveView() } }.buttonStyle(.workspacePrimary).disabled(!canSaveView || savingView)
+                Button("保存") { Task { await saveView() } }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(!canSaveView || savingView)
             }
         }.padding(24).frame(width:400)
             .workspaceModalSurface()
@@ -3132,8 +3135,8 @@ struct WorkspaceView: View {
                     Text("会把「\(source.title)」的材料并入「\(selected.title)」并删除「\(source.title)」。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
                 HStack {
+                    Button("取消") { mergingTopicID=nil;mergeTargetID="" }.buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                     Spacer()
-                    Button("取消") { mergingTopicID=nil;mergeTargetID="" }.buttonStyle(.workspaceSecondary)
                     Button("确认合并") { if let selected { Task { await mergeTopic(source, into: selected) } } }
                         .buttonStyle(.workspacePrimary).disabled(selected == nil || mergingTopic)
                 }

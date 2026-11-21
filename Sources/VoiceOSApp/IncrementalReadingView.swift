@@ -49,7 +49,7 @@ struct IncrementalReadingView: View {
             }
             if !notice.isEmpty { Text(notice).vosFont(WorkspaceText.meta).foregroundStyle(.secondary) }
             if !error.isEmpty { WorkspaceNoticeText(message:error,severity:.danger) }
-            HStack { Spacer(); Button("关闭",action:dismiss).keyboardShortcut(.defaultAction) }
+            HStack { Spacer(); Button("关闭",action:dismiss).keyboardShortcut(.cancelAction) }
         }.padding(24).frame(width:680,height:560)
         .workspaceModalSurface()
         .task(id:source.id) { await reload() }

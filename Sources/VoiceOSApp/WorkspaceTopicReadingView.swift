@@ -145,8 +145,8 @@ struct WorkspaceTopicReadingView: View {
         .onChange(of: sections.map(\.id)) { _,ids in if let selectedSection,!ids.contains(selectedSection) { self.selectedSection=nil } }
         .sheet(item:$correctingClaim) { claim in ClaimCorrectionView(claim:claim,model:model) { correctingClaim=nil } }
         .alert("停止使用这条理解？", isPresented:$confirmingRejection, presenting:pendingRejection) { claim in
-            Button("停止使用", role:.destructive) { Task { _=await model.review(claim, action:.reject) } }
             Button("取消", role:.cancel) {}
+            Button("停止使用", role:.destructive) { Task { _=await model.review(claim, action:.reject) } }
         } message: { _ in
             Text("确定后，这份理解将不再用于主题阅读与相关行动。原文与处理历史会保留。")
         }

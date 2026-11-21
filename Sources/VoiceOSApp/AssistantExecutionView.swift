@@ -260,19 +260,20 @@ struct AssistantExecutionView: View {
             .alert(confirmingCommand == .cancel ? "取消这次代办？" : "重新执行这次代办？",
                    isPresented: Binding(get: { confirmingCommand != nil }, set: { if !$0 { confirmingCommand = nil } })) {
                 if confirmingCommand == .cancel {
+                    Button("返回", role: .cancel) {}
                     Button("取消代办", role: .destructive) {
                         guard !saving else { return }
                         saving = true
                         Task { await model.cancelAssistant(execution); saving = false }
                     }.disabled(saving)
                 } else {
+                    Button("返回", role: .cancel) {}
                     Button("重新执行") {
                         guard !saving else { return }
                         saving = true
                         Task { await model.retryAssistant(execution); saving = false }
                     }.disabled(saving)
                 }
-                Button("返回", role: .cancel) {}
             } message: {
                 Text(confirmingCommand == .cancel ? "取消后这次代办不再继续；已保存的交付要求会保留。" : "重新执行会再调用一次模型，可能产生新的用量。")
             }
