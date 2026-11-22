@@ -982,6 +982,8 @@ final class ControlCenter: ObservableObject {
     private var topicForcePending = false
     private var topicTopUpPending = false
     @Published var materialNoteStates: [String: MaterialNoteState] = [:]
+    /// 会话内同步的「该材料已有可读笔记」缓存，供页头首帧决定版式。
+    @Published var materialNotePresence: [String: Bool] = [:]
     var materialNoteModel: ResponsesMaterialNotePort?
     func queueTopicOrganization(retry: Bool = false, topUp: Bool = false) {
         guard initialized, topicModel != nil else { return }

@@ -617,6 +617,9 @@ struct WorkspaceSourceView: View {
     @ViewBuilder private var readingContent:some View {
         if let scroll { readingScrollView.scrollPosition(scroll) } else { readingScrollView }
     }
+    // 有笔记时页头让出大字标题。materialNotePresence 是同步的会话内缓存，
+    // 使重开与切换材料时首帧就按正确版式排版，避免先画大标题再塌缩。
+    private var notePresent: Bool { materialNotePresent || (model.materialNotePresence[source.id] ?? false) }
     private var readingTitle: String {
         if let expression, expression.sourceIDs.count > 1 { return expression.displayTitle(in:catalog) }
         return source.displayTitle
@@ -677,9 +680,9 @@ struct WorkspaceSourceView: View {
                 VStack(alignment:.leading,spacing:10) {
                     HStack(alignment:.top,spacing:16) {
                         VStack(alignment:.leading,spacing:6) {
-                            Text((source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + (materialNotePresent ? "" : " · " + source.recordingSubtitle))
+                            Text((source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + (notePresent ? "" : " · " + source.recordingSubtitle))
                                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                            if !materialNotePresent {
+                            if !notePresent {
                                 Text(titleFit.title).vosFont(WorkspaceText.pageTitle).fixedSize(horizontal:false,vertical:true).textSelection(.enabled).accessibilityAddTraits(.isHeader)
                                 if let origin=titleFit.source {
                                     Text(origin).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText).textSelection(.enabled)

@@ -2618,7 +2618,11 @@ struct WorkspaceView: View {
         let stored=combined ? expression!.displayTitle(in:catalog) : source.displayTitle
         let manual=(combined ? expression?.manualTitle : source.presentation?.manualTitle)?
             .trimmingCharacters(in:.whitespacesAndNewlines) ?? ""
-        if stored.hasSuffix("…"), manual.isEmpty, let opening=materialOpeningText(leading.transcript) { return fittedDisplayTitle(opening) }
+        if stored.hasSuffix("…"), manual.isEmpty, let opening=materialOpeningText(leading.transcript) {
+            // 原文首句可能很长：作为行题最多取 48 个字，避免单行被撑成多屏。
+            let capped = opening.count > 48 ? String(opening.prefix(48)) : opening
+            return fittedDisplayTitle(capped)
+        }
         return fittedDisplayTitle(stored)
     }
     private func materialOpeningText(_ transcript:String?) -> String? {
@@ -3008,9 +3012,18 @@ struct WorkspaceView: View {
         func add<S:Sequence>(_ actions:S) where S.Element == ActionRecord {
             for action in actions where seen.insert(action.id).inserted { rows.append(action) }
         }
-        if ["全部","我的待办"].contains(actionFilter) { add(focusedActions) }
-        if actionFilter == "我的待办" {
-            let surface=cachedActionTimeSurface() ?? ActionTimeSurface.build(actions:visibleActions,schedules:model.scheduleIntents,links:model.reminderLinks,now:Date(),calendar:.current)
+        let timeFilters = ["全部","我的待办"].contains(actionFilter)
+        let surface: ActionTimeSurface? = timeFilters
+            ? (cachedActionTimeSurface() ?? ActionTimeSurface.build(actions:visibleActions,schedules:model.scheduleIntents,links:model.reminderLinks,now:Date(),calendar:.current))
+            : nil
+        // 键盘顺序与可见顺序一致：「全部」首屏先是今天，再是专注。
+        if actionFilter == "全部", let surface {
+            add(surface.today.map(\.action))
+            add(focusedActions)
+        } else if timeFilters {
+            add(focusedActions)
+        }
+        if actionFilter == "我的待办", let surface {
             add(surface.today.map(\.action))
             add(surface.soon.map(\.action))
             add(surface.anytime.map(\.action))

@@ -56,7 +56,11 @@ struct MaterialNoteReadingView: View {
 
     private var catalog: [String: SourceRecord] { model.sourcePageIndex.recordsByID }
     private var expression: RecordingExpression? { model.sourcePageIndex.expression(for: source.id) }
-    private var memberIDs: [String] { expression?.sourceIDs ?? [source.id] }
+    private var memberIDs: [String] {
+        guard let expression else { return [source.id] }
+        let external = (expression.externalVersions ?? [:]).keys.sorted()
+        return expression.sourceIDs + external.filter { !expression.sourceIDs.contains($0) }
+    }
     private var memberRecords: [SourceRecord] { memberIDs.compactMap { catalog[$0] } }
     private var noteState: MaterialNoteState? { model.materialNoteStates[source.id] }
     private var playbackAvailable: Bool { ["audio", "video"].contains(source.kind) && source.state == "saved" }
@@ -359,7 +363,8 @@ struct MaterialNoteReadingView: View {
                 }
                 .accessibilityElement(children: .combine)
             case .unavailable(let reason):
-                unavailableRow(reason)
+                // 已有可读笔记时不再显示「不能整理」类横幅：内容与横幅会自相矛盾。
+                if display == nil { unavailableRow(reason) }
             case .failed(let message):
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Label("整理没有完成：\(message)", systemImage: "exclamationmark.triangle")
@@ -465,9 +470,11 @@ struct MaterialNoteReadingView: View {
         if let result {
             display = MaterialNoteDisplay(note: result.note, isCurrent: result.isCurrent)
             hasNote = true
+            model.materialNotePresence[source.id] = true
         } else {
             display = nil
             hasNote = false
+            model.materialNotePresence[source.id] = false
         }
     }
 

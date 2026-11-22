@@ -14,6 +14,7 @@ enum MaterialNoteState: Equatable {
 struct MaterialNoteRun {
     let token: UUID
     let force: Bool
+    let entrySourceID: String
     let task: Task<Void, Never>
 }
 
@@ -25,25 +26,28 @@ extension ControlCenter {
     /// model call. A forced request that joined a non-forced run starts its
     /// own run once that run finishes.
     func requestMaterialNote(sourceID: String, force: Bool = false) async {
-        if let run = Self.materialNoteRuns[sourceID] {
+        // 单飞按「一篇笔记」键控：同一表达从任一分段进入都加入同一次运行。
+        let runKey = materialNoteMemberIDs(sourceID: sourceID).sorted().joined(separator: "|")
+        if let run = Self.materialNoteRuns[runKey] {
             await run.task.value
             guard !Task.isCancelled else { return }
+            if run.entrySourceID != sourceID, let state = materialNoteStates[run.entrySourceID] {
+                materialNoteStates[sourceID] = state
+            }
             guard force, !run.force else { return }
-            guard Self.materialNoteRuns[sourceID] == nil else { return }
+            guard Self.materialNoteRuns[runKey] == nil else { return }
         }
         guard !Task.isCancelled else { return }
         let token = UUID()
         let task = Task { await self.runMaterialNoteRequest(sourceID: sourceID, force: force) }
-        Self.materialNoteRuns[sourceID] = MaterialNoteRun(token: token, force: force, task: task)
+        Self.materialNoteRuns[runKey] = MaterialNoteRun(token: token, force: force, entrySourceID: sourceID, task: task)
         await task.value
-        if Self.materialNoteRuns[sourceID]?.token == token { Self.materialNoteRuns[sourceID] = nil }
+        if Self.materialNoteRuns[runKey]?.token == token { Self.materialNoteRuns[runKey] = nil }
     }
 
     private func runMaterialNoteRequest(sourceID: String, force: Bool) async {
         guard let store else { materialNoteStates[sourceID] = .unavailable("资料库尚未打开"); return }
         guard let port = materialNoteModel else { materialNoteStates[sourceID] = .unavailable("文本模型未配置"); return }
-        // 在任何 await 之前同步占据该表达，后续并发请求只能加入本次运行。
-        materialNoteStates[sourceID] = .generating
         let memberIDs = materialNoteMemberIDs(sourceID: sourceID)
         do {
             let catalog = Dictionary(try await store.sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -56,8 +60,12 @@ extension ControlCenter {
             if !force, let stored = try await store.latestMaterialNote(memberSourceIDs: memberIDs),
                await store.materialNoteIsCurrent(stored, currentTranscriptVersions: versions) {
                 materialNoteStates[sourceID] = .idle
+                materialNotePresence[sourceID] = true
                 return
             }
+            // 单飞已由 run 注册表保证；确认确实需要生成后才进入 generating，
+            // 打开已有笔记的材料不再先闪一次生成态。
+            materialNoteStates[sourceID] = .generating
             let snapshots = members.map(MaterialNoteMemberSnapshot.init)
             let noteMembers = members.map { record in
                 MaterialNoteMember(sourceID: record.id, title: record.displayTitle,
@@ -75,6 +83,7 @@ extension ControlCenter {
                 memberSourceIDs: memberIDs, note: anchored, transcriptVersions: versions,
                 modelIdentity: identity.provider + " / " + identity.model + " / " + identity.promptVersion + " / " + identity.schemaVersion,
                 ifMembersStillMatch: snapshots)
+            materialNotePresence[sourceID] = saved != nil
             materialNoteStates[sourceID] = saved == nil ? .failed("材料在生成期间有变化，请重试") : .idle
         } catch is CancellationError {
             materialNoteStates[sourceID] = .idle
@@ -91,7 +100,11 @@ extension ControlCenter {
         guard let store else { return nil }
         let memberIDs = materialNoteMemberIDs(sourceID: sourceID)
         do {
-            guard let stored = try await store.latestMaterialNote(memberSourceIDs: memberIDs) else { return nil }
+            guard let stored = try await store.latestMaterialNote(memberSourceIDs: memberIDs) else {
+                materialNotePresence[sourceID] = false
+                return nil
+            }
+            materialNotePresence[sourceID] = true
             let catalog = Dictionary(try await store.sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let current = await store.materialNoteIsCurrent(stored, currentTranscriptVersions: MaterialNoteGating.transcriptVersions(memberIDs: memberIDs, catalog: catalog))
             return (stored, current)

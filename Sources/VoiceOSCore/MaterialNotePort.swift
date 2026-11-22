@@ -74,14 +74,18 @@ public enum MaterialNoteAnchoring {
             MaterialNote.Section(heading: section.heading, paragraphs: section.paragraphs.map { paragraph in
                 // 同一段落内的锚点按叙述顺序推进：重复出现的短语优先选择上一个
                 // 锚点之后、且上下文最接近的一次，而不是永远回到全篇最早一次。
-                var lastSpanIndex = -1
+                // 次序只在同一成员内有意义；切换到另一成员时重新从头算。
+                var lastAnchor: (sourceID: String, index: Int)?
                 let anchors = paragraph.anchors.compactMap { anchor -> MaterialNote.Anchor? in
                     guard let member = bySource[anchor.sourceID] else { return nil }
                     let needle = Self.normalized(anchor.quote)
                     guard !needle.isEmpty, Self.normalized(member.transcript).contains(needle) else { return nil }
+                    let after = lastAnchor?.sourceID == anchor.sourceID ? (lastAnchor?.index ?? -1) : -1
                     let spanID = Self.resolveSpan(quote: anchor.quote, in: member,
-                                                  paragraphText: paragraph.text, after: lastSpanIndex)
-                    if let spanID, let index = member.spans.firstIndex(where: { $0.id == spanID }) { lastSpanIndex = index }
+                                                  paragraphText: paragraph.text, after: after)
+                    if let spanID, let index = member.spans.firstIndex(where: { $0.id == spanID }) {
+                        lastAnchor = (anchor.sourceID, index)
+                    }
                     return MaterialNote.Anchor(quote: anchor.quote, sourceID: anchor.sourceID,
                                                transcriptVersionID: member.transcriptVersionID,
                                                spanID: spanID)
