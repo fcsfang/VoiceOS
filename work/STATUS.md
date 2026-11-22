@@ -1077,3 +1077,4 @@
 - 173-B 锚定消歧：同段锚点按叙述顺序单调推进，多候选按段落上下文双字组重合度打分、同分取最早；跨片引文仍保留锚点（spanID 空）；并修复 `anchored` 重建段落时丢失 inferred。
 - 测试：+3（v2 解码保留 inferred、旧 JSON 兼容、两条消歧用例）。
 - 集成：构建 56 测试目标夹具参数顺序失败（应用本体与 dist 成功）；57 暴露 anchored 丢 inferred；58 全绿（575）；59 全绿（build_exit=0 / test_exit=0，577 tests / dist_build_exit=0），空闲后重启上机。
+- 构建 60：build_exit=0 / test_exit=0（577 tests）/ dist_build_exit=0，重启上机。补充笔记元数据行的「重新整理笔记」入口（force 重生成），并在真实「黑雾」材料上重生成验证 v2：3 节 7 段、11 条锚点（2 条跨时间片保留为 spanID 空、不可精确回听），第一人称正文通顺；本轮模型未产生 inferred 标记，轻标机制留待用户验收反馈。
