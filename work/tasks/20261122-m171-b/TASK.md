@@ -24,24 +24,22 @@
   - 「没有下一步的目标」区块新增一句副标题说明补一条下一步即可回到待办。
 - 键盘可达与既有交互不变：统计数字仍复用 `.workspaceQuietCompact` 按钮与 `scroll(to:)` 滚动动画；行选择、撤销、专注勾选逻辑零改动。
 
-### 行动页首屏（受阻，待主会话决定）
-任务要求的「行动页首屏」实体位于 `Sources/VoiceOSApp/WorkspaceView.swift`，而任务书禁止改动该文件（171-A 正在同文件改材料区）。证据：
-- `WorkspaceView.swift:1567`「今天 X · 逾期 Y」摘要行；
-- `WorkspaceView.swift:1584` / `:2652`「N 个目标还没有下一步」warning 横幅；
-- `WorkspaceView.swift:1635`「我的待办」列表（全部筛选下直接列出全部待办）；
-- `Sources/VoiceOSApp/WorkspaceActivityViews.swift` 实为行动详情/交付页，不含行动页首屏。
+### 行动页首屏（已完成；经主会话授权，改动 `WorkspaceView.swift` 行动区三处）
+1. **今日摘要行（原 :1567-1583）→ 首屏「今天」区块。** 原「今天 X · 逾期 Y」裸数字行改为直接列出今天确实要处理的两组行动：逾期在前、今天到期在后，复用现有 `actionRow`（行内勾选、菜单、右键、跳转全部不变）；区块副标题写明「逾期 N 项 · 今天到期 M 项」。专注中的行动仍只出现在「专注」区块，不与今天区块重复。今天和逾期都为空时，只剩一行安静收束：「今天没有要处理的待办」+ 安静的「查看我的待办」链接（保留原摘要行切换到我的待办的交互与 `summaryTodayFocus` 键盘焦点）。
+2. **我的待办积压列表（原 :1635）。** 今天区块已展示的条目从该列表移除（不再重复）；副标题补「7 天内与没有日期的待办」，让积压的范围写明，且整体位于今天区块之后，不再占据首屏第一眼。
+3. **无下一步目标横幅（原 :2652）。** 由 warning 通知条降为次要色单行辅助信息：「N 个目标还没有下一步 · 补一条下一步就回到待办」+ 安静的「打开第一条」；在「全部」页移到我的待办之后，「目标」页仍保留在顶部。单位（个）与去向（补下一步回到待办）写明，且不再使用警示色。
 
-提议的最小改法（仅信息层级，不动数据与交互）：
-1. 「全部」筛选首屏先出「今天要处理」区块：逾期在前、今天到期在后，复用现有 `actionRow`；两者皆空时给一句安静的收束文案（如「今天没有要处理的待办；积压的 17 项在下方『我的待办』」），不放要求注意力的按钮。
-2. 「我的待办」积压列表移到今天区块之后，标题补「N 项未安排日期」；无下一步目标的横幅从 warning 通知降为辅助统计行（复用 `WorkspaceStatLine`：「61 个停滞目标（无下一步）」+ 跳每周回顾），并随积压下移。
-3. 「AI 交付 6 份待读」「N 项本地完成待同步 · 稍后核对」已含单位与去向，保留。
+**今日为空时的首屏表现：** 标签页下方第一行即「今天没有要处理的待办」——没有要求注意力的按钮或警示色，右侧只有安静的「查看我的待办」一步跳转；其下才是「我的待办」积压区块。用户一眼可以确认今天无事、离开页面。
+**未改：** 数据查询与统计口径、过滤切换、行交互、`actionKeyboardOrder` 键盘顺序（今天/积压的行仍在其集合内）、专注逻辑。本轮未改 `WorkspaceDesign.swift`（按主会话护栏，行动区需要的新视图就地写成 `WorkspaceView.swift` 私有成员：`actionTodayFirstScreen`/`todaySummaryJump`/`todayScopeText`）。
 
 ## 验证
 - `xcrun --sdk macosx swiftc -parse Sources/VoiceOSApp/WorkspaceDesign.swift` → exit 0
 - `xcrun --sdk macosx swiftc -parse Sources/VoiceOSApp/WeeklyReviewView.swift` → exit 0
+- `xcrun --sdk macosx swiftc -parse Sources/VoiceOSApp/WorkspaceView.swift` → exit 0
 - 未跑 swift build/test（约束）；类型集成由主会话统一构建验证。
 
 ## 文件清单
 - Sources/VoiceOSApp/WeeklyReviewView.swift
 - Sources/VoiceOSApp/WorkspaceDesign.swift（新增 `WorkspaceStatLine` 与 `WorkspaceFlowLayout` 两个小原语）
-- 本任务书（未创建其它文件；行动页部分未落地，见上）
+- Sources/VoiceOSApp/WorkspaceView.swift（仅行动页三处区块：今天首屏块、我的待办积压区、无下一步目标横幅，及其私有辅助）
+- 本任务书
