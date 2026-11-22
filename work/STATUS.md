@@ -1024,3 +1024,7 @@
 - 163-C 滚动塌陷：英文反馈与自动入口页外层 ScrollView；可选旧练习列表 180、反馈历史 240、需要处理 180 固定高内部滚动；最小窗口下两列不再塌成 0、底部操作可滚达。
 - 163-D 三处小修：监测设置三卡补 20pt 缩进；导出 ProgressView 改 accessibilityLabel(正在导出)（备份半边经核实不成立未改）；行动页缓存键并入 actionSurfaceRevision，构建 surface 后调度分钟内最近到期瞬间的 tick 触发重算，逾期分类与计数不再冻结到下一分钟。
 - 评审来源：142–162 高风险改动四路找茬 + 前六条对抗验证，全部 CONFIRMED；本波为修复。集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 164：方向键步进统一（2026-11-22，已推送）
+- 新增 `WorkspaceKeyboardSelection`（WorkspaceDesign，internal）：id + step(up:over:) 与旧实现逐字一致（空列表 false 且 id 不动、未知 id 落首/末、边界不循环）。
+- WorkspaceView/TopicReading/WeeklyReview 三处私有类型改 typealias；SourcePlayback 步进函数改签名不变的薄包装；调用点零改动。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
