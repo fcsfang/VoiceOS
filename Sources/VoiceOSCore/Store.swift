@@ -22,7 +22,6 @@ public actor VoiceOSStore {
     var segmentAggregationActive = false
     var activeReminderLinks: Set<String> = []
     var activeEnglishAttempts: Set<String> = []
-    var activePanoramaDigests: Set<String> = []
     var contextValidationSuspended = false
     var frozenContextCount = 0
     /// A context revalidates only after a row change; its digest, the database
@@ -44,9 +43,6 @@ public actor VoiceOSStore {
         defer { contextValidationSuspended = false }
         return try body()
     }
-    nonisolated(unsafe) static var defaultPanoramaRetryDelay: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
-    var panoramaRetryDelay: @Sendable (Duration) async throws -> Void = VoiceOSStore.defaultPanoramaRetryDelay
-    public func setPanoramaRetryDelay(_ delay: @escaping @Sendable (Duration) async throws -> Void) { panoramaRetryDelay = delay }
     var assistantExecutionActive = false
     var assistantDiscoveryActive = false
     var activeAssistantRequests: [String: @Sendable () -> Void] = [:]
@@ -78,10 +74,6 @@ public actor VoiceOSStore {
         try db.execute("UPDATE expression_association_attempts SET state='unknown',error='进程退出前关联结果未登记；不自动重发' WHERE state='reserved'")
         try db.execute("UPDATE assistant_executions SET state='failed',error='执行因应用退出中断，可手动重试' WHERE state='running'")
         try db.execute("UPDATE assistant_assessments SET state='failed',error='评估因应用退出中断' WHERE state='running'")
-        try StartupTrace.measure("recover.flags") {
-        try db.execute("UPDATE panorama_steps SET state='unknown',error='进程退出前步骤结果未登记，不自动重发' WHERE state='running'")
-        try db.execute("UPDATE panorama_attempts SET state='unknown',error='进程退出前结果未登记，不自动重发' WHERE state='running'")
-        }
         try StartupTrace.measure("recover.knowledgeReviews") { try recoverKnowledgeReviews() }
         let sourcesToken = StartupTrace.begin("recover.sources")
         // Saved sources need metadata only. Selecting * here read every
@@ -168,7 +160,6 @@ public actor VoiceOSStore {
         try Self.validateReminderCompensations(db)
         }
         ready = true
-        try StartupTrace.measure("recover.backfillPanorama") { try backfillPanoramaThemeLedger() }
         StartupTrace.mark("recover.end")
     }
     @discardableResult
