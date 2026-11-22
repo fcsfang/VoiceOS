@@ -42,6 +42,9 @@ public struct TranscriptionReview: Codable, Sendable {
         public let after: String
         public let context_quote: String?
         public let reason: String
+        // 兼容字段：已存讨论上下文快照按「解码再编码」校验摘要；删除会让重编码
+        // 少一个键、摘要失配，资料库打不开（169-B 删除后曾导致 271 条上下文校验失败）。
+        public let independent_reason: String?
     }
     public struct Issue: Codable, Sendable {
         public let span_id: String
