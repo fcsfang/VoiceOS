@@ -161,7 +161,7 @@ final class ReadOnlyLibraryChecks: XCTestCase {
         XCTAssertEqual(try library.actions(limit: 2, offset: 1).map(\.id), ["action-a", "action-b"])
 
         let status = try library.status()
-        XCTAssertEqual(status.userVersion, 76)
+        XCTAssertEqual(status.userVersion, 77)
         XCTAssertTrue(status.walPresent)
         XCTAssertEqual(status.sources, 5)
         XCTAssertEqual(status.actionsOpen, 1)
