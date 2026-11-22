@@ -25,3 +25,5 @@ dist/
 .swiftpm/
 
 .claude/skills/verify-voiceos/evidence/
+.worktrees/
+.playwright-mcp/

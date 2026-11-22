@@ -1048,3 +1048,10 @@
 - 用户指出首页时间线与材料页高度重复，选择「收件箱式首页」：首页回答「现在要处理什么」，已读沉入材料页，保留右侧阅读器；复用既有未读/在读/已读三态，不加新表。
 - 实现：`@AppStorage voiceos.home.pendingOnly` 默认待处理（材料行只留非已读，行动反馈始终保留）；页头「待处理/全部」分段；行内状态点（未读 accent/在读 secondary/已读无点）与 未读/在读/已读 文案；全部视图下已读行标题降为次要色；行内 contextMenu 标为未读/在读/已读（失败回滚）；待处理清空时「待处理的都处理完了」+「查看全部」。
 - 集成：559 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 169：材料即笔记（2026-11-22，模型与减法已推送；生成与界面在途）
+- 依据产品文档《VoiceOS 产品方向与开发交接：把口述整理成笔记》：核心产物从「材料详情 + 要点清单」转向一篇文章式思考笔记，第一阶段验收 = 材料详情打开即为一篇可读、可追溯、可保存重开的笔记。
+- 169-A 笔记域模型（Core）：`MaterialNote{title, lead?, sections[{heading?, paragraphs[{text, anchors[{quote, sourceID, transcriptVersionID?, spanID?}]}]}]}` 与 `StoredMaterialNote`；表 `material_notes`（schema v76→v77），expressionKey = 成员 sourceID 排序后 `|` 连接；API `saveMaterialNote`（保留历史版本）/`latestMaterialNote`/`materialNoteIsCurrent`；包格式 51→52（addedIn52Tables）。新增 5 测试（保存读回、成员顺序归一、多版本、失效判定、空成员）。连带同步：ReadOnlyLibrary.schemaVersion、TestSchema、包版本与只读库断言（构建 47/48 修复）。
+- 169-B 死代码减法：删除 11 处零引用声明（AssistantExecutionView 三类型+ExecutionCommand、ClaimReviewHistoryView 整文件、RecordingFollowupSummary、ReflectionReviewFollowup、waitForPendingSearchRebuild、saveExpression/saveAndProcessExpression/chooseOrganizedResult/enrichReminderContexts、independent_reason）及残留 pyc，净 −412 行；保留项与理由见任务书。
+- 169-C1 生成契约（Core）：`MaterialNotePort`/`MaterialNoteRequest`/`MaterialNoteMember`/`MaterialNoteSpan`/`MaterialNoteAttemptIdentity`（material-note-v1 / note-v1）与 `ResponsesMaterialNotePort`，中文提示词固定第一人称、保留转折与细节、不加建议、标题 ≤24 字、每段 0-3 条逐字引文；`MaterialNoteAnchoring` 空白归一化后逐时间片锚定，跨片不命中、未知来源剔除。4 测试（fixture transport）。
+- 169-C2 编排（App）：`MaterialNoteCenter.swift` 接通懒生成；许可/就绪门控（未配置/仅本机/无转写 → unavailable）、幂等（已有 current 笔记不调模型）、版本快照失效守卫（生成期间成员变化 → 丢弃并置失败）、同 sourceID 单飞；`materialNoteForDisplay` 判定 current。
+- 集成：169-A/B 合并后构建 49 全绿（build_exit=0 / test_exit=0，564 tests），dist 重建并重启；169-C1/C2 合并后待构建 50。
