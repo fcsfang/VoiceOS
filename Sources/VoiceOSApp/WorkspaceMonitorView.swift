@@ -65,6 +65,7 @@ struct WorkspaceMonitorView: View {
             .frame(maxWidth: 680, alignment: .leading)
         }
         .onAppear {
+            model.monitorPageVisible = true
             model.markMonitorAttentionSeen()
             if !formLoaded {
                 formLoaded = true
@@ -88,6 +89,7 @@ struct WorkspaceMonitorView: View {
                 model.markMonitorAttentionSeen()
             }
         }
+        .onDisappear { model.monitorPageVisible = false }
         .onChange(of: showsSettings) { _, shows in
             if shows { probeQQDependenciesIfNeeded() }
         }

@@ -272,6 +272,9 @@ final class ControlCenter: ObservableObject {
     @Published var monitorChecking = false
     @Published var monitorPhase = ""
     @Published var monitorStatus = ""
+    /// Set by WorkspaceMonitorView; refreshes skip the monitor store reads
+    /// while the page is closed because opening it reloads anyway.
+    var monitorPageVisible = false
     @Published var monitorQQConversations: [QQMonitorConversation] = []
     @Published var monitorQQConversationStatus = ""
     @Published var monitorQQDiagnostics: [QQMonitorDiagnosisItem] = []
@@ -1298,7 +1301,7 @@ final class ControlCenter: ObservableObject {
         let didWork = await work.value
         guard didWork else { StartupTrace.mark("refresh.idleSkip"); return }
         StartupTrace.mark("refresh.reloaded")
-        await reloadMonitorState()
+        if monitorPageVisible { await reloadMonitorState() }
         writeMarkdownMirror()
         updateSpotlightIndex()
         StartupTrace.mark("refresh.backgroundQueued")
