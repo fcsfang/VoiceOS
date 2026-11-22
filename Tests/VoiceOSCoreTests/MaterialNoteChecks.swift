@@ -60,12 +60,14 @@ final class MaterialNoteChecks: XCTestCase {
                                                        transcriptVersions: ["a": "ta-v1"], modelIdentity: nil,
                                                        ifMembersStillMatch: [MaterialNoteMemberSnapshot(record)])
         XCTAssertNil(blocked, "成员已不在库中（或已变化）时不落库")
-        XCTAssertNil(try await store.latestMaterialNote(memberSourceIDs: ["a"]))
+        let afterBlocked = try await store.latestMaterialNote(memberSourceIDs: ["a"])
+        XCTAssertNil(afterBlocked)
         let saved = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("乙"),
                                                      transcriptVersions: ["a": "ta-v1"], modelIdentity: nil,
                                                      ifMembersStillMatch: [])
         XCTAssertNotNil(saved, "空期望不做拦截")
-        XCTAssertEqual(try await store.latestMaterialNote(memberSourceIDs: ["a"])?.note.title, "乙")
+        let afterSave = try await store.latestMaterialNote(memberSourceIDs: ["a"])
+        XCTAssertEqual(afterSave?.note.title, "乙")
     }
 
     func test成员顺序不同命中同一expressionKey() async throws {
