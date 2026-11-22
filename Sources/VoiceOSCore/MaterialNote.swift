@@ -8,9 +8,12 @@ public struct MaterialNote: Codable, Sendable, Equatable {
     public struct Paragraph: Codable, Sendable, Equatable {
         public let text: String
         public let anchors: [Anchor]
-        public init(text: String, anchors: [Anchor] = []) {
+        /// 段落包含整理时补充的关联（不是材料明说的意思），阅读界面可轻标。
+        public let inferred: Bool?
+        public init(text: String, anchors: [Anchor] = [], inferred: Bool? = nil) {
             self.text = text
             self.anchors = anchors
+            self.inferred = inferred
         }
     }
     public struct Anchor: Codable, Sendable, Equatable {

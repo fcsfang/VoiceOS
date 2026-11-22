@@ -44,7 +44,7 @@ extension ControlCenter {
         guard let port = materialNoteModel else { materialNoteStates[sourceID] = .unavailable("文本模型未配置"); return }
         // 在任何 await 之前同步占据该表达，后续并发请求只能加入本次运行。
         materialNoteStates[sourceID] = .generating
-        let memberIDs = sourcePageIndex.expression(for: sourceID)?.sourceIDs ?? [sourceID]
+        let memberIDs = materialNoteMemberIDs(sourceID: sourceID)
         do {
             let catalog = Dictionary(try await store.sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             if let reason = MaterialNoteGating.unavailableReason(memberIDs: memberIDs, catalog: catalog) {
@@ -63,7 +63,8 @@ extension ControlCenter {
                 MaterialNoteMember(sourceID: record.id, title: record.displayTitle,
                                    transcriptVersionID: record.transcriptVersionID,
                                    transcript: record.transcript ?? "",
-                                   spans: materialNoteSpans(for: record))
+                                   spans: materialNoteSpans(for: record),
+                                   origin: record.origin, speaker: record.speaker)
             }
             let note = try await port.writeNote(MaterialNoteRequest(members: noteMembers))
             let anchored = MaterialNoteAnchoring.anchored(note, members: noteMembers)
@@ -88,13 +89,21 @@ extension ControlCenter {
     /// with currentness judged against the member versions in the library now.
     func materialNoteForDisplay(sourceID: String) async -> (note: StoredMaterialNote, isCurrent: Bool)? {
         guard let store else { return nil }
-        let memberIDs = sourcePageIndex.expression(for: sourceID)?.sourceIDs ?? [sourceID]
+        let memberIDs = materialNoteMemberIDs(sourceID: sourceID)
         do {
             guard let stored = try await store.latestMaterialNote(memberSourceIDs: memberIDs) else { return nil }
             let catalog = Dictionary(try await store.sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let current = await store.materialNoteIsCurrent(stored, currentTranscriptVersions: MaterialNoteGating.transcriptVersions(memberIDs: memberIDs, catalog: catalog))
             return (stored, current)
         } catch { return nil }
+    }
+
+    /// 参与一篇笔记的成员：本人各段在前，配对的外部来源（访谈对方/节目轨）
+/// 按 sourceID 排序随后；与表达级讨论、知识核查的展开口径一致。
+    private func materialNoteMemberIDs(sourceID: String) -> [String] {
+        guard let expression = sourcePageIndex.expression(for: sourceID) else { return [sourceID] }
+        let external = (expression.externalVersions ?? [:]).keys.sorted()
+        return expression.sourceIDs + external.filter { !expression.sourceIDs.contains($0) }
     }
 
     private func materialNoteSpans(for record: SourceRecord) -> [MaterialNoteSpan] {

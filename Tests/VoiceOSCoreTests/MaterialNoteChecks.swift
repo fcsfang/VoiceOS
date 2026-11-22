@@ -21,7 +21,7 @@ final class MaterialNoteChecks: XCTestCase {
     private func note(_ title: String) -> MaterialNote {
         MaterialNote(title: title, lead: "导语 " + title, sections: [
             MaterialNote.Section(heading: "缘起", paragraphs: [
-                MaterialNote.Paragraph(text: "第一段 " + title, anchors: [
+                MaterialNote.Paragraph(text: "第一段 " + title, inferred: true, anchors: [
                     MaterialNote.Anchor(quote: "原话甲", sourceID: "a", transcriptVersionID: "ta-v1", spanID: "span-a"),
                     MaterialNote.Anchor(quote: "原话乙", sourceID: "b")
                 ]),
@@ -45,6 +45,12 @@ final class MaterialNoteChecks: XCTestCase {
         XCTAssertEqual(latest.transcriptVersions, ["a": "ta-v1", "b": "tb-v1"])
         XCTAssertEqual(latest.modelIdentity, "fixture-model")
         XCTAssertEqual(latest.createdAt, saved.createdAt)
+    }
+
+    func test旧笔记JSON无inferred字段解码为nil() throws {
+        let json = "{\"title\":\"标题\",\"lead\":null,\"sections\":[{\"heading\":null,\"paragraphs\":[{\"text\":\"一段\",\"anchors\":[]}]}]}"
+        let note = try JSONDecoder().decode(MaterialNote.self, from: Data(json.utf8))
+        XCTAssertNil(note.sections[0].paragraphs[0].inferred)
     }
 
     func test守卫保存仅在成员仍匹配时落库() async throws {

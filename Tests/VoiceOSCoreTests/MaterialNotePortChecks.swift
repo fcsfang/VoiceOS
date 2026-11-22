@@ -36,7 +36,7 @@ final class MaterialNotePortChecks: XCTestCase {
             "lead": "一次关于笔记工具取舍的回顾",
             "sections": [
                 ["heading": "先做减法", "paragraphs": [
-                    ["text": "本来想把工具做小，后来发现入口更关键。",
+                    ["text": "本来想把工具做小，后来发现入口更关键。", "inferred": true,
                      "quotes": [["sourceID": "a", "quote": "入口比功能更重要"],
                                 ["sourceID": "b", "quote": "先做减法"],
                                 ["sourceID": "b", "quote": "不存在的引文"]]],
@@ -56,6 +56,8 @@ final class MaterialNotePortChecks: XCTestCase {
         XCTAssertNil(note.sections[1].heading)
         XCTAssertEqual(note.sections[0].paragraphs.map(\.text),
                        ["本来想把工具做小，后来发现入口更关键。", "减法不是少做，而是先想清楚顺序。"])
+        XCTAssertEqual(note.sections[0].paragraphs[0].inferred, true, "模型补充的关联保留标记")
+        XCTAssertNil(note.sections[0].paragraphs[1].inferred, "未标注的段落不写标记")
         let anchors = note.sections[0].paragraphs[0].anchors
         XCTAssertEqual(anchors.map(\.quote), ["入口比功能更重要", "先做减法"], "不存在的引文在生成时剔除，其余保持模型顺序")
         XCTAssertEqual(anchors.map(\.spanID), ["a2", "b1"] as [String?])
@@ -134,7 +136,7 @@ final class MaterialNotePortChecks: XCTestCase {
                                                  apiKey: "fixture", model: "fixture-model")
         XCTAssertEqual(port.identity.provider, "responses:api.openai.com")
         XCTAssertEqual(port.identity.model, "fixture-model")
-        XCTAssertEqual(port.identity.promptVersion, "material-note-v1")
-        XCTAssertEqual(port.identity.schemaVersion, "note-v1")
+        XCTAssertEqual(port.identity.promptVersion, "material-note-v2")
+        XCTAssertEqual(port.identity.schemaVersion, "note-v2")
     }
 }

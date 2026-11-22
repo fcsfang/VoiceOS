@@ -16,9 +16,15 @@ public struct MaterialNoteMember: Sendable {
     public let transcriptVersionID: String?
     public let transcript: String
     public let spans: [MaterialNoteSpan]
-    public init(sourceID: String, title: String, transcriptVersionID: String?, transcript: String, spans: [MaterialNoteSpan]) {
+    /// 归属与说话人（user/external/ai、user/unknown/assistant）。提示词据此
+    /// 决定第一人称还是按角色转述；缺失时按「我」处理。
+    public let origin: String?
+    public let speaker: String?
+    public init(sourceID: String, title: String, transcriptVersionID: String?, transcript: String, spans: [MaterialNoteSpan],
+                origin: String? = nil, speaker: String? = nil) {
         self.sourceID = sourceID; self.title = title; self.transcriptVersionID = transcriptVersionID
         self.transcript = transcript; self.spans = spans
+        self.origin = origin; self.speaker = speaker
     }
 }
 

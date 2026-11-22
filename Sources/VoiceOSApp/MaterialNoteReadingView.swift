@@ -28,6 +28,7 @@ private struct MaterialNoteAnchorPresentation: Identifiable {
     let id: String
     let quote: String
     let memberTitle: String
+    let roleLabel: String?
     let sourceID: String
     let spanID: String?
     let timeLabel: String?
@@ -151,6 +152,7 @@ struct MaterialNoteReadingView: View {
     private func paragraphView(_ paragraph: MaterialNote.Paragraph, paragraphID: String) -> some View {
         MaterialNoteParagraphView(
             text: paragraph.text,
+            inferred: paragraph.inferred == true,
             anchors: anchorPresentations(paragraph.anchors, paragraphID: paragraphID),
             isExpanded: expandedParagraphs.contains(paragraphID),
             toggle: { toggle(paragraphID) },
@@ -276,18 +278,19 @@ struct MaterialNoteReadingView: View {
             guard !quote.isEmpty else { return nil }
             let id = paragraphID + "-a" + String(index)
             guard let record = catalog[anchor.sourceID] else {
-                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: "已移出的材料",
+                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: "已移出的材料", roleLabel: nil,
                                                       sourceID: "", spanID: nil, timeLabel: nil,
                                                       canPlay: false, canOpen: false,
                                                       caveat: "这段来源已不在资料库。")
             }
             let storedTitle = record.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
             let memberTitle = storedTitle.isEmpty ? MaterialNaming.displayName(record.name) : storedTitle
+            let role = noteRole(record)
             let canOpen = record.id != source.id
             let localHint = canOpen ? "可回到这段来源核对。" : "可在下方「原文与回听」核对。"
             let versionMatches = anchor.transcriptVersionID == nil || anchor.transcriptVersionID == record.transcriptVersionID
             guard versionMatches else {
-                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle,
+                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle, roleLabel: role,
                                                       sourceID: record.id, spanID: nil, timeLabel: nil,
                                                       canPlay: false, canOpen: canOpen,
                                                       caveat: "原文已更正，这段引文不能作为当前原话；" + localHint)
@@ -295,18 +298,25 @@ struct MaterialNoteReadingView: View {
             guard let spanID = anchor.spanID,
                   let span = record.spans.first(where: { $0.id == spanID }),
                   let start = span.startMS, let end = span.endMS else {
-                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle,
+                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle, roleLabel: role,
                                                       sourceID: record.id, spanID: nil, timeLabel: nil,
                                                       canPlay: false, canOpen: canOpen,
                                                       caveat: "未能定位到这段原话在录音里的位置；" + localHint)
             }
             let playable = ["audio", "video"].contains(record.kind) && record.state == "saved"
-            return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle,
+            return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle, roleLabel: role,
                                                   sourceID: record.id, spanID: span.id,
                                                   timeLabel: timeText(start) + " 至 " + timeText(end),
                                                   canPlay: playable, canOpen: canOpen,
                                                   caveat: playable ? nil : "这份来源当前没有可播放的录音。")
         }
+    }
+
+    /// 非本人材料的角色标注，让引文行能说清「谁说的」。
+    private func noteRole(_ record: SourceRecord) -> String? {
+        if record.origin == "ai" || record.speaker == "assistant" { return "AI 交付" }
+        if record.origin == "user" && record.speaker == "user" { return nil }
+        return ["audio", "video"].contains(record.kind) ? "对方" : "原文作者"
     }
 
     private func play(_ anchor: MaterialNoteAnchorPresentation) {
@@ -490,6 +500,7 @@ private struct MaterialNoteParagraphView: View {
     @Environment(\.vosTextScale) private var textScale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let text: String
+    let inferred: Bool
     let anchors: [MaterialNoteAnchorPresentation]
     let isExpanded: Bool
     let toggle: () -> Void
@@ -512,6 +523,12 @@ private struct MaterialNoteParagraphView: View {
                 .foregroundStyle(palette.text)
                 .lineSpacing(WorkspaceText.body.size * textScale * 0.45)
                 .fixedSize(horizontal: false, vertical: true)
+            if inferred {
+                Text("整理时补充的关联")
+                    .vosFont(WorkspaceText.caption)
+                    .foregroundStyle(palette.tertiaryText)
+                    .accessibilityLabel("这一段包含整理时补充的关联")
+            }
             if !anchors.isEmpty {
                 Button(action: toggle) {
                     HStack(spacing: 5) {
@@ -582,8 +599,11 @@ private struct MaterialNoteParagraphView: View {
     }
 
     private func provenance(_ anchor: MaterialNoteAnchorPresentation) -> String {
-        if let time = anchor.timeLabel { return anchor.memberTitle + " · " + time }
-        return anchor.memberTitle
+        var parts: [String] = []
+        if let role = anchor.roleLabel { parts.append(role) }
+        parts.append(anchor.memberTitle)
+        if let time = anchor.timeLabel { parts.append(time) }
+        return parts.joined(separator: " · ")
     }
 }
 
