@@ -86,6 +86,9 @@ private struct SourcePageReadKey: Hashable {
     let chapters:SourceChapterReadKey
     let extraction:SourceExtractionReadKey
 }
+private enum SourceReadSlot:String {
+    case pause,discussions,context,attachment,entities,chapters,claimNotes,extraction
+}
 private func sourceTime(_ ms:Int)->String { String(format:"%02d:%02d",ms/60000,ms/1000%60) }
 /// Mirrors `WorkspaceKeySelection.step` in WorkspaceView; share one helper once a third list needs it.
 private func stepSourcePlaybackSelection(_ selection:inout String?,up:Bool,over ids:[String])->Bool {
@@ -296,6 +299,7 @@ struct WorkspaceSourceView: View {
     @State private var discussionsRetry=0
     @State private var entitiesRetry=0
     @State private var chaptersRetry=0
+    @State private var appliedReadKeys:[SourceReadSlot:String]=[:]
     private func pairingIsCurrent(_ pair:RecordingContext)->Bool {
         guard let personal=catalog[pair.personalSourceID],let external=catalog[pair.externalSourceID] else { return false }
         return !personal.localOnly && !external.localOnly && !personal.needsTranscriptionReview && !external.needsTranscriptionReview && personal.transcriptVersionID == pair.personalVersionID && external.transcriptVersionID == pair.externalVersionID && personal.policyVersion == pair.personalPolicyVersion && external.policyVersion == pair.externalPolicyVersion
@@ -1108,8 +1112,15 @@ struct WorkspaceSourceView: View {
     }
     // 只有发起时的 key 仍是当前 key 且任务未被取消，才允许写回状态，避免旧结果串到新 key。
     private func readKeyIsCurrent(_ key:SourcePageReadKey)->Bool { !Task.isCancelled && key == combinedReadKey }
+    // 每个读取只看自己的子键：子键未变时跳过读取且不清空状态；读取前先记录子键，失败重试由用户重试 token 改变子键触发。
+    private func readSlotNeedsRun(_ slot:SourceReadSlot,_ subkey:AnyHashable)->Bool {
+        let value=String(describing:subkey)
+        guard appliedReadKeys[slot] != value else { return false }
+        appliedReadKeys[slot]=value
+        return true
+    }
     @MainActor private func readSourcePause(key:SourcePageReadKey) async {
-        guard readKeyIsCurrent(key),!pausedThoughts.isEmpty,let store=model.store else { return }
+        guard readKeyIsCurrent(key),readSlotNeedsRun(.pause,key.pause),!pausedThoughts.isEmpty,let store=model.store else { return }
         do {
             let summary=try await store.understandingPause(sourceID:source.id).summary
             guard readKeyIsCurrent(key) else { return }
@@ -1120,7 +1131,7 @@ struct WorkspaceSourceView: View {
         }
     }
     @MainActor private func readSourceDiscussions(key:SourcePageReadKey) async {
-        guard readKeyIsCurrent(key) else { return }
+        guard readKeyIsCurrent(key),readSlotNeedsRun(.discussions,key.discussions) else { return }
         discussionsPhase = .loading
         guard let store = model.store else { discussionsPhase = .idle; return }
         do {
@@ -1139,7 +1150,7 @@ struct WorkspaceSourceView: View {
         }
     }
     @MainActor private func readSourceContext(key:SourcePageReadKey) async {
-        guard readKeyIsCurrent(key) else { return }
+        guard readKeyIsCurrent(key),readSlotNeedsRun(.context,key.context) else { return }
         programPairs=[]
         contextLinks=[]
         contextPhase = .loading
@@ -1161,7 +1172,7 @@ struct WorkspaceSourceView: View {
         }
     }
     @MainActor private func readSourceAttachment(key:SourcePageReadKey) async {
-        guard readKeyIsCurrent(key) else { return }
+        guard readKeyIsCurrent(key),readSlotNeedsRun(.attachment,key.sourceID) else { return }
         attachmentURL=nil;attachmentMime=nil
         let captured=try? await model.sourceCaptureMetadata(sourceID:source.id)
         guard readKeyIsCurrent(key) else { return }
@@ -1177,7 +1188,7 @@ struct WorkspaceSourceView: View {
         }
     }
     @MainActor private func readSourceEntities(key:SourcePageReadKey) async {
-        guard readKeyIsCurrent(key) else { return }
+        guard readKeyIsCurrent(key),readSlotNeedsRun(.entities,key.transcript) else { return }
         entities=[]
         entitiesPhase = .loading
         guard source.transcript != nil,let store=model.store else { entitiesPhase = .idle; return }
@@ -1203,7 +1214,7 @@ struct WorkspaceSourceView: View {
         }
     }
     @MainActor private func readSourceChapters(key:SourcePageReadKey) async {
-        guard readKeyIsCurrent(key) else { return }
+        guard readKeyIsCurrent(key),readSlotNeedsRun(.chapters,key.chapters) else { return }
         chapters=[]
         chaptersPhase = .loading
         guard ["audio","video"].contains(source.kind),let store=model.store else { chaptersPhase = .idle; return }
@@ -1230,7 +1241,7 @@ struct WorkspaceSourceView: View {
         }
     }
     @MainActor private func readSourceClaimNotes(key:SourcePageReadKey) async {
-        guard readKeyIsCurrent(key) else { return }
+        guard readKeyIsCurrent(key),readSlotNeedsRun(.claimNotes,key.sourceID) else { return }
         guard let store=model.store else { return }
         do {
             let loaded=try await store.claimNotes(claimIDs:thoughts.map(\.id))
@@ -1244,7 +1255,7 @@ struct WorkspaceSourceView: View {
         }
     }
     @MainActor private func readSourceExtractionFlag(key:SourcePageReadKey) async {
-        guard readKeyIsCurrent(key) else { return }
+        guard readKeyIsCurrent(key),readSlotNeedsRun(.extraction,key.extraction) else { return }
         extractionFlag=nil
         guard let store=model.store else { return }
         let flag=try? await store.sourceExtractionFlag(sourceID:source.id)
