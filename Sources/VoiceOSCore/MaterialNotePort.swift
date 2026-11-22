@@ -72,17 +72,61 @@ public enum MaterialNoteAnchoring {
         let bySource = Dictionary(members.map { ($0.sourceID, $0) }, uniquingKeysWith: { first, _ in first })
         let sections = note.sections.map { section in
             MaterialNote.Section(heading: section.heading, paragraphs: section.paragraphs.map { paragraph in
-                MaterialNote.Paragraph(text: paragraph.text, anchors: paragraph.anchors.compactMap { anchor in
+                // 同一段落内的锚点按叙述顺序推进：重复出现的短语优先选择上一个
+                // 锚点之后、且上下文最接近的一次，而不是永远回到全篇最早一次。
+                var lastSpanIndex = -1
+                let anchors = paragraph.anchors.compactMap { anchor -> MaterialNote.Anchor? in
                     guard let member = bySource[anchor.sourceID] else { return nil }
                     let needle = Self.normalized(anchor.quote)
                     guard !needle.isEmpty, Self.normalized(member.transcript).contains(needle) else { return nil }
+                    let spanID = Self.resolveSpan(quote: anchor.quote, in: member,
+                                                  paragraphText: paragraph.text, after: lastSpanIndex)
+                    if let spanID, let index = member.spans.firstIndex(where: { $0.id == spanID }) { lastSpanIndex = index }
                     return MaterialNote.Anchor(quote: anchor.quote, sourceID: anchor.sourceID,
                                                transcriptVersionID: member.transcriptVersionID,
-                                               spanID: Self.anchor(quote: anchor.quote, in: member))
-                })
+                                               spanID: spanID)
+                }
+                return MaterialNote.Paragraph(text: paragraph.text, anchors: anchors, inferred: paragraph.inferred)
             })
         }
         return MaterialNote(title: note.title, lead: note.lead, sections: sections)
+    }
+
+    /// 在成员的单个时间片里定位引文。多次出现时：先按段落内单调次序排除上一个
+    /// 锚点之前的候选；仍有多个时，用段落上下文（去掉引文后的双字组）与各候选
+    /// 时间片的重合度打分，同分取最早。全部候选都在上一个锚点之前时退回全量候选。
+    private static func resolveSpan(quote: String, in member: MaterialNoteMember,
+                                    paragraphText: String, after lastSpanIndex: Int) -> String? {
+        let needle = normalized(quote)
+        guard !needle.isEmpty else { return nil }
+        let candidates = member.spans.enumerated().filter { normalized($0.element.text).contains(needle) }
+        guard let first = candidates.first else { return nil }
+        guard candidates.count > 1 else { return first.element.id }
+        let forward = candidates.filter { $0.offset >= lastSpanIndex }
+        let pool = forward.isEmpty ? candidates : forward
+        guard pool.count > 1 else { return pool.first?.element.id }
+        let context = Set(bigrams(normalized(paragraphText).replacingOccurrences(of: needle, with: "")))
+        var best = pool[0]
+        var bestScore = contextOverlap(Self.bigrams(normalized(best.element.text)), context)
+        for candidate in pool.dropFirst() {
+            let score = contextOverlap(Self.bigrams(normalized(candidate.element.text)), context)
+            if score > bestScore { best = candidate; bestScore = score }
+        }
+        return best.element.id
+    }
+
+    private static func bigrams(_ text: String) -> Set<String> {
+        let characters = Array(text)
+        guard characters.count > 1 else { return [] }
+        var grams: Set<String> = []
+        for index in 0..<(characters.count - 1) {
+            grams.insert(String(characters[index...(index + 1)]))
+        }
+        return grams
+    }
+
+    private static func contextOverlap(_ grams: Set<String>, _ context: Set<String>) -> Int {
+        grams.intersection(context).count
     }
 
     private static func normalized(_ text: String) -> String {

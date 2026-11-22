@@ -131,6 +131,35 @@ final class MaterialNotePortChecks: XCTestCase {
         XCTAssertEqual(kept.first?.transcriptVersionID, "ta-v1")
     }
 
+    func test重复短语按段落上下文选择更接近的一次() {
+        let members = [member("a", "材料甲", transcript: "这让我很焦虑。谈到工作边界时这让我很焦虑。",
+                              spans: [("s1", "这让我很焦虑。"), ("s2", "谈到工作边界时这让我很焦虑。")])]
+        let note = MaterialNote(title: "标题", lead: nil, sections: [
+            MaterialNote.Section(paragraphs: [
+                MaterialNote.Paragraph(text: "说到工作边界，这让我很焦虑。", anchors: [
+                    MaterialNote.Anchor(quote: "这让我很焦虑", sourceID: "a")
+                ])
+            ])
+        ])
+        let kept = MaterialNoteAnchoring.anchored(note, members: members).sections[0].paragraphs[0].anchors
+        XCTAssertEqual(kept.first?.spanID, "s2", "上下文更接近后一次出现时锚定到后一次")
+    }
+
+    func test同段重复短语按叙述顺序单调推进() {
+        let members = [member("a", "材料甲", transcript: "边界现在清楚了。后来边界又模糊了。",
+                              spans: [("s1", "边界"), ("s2", "边界现在清楚了。"), ("s3", "边界又模糊了。")])]
+        let note = MaterialNote(title: "标题", lead: nil, sections: [
+            MaterialNote.Section(paragraphs: [
+                MaterialNote.Paragraph(text: "边界现在清楚了。后来边界又模糊了。", anchors: [
+                    MaterialNote.Anchor(quote: "边界现在清楚了", sourceID: "a"),
+                    MaterialNote.Anchor(quote: "边界", sourceID: "a")
+                ])
+            ])
+        ])
+        let kept = MaterialNoteAnchoring.anchored(note, members: members).sections[0].paragraphs[0].anchors
+        XCTAssertEqual(kept.map(\.spanID), ["s2", "s2"], "第二个锚点不回到更早的 s1")
+    }
+
     func test身份包含provider模型与固定版本() throws {
         let port = try ResponsesMaterialNotePort(baseURL: URL(string: "https://api.openai.com/v1")!,
                                                  apiKey: "fixture", model: "fixture-model")
