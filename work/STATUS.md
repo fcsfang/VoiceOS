@@ -1110,3 +1110,8 @@
 - 178-C 文本模型缺失时只保存原音（阶段 2 硬性要求）：canToggleCaptureDictation 不再要求模型就绪；toggleCaptureDictation 在模型缺失时退化为只录不整理（封存原音）；菜单与工作区按钮改「开始口述（先保存原音）/停止并保存」；Siri endpoint 去掉模型门控；引导第 1 步补「文本模型未配置时原音也会先保存在本机」。
 - 未做（候选 2/4/6 留待后续）：完整整理完成态「打开这篇笔记」、首页待处理保留近期已读笔记、模型缺失时导入状态与提示的诚实化、FullRecordingView 只保存原件入口。
 - 集成：构建 69 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 179：完成即带走（2026-11-23）
+- 来源：阶段 2 审计候选 2（整理好后无需去全局行动找刚才的结果；录制完成后回到本次内容）。
+- 179-A 完整整理与自动收件：ControlCenter 新增 fullRecordingCompletedSourceID 与 openCompletedFullRecording（收起面板 + requestWorkspaceSource）；completeFullOrganization 成功与「已完整整理」复用路径都记录产出 id；自动收件成功记录首份 id 并发「录音已整理」本地通知（点开经 177 的窗口重建补消费直达材料页）；FullRecordingView 完成态显示「打开这篇笔记」为主动作，无产出 id 时保留「查看任务与后续」。
+- 未做（下一单元）：菜单「记录想法」sheet 与 QuickNote 保存后回材料、批量导入报告行内查看、RecordingInbox 完成行打开材料。
+- 集成：构建 70 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。

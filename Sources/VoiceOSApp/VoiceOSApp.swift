@@ -486,6 +486,8 @@ final class ControlCenter: ObservableObject {
     @Published var fullRecordingDetail = ""
     @Published var fullRecordingCount: Int?
     @Published var fullRecordingOutput: URL?
+    /// 最近一次完整整理产出的材料；完成面板据此提供「打开这篇笔记」。
+    @Published var fullRecordingCompletedSourceID: String?
     @Published var fullRecordingImportIssue: String?
     private var fullRecordingWorker: Task<Void, Never>?
     private var fullRecordingLog: URL?
@@ -1876,9 +1878,11 @@ final class ControlCenter: ObservableObject {
             finished(Dictionary(uniqueKeysWithValues:batch.map { ($0.digest,.retryableFailure("请等待模型就绪与当前整理完成")) }));return
         }
         fullRecordingBusy=true;fullRecordingCount=nil
+        fullRecordingCompletedSourceID=nil
         fullRecordingWorker=Task {
             let refreshTask=watchFullRecording()
             var outcomes:[String:RecordingInboxOutcome]=[:]
+            var firstProcessedID:String?
             defer { refreshTask.cancel();fullRecordingBusy=false;fullRecordingWorker=nil;fullRecordingLog=nil;fullRecordingSourceID=nil;finished(outcomes);scheduleProcessing();resumeRecordingFollowups();resumeKnowledgeReviews() }
             do {
                 let root=await store.root
@@ -1906,6 +1910,7 @@ final class ControlCenter: ObservableObject {
                             try FileManager.default.removeItem(at:audio)
                         }
                         fullRecordingSourceID=id
+                        if firstProcessedID == nil { firstProcessedID = id }
                         let policy=try await store.sourcePolicy(sourceID:id)
                         // Automatic intake retains its existing text-processing grant; never regrant an explicit revocation on retry.
                         if policy.localOnly,policy.version == 1 { _ = try await store.setSourceLocalOnly(sourceID:id,expectedVersion:policy.version,localOnly:false) }
@@ -1936,6 +1941,10 @@ final class ControlCenter: ObservableObject {
                 try await preparePendingCorrectedRecordingContexts()
                 _ = try await store.connectRecordingExpressions(using:grouping)
                 try await understandPendingRecordingExpressions(store:store,speech:speech,grouping:grouping,configuration:configuration,script:script)
+                if let firstID = firstProcessedID {
+                    fullRecordingCompletedSourceID = firstID
+                    LocalNotice.post(title: "录音已整理", body: "这次录音的笔记、观点与任务已保存。", sourceID: firstID)
+                }
                 for entry in batch { outcomes[entry.digest] = .completed }
                 requestReminderRefresh();queueRecordingTitles();queueTopicOrganization()
                 setFullRecordingStatus("连续表达已自动合并理解，原始分段与原话均保留")
@@ -2044,6 +2053,11 @@ final class ControlCenter: ObservableObject {
         let temporary=["HTTP 429","HTTP 502","HTTP 503","HTTP 504","网络","timed out","connection","response.completed","本批录音","素材仍在更新"].contains { message.localizedCaseInsensitiveContains($0) }
         return temporary ? .retryableFailure(message) : .needsAttention(message)
     }
+    /// 完成面板的「打开这篇笔记」：收起面板并打开这次录音的材料页。
+    func openCompletedFullRecording(_ sourceID: String) {
+        fullRecordingInput = nil
+        requestWorkspaceSource(sourceID)
+    }
     func organizeRecording(_ input: FullRecordingInput, track: Int, importCommand: String? = nil, finished: ((Bool) -> Void)? = nil) {
         guard FullRecordingOrganizer.decide(track: track, ownVoice: true, in: input.media).importsAsPersonal else {
             fullRecordingStatus = "完整整理只能使用本人音轨"
@@ -2056,6 +2070,7 @@ final class ControlCenter: ObservableObject {
             lastRecordingOutcome = .needsAttention(fullRecordingStatus); finished?(false); return
         }
         fullRecordingBusy = true; fullRecordingCount = nil
+        fullRecordingCompletedSourceID = nil
         lastRecordingOutcome = .needsAttention("整理未完成，请查看处理记录")
         fullRecordingWorker = Task {
             let refreshTask = watchFullRecording()
@@ -2088,7 +2103,7 @@ final class ControlCenter: ObservableObject {
                 let needsProgramContext=input.media.contextTrack != nil && track == input.media.personalTrack
                 let hasProgramContext=(try? await store.recordingContext(sourceID:id)) != nil
                 if let record = records.first(where: { $0.id == id }), isCompletelyOrganized(record), !needsProgramContext || hasProgramContext {
-                    success = true; setFullRecordingStatus("这份素材已完整整理，未重复调用模型"); return
+                    success = true; fullRecordingCompletedSourceID = id; setFullRecordingStatus("这份素材已完整整理，未重复调用模型"); return
                 }
                 let policy = try await store.sourcePolicy(sourceID: id)
                 if policy.localOnly { _ = try await store.setSourceLocalOnly(sourceID: id, expectedVersion: policy.version, localOnly: false) }
@@ -2259,6 +2274,7 @@ final class ControlCenter: ObservableObject {
         let count = try await store.ingestOrganizedPodcast(at: base, allowReminderWrites: reminderAccess?.enabled == true && reminderAccess?.title == "VoiceOS", requireAPIReview: true)
         fullRecordingCount = count
         fullRecordingOutput = base
+        fullRecordingCompletedSourceID = sourceID
         await refresh()
         _ = try await store.enqueueRecordingFollowup(sourceID: sourceID)
         if !(currentClaimsBySource[sourceID] ?? []).isEmpty {

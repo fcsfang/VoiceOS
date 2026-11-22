@@ -57,7 +57,13 @@ struct FullRecordingView: View {
                 Spacer()
                 if model.fullRecordingCount != nil {
                     Button("打开完整清单") { model.openFullRecordingOutput() }
-                    Button("查看任务与后续", action: showTasks).buttonStyle(.workspacePrimary)
+                    if let completed = model.fullRecordingCompletedSourceID {
+                        Button("打开这篇笔记") { model.openCompletedFullRecording(completed) }
+                            .buttonStyle(.workspacePrimary)
+                            .help("收起这个面板，打开这次录音的笔记与材料页")
+                    } else {
+                        Button("查看任务与后续", action: showTasks).buttonStyle(.workspacePrimary)
+                    }
                 }
                 else {
                     if input.media.tracks.count == 1 && !trackDecision.importsAsPersonal {
