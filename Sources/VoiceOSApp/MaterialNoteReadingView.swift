@@ -42,6 +42,10 @@ struct MaterialNoteReadingView: View {
     @ObservedObject var model: ControlCenter
     let source: SourceRecord
     var openSource: (String) -> Void = { _ in }
+    var openTask: (String) -> Void = { _ in }
+    var openDiscussion: (String) -> Void = { _ in }
+    var relatedActions: [ActionRecord] = []
+    var relatedDiscussions: [ConversationRecord] = []
     @Binding var hasNote: Bool
 
     @State private var display: MaterialNoteDisplay?
@@ -114,6 +118,7 @@ struct MaterialNoteReadingView: View {
                 ForEach(Array(display.note.note.sections.enumerated()), id: \.offset) { sectionIndex, section in
                     sectionView(section, index: sectionIndex)
                 }
+                relatedSection
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -196,6 +201,55 @@ struct MaterialNoteReadingView: View {
         if !title.isEmpty { return title }
         if let expression { return expression.displayTitle(in: catalog) }
         return source.displayTitle
+    }
+
+    // MARK: - Related
+
+    /// End-of-note entries, only for real associations: open actions that the
+    /// source page already derives from this expression, and discussions that
+    /// have not ended. With neither, the section renders nothing and the note
+    /// simply ends.
+    private var relatedOpenActions: [ActionRecord] {
+        relatedActions.filter { $0.validity == "current" && $0.state == "open" }
+    }
+
+    private var ongoingDiscussions: [ConversationRecord] {
+        relatedDiscussions.filter { $0.state == "active" && $0.validity == "current" }
+    }
+
+    @ViewBuilder
+    private var relatedSection: some View {
+        let shownActions = Array(relatedOpenActions.prefix(5))
+        let remainingActions = relatedOpenActions.count - shownActions.count
+        let discussions = ongoingDiscussions
+        if !shownActions.isEmpty || !discussions.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("相关")
+                    .vosFont(WorkspaceText.caption.size, weight: .medium)
+                    .foregroundStyle(palette.secondaryText)
+                    .accessibilityAddTraits(.isHeader)
+                ForEach(shownActions) { action in
+                    MaterialNoteRelatedRow(title: action.title, help: "打开这项行动") {
+                        openTask(action.id)
+                    }
+                }
+                if remainingActions > 0 {
+                    Text("还有 \(remainingActions) 项在下方列表。")
+                        .vosFont(WorkspaceText.caption)
+                        .foregroundStyle(palette.tertiaryText)
+                }
+                if !discussions.isEmpty {
+                    MaterialNoteRelatedRow(title: discussionRowTitle(count: discussions.count), help: "打开这段讨论") {
+                        openDiscussion(discussions[0].id)
+                    }
+                }
+            }
+            .padding(.top, 2)
+        }
+    }
+
+    private func discussionRowTitle(count: Int) -> String {
+        count == 1 ? "继续这段讨论" : "继续最近一段讨论（还有 \(count) 段没有结束）"
     }
 
     private var staleRow: some View {
@@ -530,5 +584,35 @@ private struct MaterialNoteParagraphView: View {
     private func provenance(_ anchor: MaterialNoteAnchorPresentation) -> String {
         if let time = anchor.timeLabel { return anchor.memberTitle + " · " + time }
         return anchor.memberTitle
+    }
+}
+
+/// One quiet end-of-note entry. No card, border or icon: the row reads as one
+/// more line of text until hovered, when it takes the accent color.
+private struct MaterialNoteRelatedRow: View {
+    @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let title: String
+    let help: String
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(title)
+                    .vosFont(WorkspaceText.meta.size, weight: .medium)
+                    .foregroundStyle(hovered ? palette.accent : palette.secondaryText)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { hovered = $0 }
+        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
     }
 }

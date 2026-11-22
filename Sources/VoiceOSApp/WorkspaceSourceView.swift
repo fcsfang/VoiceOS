@@ -716,7 +716,7 @@ struct WorkspaceSourceView: View {
                     }
                     .padding(.top,8)
                 }
-                MaterialNoteReadingView(model:model,source:source,openSource:openSource,hasNote:$materialNotePresent)
+                MaterialNoteReadingView(model:model,source:source,openSource:openSource,openTask:openTask,openDiscussion:openDiscussion,relatedActions:actions,relatedDiscussions:loadedDiscussions,hasNote:$materialNotePresent)
                 if extractionFlag == .empty {
                     WorkspaceCard(padding:16) {
                         VStack(alignment:.leading,spacing:10) {
