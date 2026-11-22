@@ -4075,13 +4075,14 @@ final class NoticeDelegate: NSObject, UNUserNotificationCenterDelegate {
         if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
             await MainActor.run {
                 (NSApp.delegate as? ApplicationDelegate)?.openMainWindow()
-                if let sourceID { ControlCenter.primary?.selected = sourceID }
+                // 整理/导入完成的通知点开就回到这次内容，不用先去列表里找。
+                if let sourceID { ControlCenter.primary?.requestWorkspaceSource(sourceID) }
                 else { ControlCenter.primary?.pendingWorkspacePageRequest = .processing }
             }
         } else if response.actionIdentifier == LocalNotice.openSourceAction, let sourceID {
             await MainActor.run {
                 (NSApp.delegate as? ApplicationDelegate)?.openMainWindow()
-                ControlCenter.primary?.selected = sourceID
+                ControlCenter.primary?.requestWorkspaceSource(sourceID)
             }
         }
     }
