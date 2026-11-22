@@ -1059,3 +1059,10 @@
 - 169-E 资料库打开修复（2026-11-22）：构建 49 起应用报「讨论上下文摘要或预算不一致」无法打开资料库。根因 = 169-B 删除 `TranscriptionReview.Correction.independent_reason` 可选字段，已存 271 条讨论上下文快照按「解码再编码」校验摘要时丢键失配。修复 = 恢复该字段为兼容字段并注明不可再删；校验与数据零改动。隔离副本验证：修复前 voiceos-check read exit=1，修复后 exit=0、integrity=true。
 - 169-D 正文式笔记阅读界面（2026-11-22）：新文件 MaterialNoteReadingView.swift（534 行）——文章式版面、共享左边线、轻元数据行（日期时长/AI 整理归属/回听）、段落级「看原话 N」就近展开逐字引文与定点回听、失效提示与重新整理、等待/仅本机/失败三态；有笔记时页头让出大字标题。工作树另跑 169-C1/C2 只读评审（9 代理），六条候选去重后五类全部 CONFIRMED：单飞守卫非原子（生成前置 await 造成双生成）、取消分支无条件写 idle、快照校验与保存非原子、跨片引文锚点被误删（契约要求保留 spanID=nil）、许可门控漏 needsTranscriptionReview；修复进入下一单元。
 - 构建 51：build_exit=0 / test_exit=0（568 tests）/ dist_build_exit=0；空闲后自动重启（attempt=30）。上机验证：资料库正常打开；打开「黑雾」表达（2 段、5 分 2 秒）真实生成并保存笔记——首屏即短标题「为什么我像一团黑雾」、轻元数据行、共享左边线、连续段落与短小标题、段落级「看原话」；首屏截图存 docs/product/audits/2026-11-22/20-笔记首屏-构建51.png。
+## 波 170：笔记收尾与信息展示并行（2026-11-22，已推送）
+- 169-F 评审修复：生成改为按 sourceID 登记的非结构化任务（并发请求加入在飞运行，`.generating` 在任何 await 前同步占据，请求取消不再杀掉生成）；`saveMaterialNote(ifMembersStillMatch:)` 快照比对与 INSERT 同一 actor 回合；`anchored` 保留跨时间片引文的锚点（spanID=nil）；门控新增 needsTranscriptionReview（未完成全文核对的转写不交云端）。
+- 170-A：笔记正文末尾安静「相关」区——有真实关联时列行动（openTask）与未结束讨论（openDiscussion），无关联整块不渲染。
+- 170-B：门控与快照判定下沉 `VoiceOSCore.MaterialNoteGating`，`MaterialNoteCenter` 改调用 Core；新增表驱动矩阵（门控原因顺序、版本映射、快照逐字段）。
+- 构建 52：build_exit=0 / dist_build_exit=0 / 已重启上机；测试目标因新增测试两处编译错误 test_exit=1（参数顺序、XCTAssert 自动闭包内 await）。
+- 构建 53：修正后 build_exit=0 / test_exit=0（574 tests）。
+- 并行会话：171-A 材料与主题列表、171-B 行动首屏与每周回顾、171-C 首页时间线（其中 171-B 经裁决授权只改行动页三处区块）。
