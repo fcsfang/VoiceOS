@@ -52,6 +52,8 @@ struct ImportFileResult: Identifiable {
     let fileName: String
     let succeeded: Bool
     let message: String
+    /// 成功保存后的材料 id，用于报告里直接打开这次导入的内容。
+    var sourceID: String? = nil
 }
 
 struct ImportBatchReport: Identifiable {
@@ -63,6 +65,8 @@ struct ImportBatchReport: Identifiable {
 struct ImportBatchReportView: View {
     let report: ImportBatchReport
     let dismiss: () -> Void
+    /// 成功行的「查看」：关闭报告并打开这次导入的材料。
+    var open: (String) -> Void = { _ in }
     /// This sheet hangs off the scene root, outside WorkspaceView's palette
     /// injection, so resolve the stored theme directly.
     private var palette: WorkspacePalette {
@@ -86,6 +90,13 @@ struct ImportBatchReportView: View {
                                 Text(result.message).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
                             }
                             Spacer(minLength: 0)
+                            if let sourceID = result.sourceID {
+                                Button("查看") { open(sourceID) }
+                                    .buttonStyle(.plain)
+                                    .vosFont(WorkspaceText.meta)
+                                    .foregroundStyle(palette.accent)
+                                    .help("打开这次导入的材料")
+                            }
                         }
                     }
                 }.padding(.vertical, 2)
@@ -2891,19 +2902,19 @@ final class ControlCenter: ObservableObject {
         if !media.isEmpty, !(await importFiles(media, notify: false)) { succeeded = false }
         var results = recentFileImportResults
         for url in textFiles {
-            let saved = await importCapturedTextFile(url)
-            results.append(.init(fileName: url.lastPathComponent, succeeded: saved, message: saved ? "已保存文字" : status))
-            if !saved { succeeded = false }
+            let savedID = await importCapturedTextFile(url)
+            results.append(.init(fileName: url.lastPathComponent, succeeded: savedID != nil, message: savedID != nil ? "已保存文字" : status, sourceID: savedID))
+            if savedID == nil { succeeded = false }
         }
         for url in pdfs {
-            let saved = await acceptPDFCapture(url)
-            results.append(.init(fileName: url.lastPathComponent, succeeded: saved, message: saved ? "已读取 PDF 文字，仅本机保存" : status))
-            if !saved { succeeded = false }
+            let savedID = await acceptPDFCapture(url)
+            results.append(.init(fileName: url.lastPathComponent, succeeded: savedID != nil, message: savedID != nil ? "已读取 PDF 文字，仅本机保存" : status, sourceID: savedID))
+            if savedID == nil { succeeded = false }
         }
         for url in images {
-            let saved = await acceptImageCapture(url)
-            results.append(.init(fileName: url.lastPathComponent, succeeded: saved, message: saved ? "已识别图片文字，仅本机保存" : status))
-            if !saved { succeeded = false }
+            let savedID = await acceptImageCapture(url)
+            results.append(.init(fileName: url.lastPathComponent, succeeded: savedID != nil, message: savedID != nil ? "已识别图片文字，仅本机保存" : status, sourceID: savedID))
+            if savedID == nil { succeeded = false }
         }
         if !unsupported.isEmpty {
             status = "暂不支持这些文件类型：" + unsupported.joined(separator: "、")
@@ -2913,22 +2924,22 @@ final class ControlCenter: ObservableObject {
         notifyImportFinished(results)
         return succeeded
     }
-    private func importCapturedTextFile(_ url: URL) async -> Bool {
+    private func importCapturedTextFile(_ url: URL) async -> String? {
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         do {
             let text = try String(contentsOf: url, encoding: .utf8)
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { status = "文字文件为空，未保存"; return true }
-            return await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil) != nil
-        } catch { status = "无法读取文字文件：" + error.localizedDescription; return false }
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { status = "文字文件为空，未保存"; return nil }
+            return await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil)
+        } catch { status = "无法读取文字文件：" + error.localizedDescription; return nil }
     }
-    private func acceptImageCapture(_ url: URL) async -> Bool {
-        guard let store else { status = "资料库尚未打开，未保存"; return false }
+    private func acceptImageCapture(_ url: URL) async -> String? {
+        guard let store else { status = "资料库尚未打开，未保存"; return nil }
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         let text: String
         do { text = try await ImageOCR.recognize(fileURL: url) }
-        catch { status = "图片识别失败：" + error.localizedDescription; return false }
+        catch { status = "图片识别失败：" + error.localizedDescription; return nil }
         do {
             let title = String(url.deletingPathExtension().lastPathComponent.prefix(100))
             let id = try await store.recordCapturedText(text, title: title, ownership: .external, commandID: UUID().uuidString)
@@ -2939,20 +2950,20 @@ final class ControlCenter: ObservableObject {
                 _ = try await store.attachSourceFile(sourceID: id, fileURL: url)
                 status = "已识别图片文字，仅本机保存"
             } catch { status = "已识别图片文字，原图保存失败：" + error.localizedDescription }
-            return true
+            return id
         } catch {
             status = error.localizedDescription
             await refresh()
-            return false
+            return nil
         }
     }
-    private func acceptPDFCapture(_ url: URL) async -> Bool {
-        guard let store else { status = "资料库尚未打开，未保存"; return false }
+    private func acceptPDFCapture(_ url: URL) async -> String? {
+        guard let store else { status = "资料库尚未打开，未保存"; return nil }
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         let text: String
         do { text = try await Task.detached(priority: .userInitiated) { try PDFText.extract(fileURL: url).text }.value }
-        catch { status = "PDF 读取失败：" + error.localizedDescription; return false }
+        catch { status = "PDF 读取失败：" + error.localizedDescription; return nil }
         do {
             let title = String(url.deletingPathExtension().lastPathComponent.prefix(100))
             let id = try await store.recordCapturedText(text, title: title, ownership: .external, commandID: UUID().uuidString)
@@ -2963,11 +2974,11 @@ final class ControlCenter: ObservableObject {
                 _ = try await store.attachSourceFile(sourceID: id, fileURL: url)
                 status = "已读取 PDF「\(url.lastPathComponent)」的文字，仅本机保存"
             } catch { status = "已读取 PDF 文字，原件保存失败：" + error.localizedDescription }
-            return true
+            return id
         } catch {
             status = error.localizedDescription
             await refresh()
-            return false
+            return nil
         }
     }
     func ocrImage(_ url: URL) async -> (text: String, title: String)? {
@@ -3045,7 +3056,7 @@ final class ControlCenter: ObservableObject {
                 selected = id
                 importedIDs.append(id)
                 recordCompletion(category: "导入", title: url.lastPathComponent, sourceID: id)
-                results.append(.init(fileName: url.lastPathComponent, succeeded: true, message: "已保存原件，正在本地转写"))
+                results.append(.init(fileName: url.lastPathComponent, succeeded: true, message: "已保存原件，正在本地转写", sourceID: id))
             } catch {
                 status = error.localizedDescription
                 results.append(.init(fileName: url.lastPathComponent, succeeded: false, message: error.localizedDescription))
@@ -4534,7 +4545,11 @@ struct VoiceOSApp: App {
         Window("VoiceOS", id: "control-center") {
             WorkspaceView(model: model).onboarding(model: model)
                 .sheet(item: $model.importReport) { report in
-                    ImportBatchReportView(report: report) { model.importReport = nil }
+                    ImportBatchReportView(report: report, dismiss: { model.importReport = nil },
+                                          open: { id in
+                                              model.importReport = nil
+                                              model.requestWorkspaceSource(id)
+                                          })
                 }
                 .sheet(isPresented: $model.showingCaptureComposer) {
                     TextCaptureView(model: model, draft: $model.textCaptureDraft,

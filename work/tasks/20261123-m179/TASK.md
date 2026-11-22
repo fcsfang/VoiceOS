@@ -22,3 +22,8 @@ parse_exit=0；集成构建 70 结果见 STATUS。
 - QuickNote 保存成功：close() 后 requestWorkspaceSource(id) 回到这次内容。
 - 菜单「记录想法」sheet 的 onSaved：关闭后 requestWorkspaceSource(id)。
 - 服务/剪贴板路径保持只保存、不抢窗口。
+
+## 179-C
+- ImportFileResult 增加 sourceID；importFiles 媒体成功行、拖放文字/PDF/图片行的保存函数改返回 String? 并透传。
+- 导入结果报告成功行加「查看」：关闭报告并 requestWorkspaceSource(id)。
+- 单文件粘贴无报告，保持原行为；服务路径不变。

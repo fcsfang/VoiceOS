@@ -1116,3 +1116,4 @@
 - 未做（下一单元）：菜单「记录想法」sheet 与 QuickNote 保存后回材料、批量导入报告行内查看、RecordingInbox 完成行打开材料。
 - 集成：构建 70 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
 - 179-B 记录入口回到本次内容：acceptCaptureRequest 改为返回材料 id；QuickNote 与菜单「记录想法」sheet 保存成功即收起并 requestWorkspaceSource，服务/剪贴板路径保持只保存不抢窗口。集成：构建 71 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
+- 179-C 导入结果报告「查看」：ImportFileResult 增加 sourceID，媒体/拖放文字/PDF/图片成功行透传；报告行内「查看」关闭报告并 requestWorkspaceSource。集成：构建 72 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
