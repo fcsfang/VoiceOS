@@ -1018,3 +1018,9 @@
 - 162-A：材料详情页 8 个 `.task(id:)` 合并为一个 `SourcePageReadKey` 组合任务（async let 并发、每读一 helper），赋值/错误/loading/重试语义逐字保留；组合 key 取并集，任一输入变化触发全部读取；每个 helper 在入口与每个 await 后校验 key 与取消状态，旧 key 结果不写回。
 - 162-B：主题页「线索」「尚未归入主题的材料」两个列表补 onAppear 视口恢复（复用 restoreKeyboardScroll）。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 163：评审确认项修复（2026-11-22，已推送）
+- 163-A 材料子键门控：组合任务内按 8 个 helper 自身子键（pause=…/discussions/context/attachment=sourceID/entities/chapters/claimNotes/extraction）记录 last-applied；子键未变不读取、不清状态（附件按钮不再消失、实体 NLTagger 与章节媒体解析不再因无关变化重跑）；失败重试靠重试 token 改子键；162 防串写保留。
+- 163-B 图谱缓存键加 focusGeneration（仅 reload 成功替换 focus 处自增）：「主题与问题」接回后图谱/检查器立即更新，手动刷新同样生效。
+- 163-C 滚动塌陷：英文反馈与自动入口页外层 ScrollView；可选旧练习列表 180、反馈历史 240、需要处理 180 固定高内部滚动；最小窗口下两列不再塌成 0、底部操作可滚达。
+- 163-D 三处小修：监测设置三卡补 20pt 缩进；导出 ProgressView 改 accessibilityLabel(正在导出)（备份半边经核实不成立未改）；行动页缓存键并入 actionSurfaceRevision，构建 surface 后调度分钟内最近到期瞬间的 tick 触发重算，逾期分类与计数不再冻结到下一分钟。
+- 评审来源：142–162 高风险改动四路找茬 + 前六条对抗验证，全部 CONFIRMED；本波为修复。集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
