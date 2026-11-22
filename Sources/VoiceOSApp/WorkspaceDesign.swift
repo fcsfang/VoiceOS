@@ -42,6 +42,26 @@ enum WorkspaceMotion {
     static let scroll = Animation.easeOut(duration: 0.18)
 }
 
+// MARK: - Keyboard selection
+
+/// One stepping rule for every arrow-key list in the workspace: an empty list
+/// ignores the key, an unknown current id lands on the last element going up
+/// and the first going down, and the ends do not wrap.
+struct WorkspaceKeyboardSelection: Equatable {
+    var id: String?
+    init(id: String? = nil) { self.id = id }
+    /// Moves to the next/previous id; returns false when the list is empty.
+    mutating func step(up: Bool, over ids: [String]) -> Bool {
+        guard !ids.isEmpty else { return false }
+        let current = id.flatMap { ids.firstIndex(of: $0) }
+        let next: Int
+        if up { next = current.map { max(0, $0 - 1) } ?? ids.count - 1 }
+        else { next = current.map { min(ids.count - 1, $0 + 1) } ?? 0 }
+        id = ids[next]
+        return true
+    }
+}
+
 // The editorial surfaces (capture, assistant, reflection) keep their serif
 // motif; the rest of the app reads in the system face.
 struct WorkspaceHero: View {

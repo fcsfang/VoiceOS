@@ -991,19 +991,7 @@ struct WeeklyReviewView: View {
         return formatter.string(from: date)
     }
 }
-// Copy of WorkspaceView's private step helper; hoist to a shared helper when a third caller needs it.
-private struct ReviewKeySelection {
-    var id: String?
-    mutating func step(up: Bool, over ids: [String]) -> Bool {
-        guard !ids.isEmpty else { return false }
-        let current = id.flatMap { ids.firstIndex(of: $0) }
-        let next: Int
-        if up { next = current.map { max(0, $0 - 1) } ?? ids.count - 1 }
-        else { next = current.map { min(ids.count - 1, $0 + 1) } ?? 0 }
-        id = ids[next]
-        return true
-    }
-}
+private typealias ReviewKeySelection = WorkspaceKeyboardSelection
 private extension View {
     @ViewBuilder func accessibilityLabelIfPresent(_ label: String?) -> some View {
         if let label { self.accessibilityLabel(label) } else { self }
