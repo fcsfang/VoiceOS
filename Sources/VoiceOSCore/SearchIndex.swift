@@ -237,14 +237,6 @@ extension VoiceOSStore {
         catch { NSLog("VoiceOS 搜索索引重建失败：\(error.localizedDescription)") }
     }
 
-    func waitForPendingSearchRebuild(timeout: TimeInterval = 5) async throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while try db.query("SELECT value FROM search_index_meta WHERE key='rebuild_pending'").first?["value"] == "1" {
-            guard Date() < deadline else { throw VoiceOSError("搜索索引重建超时") }
-            try await Task.sleep(for: .milliseconds(20))
-        }
-    }
-
     public func rebuildSearchIndex() throws {
         let fingerprint = try searchFingerprint()
         // Titles come from the same funnel as the library row, decoded from these

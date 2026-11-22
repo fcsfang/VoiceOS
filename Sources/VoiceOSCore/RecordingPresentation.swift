@@ -42,7 +42,6 @@ public struct TranscriptionReview: Codable, Sendable {
         public let after: String
         public let context_quote: String?
         public let reason: String
-        public let independent_reason: String?
     }
     public struct Issue: Codable, Sendable {
         public let span_id: String
