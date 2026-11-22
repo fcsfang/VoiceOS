@@ -74,64 +74,6 @@ final class RecentContentHomeSnapshotChecks: XCTestCase {
         }
     }
 
-    func testFeedbackGroupsShowTaskProgressWithResolvedTaskContext() {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let sources = [
-            source("f1", createdAt: "2024-05-01T10:00:00Z", transcript: "桌面已经整理完一半",
-                   feedbackKind: "reflection", feedbackActionID: "a1", feedbackRelation: "progress"),
-            source("f2", createdAt: "2024-05-01T11:00:00Z", transcript: "又想起要汇报",
-                   feedbackKind: "reflection", feedbackActionID: "a2", feedbackRelation: "repeat"),
-        ]
-        let actions = [
-            action("a1", claimID: "c1", title: "整理桌面"),
-            action("a2", claimID: "c1", title: "打磨汇报"),
-        ]
-
-        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: [], actions: actions, calendar: calendar)
-
-        let feedback = snapshot.days.flatMap(\.items).filter { $0.kind == .feedback }
-        XCTAssertEqual(feedback.map(\.title), ["任务进展"])
-        let rows = feedback.first.flatMap { snapshot.progressRows[$0.id] }
-        XCTAssertEqual(rows?.map(\.id), ["f2", "f1"])
-        XCTAssertEqual(rows?.map(\.actionID), ["a2", "a1"])
-        XCTAssertEqual(rows?.map(\.taskTitle), ["打磨汇报", "整理桌面"])
-        XCTAssertEqual(rows?.map(\.relationLabel), ["再次提及", "实际进展"])
-        XCTAssertEqual(rows?.map(\.text), ["又想起要汇报", "桌面已经整理完一半"])
-        XCTAssertEqual(rows?.map(\.isTaskAvailable), [true, true])
-    }
-
-    func testFeedbackProgressRowsGroupByDayAndMarkMissingTasks() {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "UTC")!
-        let sources = [
-            source("f1", createdAt: "2024-05-01T10:00:00Z", transcript: "第一天的反馈",
-                   feedbackKind: "reflection", feedbackActionID: "a1", feedbackRelation: "repeat"),
-            source("f2", createdAt: "2024-05-02T10:00:00Z", transcript: "第二天的反馈",
-                   feedbackKind: "outcome", feedbackActionID: "gone"),
-        ]
-
-        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: [],
-                                                       actions: [action("a1", claimID: "c1", title: "整理桌面")],
-                                                       calendar: calendar)
-
-        XCTAssertEqual(snapshot.days.map(\.id), ["2024-05-02", "2024-05-01"])
-        let feedback = snapshot.days.flatMap(\.items).filter { $0.kind == .feedback }
-        XCTAssertEqual(feedback.map(\.title), ["任务进展", "任务进展"])
-
-        let newer = feedback.first.flatMap { snapshot.progressRows[$0.id] }?.first
-        XCTAssertEqual(newer?.taskTitle, "任务已不可用")
-        XCTAssertEqual(newer?.relationLabel, "实际结果")
-        XCTAssertEqual(newer?.text, "第二天的反馈")
-        XCTAssertEqual(newer?.isTaskAvailable, false)
-
-        let older = feedback.last.flatMap { snapshot.progressRows[$0.id] }?.first
-        XCTAssertEqual(older?.taskTitle, "整理桌面")
-        XCTAssertEqual(older?.relationLabel, "再次提及")
-        XCTAssertEqual(older?.text, "第一天的反馈")
-        XCTAssertEqual(older?.isTaskAvailable, true)
-    }
-
     private func utcCalendar() -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
@@ -152,6 +94,71 @@ final class RecentContentHomeSnapshotChecks: XCTestCase {
                               RecentContentThought(claimID: "\(id)-c\($0.offset)", statement: $0.element)
                           },
                           excerpts: [], kind: .material)
+    }
+
+    func testFeedbackGroupsShowTaskProgress() {
+        struct GroupExpectation {
+            let title: String
+            let rows: [(id: String, actionID: String, taskTitle: String, relationLabel: String, text: String, available: Bool)]
+        }
+        struct Case {
+            let name: String
+            let sources: [SourceRecord]
+            let actions: [ActionRecord]
+            let dayIDs: [String]
+            let groups: [GroupExpectation]
+        }
+        let calendar = utcCalendar()
+        let cases = [
+            Case(name: "resolved tasks",
+                 sources: [
+                    source("f1", createdAt: "2024-05-01T10:00:00Z", transcript: "桌面已经整理完一半",
+                           feedbackKind: "reflection", feedbackActionID: "a1", feedbackRelation: "progress"),
+                    source("f2", createdAt: "2024-05-01T11:00:00Z", transcript: "又想起要汇报",
+                           feedbackKind: "reflection", feedbackActionID: "a2", feedbackRelation: "repeat"),
+                 ],
+                 actions: [
+                    action("a1", claimID: "c1", title: "整理桌面"),
+                    action("a2", claimID: "c1", title: "打磨汇报"),
+                 ],
+                 dayIDs: ["2024-05-01"],
+                 groups: [GroupExpectation(title: "任务进展", rows: [
+                    ("f2", "a2", "打磨汇报", "再次提及", "又想起要汇报", true),
+                    ("f1", "a1", "整理桌面", "实际进展", "桌面已经整理完一半", true),
+                 ])]),
+            Case(name: "missing tasks and day grouping",
+                 sources: [
+                    source("f1", createdAt: "2024-05-01T10:00:00Z", transcript: "第一天的反馈",
+                           feedbackKind: "reflection", feedbackActionID: "a1", feedbackRelation: "repeat"),
+                    source("f2", createdAt: "2024-05-02T10:00:00Z", transcript: "第二天的反馈",
+                           feedbackKind: "outcome", feedbackActionID: "gone"),
+                 ],
+                 actions: [action("a1", claimID: "c1", title: "整理桌面")],
+                 dayIDs: ["2024-05-02", "2024-05-01"],
+                 groups: [
+                    GroupExpectation(title: "任务进展", rows: [
+                        ("f2", "gone", "任务已不可用", "实际结果", "第二天的反馈", false),
+                    ]),
+                    GroupExpectation(title: "任务进展", rows: [
+                        ("f1", "a1", "整理桌面", "再次提及", "第一天的反馈", true),
+                    ]),
+                 ]),
+        ]
+        for c in cases {
+            let snapshot = RecentContentHomeSnapshot.build(sources: c.sources, claims: [], actions: c.actions, calendar: calendar)
+            XCTAssertEqual(snapshot.days.map(\.id), c.dayIDs, c.name)
+            let feedback = snapshot.days.flatMap(\.items).filter { $0.kind == .feedback }
+            XCTAssertEqual(feedback.map(\.title), c.groups.map(\.title), c.name)
+            for (item, expected) in zip(feedback, c.groups) {
+                let rows = snapshot.progressRows[item.id] ?? []
+                XCTAssertEqual(rows.map(\.id), expected.rows.map(\.id), item.id)
+                XCTAssertEqual(rows.map(\.actionID), expected.rows.map(\.actionID), item.id)
+                XCTAssertEqual(rows.map(\.taskTitle), expected.rows.map(\.taskTitle), item.id)
+                XCTAssertEqual(rows.map(\.relationLabel), expected.rows.map(\.relationLabel), item.id)
+                XCTAssertEqual(rows.map(\.text), expected.rows.map(\.text), item.id)
+                XCTAssertEqual(rows.map(\.isTaskAvailable), expected.rows.map(\.available), item.id)
+            }
+        }
     }
 
     func testRecentThoughtsGroupByDayWithCountsAndSourceTitles() {
@@ -237,47 +244,48 @@ final class RecentContentHomeSnapshotChecks: XCTestCase {
         XCTAssertEqual(snapshot.rows[feedback.id]?.count, snapshot.progressRows[feedback.id]?.count, "反馈行计数来自快照")
     }
 
-    func testDigestTasksKeepActionOrderAcrossClaims() {
-        let sources = [source("s1", createdAt: "2024-05-01T10:00:00Z")]
-        let claims = [
-            claim("c1", sourceIDs: ["s1"], statement: "【观点】第一件事"),
-            claim("c2", sourceIDs: ["s1"], statement: "【观点】第二件事"),
+    func testDigestTasksFilterAndKeepActionOrder() {
+        struct Case {
+            let name: String
+            let claims: [CandidateClaim]
+            let actions: [ActionRecord]
+            let reviewRequired: Set<String>
+            let expected: [String]
+        }
+        let s1 = source("s1", createdAt: "2024-05-01T10:00:00Z")
+        let cases = [
+            Case(name: "task order across claims",
+                 claims: [
+                    claim("c1", sourceIDs: ["s1"], statement: "【观点】第一件事"),
+                    claim("c2", sourceIDs: ["s1"], statement: "【观点】第二件事"),
+                 ],
+                 actions: [
+                    action("a1", claimID: "c2", title: "第二组第一件"),
+                    action("a2", claimID: "c1", title: "第一组第一件"),
+                    action("a3", claimID: "c2", title: "第二组第二件"),
+                    action("a4", claimID: "c1", title: "不是任务", kind: "note"),
+                    action("a5", claimID: "c1", title: "已完成的事", state: "done"),
+                 ],
+                 reviewRequired: [],
+                 expected: ["a1", "a2", "a3"]),
+            Case(name: "review required excluded",
+                 claims: [claim("c1", sourceIDs: ["s1"], statement: "【观点】整理桌面")],
+                 actions: [
+                    action("a1", claimID: "c1", title: "整理桌面"),
+                    action("a2", claimID: "c1", title: "待核对的行动"),
+                 ],
+                 reviewRequired: ["a2"],
+                 expected: ["a1"]),
+            Case(name: "all need review",
+                 claims: [claim("c1", sourceIDs: ["s1"], statement: "【观点】整理桌面")],
+                 actions: [action("a1", claimID: "c1", title: "待核对的行动")],
+                 reviewRequired: ["a1"],
+                 expected: []),
         ]
-        let actions = [
-            action("a1", claimID: "c2", title: "第二组第一件"),
-            action("a2", claimID: "c1", title: "第一组第一件"),
-            action("a3", claimID: "c2", title: "第二组第二件"),
-            action("a4", claimID: "c1", title: "不是任务", kind: "note"),
-            action("a5", claimID: "c1", title: "已完成的事", state: "done"),
-        ]
-
-        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: claims, actions: actions)
-
-        XCTAssertEqual(snapshot.digests["s1"]?.tasks.map(\.id), ["a1", "a2", "a3"], "任务保持行动数组原顺序，且只含未完成的任务")
-    }
-
-    func testReviewRequiredActionsStayOutOfDigestTasks() {
-        let sources = [source("s1", createdAt: "2024-05-01T10:00:00Z")]
-        let claims = [claim("c1", sourceIDs: ["s1"], statement: "【观点】整理桌面")]
-        let actions = [
-            action("a1", claimID: "c1", title: "整理桌面"),
-            action("a2", claimID: "c1", title: "待核对的行动"),
-        ]
-
-        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: claims, actions: actions,
-                                                       reviewRequiredActionIDs: ["a2"])
-
-        XCTAssertEqual(snapshot.digests["s1"]?.tasks.map(\.id), ["a1"], "需核对行动不计入首页待办，普通开放行动照常计入")
-    }
-
-    func testDigestTasksEmptyWhenEveryActionNeedsReview() {
-        let sources = [source("s1", createdAt: "2024-05-01T10:00:00Z")]
-        let claims = [claim("c1", sourceIDs: ["s1"], statement: "【观点】整理桌面")]
-        let actions = [action("a1", claimID: "c1", title: "待核对的行动")]
-
-        let snapshot = RecentContentHomeSnapshot.build(sources: sources, claims: claims, actions: actions,
-                                                       reviewRequiredActionIDs: ["a1"])
-
-        XCTAssertEqual(snapshot.digests["s1"]?.tasks, [], "全部行动需核对时首页待办为空，与材料列表口径一致")
+        for c in cases {
+            let snapshot = RecentContentHomeSnapshot.build(sources: [s1], claims: c.claims, actions: c.actions,
+                                                           reviewRequiredActionIDs: c.reviewRequired)
+            XCTAssertEqual(snapshot.digests["s1"]?.tasks.map(\.id), c.expected, c.name)
+        }
     }
 }

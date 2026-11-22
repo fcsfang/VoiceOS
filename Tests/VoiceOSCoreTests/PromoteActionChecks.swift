@@ -100,48 +100,44 @@ final class PromoteActionChecks: XCTestCase {
         }
     }
 
-    func testPromotionRejectsTask() async throws {
-        let store = try await openStore()
-        let seeded = try await addAction(store, title: "已经是待办", kind: .task)
-        do {
-            _ = try await store.promoteAction(actionID: seeded.action.id, expectedVersion: seeded.action.version)
-            XCTFail("已成待办的事项不能再提升")
-        } catch {
-            XCTAssertEqual((error as? VoiceOSError)?.message, "只有问题与目标可以转为待办")
+    func testPromotionRejectionMatrix() async throws {
+        struct Seeded {
+            let actionID: String
+            let version: Int
         }
-    }
-
-    func testPromotionRejectsDismissedOpportunity() async throws {
-        let store = try await openStore()
-        let seeded = try await addAction(store, title: "已经放弃的问题", kind: .opportunity)
-        _ = try await store.setActionState(actionID: seeded.action.id, expectedVersion: seeded.action.version,
-                                           state: .dismissed)
-        do {
-            _ = try await store.promoteAction(actionID: seeded.action.id, expectedVersion: seeded.action.version + 1)
-            XCTFail("已放弃的问题不能再提升")
-        } catch {
-            XCTAssertEqual((error as? VoiceOSError)?.message, "只有未完成的问题与目标可以转为待办")
+        struct Rejection {
+            let name: String
+            let seed: (VoiceOSStore) async throws -> Seeded
+            let message: String
         }
-    }
-
-    func testPromotionRejectsStaleVersion() async throws {
-        let store = try await openStore()
-        let seeded = try await addAction(store, title: "版本已经不匹配", kind: .opportunity)
-        do {
-            _ = try await store.promoteAction(actionID: seeded.action.id, expectedVersion: seeded.action.version + 1)
-            XCTFail("过期版本必须被拒绝")
-        } catch {
-            XCTAssertEqual((error as? VoiceOSError)?.message, "行动版本已变化，请重新核对")
-        }
-    }
-
-    func testPromotionRejectsMissingAction() async throws {
-        let store = try await openStore()
-        do {
-            _ = try await store.promoteAction(actionID: UUID().uuidString, expectedVersion: 1)
-            XCTFail("不存在的行动必须被拒绝")
-        } catch {
-            XCTAssertEqual((error as? VoiceOSError)?.message, "行动不存在")
+        let cases: [Rejection] = [
+            Rejection(name: "task", seed: { store in
+                let seeded = try await self.addAction(store, title: "已经是待办", kind: .task)
+                return Seeded(actionID: seeded.action.id, version: seeded.action.version)
+            }, message: "只有问题与目标可以转为待办"),
+            Rejection(name: "dismissed opportunity", seed: { store in
+                let seeded = try await self.addAction(store, title: "已经放弃的问题", kind: .opportunity)
+                _ = try await store.setActionState(actionID: seeded.action.id, expectedVersion: seeded.action.version,
+                                                   state: .dismissed)
+                return Seeded(actionID: seeded.action.id, version: seeded.action.version + 1)
+            }, message: "只有未完成的问题与目标可以转为待办"),
+            Rejection(name: "stale version", seed: { store in
+                let seeded = try await self.addAction(store, title: "版本已经不匹配", kind: .opportunity)
+                return Seeded(actionID: seeded.action.id, version: seeded.action.version + 1)
+            }, message: "行动版本已变化，请重新核对"),
+            Rejection(name: "missing action", seed: { _ in
+                Seeded(actionID: UUID().uuidString, version: 1)
+            }, message: "行动不存在"),
+        ]
+        for c in cases {
+            let store = try await openStore()
+            let seeded = try await c.seed(store)
+            do {
+                _ = try await store.promoteAction(actionID: seeded.actionID, expectedVersion: seeded.version)
+                XCTFail("提升必须被拒绝：" + c.name)
+            } catch {
+                XCTAssertEqual((error as? VoiceOSError)?.message, c.message, c.name)
+            }
         }
     }
 
