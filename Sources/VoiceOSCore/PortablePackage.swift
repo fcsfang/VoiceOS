@@ -59,7 +59,9 @@ private enum PackageLayout {
     static let version50Tables = version49Tables + ["task_initiations"]
     static let addedIn51Tables = ["panorama_attempts", "panorama_steps", "panorama_theme_replies", "panorama_themes", "panorama_theme_batches", "panorama_theme_appearances"]
     static let version51Tables = version50Tables + addedIn51Tables
-    static let currentVersion = 51
+    static let addedIn52Tables = ["material_notes"]
+    static let version52Tables = version51Tables + addedIn52Tables
+    static let currentVersion = 52
     static let optionalTables: Set<String> = ["action_recurrence", "source_entities"]
     static let opaqueIDTables: Set<String> = ["panorama_themes"]
     static let identityColumns: [String: [String]] = [
@@ -128,6 +130,7 @@ private enum PackageLayout {
         case 49: return version49Tables
         case 50: return version50Tables
         case 51: return version51Tables
+        case 52: return version52Tables
         default: return tables
         }
     }
@@ -175,7 +178,7 @@ extension VoiceOSStore {
         guard !FileManager.default.fileExists(atPath: destination.path) else { throw VoiceOSError("导出目录已存在，请选择新目录") }
         guard try db.query("SELECT id FROM sources WHERE input_fingerprint LIKE 'microphone-v1:%' AND state='receiving' AND expected_bytes=0").isEmpty else { throw VoiceOSError("请先停止并封存录制，再导出资料") }
         let existingTables = Set(try db.query("SELECT name FROM sqlite_master WHERE type='table'").compactMap { $0["name"] })
-        let exportTables = PackageLayout.version51Tables.filter { existingTables.contains($0) }
+        let exportTables = PackageLayout.version52Tables.filter { existingTables.contains($0) }
         var rows: [String: [[String: String]]] = [:]
         try db.transaction {
             for table in exportTables { rows[table] = try db.query("SELECT * FROM \(table) ORDER BY \(PackageLayout.keys(table).joined(separator: ","))") }
@@ -270,6 +273,7 @@ extension VoiceOSStore {
         guard manifest.version >= 48 || !manifest.files.contains(where: { ["action_review_resolutions.jsonl","expression_review_acknowledgements.jsonl"].contains($0.path) }) else { throw VoiceOSError("旧迁移格式不能携带行动关系核对记录") }
         guard manifest.version >= 49 || !manifest.files.contains(where: { $0.path.hasSuffix(".jsonl") && PackageLayout.addedIn49Tables.contains(String($0.path.dropLast(6))) }) else { throw VoiceOSError("旧迁移格式不能携带新表记录") }
         guard manifest.version >= 51 || !manifest.files.contains(where: { $0.path.hasSuffix(".jsonl") && PackageLayout.addedIn51Tables.contains(String($0.path.dropLast(6))) }) else { throw VoiceOSError("旧迁移格式不能携带新表记录") }
+        guard manifest.version >= 52 || !manifest.files.contains(where: { $0.path.hasSuffix(".jsonl") && PackageLayout.addedIn52Tables.contains(String($0.path.dropLast(6))) }) else { throw VoiceOSError("旧迁移格式不能携带笔记记录") }
         var tables = PackageLayout.tables(for: manifest.version)
         // A newer package can be relabeled as an older compatibility fixture. The
         // additive queue table is safe to carry through that validation path.

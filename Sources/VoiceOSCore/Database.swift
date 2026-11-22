@@ -20,7 +20,7 @@ final class Database {
         try execute("PRAGMA journal_mode=WAL")
         try execute("PRAGMA synchronous=FULL")
         let version = try query("PRAGMA user_version").first?["user_version"] ?? "0"
-        guard (0...76).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
+        guard (0...77).contains(Int(version) ?? -1) else { throw VoiceOSError("资料库格式比此应用更新，请使用兼容版本") }
         if version == "1" {
             // Add reference-only state without silently rewriting a newer schema.
             guard let original = try query("SELECT sql FROM sqlite_master WHERE name='sources'").first?["sql"] else { throw VoiceOSError("旧资料库缺少来源表，无法升级") }
@@ -1566,6 +1566,26 @@ final class Database {
                 }
                 try execute("CREATE INDEX IF NOT EXISTS monitor_message_pending ON monitor_messages(source_id, analyzed_report_id)")
                 try execute("PRAGMA user_version=76")
+            }
+        }
+
+        if try query("PRAGMA user_version").first?["user_version"] == "76" {
+            try transaction {
+                // A note is the article-shaped rendering of one expression's member
+                // sources. Saves are append-only so history survives; the expression
+                // key canonicalizes member order, and created_at picks the latest.
+                try execute("""
+                CREATE TABLE IF NOT EXISTS material_notes (
+                  id TEXT PRIMARY KEY,
+                  expression_key TEXT NOT NULL,
+                  transcript_versions_json TEXT NOT NULL,
+                  model_identity TEXT,
+                  created_at TEXT NOT NULL,
+                  note_json TEXT NOT NULL
+                )
+                """)
+                try execute("CREATE INDEX IF NOT EXISTS material_notes_expression ON material_notes(expression_key, created_at)")
+                try execute("PRAGMA user_version=77")
             }
         }
 
