@@ -1094,3 +1094,8 @@
 - 175-B 首页首帧笔记：ControlCenter 新增 materialNoteRows 会话缓存（按表达键存最新一版）；批量读取改为并入缓存、按 createdAt 单调合并（迟到的旧结果不会覆盖新版本、读取失败保留旧缓存）；RecentContentHome 删除视图内 @State，直接读缓存，返回首页首帧即用笔记标题与预览；阅读器元数据行有笔记时显示「继续读」（help 明示回到上次读到的位置）。
 - 集成：构建 65 因 materialNoteRows 的 private(set) setter 跨文件不可写失败（build_exit=1 / not restarting）；去掉 private(set) 后构建 66 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
 - 上机验证（175-A 位置恢复、175-B 首帧与「继续读」）因屏幕锁定暂缓：System Events 对 Finder/Claude 同样报 0 窗口，确认是图形会话不可见而非宿主捕捉故障；解锁后补拍截图入 docs/product/audits/2026-11-22/。
+## 波 176：完成后回到本次内容（2026-11-22）
+- 176-A 引导文案校准：首次引导第 2 步原写「VoiceOS 在本机整理成资料、理解与行动」，与实际不符——改为「音频在本机转写；只有你选择允许的文字会交给云端文本模型，整理成笔记、理解与行动」（产品文档阶段 2 明确要求校准此处表述）。
+- 176-B 通知直达材料页：整理/导入完成的通知原只设置选中项、不导航；默认点击与「打开材料」动作都改为 requestWorkspaceSource（经 pendingWorkspaceSourceID → go(.source(id))），窗口未打开时同时唤起主窗口。
+- 集成：构建 67 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
+- 只读评审发现 176-B 在「主窗口已关闭、通知重建窗口」的主场景下会丢失（pendingWorkspaceSourceID 只由 onChange 消费），并入 177 修复。
