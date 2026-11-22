@@ -188,6 +188,23 @@ struct MaterialNoteReadingView: View {
                 .help("从这次表达的开头回听")
                 .accessibilityLabel("从这次表达的开头回听")
             }
+            // 已是最新的笔记也需要一个安静的重整理入口（换模型、改提示词后可用）。
+            Menu {
+                Button("重新整理笔记") {
+                    Task { await model.requestMaterialNote(sourceID: source.id, force: true) }
+                }
+                .disabled(noteState == .generating)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .vosFont(WorkspaceText.meta.size)
+                    .foregroundStyle(palette.secondaryText)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .buttonStyle(.plain)
+            .help("笔记操作")
+            .accessibilityLabel("笔记操作")
         }
     }
 
