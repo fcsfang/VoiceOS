@@ -8,64 +8,74 @@ final class ReminderDefaultAlertChecks: XCTestCase {
         return calendar
     }
 
-    private func date(_ calendar: Calendar, _ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int) -> Date {
-        calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+    private func date(_ calendar: Calendar, _ components: DateComponents) -> Date {
+        calendar.date(from: components)!
     }
 
-    func testBeforeNineUsesSameDay() {
+    func testNextDefaultAlertCases() {
         let zone = calendar("Asia/Shanghai")
-        let due = ReminderDueDate.dateOnly(localDate: "2026-11-15", timeZone: nil)
-        XCTAssertEqual(ReminderFields.nextDefaultAlert(due: due, now: date(zone, 2026, 11, 15, 8, 30), calendar: zone), date(zone, 2026, 11, 15, 9, 0))
-    }
-
-    func testAfterNineUsesNextDay() {
-        let zone = calendar("Asia/Shanghai")
-        let due = ReminderDueDate.dateOnly(localDate: "2026-11-15", timeZone: nil)
-        XCTAssertEqual(ReminderFields.nextDefaultAlert(due: due, now: date(zone, 2026, 11, 15, 9, 30), calendar: zone), date(zone, 2026, 11, 16, 9, 0))
-    }
-
-    func testExactlyNineUsesNextDay() {
-        let zone = calendar("Asia/Shanghai")
-        let due = ReminderDueDate.dateOnly(localDate: "2026-11-15", timeZone: nil)
-        XCTAssertEqual(ReminderFields.nextDefaultAlert(due: due, now: date(zone, 2026, 11, 15, 9, 0), calendar: zone), date(zone, 2026, 11, 16, 9, 0))
+        let cases: [(due: ReminderDueDate, now: DateComponents, expected: DateComponents?)] = [
+            (.dateOnly(localDate: "2026-11-15", timeZone: nil),
+             .init(year: 2026, month: 11, day: 15, hour: 8, minute: 30),
+             .init(year: 2026, month: 11, day: 15, hour: 9, minute: 0)),
+            (.dateOnly(localDate: "2026-11-15", timeZone: nil),
+             .init(year: 2026, month: 11, day: 15, hour: 9, minute: 30),
+             .init(year: 2026, month: 11, day: 16, hour: 9, minute: 0)),
+            (.dateOnly(localDate: "2026-11-15", timeZone: nil),
+             .init(year: 2026, month: 11, day: 15, hour: 9, minute: 0),
+             .init(year: 2026, month: 11, day: 16, hour: 9, minute: 0)),
+            (.dateOnly(localDate: "2026-11-01", timeZone: nil),
+             .init(year: 2026, month: 11, day: 15, hour: 10, minute: 30),
+             .init(year: 2026, month: 11, day: 16, hour: 9, minute: 0)),
+            (.dateOnly(localDate: "2026-11-01", timeZone: nil),
+             .init(year: 2026, month: 11, day: 15, hour: 7, minute: 0),
+             .init(year: 2026, month: 11, day: 15, hour: 9, minute: 0)),
+            (.instant(utc: ReminderFields.timestamp(date(zone, .init(year: 2026, month: 11, day: 15, hour: 14, minute: 0))),
+                      timeZone: "Asia/Shanghai"),
+             .init(year: 2026, month: 11, day: 15, hour: 8, minute: 0),
+             nil),
+            (.none,
+             .init(year: 2026, month: 11, day: 15, hour: 8, minute: 0),
+             nil)
+        ]
+        for c in cases {
+            let now = date(zone, c.now)
+            let expected = c.expected.map { date(zone, $0) }
+            XCTAssertEqual(ReminderFields.nextDefaultAlert(due: c.due, now: now, calendar: zone), expected)
+        }
     }
 
     func testCalendarZoneChangesTheInstant() {
         let due = ReminderDueDate.dateOnly(localDate: "2026-11-15", timeZone: nil)
         let now = ISO8601DateFormatter().date(from: "2026-11-15T00:00:00Z")!
-        let shanghai = ReminderFields.nextDefaultAlert(due: due, now: now, calendar: calendar("Asia/Shanghai"))!
-        let losAngeles = ReminderFields.nextDefaultAlert(due: due, now: now, calendar: calendar("America/Los_Angeles"))!
-        XCTAssertEqual(ISO8601DateFormatter().string(from: shanghai), "2026-11-15T01:00:00Z")
-        XCTAssertEqual(ISO8601DateFormatter().string(from: losAngeles), "2026-11-15T17:00:00Z")
-        XCTAssertNotEqual(shanghai, losAngeles)
+        let cases: [(zone: String, expected: String)] = [
+            ("Asia/Shanghai", "2026-11-15T01:00:00Z"),
+            ("America/Los_Angeles", "2026-11-15T17:00:00Z")
+        ]
+        var instants: [Date] = []
+        for c in cases {
+            let value = ReminderFields.nextDefaultAlert(due: due, now: now, calendar: calendar(c.zone))!
+            XCTAssertEqual(ISO8601DateFormatter().string(from: value), c.expected, c.zone)
+            instants.append(value)
+        }
+        XCTAssertNotEqual(instants[0], instants[1])
     }
 
-    func testDateOnlyWithoutAlertsAddsNine() {
+    func testWithDefaultAlertCases() {
         let zone = calendar("Asia/Shanghai")
-        let fields = ReminderFields(due: .dateOnly(localDate: "2026-11-15", timeZone: nil))
-        let result = fields.withDefaultAlert(now: date(zone, 2026, 11, 15, 8, 0), calendar: zone)
-        XCTAssertEqual(result.alerts, [ReminderFields.timestamp(date(zone, 2026, 11, 15, 9, 0))])
-        XCTAssertNoThrow(try result.validate())
-    }
-
-    func testExistingAlertsAreKept() {
-        let zone = calendar("Asia/Shanghai")
-        let fields = ReminderFields(due: .dateOnly(localDate: "2026-11-15", timeZone: nil), alerts: ["2026-11-14T01:00:00.000Z"])
-        XCTAssertEqual(fields.withDefaultAlert(now: date(zone, 2026, 11, 15, 8, 0), calendar: zone), fields)
-    }
-
-    func testOverdueDateUsesNextNineOClock() {
-        let zone = calendar("Asia/Shanghai")
-        let due = ReminderDueDate.dateOnly(localDate: "2026-11-01", timeZone: nil)
-        XCTAssertEqual(ReminderFields.nextDefaultAlert(due: due, now: date(zone, 2026, 11, 15, 10, 30), calendar: zone), date(zone, 2026, 11, 16, 9, 0))
-        XCTAssertEqual(ReminderFields.nextDefaultAlert(due: due, now: date(zone, 2026, 11, 15, 7, 0), calendar: zone), date(zone, 2026, 11, 15, 9, 0))
-    }
-
-    func testTimedAndEmptyDueGetNoDefault() {
-        let zone = calendar("Asia/Shanghai")
-        let now = date(zone, 2026, 11, 15, 8, 0)
-        XCTAssertNil(ReminderFields.nextDefaultAlert(due: .instant(utc: ReminderFields.timestamp(date(zone, 2026, 11, 15, 14, 0)), timeZone: "Asia/Shanghai"), now: now, calendar: zone))
-        XCTAssertNil(ReminderFields.nextDefaultAlert(due: .none, now: now, calendar: zone))
+        let due = ReminderDueDate.dateOnly(localDate: "2026-11-15", timeZone: nil)
+        let nine = ReminderFields.timestamp(date(zone, .init(year: 2026, month: 11, day: 15, hour: 9, minute: 0)))
+        let existing = "2026-11-14T01:00:00.000Z"
+        let cases: [(alerts: [String], expected: [String], validates: Bool)] = [
+            ([], [nine], true),
+            ([existing], [existing], false)
+        ]
+        let now = date(zone, .init(year: 2026, month: 11, day: 15, hour: 8, minute: 0))
+        for c in cases {
+            let result = ReminderFields(due: due, alerts: c.alerts).withDefaultAlert(now: now, calendar: zone)
+            XCTAssertEqual(result.alerts, c.expected)
+            if c.validates { XCTAssertNoThrow(try result.validate()) }
+        }
     }
 
     func testAlertsWithoutDueAreRejected() {
