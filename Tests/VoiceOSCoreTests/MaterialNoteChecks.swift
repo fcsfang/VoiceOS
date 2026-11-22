@@ -21,10 +21,10 @@ final class MaterialNoteChecks: XCTestCase {
     private func note(_ title: String) -> MaterialNote {
         MaterialNote(title: title, lead: "导语 " + title, sections: [
             MaterialNote.Section(heading: "缘起", paragraphs: [
-                MaterialNote.Paragraph(text: "第一段 " + title, inferred: true, anchors: [
+                MaterialNote.Paragraph(text: "第一段 " + title, anchors: [
                     MaterialNote.Anchor(quote: "原话甲", sourceID: "a", transcriptVersionID: "ta-v1", spanID: "span-a"),
                     MaterialNote.Anchor(quote: "原话乙", sourceID: "b")
-                ]),
+                ], inferred: true),
                 MaterialNote.Paragraph(text: "第二段 " + title)
             ]),
             MaterialNote.Section(paragraphs: [
