@@ -50,8 +50,20 @@ final class TopicOrganizationStalenessChecks: XCTestCase {
         ], commandID: "staleness-claims-" + sourceID)
     }
 
-    func testStaleTopicKeepsOrganizationForReading() async throws {
-        let store = try await openStore()
+    func testStalenessScenariosTable() async throws {
+        let scenarios: [(name: String, run: (VoiceOSStore) async throws -> Void)] = [
+            ("原文更正保留旧组织供阅读", runTranscriptCorrectionKeepsOrganization),
+            ("摘要未变时重排修复归属", runReorganizationWhenDigestMatches),
+            ("未过期主题跳过重排", runCurrentTopicSkipsReorganization),
+        ]
+        for scenario in scenarios {
+            try? FileManager.default.removeItem(at: root)
+            let store = try await openStore()
+            try await scenario.run(store)
+        }
+    }
+
+    private func runTranscriptCorrectionKeepsOrganization(_ store: VoiceOSStore) async throws {
         let sourceID = try await store.recordUserExpression("主题整理后，原文更正不应清空已经生成的阅读卡片。")
         try await allowCloud(store, sourceID)
         let port = StalenessTopicPort()
@@ -80,8 +92,7 @@ final class TopicOrganizationStalenessChecks: XCTestCase {
         XCTAssertTrue(changedRefresh)
     }
 
-    func testStaleTopicReorganizesWhenBriefingDigestStillMatches() async throws {
-        let store = try await openStore()
+    private func runReorganizationWhenDigestMatches(_ store: VoiceOSStore) async throws {
         let firstID = try await store.recordUserExpression("第一份材料说明主题需要两份材料。")
         try await allowCloud(store, firstID)
         let secondID = try await store.recordUserExpression("第二份材料补充同一主题的细节。")
@@ -123,8 +134,7 @@ final class TopicOrganizationStalenessChecks: XCTestCase {
         XCTAssertFalse(repairedRefresh)
     }
 
-    func testCurrentTopicKeepsOrganizationAndSkipsReorganization() async throws {
-        let store = try await openStore()
+    private func runCurrentTopicSkipsReorganization(_ store: VoiceOSStore) async throws {
         let sourceID = try await store.recordUserExpression("未过期的主题不应重新整理，也不应出现提示。")
         try await allowCloud(store, sourceID)
         let port = StalenessTopicPort()

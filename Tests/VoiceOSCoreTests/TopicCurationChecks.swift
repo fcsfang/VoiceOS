@@ -42,8 +42,19 @@ final class TopicCurationChecks: XCTestCase {
         }
     }
 
-    func testMergeFoldsMaterialsJournalConfirmationsAndFeedback() async throws {
-        let store = try await openStore()
+    func testMergeScenariosTable() async throws {
+        let scenarios: [(name: String, run: (VoiceOSStore) async throws -> Void)] = [
+            ("合流材料、日志、确认与反馈", runMergeFoldsEverything),
+            ("目标反馈保留并拒绝坏请求", runMergeKeepsTargetFeedbackAndRejectsBadRequests),
+        ]
+        for scenario in scenarios {
+            try? FileManager.default.removeItem(at: root)
+            let store = try await openStore()
+            try await scenario.run(store)
+        }
+    }
+
+    private func runMergeFoldsEverything(_ store: VoiceOSStore) async throws {
         let db = await store.db
         let a = try await store.createReflectionQuestion(title: "甲主题")
         let b = try await store.createReflectionQuestion(title: "乙主题")
@@ -88,8 +99,7 @@ final class TopicCurationChecks: XCTestCase {
         try VoiceOSStore.validateStoredTopicFeedback(db)
     }
 
-    func testMergeKeepsTargetFeedbackAndRejectsBadRequests() async throws {
-        let store = try await openStore()
+    private func runMergeKeepsTargetFeedbackAndRejectsBadRequests(_ store: VoiceOSStore) async throws {
         let a = try await store.createReflectionQuestion(title: "甲主题")
         let b = try await store.createReflectionQuestion(title: "乙主题")
         try await store.saveTopicFeedback(questionID: a.id, mode: .paused, snooze: false)

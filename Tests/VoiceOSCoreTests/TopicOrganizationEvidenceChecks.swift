@@ -57,23 +57,33 @@ final class TopicOrganizationEvidenceChecks: XCTestCase {
         ], responseID: "r")
     }
 
-    func testExactQuotePassesUnchanged() throws {
-        let anchored = try VoiceOSStore.validateTopicBody(result(quote: "今天先确认范围，"), input: input(), sources: [transcript])
-        XCTAssertEqual(anchored.topics[0].sections[0].evidence[0].quote, "今天先确认范围，")
-        XCTAssertEqual(anchored.responseID, "r")
+    private enum QuoteOutcome {
+        case anchored(quote: String)
+        case rejected(message: String, source: String)
     }
 
-    func testReflowedWhitespaceAnchorsToTranscriptSlice() throws {
-        let anchored = try VoiceOSStore.validateTopicBody(result(quote: "今天先确认范围， 再验证结果"),
-                                                         input: input(), sources: [transcript])
-        XCTAssertEqual(anchored.topics[0].sections[0].evidence[0].quote, "今天先确认范围，\n再验证结果",
-                       "返回的引文取原文切片，保留原文换行")
-    }
-
-    func testFabricatedQuoteStillFails() {
-        XCTAssertThrowsError(try VoiceOSStore.validateTopicBody(result(quote: "录音里没有这句话"), input: input(), sources: [transcript])) { error in
-            XCTAssertTrue(error.localizedDescription.contains("主题正文的引用无法定位到当前完整原文"), error.localizedDescription)
-            XCTAssertTrue(error.localizedDescription.contains("s1"), "错误带上来源便于排查")
+    func testQuoteAnchoringTable() throws {
+        let cases: [(name: String, quote: String, outcome: QuoteOutcome)] = [
+            ("原样引文通过", "今天先确认范围，", .anchored(quote: "今天先确认范围，")),
+            ("重排空白定位到原文切片", "今天先确认范围， 再验证结果", .anchored(quote: "今天先确认范围，\n再验证结果")),
+            ("伪造引文仍然失败", "录音里没有这句话",
+             .rejected(message: "主题正文的引用无法定位到当前完整原文", source: "s1")),
+        ]
+        for testCase in cases {
+            switch testCase.outcome {
+            case .anchored(let quote):
+                let anchored = try VoiceOSStore.validateTopicBody(result(quote: testCase.quote),
+                                                                  input: input(), sources: [transcript])
+                XCTAssertEqual(anchored.topics[0].sections[0].evidence[0].quote, quote, testCase.name)
+                XCTAssertEqual(anchored.responseID, "r", testCase.name)
+            case .rejected(let message, let source):
+                XCTAssertThrowsError(try VoiceOSStore.validateTopicBody(result(quote: testCase.quote),
+                                                                        input: input(), sources: [transcript]),
+                                     testCase.name) { error in
+                    XCTAssertTrue(error.localizedDescription.contains(message), error.localizedDescription)
+                    XCTAssertTrue(error.localizedDescription.contains(source), "错误带上来源便于排查")
+                }
+            }
         }
     }
 

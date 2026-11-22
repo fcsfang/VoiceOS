@@ -31,58 +31,54 @@ final class TopicSearchIndexChecks: XCTestCase {
         return id
     }
 
-    func testTopicTitleIsSearchable() async throws {
-        let store = try await openStore()
-        let db = await store.db
-        let source = try insertSource(db, name: "习惯记录")
-        let topic = try insertTopic(db, title: "与父母沟通的节奏", sourceID: source)
-        try await store.rebuildSearchIndex()
+    func testTopicSearchIndexScenarios() async throws {
+        struct Scenario {
+            let name: String
+            let mutate: (Database, String) throws -> Void
+            let query: String
+            let expectedTitle: String?
+            let extra: ((VoiceOSStore, String) async throws -> Void)?
+        }
+        let scenarios: [Scenario] = [
+            Scenario(name: "标题可搜索", mutate: { _, _ in }, query: "沟通的节奏",
+                     expectedTitle: "与父母沟通的节奏", extra: { store, _ in
+                let hits = try await store.search(query: "沟通的节奏")
+                XCTAssertEqual(hits.first?.kind, SearchHit.Kind.topic)
+            }),
+            Scenario(name: "两字查询走索引", mutate: { _, _ in }, query: "沟通",
+                     expectedTitle: "与父母沟通的节奏", extra: { store, _ in
+                let hits = try await store.search(query: "沟通")
+                XCTAssertEqual(hits.first?.kind, .topic)
+                let topicTotal = try await store.searchAll(query: "沟通", perKindLimit: 20).total(for: .topic)
+                XCTAssertEqual(topicTotal, 1)
+            }),
+            Scenario(name: "改名刷新索引", mutate: { db, topic in
+                try db.execute("UPDATE reflection_questions SET title='与同事沟通的边界',updated_at='2026-11-15T00:00:00Z' WHERE id=?", [topic])
+            }, query: "沟通的边界", expectedTitle: "与同事沟通的边界", extra: { store, _ in
+                let old = try await store.search(query: "沟通的节奏")
+                XCTAssertTrue(old.isEmpty)
+            }),
+            Scenario(name: "删除移出索引", mutate: { db, topic in
+                try db.execute("DELETE FROM reflection_questions WHERE id=?", [topic])
+            }, query: "沟通的节奏", expectedTitle: nil, extra: nil),
+        ]
+        for testCase in scenarios {
+            try? FileManager.default.removeItem(at: root)
+            let store = try await openStore()
+            let db = await store.db
+            let source = try insertSource(db, name: "习惯记录")
+            let topic = try insertTopic(db, title: "与父母沟通的节奏", sourceID: source)
+            try await store.rebuildSearchIndex()
+            try testCase.mutate(db, topic)
 
-        let hits = try await store.search(query: "沟通的节奏")
-        XCTAssertEqual(hits.map(\.refID), [topic])
-        XCTAssertEqual(hits.first?.kind, SearchHit.Kind.topic)
-        XCTAssertEqual(hits.first?.title, "与父母沟通的节奏")
-    }
-
-    func testTwoCharacterTopicQueryUsesIndex() async throws {
-        let store = try await openStore()
-        let db = await store.db
-        let source = try insertSource(db, name: "习惯记录")
-        let topic = try insertTopic(db, title: "与父母沟通的节奏", sourceID: source)
-        try await store.rebuildSearchIndex()
-
-        let hits = try await store.search(query: "沟通")
-        XCTAssertEqual(hits.map(\.refID), [topic])
-        XCTAssertEqual(hits.first?.kind, .topic)
-        let topicTotal = try await store.searchAll(query: "沟通", perKindLimit: 20).total(for: .topic)
-        XCTAssertEqual(topicTotal, 1)
-    }
-
-    func testTopicRenameRefreshesIndex() async throws {
-        let store = try await openStore()
-        let db = await store.db
-        let source = try insertSource(db, name: "习惯记录")
-        let topic = try insertTopic(db, title: "与父母沟通的节奏", sourceID: source)
-        try await store.rebuildSearchIndex()
-        _ = try await store.search(query: "沟通的节奏")
-
-        try db.execute("UPDATE reflection_questions SET title='与同事沟通的边界',updated_at='2026-11-15T00:00:00Z' WHERE id=?", [topic])
-        let renamed = try await store.search(query: "沟通的边界")
-        XCTAssertEqual(renamed.map(\.refID), [topic])
-        XCTAssertEqual(renamed.first?.title, "与同事沟通的边界")
-        let old = try await store.search(query: "沟通的节奏")
-        XCTAssertTrue(old.isEmpty)
-    }
-
-    func testDeletedTopicLeavesIndex() async throws {
-        let store = try await openStore()
-        let db = await store.db
-        let source = try insertSource(db, name: "习惯记录")
-        let topic = try insertTopic(db, title: "与父母沟通的节奏", sourceID: source)
-        try await store.rebuildSearchIndex()
-        try db.execute("DELETE FROM reflection_questions WHERE id=?", [topic])
-
-        let hits = try await store.search(query: "沟通的节奏")
-        XCTAssertTrue(hits.isEmpty)
+            let hits = try await store.search(query: testCase.query)
+            if let expectedTitle = testCase.expectedTitle {
+                XCTAssertEqual(hits.map(\.refID), [topic], testCase.name)
+                XCTAssertEqual(hits.first?.title, expectedTitle, testCase.name)
+            } else {
+                XCTAssertTrue(hits.isEmpty, testCase.name)
+            }
+            try await testCase.extra?(store, topic)
+        }
     }
 }
