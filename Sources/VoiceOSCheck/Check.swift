@@ -8,7 +8,7 @@ struct Check {
     static func main() async {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
-            let usage = "usage: voiceos-check <read|import|import-personal-audio|ingest-podcast|task-context|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]\n       voiceos-check ax <dump|click|set-value|wait|scroll-to> --pid <pid> ..."
+            let usage = "usage: voiceos-check <read|search|import|import-personal-audio|ingest-podcast|task-context|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]\n       voiceos-check ax <dump|click|set-value|wait|scroll-to> --pid <pid> ..."
             if args.first == "ax" {
                 try AXCommands.run(Array(args.dropFirst()))
                 return
@@ -31,6 +31,8 @@ struct Check {
                 guard args.count == 3 else { throw VoiceOSError("task-context <data-dir> <output-json>") }
             case "read", "transcribe":
                 guard args.count == 2 else { throw VoiceOSError(usage) }
+            case "search":
+                guard args.count == 3 else { throw VoiceOSError("search <data-dir> <query>") }
             case "import", "import-personal-audio":
                 guard (3...4).contains(args.count) else { throw VoiceOSError(usage) }
             case "export":
@@ -48,6 +50,13 @@ struct Check {
             let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
             try await store.recover()
             switch command {
+            case "search":
+                try await store.rebuildSearchIndexIfNeeded()
+                let hits = try await store.search(query: args[2], limit: 20)
+                struct Hit: Encodable { let kind: String; let refID: String; let title: String }
+                let rows = hits.map { Hit(kind: $0.kind.rawValue, refID: $0.refID, title: $0.title) }
+                print(String(decoding: try JSONEncoder().encode(rows), as: UTF8.self))
+                return
             case "recording-titles":
                 let port = try LocalTextModel.loadSuite(from: URL(fileURLWithPath: args[2])).recordingTitles
                 let count = try await store.generateRecordingTitles(using: port)

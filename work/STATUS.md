@@ -1121,3 +1121,7 @@
 - saveFullRecordingOnly：完整录音页「只保存原件」——提取本人音轨后直接 importPersonalAudio，不转写不整理，完成发「录音已保存」通知并显示「打开这份材料」。
 - 导入与材料页文案按本机转写模型是否配置分支：未配置时说「配置本地 Qwen 后可转写」「等待本地转写模型」，材料页等待态直接给「配置本地 Qwen 转写…」按钮。
 - 集成：构建 73 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 181：搜索验证探针与隔离副本实证（2026-11-23）
+- voiceos-check 新增 `search <data-dir> <query>`：打开库、按需重建索引、输出 JSON 命中——无 GUI 也能验证搜索内容。
+- 隔离副本实证（实时库只读 .backup 到 /tmp，验证后已删）：按笔记标题「充电器是怎么匹配电压的」搜到对应材料（refID=32BA21DD…）；「黑雾」「充电器」的既有命中不回归；`read` 完整性 exit=0。shape v3 迁移在真实旧库副本上完成且索引重建成功。
+- 集成：构建 74 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
