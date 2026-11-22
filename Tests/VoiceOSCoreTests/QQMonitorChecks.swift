@@ -36,25 +36,39 @@ final class QQMonitorChecks: XCTestCase {
         }
     }
 
-    func testPermissionFailureClassifiesAsFullDiskAccessIssue() {
-        let stderr = #"{"version":1,"error":{"code":"permission_denied","zh":"需要完全磁盘访问权限","en":"PermissionError: [Errno 1] Operation not permitted: /Users/example/Library/Containers/com.tencent.qq/nt_db/nt_msg.db"}}"#
-        let message = QQMonitorHelper.contractError(stderr: Data(stderr.utf8)).localizedDescription
-        XCTAssertTrue(message.contains("permission_denied"), "应归类为权限问题：\(message)")
-        XCTAssertTrue(message.contains("完全磁盘访问权限"), "应给出完全磁盘访问权限指引：\(message)")
-        XCTAssertTrue(message.contains("系统设置"), "应给出可操作步骤：\(message)")
-        XCTAssertFalse(message.contains("重新导出密钥"), "权限问题不应误导用户重新导出密钥：\(message)")
+    func testContractErrorsClassifyPermissionAndKeyIssues() {
+        let cases: [(name: String, stderr: String, mustContain: [String], mustNotContain: [String])] = [
+            ("permission_denied 归为权限问题",
+             #"{"version":1,"error":{"code":"permission_denied","zh":"需要完全磁盘访问权限","en":"PermissionError: [Errno 1] Operation not permitted: /Users/example/Library/Containers/com.tencent.qq/nt_db/nt_msg.db"}}"#,
+             ["permission_denied", "完全磁盘访问权限", "系统设置"],
+             ["重新导出密钥"]),
+            ("旧脚本把权限问题报成密钥错误",
+             #"{"version":1,"error":{"code":"key_invalid","zh":"密钥或 QQ 数据无法读取","en":"PermissionError: [Errno 1] Operation not permitted: /Users/example/nt_msg.db"}}"#,
+             ["完全磁盘访问权限"],
+             []),
+            ("真正的密钥问题保留密钥指引",
+             #"{"version":1,"error":{"code":"key_invalid","zh":"密钥文件缺失或为空","en":"key file unavailable: /tmp/qq-key.bin"}}"#,
+             ["重新导出密钥"],
+             ["完全磁盘访问权限"]),
+            ("密钥轮换说明 QQ 升级",
+             #"{"version":1,"error":{"code":"key_invalid","zh":"QQ 可能已升级导致密钥失效，请重新导出密钥","en":"RuntimeError: expected exactly one valid key candidate; found 0"}}"#,
+             ["QQ 可能已升级", "重新导出密钥"],
+             ["完全磁盘访问权限"]),
+        ]
+        for c in cases {
+            let message = QQMonitorHelper.contractError(stderr: Data(c.stderr.utf8)).localizedDescription
+            for expected in c.mustContain {
+                XCTAssertTrue(message.contains(expected), "\(c.name)：应包含 \(expected)：\(message)")
+            }
+            for unexpected in c.mustNotContain {
+                XCTAssertFalse(message.contains(unexpected), "\(c.name)：不应包含 \(unexpected)：\(message)")
+            }
+        }
 
-        let legacy = #"{"version":1,"error":{"code":"key_invalid","zh":"密钥或 QQ 数据无法读取","en":"PermissionError: [Errno 1] Operation not permitted: /Users/example/nt_msg.db"}}"#
-        let legacyMessage = QQMonitorHelper.contractError(stderr: Data(legacy.utf8)).localizedDescription
-        XCTAssertTrue(legacyMessage.contains("完全磁盘访问权限"),
-                      "旧脚本把权限问题报成密钥错误时仍应归类为权限问题：\(legacyMessage)")
-    }
-
-    func testKeyFailureStaysKeyIssue() {
-        let stderr = #"{"version":1,"error":{"code":"key_invalid","zh":"密钥文件缺失或为空","en":"key file unavailable: /tmp/qq-key.bin"}}"#
-        let message = QQMonitorHelper.contractError(stderr: Data(stderr.utf8)).localizedDescription
-        XCTAssertTrue(message.contains("重新导出密钥"), "密钥问题应保留原有密钥指引：\(message)")
-        XCTAssertFalse(message.contains("完全磁盘访问权限"), "真正的密钥问题不应提示磁盘权限：\(message)")
+        let probe = QQMonitorHelper.mirrorProbeItem(exitCode: 1,
+                                                    stderr: "RuntimeError: expected exactly one valid key candidate; found 0")
+        XCTAssertFalse(probe.ok, "检查 QQ 依赖不应把密钥轮换报告为全绿")
+        XCTAssertTrue(probe.detail.contains("重新导出密钥"), "镜像库探测应给出密钥修复指引：\(probe.detail)")
     }
 
     func testPermissionRecheckClassifiesAsFullDiskAccessIssue() {
@@ -71,18 +85,6 @@ final class QQMonitorChecks: XCTestCase {
         XCTAssertFalse(missing.ok)
         XCTAssertFalse(missing.needsFullDiskAccess, "真正的数据目录缺失不应误报为权限问题")
         XCTAssertTrue(missing.detail.contains("登录"), "数据目录缺失应提示确认登录：\(missing.detail)")
-    }
-
-    func testValidKeyCandidateFailureClassifiesAsKeyInvalid() {
-        let stderr = #"{"version":1,"error":{"code":"key_invalid","zh":"QQ 可能已升级导致密钥失效，请重新导出密钥","en":"RuntimeError: expected exactly one valid key candidate; found 0"}}"#
-        let message = QQMonitorHelper.contractError(stderr: Data(stderr.utf8)).localizedDescription
-        XCTAssertTrue(message.contains("QQ 可能已升级"), "密钥轮换应说明 QQ 升级原因：\(message)")
-        XCTAssertTrue(message.contains("重新导出密钥"), "应给出重新导出密钥的指引：\(message)")
-        XCTAssertFalse(message.contains("完全磁盘访问权限"), "密钥失效不应误导为权限问题：\(message)")
-        let probe = QQMonitorHelper.mirrorProbeItem(exitCode: 1,
-                                                    stderr: "RuntimeError: expected exactly one valid key candidate; found 0")
-        XCTAssertFalse(probe.ok, "检查 QQ 依赖不应把密钥轮换报告为全绿")
-        XCTAssertTrue(probe.detail.contains("重新导出密钥"), "镜像库探测应给出密钥修复指引：\(probe.detail)")
     }
 
     func testScriptPassesStaticCompileCheck() throws {
