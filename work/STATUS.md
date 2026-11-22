@@ -1115,3 +1115,4 @@
 - 179-A 完整整理与自动收件：ControlCenter 新增 fullRecordingCompletedSourceID 与 openCompletedFullRecording（收起面板 + requestWorkspaceSource）；completeFullOrganization 成功与「已完整整理」复用路径都记录产出 id；自动收件成功记录首份 id 并发「录音已整理」本地通知（点开经 177 的窗口重建补消费直达材料页）；FullRecordingView 完成态显示「打开这篇笔记」为主动作，无产出 id 时保留「查看任务与后续」。
 - 未做（下一单元）：菜单「记录想法」sheet 与 QuickNote 保存后回材料、批量导入报告行内查看、RecordingInbox 完成行打开材料。
 - 集成：构建 70 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
+- 179-B 记录入口回到本次内容：acceptCaptureRequest 改为返回材料 id；QuickNote 与菜单「记录想法」sheet 保存成功即收起并 requestWorkspaceSource，服务/剪贴板路径保持只保存不抢窗口。集成：构建 71 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。

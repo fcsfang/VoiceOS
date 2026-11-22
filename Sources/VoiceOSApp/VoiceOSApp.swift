@@ -2803,12 +2803,14 @@ final class ControlCenter: ObservableObject {
     }
     func acceptCaptureURL(_ url: URL) async -> Bool {
         guard let link = CaptureLink.parse(url) else { status = "抓取链接无效，未保存"; return false }
-        return await acceptCaptureRequest(text: link.text, title: link.title, url: link.url, successURL: link.successURL)
+        return await acceptCaptureRequest(text: link.text, title: link.title, url: link.url, successURL: link.successURL) != nil
     }
-    func acceptCaptureRequest(text: String?, title: String?, url: String?, successURL: URL?, context: String? = nil) async -> Bool {
-        guard let store else { status = "资料库尚未打开，未保存"; return false }
+    /// 保存一段抓取内容；成功返回材料 id，供调用方收起界面并回到这次内容。
+    @discardableResult
+    func acceptCaptureRequest(text: String?, title: String?, url: String?, successURL: URL?, context: String? = nil) async -> String? {
+        guard let store else { status = "资料库尚未打开，未保存"; return nil }
         let body = [text, url].compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }.first { !$0.isEmpty }
-        guard let body else { status = "抓取内容为空，未保存"; return false }
+        guard let body else { status = "抓取内容为空，未保存"; return nil }
         let metadataURL = url.flatMap { value -> String? in
             guard let scheme = URL(string: value)?.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
             return value
@@ -2822,11 +2824,11 @@ final class ControlCenter: ObservableObject {
             await refresh()
             if let successURL, let callback = CaptureLink.successCallback(successURL, sourceID: id) { NSWorkspace.shared.open(callback) }
             status = previousID == nil ? "已存入外部资料，仅本机保存" : "与刚才的内容相同，已合并"
-            return true
+            return id
         } catch {
             status = "抓取未保存：" + error.localizedDescription
             await refresh()
-            return false
+            return nil
         }
     }
     func captureClipboardText() {
@@ -2917,7 +2919,7 @@ final class ControlCenter: ObservableObject {
         do {
             let text = try String(contentsOf: url, encoding: .utf8)
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { status = "文字文件为空，未保存"; return true }
-            return await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil)
+            return await acceptCaptureRequest(text: text, title: nil, url: nil, successURL: nil) != nil
         } catch { status = "无法读取文字文件：" + error.localizedDescription; return false }
     }
     private func acceptImageCapture(_ url: URL) async -> Bool {
@@ -4536,7 +4538,10 @@ struct VoiceOSApp: App {
                 }
                 .sheet(isPresented: $model.showingCaptureComposer) {
                     TextCaptureView(model: model, draft: $model.textCaptureDraft,
-                                    onSaved: { _ in model.showingCaptureComposer = false },
+                                    onSaved: { id in
+                                        model.showingCaptureComposer = false
+                                        model.requestWorkspaceSource(id)
+                                    },
                                     dismiss: { model.showingCaptureComposer = false })
                         .frame(minWidth: WorkspaceMetrics.modalSmall, minHeight: 560)
                 }
@@ -5579,7 +5584,7 @@ extension ApplicationDelegate: VoiceOSIntentEndpoint {
     }
     @MainActor func captureVoiceOSIntent(text: String, title: String?) async -> Bool {
         guard let model = await readyControlCenter() else { return false }
-        return await model.acceptCaptureRequest(text: text, title: title, url: nil, successURL: nil, context: "快捷指令")
+        return await model.acceptCaptureRequest(text: text, title: title, url: nil, successURL: nil, context: "快捷指令") != nil
     }
     @MainActor func openTodayActions() -> Bool {
         guard let model = ControlCenter.primary else { return false }

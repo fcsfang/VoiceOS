@@ -16,3 +16,9 @@
 
 ## 验证
 parse_exit=0；集成构建 70 结果见 STATUS。
+
+## 179-B
+- acceptCaptureRequest 改为返回保存的材料 id（@discardableResult String?）；URL/Intent/文字文件包装层改用 `!= nil`。
+- QuickNote 保存成功：close() 后 requestWorkspaceSource(id) 回到这次内容。
+- 菜单「记录想法」sheet 的 onSaved：关闭后 requestWorkspaceSource(id)。
+- 服务/剪贴板路径保持只保存、不抢窗口。

@@ -99,9 +99,13 @@ private struct QuickNoteView: View {
         saving = true
         error = ""
         Task {
-            let saved = await model.acceptCaptureRequest(text: text, title: title, url: nil, successURL: nil, context: context)
+            let savedID = await model.acceptCaptureRequest(text: text, title: title, url: nil, successURL: nil, context: context)
             saving = false
-            if saved { close() } else { error = model.status.isEmpty ? "保存失败，请稍后重试" : model.status }
+            if let savedID {
+                close()
+                // 保存后回到这次内容，而不是留在原地找刚才写的东西。
+                model.requestWorkspaceSource(savedID)
+            } else { error = model.status.isEmpty ? "保存失败，请稍后重试" : model.status }
         }
     }
 }
