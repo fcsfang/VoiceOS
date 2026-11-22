@@ -844,12 +844,15 @@ struct WorkspaceMonitorView: View {
                     WorkspaceListDivider()
                     authorizationSettings
                 }
+                .padding(.horizontal, 20).padding(.bottom, 14)
             }
             WorkspaceSettingsCard(title: "微信推送") {
                 VStack(alignment: .leading, spacing: 14) { pushSettings }
+                    .padding(.horizontal, 20).padding(.bottom, 14)
             }
             WorkspaceSettingsCard(title: "QQ 群读取") {
                 VStack(alignment: .leading, spacing: 14) { qqSettings }
+                    .padding(.horizontal, 20).padding(.bottom, 14)
             }
             if !model.monitorStatus.isEmpty {
                 Text(model.monitorStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)

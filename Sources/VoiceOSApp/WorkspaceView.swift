@@ -1487,9 +1487,11 @@ struct WorkspaceView: View {
     }
     @State private var showingClarifyQueue = false
     @State private var clarifyScope: ClarifyQueueScope = .questions
+    @State private var actionSurfaceRevision = 0
     private var actionPageKey: ActionPageCache.Key {
         ActionPageCache.Key(records: model.recordsRevision, secondary: model.secondaryRevision,
-                            minute: Int(Date().timeIntervalSince1970/60), filter: actionFilter)
+                            minute: Int(Date().timeIntervalSince1970/60) &+ actionSurfaceRevision,
+                            filter: actionFilter)
     }
     private func actionPageRowReads() -> ActionRowReads {
         if let reads = actionPageCache.rowReads { return reads }
@@ -1503,7 +1505,26 @@ struct WorkspaceView: View {
         let surface = ActionTimeSurface.build(actions: todoActions, schedules: model.scheduleIntents,
                                               links: model.reminderLinks, now: Date(), calendar: .current)
         actionPageCache.timeSurface = surface
+        scheduleActionSurfaceTick(for: surface)
         return surface
+    }
+    /// The cached surface keeps its overdue flags for the rest of the minute;
+    /// wake once when the nearest upcoming due instant inside this minute passes.
+    private func scheduleActionSurfaceTick(for surface: ActionTimeSurface) {
+        let now = Date()
+        let upcoming: [Date] = (surface.today + surface.soon).compactMap { entry in
+            guard case let .instant(utc, _)? = entry.due else { return nil }
+            let parsed = ActionTimeFormatting.isoFractional.date(from: utc) ?? ActionTimeFormatting.iso.date(from: utc)
+            guard let parsed, parsed > now, parsed.timeIntervalSince(now) < 61 else { return nil }
+            return parsed
+        }
+        guard let next = upcoming.min() else { return }
+        let revision = actionSurfaceRevision
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(max(0.1, next.timeIntervalSinceNow + 0.05)))
+            guard !Task.isCancelled, revision == actionSurfaceRevision else { return }
+            actionSurfaceRevision &+= 1
+        }
     }
     /// The body already built this surface from `myTodoActions` in this minute.
     /// Both keyboard call sites use `visibleActions`, which is that same list
@@ -2331,7 +2352,7 @@ struct WorkspaceView: View {
             }
             WorkspaceSettingsRow(title:"导出资料与原件", subtitle:"包含录音、视频与附件") {
                 HStack(spacing:8) {
-                    if model.exporting { ProgressView().controlSize(.mini).accessibilityHidden(true) }
+                    if model.exporting { ProgressView().controlSize(.mini).accessibilityLabel("正在导出") }
                     Button("导出") { model.export(includeMedia:true) }.buttonStyle(.workspaceSecondaryCompact).disabled(model.exporting).accessibilityLabel("导出资料与原件")
                 }
             }
