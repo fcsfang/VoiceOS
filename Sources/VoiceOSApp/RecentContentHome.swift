@@ -26,6 +26,7 @@ struct RecentContentHome: View {
     @SceneStorage("recentHome.timelineAnchor") private var storedTimelineAnchor = ""
     @State private var timelineRestored = false
     @State private var readingStates: [String: SourceReadingState] = [:]
+    @AppStorage("voiceos.home.pendingOnly") private var showsOnlyPending = true
     @State private var clueRename: ClueRenameRequest?
     @State private var clueFailureText = ""
     @State private var clueFailureTitle = "操作未完成"
@@ -50,7 +51,19 @@ struct RecentContentHome: View {
     private var timelineWidth: CGFloat { 288 * min(max(textScale, 1), 1.3) }
 
     private var days: [RecentContentDay] { model.homeSnapshot.days }
-    private var items: [RecentContentItem] { days.flatMap(\.items) }
+    /// The inbox default: only materials still unread or in progress; action
+    /// feedback always stays because it has no reading state of its own.
+    private var visibleDays: [RecentContentDay] {
+        guard showsOnlyPending else { return days }
+        return days.compactMap { day in
+            let kept = day.items.filter { item in
+                guard item.kind == .material, let source = materialSource(item) else { return true }
+                return (readingStates[source.id] ?? .unread) != .read
+            }
+            return kept.isEmpty ? nil : RecentContentDay(id: day.id, date: day.date, items: kept)
+        }
+    }
+    private var items: [RecentContentItem] { visibleDays.flatMap(\.items) }
     private var selected: RecentContentItem? {
         items.first { $0.id == selectedID }
             ?? items.first { !storedSelection.isEmpty && $0.id == storedSelection }
@@ -63,7 +76,16 @@ struct RecentContentHome: View {
             homeHeader
             Group {
                 if items.isEmpty {
-                    empty.onAppear { StartupTrace.mark("home.appear.empty") }
+                    Group {
+                        if days.isEmpty {
+                            empty
+                        } else {
+                            WorkspaceEmptyState(title: "待处理的都处理完了", systemImage: "checkmark.circle",
+                                                description: "已读的内容留在「材料」页；也可以看全部最近记录。") {
+                                Button("查看全部") { showsOnlyPending = false }.buttonStyle(.workspaceSecondary)
+                            }
+                        }
+                    }.onAppear { StartupTrace.mark("home.appear.empty") }
                 } else {
                     HStack(spacing: 0) {
                         timeline.frame(width: timelineWidth)
@@ -96,6 +118,11 @@ struct RecentContentHome: View {
 
     private var homeHeader: some View {
         HStack(spacing: 12) {
+            Picker("范围", selection: $showsOnlyPending) {
+                Text("待处理").tag(true)
+                Text("全部").tag(false)
+            }.pickerStyle(.segmented).labelsHidden().frame(width: 150)
+            .accessibilityLabel("时间线范围")
             Spacer()
             Button(action: openWeeklyReview) {
                 HStack(spacing: 4) {
@@ -159,7 +186,7 @@ struct RecentContentHome: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
                     if !recentThoughts.isEmpty { recentThoughtsEntry(recentThoughts).id(recentThoughtsRowID) }
-                    ForEach(days) { day in
+                    ForEach(visibleDays) { day in
                         VStack(alignment: .leading, spacing: 6) {
                             dayHeader(day)
                             VStack(alignment: .leading, spacing: 8) {
@@ -167,6 +194,13 @@ struct RecentContentHome: View {
                                     Button { keyboardDrivenSelection = false; recentThoughtsHighlighted = false; selectedID = item.id } label: { row(item) }
                                         .buttonStyle(.plain)
                                         .id(item.id)
+                                        .contextMenu {
+                                            if item.kind == .material {
+                                                Button("标为未读") { setReading(item, .unread) }
+                                                Button("标为在读") { setReading(item, .reading) }
+                                                Button("标为已读") { setReading(item, .read) }
+                                            }
+                                        }
                                         .background {
                                             GeometryReader { geometry in
                                                 Color.clear.preference(key: TimelineAnchorKey.self, value: [item.id: geometry.frame(in: .named(timelineSpace)).minY])
@@ -296,8 +330,13 @@ struct RecentContentHome: View {
                 // The title line belongs to the title alone. Every row reads one
                 // title line plus one metadata line, so density stays uniform.
                 Text(presentation.title).vosFont(WorkspaceText.rowTitle)
-                    .foregroundStyle(palette.text).lineLimit(isLargeText ? 2 : 1).multilineTextAlignment(.leading)
+                    .foregroundStyle(readingState(item) == .read ? palette.secondaryText : palette.text)
+                    .lineLimit(isLargeText ? 2 : 1).multilineTextAlignment(.leading)
                 HStack(spacing: 4) {
+                    if let state = readingState(item), state != .read {
+                        Circle().fill(state == .unread ? palette.accent : palette.secondaryText)
+                            .frame(width: 5, height: 5).accessibilityHidden(true)
+                    }
                     Text(presentation.meta).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         .lineLimit(1)
                     if let trailing = presentation.trailing {
@@ -354,6 +393,19 @@ struct RecentContentHome: View {
         guard let id = item.sourceIDs.first else { return nil }
         return model.sourcePageIndex.recordsByID[id]
     }
+    private func readingState(_ item: RecentContentItem) -> SourceReadingState? {
+        guard item.kind == .material, let source = materialSource(item) else { return nil }
+        return readingStates[source.id] ?? .unread
+    }
+    private func setReading(_ item: RecentContentItem, _ state: SourceReadingState) {
+        guard let source = materialSource(item) else { return }
+        let previous = readingStates[source.id]
+        readingStates[source.id] = state
+        Task {
+            let ok = await model.setReadingState(sourceID: source.id, state: state)
+            if !ok { readingStates[source.id] = previous }
+        }
+    }
 
     /// The trailing slot carries the value a material produced: its open tasks.
     /// Process states read inline as secondary text instead.
@@ -371,8 +423,12 @@ struct RecentContentHome: View {
         case .some(.issues(let count)): return "疑点 \(count)"
         case nil: break
         }
-        guard item.kind == .material, let source = materialSource(item), readingStates[source.id] == .reading else { return nil }
-        return "在读"
+        guard item.kind == .material, let source = materialSource(item) else { return nil }
+        switch readingStates[source.id] ?? .unread {
+        case .unread: return "未读"
+        case .reading: return "在读"
+        case .read: return "已读"
+        }
     }
 
     private func progressCount(_ item: RecentContentItem) -> Int {
