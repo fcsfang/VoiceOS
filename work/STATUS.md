@@ -1033,3 +1033,10 @@
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
 - 更正（2026-11-22）：上条「737 tests 全绿、dist 重建并重启」为误记。build43 真实退出码 test_exit=1（738 tests、3 failures）：构建启动后新建并随即删除的临时测试文件被构建快照带入，文件未入库、当前树无；应用未更新（仍为 164 构建）。已重跑集成（见波 166 记录前的构建 44 结果），教训写入记忆。
 - 更正后复核（构建 44）：build_exit=0 / test_exit=0（737 tests, 0 failures）/ dist_build_exit=0 / restarted——165 现为真实全绿并已上机。
+## 波 166：删除全景特性（2026-11-22，已推送）
+- 用户取舍：「全景图效果非常差，已用不到，要么直接删掉」——决定整体删除 Panorama。
+- 删除 17 个文件（Core 10：生成流程/提示词/端口/切片/主题身份/刷新策略/存储扩展/模型输入；App 3：屏幕模型/星座视图/全景视图；测试 4），共约 8758 行移除、13 行新增。
+- 宿主清理：首页移除「最近/全景」切换与 PanoramaHome 分支（首页只留时间线）；处理页移除「全景生成未完成」区块与注意力项；VoiceOSApp 移除 panorama 屏幕模型/刷新策略/端口/启动重试块/菜单与讨论路由入口；LocalTextModel 删除 panorama 与 themeReply 端口（后者仅服务全景主题简报，随其定义文件删除，避免悬空类型）；Store 移除全景恢复/回填调用；PortablePackage 恢复时忽略 panorama 表、保留版本 51 守卫与表清单，旧包仍可恢复。
+- 保留：model_attempts/contexts/claims 共用基建、全部数据库 DDL 与迁移（panorama_* 表作为休眠数据，不 DROP）、认知地图与其余功能；老资料库可正常打开。
+- 附：README 首页描述更新；restart_preflight.sh 不再统计休眠的全景运行行（避免陈旧 running 行阻塞重启）。
+- 集成：704 tests 全绿（build_exit=0 / test_exit=0，测试数由 737 减至 704，减少的 33 个均为已删除的全景专用测试），dist 重建并重启。
