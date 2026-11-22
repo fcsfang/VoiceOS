@@ -12,129 +12,101 @@ final class MaterialTitleTextChecks: XCTestCase {
                      timeZone: "Asia/Shanghai", presentation: presentation)
     }
 
-    func testOpeningFillersAndDuplicatedPronounAreStripped() {
-        let title = MaterialTitleText.derived(fromTranscript: "所以我我要考虑找一个方法，在使用AI的过程中要减少这种情况。")
-        XCTAssertNotNil(title)
-        XCTAssertTrue(title?.hasPrefix("我要考虑") == true)
-        XCTAssertLessThanOrEqual(title?.count ?? 0, 20)
+    private struct PresentationSpec {
+        let manual: String?
+        let automatic: String?
+        let version: String
     }
 
-    func testFirstClauseIsKeptBeforeComma() {
-        XCTAssertEqual(MaterialTitleText.derived(fromTranscript: "我想做一个标题工具，后面还有很多内容"), "我想做一个标题工具")
+    private func makePresentation(_ spec: PresentationSpec) -> RecordingPresentation {
+        RecordingPresentation(
+            manualTitle: spec.manual,
+            automatic: spec.automatic.map { RecordingTitleProposal(sourceID: "s", title: $0, summary: "s", quotes: []) },
+            transcriptVersionID: spec.version)
     }
 
-    func testLongUnpunctuatedTextGetsEllipsisWithinTwentyCharacters() {
-        XCTAssertEqual(MaterialTitleText.derived(fromTranscript: String(repeating: "长", count: 25)),
-                       String(repeating: "长", count: 20) + "…")
+    private struct DisplayTitleCase {
+        let id: String
+        let presentation: PresentationSpec?
+        let transcript: String
+        let displayTitle: String
+        let contentTitle: String?
     }
 
-    func testExactlyTwentyCharactersStaysIntact() {
-        XCTAssertEqual(MaterialTitleText.derived(fromTranscript: String(repeating: "字", count: 20)),
-                       String(repeating: "字", count: 20))
-    }
+    private let filler = "所以我我要考虑找一个方法，在使用AI的过程中要减少这种情况。"
 
-    func testOverStrippingFallsBackToOriginalWording() {
-        XCTAssertEqual(MaterialTitleText.derived(fromTranscript: "那个方案很好"), "那个方案很好")
-    }
-
-    func testGeneratedTitleLosesMarkdownAndTrailingPunctuation() {
-        XCTAssertEqual(MaterialTitleText.normalizedGenerated("**周会结论**。"), "周会结论")
-        XCTAssertEqual(MaterialTitleText.normalizedGenerated("## 预算安排\n第二行"), "预算安排 第二行")
-    }
-
-    func testGeneratedTitleIsCappedAtTwentyFourCharacters() {
-        XCTAssertEqual(MaterialTitleText.normalizedGenerated(String(repeating: "题", count: 30)),
-                       String(repeating: "题", count: 24) + "…")
-    }
-
-    func testEmptyAndPunctuationOnlyTitlesAreNil() {
-        XCTAssertNil(MaterialTitleText.normalizedGenerated(""))
-        XCTAssertNil(MaterialTitleText.normalizedGenerated("  \n "))
-        XCTAssertNil(MaterialTitleText.normalizedGenerated("。。。"))
-        XCTAssertNil(MaterialTitleText.derived(fromTranscript: "，，，"))
-    }
-
-    func testManualTitleIsTrimmedButNotRewritten() {
-        let presentation = RecordingPresentation(
-            manualTitle: "  我的标题。 ",
-            automatic: RecordingTitleProposal(sourceID: "s1", title: "**自动标题**。", summary: "s", quotes: []),
-            transcriptVersionID: "t-s1")
-        let record = source(id: "s1", transcript: "所以我我要考虑找一个方法，在使用AI的过程中要减少这种情况。", presentation: presentation)
-        XCTAssertEqual(record.displayTitle, "我的标题。")
-    }
-
-    func testAutomaticTitleReachesDisplayTitleNormalized() {
-        let presentation = RecordingPresentation(
-            automatic: RecordingTitleProposal(sourceID: "s2", title: "**周会结论**。", summary: "s", quotes: []),
-            transcriptVersionID: "t-s2")
-        XCTAssertEqual(source(id: "s2", transcript: "原文", presentation: presentation).displayTitle, "周会结论")
-    }
-
-    func testTranscriptFallbackReachesDisplayTitleDerived() {
-        let record = source(id: "s3", transcript: "所以我我要考虑找一个方法，在使用AI的过程中要减少这种情况。", presentation: nil)
-        XCTAssertEqual(record.displayTitle, "我要考虑找一个方法")
-    }
-
-    func testGraphemeClustersAreNotTorn() {
+    func testDerivedTitleCases() {
         let family = "👨‍👩‍👧‍👦"
-        XCTAssertEqual(MaterialTitleText.derived(fromTranscript: String(repeating: family, count: 22)),
-                       String(repeating: family, count: 20) + "…")
-        XCTAssertEqual(MaterialTitleText.normalizedGenerated(String(repeating: family, count: 30)),
-                       String(repeating: family, count: 24) + "…")
+        let cases: [(transcript: String, expected: String?)] = [
+            (filler, "我要考虑找一个方法"),
+            ("我想做一个标题工具，后面还有很多内容", "我想做一个标题工具"),
+            (String(repeating: "长", count: 25), String(repeating: "长", count: 20) + "…"),
+            (String(repeating: "字", count: 20), String(repeating: "字", count: 20)),
+            ("那个方案很好", "那个方案很好"),
+            ("，，，", nil),
+            (String(repeating: family, count: 22), String(repeating: family, count: 20) + "…")
+        ]
+        for c in cases {
+            XCTAssertEqual(MaterialTitleText.derived(fromTranscript: c.transcript), c.expected, c.transcript)
+        }
     }
 
-    func testGeneratedTitleNormalizationIsIdempotent() {
-        let inputs = ["**周会结论**。", String(repeating: "题", count: 30), "标题…。",
-                      "## 预算安排\n第二行", "好的……"]
-        for input in inputs {
+    func testGeneratedTitleCases() {
+        let family = "👨‍👩‍👧‍👦"
+        let capped = String(repeating: "题", count: 24) + "…"
+        let cases: [(input: String, expected: String?)] = [
+            ("**周会结论**。", "周会结论"),
+            ("## 预算安排\n第二行", "预算安排 第二行"),
+            (String(repeating: "题", count: 30), capped),
+            ("", nil),
+            ("  \n ", nil),
+            ("。。。", nil),
+            ("标题…。", "标题…"),
+            (capped, capped),
+            ("用 C# 写 snake_case 工具", "用 C# 写 snake_case 工具"),
+            ("- 用 C# 写 snake_case 工具", "用 C# 写 snake_case 工具"),
+            (String(repeating: family, count: 30), String(repeating: family, count: 24) + "…")
+        ]
+        for c in cases {
+            XCTAssertEqual(MaterialTitleText.normalizedGenerated(c.input), c.expected, c.input)
+        }
+        for input in ["**周会结论**。", String(repeating: "题", count: 30), "标题…。",
+                      "## 预算安排\n第二行", "好的……"] {
             let once = MaterialTitleText.normalizedGenerated(input)
             XCTAssertEqual(once.flatMap(MaterialTitleText.normalizedGenerated), once, input)
         }
     }
 
-    func testGeneratedTitleKeepsInWordSymbols() {
-        XCTAssertEqual(MaterialTitleText.normalizedGenerated("用 C# 写 snake_case 工具"),
-                       "用 C# 写 snake_case 工具")
-        XCTAssertEqual(MaterialTitleText.normalizedGenerated("- 用 C# 写 snake_case 工具"),
-                       "用 C# 写 snake_case 工具")
+    func testDisplayAndContentTitleCases() {
+        let cases: [DisplayTitleCase] = [
+            .init(id: "s1",
+                  presentation: PresentationSpec(manual: "  我的标题。 ", automatic: "**自动标题**。", version: "t-s1"),
+                  transcript: filler, displayTitle: "我的标题。", contentTitle: "我的标题。"),
+            .init(id: "s2",
+                  presentation: PresentationSpec(manual: nil, automatic: "**周会结论**。", version: "t-s2"),
+                  transcript: "原文", displayTitle: "周会结论", contentTitle: "周会结论"),
+            .init(id: "s3",
+                  presentation: PresentationSpec(manual: nil, automatic: "过期标题", version: "t-old"),
+                  transcript: "原文", displayTitle: "原文", contentTitle: nil)
+        ]
+        for c in cases {
+            let record = source(id: c.id, transcript: c.transcript, presentation: c.presentation.map(makePresentation))
+            XCTAssertEqual(record.displayTitle, c.displayTitle, c.id)
+            XCTAssertEqual(record.contentTitle, c.contentTitle, c.id)
+        }
     }
 
-    func testTruncationEllipsisIsStable() {
-        let long = String(repeating: "题", count: 30)
-        XCTAssertEqual(MaterialTitleText.normalizedGenerated(long), String(repeating: "题", count: 24) + "…")
-        XCTAssertEqual(MaterialTitleText.normalizedGenerated(String(repeating: "题", count: 24) + "…"),
-                       String(repeating: "题", count: 24) + "…")
-        XCTAssertEqual(MaterialTitleText.normalizedGenerated("标题…。"), "标题…")
-    }
-
-    func testContentTitleTrimsManualAndNormalizesAutomatic() {
-        let manual = RecordingPresentation(
-            manualTitle: "  我的标题。 ",
-            automatic: RecordingTitleProposal(sourceID: "s1", title: "**自动标题**。", summary: "s", quotes: []),
-            transcriptVersionID: "t-s1")
-        XCTAssertEqual(source(id: "s1", transcript: "原文", presentation: manual).contentTitle, "我的标题。")
-
-        let automatic = RecordingPresentation(
-            automatic: RecordingTitleProposal(sourceID: "s2", title: "**周会结论**。", summary: "s", quotes: []),
-            transcriptVersionID: "t-s2")
-        XCTAssertEqual(source(id: "s2", transcript: "原文", presentation: automatic).contentTitle, "周会结论")
-
-        let stale = RecordingPresentation(
-            automatic: RecordingTitleProposal(sourceID: "s3", title: "过期标题", summary: "s", quotes: []),
-            transcriptVersionID: "t-old")
-        XCTAssertNil(source(id: "s3", transcript: "原文", presentation: stale).contentTitle)
-    }
-
-    func testExplicitTitleSharesManualAndVersionCheckedAutomaticContract() {
-        let presentation = RecordingPresentation(
-            manualTitle: "  ",
-            automatic: RecordingTitleProposal(sourceID: "s", title: "**周会结论**。", summary: "s", quotes: []),
-            transcriptVersionID: "t-1")
-        XCTAssertEqual(MaterialDisplayTitle.explicitTitle(presentation: presentation, transcriptVersionID: "t-1"), "周会结论")
-        XCTAssertNil(MaterialDisplayTitle.explicitTitle(presentation: presentation, transcriptVersionID: "t-2"))
-
-        let manual = RecordingPresentation(manualTitle: "  我的标题。 ", transcriptVersionID: "t-old")
-        XCTAssertEqual(MaterialDisplayTitle.explicitTitle(presentation: manual, transcriptVersionID: "t-new"), "我的标题。")
-        XCTAssertNil(MaterialDisplayTitle.explicitTitle(presentation: nil, transcriptVersionID: nil))
+    func testExplicitTitleCases() {
+        let automatic = PresentationSpec(manual: "  ", automatic: "**周会结论**。", version: "t-1")
+        let cases: [(presentation: PresentationSpec?, transcriptVersionID: String?, expected: String?)] = [
+            (automatic, "t-1", "周会结论"),
+            (automatic, "t-2", nil),
+            (PresentationSpec(manual: "  我的标题。 ", automatic: nil, version: "t-old"), "t-new", "我的标题。"),
+            (nil, nil, nil)
+        ]
+        for c in cases {
+            let value = c.presentation.map(makePresentation)
+            XCTAssertEqual(MaterialDisplayTitle.explicitTitle(presentation: value, transcriptVersionID: c.transcriptVersionID), c.expected)
+        }
     }
 }

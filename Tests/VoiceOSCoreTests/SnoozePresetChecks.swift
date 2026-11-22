@@ -8,51 +8,43 @@ final class SnoozePresetChecks: XCTestCase {
         return calendar
     }
 
-    private func date(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int) -> Date {
-        calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+    private func date(_ components: DateComponents) -> Date {
+        calendar.date(from: components)!
     }
 
     func testPresetTitles() {
         XCTAssertEqual(SnoozePreset.allCases.map(\.title), ["今晚", "明天", "下周"])
     }
 
-    func testTonightBeforeEightUsesSameDayEight() {
-        let now = date(2026, 11, 14, 12, 30)
-        XCTAssertEqual(SnoozePreset.tonight.dueDate(now: now, calendar: calendar), date(2026, 11, 14, 20, 0))
-    }
-
-    func testTonightAtEightMovesOneHourLater() {
-        let now = date(2026, 11, 14, 20, 0)
-        XCTAssertEqual(SnoozePreset.tonight.dueDate(now: now, calendar: calendar), date(2026, 11, 14, 21, 0))
-    }
-
-    func testTonightAfterEightCrossesMidnight() {
-        let now = date(2026, 11, 14, 23, 30)
-        XCTAssertEqual(SnoozePreset.tonight.dueDate(now: now, calendar: calendar), date(2026, 11, 15, 0, 30))
-    }
-
-    func testTomorrowUsesNextDayNineAcrossMidnight() {
-        let now = date(2026, 11, 14, 23, 50)
-        XCTAssertEqual(SnoozePreset.tomorrow.dueDate(now: now, calendar: calendar), date(2026, 11, 15, 9, 0))
-    }
-
-    func testTomorrowUsesNextDayNineAfterMidnight() {
-        let now = date(2026, 11, 14, 0, 10)
-        XCTAssertEqual(SnoozePreset.tomorrow.dueDate(now: now, calendar: calendar), date(2026, 11, 15, 9, 0))
-    }
-
-    func testNextWeekOnMondayAddsSevenDays() {
-        let now = date(2026, 11, 16, 10, 0)
-        XCTAssertEqual(SnoozePreset.nextWeek.dueDate(now: now, calendar: calendar), date(2026, 11, 23, 9, 0))
-    }
-
-    func testNextWeekOnSaturdayUsesUpcomingMonday() {
-        let now = date(2026, 11, 14, 10, 0)
-        XCTAssertEqual(SnoozePreset.nextWeek.dueDate(now: now, calendar: calendar), date(2026, 11, 16, 9, 0))
-    }
-
-    func testNextWeekOnSundayUsesTomorrowMonday() {
-        let now = date(2026, 11, 15, 22, 0)
-        XCTAssertEqual(SnoozePreset.nextWeek.dueDate(now: now, calendar: calendar), date(2026, 11, 16, 9, 0))
+    func testDueDates() {
+        let cases: [(preset: SnoozePreset, now: DateComponents, expected: DateComponents)] = [
+            (.tonight,
+             .init(year: 2026, month: 11, day: 14, hour: 12, minute: 30),
+             .init(year: 2026, month: 11, day: 14, hour: 20, minute: 0)),
+            (.tonight,
+             .init(year: 2026, month: 11, day: 14, hour: 20, minute: 0),
+             .init(year: 2026, month: 11, day: 14, hour: 21, minute: 0)),
+            (.tonight,
+             .init(year: 2026, month: 11, day: 14, hour: 23, minute: 30),
+             .init(year: 2026, month: 11, day: 15, hour: 0, minute: 30)),
+            (.tomorrow,
+             .init(year: 2026, month: 11, day: 14, hour: 23, minute: 50),
+             .init(year: 2026, month: 11, day: 15, hour: 9, minute: 0)),
+            (.tomorrow,
+             .init(year: 2026, month: 11, day: 14, hour: 0, minute: 10),
+             .init(year: 2026, month: 11, day: 15, hour: 9, minute: 0)),
+            (.nextWeek,
+             .init(year: 2026, month: 11, day: 16, hour: 10, minute: 0),
+             .init(year: 2026, month: 11, day: 23, hour: 9, minute: 0)),
+            (.nextWeek,
+             .init(year: 2026, month: 11, day: 14, hour: 10, minute: 0),
+             .init(year: 2026, month: 11, day: 16, hour: 9, minute: 0)),
+            (.nextWeek,
+             .init(year: 2026, month: 11, day: 15, hour: 22, minute: 0),
+             .init(year: 2026, month: 11, day: 16, hour: 9, minute: 0))
+        ]
+        for c in cases {
+            XCTAssertEqual(c.preset.dueDate(now: date(c.now), calendar: calendar), date(c.expected))
+        }
     }
 }
