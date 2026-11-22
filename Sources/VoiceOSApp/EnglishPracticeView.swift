@@ -46,122 +46,127 @@ struct EnglishPracticeView: View {
         return nil
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
-            WorkspacePageHeading(eyebrow: "工具 · 英文练习", title: "英文表达反馈",
-                                 subtitle: "只发送选定的个人文字和出处；原始音频不会上传。")
-            if sources.isEmpty {
-                WorkspaceEmptyState(title: "还没有可练习的英文原话", systemImage: "character.book.closed",
-                                    description: "需要一份已保存、已完成文字转写的个人原话。完成一段英文录音并保存后，回到这里即可练习。") {
-                    if let openCapture { Button("去记录英文表达", action: openCapture).buttonStyle(.workspacePrimary) }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                WorkspaceSettingsCard(title: "本次练习", subtitle: "选择原话与旧练习，准备核对后发送") {
-                    VStack(alignment: .leading, spacing: 0) {
-                        WorkspaceSettingsRow(title: "原话", showsDivider: false) {
-                            Picker("本次练习", selection: $currentID) {
-                                Text("选择一份我的英文原话").tag("")
-                                ForEach(sources) { source in
-                                    Text(String((source.transcript ?? source.displayTitle).prefix(90))).tag(source.id)
-                                }
-                            }
-                            .labelsHidden()
-                            .frame(minWidth: 320, alignment: .trailing)
-                            .disabled(model.englishBusy)
-                            .onChange(of: currentID) { _, _ in
-                                if suppressSelectionReset { suppressSelectionReset = false; return }
-                                priorIDs = priorIDs.filter { $0 != currentID }; model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
-                            }
-                        }
-                        VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
-                            WorkspaceSectionHeading("可选旧练习（最多 2 份）")
-                            ScrollView {
-                                ForEach(priorCandidates) { source in
-                                    Toggle(isOn: Binding(get: { priorIDs.contains(source.id) }, set: { value in
-                                        if value { if priorIDs.count < 2 { priorIDs.insert(source.id) } }
-                                        else { priorIDs.remove(source.id) }
-                                        model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
-                                    })) {
-                                        VStack(alignment: .leading) { Text(source.displayTitle); Text(source.transcript ?? "").lineLimit(2).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText) }
-                                    }.disabled(model.englishBusy || (!priorIDs.contains(source.id) && priorIDs.count >= 2))
-                                }
-                            }.frame(maxHeight: model.englishAttempts.isEmpty ? 210 : 110)
-                        }
-                        .padding(.horizontal, 20).padding(.vertical, 12)
-                        WorkspaceSettingsRow(title: "准备与发送") {
-                            HStack(spacing: 8) {
-                                Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)) } } }
-                                    .buttonStyle(.workspaceSecondary)
-                                    .disabled(current == nil || model.englishBusy)
-                                Button(model.englishBusy ? "正在发送…" : "发送文本反馈") { Task { await model.performEnglishPractice() } }
-                                    .buttonStyle(.workspacePrimary)
-                                    .disabled(model.englishSnapshot == nil || model.englishBusy || !model.modelConfigured)
-                                if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
-                                if model.englishSnapshot != nil { Button("查看待发送文字…") { showingInput = true } }
-                            }
-                        }
-                        WorkspaceListDivider().padding(.horizontal, 20)
-                        if englishStatusIsError {
-                            WorkspaceNoticeText(message: model.englishStatus, severity: .danger)
-                                .padding(.horizontal, 20).padding(.vertical, 12)
-                        } else {
-                            Text(model.englishStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                                .padding(.horizontal, 20).padding(.vertical, 12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        if let hint = sendHint {
-                            Text(hint).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                                .padding(.horizontal, 20).padding(.vertical, 12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+                WorkspacePageHeading(eyebrow: "工具 · 英文练习", title: "英文表达反馈",
+                                     subtitle: "只发送选定的个人文字和出处；原始音频不会上传。")
+                if sources.isEmpty {
+                    WorkspaceEmptyState(title: "还没有可练习的英文原话", systemImage: "character.book.closed",
+                                        description: "需要一份已保存、已完成文字转写的个人原话。完成一段英文录音并保存后，回到这里即可练习。") {
+                        if let openCapture { Button("去记录英文表达", action: openCapture).buttonStyle(.workspacePrimary) }
                     }
-                }
-            }
-            if !model.englishAttempts.isEmpty {
-                WorkspaceSettingsCard(title: "反馈历史", subtitle: "共 \(model.englishAttempts.count) 次，最新在上") {
-                    ScrollView {
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    WorkspaceSettingsCard(title: "本次练习", subtitle: "选择原话与旧练习，准备核对后发送") {
                         VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(model.englishAttempts.enumerated()), id: \.element.id) { index, attempt in
-                                if index > 0 { WorkspaceListDivider().padding(.horizontal, 20) }
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text("\(attempt.state == "completed" ? "已保存" : attempt.state == "reserved" ? "等待结果" : "未完成 · 不自动重发") · \(ConversationReflectionFocus.date(attempt.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知")").vosFont(WorkspaceText.meta)
-                                    if let reason = attempt.error { Text(reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
-                                    if attempt.validity == "frozen" { Text("历史反馈 · 依据或授权已变化，暂停当前使用").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
-                                    if let result = attempt.result {
-                                        ForEach(Array(result.suggestions.enumerated()), id: \.offset) { index, suggestion in
-                                            VStack(alignment: .leading, spacing: 3) {
-                                                Text("建议 \(index + 1) · \(suggestionKindLabel(suggestion.kind))").vosFont(WorkspaceText.rowTitle)
-                                                Text("原句：\(suggestion.original.quote)").textSelection(.enabled)
-                                                Text("建议：\(suggestion.suggestedText)").textSelection(.enabled)
-                                                Text(suggestion.explanation).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                                                if suggestion.possibleTranscriptIssue { Text("可能是转写问题，需人工核对").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
-                                            }.padding(8).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                                        }
-                                        ForEach(Array(result.comparisons.enumerated()), id: \.offset) { _, comparison in
-                                            VStack(alignment: .leading, spacing: 3) {
-                                                Text("本次：\(comparison.current.quote)").textSelection(.enabled)
-                                                Text("旧练习：\(comparison.prior.quote)").textSelection(.enabled)
-                                                Text("比较：\(comparison.explanation)").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                                            }
-                                        }
-                                        Text("文字建议不代表发音、熟练度或学习效果判断。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                            WorkspaceSettingsRow(title: "原话", showsDivider: false) {
+                                Picker("本次练习", selection: $currentID) {
+                                    Text("选择一份我的英文原话").tag("")
+                                    ForEach(sources) { source in
+                                        Text(String((source.transcript ?? source.displayTitle).prefix(90))).tag(source.id)
                                     }
                                 }
-                                .padding(.horizontal, 20).padding(.vertical, 12)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .labelsHidden()
+                                .frame(minWidth: 320, alignment: .trailing)
+                                .disabled(model.englishBusy)
+                                .onChange(of: currentID) { _, _ in
+                                    if suppressSelectionReset { suppressSelectionReset = false; return }
+                                    priorIDs = priorIDs.filter { $0 != currentID }; model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
+                                }
+                            }
+                            VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
+                                WorkspaceSectionHeading("可选旧练习（最多 2 份）")
+                                ScrollView {
+                                    ForEach(priorCandidates) { source in
+                                        Toggle(isOn: Binding(get: { priorIDs.contains(source.id) }, set: { value in
+                                            if value { if priorIDs.count < 2 { priorIDs.insert(source.id) } }
+                                            else { priorIDs.remove(source.id) }
+                                            model.englishSnapshot = nil; model.englishStatus = "选择已变化，请重新准备并核对文字。"
+                                        })) {
+                                            VStack(alignment: .leading) { Text(source.displayTitle); Text(source.transcript ?? "").lineLimit(2).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText) }
+                                        }.disabled(model.englishBusy || (!priorIDs.contains(source.id) && priorIDs.count >= 2))
+                                    }
+                                }.frame(height: 180)
+                            }
+                            .padding(.horizontal, 20).padding(.vertical, 12)
+                            WorkspaceSettingsRow(title: "准备与发送") {
+                                HStack(spacing: 8) {
+                                    Button("准备并核对文字") { if let current { Task { await model.prepareEnglishPractice(current: current, priorIDs: Array(priorIDs)) } } }
+                                        .buttonStyle(.workspaceSecondary)
+                                        .disabled(current == nil || model.englishBusy)
+                                    Button(model.englishBusy ? "正在发送…" : "发送文本反馈") { Task { await model.performEnglishPractice() } }
+                                        .buttonStyle(.workspacePrimary)
+                                        .disabled(model.englishSnapshot == nil || model.englishBusy || !model.modelConfigured)
+                                    if !model.modelConfigured { Button("配置文本模型…") { model.chooseTextModel() } }
+                                    if model.englishSnapshot != nil { Button("查看待发送文字…") { showingInput = true } }
+                                }
+                            }
+                            WorkspaceListDivider().padding(.horizontal, 20)
+                            if englishStatusIsError {
+                                WorkspaceNoticeText(message: model.englishStatus, severity: .danger)
+                                    .padding(.horizontal, 20).padding(.vertical, 12)
+                            } else {
+                                Text(model.englishStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                                    .padding(.horizontal, 20).padding(.vertical, 12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            if let hint = sendHint {
+                                Text(hint).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                                    .padding(.horizontal, 20).padding(.vertical, 12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }
                     }
                 }
-            }
-            if !embedded, !sources.isEmpty {
-                HStack {
-                    Spacer()
-                    Button("完成", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary)
+                if !model.englishAttempts.isEmpty {
+                    WorkspaceSettingsCard(title: "反馈历史", subtitle: "共 \(model.englishAttempts.count) 次，最新在上") {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(model.englishAttempts.enumerated()), id: \.element.id) { index, attempt in
+                                    if index > 0 { WorkspaceListDivider().padding(.horizontal, 20) }
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text("\(attempt.state == "completed" ? "已保存" : attempt.state == "reserved" ? "等待结果" : "未完成 · 不自动重发") · \(ConversationReflectionFocus.date(attempt.createdAt)?.formatted(date:.abbreviated,time:.shortened) ?? "时间未知")").vosFont(WorkspaceText.meta)
+                                        if let reason = attempt.error { Text(reason).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
+                                        if attempt.validity == "frozen" { Text("历史反馈 · 依据或授权已变化，暂停当前使用").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
+                                        if let result = attempt.result {
+                                            ForEach(Array(result.suggestions.enumerated()), id: \.offset) { index, suggestion in
+                                                VStack(alignment: .leading, spacing: 3) {
+                                                    Text("建议 \(index + 1) · \(suggestionKindLabel(suggestion.kind))").vosFont(WorkspaceText.rowTitle)
+                                                    Text("原句：\(suggestion.original.quote)").textSelection(.enabled)
+                                                    Text("建议：\(suggestion.suggestedText)").textSelection(.enabled)
+                                                    Text(suggestion.explanation).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                                                    if suggestion.possibleTranscriptIssue { Text("可能是转写问题，需人工核对").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning) }
+                                                }.padding(8).background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                                            }
+                                            ForEach(Array(result.comparisons.enumerated()), id: \.offset) { _, comparison in
+                                                VStack(alignment: .leading, spacing: 3) {
+                                                    Text("本次：\(comparison.current.quote)").textSelection(.enabled)
+                                                    Text("旧练习：\(comparison.prior.quote)").textSelection(.enabled)
+                                                    Text("比较：\(comparison.explanation)").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                                                }
+                                            }
+                                            Text("文字建议不代表发音、熟练度或学习效果判断。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                                        }
+                                    }
+                                    .padding(.horizontal, 20).padding(.vertical, 12)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                        .frame(height: 240)
+                    }
                 }
-            }
-        }.frame(maxWidth: 760, alignment: .leading)
-        .padding(24).frame(width: embedded ? nil : WorkspaceMetrics.modalMedium, height: embedded ? nil : 600)
+                if !embedded, !sources.isEmpty {
+                    HStack {
+                        Spacer()
+                        Button("完成", action: dismiss).keyboardShortcut(.cancelAction).buttonStyle(.workspaceSecondary)
+                    }
+                }
+            }.frame(maxWidth: 760, alignment: .leading)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .frame(width: embedded ? nil : WorkspaceMetrics.modalMedium, height: embedded ? nil : 600)
         .sheet(isPresented: $showingInput) {
             if let snapshot = model.englishSnapshot { EnglishInputPreview(snapshot: snapshot) { showingInput = false } }
         }
