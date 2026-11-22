@@ -981,6 +981,8 @@ final class ControlCenter: ObservableObject {
     private var topicPending = false
     private var topicForcePending = false
     private var topicTopUpPending = false
+    @Published var materialNoteStates: [String: MaterialNoteState] = [:]
+    var materialNoteModel: ResponsesMaterialNotePort?
     func queueTopicOrganization(retry: Bool = false, topUp: Bool = false) {
         guard initialized, topicModel != nil else { return }
         topicForcePending = topicForcePending || retry
@@ -1713,7 +1715,7 @@ final class ControlCenter: ObservableObject {
             let suite=try LocalTextModel.loadSuite(from:file,segmentRequestTimeout:600,segmentStreaming:true),port=suite.cognition
             discussionModel=suite.discussion;outcomeModel=suite.outcome
             recordingTitleModel=suite.recordingTitles
-            topicModel=suite.topics; topicAttemptDigest=nil
+            topicModel=suite.topics; topicAttemptDigest=nil; materialNoteModel=suite.note
             recordingExpressionModel=suite.recordingExpressions
             assistantModel=suite.assistant
             initiationModel=suite.initiation
@@ -1754,6 +1756,7 @@ final class ControlCenter: ObservableObject {
         outcomeModel = nil
         recordingTitleModel = nil
         topicModel = nil; topicAttemptDigest = nil
+        materialNoteModel = nil
         recordingExpressionModel = nil
         assistantModel = nil
         initiationModel = nil
