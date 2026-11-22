@@ -468,124 +468,127 @@ struct RecordingInboxView: View {
     @State private var folderPendingRemoval: RecordingInboxFolder?
     @State private var itemPendingIgnore: RecordingInboxItem?
     var body: some View {
-        VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
-            WorkspaceHeading(eyebrow: "工具 · 收件箱", title: "自动接收录音",
-                             subtitle: "将自己的录音放入收件箱，或连接已同步到 Mac 的语音备忘录。")
-            WorkspaceSettingsCard(title: "工作方式", subtitle: "接收与处理的规则") {
-                DisclosureGroup("查看接收与处理规则") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("VoiceOS 打开且 Mac 唤醒时，自动完成 Qwen 全长转写，由 AI 识别连续表达并合并理解，再整理观点、任务和提醒事项。").vosFont(WorkspaceText.body)
-                        Text("只接收连接后新增或更新的素材；原文件保留。有变化时立即检查，文件连续两次检查不变后自动处理。同批录音先转写再判断分组；稍后到达的补录自动接续。音频在本机处理，文字使用已配置文本模型。")
-                            .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                        Text(RecordingMediaInfo.personalRecordingLayout).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-                    }.padding(.top, 8)
-                }
-                .vosFont(WorkspaceText.body)
-                .padding(.horizontal, 20).padding(.vertical, 12)
-            }
-            WorkspaceSettingsCard(title: "接收位置", subtitle: "VoiceOS 收件箱与语音备忘录") {
-                HStack {
-                    Button("启用 VoiceOS收件箱") { inbox.addDefaultInbox() }.buttonStyle(.workspacePrimary)
-                    Button("其他文件夹…") { inbox.chooseFolder(voiceMemos: false) }.buttonStyle(.workspaceSecondary)
-                    Button("连接语音备忘录…") { inbox.chooseFolder(voiceMemos: true) }.buttonStyle(.workspaceSecondary)
-                }
-                .padding(.horizontal, 20).padding(.vertical, 12)
-                if !inbox.folders.isEmpty && (!model.speechConfigured || !model.textModelConfigured) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("已连接；配置模型后开始处理新录音").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                        HStack {
-                            if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.buttonStyle(.workspaceSecondaryCompact) }
-                            if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceSecondaryCompact) }
-                        }
+        ScrollView {
+            VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+                WorkspaceHeading(eyebrow: "工具 · 收件箱", title: "自动接收录音",
+                                 subtitle: "将自己的录音放入收件箱，或连接已同步到 Mac 的语音备忘录。")
+                WorkspaceSettingsCard(title: "工作方式", subtitle: "接收与处理的规则") {
+                    DisclosureGroup("查看接收与处理规则") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("VoiceOS 打开且 Mac 唤醒时，自动完成 Qwen 全长转写，由 AI 识别连续表达并合并理解，再整理观点、任务和提醒事项。").vosFont(WorkspaceText.body)
+                            Text("只接收连接后新增或更新的素材；原文件保留。有变化时立即检查，文件连续两次检查不变后自动处理。同批录音先转写再判断分组；稍后到达的补录自动接续。音频在本机处理，文字使用已配置文本模型。")
+                                .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                            Text(RecordingMediaInfo.personalRecordingLayout).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                        }.padding(.top, 8)
                     }
-                    .padding(.horizontal, 20).padding(.bottom, 12)
-                }
-                ForEach(inbox.folders) { folder in
-                    WorkspaceSettingsRow(title: folder.voiceMemos ? "语音备忘录" : URL(fileURLWithPath: folder.path).lastPathComponent,
-                                         subtitle: folder.path) {
-                        HStack(spacing: 8) {
-                            Toggle(folder.voiceMemos ? "语音备忘录" : URL(fileURLWithPath: folder.path).lastPathComponent,
-                                   isOn: Binding(get: { inbox.folders.first(where: { $0.id == folder.id })?.enabled ?? false }, set: { inbox.setEnabled(folder, $0) }))
-                                .toggleStyle(.switch).labelsHidden()
-                                .accessibilityLabel(folder.voiceMemos ? "语音备忘录" : URL(fileURLWithPath: folder.path).lastPathComponent)
-                            Button("打开文件夹") { inbox.open(folder) }.buttonStyle(.workspaceQuiet)
-                            Button("移除入口", role: .destructive) { folderPendingRemoval = folder }.buttonStyle(.workspaceDestructive)
-                        }
-                    }
-                    .textSelection(.enabled)
-                    if let error = inbox.folderErrors[folder.id] {
-                        WorkspaceNoticeText(message: error).padding(.horizontal, 20).padding(.bottom, 8)
-                    }
-                }
-                .alert("移除这个自动入口？", isPresented: Binding(get: { folderPendingRemoval != nil }, set: { if !$0 { folderPendingRemoval = nil } }), presenting: folderPendingRemoval) { folder in
-                    Button("保留", role: .cancel) { folderPendingRemoval = nil }
-                    Button("移除入口", role: .destructive) { inbox.removeFolder(folder); folderPendingRemoval = nil }
-                } message: { _ in
-                    Text("移除入口不会删除原文件，只是不再自动接收这个文件夹的新录音。")
-                }
-                Text(inbox.status).vosFont(WorkspaceText.meta).textSelection(.enabled)
+                    .vosFont(WorkspaceText.body)
                     .padding(.horizontal, 20).padding(.vertical, 12)
-            }
-            if !inbox.pendingItems.isEmpty {
-                WorkspaceSettingsCard(title: "需要处理", subtitle: "失败或已完成待确认的素材") {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(inbox.pendingItems.enumerated()), id: \.element.id) { index, item in
-                                VStack(alignment: .leading, spacing: 0) {
-                                    if index > 0 { WorkspaceListDivider().padding(.horizontal, 20) }
-                                    VStack(alignment: .leading, spacing: 3) {
-                                        Text(URL(fileURLWithPath: item.path).lastPathComponent).vosFont(WorkspaceText.rowTitle).lineLimit(1)
-                                        if item.state == .processing {
-                                            WorkspaceBadge(text: "正在整理 · 第 \(item.attempts) 次尝试", tone: .accent)
-                                        } else if let next = item.nextAttempt {
-                                            WorkspaceBadge(text: "将在 \(next.formatted(date: .abbreviated, time: .standard)) 自动重试 · 已尝试 \(item.attempts) 次")
-                                        } else {
-                                            WorkspaceBadge(text: "等待手动重试 · 已尝试 \(item.attempts) 次", tone: .warning)
-                                        }
-                                        Text(item.explanation).foregroundStyle(palette.secondaryText).textSelection(.enabled)
-                                        if item.state != .processing {
-                                            HStack(spacing: 8) {
-                                                Button("重试这份素材") { inbox.retry(item.id) }.buttonStyle(.workspaceSecondaryCompact)
-                                                Button("不再处理这份素材", role: .destructive) { itemPendingIgnore = item }.buttonStyle(.workspaceDestructive)
-                                            }
-                                        }
-                                        if inbox.folders.first(where: { $0.id == item.folderID })?.enabled == false {
-                                            Text("入口已暂停，恢复前不会自动重试").foregroundStyle(palette.secondaryText)
-                                        }
-                                    }.vosFont(WorkspaceText.meta)
-                                    .padding(.horizontal, 20).padding(.vertical, 12)
-                                }
-                            }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .alert("不再处理这份素材？", isPresented: Binding(get: { itemPendingIgnore != nil }, set: { if !$0 { itemPendingIgnore = nil } }), presenting: itemPendingIgnore) { item in
-                        Button("保留", role: .cancel) { itemPendingIgnore = nil }
-                        Button("不再处理", role: .destructive) { inbox.ignore(item.id); itemPendingIgnore = nil }
-                    } message: { item in
-                        Text("“\(URL(fileURLWithPath: item.path).lastPathComponent)”不会再自动处理；原件保留在原处。")
-                    }
-                    .frame(maxHeight: 150)
                 }
-            }
-            if model.fullRecordingBusy { ProgressView(model.fullRecordingStatus).vosFont(WorkspaceText.meta) }
-            WorkspaceSettingsCard(title: "手动检查", subtitle: "检查新素材，或重试未完成的素材") {
-                HStack {
-                    Button("检查新素材") { Task { await inbox.scan() } }.buttonStyle(.workspaceSecondary).disabled(inbox.scanning)
-                    Button("重试未完成素材") { inbox.retryFailures() }.buttonStyle(.workspaceSecondary).disabled(inbox.scanning)
-                    if inbox.scanning {
-                        HStack(spacing: 6) {
-                            ProgressView().controlSize(.small)
-                            Text("正在检查新素材…").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                WorkspaceSettingsCard(title: "接收位置", subtitle: "VoiceOS 收件箱与语音备忘录") {
+                    HStack {
+                        Button("启用 VoiceOS收件箱") { inbox.addDefaultInbox() }.buttonStyle(.workspacePrimary)
+                        Button("其他文件夹…") { inbox.chooseFolder(voiceMemos: false) }.buttonStyle(.workspaceSecondary)
+                        Button("连接语音备忘录…") { inbox.chooseFolder(voiceMemos: true) }.buttonStyle(.workspaceSecondary)
+                    }
+                    .padding(.horizontal, 20).padding(.vertical, 12)
+                    if !inbox.folders.isEmpty && (!model.speechConfigured || !model.textModelConfigured) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("已连接；配置模型后开始处理新录音").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                            HStack {
+                                if !model.speechConfigured { Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.buttonStyle(.workspaceSecondaryCompact) }
+                                if !model.textModelConfigured { Button("配置文本模型…") { model.chooseTextModel() }.buttonStyle(.workspaceSecondaryCompact) }
+                            }
+                        }
+                        .padding(.horizontal, 20).padding(.bottom, 12)
+                    }
+                    ForEach(inbox.folders) { folder in
+                        WorkspaceSettingsRow(title: folder.voiceMemos ? "语音备忘录" : URL(fileURLWithPath: folder.path).lastPathComponent,
+                                             subtitle: folder.path) {
+                            HStack(spacing: 8) {
+                                Toggle(folder.voiceMemos ? "语音备忘录" : URL(fileURLWithPath: folder.path).lastPathComponent,
+                                       isOn: Binding(get: { inbox.folders.first(where: { $0.id == folder.id })?.enabled ?? false }, set: { inbox.setEnabled(folder, $0) }))
+                                    .toggleStyle(.switch).labelsHidden()
+                                    .accessibilityLabel(folder.voiceMemos ? "语音备忘录" : URL(fileURLWithPath: folder.path).lastPathComponent)
+                                Button("打开文件夹") { inbox.open(folder) }.buttonStyle(.workspaceQuiet)
+                                Button("移除入口", role: .destructive) { folderPendingRemoval = folder }.buttonStyle(.workspaceDestructive)
+                            }
+                        }
+                        .textSelection(.enabled)
+                        if let error = inbox.folderErrors[folder.id] {
+                            WorkspaceNoticeText(message: error).padding(.horizontal, 20).padding(.bottom, 8)
                         }
                     }
-                    if inbox.voiceMemosNeedsPermission || inbox.folderErrors.values.contains(where: { $0.contains("隐私") }) { Button("打开系统隐私设置") { inbox.openPrivacySettings() }.buttonStyle(.workspaceSecondary) }
-                    Spacer(); if !embedded { Button("完成", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction) }
+                    .alert("移除这个自动入口？", isPresented: Binding(get: { folderPendingRemoval != nil }, set: { if !$0 { folderPendingRemoval = nil } }), presenting: folderPendingRemoval) { folder in
+                        Button("保留", role: .cancel) { folderPendingRemoval = nil }
+                        Button("移除入口", role: .destructive) { inbox.removeFolder(folder); folderPendingRemoval = nil }
+                    } message: { _ in
+                        Text("移除入口不会删除原文件，只是不再自动接收这个文件夹的新录音。")
+                    }
+                    Text(inbox.status).vosFont(WorkspaceText.meta).textSelection(.enabled)
+                        .padding(.horizontal, 20).padding(.vertical, 12)
                 }
-                .padding(.horizontal, 20).padding(.vertical, 12)
+                if !inbox.pendingItems.isEmpty {
+                    WorkspaceSettingsCard(title: "需要处理", subtitle: "失败或已完成待确认的素材") {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(inbox.pendingItems.enumerated()), id: \.element.id) { index, item in
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        if index > 0 { WorkspaceListDivider().padding(.horizontal, 20) }
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(URL(fileURLWithPath: item.path).lastPathComponent).vosFont(WorkspaceText.rowTitle).lineLimit(1)
+                                            if item.state == .processing {
+                                                WorkspaceBadge(text: "正在整理 · 第 \(item.attempts) 次尝试", tone: .accent)
+                                            } else if let next = item.nextAttempt {
+                                                WorkspaceBadge(text: "将在 \(next.formatted(date: .abbreviated, time: .standard)) 自动重试 · 已尝试 \(item.attempts) 次")
+                                            } else {
+                                                WorkspaceBadge(text: "等待手动重试 · 已尝试 \(item.attempts) 次", tone: .warning)
+                                            }
+                                            Text(item.explanation).foregroundStyle(palette.secondaryText).textSelection(.enabled)
+                                            if item.state != .processing {
+                                                HStack(spacing: 8) {
+                                                    Button("重试这份素材") { inbox.retry(item.id) }.buttonStyle(.workspaceSecondaryCompact)
+                                                    Button("不再处理这份素材", role: .destructive) { itemPendingIgnore = item }.buttonStyle(.workspaceDestructive)
+                                                }
+                                            }
+                                            if inbox.folders.first(where: { $0.id == item.folderID })?.enabled == false {
+                                                Text("入口已暂停，恢复前不会自动重试").foregroundStyle(palette.secondaryText)
+                                            }
+                                        }.vosFont(WorkspaceText.meta)
+                                        .padding(.horizontal, 20).padding(.vertical, 12)
+                                    }
+                                }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .alert("不再处理这份素材？", isPresented: Binding(get: { itemPendingIgnore != nil }, set: { if !$0 { itemPendingIgnore = nil } }), presenting: itemPendingIgnore) { item in
+                            Button("保留", role: .cancel) { itemPendingIgnore = nil }
+                            Button("不再处理", role: .destructive) { inbox.ignore(item.id); itemPendingIgnore = nil }
+                        } message: { item in
+                            Text("“\(URL(fileURLWithPath: item.path).lastPathComponent)”不会再自动处理；原件保留在原处。")
+                        }
+                        .frame(height: 180)
+                    }
+                }
+                if model.fullRecordingBusy { ProgressView(model.fullRecordingStatus).vosFont(WorkspaceText.meta) }
+                WorkspaceSettingsCard(title: "手动检查", subtitle: "检查新素材，或重试未完成的素材") {
+                    HStack {
+                        Button("检查新素材") { Task { await inbox.scan() } }.buttonStyle(.workspaceSecondary).disabled(inbox.scanning)
+                        Button("重试未完成素材") { inbox.retryFailures() }.buttonStyle(.workspaceSecondary).disabled(inbox.scanning)
+                        if inbox.scanning {
+                            HStack(spacing: 6) {
+                                ProgressView().controlSize(.small)
+                                Text("正在检查新素材…").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                            }
+                        }
+                        if inbox.voiceMemosNeedsPermission || inbox.folderErrors.values.contains(where: { $0.contains("隐私") }) { Button("打开系统隐私设置") { inbox.openPrivacySettings() }.buttonStyle(.workspaceSecondary) }
+                        Spacer(); if !embedded { Button("完成", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction) }
+                    }
+                    .padding(.horizontal, 20).padding(.vertical, 12)
+                }
             }
+            .frame(maxWidth: 680, alignment: .leading)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-        .frame(maxWidth: 680, alignment: .leading)
-        .padding(24)
         .frame(width: embedded ? nil : 700)
     }
 }
