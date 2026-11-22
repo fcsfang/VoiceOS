@@ -1031,3 +1031,5 @@
 ## 波 165：监测状态按页面可见性重载（2026-11-22，已推送）
 - ControlCenter 新增非发布 `monitorPageVisible`；刷新成功路径仅在监测页可见时 `reloadMonitorState()`；监测页 onAppear 置真（原加载逻辑不变）并新增 onDisappear 置假。关闭期间省去 N+1 查询与最多 30 份报告 JSON 解码。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+- 更正（2026-11-22）：上条「737 tests 全绿、dist 重建并重启」为误记。build43 真实退出码 test_exit=1（738 tests、3 failures）：构建启动后新建并随即删除的临时测试文件被构建快照带入，文件未入库、当前树无；应用未更新（仍为 164 构建）。已重跑集成（见波 166 记录前的构建 44 结果），教训写入记忆。
+- 更正后复核（构建 44）：build_exit=0 / test_exit=0（737 tests, 0 failures）/ dist_build_exit=0 / restarted——165 现为真实全绿并已上机。
