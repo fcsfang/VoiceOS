@@ -368,8 +368,13 @@ struct WorkspaceSourceView: View {
     @State private var showingCorrectionImpacts=false
     @State private var entities:[SourceEntity]=[]
     @State private var chapters:[SourceChapter]=[]
+    /// 已排队但本机转写模型没配置：如实显示「等待」，不再假装正在转写。
+    private var waitingForSpeech: Bool {
+        transcriptionRunning && source.jobState == "queued" && !model.speechConfigured
+    }
     private var sourceStatus: String {
         if source.transcript == nil {
+            if waitingForSpeech { return "等待本地转写模型" }
             if transcriptionRunning { return "正在转写…" }
             return transcriptionFailed ? "转写失败 · 原件已保存" : "尚未完成转写 · 原件已保存"
         }
@@ -704,8 +709,8 @@ struct WorkspaceSourceView: View {
                         if transcriptionRunning {
                             HStack(spacing:6) {
                                 ProgressView().controlSize(.small).accessibilityHidden(true)
-                                Text("正在转写…").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-                            }.accessibilityElement(children:.combine).accessibilityLabel("正在转写")
+                                Text(waitingForSpeech ? "等待本地转写模型…" : "正在转写…").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                            }.accessibilityElement(children:.combine).accessibilityLabel(waitingForSpeech ? "等待本地转写模型" : "正在转写")
                         } else {
                             Label(sourceStatus,systemImage:sourceStatusIcon).vosFont(WorkspaceText.caption).foregroundStyle(transcriptionFailed ? palette.warning : palette.secondaryText)
                         }
@@ -1280,7 +1285,10 @@ struct WorkspaceSourceView: View {
         } else if transcriptionRunning {
             HStack(spacing:10) {
                 ProgressView().controlSize(.small).accessibilityHidden(true)
-                Text("正在转写… 原件已保存").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Text(waitingForSpeech ? "等待本地转写模型 · 原件已保存" : "正在转写… 原件已保存").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                if waitingForSpeech {
+                    Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }.buttonStyle(.workspaceQuietCompact)
+                }
             }.accessibilityElement(children:.combine)
         } else if transcriptionFailed {
             Text("转写失败 · 原件已保存").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)

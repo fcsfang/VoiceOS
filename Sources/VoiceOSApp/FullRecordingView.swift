@@ -70,9 +70,17 @@ struct FullRecordingView: View {
                         Button("作为外部资料导入") { model.importFullRecordingAsExternal(input) }
                             .disabled(model.fullRecordingBusy || model.importing)
                     }
+                    if let completed = model.fullRecordingCompletedSourceID, !model.fullRecordingBusy {
+                        Button("打开这份材料") { model.openCompletedFullRecording(completed) }
+                    }
                     Button("完整转写并整理") { model.organizeRecording(input, track: track) }
                         .buttonStyle(.workspacePrimary)
                         .disabled(!trackDecision.importsAsPersonal || model.fullRecordingBusy || model.recordingModelIssue != nil)
+                    if trackDecision.importsAsPersonal {
+                        Button("只保存原件") { model.saveFullRecordingOnly(input, track: track) }
+                            .disabled(model.fullRecordingBusy || model.importing)
+                            .help("不转写、不整理，先把本人音轨保存在本机；之后可再完整整理")
+                    }
                 }
             }
         }.padding(24).frame(width: embedded ? nil : WorkspaceMetrics.modalSmall).frame(maxWidth: embedded ? 780 : nil)

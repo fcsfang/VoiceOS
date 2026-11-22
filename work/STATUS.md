@@ -1117,3 +1117,7 @@
 - 集成：构建 70 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
 - 179-B 记录入口回到本次内容：acceptCaptureRequest 改为返回材料 id；QuickNote 与菜单「记录想法」sheet 保存成功即收起并 requestWorkspaceSource，服务/剪贴板路径保持只保存不抢窗口。集成：构建 71 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
 - 179-C 导入结果报告「查看」：ImportFileResult 增加 sourceID，媒体/拖放文字/PDF/图片成功行透传；报告行内「查看」关闭报告并 requestWorkspaceSource。集成：构建 72 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 180：只保存原件与等待转写的诚实提示（2026-11-23）
+- saveFullRecordingOnly：完整录音页「只保存原件」——提取本人音轨后直接 importPersonalAudio，不转写不整理，完成发「录音已保存」通知并显示「打开这份材料」。
+- 导入与材料页文案按本机转写模型是否配置分支：未配置时说「配置本地 Qwen 后可转写」「等待本地转写模型」，材料页等待态直接给「配置本地 Qwen 转写…」按钮。
+- 集成：构建 73 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。

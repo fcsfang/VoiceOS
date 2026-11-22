@@ -2069,6 +2069,36 @@ final class ControlCenter: ObservableObject {
         fullRecordingInput = nil
         requestWorkspaceSource(sourceID)
     }
+    /// 只保存本人音轨、不转写不整理：转写或文本模型缺失时仍可先把原音留在本机。
+    func saveFullRecordingOnly(_ input: FullRecordingInput, track: Int) {
+        guard let store, !fullRecordingBusy, !importing else { status = "请等待当前处理结束"; return }
+        fullRecordingBusy = true
+        fullRecordingCompletedSourceID = nil
+        fullRecordingCount = nil
+        fullRecordingStatus = "正在保存本人音轨…"
+        fullRecordingWorker = Task {
+            defer { fullRecordingBusy = false; fullRecordingWorker = nil }
+            do {
+                let root = await store.root
+                let staging = root.appendingPathComponent("整理/仅保存原件")
+                try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                let log = staging.appendingPathComponent("处理日志.txt")
+                let audio = staging.appendingPathComponent(input.url.deletingPathExtension().lastPathComponent + "_音轨\(track).wav")
+                if FileManager.default.fileExists(atPath: audio.path) { try FileManager.default.removeItem(at: audio) }
+                try await FullRecordingOrganizer.extract(input.url, track: track, to: audio, log: log)
+                let id = try await store.importPersonalAudio(audio)
+                try FileManager.default.removeItem(at: audio)
+                await refresh()
+                fullRecordingCompletedSourceID = id
+                fullRecordingStatus = "已保存本人音轨；配置模型后可再完整整理"
+                LocalNotice.post(title: "录音已保存", body: "本人音轨已保存在本机，可在材料页查看。", sourceID: id)
+            } catch is CancellationError {
+                fullRecordingStatus = "已停止；原件保留在原处"
+            } catch {
+                fullRecordingStatus = error.localizedDescription
+            }
+        }
+    }
     func organizeRecording(_ input: FullRecordingInput, track: Int, importCommand: String? = nil, finished: ((Bool) -> Void)? = nil) {
         guard FullRecordingOrganizer.decide(track: track, ownVoice: true, in: input.media).importsAsPersonal else {
             fullRecordingStatus = "完整整理只能使用本人音轨"
@@ -3056,7 +3086,7 @@ final class ControlCenter: ObservableObject {
                 selected = id
                 importedIDs.append(id)
                 recordCompletion(category: "导入", title: url.lastPathComponent, sourceID: id)
-                results.append(.init(fileName: url.lastPathComponent, succeeded: true, message: "已保存原件，正在本地转写", sourceID: id))
+                results.append(.init(fileName: url.lastPathComponent, succeeded: true, message: speechConfigured ? "已保存原件，正在本地转写" : "已保存原件；配置本地 Qwen 后可转写", sourceID: id))
             } catch {
                 status = error.localizedDescription
                 results.append(.init(fileName: url.lastPathComponent, succeeded: false, message: error.localizedDescription))
@@ -3083,7 +3113,8 @@ final class ControlCenter: ObservableObject {
         let succeededIDs = results.compactMap { $0.succeeded ? remainingIDs.next() : nil }
         let sourceID = succeededIDs.count == 1 ? succeededIDs[0] : nil
         if failures.isEmpty {
-            LocalNotice.post(title: "导入完成", body: "已可靠保存 \(results.count) 份材料，正在本地转写。", sourceID: sourceID)
+            let next = speechConfigured ? "正在本地转写。" : "配置本地 Qwen 后可转写。"
+            LocalNotice.post(title: "导入完成", body: "已可靠保存 \(results.count) 份材料，" + next, sourceID: sourceID)
         } else {
             let detail = failures.prefix(3).map { $0.fileName + "：" + $0.message }.joined(separator: "；")
             LocalNotice.post(title: "导入未全部完成", body: "成功 \(results.count - failures.count) 份，失败 \(failures.count) 份。" + detail + (failures.count > 3 ? "；等" : ""), sourceID: sourceID)
