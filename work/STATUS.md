@@ -1028,3 +1028,6 @@
 - 新增 `WorkspaceKeyboardSelection`（WorkspaceDesign，internal）：id + step(up:over:) 与旧实现逐字一致（空列表 false 且 id 不动、未知 id 落首/末、边界不循环）。
 - WorkspaceView/TopicReading/WeeklyReview 三处私有类型改 typealias；SourcePlayback 步进函数改签名不变的薄包装；调用点零改动。
 - 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
+## 波 165：监测状态按页面可见性重载（2026-11-22，已推送）
+- ControlCenter 新增非发布 `monitorPageVisible`；刷新成功路径仅在监测页可见时 `reloadMonitorState()`；监测页 onAppear 置真（原加载逻辑不变）并新增 onDisappear 置假。关闭期间省去 N+1 查询与最多 30 份报告 JSON 解码。
+- 集成：737 tests 全绿（build_exit=0 / test_exit=0），dist 重建并重启。
