@@ -22,7 +22,7 @@ private struct AtlasEdge: Identifiable {
 }
 
 private final class AtlasGraphCache {
-    struct Key: Equatable { let records: Int; let secondary: Int; let reflection: String }
+    struct Key: Equatable { let records: Int; let secondary: Int; let reflection: String; let focusGeneration: Int }
     var key: Key?
     var nodes: [AtlasNode] = []
     var edges: [AtlasEdge] = []
@@ -44,6 +44,7 @@ struct ReflectionTimelineView: View {
     @State private var period = ReflectionPeriod.week
     @State private var anchor = Date()
     @State private var focus: ConversationReflectionFocus?
+    @State private var focusGeneration = 0
     @State private var error: String?
     @State private var loading = false
     @State private var loadedKey: String?
@@ -262,7 +263,9 @@ struct ReflectionTimelineView: View {
                 snapshot = try await model.loadTopicReflection(topicID)
             } else { return }
             guard !Task.isCancelled, requestedKey == reflectionKey else { return }
+            // A new focus under the same reflection key must invalidate the cached graph.
             focus = snapshot
+            focusGeneration += 1
             loadedKey = requestedKey
             if !requestedPeriodic, let topicID { try await model.markTopicReviewed(topicID) }
         } catch {
@@ -355,10 +358,10 @@ struct ReflectionTimelineView: View {
         }
         return result
     }
-    /// One build per records/secondary generation or reflection target. Layout
+    /// One build per records/secondary/focus generation or reflection target. Layout
     /// depends only on the focus and its nodes, not on zoom or the viewport.
     private func graphData(_ focus: ConversationReflectionFocus) -> (nodes: [AtlasNode], edges: [AtlasEdge], positions: [String: CGPoint]) {
-        let key = AtlasGraphCache.Key(records: model.recordsRevision, secondary: model.secondaryRevision, reflection: reflectionKey)
+        let key = AtlasGraphCache.Key(records: model.recordsRevision, secondary: model.secondaryRevision, reflection: reflectionKey, focusGeneration: focusGeneration)
         if !loading, graphCache.key == key { return (graphCache.nodes, graphCache.edges, graphCache.positions) }
         let items = nodes(focus), links = edges(focus, nodes: items), layout = positions(focus, nodes: items)
         // A reload in flight can replace the focus under the same key; render it
