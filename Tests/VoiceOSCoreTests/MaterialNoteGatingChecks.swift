@@ -4,14 +4,31 @@ import XCTest
 final class MaterialNoteGatingChecks: XCTestCase {
     private func source(_ id: String, state: String = "saved", transcript: String? = "原话",
                         versionID: String? = "t-1", localOnly: Bool = false,
-                        policyVersion: Int = 1) -> SourceRecord {
-        SourceRecord(id: id, assetID: "asset-" + id, name: id, state: state, kind: "user_text",
+                        policyVersion: Int = 1, kind: String = "user_text",
+                        backend: String? = nil, spans: [TranscriptSpan] = [],
+                        presentation: RecordingPresentation? = nil) -> SourceRecord {
+        SourceRecord(id: id, assetID: "asset-" + id, name: id, state: state, kind: kind,
                      createdAt: "2026-04-01T00:00:00Z", bytes: 1, duration: nil, jobState: "completed",
                      transcript: transcript, error: nil, relativePath: "assets/" + id,
-                     transcriptVersionID: versionID, transcriptionBackend: nil, spans: [],
+                     transcriptVersionID: versionID, transcriptionBackend: backend, spans: spans,
                      localOnly: localOnly, policyVersion: policyVersion, origin: "user", speaker: "user",
                      feedbackActionID: nil, feedbackActionVersion: nil, feedbackKind: nil,
-                     feedbackRelation: nil, timeZone: "Asia/Shanghai", presentation: nil)
+                     feedbackRelation: nil, timeZone: "Asia/Shanghai", presentation: presentation)
+    }
+
+    private func timedSpans() -> [TranscriptSpan] {
+        [TranscriptSpan(id: "s1", textStart: 0, textEnd: 2, startMS: 0, endMS: 100)]
+    }
+
+    private func reviewedPresentation(_ versionID: String) -> RecordingPresentation {
+        var presentation = RecordingPresentation()
+        presentation.transcriptionReview = TranscriptionReview(
+            completed: true, changed: false, response_id: "review", response_ids: ["review"],
+            context_review_version: 3, corrections: [], unresolved_issues: [],
+            transcriptVersionID: versionID, scope: "complete_expression_knowledge_and_intent",
+            full_text_independent_passes: 1, review_method: "direct_ai")
+        presentation.transcriptVersionID = versionID
+        return presentation
     }
 
     private func catalog(_ records: [SourceRecord]) -> [String: SourceRecord] {
@@ -51,6 +68,16 @@ final class MaterialNoteGatingChecks: XCTestCase {
                 memberIDs: ["a"], expected: "尚无转写"),
             Row(name: "无转写版本号", present: [source("a", versionID: nil)],
                 memberIDs: ["a"], expected: "尚无转写"),
+            Row(name: "Qwen 转写核对未完成", present: [source("a", kind: "audio", backend: "Qwen3-ASR-1.7B",
+                                                              spans: timedSpans())],
+                memberIDs: ["a"], expected: "转写核对未完成，暂不能交给云端整理"),
+            Row(name: "仅本机先于转写核对", present: [source("a", kind: "audio", backend: "Qwen3-ASR-1.7B",
+                                                            localOnly: true, spans: timedSpans())],
+                memberIDs: ["a"], expected: "仅本机保存"),
+            Row(name: "Qwen 转写核对完成后可生成",
+                present: [source("a", kind: "audio", backend: "Qwen3-ASR-1.7B", spans: timedSpans(),
+                                 presentation: reviewedPresentation("t-1"))],
+                memberIDs: ["a"], expected: nil),
             Row(name: "后位成员的原因", present: [source("a"), source("b", localOnly: true)],
                 memberIDs: ["a", "b"], expected: "仅本机保存")
         ]

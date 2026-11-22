@@ -112,6 +112,23 @@ final class MaterialNotePortChecks: XCTestCase {
         XCTAssertEqual(second.first?.transcriptVersionID, "tb-v1")
     }
 
+    func testanchored跨时间片引文保留锚点但spanID为空() {
+        let members = [member("a", "材料甲", version: "ta-v1", transcript: "跨片前半后半引文",
+                              spans: [("s1", "跨片前半"), ("s2", "后半引文")])]
+        let note = MaterialNote(title: "标题", lead: nil, sections: [
+            MaterialNote.Section(heading: nil, paragraphs: [
+                MaterialNote.Paragraph(text: "第一段", anchors: [
+                    MaterialNote.Anchor(quote: "跨片前半后半引文", sourceID: "a")
+                ])
+            ])
+        ])
+        let kept = MaterialNoteAnchoring.anchored(note, members: members).sections[0].paragraphs[0].anchors
+        XCTAssertEqual(kept.count, 1, "存在于转写的引文即使跨片也保留锚点")
+        XCTAssertEqual(kept.first?.quote, "跨片前半后半引文")
+        XCTAssertNil(kept.first?.spanID, "跨片引文没有单一时间片，spanID 为空")
+        XCTAssertEqual(kept.first?.transcriptVersionID, "ta-v1")
+    }
+
     func test身份包含provider模型与固定版本() throws {
         let port = try ResponsesMaterialNotePort(baseURL: URL(string: "https://api.openai.com/v1")!,
                                                  apiKey: "fixture", model: "fixture-model")

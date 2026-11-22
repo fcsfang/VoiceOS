@@ -13,6 +13,9 @@ public enum MaterialNoteGating {
             guard let transcript = record.transcript,
                   !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   record.transcriptVersionID != nil else { return "尚无转写" }
+            // 与所有云端理解路径的 requireReviewedTranscriptions 屏障一致：
+            // 未完成全文核对的 Qwen 转写不得交给云端生成笔记。
+            guard !record.needsTranscriptionReview else { return "转写核对未完成，暂不能交给云端整理" }
         }
         return nil
     }

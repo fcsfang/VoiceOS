@@ -71,6 +71,17 @@ extension VoiceOSStore {
         return StoredMaterialNote(id: id, expressionKey: expressionKey, note: note, transcriptVersions: transcriptVersions, modelIdentity: modelIdentity, createdAt: createdAt)
     }
 
+    /// Appends a new revision only while every expected member still matches
+    /// the library. The snapshot comparison and the insert run in one actor
+    /// turn, so a transcript or permission change cannot land in between.
+    @discardableResult
+    public func saveMaterialNote(memberSourceIDs: [String], note: MaterialNote, transcriptVersions: [String: String], modelIdentity: String?, ifMembersStillMatch expected: [MaterialNoteMemberSnapshot]) throws -> StoredMaterialNote? {
+        let catalog = Dictionary(try sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        guard expected.allSatisfy({ $0.matches(catalog[$0.sourceID]) }) else { return nil }
+        return try saveMaterialNote(memberSourceIDs: memberSourceIDs, note: note,
+                                    transcriptVersions: transcriptVersions, modelIdentity: modelIdentity)
+    }
+
     /// The newest revision for the member set; empty members have no note.
     public func latestMaterialNote(memberSourceIDs: [String]) throws -> StoredMaterialNote? {
         guard !memberSourceIDs.isEmpty else { return nil }

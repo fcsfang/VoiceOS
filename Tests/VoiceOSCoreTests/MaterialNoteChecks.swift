@@ -47,6 +47,27 @@ final class MaterialNoteChecks: XCTestCase {
         XCTAssertEqual(latest.createdAt, saved.createdAt)
     }
 
+    func test守卫保存仅在成员仍匹配时落库() async throws {
+        let store = try await openStore()
+        let record = SourceRecord(id: "a", assetID: "asset-a", name: "a", state: "saved", kind: "user_text",
+                                  createdAt: "2026-04-01T00:00:00Z", bytes: 1, duration: nil, jobState: "completed",
+                                  transcript: "原话", error: nil, relativePath: "assets/a",
+                                  transcriptVersionID: "ta-v1", transcriptionBackend: nil, spans: [],
+                                  localOnly: false, policyVersion: 1, origin: "user", speaker: "user",
+                                  feedbackActionID: nil, feedbackActionVersion: nil, feedbackKind: nil,
+                                  feedbackRelation: nil, timeZone: "Asia/Shanghai", presentation: nil)
+        let blocked = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("甲"),
+                                                       transcriptVersions: ["a": "ta-v1"], modelIdentity: nil,
+                                                       ifMembersStillMatch: [MaterialNoteMemberSnapshot(record)])
+        XCTAssertNil(blocked, "成员已不在库中（或已变化）时不落库")
+        XCTAssertNil(try await store.latestMaterialNote(memberSourceIDs: ["a"]))
+        let saved = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("乙"),
+                                                     transcriptVersions: ["a": "ta-v1"], modelIdentity: nil,
+                                                     ifMembersStillMatch: [])
+        XCTAssertNotNil(saved, "空期望不做拦截")
+        XCTAssertEqual(try await store.latestMaterialNote(memberSourceIDs: ["a"])?.note.title, "乙")
+    }
+
     func test成员顺序不同命中同一expressionKey() async throws {
         let store = try await openStore()
         let first = try await store.saveMaterialNote(memberSourceIDs: ["b", "a"], note: note("甲"),

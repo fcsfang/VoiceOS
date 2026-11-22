@@ -59,15 +59,20 @@ public enum MaterialNoteAnchoring {
     /// Drops anchors naming a member outside this expression or a quote absent
     /// from that member's transcript, and records the member's transcript
     /// version and the matched span on the rest, so a saved note can be
-    /// re-read against the source it came from.
+    /// re-read against the source it came from. A quote that exists in the
+    /// transcript but spans several timed spans keeps its anchor with a nil
+    /// spanID; only quotes missing from the transcript entirely are dropped.
     public static func anchored(_ note: MaterialNote, members: [MaterialNoteMember]) -> MaterialNote {
         let bySource = Dictionary(members.map { ($0.sourceID, $0) }, uniquingKeysWith: { first, _ in first })
         let sections = note.sections.map { section in
             MaterialNote.Section(heading: section.heading, paragraphs: section.paragraphs.map { paragraph in
                 MaterialNote.Paragraph(text: paragraph.text, anchors: paragraph.anchors.compactMap { anchor in
-                    guard let member = bySource[anchor.sourceID], let spanID = Self.anchor(quote: anchor.quote, in: member) else { return nil }
+                    guard let member = bySource[anchor.sourceID] else { return nil }
+                    let needle = Self.normalized(anchor.quote)
+                    guard !needle.isEmpty, Self.normalized(member.transcript).contains(needle) else { return nil }
                     return MaterialNote.Anchor(quote: anchor.quote, sourceID: anchor.sourceID,
-                                               transcriptVersionID: member.transcriptVersionID, spanID: spanID)
+                                               transcriptVersionID: member.transcriptVersionID,
+                                               spanID: Self.anchor(quote: anchor.quote, in: member))
                 })
             })
         }
