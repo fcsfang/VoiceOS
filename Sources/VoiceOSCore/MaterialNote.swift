@@ -59,7 +59,8 @@ public struct StoredMaterialNote: Sendable, Equatable {
 
 extension VoiceOSStore {
     /// Canonical member-set identity: sorted, de-duplicated source IDs joined by `|`.
-    static func materialNoteExpressionKey(_ memberSourceIDs: [String]) -> String {
+    /// Views that only hold a source ID use it to look the same note up in batch.
+    public static func materialNoteExpressionKey(_ memberSourceIDs: [String]) -> String {
         Set(memberSourceIDs).sorted().joined(separator: "|")
     }
 
@@ -91,6 +92,24 @@ extension VoiceOSStore {
         let expressionKey = Self.materialNoteExpressionKey(memberSourceIDs)
         guard let row = try db.query("SELECT * FROM material_notes WHERE expression_key=? ORDER BY created_at DESC, rowid DESC LIMIT 1", [expressionKey]).first else { return nil }
         return try Self.storedMaterialNote(row)
+    }
+
+    /// The newest revision for each expression key, in one query. Keys with no
+    /// saved note are absent; an empty input reads nothing. Rows arrive newest
+    /// first, so the first row seen for a key is that key's latest revision.
+    public func latestMaterialNotes(expressionKeys: [String]) throws -> [String: StoredMaterialNote] {
+        let keys = Set(expressionKeys)
+        guard !keys.isEmpty else { return [:] }
+        let placeholders = Array(repeating: "?", count: keys.count).joined(separator: ",")
+        let rows = try db.query(
+            "SELECT * FROM material_notes WHERE expression_key IN (\(placeholders)) ORDER BY created_at DESC, rowid DESC",
+            keys.sorted().map { $0 as String? })
+        var latest: [String: StoredMaterialNote] = [:]
+        for row in rows {
+            guard let key = row["expression_key"], latest[key] == nil else { continue }
+            latest[key] = try Self.storedMaterialNote(row)
+        }
+        return latest
     }
 
     /// Current only while every member's transcript version still matches the

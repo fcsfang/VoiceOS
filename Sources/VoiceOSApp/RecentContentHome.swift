@@ -26,6 +26,7 @@ struct RecentContentHome: View {
     @SceneStorage("recentHome.timelineAnchor") private var storedTimelineAnchor = ""
     @State private var timelineRestored = false
     @State private var readingStates: [String: SourceReadingState] = [:]
+    @State private var materialNotes: [String: StoredMaterialNote] = [:]
     @AppStorage("voiceos.home.pendingOnly") private var showsOnlyPending = true
     @State private var clueRename: ClueRenameRequest?
     @State private var clueFailureText = ""
@@ -102,6 +103,7 @@ struct RecentContentHome: View {
         }
         .onChange(of: selected?.id) { _, _ in syncSelection() }
         .task(id: model.homeSnapshot) { await reloadReadingStates() }
+        .task(id: materialNotesReadKey) { await reloadMaterialNotes() }
         .onChange(of: model.understandingSource) { _, id in finishOrganizeAttempt(id) }
         .sheet(item: $clueRename) { request in
             RecentClueRenameSheet(model: model, clue: request.clue, title: request.title, resettable: request.resettable) { clueRename = nil }
@@ -385,7 +387,8 @@ struct RecentContentHome: View {
     /// One title fit, one preview read and one status read per row; title,
     /// preview, meta, trailing and spoken label all read from this result.
     private func rowPresentation(_ item: RecentContentItem) -> HomeRowPresentation {
-        let fit = WorkspaceTitleFit.present(item.title)
+        let storedNote = materialNote(for: item)
+        let fit = WorkspaceTitleFit.present(storedNote.flatMap { MaterialNoteHomeText.title($0.note) } ?? item.title)
         let title = item.kind == .feedback ? fit.title + " · \(progressCount(item)) 条" : fit.title
         let note = rowStatusNote(item)
         let time = timeLabel(item.date)
@@ -400,21 +403,22 @@ struct RecentContentHome: View {
         if let trailing { spokenParts.append(trailing) }
         return HomeRowPresentation(
             title: title,
-            preview: rowPreview(item, title: fit.title),
+            preview: rowPreview(item, note: storedNote, title: fit.title),
             meta: metaParts.joined(separator: " · "),
             trailing: trailing,
             accessibilityLabel: spokenParts.joined(separator: "，")
         )
     }
 
-    /// The preview is the same first paragraph the reader opens with, flattened
-    /// to one line of flow so a stray newline cannot break the row's rhythm.
-    /// A material without a summary borrows its opening thought.
-    private func rowPreview(_ item: RecentContentItem, title: String) -> String? {
+    /// The preview prefers the saved note's lead or first paragraph, then the
+    /// row's own summary or its opening thought. Every source flattens to one
+    /// line of flow so a stray newline cannot break the row's rhythm.
+    private func rowPreview(_ item: RecentContentItem, note: StoredMaterialNote?, title: String) -> String? {
         guard item.kind == .material else { return nil }
-        let raw = item.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            ? (item.thoughts.first?.statement ?? "")
-            : item.summary
+        let raw = note.flatMap { MaterialNoteHomeText.preview($0.note) }
+            ?? (item.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ? (item.thoughts.first?.statement ?? "")
+                : item.summary)
         let collapsed = raw.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         guard !collapsed.isEmpty, collapsed != title else { return nil }
         return collapsed
@@ -611,15 +615,17 @@ struct RecentContentHome: View {
                         .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                 }
             }
-            let fit = WorkspaceTitleFit.present(item.title)
+            let note = materialNote(for: item)
+            let fit = WorkspaceTitleFit.present(note.flatMap { MaterialNoteHomeText.title($0.note) } ?? item.title)
             Text(fit.title).vosFont(WorkspaceText.pageTitle).lineSpacing(4).lineLimit(4)
                 .padding(.top, WorkspaceMetrics.groupGap).textSelection(.enabled).accessibilityAddTraits(.isHeader)
             if let source = fit.source {
                 Text(source).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
                     .padding(.top, 6).textSelection(.enabled)
             }
-            if !item.summary.isEmpty {
-                Text(item.summary).vosFont(WorkspaceText.body).lineSpacing(5)
+            if let summary = note.flatMap({ MaterialNoteHomeText.preview($0.note) })
+                ?? (item.summary.isEmpty ? nil : item.summary) {
+                Text(summary).vosFont(WorkspaceText.body).lineSpacing(5)
                     .textSelection(.enabled)
                     .padding(.top, WorkspaceMetrics.sectionGap)
             }
@@ -940,6 +946,41 @@ struct RecentContentHome: View {
         readingStates = await model.readingStates()
     }
 
+    /// The note read refreshes when the library or a note revision changes, or
+    /// when the visible row set does. `task(id:)` cancels the old read; the key
+    /// comparison before writing back stops a late result landing on a newer set.
+    private var materialNotesReadKey: HomeMaterialNotesKey {
+        let keys = items.compactMap { $0.kind == .material ? materialNoteExpressionKey(for: $0) : nil }
+        return HomeMaterialNotesKey(records: model.recordsRevision, notes: model.materialNotesRevision,
+                                    expressionKeys: Set(keys).sorted())
+    }
+
+    /// The expression's member set exactly as note generation saved it: source
+    /// IDs plus paired external sources, canonicalized by the store.
+    private func materialNoteExpressionKey(for item: RecentContentItem) -> String? {
+        guard let sourceID = item.sourceIDs.first else { return nil }
+        let memberIDs = model.sourcePageIndex.expression(for: sourceID).map { expression in
+            expression.sourceIDs + (expression.externalVersions ?? [:]).keys.sorted()
+                .filter { !expression.sourceIDs.contains($0) }
+        } ?? [sourceID]
+        return VoiceOSStore.materialNoteExpressionKey(memberIDs)
+    }
+
+    private func materialNote(for item: RecentContentItem) -> StoredMaterialNote? {
+        guard item.kind == .material, let key = materialNoteExpressionKey(for: item) else { return nil }
+        return materialNotes[key]
+    }
+
+    @MainActor
+    private func reloadMaterialNotes() async {
+        let key = materialNotesReadKey
+        let notes: [String: StoredMaterialNote] = key.expressionKeys.isEmpty
+            ? [:]
+            : await model.latestMaterialNotes(expressionKeys: key.expressionKeys)
+        guard key == materialNotesReadKey, !Task.isCancelled else { return }
+        materialNotes = notes
+    }
+
     private func organizeBlocker(_ source: SourceRecord, organizing: Bool) -> String? {
         guard !organizing else { return nil }
         if model.fullRecordingBusy { return "正在处理录音，完成后再整理。" }
@@ -985,6 +1026,15 @@ struct RecentContentHome: View {
 
     private func timeLabel(_ date: Date) -> String {
         HomeDateFormatting.time.string(from: date)
+    }
+}
+
+extension ControlCenter {
+    /// One read for the visible rows; a failed read leaves every row on its own
+    /// title and preview.
+    func latestMaterialNotes(expressionKeys: [String]) async -> [String: StoredMaterialNote] {
+        guard !expressionKeys.isEmpty, let store else { return [:] }
+        return (try? await store.latestMaterialNotes(expressionKeys: expressionKeys)) ?? [:]
     }
 }
 
@@ -1115,6 +1165,56 @@ private struct RecentClueRenameSheet: View {
         }.padding(24).frame(width: 520)
             .workspaceModalSurface()
             .task { try? await Task.sleep(for: .milliseconds(100)); titleFocused = true }
+    }
+}
+
+/// The home timeline's batched note read: the library revision, the note
+/// revision and the canonical expression keys of the visible rows.
+private struct HomeMaterialNotesKey: Equatable {
+    let records: Int
+    let notes: Int
+    let expressionKeys: [String]
+}
+
+/// Title and preview text the home rows and the reader take from a saved note.
+/// The preview is the lead when present, otherwise the first paragraph's first
+/// sentence, cut to `excerptLength` characters with an ellipsis.
+private enum MaterialNoteHomeText {
+    static func title(_ note: MaterialNote) -> String? {
+        let title = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? nil : title
+    }
+
+    static func preview(_ note: MaterialNote) -> String? {
+        if let lead = note.lead {
+            let text = flattened(lead)
+            if !text.isEmpty { return text }
+        }
+        for section in note.sections {
+            for paragraph in section.paragraphs {
+                let text = flattened(paragraph.text)
+                if !text.isEmpty { return excerpt(text) }
+            }
+        }
+        return nil
+    }
+
+    private static let excerptLength = 80
+    private static let sentenceEndings: Set<Character> = ["。", "！", "？", "!", "?", "…"]
+
+    private static func flattened(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    private static func excerpt(_ text: String) -> String {
+        if let ending = text.firstIndex(where: { sentenceEndings.contains($0) }),
+           text.distance(from: text.startIndex, to: ending) < excerptLength {
+            var end = text.index(after: ending)
+            while end < text.endIndex, text[end] == "…" { end = text.index(after: end) }
+            return String(text[..<end])
+        }
+        guard text.count > excerptLength else { return text }
+        return String(text.prefix(excerptLength)) + "…"
     }
 }
 

@@ -84,6 +84,7 @@ extension ControlCenter {
                 modelIdentity: identity.provider + " / " + identity.model + " / " + identity.promptVersion + " / " + identity.schemaVersion,
                 ifMembersStillMatch: snapshots)
             materialNotePresence[sourceID] = saved != nil
+            if saved != nil { materialNoteDidSave() }
             materialNoteStates[sourceID] = saved == nil ? .failed("材料在生成期间有变化，请重试") : .idle
         } catch is CancellationError {
             materialNoteStates[sourceID] = .idle
