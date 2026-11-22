@@ -90,15 +90,13 @@ private enum SourceReadSlot:String {
     case pause,discussions,context,attachment,entities,chapters,claimNotes,extraction
 }
 private func sourceTime(_ ms:Int)->String { String(format:"%02d:%02d",ms/60000,ms/1000%60) }
-/// Mirrors `WorkspaceKeySelection.step` in WorkspaceView; share one helper once a third list needs it.
+/// Thin wrapper kept for the playback key handler; stepping lives in
+/// `WorkspaceKeyboardSelection` so every list shares one rule.
 private func stepSourcePlaybackSelection(_ selection:inout String?,up:Bool,over ids:[String])->Bool {
-    guard !ids.isEmpty else { return false }
-    let current=selection.flatMap { ids.firstIndex(of:$0) }
-    let next:Int
-    if up { next=current.map { max(0,$0 - 1) } ?? ids.count - 1 }
-    else { next=current.map { min(ids.count - 1,$0 + 1) } ?? 0 }
-    selection=ids[next]
-    return true
+    var state = WorkspaceKeyboardSelection(id: selection)
+    let moved = state.step(up: up, over: ids)
+    selection = state.id
+    return moved
 }
 struct SourceFoldState: Equatable {
     var original = false

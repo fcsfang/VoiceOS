@@ -3729,18 +3729,7 @@ private struct WorkspaceTopicEntry: View {
     }
 }
 
-private struct WorkspaceKeySelection {
-    var id: String?
-    mutating func step(up: Bool, over ids: [String]) -> Bool {
-        guard !ids.isEmpty else { return false }
-        let current = id.flatMap { ids.firstIndex(of: $0) }
-        let next: Int
-        if up { next = current.map { max(0,$0 - 1) } ?? ids.count - 1 }
-        else { next = current.map { min(ids.count - 1,$0 + 1) } ?? 0 }
-        id = ids[next]
-        return true
-    }
-}
+private typealias WorkspaceKeySelection = WorkspaceKeyboardSelection
 
 private struct ActionUndoState: Equatable {
     enum Kind: Equatable {
