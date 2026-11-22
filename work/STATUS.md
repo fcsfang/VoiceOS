@@ -1103,3 +1103,10 @@
 - 只读评审（175-A/B 与 176-B 全链路）确认四项：①【高】通知在窗口重建场景丢失——pendingWorkspaceSourceID 仅由 onChange 消费，改在 onAppear 的 consumePendingNavigation 补消费；②【中】位置恢复每次下漂一段——判定基准改为视口顶部（容差 8pt），与 scrollTo(.top) 幂等；③【中】生成完成不写首页缓存——保存成功即写 materialNoteRows，展示读取也写；④【低】重生成后探针残值——note id 变化时清空探针盒。
 - 「同秒两版缺 rowid 决胜」评为低危潜在项，暂不修（DB 查询按 rowid 决胜，缓存窗口极小）。
 - 集成：构建 68 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 178：阶段 2 审计落地三项（2026-11-23）
+- 来源：阶段 2 差距发现工作流（四路只读读者 + 汇总，41 条候选均有代码证据）。取影响最大、成本最低的三组。
+- 178-A 阅读位置跨启动持久化：MaterialNoteReadingPosition 改 UserDefaults（上限 400 条），条目记 noteID + anchor，重生成后 id 变化不再沿用旧锚点；首页「继续读」help 的「回到上次读到的位置」自此跨启动成立。
+- 178-B 搜索纳入笔记：搜索索引把每个表达最新一版笔记的标题/导语/小标题/段落按成员集并入材料条目正文；searchIndexShape 升 cjk-spaced-v3-notes 强制旧库重建；searchFingerprint 纳入 material_notes，新笔记保存后下一次搜索自动重建——首页显示的笔记标题现在搜得到。
+- 178-C 文本模型缺失时只保存原音（阶段 2 硬性要求）：canToggleCaptureDictation 不再要求模型就绪；toggleCaptureDictation 在模型缺失时退化为只录不整理（封存原音）；菜单与工作区按钮改「开始口述（先保存原音）/停止并保存」；Siri endpoint 去掉模型门控；引导第 1 步补「文本模型未配置时原音也会先保存在本机」。
+- 未做（候选 2/4/6 留待后续）：完整整理完成态「打开这篇笔记」、首页待处理保留近期已读笔记、模型缺失时导入状态与提示的诚实化、FullRecordingView 只保存原件入口。
+- 集成：构建 69 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。

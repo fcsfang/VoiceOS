@@ -136,18 +136,19 @@ struct MaterialNoteReadingView: View {
     }
 
     private func recordReadingPosition() {
+        guard let display else { return }
         // 视口顶部处开始的块就是当前阅读位置；都比线低说明还在笔记上方。
         guard let pick = probeBox.tops.filter({ $0.value <= Self.readingTopTolerance })
             .max(by: { $0.value < $1.value })?.key,
             pick != probeBox.lastAnchor else { return }
         probeBox.lastAnchor = pick
-        MaterialNoteReadingPosition.record(pick, for: positionKey)
+        MaterialNoteReadingPosition.record(pick, for: positionKey, noteID: display.note.id)
     }
 
     private func restoreReadingPositionIfNeeded() async {
-        guard !hasRestored, display != nil else { return }
+        guard !hasRestored, let display else { return }
         guard let scroll = restoreScroll,
-              let anchor = MaterialNoteReadingPosition.anchor(for: positionKey) else {
+              let anchor = MaterialNoteReadingPosition.anchor(for: positionKey, noteID: display.note.id) else {
             hasRestored = true
             return
         }

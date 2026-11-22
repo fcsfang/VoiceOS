@@ -1125,10 +1125,15 @@ final class ControlCenter: ObservableObject {
         dictation.stop()
     }
     var canToggleCaptureDictation: Bool {
-        initialized && !dictationBusy && (dictationActive || recordingModelIssue == nil)
+        // 文本模型缺失不再拦住口述：录下来先存原音，配置后再整理。
+        initialized && !dictationBusy
     }
     func toggleCaptureDictation() {
-        if dictationActive { stopDictation() } else { Task { await startDictation(processAfterTranscription: true) } }
+        if dictationActive {
+            stopDictation()
+        } else {
+            Task { await startDictation(processAfterTranscription: recordingModelIssue == nil) }
+        }
     }
     private func finishDictation(success:Bool) async {
         guard let store, let id = dictationSource else { return }
@@ -4260,9 +4265,11 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate
         if model.dictationBusy && model.dictationActive {
             dictationMenuItem?.title = "正在封存录音…"
         } else if model.dictationActive {
-            dictationMenuItem?.title = "正在录音 " + model.dictationElapsedText + " · 停止并整理" + suffix
+            let finish = model.recordingModelIssue == nil ? " · 停止并整理" : " · 停止并保存"
+            dictationMenuItem?.title = "正在录音 " + model.dictationElapsedText + finish + suffix
         } else {
-            dictationMenuItem?.title = "开始口述并自动整理" + suffix
+            let start = model.recordingModelIssue == nil ? "开始口述并自动整理" : "开始口述（先保存原音）"
+            dictationMenuItem?.title = start + suffix
         }
         dictationMenuItem?.toolTip = conflict ? "快捷键 ⌥⌘D 被其它应用占用；可从菜单开始口述，或在设置中查看更换指引" : nil
         dictationMenuItem?.isEnabled = model.canToggleCaptureDictation
@@ -5577,7 +5584,7 @@ extension ApplicationDelegate: VoiceOSIntentEndpoint {
             return .stopped
         }
         if let reason = model.dictationBusyReason { return .failed(reason) }
-        if let issue = model.recordingModelIssue { return .failed(issue + "无法录制并完整整理") }
+        // 文本模型缺失时 toggleCaptureDictation 会退化为只保存原音，不再拒绝。
         let previousStatus = model.status
         model.toggleCaptureDictation()
         let deadline = Date().addingTimeInterval(2)

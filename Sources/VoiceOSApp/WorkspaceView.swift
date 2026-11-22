@@ -985,9 +985,9 @@ struct WorkspaceView: View {
             VStack(alignment:.leading,spacing:0) {
                 VStack(alignment:.leading,spacing:10) {
                     HStack {
-                        Button(model.dictationActive ? "停止并整理" : "开始口述并自动整理",systemImage:model.dictationActive ? "stop.circle" : "mic") {
-                            if model.dictationActive { model.stopDictation() } else { Task { await model.startDictation(processAfterTranscription:true) } }
-                        }.buttonStyle(.workspacePrimary).disabled(model.dictationBusy || model.fullRecordingBusy || (!model.dictationActive && model.recordingModelIssue != nil))
+                        Button(model.dictationActive ? (model.recordingModelIssue == nil ? "停止并整理" : "停止并保存") : (model.recordingModelIssue == nil ? "开始口述并自动整理" : "开始口述（先保存原音）"),systemImage:model.dictationActive ? "stop.circle" : "mic") {
+                            if model.dictationActive { model.stopDictation() } else { Task { await model.startDictation(processAfterTranscription: model.recordingModelIssue == nil) } }
+                        }.buttonStyle(.workspacePrimary).disabled(model.dictationBusy || model.fullRecordingBusy)
                         Button("导入音频 / 视频") { model.chooseFullRecording() }.buttonStyle(.workspaceSecondary)
                     }
                     if let issue = model.recordingModelIssue {

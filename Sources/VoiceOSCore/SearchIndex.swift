@@ -148,7 +148,7 @@ extension VoiceOSStore {
         return SearchTokens(drivable: drivable, filters: filters)
     }
 
-    private var searchIndexShape: String { "cjk-spaced-v2-grouped-" + TimeZone.current.identifier }
+    private var searchIndexShape: String { "cjk-spaced-v3-notes-" + TimeZone.current.identifier }
 
     private func searchSpaced(_ text: String) -> String {
         var result = ""
@@ -285,6 +285,30 @@ extension VoiceOSStore {
         let claims = try db.query("SELECT id, statement AS title, statement AS body FROM claims")
         let actions = try db.query("SELECT id, title, note AS body FROM actions")
         let topics = try db.query("SELECT id, title, title AS body FROM reflection_questions")
+        // 首页显示的是笔记标题；把每个表达最新一版的标题、导语与正文并入材料
+        // 条目的搜索正文，否则按屏幕上看到的标题搜不到东西。
+        let noteTexts: [String: String] = {
+            guard let rows = try? db.query("""
+                SELECT m.expression_key AS expression_key, m.note_json AS note_json
+                FROM material_notes m
+                WHERE m.rowid = (SELECT rowid FROM material_notes
+                                 WHERE expression_key = m.expression_key
+                                 ORDER BY created_at DESC, rowid DESC LIMIT 1)
+                """) else { return [:] }
+            var map: [String: String] = [:]
+            for row in rows {
+                guard let key = row["expression_key"], let json = row["note_json"],
+                      let note = try? JSONDecoder().decode(MaterialNote.self, from: Data(json.utf8)) else { continue }
+                var parts = [note.title]
+                if let lead = note.lead { parts.append(lead) }
+                for section in note.sections {
+                    if let heading = section.heading { parts.append(heading) }
+                    parts.append(contentsOf: section.paragraphs.map(\.text))
+                }
+                map[key] = parts.joined(separator: "\n")
+            }
+            return map
+        }()
         try db.transaction {
             try db.execute("DELETE FROM search_index")
             for group in groups {
@@ -302,6 +326,14 @@ extension VoiceOSStore {
                 // timestamp still finds the material after a rename.
                 let storedName = row["stored_name"] ?? ""
                 let body = group.transcripts.compactMap { $0.text }.joined(separator: " ")
+                // 笔记按表达成员集键控；成员口径与笔记生成一致（本人各段在前，
+                // 配对的外部来源按 sourceID 排序随后）。
+                let memberIDs: [String]
+                if let expression = presentation?.expression, !expression.sourceIDs.isEmpty {
+                    let external = (expression.externalVersions ?? [:]).keys.sorted()
+                    memberIDs = expression.sourceIDs + external.filter { !expression.sourceIDs.contains($0) }
+                } else { memberIDs = [id] }
+                let noteText = noteTexts[Self.materialNoteExpressionKey(memberIDs)]
                 var selected = group.transcripts.last
                 if let version = presentation?.transcriptVersionID,
                    let match = group.transcripts.last(where: { $0.versionID == version }) {
@@ -318,7 +350,7 @@ extension VoiceOSStore {
                     transcriptVersionID: selected?.versionID)
                 let indexTitle = MaterialNaming.displayName(MarkdownDocument.plainTitle(title))
                 try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('material', ?, ?, ?)",
-                               [id, searchSpaced(indexTitle), searchSpaced(storedName + " " + body)])
+                               [id, searchSpaced(indexTitle), searchSpaced(storedName + " " + body + " " + (noteText ?? ""))])
             }
             for row in claims {
                 try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('claim', ?, ?, ?)",
@@ -340,7 +372,7 @@ extension VoiceOSStore {
 
     private func searchFingerprint() throws -> String {
         var parts: [String] = []
-        for table in ["sources", "claims", "actions", "transcript_versions", "reflection_questions"] {
+        for table in ["sources", "claims", "actions", "transcript_versions", "reflection_questions", "material_notes"] {
             let row = try db.query("SELECT COUNT(*) AS count, COALESCE(MAX(created_at), '') AS latest FROM \(table)").first!
             var part = "\(row["count"]!):\(row["latest"]!)"
             // Topic renames update the row in place and no dirty trigger covers that
