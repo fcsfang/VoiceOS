@@ -105,7 +105,8 @@ struct WeeklyReviewView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
-                    WorkspacePageHeading(eyebrow: "行动 · 每周回顾", title: "这一周，行动走到了哪里") {
+                    WorkspacePageHeading(eyebrow: "行动 · 每周回顾", title: "这一周，行动走到了哪里",
+                                         subtitle: "最近 7 天完成的行动，和仍等你处理的积压。") {
                         HStack(spacing: 10) {
                             Button("认知地图", systemImage: "point.3.connected.trianglepath.dotted") { showingReflectionMap = true }
                                 .buttonStyle(.workspaceSecondary)
@@ -115,7 +116,7 @@ struct WeeklyReviewView: View {
                                 .keyboardShortcut(.cancelAction)
                         }
                     }
-                    summaryRow(proxy)
+                    scopeSummary(proxy)
                     if loadState == .loading && showSlowLoad {
                         ProgressView("正在读取本周行动…").controlSize(.small)
                     }
@@ -183,38 +184,43 @@ struct WeeklyReviewView: View {
         return "review.pending." + action.id
     }
 
-    private func summaryRow(_ proxy: ScrollViewProxy) -> some View {
+    // The review opens with what was counted over and what is still pending.
+    // Retrospective figures share one range caption; backlog figures name their
+    // window and jump to the section that holds them. Both lines stay at
+    // auxiliary size so the day's real work keeps the first screen.
+    private func scopeSummary(_ proxy: ScrollViewProxy) -> some View {
         let links = WeeklyReviewSummaryLinks(weekCompleted: weekCompleted.count,
                                              pendingOutcomes: model.visibleOutcomeFollowups.count,
                                              stalledGoals: stalledGoals.count,
                                              unclarifiedTasks: unclarifiedTasks.count)
-        return HStack(spacing: 10) {
-            summaryStat("本周完成", count: weekCompleted.count, target: "review.completed", isLink: links.completed, proxy: proxy)
-            Text("·").foregroundStyle(palette.tertiaryText)
-            summaryStat("待补结果", count: model.visibleOutcomeFollowups.count, target: pendingOutcomeAnchor, isLink: links.pendingOutcome, proxy: proxy)
-            Text("·").foregroundStyle(palette.tertiaryText)
-            summaryStat("停滞目标", count: stalledGoals.count, target: "review.stalled", isLink: links.stalled, proxy: proxy)
-            Text("·").foregroundStyle(palette.tertiaryText)
-            summaryStat("待确认", count: unclarifiedTasks.count, target: "review.unclarified", isLink: links.unclarified, proxy: proxy)
-            Spacer(minLength: 0)
+        return VStack(alignment: .leading, spacing: 9) {
+            WorkspaceStatLine(caption: "回顾 · 最近 7 天", stats: [
+                .init(label: "已完成", value: "\(weekCompleted.count) 项",
+                      help: "跳到「本周完成」所在区块",
+                      action: scrollAction("review.completed", proxy, when: links.completed))
+            ])
+            WorkspaceStatLine(caption: "待处理 · 点数字跳到对应区块", stats: [
+                .init(label: "待补结果", value: "\(model.visibleOutcomeFollowups.count) 项", note: "累计",
+                      help: "跳到待补结果所在区块",
+                      action: scrollAction(pendingOutcomeAnchor, proxy, when: links.pendingOutcome)),
+                .init(label: "停滞目标", value: "\(stalledGoals.count) 个",
+                      help: "跳到「没有下一步的目标」所在区块",
+                      action: scrollAction("review.stalled", proxy, when: links.stalled)),
+                .init(label: "待确认", value: "\(unclarifiedTasks.count) 项", note: "最近 14 天抽取",
+                      help: "跳到「待确认」所在区块",
+                      action: scrollAction("review.unclarified", proxy, when: links.unclarified))
+            ])
         }
     }
 
-    @ViewBuilder
-    private func summaryStat(_ title: String, count: Int, target: String, isLink: Bool, proxy: ScrollViewProxy) -> some View {
-        let label = Text("\(title) \(count)")
-        if isLink {
-            Button {
-                withAnimation(reduceMotion ? nil : WorkspaceMotion.scroll) { proxy.scrollTo(target, anchor: .top) }
-            } label: {
-                label
-            }
-            .buttonStyle(WorkspaceButtonStyle(emphasis: .quiet, compact: true, monospacedDigit: true))
-            .help("跳到「\(title) \(count)」所在区块")
-        } else {
-            label.vosFont(WorkspaceText.meta.size, weight: .medium, monospacedDigit: true)
-                .foregroundStyle(palette.secondaryText)
-        }
+    /// A stat only acts when its section is on screen; otherwise it stays plain text.
+    private func scrollAction(_ anchor: String, _ proxy: ScrollViewProxy, when isLink: Bool) -> (() -> Void)? {
+        guard isLink else { return nil }
+        return { scroll(to: anchor, proxy) }
+    }
+
+    private func scroll(to anchor: String, _ proxy: ScrollViewProxy) {
+        withAnimation(reduceMotion ? nil : WorkspaceMotion.scroll) { proxy.scrollTo(anchor, anchor: .top) }
     }
 
     private func load() async {
@@ -619,7 +625,7 @@ struct WeeklyReviewView: View {
     private func unavailableProgressRow(_ row: RecentContentProgressRow, highlighted: Bool) -> some View {
         let hasMaterial = progressRowHasMaterial(row)
         return HStack(alignment: .top, spacing: 14) {
-            Image(systemName: "circle").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+            Image(systemName: "circle").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.secondaryText)
                 .frame(width: 34, height: 34)
                 .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                 .accessibilityHidden(true)
@@ -684,7 +690,7 @@ struct WeeklyReviewView: View {
                         }
                         Spacer(minLength: 8)
                         if pending {
-                            WorkspaceBadge(text: "待补结果", tone: .warning).padding(.top, 3)
+                            WorkspaceBadge(text: "待补结果", tone: .neutral).padding(.top, 3)
                         }
                         Image(systemName: "chevron.right").vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText).padding(.top, 3).accessibilityHidden(true)
                     }
@@ -757,7 +763,8 @@ struct WeeklyReviewView: View {
 
     private var stalledGoalsSection: some View {
         let rows = Array(stalledGoals.prefix(5))
-        return WorkspaceSection(title: "没有下一步的目标", icon: "exclamationmark.circle", count: stalledGoals.count,
+        return WorkspaceSection(title: "没有下一步的目标", subtitle: "还停在原处；补一条下一步就会回到待办。",
+                                icon: "exclamationmark.circle", count: stalledGoals.count,
                                 actionTitle: "逐个澄清", action: { showingClarifyQueue = true }) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, goal in
                 if index > 0 { WorkspaceListDivider() }
@@ -778,7 +785,7 @@ struct WeeklyReviewView: View {
         return HStack(alignment: .top, spacing: 12) {
             Button { openTask(goal.id) } label: {
                 HStack(alignment: .top, spacing: 14) {
-                    Image(systemName: "exclamationmark.circle").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                    Image(systemName: "exclamationmark.circle").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.secondaryText)
                         .frame(width: 34, height: 34)
                         .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .accessibilityHidden(true)
@@ -827,7 +834,7 @@ struct WeeklyReviewView: View {
         HStack(alignment: .top, spacing: 12) {
             Button { openTask(goal.id) } label: {
                 HStack(alignment: .top, spacing: 14) {
-                    Image(systemName: "tray").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                    Image(systemName: "tray").vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.secondaryText)
                         .frame(width: 34, height: 34)
                         .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                         .accessibilityHidden(true)
@@ -876,7 +883,7 @@ struct WeeklyReviewView: View {
                            highlighted: Bool, open: @escaping () -> Void) -> some View {
         Button(action: open) {
             HStack(alignment: .top, spacing: 14) {
-                Image(systemName: icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
+                Image(systemName: icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.secondaryText)
                     .frame(width: 34, height: 34)
                     .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
                     .accessibilityHidden(true)
