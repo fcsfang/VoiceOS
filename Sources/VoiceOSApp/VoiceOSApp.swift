@@ -150,6 +150,10 @@ final class ControlCenter: ObservableObject {
     @Published var records: [SourceRecord] = []
     @Published private(set) var recordsRevision = 0
     @Published private(set) var secondaryRevision = 0
+    /// Advances when a note revision is saved, so the home timeline picks up a
+    /// title or preview that changed while it stayed open.
+    @Published private(set) var materialNotesRevision = 0
+    func materialNoteDidSave() { materialNotesRevision &+= 1 }
     @Published var recordingTitleStatus = ""
     @Published var generatingRecordingTitles = false
     private var recordingTitleModel: ResponsesRecordingTitlePort?
