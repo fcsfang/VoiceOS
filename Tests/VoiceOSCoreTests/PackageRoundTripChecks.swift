@@ -86,20 +86,6 @@ final class PackageRoundTripChecks: XCTestCase {
         return id
     }
 
-    private func insertPanorama(_ store: VoiceOSStore) async throws -> (attemptID: String, themeID: String) {
-        let db = await store.db
-        let attemptID = UUID().uuidString, themeID = "theme-" + String(repeating: "b", count: 32), now = "2026-11-15T00:00:00Z", digest = String(repeating: "a", count: 64)
-        try db.execute("INSERT INTO panorama_attempts(id,digest,state,input_json,created_at) VALUES(?,?,'completed','{}',?)", [attemptID, digest, now])
-        try db.execute("INSERT INTO panorama_themes(id,title,created_at,last_seen_at) VALUES(?,'主题甲',?,?)", [themeID, now, now])
-        try db.execute("INSERT INTO panorama_theme_batches(attempt_id,phase,theme_count,created_at) VALUES(?,'completed',1,?)", [attemptID, now])
-        try db.execute("""
-        INSERT INTO panorama_theme_appearances(attempt_id,phase,theme_id,raw_region_id,region_title,question_titles_json,claim_ids_json,source_ids_json,quote_keys_json,match_kind,match_score,created_at)
-        VALUES(?,'completed',?,'region-1','主题甲','[]','[]','[]','[]','new',0.5,?)
-        """, [attemptID, themeID, now])
-        try db.execute("INSERT INTO panorama_theme_replies(region_id,digest,reply,model,prompt_version,state,created_at) VALUES('region-1',?,'回收主题','fixture','v1','completed',?)", [digest, now])
-        return (attemptID, themeID)
-    }
-
     func testPackageVersion49RoundTripPreservesNewTablesAndAttachments() async throws {
         let store = try await openStore()
         let fixture = try await makeFixture(store)
@@ -155,11 +141,10 @@ final class PackageRoundTripChecks: XCTestCase {
         XCTAssertEqual(copied, original)
     }
 
-    func testPackageVersion51RoundTripPreservesTaskInitiationsAndPanorama() async throws {
+    func testPackageVersion51RoundTripPreservesTaskInitiations() async throws {
         let store = try await openStore()
         let fixture = try await makeFixture(store)
         let initiationID = try await insertTaskInitiation(store, sourceID: fixture.sourceID)
-        let panorama = try await insertPanorama(store)
         let package = base.appendingPathComponent("package51")
         try await store.exportPackage(to: package, includeMedia: true)
         let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: package.appendingPathComponent("manifest.json"))) as? [String: Any]
@@ -167,7 +152,6 @@ final class PackageRoundTripChecks: XCTestCase {
         XCTAssertEqual(manifest?["databaseSchema"] as? Int, 51)
         let counts = try XCTUnwrap(manifest?["counts"] as? [String: Any])
         XCTAssertEqual(counts["task_initiations"] as? Int, 1)
-        for table in Self.addedIn51Tables { XCTAssertEqual(counts[table] as? Int, table == "panorama_steps" ? 0 : 1, table) }
 
         let restoredRoot = base.appendingPathComponent("restored51")
         try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
@@ -179,17 +163,6 @@ final class PackageRoundTripChecks: XCTestCase {
         XCTAssertEqual(records.first?.sourceID, fixture.sourceID)
         XCTAssertEqual(records.first?.proposal.title, "迁移往返启动包")
         XCTAssertEqual(records.first?.basisChanged, false)
-        let restoredDB = await restored.db
-        XCTAssertEqual(try restoredDB.query("SELECT state FROM panorama_attempts WHERE id=?", [panorama.attemptID]).first?["state"], "completed")
-        XCTAssertEqual(try restoredDB.query("SELECT title FROM panorama_themes WHERE id=?", [panorama.themeID]).first?["title"], "主题甲")
-        XCTAssertEqual(try restoredDB.query("SELECT theme_count FROM panorama_theme_batches").first?["theme_count"], "1")
-        XCTAssertEqual(try restoredDB.query("SELECT match_kind,match_score FROM panorama_theme_appearances").first?["match_kind"], "new")
-        XCTAssertEqual(try restoredDB.query("SELECT match_kind,match_score FROM panorama_theme_appearances").first?["match_score"], "0.5")
-        XCTAssertEqual(try restoredDB.query("SELECT reply FROM panorama_theme_replies").first?["reply"], "回收主题")
-        let themeMap = try await restored.latestPanoramaThemeMap()
-        XCTAssertEqual(themeMap?.references.map(\.id), [panorama.themeID])
-        let history = try await restored.panoramaThemeHistory()
-        XCTAssertEqual(history[panorama.themeID]?.appearanceCount, 1)
 
         try rewriteAsVersion50(package)
         let olderRoot = base.appendingPathComponent("restored50")
@@ -208,69 +181,6 @@ final class PackageRoundTripChecks: XCTestCase {
         XCTAssertTrue(oldestRecords.isEmpty)
         let oldestDB = await oldest.db
         XCTAssertEqual(try oldestDB.query("SELECT count(*) AS n FROM task_initiations").first?["n"], "0")
-    }
-
-    func testRestoreRejectsCorruptPanoramaLedgerJSONAndCleansUp() async throws {
-        let store = try await openStore()
-        _ = try await makeFixture(store)
-        _ = try await insertPanorama(store)
-        let db = await store.db
-        try db.execute("UPDATE panorama_theme_appearances SET claim_ids_json='[broken'")
-        let package = base.appendingPathComponent("package-bad-json")
-        try await store.exportPackage(to: package, includeMedia: true)
-        let restoredRoot = base.appendingPathComponent("restored-bad-json")
-        do {
-            try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
-            XCTFail("全景账本 JSON 损坏时必须拒绝恢复")
-        } catch {
-            XCTAssertEqual((error as? VoiceOSError)?.message, "全景主题记录 JSON 无效")
-        }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: restoredRoot.path))
-        let leftovers = try FileManager.default.contentsOfDirectory(atPath: base.path).filter { $0.hasPrefix(".voiceos-restore-") }
-        XCTAssertTrue(leftovers.isEmpty)
-    }
-
-    func testRestoreTrimsDanglingPanoramaReferences() async throws {
-        let store = try await openStore()
-        let fixture = try await makeFixture(store)
-        let panorama = try await insertPanorama(store)
-        let db = await store.db
-        try db.execute("UPDATE panorama_theme_appearances SET claim_ids_json=?,source_ids_json=?",
-                       ["[\"\(fixture.claimID)\",\"\(UUID().uuidString)\"]", "[\"\(fixture.sourceID)\",\"\(UUID().uuidString)\"]"])
-        let package = base.appendingPathComponent("package-dangling")
-        try await store.exportPackage(to: package, includeMedia: true)
-        let restoredRoot = base.appendingPathComponent("restored-dangling")
-        try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
-        let restored = try await openStore(restoredRoot)
-        let restoredDB = await restored.db
-        let row = try XCTUnwrap(restoredDB.query("SELECT claim_ids_json,source_ids_json,question_titles_json FROM panorama_theme_appearances").first)
-        let claimsJSON = try XCTUnwrap(row["claim_ids_json"]), sourcesJSON = try XCTUnwrap(row["source_ids_json"]), titlesJSON = try XCTUnwrap(row["question_titles_json"])
-        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(claimsJSON.utf8)), [fixture.claimID])
-        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(sourcesJSON.utf8)), [fixture.sourceID])
-        XCTAssertEqual(try JSONDecoder().decode([String].self, from: Data(titlesJSON.utf8)), [])
-        let themeMap = try await restored.latestPanoramaThemeMap()
-        XCTAssertEqual(themeMap?.references.first?.claimIDs, Set([fixture.claimID]))
-        XCTAssertEqual(themeMap?.references.first?.sourceIDs, Set([fixture.sourceID]))
-        let history = try await restored.panoramaThemeHistory()
-        XCTAssertEqual(history[panorama.themeID]?.appearanceCount, 1)
-    }
-
-    func testRestoreRejectsPanoramaThemeCountMismatch() async throws {
-        let store = try await openStore()
-        _ = try await makeFixture(store)
-        _ = try await insertPanorama(store)
-        let db = await store.db
-        try db.execute("UPDATE panorama_theme_batches SET theme_count=2")
-        let package = base.appendingPathComponent("package-count")
-        try await store.exportPackage(to: package, includeMedia: true)
-        let restoredRoot = base.appendingPathComponent("restored-count")
-        do {
-            try await VoiceOSStore.restorePackage(from: package, to: restoredRoot, inspector: NativeMediaInspector())
-            XCTFail("主题计数与出现记录不一致时必须拒绝恢复")
-        } catch {
-            XCTAssertEqual((error as? VoiceOSError)?.message, "全景主题计数与出现记录不一致")
-        }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: restoredRoot.path))
     }
 
     func testVersion48PackageStillRestoresAndLeavesNewTablesEmpty() async throws {

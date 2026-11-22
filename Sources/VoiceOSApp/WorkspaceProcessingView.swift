@@ -156,10 +156,6 @@ extension ControlCenter {
         var seen=Set<String>()
         return recordingFollowups.reversed().filter { seen.insert($0.sourceID).inserted }.filter { $0.state == "failed" }
     }
-    var workspacePanoramaFailure: (status: String, reason: String?)? {
-        guard let state = panorama.state, ["failed","unknown"].contains(state.status) else { return nil }
-        return (state.status, state.error)
-    }
     var workspaceFailedKnowledgeReviews: [KnowledgeReviewRecord] {
         knowledgeReviews.filter { $0.validity == "current" && $0.state == "failed" && !ProcessingDismissals.isIgnored("knowledge:" + $0.id) }
     }
@@ -191,7 +187,6 @@ extension ControlCenter {
             || intents.contains { $0.needsAttention }
             || recordingRequests.contains { $0.state == "blocked" }
             || !failedAssistant.isEmpty
-            || workspacePanoramaFailure != nil
             || !segmentedFailures.isEmpty
             || records.contains { transcriptReviewIssue(for: $0) != nil }
             || reminderFieldIssue != nil
@@ -306,7 +301,6 @@ struct WorkspaceProcessingView: View {
                 let showReminderAnomalies=reminderAnomalies.total > 0 || reminderAnomalies.failureTotal > 0
                 let showPendingReminderSyncs = !pendingReminderSyncs.isEmpty
                 let showStartupIssue = !model.startupIssue.isEmpty
-                let showPanoramaFailure=model.workspacePanoramaFailure != nil
                 let showTopicOrganization=attention.topicOrganizationNeedsAttention
                 let showInbox = !inbox.folders.isEmpty || !inbox.pendingItems.isEmpty || !inbox.folderErrors.isEmpty
                 let showModelStatus=model.initialized
@@ -676,8 +670,8 @@ struct WorkspaceProcessingView: View {
                         }
                     }
                 }
-                if showStartupIssue || showPanoramaFailure || showTopicOrganization || showInbox || showModelStatus {
-                    WorkspaceSettingsCard(title:"系统与后台", subtitle:"资料库、全景、主题与运行配置") {
+                if showStartupIssue || showTopicOrganization || showInbox || showModelStatus {
+                    WorkspaceSettingsCard(title:"系统与后台", subtitle:"资料库、主题与运行配置") {
                         if showStartupIssue {
                             VStack(alignment:.leading,spacing:12) {
                                 WorkspaceSectionHeading("资料库尚未打开")
@@ -689,25 +683,8 @@ struct WorkspaceProcessingView: View {
                                     .accessibilityIdentifier("processing.library.retry")
                             }.padding(.horizontal,20).padding(.top,14)
                         }
-                        if showPanoramaFailure {
-                            if showStartupIssue { WorkspaceListDivider().padding(.horizontal,20) }
-                            if let failure = model.workspacePanoramaFailure {
-                                VStack(alignment:.leading,spacing:12) {
-                                    WorkspaceSectionHeading("全景生成未完成")
-                                    Text("已有材料与已核对区域保留；失败不会删除原文，可以明确重试。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3)
-                                    WorkspaceListDivider()
-                                    Text(failure.status == "unknown" ? "上次生成在进程退出前未登记结果，没有自动重发。" : "上一次生成没有完成。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                                    if let error = failure.reason { reason(error) }
-                                    Button("重试生成全景") { model.retryPanorama() }
-                                        .buttonStyle(.workspaceSecondary)
-                                        .disabled(!model.panorama.modelConfigured || model.panorama.isGenerating || model.panorama.state?.status == "running")
-                                        .accessibilityLabel("重试生成全景")
-                                        .accessibilityIdentifier("processing.panorama.retry")
-                                }.padding(.horizontal,20).padding(.top,14)
-                            }
-                        }
                         if showTopicOrganization {
-                            if showStartupIssue || showPanoramaFailure { WorkspaceListDivider().padding(.horizontal,20) }
+                            if showStartupIssue { WorkspaceListDivider().padding(.horizontal,20) }
                             let pending=model.topicOrganizationPendingTopicCount
                             VStack(alignment:.leading,spacing:12) {
                                 WorkspaceSectionHeading(title:"主题整理未完成") { WorkspaceBadge(text:"\(pending)", tone:.warning) }
@@ -721,7 +698,7 @@ struct WorkspaceProcessingView: View {
                             }.padding(.horizontal,20).padding(.top,14)
                         }
                         if showInbox {
-                            if showStartupIssue || showPanoramaFailure || showTopicOrganization { WorkspaceListDivider().padding(.horizontal,20) }
+                            if showStartupIssue || showTopicOrganization { WorkspaceListDivider().padding(.horizontal,20) }
                             VStack(alignment:.leading,spacing:12) {
                                 WorkspaceSectionHeading("录音自动入口")
                                 WorkspaceListDivider()
@@ -732,7 +709,7 @@ struct WorkspaceProcessingView: View {
                             }.padding(.horizontal,20).padding(.top,14)
                         }
                         if showModelStatus {
-                            if showStartupIssue || showPanoramaFailure || showTopicOrganization || showInbox { WorkspaceListDivider().padding(.horizontal,20) }
+                            if showStartupIssue || showTopicOrganization || showInbox { WorkspaceListDivider().padding(.horizontal,20) }
                             VStack(alignment:.leading,spacing:12) {
                                 WorkspaceSectionHeading("模型与提醒事项")
                                 WorkspaceListDivider()

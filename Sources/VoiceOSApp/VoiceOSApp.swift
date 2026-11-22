@@ -103,9 +103,6 @@ struct ImportBatchReportView: View {
 
 @MainActor
 final class ControlCenter: ObservableObject {
-    let panorama = PanoramaScreenModel()
-    private var panoramaPolicy = PanoramaRefreshPolicy()
-    private var panoramaModel: ResponsesPanoramaPort?
     private let spotlightIndexer = SpotlightIndexer()
     private var markdownMirror: MarkdownMirror?
     private var mirrorWorker: Task<Void, Never>?
@@ -248,7 +245,6 @@ final class ControlCenter: ObservableObject {
     private var outcomeModel:ResponsesOutcomePort?
     @Published var discussionStatus="选择一份历史，明确进入讨论。"
     private var discussionModel:ResponsesDiscussionPort?
-    private var themeReplyModel:ResponsesThemeReplyPort?
     @Published var selected: String?
     /// Sheet-scoped views cannot navigate the workspace themselves; they ask
     /// for a source and the workspace consumes the request from its own state.
@@ -1239,19 +1235,6 @@ final class ControlCenter: ObservableObject {
             await restoreTranscriptReviewFailures()
             do { if try await store.recoverRecordingFollowups() { await refresh(.full) } }
             catch { status = error.localizedDescription }
-            // Long panorama runs must be resumable without a visible window.
-            // Only the explicit launch variable retries; a failed state alone
-            // never auto-spends on its own.
-            if ProcessInfo.processInfo.environment["VOICEOS_RETRY_PANORAMA"] == "1", !panoramaLaunchRetryIssued,
-               modelConfigured, panorama.state?.status == "failed" {
-                panoramaLaunchRetryIssued = true
-                retryPanorama()
-            }
-            if ProcessInfo.processInfo.environment["VOICEOS_DRAFT_PANORAMA"] == "1", !panoramaDraftIssued,
-               modelConfigured, panorama.state?.snapshot?.isPartial == true {
-                panoramaDraftIssued = true
-                generateDraftPanorama()
-            }
             scheduleProcessing()
             installReminderRefresh()
             installMonitorSchedule()
@@ -1281,8 +1264,6 @@ final class ControlCenter: ObservableObject {
     }
     private var refreshWorker: Task<Bool, Never>?
     private var pendingRefreshPlan: RefreshPlan?
-    private var panoramaLaunchRetryIssued = false
-    private var panoramaDraftIssued = false
     func refresh(_ scope: RefreshScope = .interactive) async {
         let request = RefreshPlan(scope)
         if var pending = pendingRefreshPlan { pending.merge(request); pendingRefreshPlan = pending }
@@ -1616,8 +1597,6 @@ final class ControlCenter: ObservableObject {
             return false
         }
         StartupTrace.mark("reload.begin")
-        await panoramaChanged()
-        StartupTrace.mark("reload.panoramaChecked")
         var contextsFroze = false
         var coreSnapshotApplied = false
         var latestClaimsBySource: [String: [CandidateClaim]]?
@@ -1722,19 +1701,6 @@ final class ControlCenter: ObservableObject {
             }
         }
     }
-    func setPanoramaVisible(_ visible: Bool) async {
-        guard panoramaPolicy.setVisible(visible) else { return }
-        await refreshPanorama()
-    }
-    private func refreshPanorama() async {
-        guard panoramaPolicy.isVisible, let store else { return }
-        panoramaPolicy.markRefreshed()
-        await panorama.refresh(store: store, port: panoramaModel)
-    }
-    private func panoramaChanged() async {
-        guard panoramaPolicy.workspaceChanged() else { return }
-        await refreshPanorama()
-    }
     func chooseTextModel() {
         let panel = NSOpenPanel()
         panel.title = "选择本地文本模型配置"; panel.prompt = "使用配置"
@@ -1749,10 +1715,7 @@ final class ControlCenter: ObservableObject {
             // transport and 600-second window. Its versioned identity prevents
             // queued non-streaming attempts from being silently replayed.
             let suite=try LocalTextModel.loadSuite(from:file,segmentRequestTimeout:600,segmentStreaming:true),port=suite.cognition
-            panoramaModel=suite.panorama
-            Task { await self.panoramaChanged() }
             discussionModel=suite.discussion;outcomeModel=suite.outcome
-            themeReplyModel=suite.themeReply
             recordingTitleModel=suite.recordingTitles
             topicModel=suite.topics; topicAttemptDigest=nil
             recordingExpressionModel=suite.recordingExpressions
@@ -1791,10 +1754,8 @@ final class ControlCenter: ObservableObject {
     /// Clears every model port so AI entries read as unconfigured, and remembers
     /// the choice so the bundle's development .env is not reloaded on launch.
     func clearTextModel() {
-        panoramaModel = nil
         discussionModel = nil
         outcomeModel = nil
-        themeReplyModel = nil
         recordingTitleModel = nil
         topicModel = nil; topicAttemptDigest = nil
         recordingExpressionModel = nil
@@ -1816,7 +1777,6 @@ final class ControlCenter: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
         UserDefaults.standard.set(true, forKey: "voiceos.textModelConfigurationCleared.v1")
         status = "已清除文本模型配置；AI 功能暂停，直到重新选择配置"
-        Task { await panorama.refresh(store: store, port: nil) }
     }
     func chooseFullRecording() {
         guard !fullRecordingBusy else { return }
@@ -5167,35 +5127,6 @@ extension ControlCenter {
             discussionStatus="已打开讨论历史；没有自动发送。"
             await refreshDiscussion(); return true
         } catch { discussionStatus=error.localizedDescription; return false }
-    }
-    func retryPanorama() { panorama.retry(store: store, port: panoramaModel) }
-    func generateDraftPanorama() {
-        guard let store, let port=panoramaModel else { return }
-        Task {
-            do { try await store.draftPanorama(using: port); await refresh() }
-            catch { status=error.localizedDescription }
-        }
-    }
-    func themeReply(_ briefing: PanoramaThemeBriefing) async throws -> String {
-        guard let store else { throw VoiceOSError("资料库尚未打开") }
-        guard let themeReplyModel else { throw VoiceOSError("请先配置文本模型") }
-        return try await store.panoramaThemeReply(briefing, using: themeReplyModel)
-    }
-    func beginPanoramaDiscussion(snapshotID: String, selection: PanoramaSelection) async -> String? {
-        guard let store, !discussionSaving, !discussionSending, !discussionExtracting, !dictationActive else { return nil }
-        discussionSaving = true
-        defer { discussionSaving = false }
-        do {
-            let result = try await store.beginPanoramaConversation(snapshotID: snapshotID, selection: selection)
-            discussionSession = result.conversation; discussionRecordingID = nil
-            discussionStatus = "AI 候选草稿尚未发送，可编辑后保存并发送。已带入相关完整表达与节目原文。"
-            await refreshDiscussion()
-            return result.draft
-        } catch {
-            status = error.localizedDescription
-            await panoramaChanged()
-            return nil
-        }
     }
     func beginDiscussion(_ record:SourceRecord) async -> Bool {
         guard let store,!discussionSaving,!discussionSending,!discussionExtracting,!dictationActive else { return false }

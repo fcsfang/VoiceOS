@@ -347,7 +347,6 @@ struct WorkspaceView: View {
     private var palette: WorkspacePalette { WorkspacePalette(theme: theme) }
     private var brandImage: NSImage? { AppBrand.image(for: colorScheme) }
     @State private var page: WorkspacePage = .home
-    @State private var homeShowsPanorama = false
     @State private var path: [WorkspaceNavigationEntry] = []
     @State private var scrollPositions: [WorkspaceNavigationEntry: ScrollPosition] = [:]
     @State private var sourceScrollPositions: [String: ScrollPosition] = [:]
@@ -361,8 +360,6 @@ struct WorkspaceView: View {
     @State private var discussionDraftSessionID: String?
     @State private var discussionDrafts: [String: String] = [:]
     @State private var pendingURL: URL?
-    @State private var panoramaSourceEditor: SourceRecord?
-    @State private var panoramaClaimEditor: CandidateClaim?
     @State private var showingOutcome = false
     @State private var materialFilter = "日常材料"
     @State private var actionFilter = "全部"
@@ -458,9 +455,6 @@ struct WorkspaceView: View {
     }
     private var topic: ReflectionQuestion? { model.workspaceTopics.first { $0.id == topicID } }
     private var sourceIDs: Set<String> { Set(topicID.flatMap { model.workspaceTopicSources[$0] } ?? []) }
-    private var panoramaTopicLinks: [PanoramaTopicLink] {
-        model.workspaceTopics.map { PanoramaTopicLink(id: $0.id, title: $0.title, sourceIDs: Set(model.workspaceTopicSources[$0.id] ?? [])) }
-    }
     private var deliveries: [AssistantExecutionRecord] { model.sortedAssistantDeliveries(model.assistantExecutions.filter { $0.validity == "current" && $0.state == "completed" }) }
     private var activeMaterials: [SourceRecord] { model.records.filter { !$0.isArchived && !$0.isTrashed } }
     private var section: String {
@@ -530,7 +524,6 @@ struct WorkspaceView: View {
             .task { await model.start() }
             .task(id:model.initialized) { if model.initialized { readingStates = await model.readingStates(); readingStatesRevision &+= 1 } }
             .task(id:model.initialized) { if model.initialized { savedViews = await model.savedWorkspaceViews() } }
-            .task { await model.setPanoramaVisible(page == .home && homeShowsPanorama) }
             .task(id:topicLoadKey) {
                 guard page == .themes, let id=topicID else {
                     topicFocus=nil;topicFocusTopicID=nil
@@ -558,10 +551,6 @@ struct WorkspaceView: View {
                 model.stopPlayback()
                 if next != .search { searchFocused = false }
                 if case .source(let id) = next { model.selected = id }
-                Task { await model.setPanoramaVisible(next == .home && homeShowsPanorama) }
-            }
-            .onChange(of:homeShowsPanorama) { _, show in
-                Task { await model.setPanoramaVisible(page == .home && show) }
             }
             .onChange(of:model.selected) { _, id in
                 model.stopPlayback()
@@ -587,7 +576,6 @@ struct WorkspaceView: View {
             .onOpenURL { url in if model.initialized { routeExternalURL(url) } else { pendingURL=url } }
             .onChange(of:model.initialized) { _, ready in if ready,let url=pendingURL { pendingURL=nil;routeExternalURL(url) } }
             .onAppear { consumePendingNavigation() }
-            .onDisappear { Task { await model.setPanoramaVisible(false) } }
     }
     private var sheetContent: some View {
         lifecycleContent
@@ -603,12 +591,6 @@ struct WorkspaceView: View {
                 }.padding(24)
                     .frame(minWidth:440,idealWidth:440,maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
                     .workspaceModalSurface()
-            }
-            .sheet(item: $panoramaSourceEditor) { source in
-                WorkspaceTranscriptEditor(model: model, source: source) { panoramaSourceEditor = nil }
-            }
-            .sheet(item: $panoramaClaimEditor) { claim in
-                ClaimCorrectionView(claim: claim, model: model) { panoramaClaimEditor = nil }
             }
             .sheet(item:$model.pendingScheduleEffect) { effect in ReminderScheduleConfirmationView(effect:effect,model:model) { model.pendingScheduleEffect=nil } }
             .sheet(isPresented:$showingOutcome) {
@@ -907,32 +889,10 @@ struct WorkspaceView: View {
     @ViewBuilder private var pageContent: some View {
         switch page {
         case .home:
-            VStack(spacing: 0) {
-                HStack {
-                    Picker("首页视图", selection: $homeShowsPanorama) {
-                        Text("最近").tag(false)
-                        Text("全景").tag(true)
-                    }.pickerStyle(.segmented).labelsHidden().frame(width: 172)
-                    Spacer()
-                }.padding(.horizontal, WorkspaceMetrics.pagePadding).padding(.top, 12).padding(.bottom, 2)
-                if homeShowsPanorama {
-                    PanoramaHome(screen: model.panorama, retry: model.retryPanorama, draft: model.generateDraftPanorama, chooseTextModel: model.chooseTextModel,
-                        openMaterials: { go(.materials) }, openSource: { go(.source($0)) }, correctSource: { id in
-                            panoramaSourceEditor = model.sourcePageIndex.recordsByID[id]
-                        }, correctClaim: { id in
-                            panoramaClaimEditor = model.sourcePageIndex.claim(for: id)
-                        }, discuss: { snapshot, selection in
-                            Task { await openPanoramaDiscussion(snapshotID: snapshot, selection: selection) }
-                        }, topicLinks: panoramaTopicLinks, openTopic: { selectTopic($0) }, themeReply: { briefing in
-                            try await model.themeReply(briefing)
-                        })
-                } else {
-                    RecentContentHome(model: model, openSource: { go(.source($0)) }, openSpan: { sourceID, spanID in
-                        revealSourceSpan(sourceID, spanID: spanID)
-                        go(.source(sourceID))
-                    }, openTask: { go(.task($0)) }, capture: { go(.capture) })
-                }
-            }
+            RecentContentHome(model: model, openSource: { go(.source($0)) }, openSpan: { sourceID, spanID in
+                revealSourceSpan(sourceID, spanID: spanID)
+                go(.source(sourceID))
+            }, openTask: { go(.task($0)) }, capture: { go(.capture) })
         case .themes:
             ScrollViewReader { proxy in
                 scrolled { themes(proxy: proxy) }.id(navigationEntry)
@@ -3581,14 +3541,6 @@ struct WorkspaceView: View {
         discussionDraft = prompt.isEmpty || savedDraft == prompt ? savedDraft : savedDraft.isEmpty ? prompt : savedDraft + "\n\n" + prompt
         showingDiscussion = true
     }
-    private func openPanoramaDiscussion(snapshotID: String, selection: PanoramaSelection) async {
-        let key = discussionKey
-        guard let draft = await model.beginPanoramaDiscussion(snapshotID: snapshotID, selection: selection) else {
-            if key == discussionKey { error = model.status }
-            return
-        }
-        presentDiscussion(for: key, prompt: draft)
-    }
     private func openSavedDiscussion(_ id: String) async {
         let key = discussionKey
         guard await model.openDiscussion(id) else { if key == discussionKey { error = model.discussionStatus }; return }
@@ -3606,7 +3558,6 @@ struct WorkspaceView: View {
     }
     private var homeCanDiscuss: Bool {
         guard page == .home else { return true }
-        if homeShowsPanorama { return model.panorama.state?.snapshot != nil && model.panorama.selection != nil }
         return model.homeSnapshot.days.contains { day in
             day.items.contains { $0.kind == .material && !$0.sourceIDs.isEmpty }
         }
@@ -3632,7 +3583,7 @@ struct WorkspaceView: View {
     }
     private var discussionEntryHint: String {
         switch page {
-        case .home: homeCanDiscuss ? "讨论" : "先选择一条材料或全景中的问题"
+        case .home: homeCanDiscuss ? "讨论" : "先选择一条材料，再开始讨论"
         case .themes: topic == nil ? "先在主题列表中选择一个主题，再开始讨论" : "讨论"
         case .materials: discussionEntry == nil ? "先选中一条材料，再开始讨论" : "讨论"
         case .actions: selectingActions ? "批量选择中不能开始讨论；先结束选择" : (discussionEntry == nil ? "先选中一条行动，再开始讨论" : "讨论")
@@ -3652,11 +3603,6 @@ struct WorkspaceView: View {
         let opened:Bool
         switch page {
         case .home:
-            if homeShowsPanorama {
-                guard let snapshot = model.panorama.state?.snapshot, let selection = model.panorama.selection else { return }
-                await openPanoramaDiscussion(snapshotID: snapshot.id, selection: selection)
-                return
-            }
             let items = model.homeSnapshot.days.flatMap(\.items)
             let picked = RecentContentHomeSelection.shared.itemID.flatMap { id in items.first { $0.id == id } }
                 ?? items.first { !$0.thoughts.isEmpty } ?? items.first

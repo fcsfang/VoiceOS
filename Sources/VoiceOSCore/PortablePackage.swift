@@ -269,7 +269,7 @@ extension VoiceOSStore {
         guard manifest.version >= 42 || !manifest.files.contains(where: { $0.path.hasPrefix("reflection_question") }) else { throw VoiceOSError("旧迁移格式不能携带长期问题记录") }
         guard manifest.version >= 48 || !manifest.files.contains(where: { ["action_review_resolutions.jsonl","expression_review_acknowledgements.jsonl"].contains($0.path) }) else { throw VoiceOSError("旧迁移格式不能携带行动关系核对记录") }
         guard manifest.version >= 49 || !manifest.files.contains(where: { $0.path.hasSuffix(".jsonl") && PackageLayout.addedIn49Tables.contains(String($0.path.dropLast(6))) }) else { throw VoiceOSError("旧迁移格式不能携带新表记录") }
-        guard manifest.version >= 51 || !manifest.files.contains(where: { $0.path.hasSuffix(".jsonl") && PackageLayout.addedIn51Tables.contains(String($0.path.dropLast(6))) }) else { throw VoiceOSError("旧迁移格式不能携带全景主题记录") }
+        guard manifest.version >= 51 || !manifest.files.contains(where: { $0.path.hasSuffix(".jsonl") && PackageLayout.addedIn51Tables.contains(String($0.path.dropLast(6))) }) else { throw VoiceOSError("旧迁移格式不能携带新表记录") }
         var tables = PackageLayout.tables(for: manifest.version)
         // A newer package can be relabeled as an older compatibility fixture. The
         // additive queue table is safe to carry through that validation path.
@@ -518,7 +518,6 @@ extension VoiceOSStore {
             try VoiceOSStore.validateStoredSegmentExtraction(database)
             try VoiceOSStore.validateStoredSegmentAggregation(database)
             try VoiceOSStore.validateStoredSegmentCognitiveCommits(database)
-            if tables.contains("panorama_theme_appearances") { try VoiceOSStore.validateStoredPanoramaThemes(database) }
             guard try database.query("PRAGMA foreign_key_check").isEmpty else { throw VoiceOSError("恢复记录存在悬空引用") }
             guard try database.query("""
             SELECT j.id FROM jobs j JOIN sources s ON s.id=j.source_id WHERE j.input_version_id!=s.version_id
@@ -529,38 +528,6 @@ extension VoiceOSStore {
         }
         guard try database.query("PRAGMA integrity_check").first?["integrity_check"] == "ok" else { throw VoiceOSError("恢复数据库校验失败") }
         try database.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    }
-    static func validateStoredPanoramaThemes(_ db: Database) throws {
-        let sourceIDs = Set(try db.query("SELECT id FROM sources").compactMap { $0["id"] })
-        let claimIDs = Set(try db.query("SELECT id FROM claims").compactMap { $0["id"] })
-        for batch in try db.query("SELECT attempt_id,phase,theme_count FROM panorama_theme_batches") {
-            guard let attempt = batch["attempt_id"], let phase = batch["phase"],
-                  let count = batch["theme_count"].flatMap(Int.init) else { throw VoiceOSError("全景主题批次记录损坏") }
-            let appearances = try db.query("SELECT * FROM panorama_theme_appearances WHERE attempt_id=? AND phase=?", [attempt, phase])
-            guard appearances.count == count else { throw VoiceOSError("全景主题计数与出现记录不一致") }
-            for row in appearances {
-                guard let themeID = row["theme_id"], !themeID.isEmpty, themeID.utf8.count <= 128,
-                      themeID.unicodeScalars.allSatisfy({ !CharacterSet.whitespacesAndNewlines.contains($0) && !CharacterSet.controlCharacters.contains($0) }) else {
-                    throw VoiceOSError("全景主题身份格式错误")
-                }
-                guard let claimIDsJSON = row["claim_ids_json"], let sourceIDsJSON = row["source_ids_json"], let questionTitlesJSON = row["question_titles_json"],
-                      let storedClaims = try? JSONDecoder().decode([String].self, from: Data(claimIDsJSON.utf8)),
-                      let storedSources = try? JSONDecoder().decode([String].self, from: Data(sourceIDsJSON.utf8)),
-                      (try? JSONDecoder().decode([String].self, from: Data(questionTitlesJSON.utf8))) != nil else {
-                    throw VoiceOSError("全景主题记录 JSON 无效")
-                }
-                let keptClaims = storedClaims.filter { claimIDs.contains($0) }
-                let keptSources = storedSources.filter { sourceIDs.contains($0) }
-                if keptClaims.count != storedClaims.count {
-                    try db.execute("UPDATE panorama_theme_appearances SET claim_ids_json=? WHERE attempt_id=? AND phase=? AND theme_id=?",
-                                   [try Self.relevanceJSON(keptClaims), attempt, phase, themeID])
-                }
-                if keptSources.count != storedSources.count {
-                    try db.execute("UPDATE panorama_theme_appearances SET source_ids_json=? WHERE attempt_id=? AND phase=? AND theme_id=?",
-                                   [try Self.relevanceJSON(keptSources), attempt, phase, themeID])
-                }
-            }
-        }
     }
     private func syncFile(_ file: URL) throws {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
