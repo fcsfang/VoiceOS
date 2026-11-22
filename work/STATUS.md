@@ -1078,3 +1078,13 @@
 - 测试：+3（v2 解码保留 inferred、旧 JSON 兼容、两条消歧用例）。
 - 集成：构建 56 测试目标夹具参数顺序失败（应用本体与 dist 成功）；57 暴露 anchored 丢 inferred；58 全绿（575）；59 全绿（build_exit=0 / test_exit=0，577 tests / dist_build_exit=0），空闲后重启上机。
 - 构建 60：build_exit=0 / test_exit=0（577 tests）/ dist_build_exit=0，重启上机。补充笔记元数据行的「重新整理笔记」入口（force 重生成），并在真实「黑雾」材料上重生成验证 v2：3 节 7 段、11 条锚点（2 条跨时间片保留为 spanID 空、不可精确回听），第一人称正文通顺；本轮模型未产生 inferred 标记，轻标机制留待用户验收反馈。
+## 波 174：首页同一篇笔记与批量读取收口（2026-11-22）
+- 174-A 首页标题与预览（分支 claude/modest-engelbart-840634，合并 commit 8124f69）：Core 新增批量查询 `latestMaterialNotes(expressionKeys:)`（单条 IN SQL，按键取 created_at/rowid 最新，空数组返回空字典）；首页材料行与右侧阅读器同源使用笔记标题（回退现有标题）与 lead/首段预览（回退原摘要）；读取键含 records/notes 代际与可见行表达式键，写回前校验；成员口径复用 sourcePageIndex.expression + externalVersions，经 `materialNoteExpressionKey` 规范化。
+- 174-B 今日改动回归评审八条确认项修复（commit ed2d289）：生成态不再先闪（确认需生成后才写 generating）；失效横幅只在无笔记时出现；页头首帧用同步 presence 判定版式；行动页方向键顺序与可见顺序一致；材料行题限 48 字；锚定跨成员复位；阅读视图成员集合并入外部配对；单飞按表达式键控，不同分段共享一次运行。
+- 174-C：174-A 只读评审（两视角找茬 + 逐条对抗验证，5 候选去重后 3 类全部 CONFIRMED）修复：
+  - 批量查询每键只取最新一版：原 IN 查询把每个 expression_key 的全部历史 revision（含整段 note_json）物化后再丢弃，读取量随重生成历史无界增长；改为相关子查询按 (expression_key, created_at) 索引取 rowid LIMIT 1，每键恰读一行。
+  - 批量读逐键容错：原循环裸 try，任一条最新笔记解码失败会让整批抛出、包装层 try? 吞掉后首页所有笔记标题与预览一起消失；改为单条失败只跳过该表达。
+  - 首页首读不再发超集查询：阅读态未就绪时键集合为空，等 readingStates 落回后按真正可见行一次读取，避免同一 actor 上先超集后收缩的两次串行查询。
+  - 测试 +2：批量读每键只返回最新一版（多键多版本）、单行损坏不拖垮其余笔记（手工写坏 note_json）。
+- 集成：构建 61 全绿（build_exit=0 / test_exit=0，577 tests / dist_build_exit=0，attempt=104 重启）；构建 62（174-A 合并后）全绿（577 tests，attempt=110 重启）；构建 63（174-C）全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
+- 上机实测（构建 62）：打开材料页真实生成新笔记「充电器是怎么匹配电压的？」后返回首页，时间线行与阅读器标题同步换成笔记标题（174-A 生效）；再次打开同一材料落回页面顶部——翻页位置不保留，175-A 阅读位置恢复确有必要。

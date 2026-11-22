@@ -26,6 +26,9 @@ struct RecentContentHome: View {
     @SceneStorage("recentHome.timelineAnchor") private var storedTimelineAnchor = ""
     @State private var timelineRestored = false
     @State private var readingStates: [String: SourceReadingState] = [:]
+    /// 阅读态到达前「待处理」过滤无法算出真正的可见集合；过早按全部材料
+    /// 读笔记会在状态落回后立刻再读一次，两次查询在 store actor 上串行。
+    @State private var readingStatesLoaded = false
     @State private var materialNotes: [String: StoredMaterialNote] = [:]
     @AppStorage("voiceos.home.pendingOnly") private var showsOnlyPending = true
     @State private var clueRename: ClueRenameRequest?
@@ -944,13 +947,17 @@ struct RecentContentHome: View {
     private func reloadReadingStates() async {
         guard model.initialized else { return }
         readingStates = await model.readingStates()
+        readingStatesLoaded = true
     }
 
     /// The note read refreshes when the library or a note revision changes, or
     /// when the visible row set does. `task(id:)` cancels the old read; the key
     /// comparison before writing back stops a late result landing on a newer set.
+    /// 阅读态未就绪时键集合为空，等它落回后再一次性读真正的可见行。
     private var materialNotesReadKey: HomeMaterialNotesKey {
-        let keys = items.compactMap { $0.kind == .material ? materialNoteExpressionKey(for: $0) : nil }
+        let keys = readingStatesLoaded
+            ? items.compactMap { $0.kind == .material ? materialNoteExpressionKey(for: $0) : nil }
+            : []
         return HomeMaterialNotesKey(records: model.recordsRevision, notes: model.materialNotesRevision,
                                     expressionKeys: Set(keys).sorted())
     }

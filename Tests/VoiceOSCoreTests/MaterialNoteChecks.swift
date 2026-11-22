@@ -123,4 +123,32 @@ final class MaterialNoteChecks: XCTestCase {
         let latest = try await store.latestMaterialNote(memberSourceIDs: [])
         XCTAssertNil(latest)
     }
+
+    func test批量读每键只返回最新一版() async throws {
+        let store = try await openStore()
+        try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("第一版"),
+                                         transcriptVersions: ["a": "ta-v1"], modelIdentity: nil)
+        let newestA = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("第二版"),
+                                                       transcriptVersions: ["a": "ta-v2"], modelIdentity: nil)
+        let newestBC = try await store.saveMaterialNote(memberSourceIDs: ["b", "c"], note: note("另一篇"),
+                                                        transcriptVersions: ["b": "tb-v1", "c": "tc-v1"], modelIdentity: nil)
+        let latest = try await store.latestMaterialNotes(expressionKeys: ["a", "b|c", "a"])
+        XCTAssertEqual(latest.count, 2)
+        XCTAssertEqual(latest["a"], newestA)
+        XCTAssertEqual(latest["b|c"], newestBC)
+    }
+
+    func test批量读单行损坏不拖垮其余笔记() async throws {
+        let store = try await openStore()
+        let good = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("完好"),
+                                                    transcriptVersions: ["a": "ta-v1"], modelIdentity: nil)
+        try await store.saveMaterialNote(memberSourceIDs: ["b"], note: note("将损坏"),
+                                         transcriptVersions: ["b": "tb-v1"], modelIdentity: nil)
+        let db = await store.db
+        try db.execute("UPDATE material_notes SET note_json=? WHERE expression_key=?", ["{不是 JSON", "b"])
+        let latest = try await store.latestMaterialNotes(expressionKeys: ["a", "b"])
+        XCTAssertEqual(latest.count, 1)
+        XCTAssertEqual(latest["a"], good)
+        XCTAssertNil(latest["b"])
+    }
 }

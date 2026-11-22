@@ -95,19 +95,28 @@ extension VoiceOSStore {
     }
 
     /// The newest revision for each expression key, in one query. Keys with no
-    /// saved note are absent; an empty input reads nothing. Rows arrive newest
-    /// first, so the first row seen for a key is that key's latest revision.
+    /// saved note are absent; an empty input reads nothing. History is
+    /// append-only, so each key's latest row is picked in SQL: the correlated
+    /// subquery walks the (expression_key, created_at) index and reads exactly
+    /// one row per key instead of materializing every revision's note_json.
     public func latestMaterialNotes(expressionKeys: [String]) throws -> [String: StoredMaterialNote] {
         let keys = Set(expressionKeys)
         guard !keys.isEmpty else { return [:] }
         let placeholders = Array(repeating: "?", count: keys.count).joined(separator: ",")
         let rows = try db.query(
-            "SELECT * FROM material_notes WHERE expression_key IN (\(placeholders)) ORDER BY created_at DESC, rowid DESC",
+            """
+            SELECT * FROM material_notes m
+            WHERE m.expression_key IN (\(placeholders))
+              AND m.rowid = (SELECT rowid FROM material_notes
+                             WHERE expression_key = m.expression_key
+                             ORDER BY created_at DESC, rowid DESC LIMIT 1)
+            """,
             keys.sorted().map { $0 as String? })
         var latest: [String: StoredMaterialNote] = [:]
         for row in rows {
             guard let key = row["expression_key"], latest[key] == nil else { continue }
-            latest[key] = try Self.storedMaterialNote(row)
+            // 单条损坏只让该表达的标题/预览回退，不能拖垮其余笔记。
+            if let stored = try? Self.storedMaterialNote(row) { latest[key] = stored }
         }
         return latest
     }
