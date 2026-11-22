@@ -20,12 +20,12 @@ extension ControlCenter {
         let memberIDs = sourcePageIndex.expression(for: sourceID)?.sourceIDs ?? [sourceID]
         do {
             let catalog = Dictionary(try await store.sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            if let reason = materialNoteUnavailableReason(memberIDs: memberIDs, catalog: catalog) {
+            if let reason = MaterialNoteGating.unavailableReason(memberIDs: memberIDs, catalog: catalog) {
                 materialNoteStates[sourceID] = .unavailable(reason)
                 return
             }
             let members = memberIDs.compactMap { catalog[$0] }
-            let versions = materialNoteTranscriptVersions(memberIDs: memberIDs, catalog: catalog)
+            let versions = MaterialNoteGating.transcriptVersions(memberIDs: memberIDs, catalog: catalog)
             if !force, let stored = try await store.latestMaterialNote(memberSourceIDs: memberIDs),
                await store.materialNoteIsCurrent(stored, currentTranscriptVersions: versions) {
                 materialNoteStates[sourceID] = .idle
@@ -66,29 +66,9 @@ extension ControlCenter {
         do {
             guard let stored = try await store.latestMaterialNote(memberSourceIDs: memberIDs) else { return nil }
             let catalog = Dictionary(try await store.sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-            let current = await store.materialNoteIsCurrent(stored, currentTranscriptVersions: materialNoteTranscriptVersions(memberIDs: memberIDs, catalog: catalog))
+            let current = await store.materialNoteIsCurrent(stored, currentTranscriptVersions: MaterialNoteGating.transcriptVersions(memberIDs: memberIDs, catalog: catalog))
             return (stored, current)
         } catch { return nil }
-    }
-
-    private func materialNoteUnavailableReason(memberIDs: [String], catalog: [String: SourceRecord]) -> String? {
-        for id in memberIDs {
-            guard let record = catalog[id] else { return "材料已变化或已移出资料库" }
-            guard ["saved", "reference_only"].contains(record.state) else { return "材料尚未保存完成" }
-            guard !record.localOnly else { return "仅本机保存" }
-            guard let transcript = record.transcript,
-                  !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  record.transcriptVersionID != nil else { return "尚无转写" }
-        }
-        return nil
-    }
-
-    private func materialNoteTranscriptVersions(memberIDs: [String], catalog: [String: SourceRecord]) -> [String: String] {
-        var versions: [String: String] = [:]
-        for id in memberIDs {
-            if let version = catalog[id]?.transcriptVersionID { versions[id] = version }
-        }
-        return versions
     }
 
     private func materialNoteSpans(for record: SourceRecord) -> [MaterialNoteSpan] {
@@ -104,28 +84,5 @@ extension ControlCenter {
     private static func materialNoteFailureMessage(_ error: Error) -> String {
         if case ModelPortFailure.rejected(let reason, _, _) = error { return reason }
         return error.localizedDescription
-    }
-}
-
-private struct MaterialNoteMemberSnapshot {
-    let sourceID: String
-    let transcriptVersionID: String?
-    let policyVersion: Int
-    let localOnly: Bool
-    let state: String
-
-    init(_ record: SourceRecord) {
-        sourceID = record.id
-        transcriptVersionID = record.transcriptVersionID
-        policyVersion = record.policyVersion
-        localOnly = record.localOnly
-        state = record.state
-    }
-
-    func matches(_ record: SourceRecord?) -> Bool {
-        guard let record else { return false }
-        return record.state == state && record.transcriptVersionID == transcriptVersionID &&
-            record.policyVersion == policyVersion && record.localOnly == localOnly &&
-            ["saved", "reference_only"].contains(record.state)
     }
 }
