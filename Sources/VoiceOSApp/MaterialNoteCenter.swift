@@ -83,6 +83,8 @@ extension ControlCenter {
                 memberSourceIDs: memberIDs, note: anchored, transcriptVersions: versions,
                 modelIdentity: identity.provider + " / " + identity.model + " / " + identity.promptVersion + " / " + identity.schemaVersion,
                 ifMembersStillMatch: snapshots)
+            // 新笔记立刻进入首页缓存，生成后第一次返回首页就能用笔记标题渲染。
+            if let saved { materialNoteRows[VoiceOSStore.materialNoteExpressionKey(memberIDs)] = saved }
             materialNotePresence[sourceID] = saved != nil
             if saved != nil { materialNoteDidSave() }
             materialNoteStates[sourceID] = saved == nil ? .failed("材料在生成期间有变化，请重试") : .idle
@@ -106,6 +108,7 @@ extension ControlCenter {
                 return nil
             }
             materialNotePresence[sourceID] = true
+            materialNoteRows[VoiceOSStore.materialNoteExpressionKey(memberIDs)] = stored
             let catalog = Dictionary(try await store.sources().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             let current = await store.materialNoteIsCurrent(stored, currentTranscriptVersions: MaterialNoteGating.transcriptVersions(memberIDs: memberIDs, catalog: catalog))
             return (stored, current)

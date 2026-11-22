@@ -1099,3 +1099,7 @@
 - 176-B 通知直达材料页：整理/导入完成的通知原只设置选中项、不导航；默认点击与「打开材料」动作都改为 requestWorkspaceSource（经 pendingWorkspaceSourceID → go(.source(id))），窗口未打开时同时唤起主窗口。
 - 集成：构建 67 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
 - 只读评审发现 176-B 在「主窗口已关闭、通知重建窗口」的主场景下会丢失（pendingWorkspaceSourceID 只由 onChange 消费），并入 177 修复。
+## 波 177：175/176 评审修复（2026-11-23）
+- 只读评审（175-A/B 与 176-B 全链路）确认四项：①【高】通知在窗口重建场景丢失——pendingWorkspaceSourceID 仅由 onChange 消费，改在 onAppear 的 consumePendingNavigation 补消费；②【中】位置恢复每次下漂一段——判定基准改为视口顶部（容差 8pt），与 scrollTo(.top) 幂等；③【中】生成完成不写首页缓存——保存成功即写 materialNoteRows，展示读取也写；④【低】重生成后探针残值——note id 变化时清空探针盒。
+- 「同秒两版缺 rowid 决胜」评为低危潜在项，暂不修（DB 查询按 rowid 决胜，缓存窗口极小）。
+- 集成：构建 68 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。

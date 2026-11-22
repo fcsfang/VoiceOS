@@ -3590,6 +3590,11 @@ struct WorkspaceView: View {
             model.pendingWorkspaceTaskID = nil
             go(.task(id))
         }
+        // 通知在窗口关闭时写入的请求早于本视图挂载，onChange 收不到，这里补消费。
+        if let id = model.pendingWorkspaceSourceID {
+            model.pendingWorkspaceSourceID = nil
+            go(.source(id))
+        }
     }
     private func routeExternalURL(_ url:URL) {
         if CaptureLink.isCapture(url) { Task { await model.acceptCaptureURL(url) } }

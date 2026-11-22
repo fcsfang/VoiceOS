@@ -102,8 +102,10 @@ struct MaterialNoteReadingView: View {
 
     // MARK: - 阅读位置
 
-    /// 段落顶部越过视口顶部这段距离后就算「读到过」，用来判定当前段。
-    private static let readingLineThreshold: CGFloat = 96
+    /// 视口顶部（含少量布局抖动）即当前阅读段。恢复时目标段顶对齐到 0，
+/// 这里必须用同一基准判定，否则恢复完会立刻把下一段记成当前位置、每次
+/// 重开都向下漂一段。
+    private static let readingTopTolerance: CGFloat = 8
 
     private struct PositionRestoreKey: Hashable {
         let expressionKey: String
@@ -134,8 +136,8 @@ struct MaterialNoteReadingView: View {
     }
 
     private func recordReadingPosition() {
-        // 视口顶部线之上最近的块就是当前阅读位置；都还在线下方说明没读到笔记。
-        guard let pick = probeBox.tops.filter({ $0.value <= Self.readingLineThreshold })
+        // 视口顶部处开始的块就是当前阅读位置；都比线低说明还在笔记上方。
+        guard let pick = probeBox.tops.filter({ $0.value <= Self.readingTopTolerance })
             .max(by: { $0.value < $1.value })?.key,
             pick != probeBox.lastAnchor else { return }
         probeBox.lastAnchor = pick
@@ -541,7 +543,9 @@ struct MaterialNoteReadingView: View {
         guard key == readKey, !Task.isCancelled else { return }
         loadedOnce = true
         if let result {
-            display = MaterialNoteDisplay(note: result.note, isCurrent: result.isCurrent)
+            let next = MaterialNoteDisplay(note: result.note, isCurrent: result.isCurrent)
+            if next.note.id != display?.note.id { resetReadingProbes() }
+            display = next
             hasNote = true
             model.materialNotePresence[source.id] = true
         } else {
@@ -549,6 +553,12 @@ struct MaterialNoteReadingView: View {
             hasNote = false
             model.materialNotePresence[source.id] = false
         }
+    }
+
+    /// 重生成后段落集合可能变化，旧探针残值不能再参与位置挑选。
+    private func resetReadingProbes() {
+        probeBox.tops.removeAll()
+        probeBox.lastAnchor = nil
     }
 
     @MainActor
