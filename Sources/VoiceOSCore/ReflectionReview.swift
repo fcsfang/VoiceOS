@@ -43,31 +43,6 @@ public extension ReflectionPeriod {
     }
 }
 
-/// These are editable discussion drafts. Selecting one never sends a request
-/// or creates a task on the user's behalf.
-public enum ReflectionReviewFollowup: String, CaseIterable, Sendable {
-    case connection, counterexample, experiment
-
-    public var label: String {
-        switch self {
-        case .connection: "核对联系"
-        case .counterexample: "找反例"
-        case .experiment: "设计小验证"
-        }
-    }
-
-    public var prompt: String {
-        switch self {
-        case .connection:
-            "请核对刚才提出的跨主题联系：分别引用两侧材料，解释共同机制、条件差异以及类比可能失效的边界。如果证据不足或联系牵强，请明确指出并修正。请将尚未证实的联系标为 AI 待核对推论。"
-        case .counterexample:
-            "请从已有资料寻找刚才判断的反例或不同条件，附原文依据，并说明它们会怎样限定或修正这个判断。没有实际反例时请直接说明；可以提出假设情形供我检验，但要明确标为假设。"
-        case .experiment:
-            "请把刚才一个值得验证的判断，写成我能修改的小验证建议：要检验的判断、可尝试什么、观察什么，以及结果不支持时怎样修正。区分已有结果与建议，不替我承诺、创建任务或声称已执行。"
-        }
-    }
-}
-
 public extension ConversationReflectionFocus {
     var reviewPurpose: String {
         isTopicOverview ? "跨时间梳理这个主题的当前理解、形成依据、不同判断、实践结果和未解问题；时间用于解释演化，不按周切断思考。" : reviewPeriod.reviewPurpose

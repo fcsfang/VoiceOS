@@ -1,26 +1,6 @@
 import SwiftUI
 import VoiceOSCore
 
-struct RecordingFollowupSummary: View {
-    @Environment(\.workspacePalette) private var palette
-    let receipt: RecordingFollowupReceipt
-    @ObservedObject var model: ControlCenter
-    let open: () -> Void
-    var body: some View {
-        WorkspaceCard(padding: 12) {
-            VStack(alignment: .leading, spacing: 8) {
-                if let result = receipt.result {
-                    Text("旧思想关联 \(result.thoughtUpdates.count) · 目标下一步 \(result.goalPlans.count)" + (result.english.isPractice ? " · 英语反馈已接续" : "")).vosFont(WorkspaceText.meta)
-                    if model.followupValidity[receipt.id]?.sourceCurrent != true { Text("录音依据已变化，历史结果保留；可重新生成跟进").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText) }
-                } else {
-                    Text(receipt.state == "running" ? "正在后台生成思想关联与下一步" : receipt.state == "queued" ? "思想关联与下一步已排队，录音和任务已保存" : "自动跟进待完成，可重试").vosFont(WorkspaceText.meta)
-                }
-                Button("查看思想与下一步", action: open).buttonStyle(.workspaceQuietCompact)
-            }
-        }
-    }
-}
-
 struct RecordingFollowupView: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter

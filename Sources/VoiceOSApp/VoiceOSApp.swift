@@ -954,10 +954,6 @@ final class ControlCenter: ObservableObject {
     func actionReviewPairs(for action: ActionRecord) -> [ActionReviewPair] {
         actionReviewLedgers.values.flatMap { $0.unresolvedPairs(for: action.id) }.sorted { $0.id < $1.id }
     }
-    func reminderSourceAllowed(_ action: ActionRecord) -> Bool {
-        guard let claim = claims.first(where: { $0.id == action.claimID }) else { return false }
-        return !recordingActionRequiresReview(action) && !claim.references.isEmpty && claim.references.allSatisfy { ref in records.contains { $0.id == ref.sourceID && !$0.localOnly } }
-    }
     static weak var primary: ControlCenter?
     private let rootOverride: URL?
     private(set) var libraryRoot: URL?
@@ -2298,21 +2294,6 @@ final class ControlCenter: ObservableObject {
             }
         }
     }
-    func chooseOrganizedResult() {
-        guard !fullRecordingBusy, !importing else { return }
-        let panel = NSOpenPanel(); panel.title = "导入已完成的全文整理"; panel.canChooseDirectories = true; panel.canChooseFiles = false
-        panel.begin { response in
-            guard response == .OK, let url = panel.url, let store = self.store else { return }
-            Task {
-                self.importing = true; defer { self.importing = false }
-                do {
-                    let count = try await store.ingestOrganizedPodcast(at: url, allowReminderWrites: self.reminderAccess?.enabled == true && self.reminderAccess?.title == "VoiceOS", requireAPIReview: true)
-                    await self.refresh(); self.requestReminderRefresh()
-                    self.status = "已导入完整整理 \(count) 个事项；相同清单不会重复创建"
-                } catch { self.status = error.localizedDescription }
-            }
-        }
-    }
     func processFollowup(sourceID: String, retry: Bool = false) async {
         if followupBusy {
             do { _ = try await store?.enqueueRecordingFollowup(sourceID: sourceID, retry: retry) }
@@ -2764,14 +2745,6 @@ final class ControlCenter: ObservableObject {
             status = "已有理解记录 · \(label)；未重发，也未启动后续关联"
         }
     }
-    func saveExpression(_ text: String, commandID: String) async -> Bool {
-        guard let store else { return false }
-        do {
-            selected = try await store.recordUserExpression(text, commandID: commandID)
-            await refresh(); status = "表达原文已保存 · 仅本地，尚未发送模型或提醒事项"
-            return true
-        } catch { status = error.localizedDescription; await refresh(); return false }
-    }
     var canUnderstandCapturedText: Bool { modelConfigured && understandingWorker == nil && !discussionExtracting }
     func saveCapturedText(_ text: String, title: String, ownership: TextCaptureOwnership, allowCloud: Bool, commandID: String) async -> String? {
         guard let store else { return nil }
@@ -2971,25 +2944,6 @@ final class ControlCenter: ObservableObject {
         } catch {
             status = "图片识别失败：" + error.localizedDescription
             return nil
-        }
-    }
-    func saveAndProcessExpression(_ text: String, commandID: String) async -> Bool {
-        guard let store, let cognition = textModel, let association = associationModel else {
-            status = "文本模型或关联模型尚未配置；原文仍可先本地保存"; return false
-        }
-        var savedSourceID: String?
-        do {
-            let source = try await store.recordUserExpression(text, commandID: commandID)
-            savedSourceID = source; selected = source
-            guard let current = try await store.sources().first(where: { $0.id == source }) else { throw VoiceOSError("表达保存后找不到来源") }
-            if current.localOnly { _ = try await store.setSourceLocalOnly(sourceID: source, expectedVersion: current.policyVersion, localOnly: false) }
-            let snapshot = try await store.prepareExpressionProcessingIntent(sourceID: source, cognition: cognition.configuration, association: association.configuration)
-            let intent = try await store.enqueueExpressionProcessingIntent(snapshot, commandID: "process:" + commandID, cognition: cognition.configuration, association: association.configuration)
-            status = intent.state == .queued ? "原文已保存并排队处理 · 本次文字已允许云端" : "原文已保存 · 原处理回执：\(workspaceStateLabel(intent.state.rawValue))；未重复排队"
-            await refresh(); scheduleProcessing(); return true
-        } catch {
-            status = (savedSourceID == nil ? "原文未保存：" : "原文已保存，处理未排队：") + error.localizedDescription
-            await refresh(); return false
         }
     }
     func export(includeMedia: Bool) {
@@ -3697,23 +3651,6 @@ final class ControlCenter: ObservableObject {
         focusedTaskID = action.id
         selected = claims.first(where: { $0.id == action.claimID })?.references.first?.sourceID
         return true
-    }
-    func enrichReminderContexts() async {
-        guard let store, let access = reminderAccess, access.enabled, !remindersBusy else { return }
-        remindersBusy = true; defer { remindersBusy = false; requestReminderRefresh() }
-        var count = 0
-        do {
-            for link in reminderLinks where link.calendarID == access.calendarID && link.state == "linked" {
-                guard let id = link.externalID, let action = actionRecords.first(where: { $0.id == link.actionID }),
-                      action.validity == "current", reminderSourceAllowed(action) else { continue }
-                let context = try await store.reminderContext(actionID: action.id)
-                guard (try await store.reminderAccess())?.version == access.version else { throw VoiceOSError("提醒事项连接已变化，停止补充出处") }
-                try reminders.updateContext(calendarID: access.calendarID, externalID: id, marker: "voiceos-action:" + link.id, context: context)
-                count += 1
-            }
-            status = "已精简 \(count) 条提醒事项；完整原话、时间与说明保留在 VoiceOS"
-        } catch { status = "已精简 \(count) 条提醒；" + error.localizedDescription }
-        await refresh()
     }
     func acceptReminderStatus(_ link: ReminderLink, action: ActionRecord) async {
         guard let store, let access = reminderAccess, access.enabled,
