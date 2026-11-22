@@ -783,12 +783,14 @@ struct WorkspaceStatLine: View {
     }
 
     @ViewBuilder private func statView(_ stat: Stat, leadingDot: Bool) -> some View {
+        // Help 文案先成形再传入：内联字符串拼接会拖垮整条 Button 修饰链的类型检查。
+        let jumpHelp = stat.help ?? "跳到「" + stat.label + "」所在区块"
         if let action = stat.action {
             Button(action: action) { statText(stat, leadingDot: leadingDot) }
                 .buttonStyle(.workspaceQuietCompact)
-                .help(stat.help ?? "跳到「" + stat.label + "」所在区块")
+                .help(jumpHelp)
                 .accessibilityLabel(stat.text)
-                .accessibilityHint(stat.help ?? "跳到「" + stat.label + "」所在区块")
+                .accessibilityHint(jumpHelp)
         } else {
             statText(stat, leadingDot: leadingDot).foregroundStyle(palette.secondaryText)
                 .accessibilityElement(children: .combine)
