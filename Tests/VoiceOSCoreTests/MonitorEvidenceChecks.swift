@@ -22,31 +22,35 @@ final class MonitorEvidenceChecks: XCTestCase {
         XCTAssertTrue(input.needsReview, "合并转发仍需用户打开查看")
     }
 
-    func testEvidenceExcerptIsTruncatedAndReplyIsShown() {
+    func testEvidenceBuilderTruncatesExcerptAndFallsBackForMissingMessage() {
         let body = String(repeating: "通", count: 150)
         let meta = "{\"replyContext\":{\"accountName\":\"班长\",\"content\":\"前文通知内容\"}}"
-        let records = MonitorEvidenceBuilder.build(
-            refs: [.init(sourceID: "s1", externalID: "m1")],
-            messagesBySource: ["s1": [message("m1", kind: .text, content: body, metaJSON: meta)]],
-            sourceNames: ["s1": "示例班级群"], sourceKinds: ["s1": .qqGroup])
-        XCTAssertEqual(records.count, 1)
-        XCTAssertEqual(records[0].kind, .text)
-        XCTAssertEqual(records[0].excerpt, String(repeating: "通", count: 120) + "…",
-                       "证据正文片段应截断到 120 字")
-        XCTAssertEqual(records[0].replyQuote, "引用：班长：前文通知内容", "有引用上下文时应显示引用行")
-        XCTAssertEqual(records[0].sourceName, "示例班级群")
-        XCTAssertFalse(records[0].missing)
-    }
-
-    func testMissingMessageFallsBackToSourceName() {
-        let records = MonitorEvidenceBuilder.build(
-            refs: [.init(sourceID: "s1", externalID: "deleted-1")],
-            messagesBySource: ["s1": []],
-            sourceNames: ["s1": "示例班级群"], sourceKinds: ["s1": .qqGroup])
-        XCTAssertEqual(records.count, 1)
-        XCTAssertTrue(records[0].missing, "消息已删除时证据应标记原文未找到")
-        XCTAssertEqual(records[0].sourceName, "示例班级群", "降级后仍应显示来源名")
-        XCTAssertNil(records[0].kind)
-        XCTAssertEqual(records[0].excerpt, "")
+        let cases: [(name: String, records: () -> [MonitorEvidenceRecord],
+                     kind: MonitorMessageKind?, excerpt: String,
+                     replyQuote: String?, missing: Bool)] = [
+            ("消息存在", {
+                MonitorEvidenceBuilder.build(
+                    refs: [.init(sourceID: "s1", externalID: "m1")],
+                    messagesBySource: ["s1": [self.message("m1", kind: .text, content: body, metaJSON: meta)]],
+                    sourceNames: ["s1": "示例班级群"], sourceKinds: ["s1": .qqGroup])
+            }, .text, String(repeating: "通", count: 120) + "…", "引用：班长：前文通知内容", false),
+            ("消息已删除", {
+                MonitorEvidenceBuilder.build(
+                    refs: [.init(sourceID: "s1", externalID: "deleted-1")],
+                    messagesBySource: ["s1": []],
+                    sourceNames: ["s1": "示例班级群"], sourceKinds: ["s1": .qqGroup])
+            }, nil, "", nil, true),
+        ]
+        for c in cases {
+            let records = c.records()
+            XCTAssertEqual(records.count, 1, "\(c.name)：应生成一条证据")
+            XCTAssertEqual(records[0].kind, c.kind, "\(c.name)：消息类型")
+            XCTAssertEqual(records[0].excerpt, c.excerpt, "\(c.name)：证据正文片段")
+            if let replyQuote = c.replyQuote {
+                XCTAssertEqual(records[0].replyQuote, replyQuote, "\(c.name)：引用行")
+            }
+            XCTAssertEqual(records[0].sourceName, "示例班级群", "\(c.name)：来源名")
+            XCTAssertEqual(records[0].missing, c.missing, "\(c.name)：原文缺失标记")
+        }
     }
 }

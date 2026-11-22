@@ -69,8 +69,8 @@ final class MessageMonitorRunnerChecks: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
-    private func openStore() async throws -> VoiceOSStore {
-        let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
+    private func openStore(_ tag: String = "store") async throws -> VoiceOSStore {
+        let store = try VoiceOSStore(root: root.appendingPathComponent(tag), inspector: NativeMediaInspector())
         try await store.recover()
         return store
     }
@@ -141,29 +141,61 @@ final class MessageMonitorRunnerChecks: XCTestCase {
                        "重复读取的旧消息不产生重复行")
     }
 
-    func testAnalysisFailureKeepsMessagesAndCursorThenRetrySucceeds() async throws {
-        let store = try await openStore()
-        let source = try await store.addMonitorSource(kind: .qqGroup, displayName: "示例班级群",
-                                                      configJSON: "{\"conversation_id\":\"group:fixture\"}")
-        let day = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9))!
-        let analysis = FlakyAnalysis(failuresLeft: 1)
-        let failed = try await runner(store: store, qq: StubQQCollector(messages: [message("m1", text: "奖学金通知全文")], failure: nil),
-                                      analysis: analysis, now: day).runDailyCheck(date: day)
-        XCTAssertEqual(failed.state, .failed, "模型失败应把当天报告标为失败")
-        let storedFailed = try await store.monitorReport(date: "2026-11-18")
-        XCTAssertEqual(storedFailed?.state, .failed)
-        let db = await store.db
-        XCTAssertEqual(try db.query("SELECT COUNT(*) AS n FROM monitor_messages").first?["n"], "1",
-                       "分析失败时已采集原文必须保留")
-        let cursor = try await store.monitorCursor(sourceID: source.id)
-        XCTAssertNotNil(cursor?.lastSuccessAt, "消息持久化成功后游标应已推进")
+    func testAnalysisFailureKeepsMessagesUntilRetrySucceeds() async throws {
+        let cases: [(name: String, verify: (VoiceOSStore, FlakyAnalysis) async throws -> Void)] = [
+            ("用 retryAnalysis 补分析", { store, analysis in
+                let source = try await store.addMonitorSource(kind: .qqGroup, displayName: "示例班级群",
+                                                              configJSON: "{\"conversation_id\":\"group:fixture\"}")
+                let day = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9))!
+                let failed = try await self.runner(store: store,
+                                                   qq: StubQQCollector(messages: [self.message("m1", text: "奖学金通知全文")], failure: nil),
+                                                   analysis: analysis, now: day).runDailyCheck(date: day)
+                XCTAssertEqual(failed.state, .failed, "模型失败应把当天报告标为失败")
+                let storedFailed = try await store.monitorReport(date: "2026-11-18")
+                XCTAssertEqual(storedFailed?.state, .failed)
+                let db = await store.db
+                XCTAssertEqual(try db.query("SELECT COUNT(*) AS n FROM monitor_messages").first?["n"], "1",
+                               "分析失败时已采集原文必须保留")
+                let cursor = try await store.monitorCursor(sourceID: source.id)
+                XCTAssertNotNil(cursor?.lastSuccessAt, "消息持久化成功后游标应已推进")
 
-        let retried = try await runner(store: store, qq: StubQQCollector(messages: [], failure: nil),
-                                       analysis: analysis, now: day).retryAnalysis(reportDate: day)
-        XCTAssertEqual(retried.state, .complete, "重试分析成功后报告应为完整")
-        XCTAssertEqual(retried.itemCount, 1)
-        XCTAssertEqual(try db.query("SELECT COUNT(*) AS n FROM monitor_messages").first?["n"], "1",
-                       "只重分析不应重新采集或重复保存消息")
+                let retried = try await self.runner(store: store, qq: StubQQCollector(messages: [], failure: nil),
+                                                    analysis: analysis, now: day).retryAnalysis(reportDate: day)
+                XCTAssertEqual(retried.state, .complete, "重试分析成功后报告应为完整")
+                XCTAssertEqual(retried.itemCount, 1)
+                XCTAssertEqual(try db.query("SELECT COUNT(*) AS n FROM monitor_messages").first?["n"], "1",
+                               "只重分析不应重新采集或重复保存消息")
+            }),
+            ("再次检查时补分析", { store, analysis in
+                _ = try await store.addMonitorSource(kind: .qqGroup, displayName: "示例班级群",
+                                                     configJSON: "{\"conversation_id\":\"group:fixture\"}")
+                let day = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9))!
+                let failed = try await self.runner(store: store,
+                                                   qq: StubQQCollector(messages: [self.message("m1", text: "奖学金申请截止 11 月 20 日")], failure: nil),
+                                                   analysis: analysis, now: day).runDailyCheck(date: day)
+                XCTAssertEqual(failed.state, .failed, "模型失败应把当天报告标为失败")
+                let db = await store.db
+                XCTAssertEqual(try db.query("SELECT COUNT(*) AS n FROM monitor_messages WHERE analyzed_report_id IS NULL").first?["n"], "1",
+                               "分析失败的消息必须保持未分析，等待补分析")
+                let retried = try await self.runner(store: store, qq: StubQQCollector(messages: [], failure: nil),
+                                                    analysis: analysis, now: day).runDailyCheck(date: day)
+                XCTAssertEqual(retried.state, .complete, "再次检查应补分析同一批未分析原文并成功")
+                XCTAssertEqual(retried.itemCount, 1, "补分析应生成今日报告的事项")
+                let stored = try await store.monitorReport(date: "2026-11-18")
+                XCTAssertEqual(stored?.state, .complete, "补分析成功后今日报告应更新为完整")
+                XCTAssertEqual(try db.query("SELECT analyzed_report_id FROM monitor_messages WHERE external_id='m1'").first?["analyzed_report_id"],
+                               stored?.id, "分析成功后消息应标记为当前报告 id")
+            }),
+        ]
+        for (index, c) in cases.enumerated() {
+            let store = try await openStore("analysis-failure-\(index)")
+            let analysis = FlakyAnalysis(failuresLeft: 1)
+            do {
+                try await c.verify(store, analysis)
+            } catch {
+                XCTFail("\(c.name)：\(error)")
+            }
+        }
     }
 
     func testQQFailureDoesNotDiscardWebsiteResults() async throws {
@@ -224,28 +256,6 @@ final class MessageMonitorRunnerChecks: XCTestCase {
         XCTAssertEqual(datedComponents?.year, 2026, "可解析日期的条目应把发布日期写入 sent_at")
         XCTAssertEqual(datedComponents?.month, 11)
         XCTAssertEqual(datedComponents?.day, 18)
-    }
-
-    func testAnalysisFailureKeepsMessagesPendingUntilRetryMarksThem() async throws {
-        let store = try await openStore()
-        _ = try await store.addMonitorSource(kind: .qqGroup, displayName: "示例班级群",
-                                             configJSON: "{\"conversation_id\":\"group:fixture\"}")
-        let day = Calendar.current.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 9))!
-        let analysis = FlakyAnalysis(failuresLeft: 1)
-        let failed = try await runner(store: store, qq: StubQQCollector(messages: [message("m1", text: "奖学金申请截止 11 月 20 日")], failure: nil),
-                                      analysis: analysis, now: day).runDailyCheck(date: day)
-        XCTAssertEqual(failed.state, .failed, "模型失败应把当天报告标为失败")
-        let db = await store.db
-        XCTAssertEqual(try db.query("SELECT COUNT(*) AS n FROM monitor_messages WHERE analyzed_report_id IS NULL").first?["n"], "1",
-                       "分析失败的消息必须保持未分析，等待补分析")
-        let retried = try await runner(store: store, qq: StubQQCollector(messages: [], failure: nil),
-                                       analysis: analysis, now: day).runDailyCheck(date: day)
-        XCTAssertEqual(retried.state, .complete, "再次检查应补分析同一批未分析原文并成功")
-        XCTAssertEqual(retried.itemCount, 1, "补分析应生成今日报告的事项")
-        let stored = try await store.monitorReport(date: "2026-11-18")
-        XCTAssertEqual(stored?.state, .complete, "补分析成功后今日报告应更新为完整")
-        XCTAssertEqual(try db.query("SELECT analyzed_report_id FROM monitor_messages WHERE external_id='m1'").first?["analyzed_report_id"],
-                       stored?.id, "分析成功后消息应标记为当前报告 id")
     }
 
     func testAnalyzedMessagesAreNotAnalyzedAgain() async throws {

@@ -11,22 +11,17 @@ final class MonitorItemsPresentationChecks: XCTestCase {
                     createdAt: "2026-11-19", updatedAt: "2026-11-19")
     }
 
-    func test缓存缺失且未失败时显示加载态() {
-        XCTAssertEqual(MonitorItemsPresentation.resolve(items: nil, loadFailed: false), .loading,
-                       "事项缓存尚未补齐时应显示加载态，不能当作空列表")
-    }
-
-    func test读取成功后的空数组才显示空态() {
-        XCTAssertEqual(MonitorItemsPresentation.resolve(items: [], loadFailed: false), .empty,
-                       "只有读取成功且确实没有事项时才允许显示空态")
-        XCTAssertEqual(MonitorItemsPresentation.resolve(items: [item()], loadFailed: false), .items,
-                       "读取成功且有条目时显示事项列表")
-    }
-
-    func test读取失败显示错误且旧缓存优先() {
-        XCTAssertEqual(MonitorItemsPresentation.resolve(items: nil, loadFailed: true), .failed,
-                       "读取失败时应显示错误而不是空态")
-        XCTAssertEqual(MonitorItemsPresentation.resolve(items: [item()], loadFailed: true), .items,
-                       "失败时若已有旧缓存，仍显示缓存事项")
+    func testResolveDistinguishesLoadingEmptyFailedAndCachedItems() {
+        let cases: [(name: String, items: [MonitorItem]?, loadFailed: Bool, expected: MonitorItemsPresentation)] = [
+            ("缓存缺失且未失败", nil, false, .loading),
+            ("读取成功且为空", [], false, .empty),
+            ("读取成功且有事项", [item()], false, .items),
+            ("读取失败且无缓存", nil, true, .failed),
+            ("读取失败但保留旧缓存", [item()], true, .items),
+        ]
+        for c in cases {
+            XCTAssertEqual(MonitorItemsPresentation.resolve(items: c.items, loadFailed: c.loadFailed), c.expected,
+                           "\(c.name) 时应显示 \(c.expected)")
+        }
     }
 }
