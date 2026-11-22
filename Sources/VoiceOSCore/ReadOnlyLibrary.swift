@@ -132,7 +132,7 @@ public struct ReadOnlyStatus: Codable, Sendable, Equatable {
 /// recovery and an exclusive flock, so an agent process must not open it;
 /// this type reads the same file directly and never writes.
 public struct ReadOnlyLibrary {
-    static let schemaVersion = 76
+    static let schemaVersion = 77
     private let connection: ReadOnlyConnection
     private let databaseFile: URL
 

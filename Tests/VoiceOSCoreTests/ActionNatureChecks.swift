@@ -210,7 +210,7 @@ final class ActionNatureChecks: XCTestCase {
 
         try removeNatureFromPackage(package)
         let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: package.appendingPathComponent("manifest.json"))) as? [String: Any]
-        XCTAssertEqual(manifest?["version"] as? Int, 51)
+        XCTAssertEqual(manifest?["version"] as? Int, 52)
         let legacyRoot = base.appendingPathComponent("legacy")
         try await VoiceOSStore.restorePackage(from: package, to: legacyRoot, inspector: NativeMediaInspector())
         let legacy = try await openStore(legacyRoot)

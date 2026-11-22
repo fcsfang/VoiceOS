@@ -8,6 +8,7 @@ final class PackageRoundTripChecks: XCTestCase {
     private static let optionalTables = ["action_recurrence", "source_entities"]
     private static let addedIn50Tables = ["task_initiations"]
     private static let addedIn51Tables = ["panorama_attempts", "panorama_steps", "panorama_theme_replies", "panorama_themes", "panorama_theme_batches", "panorama_theme_appearances"]
+    private static let addedIn52Tables = ["material_notes"]
     private var base: URL!
     private var root: URL!
     private var input: URL!
@@ -148,8 +149,8 @@ final class PackageRoundTripChecks: XCTestCase {
         let package = base.appendingPathComponent("package51")
         try await store.exportPackage(to: package, includeMedia: true)
         let manifest = try JSONSerialization.jsonObject(with: Data(contentsOf: package.appendingPathComponent("manifest.json"))) as? [String: Any]
-        XCTAssertEqual(manifest?["version"] as? Int, 51)
-        XCTAssertEqual(manifest?["databaseSchema"] as? Int, 51)
+        XCTAssertEqual(manifest?["version"] as? Int, 52)
+        XCTAssertEqual(manifest?["databaseSchema"] as? Int, 52)
         let counts = try XCTUnwrap(manifest?["counts"] as? [String: Any])
         XCTAssertEqual(counts["task_initiations"] as? Int, 1)
 
@@ -240,15 +241,15 @@ final class PackageRoundTripChecks: XCTestCase {
     }
 
     private func rewriteAsVersion48(_ package: URL, attachment: SourceAttachment) throws {
-        try rewriteManifest(package, version: 48, dropping: Self.newTables + Self.optionalTables + Self.addedIn50Tables + Self.addedIn51Tables, removing: [attachment.relativePath])
+        try rewriteManifest(package, version: 48, dropping: Self.newTables + Self.optionalTables + Self.addedIn50Tables + Self.addedIn51Tables + Self.addedIn52Tables, removing: [attachment.relativePath])
     }
 
     private func rewriteAsVersion49(_ package: URL) throws {
-        try rewriteManifest(package, version: 49, dropping: Self.addedIn50Tables + Self.addedIn51Tables, removing: [])
+        try rewriteManifest(package, version: 49, dropping: Self.addedIn50Tables + Self.addedIn51Tables + Self.addedIn52Tables, removing: [])
     }
 
     private func rewriteAsVersion50(_ package: URL) throws {
-        try rewriteManifest(package, version: 50, dropping: Self.addedIn51Tables, removing: [])
+        try rewriteManifest(package, version: 50, dropping: Self.addedIn51Tables + Self.addedIn52Tables, removing: [])
     }
 
     private func rewriteManifest(_ package: URL, version: Int, dropping tables: [String], removing paths: [String]) throws {
@@ -297,8 +298,8 @@ final class PackageRoundTripChecks: XCTestCase {
         _ = try await makeFixture(store)
         let package = base.appendingPathComponent("package-newer")
         try await store.exportPackage(to: package, includeMedia: true)
-        try rewriteManifest(package, version: 52, dropping: [], removing: [])
-        let message = "此迁移包由更新版本的 VoiceOS 创建（包版本 52），请升级后再恢复"
+        try rewriteManifest(package, version: 53, dropping: [], removing: [])
+        let message = "此迁移包由更新版本的 VoiceOS 创建（包版本 53），请升级后再恢复"
 
         do {
             _ = try VoiceOSStore.packageSummary(at: package)
