@@ -62,6 +62,11 @@ private struct TopicMergeOption: Identifiable {
     let materialCount: Int
     var id: String { topic.id }
 }
+private enum TopicCardPreview {
+    case question(String)
+    case excerpt(String, sourceLabel: String)
+    case summary(String)
+}
 private enum MaterialDayFormatting {
     static let currentYear: DateFormatter = {
         let formatter = DateFormatter()
@@ -179,6 +184,7 @@ struct WorkspaceRow: View {
     /// Spoken status for the dot style, which carries no text of its own.
     var statusAccessibility: String = ""
     var trailingGutter: CGFloat = 0
+    var titleLineLimit: Int? = nil
     var completion: CompletionControl? = nil
     let open: () -> Void
     var body: some View {
@@ -233,7 +239,7 @@ struct WorkspaceRow: View {
     private var titleAndTrailing: some View {
         HStack(alignment:.top,spacing:14) {
             VStack(alignment:.leading,spacing:3) {
-                Text(title).vosFont(WorkspaceText.rowTitle).lineSpacing(3).lineLimit(textScale >= 1.3 ? 3 : 2).fixedSize(horizontal:false,vertical:true).help(title)
+                Text(title).vosFont(WorkspaceText.rowTitle).lineSpacing(3).lineLimit(titleLineLimit ?? (textScale >= 1.3 ? 3 : 2)).fixedSize(horizontal:false,vertical:true).help(title)
                 if !subtitle.isEmpty { Text(subtitle).vosFont(WorkspaceText.meta).foregroundStyle(subtitleTone ?? palette.secondaryText).lineSpacing(3).lineLimit(textScale >= 1.3 ? 3 : 2).fixedSize(horizontal:false,vertical:true).help(subtitle) }
             }
             Spacer(minLength:8)
@@ -1139,18 +1145,24 @@ struct WorkspaceView: View {
                     ForEach(materialDayGroups(rows)) { group in
                         VStack(alignment:.leading,spacing:0) {
                             WorkspaceListGroupHeader(title:group.label)
-                            VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
-                                ForEach(group.sources) { source in
+                            VStack(alignment:.leading,spacing:0) {
+                                ForEach(Array(group.sources.enumerated()),id:\.element.id) { index,source in
+                                    if index > 0 { WorkspaceListDivider().padding(.horizontal,WorkspaceMetrics.controlPadding) }
                                     MaterialMenuRow(revealed: materialKeyboardFocus.id == source.id) {
                                         MaterialManagementControls(model:model,source:source,style:.compact,
                                             onSetReadingState:{ setMaterialReading(source.id,$0) },
                                             onSplitExpression:{ splitMaterialExpression(model.sourcePageIndex.expression(for: source.id)?.sourceIDs ?? [source.id]) },
                                             onRejudgeExpressions:{ rejudgeMaterialExpressions(source.presentation?.expression?.sourceIDs ?? [source.id]) })
                                     } row: {
-                                        sourceRow(source,catalog:catalog,trailingGutter: source.isArchived || source.isTrashed ? WorkspaceRowChrome.materialWideGutter : WorkspaceRowChrome.materialGutter).frame(maxWidth:.infinity,alignment:.leading).materialCard(highlighted: materialKeyboardFocus.id == source.id)
-                                    }.id(source.id)
+                                        sourceRow(source,catalog:catalog,trailingGutter: source.isArchived || source.isTrashed ? WorkspaceRowChrome.materialWideGutter : WorkspaceRowChrome.materialGutter).frame(maxWidth:.infinity,alignment:.leading)
+                                    }
+                                    .workspaceSelectionHighlight(materialKeyboardFocus.id == source.id)
+                                    .id(source.id)
                                 }
                             }
+                            .padding(.vertical,4)
+                            .background(palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+                            .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(palette.border,lineWidth:1) }
                         }
                     }
                 }
@@ -1217,7 +1229,11 @@ struct WorkspaceView: View {
                 if !themeListings.isEmpty {
                     LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing: WorkspaceMetrics.groupGap)],alignment:.leading,spacing: WorkspaceMetrics.groupGap) {
                         ForEach(themeListings) { listing in
-                            WorkspaceTopicTile(topic:listing.topic,sourceCount:listing.materialCount,highlighted:themeKeyboardFocus.id == listing.id) { selectTopic(listing.topic.id) }
+                            TopicPreviewCard(topic:listing.topic,preview:topicCardPreview(listing.topic,catalog:catalog),
+                                             materialCount:listing.materialCount,
+                                             sectionCount:listing.topic.organization?.sections?.count,
+                                             latestLabel:listing.latestMaterialDate == nil ? nil : clueDateLabel(listing.latestMaterialDate),
+                                             highlighted:themeKeyboardFocus.id == listing.id) { selectTopic(listing.topic.id) }
                                 .id(listing.id)
                         }
                     }
@@ -1313,6 +1329,26 @@ struct WorkspaceView: View {
                 }.padding(18).background(palette.selection,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
             }
         }
+    }
+    private func topicCardPreview(_ topic:ReflectionQuestion,catalog:[String:SourceRecord]) -> TopicCardPreview? {
+        if let question=topic.organization?.questions.first(where:{ !$0.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty }) {
+            return .question(question)
+        }
+        for section in topic.organization?.sections ?? [] {
+            for evidence in section.evidence {
+                guard let sentence=firstSentence(evidence.quote), sentence.count >= 8 else { continue }
+                return .excerpt(sentence, sourceLabel:catalog[evidence.sourceID]?.recordingDateLabel ?? "来源材料")
+            }
+        }
+        if let summary=topic.organization?.summary, !summary.isEmpty { return .summary(summary) }
+        return nil
+    }
+    private func firstSentence(_ text:String) -> String? {
+        let cleaned=text.split(whereSeparator:\.isWhitespace).joined(separator:" ")
+            .trimmingCharacters(in:.whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+        guard let end=cleaned.firstIndex(where:{ "。！？!?".contains($0) }) else { return cleaned }
+        return String(cleaned[...end])
     }
     private func topicListing(_ topic: ReflectionQuestion, catalog: [String: SourceRecord]) -> TopicListing {
         let ids = model.workspaceTopicSources[topic.id] ?? []
@@ -2535,6 +2571,24 @@ struct WorkspaceView: View {
         readingPlans=(try? await store.incrementalPlans()) ?? []
     }
     private var recordCatalog: [String:SourceRecord] { model.sourcePageIndex.recordsByID }
+    /// 资料库存的转写回退题目和自动题目已被截成 20/24 字加「…」；列表改用原文首句辨认，不再显示半句话。
+    private func materialRowTitle(_ source:SourceRecord, expression:RecordingExpression?, leading:SourceRecord, catalog:[String:SourceRecord]) -> String {
+        let combined=(expression?.sourceIDs.count ?? 0) > 1
+        let stored=combined ? expression!.displayTitle(in:catalog) : source.displayTitle
+        let manual=(combined ? expression?.manualTitle : source.presentation?.manualTitle)?
+            .trimmingCharacters(in:.whitespacesAndNewlines) ?? ""
+        if stored.hasSuffix("…"), manual.isEmpty, let opening=materialOpeningText(leading.transcript) { return fittedDisplayTitle(opening) }
+        return fittedDisplayTitle(stored)
+    }
+    private func materialOpeningText(_ transcript:String?) -> String? {
+        guard let transcript else { return nil }
+        let line=transcript.split(whereSeparator:\.isNewline)
+            .first { !$0.trimmingCharacters(in:.whitespaces).isEmpty }?
+            .trimmingCharacters(in:.whitespaces)
+        guard let line, !line.isEmpty else { return nil }
+        guard let end=line.firstIndex(where:{ "。！？!?；;".contains($0) }) else { return line }
+        return String(line[...end])
+    }
     private func sourceRow(_ source:SourceRecord,catalog:[String:SourceRecord],trailingGutter:CGFloat = 0,reason:String? = nil) -> some View {
         let expression=model.sourcePageIndex.expression(for:source.id)
         let combined=(expression?.sourceIDs.count ?? 0) > 1
@@ -2545,12 +2599,13 @@ struct WorkspaceView: View {
         let groupNote=reason ?? (model.sourcePageIndex.expressionIssue(for: source.id) != nil ? "分组待重新判断" : nil)
         let localOnlyNote=source.localOnly ? " · 仅本地" : ""
         let metadata=origin + localOnlyNote + (groupNote.map { " · " + $0 } ?? "")
-        let subtitle=first.recordingDateLabel + " · " + origin + localOnlyNote
+        let sourceNote=(source.origin == "user" ? "" : " · " + origin) + localOnlyNote
+        let subtitle=first.recordingDateLabel + sourceNote
         let openCount=model.sourcePageIndex.openActionCount(for:Set(expression?.sourceIDs ?? [source.id]))
         let trailingText=openCount > 0 ? "\(openCount) 条待办" + (issues > 0 ? " · 疑点 \(issues)" : "") : reading?.text ?? ""
         let trailingDisplay=trailingText
         let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .badge(.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
-        return WorkspaceRow(title:fittedDisplayTitle(combined ? expression!.displayTitle(in:catalog) : source.displayTitle),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter) { go(.source(source.id)) }
+        return WorkspaceRow(title:materialRowTitle(source,expression:expression,leading:first,catalog:catalog),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }
             .help(metadata)
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
@@ -3651,6 +3706,72 @@ struct WorkspaceView: View {
         }
         if opened { presentDiscussion(for:key,prompt:prompt) }
         else if key == discussionKey { error=model.status }
+    }
+}
+
+private struct TopicPreviewCard: View {
+    @Environment(\.workspacePalette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovered = false
+    let topic: ReflectionQuestion
+    let preview: TopicCardPreview?
+    let materialCount: Int
+    let sectionCount: Int?
+    let latestLabel: String?
+    var highlighted = false
+    let open: () -> Void
+
+    var body: some View {
+        Button(action:open) {
+            VStack(alignment:.leading,spacing:10) {
+                Text(topic.title).vosFont(WorkspaceText.sectionTitle)
+                    .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
+                if topic.organizationStale == true { TopicStaleBanner() }
+                if topic.organization?.bodyPending == true { WorkspaceBadge(text:"正文整理中") }
+                if let preview { previewBody(preview) }
+                Spacer(minLength:0)
+                Text(metaLine).vosFont(WorkspaceText.meta,monospacedDigit:true)
+                    .foregroundStyle(palette.tertiaryText)
+            }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
+                .padding(20)
+                .background(highlighted ? palette.selection : hovered ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+                .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(highlighted ? palette.focusRing : palette.border,lineWidth:1) }
+                .contentShape(RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
+        }.buttonStyle(.plain).onHover { hovered=$0 }
+            .accessibilityElement(children:.combine)
+            .accessibilityAddTraits(highlighted ? .isSelected : [])
+            .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
+            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: highlighted)
+    }
+
+    @ViewBuilder private func previewBody(_ preview:TopicCardPreview) -> some View {
+        switch preview {
+        case .question(let text):
+            HStack(alignment:.top,spacing:8) {
+                Image(systemName:"questionmark.bubble").vosFont(WorkspaceText.meta.size,weight:.medium)
+                    .foregroundStyle(palette.action).accessibilityHidden(true).padding(.top,2)
+                Text(text).vosFont(WorkspaceText.body).lineSpacing(4).foregroundStyle(palette.text)
+                    .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
+            }
+        case .excerpt(let text,let sourceLabel):
+            VStack(alignment:.leading,spacing:6) {
+                Text("“" + text + "”").vosFont(WorkspaceText.body).lineSpacing(4)
+                    .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
+                    .fixedSize(horizontal:false,vertical:true)
+                Text("原话 · " + sourceLabel).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+            }
+        case .summary(let text):
+            Text(text).vosFont(WorkspaceText.body).lineSpacing(4)
+                .foregroundStyle(palette.secondaryText).multilineTextAlignment(.leading)
+                .fixedSize(horizontal:false,vertical:true)
+        }
+    }
+
+    private var metaLine: String {
+        var parts=["\(materialCount) 份材料"]
+        if let sectionCount { parts.append("\(sectionCount) 个小主题") }
+        if let latestLabel { parts.append("最近 " + latestLabel) }
+        return parts.joined(separator:" · ")
     }
 }
 
