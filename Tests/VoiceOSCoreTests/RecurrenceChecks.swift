@@ -23,6 +23,12 @@ final class RecurrenceChecks: XCTestCase {
         return store
     }
 
+    private func openStore(at directory: URL) async throws -> VoiceOSStore {
+        let store = try VoiceOSStore(root: directory, inspector: NativeMediaInspector())
+        try await store.recover()
+        return store
+    }
+
     private func calendar(_ zone: String) -> Calendar {
         var value = Calendar(identifier: .gregorian)
         value.timeZone = TimeZone(identifier: zone)!
@@ -73,24 +79,21 @@ final class RecurrenceChecks: XCTestCase {
 
     func testPeriodsAdvanceFromLocalDate() {
         let zone = calendar("Asia/Shanghai")
-        XCTAssertEqual(RecurrencePeriod.nextLocalDate(after: "2026-11-15", period: .daily, calendar: zone), "2026-11-16")
-        XCTAssertEqual(RecurrencePeriod.nextLocalDate(after: "2026-11-15", period: .weekly, calendar: zone), "2026-11-22")
-        XCTAssertEqual(RecurrencePeriod.nextLocalDate(after: "2026-11-15", period: .biweekly, calendar: zone), "2026-11-29")
+        let transitions: [(after: String, period: RecurrencePeriod, expected: String)] = [
+            ("2026-11-15", .daily, "2026-11-16"),
+            ("2026-11-15", .weekly, "2026-11-22"),
+            ("2026-11-15", .biweekly, "2026-11-29"),
+            ("2026-01-31", .monthly, "2026-02-28"),
+            ("2024-01-31", .monthly, "2024-02-29"),
+            ("2026-12-31", .monthly, "2027-01-31"),
+        ]
+        for c in transitions {
+            XCTAssertEqual(RecurrencePeriod.nextLocalDate(after: c.after, period: c.period, calendar: zone), c.expected, c.after)
+        }
         XCTAssertEqual(RecurrencePeriod.nextDue(after: date(zone, 2026, 11, 15, 10, 30), period: .weekly, calendar: zone), date(zone, 2026, 11, 22, 10, 30))
-    }
-
-    func testMonthlyClampsMonthEnd() {
-        let zone = calendar("Asia/Shanghai")
-        XCTAssertEqual(RecurrencePeriod.nextLocalDate(after: "2026-01-31", period: .monthly, calendar: zone), "2026-02-28")
-        XCTAssertEqual(RecurrencePeriod.nextLocalDate(after: "2024-01-31", period: .monthly, calendar: zone), "2024-02-29")
-        XCTAssertEqual(RecurrencePeriod.nextLocalDate(after: "2026-12-31", period: .monthly, calendar: zone), "2027-01-31")
-    }
-
-    func testMonthlyLeapDayFallsBackToFebruary28() {
-        let zone = calendar("Asia/Shanghai")
-        var value = "2024-02-29"
-        for _ in 0..<12 { value = RecurrencePeriod.nextLocalDate(after: value, period: .monthly, calendar: zone) }
-        XCTAssertEqual(value, "2025-02-28")
+        var leap = "2024-02-29"
+        for _ in 0..<12 { leap = RecurrencePeriod.nextLocalDate(after: leap, period: .monthly, calendar: zone) }
+        XCTAssertEqual(leap, "2025-02-28")
     }
 
     func testSetRecurrenceRequiresOpenActionAndKeepsOneRow() async throws {
@@ -229,41 +232,41 @@ final class RecurrenceChecks: XCTestCase {
     }
 
     func testReopenDeletesUntouchedSuccessorAndRestoresSeries() async throws {
-        let store = try await openStore()
-        let db = await store.db
-        let zone = calendar("Asia/Shanghai")
-        let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"))
-        try await store.setRecurrence(actionID: action, period: .weekly)
-        let seriesID = try XCTUnwrap(try db.query("SELECT series_id FROM action_recurrence WHERE action_id=?", [action]).first?["series_id"])
-        let successorRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
-        let successor = try XCTUnwrap(successorRaw)
-        let kept = try await store.reopenActionWithRecurrence(id: action, successorID: successor)
-        XCTAssertNil(kept)
-        let reopened = try XCTUnwrap(try db.query("SELECT state,version FROM actions WHERE id=?", [action]).first)
-        XCTAssertEqual(reopened["state"], "open")
-        XCTAssertEqual(reopened["version"], "3")
-        XCTAssertEqual(try db.query("SELECT id FROM actions WHERE id=?", [successor]).count, 0)
-        let successorRecurrence = try await store.recurrence(actionID: successor)
-        let actionRecurrence = try await store.recurrence(actionID: action)
-        XCTAssertNil(successorRecurrence)
-        XCTAssertEqual(actionRecurrence, .weekly)
-        XCTAssertEqual(try db.query("SELECT series_id FROM action_recurrence WHERE action_id=?", [action]).first?["series_id"], seriesID)
-        XCTAssertEqual(try db.query("SELECT count(*) AS n FROM action_recurrence").first?["n"], "1")
-    }
-
-    func testReopenFindsSuccessorByCommandPrefix() async throws {
-        let store = try await openStore()
-        let db = await store.db
-        let zone = calendar("Asia/Shanghai")
-        let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"))
-        try await store.setRecurrence(actionID: action, period: .weekly)
-        let successorRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
-        let successor = try XCTUnwrap(successorRaw)
-        let kept = try await store.reopenActionWithRecurrence(id: action)
-        XCTAssertNil(kept)
-        XCTAssertEqual(try db.query("SELECT id FROM actions WHERE id=?", [successor]).count, 0)
-        let restored = try await store.recurrence(actionID: action)
-        XCTAssertEqual(restored, .weekly)
+        struct ReopenCase {
+            let name: String
+            let note: String
+            let passSuccessor: Bool
+        }
+        let cases: [ReopenCase] = [
+            ReopenCase(name: "explicit successor", note: "", passSuccessor: true),
+            ReopenCase(name: "successor found by command prefix", note: "", passSuccessor: false),
+            ReopenCase(name: "predecessor note", note: "原话：每周复盘", passSuccessor: true),
+        ]
+        for c in cases {
+            let caseRoot = FileManager.default.temporaryDirectory.appendingPathComponent("voiceos-recurrence-case-" + UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: caseRoot) }
+            let store = try await openStore(at: caseRoot)
+            let db = await store.db
+            let zone = calendar("Asia/Shanghai")
+            let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"), note: c.note)
+            try await store.setRecurrence(actionID: action, period: .weekly)
+            let seriesID = try XCTUnwrap(try db.query("SELECT series_id FROM action_recurrence WHERE action_id=?", [action]).first?["series_id"])
+            let successorRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
+            let successor = try XCTUnwrap(successorRaw)
+            XCTAssertEqual(try db.query("SELECT note FROM actions WHERE id=?", [successor]).first?["note"], c.note, c.name)
+            let kept = try await store.reopenActionWithRecurrence(id: action, successorID: c.passSuccessor ? successor : nil)
+            XCTAssertNil(kept, c.name)
+            let reopened = try XCTUnwrap(try db.query("SELECT state,version FROM actions WHERE id=?", [action]).first)
+            XCTAssertEqual(reopened["state"], "open", c.name)
+            XCTAssertEqual(reopened["version"], "3", c.name)
+            XCTAssertEqual(try db.query("SELECT id FROM actions WHERE id=?", [successor]).count, 0, c.name)
+            let successorPeriod = try await store.recurrence(actionID: successor)
+            XCTAssertNil(successorPeriod, c.name)
+            let actionPeriod = try await store.recurrence(actionID: action)
+            XCTAssertEqual(actionPeriod, .weekly, c.name)
+            XCTAssertEqual(try db.query("SELECT series_id FROM action_recurrence WHERE action_id=?", [action]).first?["series_id"], seriesID, c.name)
+            XCTAssertEqual(try db.query("SELECT count(*) AS n FROM action_recurrence").first?["n"], "1", c.name)
+        }
     }
 
     func testReopenKeepsModifiedSuccessor() async throws {
@@ -308,22 +311,6 @@ final class RecurrenceChecks: XCTestCase {
         let row = try XCTUnwrap(try db.query("SELECT state,validity FROM actions WHERE id=?", [second]).first)
         XCTAssertEqual(row["state"], "open")
         XCTAssertEqual(row["validity"], "current")
-    }
-
-    func testReopenDeletesUntouchedSuccessorWithPredecessorNote() async throws {
-        let store = try await openStore()
-        let db = await store.db
-        let zone = calendar("Asia/Shanghai")
-        let action = try await makeTask(store, due: .dateOnly(localDate: "2026-11-01", timeZone: "Asia/Shanghai"), note: "原话：每周复盘")
-        try await store.setRecurrence(actionID: action, period: .weekly)
-        let successorRaw = try await store.completeActionWithRecurrence(id: action, now: date(zone, 2026, 11, 2, 8, 0))
-        let successor = try XCTUnwrap(successorRaw)
-        XCTAssertEqual(try db.query("SELECT note FROM actions WHERE id=?", [successor]).first?["note"], "原话：每周复盘")
-        let kept = try await store.reopenActionWithRecurrence(id: action, successorID: successor)
-        XCTAssertNil(kept)
-        XCTAssertEqual(try db.query("SELECT id FROM actions WHERE id=?", [successor]).count, 0)
-        let moved = try await store.recurrence(actionID: action)
-        XCTAssertEqual(moved, .weekly)
     }
 
     func testFrozenSourceCreatesFrozenSuccessorWithoutAutoSend() async throws {

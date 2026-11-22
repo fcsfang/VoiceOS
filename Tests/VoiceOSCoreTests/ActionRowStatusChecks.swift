@@ -3,6 +3,14 @@ import XCTest
 import VoiceOSPlatform
 
 final class ActionRowStatusChecks: XCTestCase {
+    private struct RowCase {
+        let name: String
+        let configure: (inout ActionRowFacts) -> Void
+        let status: String
+        let tone: ActionRowTone
+        let meta: String
+    }
+
     private func facts(_ configure: (inout ActionRowFacts) -> Void) -> ActionRowStatus {
         var facts = ActionRowFacts()
         configure(&facts)
@@ -15,97 +23,158 @@ final class ActionRowStatusChecks: XCTestCase {
                      autoSend: false, intent: nil, commandID: "c", createdAt: "", parentID: parent)
     }
 
-    func testMetaCarriesDueInsteadOfSource() {
-        let row = facts { facts in
-            facts.isGoal = true
-            facts.due = "到期 11月20日"
-            facts.sourceTitle = "早餐时的想法"
+    func testStatusMatrixCoversGroupsGoalsAndQuestions() {
+        let cases: [RowCase] = [
+            RowCase(name: "due wins over source",
+                    configure: { facts in
+                        facts.isGoal = true
+                        facts.due = "到期 11月20日"
+                        facts.sourceTitle = "早餐时的想法"
+                    },
+                    status: "", tone: .secondary, meta: "到期 11月20日"),
+            RowCase(name: "source fallback",
+                    configure: { facts in
+                        facts.isGoal = true
+                        facts.sourceTitle = "早餐时的想法"
+                    },
+                    status: "", tone: .secondary, meta: "来自『早餐时的想法』"),
+            RowCase(name: "goal shows next step count",
+                    configure: { facts in
+                        facts.isGoal = true
+                        facts.nextStepCount = 2
+                        facts.sourceTitle = "早餐时的想法"
+                    },
+                    status: "2 个下一步", tone: .secondary, meta: "来自『早餐时的想法』"),
+            RowCase(name: "goal with no next steps",
+                    configure: { facts in
+                        facts.isGoal = true
+                        facts.nextStepCount = 0
+                    },
+                    status: "", tone: .secondary, meta: ""),
+            RowCase(name: "needs review group does not reafirm",
+                    configure: { facts in
+                        facts.group = .needsReview
+                        facts.requiresReview = true
+                    },
+                    status: "", tone: .secondary, meta: ""),
+            RowCase(name: "needs review group frozen",
+                    configure: { facts in
+                        facts.group = .needsReview
+                        facts.validity = "frozen"
+                    },
+                    status: "", tone: .secondary, meta: ""),
+            RowCase(name: "needs review outside its group",
+                    configure: { facts in
+                        facts.requiresReview = true
+                    },
+                    status: "待核对", tone: .warning, meta: ""),
+            RowCase(name: "completed group does not repeat completion",
+                    configure: { facts in
+                        facts.group = .completed
+                        facts.state = "completed"
+                    },
+                    status: "", tone: .secondary, meta: ""),
+            RowCase(name: "history frozen",
+                    configure: { facts in
+                        facts.group = .history
+                        facts.validity = "frozen"
+                    },
+                    status: "", tone: .secondary, meta: ""),
+            RowCase(name: "history dismissed",
+                    configure: { facts in
+                        facts.group = .history
+                        facts.state = "dismissed"
+                    },
+                    status: "已放下", tone: .tertiary, meta: ""),
+            RowCase(name: "local unsynced wins over next steps",
+                    configure: { facts in
+                        facts.isGoal = true
+                        facts.nextStepCount = 3
+                        facts.localUnsynced = true
+                    },
+                    status: "本地未同步", tone: .warning, meta: ""),
+            RowCase(name: "question unanswered",
+                    configure: { facts in
+                        facts.isQuestion = true
+                        facts.sourceTitle = "早餐时的想法"
+                    },
+                    status: "未回答", tone: .secondary, meta: "来自『早餐时的想法』"),
+            RowCase(name: "question queued",
+                    configure: { facts in
+                        facts.isQuestion = true
+                        facts.answerState = "queued"
+                    },
+                    status: "回答中", tone: .secondary, meta: ""),
+            RowCase(name: "question running",
+                    configure: { facts in
+                        facts.isQuestion = true
+                        facts.answerState = "running"
+                    },
+                    status: "回答中", tone: .secondary, meta: ""),
+            RowCase(name: "question reserved",
+                    configure: { facts in
+                        facts.isQuestion = true
+                        facts.answerState = "reserved"
+                    },
+                    status: "回答中", tone: .secondary, meta: ""),
+            RowCase(name: "question blocked",
+                    configure: { facts in
+                        facts.isQuestion = true
+                        facts.answerState = "blocked"
+                    },
+                    status: "回答中", tone: .secondary, meta: ""),
+            RowCase(name: "question completed",
+                    configure: { facts in
+                        facts.isQuestion = true
+                        facts.answerState = "completed"
+                    },
+                    status: "已回答", tone: .success, meta: ""),
+            RowCase(name: "question failed",
+                    configure: { facts in
+                        facts.isQuestion = true
+                        facts.answerState = "failed"
+                    },
+                    status: "回答失败", tone: .warning, meta: ""),
+            RowCase(name: "question cancelled",
+                    configure: { facts in
+                        facts.isQuestion = true
+                        facts.answerState = "cancelled"
+                    },
+                    status: "回答失败", tone: .warning, meta: ""),
+            RowCase(name: "question unknown state",
+                    configure: { facts in
+                        facts.isQuestion = true
+                        facts.answerState = "unknown"
+                    },
+                    status: "未回答", tone: .secondary, meta: ""),
+            RowCase(name: "question wins over next steps",
+                    configure: { facts in
+                        facts.isQuestion = true
+                        facts.nextStepCount = 2
+                    },
+                    status: "未回答", tone: .secondary, meta: ""),
+            RowCase(name: "completed row shows completion date",
+                    configure: { facts in
+                        facts.group = .completed
+                        facts.state = "completed"
+                        facts.completedAt = "完成于 11月16日"
+                        facts.sourceTitle = "早餐时的想法"
+                    },
+                    status: "", tone: .secondary, meta: "完成于 11月16日"),
+            RowCase(name: "completion date only inside completed group",
+                    configure: { facts in
+                        facts.state = "completed"
+                        facts.completedAt = "完成于 11月16日"
+                        facts.sourceTitle = "早餐时的想法"
+                    },
+                    status: "已登记完成", tone: .secondary, meta: "来自『早餐时的想法』"),
+        ]
+        for c in cases {
+            let row = facts(c.configure)
+            XCTAssertEqual(row.status, c.status, c.name)
+            XCTAssertEqual(row.tone, c.tone, c.name)
+            XCTAssertEqual(row.meta, c.meta, c.name)
         }
-        XCTAssertEqual(row.meta, "到期 11月20日")
-        XCTAssertFalse(row.meta.contains("来自"))
-    }
-
-    func testMetaFallsBackToSourceWhenNoDue() {
-        let row = facts { facts in
-            facts.isGoal = true
-            facts.sourceTitle = "早餐时的想法"
-        }
-        XCTAssertEqual(row.meta, "来自『早餐时的想法』")
-    }
-
-    func testGoalShowsOpenNextStepCountInStatusSlot() {
-        let row = facts { facts in
-            facts.isGoal = true
-            facts.nextStepCount = 2
-            facts.sourceTitle = "早餐时的想法"
-        }
-        XCTAssertEqual(row.status, "2 个下一步")
-        XCTAssertEqual(row.tone, .secondary)
-        XCTAssertFalse(row.meta.contains("下一步"))
-    }
-
-    func testGoalWithNoNextStepsLeavesStatusToTheBanner() {
-        let row = facts { facts in
-            facts.isGoal = true
-            facts.nextStepCount = 0
-        }
-        XCTAssertEqual(row.status, "")
-    }
-
-    func testNeedsReviewGroupDoesNotReafirmItsOwnStatus() {
-        let row = facts { facts in
-            facts.group = .needsReview
-            facts.requiresReview = true
-        }
-        XCTAssertEqual(row.status, "")
-        let frozen = facts { facts in
-            facts.group = .needsReview
-            facts.validity = "frozen"
-        }
-        XCTAssertEqual(frozen.status, "")
-    }
-
-    func testNeedsReviewShowsAsWarningOutsideItsGroup() {
-        let row = facts { facts in
-            facts.requiresReview = true
-        }
-        XCTAssertEqual(row.status, "待核对")
-        XCTAssertEqual(row.tone, .warning)
-    }
-
-    func testCompletedGroupDoesNotRepeatCompletion() {
-        let row = facts { facts in
-            facts.group = .completed
-            facts.state = "completed"
-        }
-        XCTAssertEqual(row.status, "")
-    }
-
-    func testHistoricalRowDoesNotRepeatTheGroupLabel() {
-        let row = facts { facts in
-            facts.group = .history
-            facts.validity = "frozen"
-        }
-        XCTAssertEqual(row.status, "")
-    }
-
-    func testDismissedRowKeepsItsOwnOutcome() {
-        let row = facts { facts in
-            facts.group = .history
-            facts.state = "dismissed"
-        }
-        XCTAssertEqual(row.status, "已放下")
-        XCTAssertEqual(row.tone, .tertiary)
-    }
-
-    func testWarningExceptionWinsOverNextStepCount() {
-        let row = facts { facts in
-            facts.isGoal = true
-            facts.nextStepCount = 3
-            facts.localUnsynced = true
-        }
-        XCTAssertEqual(row.status, "本地未同步")
-        XCTAssertEqual(row.tone, .warning)
     }
 
     func testNextStepCountsCountOpenChildrenPerOutcome() {
@@ -119,82 +188,6 @@ final class ActionRowStatusChecks: XCTestCase {
         XCTAssertEqual(ActionRowLayout.nextStepCounts(actions), ["goal": 2, "other": 1])
     }
 
-    func testQuestionWithoutAnalysisShowsUnanswered() {
-        let row = facts { facts in
-            facts.isQuestion = true
-            facts.sourceTitle = "早餐时的想法"
-        }
-        XCTAssertEqual(row.status, "未回答")
-        XCTAssertEqual(row.tone, .secondary)
-        XCTAssertEqual(row.meta, "来自『早餐时的想法』")
-    }
-
-    func testQuestionWaitingOrRunningShowsAnswering() {
-        for state in ["queued", "running", "reserved", "blocked"] {
-            let row = facts { facts in
-                facts.isQuestion = true
-                facts.answerState = state
-            }
-            XCTAssertEqual(row.status, "回答中", state)
-            XCTAssertEqual(row.tone, .secondary, state)
-        }
-    }
-
-    func testQuestionWithCompletedAnalysisShowsAnswered() {
-        let row = facts { facts in
-            facts.isQuestion = true
-            facts.answerState = "completed"
-        }
-        XCTAssertEqual(row.status, "已回答")
-        XCTAssertEqual(row.tone, .success)
-    }
-
-    func testQuestionWithFailedOrCancelledAnalysisShowsFailure() {
-        for state in ["failed", "cancelled"] {
-            let row = facts { facts in
-                facts.isQuestion = true
-                facts.answerState = state
-            }
-            XCTAssertEqual(row.status, "回答失败", state)
-            XCTAssertEqual(row.tone, .warning, state)
-        }
-        let unknown = facts { facts in
-            facts.isQuestion = true
-            facts.answerState = "unknown"
-        }
-        XCTAssertEqual(unknown.status, "未回答")
-    }
-
-    func testQuestionStatusWinsOverNextStepCount() {
-        let row = facts { facts in
-            facts.isQuestion = true
-            facts.nextStepCount = 2
-        }
-        XCTAssertEqual(row.status, "未回答")
-        XCTAssertEqual(row.meta, "")
-    }
-
-    func testCompletedRowShowsCompletionDateInsteadOfSource() {
-        let row = facts { facts in
-            facts.group = .completed
-            facts.state = "completed"
-            facts.completedAt = "完成于 11月16日"
-            facts.sourceTitle = "早餐时的想法"
-        }
-        XCTAssertEqual(row.meta, "完成于 11月16日")
-        XCTAssertEqual(row.status, "")
-    }
-
-    func testCompletionDateOnlyAppliesInsideTheCompletedGroup() {
-        let row = facts { facts in
-            facts.state = "completed"
-            facts.completedAt = "完成于 11月16日"
-            facts.sourceTitle = "早餐时的想法"
-        }
-        XCTAssertEqual(row.meta, "来自『早餐时的想法』")
-        XCTAssertEqual(row.status, "已登记完成")
-    }
-
     private func reminderRow(state: String, due: ReminderDueDate) -> ActionRowStatus {
         var facts = ActionRowFacts()
         facts.reminderLinkState = state
@@ -205,24 +198,17 @@ final class ActionRowStatusChecks: XCTestCase {
         return ActionRowLayout.status(facts, now: now, calendar: calendar)
     }
 
-    func testReminderMetaShowsLinkedDueToday() {
-        let row = reminderRow(state: "linked", due: .dateOnly(localDate: "2026-11-19", timeZone: nil))
-        XCTAssertEqual(row.meta, "已写入提醒事项 · 今天")
-    }
-
-    func testReminderMetaShowsLinkedDueTomorrow() {
-        let row = reminderRow(state: "linked", due: .dateOnly(localDate: "2026-11-20", timeZone: nil))
-        XCTAssertEqual(row.meta, "已写入提醒事项 · 明天")
-    }
-
-    func testReminderMetaShowsConflictOverdueDate() {
-        let row = reminderRow(state: "conflict", due: .dateOnly(localDate: "2026-11-18", timeZone: nil))
-        XCTAssertEqual(row.meta, "提醒待核对 · 已逾期 11月18日")
-    }
-
-    func testReminderMetaFallsBackToMonthDayBeyondAWeek() {
-        let row = reminderRow(state: "linked", due: .dateOnly(localDate: "2026-12-01", timeZone: nil))
-        XCTAssertEqual(row.meta, "已写入提醒事项 · 12月1日")
+    func testReminderMetaMatrix() {
+        let cases: [(name: String, state: String, due: ReminderDueDate, meta: String)] = [
+            ("linked due today", "linked", .dateOnly(localDate: "2026-11-19", timeZone: nil), "已写入提醒事项 · 今天"),
+            ("linked due tomorrow", "linked", .dateOnly(localDate: "2026-11-20", timeZone: nil), "已写入提醒事项 · 明天"),
+            ("conflict overdue", "conflict", .dateOnly(localDate: "2026-11-18", timeZone: nil), "提醒待核对 · 已逾期 11月18日"),
+            ("linked beyond a week", "linked", .dateOnly(localDate: "2026-12-01", timeZone: nil), "已写入提醒事项 · 12月1日"),
+        ]
+        for c in cases {
+            let row = reminderRow(state: c.state, due: c.due)
+            XCTAssertEqual(row.meta, c.meta, c.name)
+        }
     }
 }
 

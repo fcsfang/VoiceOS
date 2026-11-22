@@ -58,66 +58,45 @@ final class ExternalActionCommandChecks: XCTestCase {
                        .complete(actionID: actionID))
     }
 
-    func testNavigationRouteReturnsNil() throws {
-        XCTAssertNil(try ExternalActionCommand.parse(url("/\(actionID)")))
+    func testNilReturningURLs() throws {
+        let cases: [(name: String, url: URL)] = [
+            ("navigation route", url("/\(actionID)")),
+            ("unknown route", url("/\(actionID)/open")),
+            ("non-voiceos scheme", URL(string: "https://example.com/action/\(actionID)/feedback?text=hello")!),
+        ]
+        for c in cases {
+            XCTAssertNil(try ExternalActionCommand.parse(c.url), c.name)
+        }
     }
 
-    func testUnknownRouteReturnsNil() throws {
-        XCTAssertNil(try ExternalActionCommand.parse(url("/\(actionID)/open")))
-    }
-
-    func testNonVoiceOSSchemeReturnsNil() throws {
-        let external = URL(string: "https://example.com/action/\(actionID)/feedback?text=hello")!
-        XCTAssertNil(try ExternalActionCommand.parse(external))
-    }
-
-    func testInvalidActionIDThrows() {
-        XCTAssertThrowsError(try ExternalActionCommand.parse(url("/not-a-uuid/feedback", query: [
-            URLQueryItem(name: "text", value: "x"),
-        ]))) { XCTAssertTrue($0 is VoiceOSError) }
-    }
-
-    func testEmptyTextThrows() {
-        XCTAssertThrowsError(try ExternalActionCommand.parse(url("/\(actionID)/feedback", query: [
-            URLQueryItem(name: "text", value: "   "),
-        ])))
-    }
-
-    func testMissingTextThrows() {
-        XCTAssertThrowsError(try ExternalActionCommand.parse(url("/\(actionID)/feedback")))
-    }
-
-    func testOverlongTextThrows() {
-        let text = String(repeating: "字", count: ExternalActionCommand.maximumTextLength + 1)
-        XCTAssertThrowsError(try ExternalActionCommand.parse(url("/\(actionID)/feedback", query: [
-            URLQueryItem(name: "text", value: text),
-        ])))
-    }
-
-    func testUnknownQueryKeyThrows() {
-        XCTAssertThrowsError(try ExternalActionCommand.parse(url("/\(actionID)/feedback", query: [
-            URLQueryItem(name: "text", value: "x"),
-            URLQueryItem(name: "note", value: "y"),
-        ])))
-    }
-
-    func testInvalidKindThrows() {
-        XCTAssertThrowsError(try ExternalActionCommand.parse(url("/\(actionID)/feedback", query: [
-            URLQueryItem(name: "text", value: "x"),
-            URLQueryItem(name: "kind", value: "progress"),
-        ])))
-    }
-
-    func testInvalidCommandThrows() {
-        XCTAssertThrowsError(try ExternalActionCommand.parse(url("/\(actionID)/feedback", query: [
-            URLQueryItem(name: "text", value: "x"),
-            URLQueryItem(name: "command", value: "not-a-uuid"),
-        ])))
-    }
-
-    func testCompleteRejectsQuery() {
-        XCTAssertThrowsError(try ExternalActionCommand.parse(url("/\(actionID)/complete", query: [
-            URLQueryItem(name: "text", value: "x"),
-        ])))
+    func testThrowingURLs() {
+        let cases: [(name: String, url: URL, isVoiceOSError: Bool)] = [
+            ("invalid action ID", url("/not-a-uuid/feedback", query: [URLQueryItem(name: "text", value: "x")]), true),
+            ("empty text", url("/\(actionID)/feedback", query: [URLQueryItem(name: "text", value: "   ")]), false),
+            ("missing text", url("/\(actionID)/feedback"), false),
+            ("overlong text", url("/\(actionID)/feedback", query: [
+                URLQueryItem(name: "text", value: String(repeating: "字", count: ExternalActionCommand.maximumTextLength + 1)),
+            ]), false),
+            ("unknown query key", url("/\(actionID)/feedback", query: [
+                URLQueryItem(name: "text", value: "x"),
+                URLQueryItem(name: "note", value: "y"),
+            ]), false),
+            ("invalid kind", url("/\(actionID)/feedback", query: [
+                URLQueryItem(name: "text", value: "x"),
+                URLQueryItem(name: "kind", value: "progress"),
+            ]), false),
+            ("invalid command", url("/\(actionID)/feedback", query: [
+                URLQueryItem(name: "text", value: "x"),
+                URLQueryItem(name: "command", value: "not-a-uuid"),
+            ]), false),
+            ("complete with query", url("/\(actionID)/complete", query: [
+                URLQueryItem(name: "text", value: "x"),
+            ]), false),
+        ]
+        for c in cases {
+            XCTAssertThrowsError(try ExternalActionCommand.parse(c.url), c.name) { error in
+                if c.isVoiceOSError { XCTAssertTrue(error is VoiceOSError, c.name) }
+            }
+        }
     }
 }

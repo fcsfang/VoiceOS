@@ -35,25 +35,22 @@ final class RecentContentDigestChecks: XCTestCase {
         XCTAssertEqual(digest.thoughtCount, thoughts.count)
     }
 
-    func testAllThoughtsAreShownInOriginalOrder() {
-        let thoughts = makeThoughts([
-            ("第二个实习项目是给老系统补功能", .insight),
-            ("完成比完美更重要，先把成果交付出去", .insight),
-        ])
-        let digest = RecentContentDigest.build(thoughts: thoughts, duration: 0)
-        XCTAssertEqual(digest.threads.first?.thoughts.map(\.statement),
-                       ["第二个实习项目是给老系统补功能", "完成比完美更重要，先把成果交付出去"])
-    }
-
-    func testFamilyThreadKeepsEveryStatement() {
-        let thoughts = makeThoughts([
-            ("与父母长谈很愉快", .insight),
-            ("过去对父亲的了解有偏差", .insight),
-        ])
-        let digest = RecentContentDigest.build(thoughts: thoughts, duration: 0)
-        XCTAssertEqual(digest.threads.first?.id, "family")
-        XCTAssertEqual(digest.threads.first?.thoughts.map(\.statement),
-                       ["与父母长谈很愉快", "过去对父亲的了解有偏差"])
+    func testThreadsKeepEveryStatementInOriginalOrder() {
+        let cases: [(name: String, threadID: String, entries: [(String, RecentThoughtKind)], statements: [String])] = [
+            ("work", "work",
+             [("第二个实习项目是给老系统补功能", .insight),
+              ("完成比完美更重要，先把成果交付出去", .insight)],
+             ["第二个实习项目是给老系统补功能", "完成比完美更重要，先把成果交付出去"]),
+            ("family", "family",
+             [("与父母长谈很愉快", .insight),
+              ("过去对父亲的了解有偏差", .insight)],
+             ["与父母长谈很愉快", "过去对父亲的了解有偏差"]),
+        ]
+        for c in cases {
+            let digest = RecentContentDigest.build(thoughts: makeThoughts(c.entries), duration: 0)
+            XCTAssertEqual(digest.threads.first?.id, c.threadID, c.name)
+            XCTAssertEqual(digest.threads.first?.thoughts.map(\.statement), c.statements, c.name)
+        }
     }
 
     func testLifeSignalsOutrankWorkAndFamilyComesFirst() {

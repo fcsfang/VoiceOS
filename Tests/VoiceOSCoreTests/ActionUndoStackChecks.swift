@@ -102,61 +102,57 @@ final class ActionUndoStackChecks: XCTestCase {
         XCTAssertEqual(stack.entries.map(kindName), ["action", "disposition", "title", "action", "disposition", "title", "action", "disposition", "title", "action"])
     }
 
-    func testSkipsActionWhoseStateChanged() {
-        let value = entry(1, from: .open, to: .completed)
-        XCTAssertNil(value.skipReason(current: .completed))
-        XCTAssertEqual(value.skipReason(current: .open), .objectChanged)
-        XCTAssertEqual(value.skipReason(current: nil), .objectChanged)
-    }
-
-    func testSkipsDispositionChangeAfterMaterialMovedAgain() {
-        let change = MaterialDispositionChange(sourceIDs: ["source-1", "source-2"], title: "材料", from: .active, to: .archived)
-        XCTAssertNil(change.skipReason(current: ["source-1": .archived, "source-2": .archived]))
-        XCTAssertEqual(change.skipReason(current: ["source-1": .trashed, "source-2": .archived]), .objectChanged)
-        XCTAssertEqual(change.skipReason(current: ["source-1": .archived]), .objectChanged)
-    }
-
-    func testSkipsTitleChangeAfterTitleRenamedAgain() {
-        let change = MaterialTitleChange(sourceID: "source-1", title: "材料", from: "旧标题", to: "新标题")
-        XCTAssertNil(change.skipReason(currentTitle: "新标题"))
-        XCTAssertEqual(change.skipReason(currentTitle: "另一个标题"), .objectChanged)
-        XCTAssertEqual(change.skipReason(currentTitle: nil), .objectChanged)
-    }
-
-    func testSkipReasonMessage() {
-        XCTAssertEqual(UndoSkip.objectChanged.message, "已跳过：对象已变化")
+    func testSkipReasonMatrix() {
+        let action = entry(1, from: .open, to: .completed)
+        let disposition = MaterialDispositionChange(sourceIDs: ["source-1", "source-2"], title: "材料", from: .active, to: .archived)
+        let title = MaterialTitleChange(sourceID: "source-1", title: "材料", from: "旧标题", to: "新标题")
+        let cases: [(name: String, check: () -> Void)] = [
+            ("action unchanged", { XCTAssertNil(action.skipReason(current: .completed)) }),
+            ("action changed", { XCTAssertEqual(action.skipReason(current: .open), .objectChanged) }),
+            ("action missing", { XCTAssertEqual(action.skipReason(current: nil), .objectChanged) }),
+            ("disposition unchanged", { XCTAssertNil(disposition.skipReason(current: ["source-1": .archived, "source-2": .archived])) }),
+            ("disposition moved again", { XCTAssertEqual(disposition.skipReason(current: ["source-1": .trashed, "source-2": .archived]), .objectChanged) }),
+            ("disposition partially moved", { XCTAssertEqual(disposition.skipReason(current: ["source-1": .archived]), .objectChanged) }),
+            ("title unchanged", { XCTAssertNil(title.skipReason(currentTitle: "新标题")) }),
+            ("title renamed again", { XCTAssertEqual(title.skipReason(currentTitle: "另一个标题"), .objectChanged) }),
+            ("title missing", { XCTAssertEqual(title.skipReason(currentTitle: nil), .objectChanged) }),
+            ("message", { XCTAssertEqual(UndoSkip.objectChanged.message, "已跳过：对象已变化") }),
+        ]
+        for c in cases { c.check() }
     }
 
     func testDispositionUndoRestoresPreviousState() async throws {
+        struct Case {
+            let name: String
+            let text: String
+            let title: String
+            let moved: MaterialDisposition
+            let isRestored: (SourceRecord) -> Bool
+        }
+        let cases = [
+            Case(name: "archive", text: "归档撤销的合成材料", title: "归档撤销", moved: .archived, isRestored: { !$0.isArchived }),
+            Case(name: "trash", text: "回收站撤销的合成材料", title: "回收站撤销", moved: .trashed, isRestored: { !$0.isTrashed }),
+        ]
         let store = try await openStore()
-        let id = try await store.recordCapturedText("归档撤销的合成材料", title: "归档撤销", ownership: .personal)
-        try await store.setMaterialDisposition(sourceIDs: [id], disposition: .archived)
-        let archivedSources = try await store.sources()
-        let archived = try XCTUnwrap(archivedSources.first { $0.id == id })
-        XCTAssertEqual(archived.disposition, .archived)
-        try await store.setMaterialDisposition(sourceIDs: [id], disposition: .active)
-        let restoredSources = try await store.sources()
-        let restored = try XCTUnwrap(restoredSources.first { $0.id == id })
-        XCTAssertEqual(restored.disposition, .active)
-        XCTAssertFalse(restored.isArchived)
-        try await store.setMaterialDisposition(sourceIDs: [id], disposition: .active)
-        let repeatedSources = try await store.sources()
-        XCTAssertEqual(repeatedSources.first { $0.id == id }?.disposition, .active)
-    }
+        for c in cases {
+            let id = try await store.recordCapturedText(c.text, title: c.title, ownership: .personal)
+            try await store.setMaterialDisposition(sourceIDs: [id], disposition: c.moved)
+            var sources = try await store.sources()
+            let moved = try XCTUnwrap(sources.first { $0.id == id })
+            XCTAssertEqual(moved.disposition, c.moved, c.name)
 
-    func testTrashUndoRestoresMaterial() async throws {
-        let store = try await openStore()
-        let id = try await store.recordCapturedText("回收站撤销的合成材料", title: "回收站撤销", ownership: .personal)
-        try await store.setMaterialDisposition(sourceIDs: [id], disposition: .trashed)
-        let trashedSources = try await store.sources()
-        let trashed = try XCTUnwrap(trashedSources.first { $0.id == id })
-        XCTAssertEqual(trashed.disposition, .trashed)
-        try await store.setMaterialDisposition(sourceIDs: [id], disposition: .active)
-        let restoredSources = try await store.sources()
-        let restored = try XCTUnwrap(restoredSources.first { $0.id == id })
-        XCTAssertEqual(restored.disposition, .active)
-        XCTAssertFalse(restored.isTrashed)
-        XCTAssertEqual(restored.transcript, "回收站撤销的合成材料")
+            try await store.setMaterialDisposition(sourceIDs: [id], disposition: .active)
+            sources = try await store.sources()
+            let restored = try XCTUnwrap(sources.first { $0.id == id })
+            XCTAssertEqual(restored.disposition, .active, c.name)
+            XCTAssertTrue(c.isRestored(restored), c.name)
+            XCTAssertEqual(restored.transcript, c.text, c.name)
+
+            try await store.setMaterialDisposition(sourceIDs: [id], disposition: .active)
+            sources = try await store.sources()
+            let repeated = sources.first { $0.id == id }
+            XCTAssertEqual(repeated?.disposition, .active, c.name)
+        }
     }
 
     func testTitleUndoRestoresPreviousTitle() async throws {

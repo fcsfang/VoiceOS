@@ -2,6 +2,17 @@ import XCTest
 @testable import VoiceOSCore
 
 final class FollowupSuggestionChecks: XCTestCase {
+    private struct MatrixCase {
+        let name: String
+        let claims: [CandidateClaim]
+        let sources: [SourceRecord]
+        let titles: [String]
+        let claimIDs: [String]
+        var sourceTitle: String? = nil
+        var promptContains: String? = nil
+        var uniqueIDCount: Int? = nil
+    }
+
     private func source(_ id: String, title: String) -> SourceRecord {
         SourceRecord(id: id, assetID: "asset-" + id, name: id, state: "saved", kind: "external_text",
                      createdAt: "2026-11-14T00:00:00Z", bytes: 1, duration: nil, jobState: nil,
@@ -20,81 +31,66 @@ final class FollowupSuggestionChecks: XCTestCase {
                        reviewVersion: 1, reviewState: "pending")
     }
 
-    func testNoClaimsReturnsEmpty() {
-        XCTAssertTrue(FollowupSuggestions.suggest(claims: [], sources: [source("s1", title: "阅读摘录")]).isEmpty)
-    }
-
-    func testSingleClaimReturnsTwoQuestionsWithSourceTitle() {
-        let suggestions = FollowupSuggestions.suggest(
-            claims: [claim("c1", statement: "检索质量决定笔记价值")],
-            sources: [source("s1", title: "阅读摘录")])
-        XCTAssertEqual(suggestions.map(\.title), ["问成立条件", "找反例"])
-        XCTAssertEqual(Set(suggestions.map(\.id)).count, 2)
-        XCTAssertTrue(suggestions.allSatisfy { $0.claimID == "c1" })
-        XCTAssertTrue(suggestions.allSatisfy { $0.sourceTitle == "阅读摘录" })
-        XCTAssertTrue(suggestions[0].prompt.contains("检索质量决定笔记价值"))
-    }
-
-    func testThreeDistinctClaimsCoverAllAngles() {
-        let suggestions = FollowupSuggestions.suggest(
-            claims: [claim("c1", statement: "检索质量决定笔记价值"),
-                     claim("c2", statement: "每周复盘能发现遗漏"),
-                     claim("c3", statement: "先写结论再补证据")],
-            sources: [source("s1", title: "阅读摘录")])
-        XCTAssertEqual(suggestions.map(\.title), ["问成立条件", "找反例", "定下一步"])
-        XCTAssertEqual(suggestions.map(\.claimID), ["c1", "c2", "c3"])
-    }
-
-    func testSimilarStatementsKeepFirstOnly() {
-        let suggestions = FollowupSuggestions.suggest(
-            claims: [claim("c1", statement: "检索质量决定笔记价值"),
-                     claim("c2", statement: "检索质量决定笔记价值！"),
-                     claim("c3", statement: "每周复盘能发现遗漏")],
-            sources: [source("s1", title: "阅读摘录")])
-        XCTAssertEqual(suggestions.count, 2)
-        XCTAssertEqual(suggestions.map(\.claimID), ["c1", "c3"])
-    }
-
-    func testContainedStatementIsTreatedAsDuplicate() {
-        let suggestions = FollowupSuggestions.suggest(
-            claims: [claim("c1", statement: "检索质量决定笔记价值"),
-                     claim("c2", statement: "我认为检索质量决定笔记价值")],
-            sources: [source("s1", title: "阅读摘录")])
-        XCTAssertEqual(suggestions.count, 2)
-        XCTAssertTrue(suggestions.allSatisfy { $0.claimID == "c1" })
-    }
-
-    func testAtMostThreeSuggestions() {
-        let claims = (1...5).map { claim("c\($0)", statement: "第 \($0) 条不同的判断是这样表述的") }
-        let suggestions = FollowupSuggestions.suggest(claims: claims, sources: [source("s1", title: "阅读摘录")])
-        XCTAssertEqual(suggestions.count, 3)
-        XCTAssertEqual(suggestions.map(\.claimID), ["c1", "c2", "c3"])
-    }
-
-    func testClaimsWithoutResolvedSourceOrWithFrozenValidityAreSkipped() {
-        let suggestions = FollowupSuggestions.suggest(
-            claims: [claim("c1", statement: "来源已经不在讨论里", sourceID: "missing"),
-                     claim("c2", statement: "历史判断已经冻结", validity: "frozen"),
-                     claim("c3", statement: "检索质量决定笔记价值")],
-            sources: [source("s1", title: "阅读摘录")])
-        XCTAssertEqual(suggestions.count, 2)
-        XCTAssertTrue(suggestions.allSatisfy { $0.claimID == "c3" })
-        XCTAssertTrue(suggestions.allSatisfy { $0.sourceTitle == "阅读摘录" })
-    }
-
-    func testNoUsableClaimsReturnsEmpty() {
-        let suggestions = FollowupSuggestions.suggest(
-            claims: [claim("c1", statement: "来源已经不在讨论里", sourceID: "missing"),
-                     claim("c2", statement: "历史判断已经冻结", validity: "frozen")],
-            sources: [source("s1", title: "阅读摘录")])
-        XCTAssertTrue(suggestions.isEmpty)
-    }
-
-    func testClaimWithQuoteOutranksSourceOnlyClaim() {
-        let suggestions = FollowupSuggestions.suggest(
-            claims: [claim("c1", statement: "只有来源没有原话", spanID: ""),
-                     claim("c2", statement: "原话与来源都在")],
-            sources: [source("s1", title: "阅读摘录")])
-        XCTAssertEqual(suggestions.map(\.claimID), ["c2", "c1"])
+    func testSuggestionMatrix() {
+        let sources = [source("s1", title: "阅读摘录")]
+        let cases: [MatrixCase] = [
+            MatrixCase(name: "no claims", claims: [], sources: sources, titles: [], claimIDs: []),
+            MatrixCase(name: "single claim gets two questions",
+                       claims: [claim("c1", statement: "检索质量决定笔记价值")],
+                       sources: sources,
+                       titles: ["问成立条件", "找反例"], claimIDs: ["c1", "c1"],
+                       sourceTitle: "阅读摘录", promptContains: "检索质量决定笔记价值", uniqueIDCount: 2),
+            MatrixCase(name: "three distinct claims cover all angles",
+                       claims: [claim("c1", statement: "检索质量决定笔记价值"),
+                                claim("c2", statement: "每周复盘能发现遗漏"),
+                                claim("c3", statement: "先写结论再补证据")],
+                       sources: sources,
+                       titles: ["问成立条件", "找反例", "定下一步"], claimIDs: ["c1", "c2", "c3"]),
+            MatrixCase(name: "similar statements keep first only",
+                       claims: [claim("c1", statement: "检索质量决定笔记价值"),
+                                claim("c2", statement: "检索质量决定笔记价值！"),
+                                claim("c3", statement: "每周复盘能发现遗漏")],
+                       sources: sources,
+                       titles: ["问成立条件", "找反例"], claimIDs: ["c1", "c3"]),
+            MatrixCase(name: "contained statement is a duplicate",
+                       claims: [claim("c1", statement: "检索质量决定笔记价值"),
+                                claim("c2", statement: "我认为检索质量决定笔记价值")],
+                       sources: sources,
+                       titles: ["问成立条件", "找反例"], claimIDs: ["c1", "c1"]),
+            MatrixCase(name: "at most three suggestions",
+                       claims: (1...5).map { claim("c\($0)", statement: "第 \($0) 条不同的判断是这样表述的") },
+                       sources: sources,
+                       titles: ["问成立条件", "找反例", "定下一步"], claimIDs: ["c1", "c2", "c3"]),
+            MatrixCase(name: "unresolved or frozen claims are skipped",
+                       claims: [claim("c1", statement: "来源已经不在讨论里", sourceID: "missing"),
+                                claim("c2", statement: "历史判断已经冻结", validity: "frozen"),
+                                claim("c3", statement: "检索质量决定笔记价值")],
+                       sources: sources,
+                       titles: ["问成立条件", "找反例"], claimIDs: ["c3", "c3"],
+                       sourceTitle: "阅读摘录"),
+            MatrixCase(name: "no usable claims",
+                       claims: [claim("c1", statement: "来源已经不在讨论里", sourceID: "missing"),
+                                claim("c2", statement: "历史判断已经冻结", validity: "frozen")],
+                       sources: sources, titles: [], claimIDs: []),
+            MatrixCase(name: "quote outranks source only claim",
+                       claims: [claim("c1", statement: "只有来源没有原话", spanID: ""),
+                                claim("c2", statement: "原话与来源都在")],
+                       sources: sources,
+                       titles: ["问成立条件", "找反例"], claimIDs: ["c2", "c1"]),
+        ]
+        for c in cases {
+            let suggestions = FollowupSuggestions.suggest(claims: c.claims, sources: c.sources)
+            XCTAssertEqual(suggestions.map(\.title), c.titles, c.name)
+            XCTAssertEqual(suggestions.map(\.claimID), c.claimIDs, c.name)
+            if let sourceTitle = c.sourceTitle {
+                XCTAssertTrue(suggestions.allSatisfy { $0.sourceTitle == sourceTitle }, c.name)
+            }
+            if let promptContains = c.promptContains {
+                XCTAssertTrue(suggestions[0].prompt.contains(promptContains), c.name)
+            }
+            if let uniqueIDCount = c.uniqueIDCount {
+                XCTAssertEqual(Set(suggestions.map(\.id)).count, uniqueIDCount, c.name)
+            }
+        }
     }
 }

@@ -26,7 +26,11 @@ final class ExternalCompletionChecks: XCTestCase {
     }
 
     private func openStore() async throws -> VoiceOSStore {
-        let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
+        try await openStore(at: root)
+    }
+
+    private func openStore(at directory: URL) async throws -> VoiceOSStore {
+        let store = try VoiceOSStore(root: directory, inspector: NativeMediaInspector())
         try await store.recover()
         return store
     }
@@ -72,22 +76,22 @@ final class ExternalCompletionChecks: XCTestCase {
         return Fixture(action: action, link: link, observationID: try XCTUnwrap(link.lastObservationID), access: access, reminders: reminders)
     }
 
-    private func assertRefused(_ store: VoiceOSStore, fixture: Fixture, expectedVersion: Int? = nil,
+    private func assertRefused(_ store: VoiceOSStore, fixture: Fixture, name: String, expectedVersion: Int? = nil,
                                observationID: String? = nil, validity: String = "frozen", state: String = "open") async throws {
         do {
             _ = try await store.confirmExternalCompletion(
                 actionID: fixture.action.id, expectedVersion: expectedVersion ?? fixture.action.version,
                 linkID: fixture.link.id, expectedObservationID: observationID ?? fixture.observationID,
                 commandID: UUID().uuidString)
-            XCTFail("Invalid external completion must be refused")
+            XCTFail("Invalid external completion must be refused: " + name)
         } catch {}
         let actions = try await store.actions(includeHistory: true)
         let saved = try XCTUnwrap(actions.first { $0.id == fixture.action.id })
-        XCTAssertEqual(saved.version, fixture.action.version)
-        XCTAssertEqual(saved.state, state)
-        XCTAssertEqual(saved.validity, validity)
+        XCTAssertEqual(saved.version, fixture.action.version, name)
+        XCTAssertEqual(saved.state, state, name)
+        XCTAssertEqual(saved.validity, validity, name)
         let history = try await store.actionHistory(actionID: fixture.action.id)
-        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history.count, 1, name)
     }
 
     func testFrozenTaskWithCompletedObservationConfirmsCompletion() async throws {
@@ -157,62 +161,64 @@ final class ExternalCompletionChecks: XCTestCase {
         XCTAssertEqual(unchanged.count, 2)
     }
 
-    func testWrongVersionIsRefused() async throws {
-        let store = try await openStore()
-        let fixture = try await makeFixture(store)
-        try await assertRefused(store, fixture: fixture, expectedVersion: fixture.action.version + 1)
-    }
-
-    func testWrongObservationIsRefused() async throws {
-        let store = try await openStore()
-        let fixture = try await makeFixture(store)
-        try await assertRefused(store, fixture: fixture, observationID: UUID().uuidString)
-    }
-
-    func testUnlinkedReminderIsRefused() async throws {
-        let store = try await openStore()
-        let fixture = try await makeFixture(store)
-        let database = await store.db
-        try database.execute("UPDATE reminder_links SET state='conflict' WHERE id=?", [fixture.link.id])
-        try await assertRefused(store, fixture: fixture)
-    }
-
-    func testNonFrozenTaskIsRefused() async throws {
-        let store = try await openStore()
-        let fixture = try await makeFixture(store)
-        let database = await store.db
-        try database.execute("UPDATE actions SET validity='current' WHERE id=?", [fixture.action.id])
-        try await assertRefused(store, fixture: fixture, validity: "current")
-    }
-
-    func testDismissedTaskIsRefused() async throws {
-        let store = try await openStore()
-        let fixture = try await makeFixture(store)
-        let database = await store.db
-        try database.execute("UPDATE actions SET state='dismissed' WHERE id=?", [fixture.action.id])
-        try await assertRefused(store, fixture: fixture, state: "dismissed")
-    }
-
-    func testUncompletedObservationIsRefused() async throws {
-        let store = try await openStore()
-        let fixture = try await makeFixture(store, complete: false)
-        try await assertRefused(store, fixture: fixture)
-    }
-
-    func testInvalidMarkerIsRefused() async throws {
-        let store = try await openStore()
-        let fixture = try await makeFixture(store)
-        let database = await store.db
-        try database.execute("UPDATE reminder_observations SET marker_valid=0 WHERE id=?", [fixture.observationID])
-        try await assertRefused(store, fixture: fixture)
-    }
-
-    func testMismatchedObservationIdentityIsRefused() async throws {
-        let store = try await openStore()
-        let fixture = try await makeFixture(store)
-        let database = await store.db
-        try database.execute("UPDATE reminder_observations SET external_id='other-reminder' WHERE id=?", [fixture.observationID])
-        try await assertRefused(store, fixture: fixture)
+    func testRefusalMatrix() async throws {
+        struct Expectation {
+            var version: Int? = nil
+            var observationID: String? = nil
+            var validity: String = "frozen"
+            var state: String = "open"
+        }
+        struct RefusalCase {
+            let name: String
+            let complete: Bool
+            let prepare: (VoiceOSStore, Fixture) async throws -> Expectation
+        }
+        let cases: [RefusalCase] = [
+            RefusalCase(name: "wrong version", complete: true, prepare: { _, fixture in
+                Expectation(version: fixture.action.version + 1)
+            }),
+            RefusalCase(name: "wrong observation", complete: true, prepare: { _, _ in
+                Expectation(observationID: UUID().uuidString)
+            }),
+            RefusalCase(name: "unlinked reminder", complete: true, prepare: { store, fixture in
+                let database = await store.db
+                try database.execute("UPDATE reminder_links SET state='conflict' WHERE id=?", [fixture.link.id])
+                return Expectation()
+            }),
+            RefusalCase(name: "non-frozen task", complete: true, prepare: { store, fixture in
+                let database = await store.db
+                try database.execute("UPDATE actions SET validity='current' WHERE id=?", [fixture.action.id])
+                return Expectation(validity: "current")
+            }),
+            RefusalCase(name: "dismissed task", complete: true, prepare: { store, fixture in
+                let database = await store.db
+                try database.execute("UPDATE actions SET state='dismissed' WHERE id=?", [fixture.action.id])
+                return Expectation(state: "dismissed")
+            }),
+            RefusalCase(name: "uncompleted observation", complete: false, prepare: { _, _ in
+                Expectation()
+            }),
+            RefusalCase(name: "invalid marker", complete: true, prepare: { store, fixture in
+                let database = await store.db
+                try database.execute("UPDATE reminder_observations SET marker_valid=0 WHERE id=?", [fixture.observationID])
+                return Expectation()
+            }),
+            RefusalCase(name: "mismatched observation identity", complete: true, prepare: { store, fixture in
+                let database = await store.db
+                try database.execute("UPDATE reminder_observations SET external_id='other-reminder' WHERE id=?", [fixture.observationID])
+                return Expectation()
+            }),
+        ]
+        for c in cases {
+            let caseRoot = FileManager.default.temporaryDirectory.appendingPathComponent("voiceos-external-completion-case-" + UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: caseRoot) }
+            let store = try await openStore(at: caseRoot)
+            let fixture = try await makeFixture(store, complete: c.complete)
+            let expectation = try await c.prepare(store, fixture)
+            try await assertRefused(store, fixture: fixture, name: c.name, expectedVersion: expectation.version,
+                                    observationID: expectation.observationID,
+                                    validity: expectation.validity, state: expectation.state)
+        }
     }
 
     func testFrozenCompletedTaskWithoutConfirmationStaysOutOfOutcomeQueue() async throws {
