@@ -682,6 +682,135 @@ struct WorkspaceBadge: View {
     }
 }
 
+// MARK: - Stat lines
+
+/// Left-aligned flow: each child keeps its ideal width and wraps to the next
+/// line when the row is full. Auxiliary stat lines use it so a scoped
+/// sentence stays on one line at standard sizes and wraps instead of
+/// truncating when the reader enlarges text.
+struct WorkspaceFlowLayout: Layout {
+    var horizontalSpacing: CGFloat = 8
+    var verticalSpacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var lineWidth: CGFloat = 0
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            let advance = lineWidth == 0 ? size.width : horizontalSpacing + size.width
+            if lineWidth > 0, lineWidth + advance > maxWidth {
+                width = max(width, lineWidth)
+                height += lineHeight + verticalSpacing
+                lineWidth = size.width
+                lineHeight = size.height
+            } else {
+                lineWidth += advance
+                lineHeight = max(lineHeight, size.height)
+            }
+        }
+        return CGSize(width: proposal.width ?? max(width, lineWidth), height: height + lineHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var lineHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + horizontalSpacing + size.width > bounds.maxX {
+                x = bounds.minX
+                y += lineHeight + verticalSpacing
+                lineHeight = 0
+            }
+            if x > bounds.minX { x += horizontalSpacing }
+            subview.place(at: CGPoint(x: x, y: y), anchor: .topLeading, proposal: ProposedViewSize(size))
+            x += size.width
+            lineHeight = max(lineHeight, size.height)
+        }
+    }
+}
+
+/// Aggregate numbers read as a sentence, never as a dashboard: the line names
+/// the range it counted over, each figure carries its unit and, where it
+/// matters, its window, and a linked figure jumps to the section that holds
+/// it. Everything stays at auxiliary size so the page's real work keeps the
+/// first screen.
+struct WorkspaceStatLine: View {
+    struct Stat: Identifiable {
+        let label: String
+        let value: String
+        var note: String? = nil
+        var help: String? = nil
+        var action: (() -> Void)? = nil
+        var id: String { label }
+        /// "84 项待补结果（累计）" — the one string read by VoiceOver and help.
+        var text: String { value + label + (note.map { "（" + $0 + "）" } ?? "") }
+    }
+
+    @Environment(\.workspacePalette) private var palette
+    let caption: String
+    let stats: [Stat]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 16) {
+                captionLabel
+                statsFlow
+                Spacer(minLength: 0)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                captionLabel
+                statsFlow
+            }
+        }
+    }
+
+    private var captionLabel: some View {
+        Text(caption).vosFont(WorkspaceText.caption.size, weight: .semibold)
+            .foregroundStyle(palette.tertiaryText)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var statsFlow: some View {
+        WorkspaceFlowLayout(horizontalSpacing: 8, verticalSpacing: 6) {
+            ForEach(Array(stats.enumerated()), id: \.element.id) { index, stat in
+                statView(stat, leadingDot: index > 0)
+            }
+        }
+    }
+
+    @ViewBuilder private func statView(_ stat: Stat, leadingDot: Bool) -> some View {
+        if let action = stat.action {
+            Button(action: action) { statText(stat, leadingDot: leadingDot) }
+                .buttonStyle(.workspaceQuietCompact)
+                .help(stat.help ?? "跳到「" + stat.label + "」所在区块")
+                .accessibilityLabel(stat.text)
+                .accessibilityHint(stat.help ?? "跳到「" + stat.label + "」所在区块")
+        } else {
+            statText(stat, leadingDot: leadingDot).foregroundStyle(palette.secondaryText)
+                .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func statText(_ stat: Stat, leadingDot: Bool) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            if leadingDot {
+                Text("·").vosFont(WorkspaceText.meta).foregroundStyle(palette.disabledText)
+                    .accessibilityHidden(true)
+            }
+            Text(stat.value).vosFont(WorkspaceText.meta.size, weight: .semibold, monospacedDigit: true)
+            Text(stat.label).vosFont(WorkspaceText.meta)
+            if let note = stat.note {
+                Text(note).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+            }
+        }
+        .lineLimit(1)
+    }
+}
+
 // MARK: - Page and section headers
 
 /// Every page opens with the same block: optional eyebrow, a page title, an

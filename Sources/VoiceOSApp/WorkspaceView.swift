@@ -1601,26 +1601,18 @@ struct WorkspaceView: View {
                     .accessibilityLabel("本地完成待同步 \(model.pendingReminderSyncs.count) 项，打开核对")
             }
             if actionFilter == "全部", let surface = timeSurface {
-                let overdue = surface.today.filter(\.isOverdue).count
-                Button { actionFilter = "我的待办" } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "sun.max").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.accent)
-                        Text("今天 \(surface.today.count - overdue) · 逾期 \(overdue)").monospacedDigit().vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                        Image(systemName: "chevron.right").vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(palette.disabledText)
-                        Spacer(minLength: 0)
-                    }.frame(minHeight: WorkspaceMetrics.rowActionMinHeight).contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                    .focused($summaryTodayFocus).focusEffectDisabled()
-                    .workspaceHoverHighlight(cornerRadius: WorkspaceMetrics.controlRadius)
-                    .workspaceFocusRing(summaryTodayFocus, radius: WorkspaceMetrics.controlRadius)
-                    .accessibilityLabel("今天 \(surface.today.count - overdue) 项，逾期 \(overdue) 项")
-                    .accessibilityHint("切到我的待办")
-                    .help("切到我的待办")
+                let focusedTodayIDs = Set(focusedActions.map(\.id))
+                let overdue = surface.today.filter { $0.isOverdue && !focusedTodayIDs.contains($0.action.id) }
+                let dueToday = surface.today.filter { !$0.isOverdue && !focusedTodayIDs.contains($0.action.id) }
+                actionTodayFirstScreen(overdue: overdue, dueToday: dueToday, nextStepCounts: nextStepCounts, reads: rowReads)
             }
-            if ["目标","全部"].contains(actionFilter), !model.stalledOutcomes.isEmpty { stalledBanner }
+            if actionFilter == "目标", !model.stalledOutcomes.isEmpty { stalledBanner }
             let visible = ["全部","我的待办"].contains(actionFilter) ? todoActions : visibleActions
             let focusedIDs = Set(focusedActions.map(\.id))
-            let listed = actionFilter == "全部" ? todoOrder(visible, surface: timeSurface).filter { !focusedIDs.contains($0.id) } : visible
+            let todayIDs = Set((timeSurface?.today ?? []).map(\.action.id))
+            let listed = actionFilter == "全部"
+                ? todoOrder(visible, surface: timeSurface).filter { !focusedIDs.contains($0.id) && !todayIDs.contains($0.id) }
+                : visible
             let timeEntries: [String: ActionTimeEntry] = timeSurface.map { surface in
                 Dictionary(uniqueKeysWithValues: (surface.today + surface.soon + surface.anytime).map { ($0.id, $0) })
             } ?? [:]
@@ -1669,12 +1661,15 @@ struct WorkspaceView: View {
                     WorkspaceListSection(title:"AI 助理的工作",count:executions.count) { executionRows(executions) }
                 }
             } else if !listed.isEmpty {
-                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "问题" ? "VoiceOS 先回答；想清楚了可以转成下一步。" : actionFilter == "目标" ? "你要长期达到的结果；转成待办后可提醒。" : "",count:listed.count) {
+                WorkspaceListSection(title:actionFilter == "全部" ? "我的待办" : actionFilter,subtitle:actionFilter == "全部" ? "7 天内与没有日期的待办" : actionFilter == "问题" ? "VoiceOS 先回答；想清楚了可以转成下一步。" : actionFilter == "目标" ? "你要长期达到的结果；转成待办后可提醒。" : "",count:listed.count) {
                     ActionCardList {
                         ForEach(listed) { action in actionRow(action,timeEntry:timeEntries[action.id],group:listGroup,nature:listNature,nextStepCounts:nextStepCounts,reads:rowReads) }
                     }
                 }
             }
+            // Stalled goals are a standing backlog, not today's work; on the
+            // overview they sit below the backlog as one quiet line.
+            if actionFilter == "全部", !model.stalledOutcomes.isEmpty { stalledBanner }
             if actionFilter == "全部", !paused.isEmpty {
                 WorkspaceListSection(title:"需要核对的待办",subtitle:"打开任务查看原因。",count:paused.count) {
                     ActionCardList {
@@ -1790,6 +1785,52 @@ struct WorkspaceView: View {
         case "目标": "这里是你长期要达到的结果；转成待办后可提醒。"
         default: "已暂停的历史、问题与目标分别保留，可通过上方分类查看。"
         }
+    }
+    /// 「全部」opens on what today actually asks for: overdue work first, then
+    /// today's due list. When both are empty, one quiet line says the day is
+    /// clear and the backlog stays a single step away, so the reader can leave.
+    /// Undated backlog lives in its own section below this block.
+    @ViewBuilder private func actionTodayFirstScreen(overdue: [ActionTimeEntry], dueToday: [ActionTimeEntry],
+                                                     nextStepCounts: [String: Int], reads: ActionRowReads) -> some View {
+        if overdue.isEmpty && dueToday.isEmpty {
+            HStack(spacing: 8) {
+                Image(systemName: "sun.max").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText)
+                    .accessibilityHidden(true)
+                Text("今天没有要处理的待办").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+                Spacer(minLength: 8)
+                todaySummaryJump
+            }.frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
+        } else {
+            WorkspaceListSection(title: "今天", subtitle: todayScopeText(overdue: overdue.count, due: dueToday.count), count: overdue.count + dueToday.count) {
+                ActionCardList {
+                    ForEach(Array(overdue.enumerated()), id: \.element.id) { _, entry in
+                        actionRow(entry.action, timeEntry: entry, nextStepCounts: nextStepCounts, reads: reads)
+                    }
+                    ForEach(Array(dueToday.enumerated()), id: \.element.id) { _, entry in
+                        actionRow(entry.action, timeEntry: entry, nextStepCounts: nextStepCounts, reads: reads)
+                    }
+                }
+            }
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                todaySummaryJump
+            }
+        }
+    }
+    private var todaySummaryJump: some View {
+        Button("查看我的待办") { actionFilter = "我的待办" }
+            .buttonStyle(.workspaceQuietCompact)
+            .focused($summaryTodayFocus).focusEffectDisabled()
+            .workspaceFocusRing(summaryTodayFocus, radius: WorkspaceMetrics.controlRadius)
+            .accessibilityLabel("查看我的待办")
+            .accessibilityHint("切到我的待办")
+            .help("切到我的待办")
+    }
+    private func todayScopeText(overdue: Int, due: Int) -> String {
+        var parts: [String] = []
+        if overdue > 0 { parts.append("逾期 \(overdue) 项") }
+        if due > 0 { parts.append("今天到期 \(due) 项") }
+        return parts.joined(separator: " · ")
     }
     private var listNature: ActionNature? {
         switch actionFilter {
@@ -2704,16 +2745,25 @@ struct WorkspaceView: View {
         }
         return nil
     }
+    /// Stalled goals are a backlog, not a deadline: one quiet line carries the
+    /// count with its unit and where it goes, and the first goal opens only on
+    /// request. 「全部」keeps it below the backlog; 「目标」keeps it on top.
     private var stalledBanner: some View {
         let goals = model.stalledOutcomes
-        return HStack(alignment: .center, spacing: 12) {
-            WorkspaceNoticeText(message: "\(goals.count) 个目标还没有下一步", severity: .warning)
+        return HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "circle.dashed").vosFont(WorkspaceText.meta.size, weight: .medium)
+                .foregroundStyle(palette.secondaryText).accessibilityHidden(true)
+            Text("\(goals.count) 个目标还没有下一步 · 补一条下一步就回到待办")
+                .vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
             if let first = goals.first {
                 Button("打开第一条") { go(.task(first.id)) }
                     .buttonStyle(.workspaceQuietCompact)
                     .accessibilityLabel("打开第一个没有下一步的目标：" + first.title)
             }
         }
+        .frame(minHeight: WorkspaceMetrics.rowActionMinHeight)
     }
     @ViewBuilder private func actionMenuItems(_ action:ActionRecord,focused:Bool,canChangeDay:Bool,canTransition:Bool) -> some View {
         if model.workspaceExternalCompletion(action) != nil {
