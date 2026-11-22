@@ -1,0 +1,534 @@
+import Foundation
+import SwiftUI
+import VoiceOSCore
+
+/// Article-shaped reading surface for one expression's saved note. The center
+/// owns generation and persistence; this view only reads the newest revision,
+/// keeps it current against member transcript versions, and renders each
+/// paragraph beside its verbatim anchors.
+private struct MaterialNoteReadKey: Hashable {
+    let sourceID: String
+    let transcriptVersionID: String?
+    let policyVersion: Int
+    let state: String
+    let members: [String]
+}
+
+private struct MaterialNoteRequestKey: Hashable {
+    let sourceID: String
+    let members: [String]
+}
+
+private struct MaterialNoteDisplay: Equatable {
+    let note: StoredMaterialNote
+    let isCurrent: Bool
+}
+
+private struct MaterialNoteAnchorPresentation: Identifiable {
+    let id: String
+    let quote: String
+    let memberTitle: String
+    let sourceID: String
+    let spanID: String?
+    let timeLabel: String?
+    let canPlay: Bool
+    let canOpen: Bool
+    let caveat: String?
+}
+
+struct MaterialNoteReadingView: View {
+    @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
+    @ObservedObject var model: ControlCenter
+    let source: SourceRecord
+    var openSource: (String) -> Void = { _ in }
+    @Binding var hasNote: Bool
+
+    @State private var display: MaterialNoteDisplay?
+    @State private var expandedParagraphs: Set<String> = []
+    @State private var requested = false
+    @State private var loadedOnce = false
+
+    private var catalog: [String: SourceRecord] { model.sourcePageIndex.recordsByID }
+    private var expression: RecordingExpression? { model.sourcePageIndex.expression(for: source.id) }
+    private var memberIDs: [String] { expression?.sourceIDs ?? [source.id] }
+    private var memberRecords: [SourceRecord] { memberIDs.compactMap { catalog[$0] } }
+    private var noteState: MaterialNoteState? { model.materialNoteStates[source.id] }
+    private var playbackAvailable: Bool { ["audio", "video"].contains(source.kind) && source.state == "saved" }
+
+    // Policy and local-only changes also matter: they can unblock or block the
+    // next attempt even when no transcript changed.
+    private var memberSignature: [String] {
+        memberIDs.map { id in
+            guard let record = catalog[id] else { return id + "|missing" }
+            return id + "|" + (record.transcriptVersionID ?? "") + "|" + String(record.policyVersion) + "|" + (record.localOnly ? "local" : "cloud")
+        }
+    }
+
+    private var readKey: MaterialNoteReadKey {
+        MaterialNoteReadKey(sourceID: source.id, transcriptVersionID: source.transcriptVersionID,
+                            policyVersion: source.policyVersion, state: Self.stateToken(noteState),
+                            members: memberSignature)
+    }
+
+    private var requestKey: MaterialNoteRequestKey {
+        MaterialNoteRequestKey(sourceID: source.id, members: memberSignature)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            statusRows
+            if let display {
+                article(display)
+            }
+        }
+        .task(id: readKey) { await load() }
+        .task(id: requestKey) { await requestNote() }
+    }
+
+    // MARK: - Article
+
+    private func article(_ display: MaterialNoteDisplay) -> some View {
+        HStack(alignment: .top, spacing: 18) {
+            Rectangle().fill(palette.border)
+                .frame(width: 1)
+                .frame(maxHeight: .infinity)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 26) {
+                if !display.isCurrent { staleRow }
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(articleTitle(display.note.note))
+                        .vosFont(WorkspaceText.pageTitle)
+                        .foregroundStyle(palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                    metaLine
+                }
+                if let lead = normalized(display.note.note.lead) {
+                    Text(lead)
+                        .vosFont(WorkspaceText.body)
+                        .foregroundStyle(palette.text)
+                        .lineSpacing(WorkspaceText.body.size * textScale * 0.45)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(Array(display.note.note.sections.enumerated()), id: \.offset) { sectionIndex, section in
+                    sectionView(section, index: sectionIndex)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .textSelection(.enabled)
+    }
+
+    @ViewBuilder
+    private func sectionView(_ section: MaterialNote.Section, index: Int) -> some View {
+        let paragraphs = Array(section.paragraphs.enumerated()).filter {
+            !$0.element.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        if !paragraphs.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                if let heading = normalized(section.heading) {
+                    Text(heading)
+                        .vosFont(WorkspaceText.sectionTitle)
+                        .foregroundStyle(palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                }
+                VStack(alignment: .leading, spacing: 18) {
+                    ForEach(paragraphs, id: \.offset) { paragraphIndex, paragraph in
+                        paragraphView(paragraph, paragraphID: "\(index)-\(paragraphIndex)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func paragraphView(_ paragraph: MaterialNote.Paragraph, paragraphID: String) -> some View {
+        MaterialNoteParagraphView(
+            text: paragraph.text,
+            anchors: anchorPresentations(paragraph.anchors, paragraphID: paragraphID),
+            isExpanded: expandedParagraphs.contains(paragraphID),
+            toggle: { toggle(paragraphID) },
+            play: play,
+            openSource: openSource)
+    }
+
+    private func toggle(_ paragraphID: String) {
+        if expandedParagraphs.contains(paragraphID) { expandedParagraphs.remove(paragraphID) }
+        else { expandedParagraphs.insert(paragraphID) }
+    }
+
+    private var metaLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(metaText)
+                .vosFont(WorkspaceText.meta)
+                .foregroundStyle(palette.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            if playbackAvailable {
+                Button {
+                    Task { _ = await model.playSpan(source, milliseconds: 0) }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "play.circle").accessibilityHidden(true)
+                        Text("回听")
+                    }
+                    .vosFont(WorkspaceText.meta.size, weight: .medium)
+                    .foregroundStyle(palette.secondaryText)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("从这次表达的开头回听")
+                .accessibilityLabel("从这次表达的开头回听")
+            }
+        }
+    }
+
+    private var metaText: String {
+        var parts = [source.recordingSubtitle]
+        if memberIDs.count > 1 { parts.append("本次表达 \(memberIDs.count) 段") }
+        parts.append(source.origin == "user" ? "AI 根据你的口述整理" : "AI 根据原文整理")
+        return parts.joined(separator: " · ")
+    }
+
+    private func articleTitle(_ note: MaterialNote) -> String {
+        let title = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !title.isEmpty { return title }
+        if let expression { return expression.displayTitle(in: catalog) }
+        return source.displayTitle
+    }
+
+    private var staleRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "exclamationmark.circle")
+                .vosFont(WorkspaceText.meta.size, weight: .medium)
+                .foregroundStyle(palette.warning)
+                .accessibilityHidden(true)
+            Text("原话已更正或处理许可变化，这篇笔记可能不再对应。")
+                .vosFont(WorkspaceText.meta)
+                .foregroundStyle(palette.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("重新整理") { retry() }
+                .buttonStyle(.workspaceQuietCompact)
+        }
+    }
+
+    // MARK: - Anchors
+
+    private func anchorPresentations(_ anchors: [MaterialNote.Anchor], paragraphID: String) -> [MaterialNoteAnchorPresentation] {
+        anchors.enumerated().compactMap { index, anchor in
+            let quote = anchor.quote.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !quote.isEmpty else { return nil }
+            let id = paragraphID + "-a" + String(index)
+            guard let record = catalog[anchor.sourceID] else {
+                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: "已移出的材料",
+                                                      sourceID: "", spanID: nil, timeLabel: nil,
+                                                      canPlay: false, canOpen: false,
+                                                      caveat: "这段来源已不在资料库。")
+            }
+            let storedTitle = record.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            let memberTitle = storedTitle.isEmpty ? MaterialNaming.displayName(record.name) : storedTitle
+            let canOpen = record.id != source.id
+            let localHint = canOpen ? "可回到这段来源核对。" : "可在下方「原文与回听」核对。"
+            let versionMatches = anchor.transcriptVersionID == nil || anchor.transcriptVersionID == record.transcriptVersionID
+            guard versionMatches else {
+                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle,
+                                                      sourceID: record.id, spanID: nil, timeLabel: nil,
+                                                      canPlay: false, canOpen: canOpen,
+                                                      caveat: "原文已更正，这段引文不能作为当前原话；" + localHint)
+            }
+            guard let spanID = anchor.spanID,
+                  let span = record.spans.first(where: { $0.id == spanID }),
+                  let start = span.startMS, let end = span.endMS else {
+                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle,
+                                                      sourceID: record.id, spanID: nil, timeLabel: nil,
+                                                      canPlay: false, canOpen: canOpen,
+                                                      caveat: "未能定位到这段原话在录音里的位置；" + localHint)
+            }
+            let playable = ["audio", "video"].contains(record.kind) && record.state == "saved"
+            return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle,
+                                                  sourceID: record.id, spanID: span.id,
+                                                  timeLabel: timeText(start) + " 至 " + timeText(end),
+                                                  canPlay: playable, canOpen: canOpen,
+                                                  caveat: playable ? nil : "这份来源当前没有可播放的录音。")
+        }
+    }
+
+    private func play(_ anchor: MaterialNoteAnchorPresentation) {
+        guard anchor.canPlay, let record = catalog[anchor.sourceID], let spanID = anchor.spanID,
+              let span = record.spans.first(where: { $0.id == spanID }),
+              let start = span.startMS, let end = span.endMS,
+              ["audio", "video"].contains(record.kind), record.state == "saved" else { return }
+        Task { _ = await model.playSpan(record, milliseconds: start, endMilliseconds: end) }
+    }
+
+    // MARK: - Status
+
+    @ViewBuilder
+    private var statusRows: some View {
+        if let noteState {
+            switch noteState {
+            case .generating:
+                HStack(spacing: 9) {
+                    ProgressView().controlSize(.small).accessibilityHidden(true)
+                    Text(display == nil ? "正在整理成笔记…" : "正在重新整理…")
+                        .vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.secondaryText)
+                }
+                .accessibilityElement(children: .combine)
+            case .unavailable(let reason):
+                unavailableRow(reason)
+            case .failed(let message):
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Label("整理没有完成：\(message)", systemImage: "exclamationmark.triangle")
+                        .vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 8)
+                    Button("重试", systemImage: "arrow.clockwise") { retry() }
+                        .buttonStyle(.workspaceQuietCompact)
+                }
+            case .idle:
+                idleRow
+            }
+        } else {
+            idleRow
+        }
+    }
+
+    @ViewBuilder
+    private var idleRow: some View {
+        if display == nil, loadedOnce, requested {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("还没有整理成笔记。")
+                    .vosFont(WorkspaceText.meta)
+                    .foregroundStyle(palette.secondaryText)
+                Spacer(minLength: 8)
+                Button("整理成笔记") {
+                    Task { await model.requestMaterialNote(sourceID: source.id) }
+                }
+                .buttonStyle(.workspaceSecondaryCompact)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func unavailableRow(_ reason: String) -> some View {
+        switch reason {
+        case "仅本机保存":
+            if source.localOnly {
+                actionRow("这段文字仅保存在本机，还没有交给模型整理。") {
+                    Button("允许这份文字用于云端并整理") { allowCloudAndRequest() }
+                        .buttonStyle(.workspaceSecondaryCompact)
+                }
+            } else {
+                let blocked = memberRecords.filter(\.localOnly)
+                actionRow("这份表达里还有 \(max(blocked.count, 1)) 段文字仅本机保存；到那一部分允许云端整理后，这里会自动继续。") {
+                    if let first = blocked.first {
+                        Button("打开那段") { openSource(first.id) }
+                            .buttonStyle(.workspaceQuietCompact)
+                    }
+                }
+            }
+        case "文本模型未配置":
+            actionRow("还没有配置文本模型，暂时不能整理成笔记。") {
+                Button("配置文本模型…") { model.chooseTextModel() }
+                    .buttonStyle(.workspaceSecondaryCompact)
+            }
+        case "尚无转写":
+            noteText("转写完成后才能整理成笔记；录音和原文已经保存。")
+        case "材料尚未保存完成":
+            noteText("材料还在保存，稍后会自动尝试整理。")
+        case "资料库尚未打开":
+            noteText("资料库还没有打开，暂时无法读取这份笔记。")
+        default:
+            noteText(sentence(reason))
+        }
+    }
+
+    private func noteText(_ text: String) -> some View {
+        Text(text)
+            .vosFont(WorkspaceText.meta)
+            .foregroundStyle(palette.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func actionRow<Actions: View>(_ text: String, @ViewBuilder actions: () -> Actions) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            noteText(text)
+            Spacer(minLength: 8)
+            actions()
+        }
+    }
+
+    // MARK: - Actions and reads
+
+    private func retry() {
+        Task { await model.requestMaterialNote(sourceID: source.id, force: true) }
+    }
+
+    private func allowCloudAndRequest() {
+        Task {
+            await model.changeTextPolicy(source)
+            await model.requestMaterialNote(sourceID: source.id, force: true)
+        }
+    }
+
+    @MainActor
+    private func load() async {
+        let key = readKey
+        let result = await model.materialNoteForDisplay(sourceID: source.id)
+        guard key == readKey, !Task.isCancelled else { return }
+        loadedOnce = true
+        if let result {
+            display = MaterialNoteDisplay(note: result.note, isCurrent: result.isCurrent)
+            hasNote = true
+        } else {
+            display = nil
+            hasNote = false
+        }
+    }
+
+    @MainActor
+    private func requestNote() async {
+        await model.requestMaterialNote(sourceID: source.id)
+        guard !Task.isCancelled else { return }
+        requested = true
+    }
+
+    // MARK: - Formatting
+
+    private static func stateToken(_ state: MaterialNoteState?) -> String {
+        guard let state else { return "idle" }
+        switch state {
+        case .idle: return "idle"
+        case .generating: return "generating"
+        case .unavailable(let reason): return "unavailable:" + reason
+        case .failed(let message): return "failed:" + message
+        }
+    }
+
+    private func timeText(_ milliseconds: Int) -> String {
+        let seconds = max(0, milliseconds) / 1000
+        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private func normalized(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func sentence(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let last = trimmed.last else { return trimmed }
+        return "。！？!?".contains(last) ? trimmed : trimmed + "。"
+    }
+}
+
+/// One paragraph with its static text, the quiet "看原话" trigger and the
+/// expanded verbatim anchors. Quote rows never wrap organized prose in quotes;
+/// they show the anchored text with a source line and only offer playback when
+/// the span resolves to a real time range.
+private struct MaterialNoteParagraphView: View {
+    @Environment(\.workspacePalette) private var palette
+    @Environment(\.vosTextScale) private var textScale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let text: String
+    let anchors: [MaterialNoteAnchorPresentation]
+    let isExpanded: Bool
+    let toggle: () -> Void
+    let play: (MaterialNoteAnchorPresentation) -> Void
+    let openSource: (String) -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        if anchors.isEmpty {
+            content
+        } else {
+            content.contextMenu { menu }
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(text)
+                .vosFont(WorkspaceText.body)
+                .foregroundStyle(palette.text)
+                .lineSpacing(WorkspaceText.body.size * textScale * 0.45)
+                .fixedSize(horizontal: false, vertical: true)
+            if !anchors.isEmpty {
+                Button(action: toggle) {
+                    HStack(spacing: 5) {
+                        Text(isExpanded ? "收起原话" : "看原话 \(anchors.count)")
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .vosFont(WorkspaceText.caption.size, weight: .semibold)
+                    }
+                    .vosFont(WorkspaceText.meta.size, weight: .medium)
+                    .foregroundStyle(hovered || isExpanded ? palette.accent : palette.tertiaryText)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("查看这一段对应的原话")
+                .accessibilityLabel(isExpanded ? "收起这一段的原话" : "查看这一段的原话")
+            }
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(anchors) { anchor in
+                        quoteRow(anchor)
+                    }
+                }
+                .padding(.leading, 2)
+            }
+        }
+        .onHover { hovered = $0 }
+        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
+    }
+
+    @ViewBuilder
+    private var menu: some View {
+        Button(isExpanded ? "收起原话" : "看原话 \(anchors.count)", systemImage: "text.quote", action: toggle)
+        if let first = anchors.first(where: { $0.canPlay }) {
+            Button("回听这一段", systemImage: "play.circle") { play(first) }
+        }
+    }
+
+    private func quoteRow(_ anchor: MaterialNoteAnchorPresentation) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(anchor.quote)
+                .vosFont(WorkspaceText.body)
+                .foregroundStyle(palette.secondaryText)
+                .lineSpacing(WorkspaceText.body.size * textScale * 0.35)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(provenance(anchor))
+                    .vosFont(WorkspaceText.caption)
+                    .foregroundStyle(palette.tertiaryText)
+                    .lineLimit(2)
+                Spacer(minLength: 8)
+                if anchor.canPlay {
+                    Button("回听这句", systemImage: "play.circle") { play(anchor) }
+                        .buttonStyle(.workspaceQuietCompact)
+                        .help("回听这句原话")
+                } else if anchor.canOpen {
+                    Button("查看原文", systemImage: "text.magnifyingglass") { openSource(anchor.sourceID) }
+                        .buttonStyle(.workspaceQuietCompact)
+                        .help(anchor.caveat ?? "打开这段来源")
+                }
+            }
+            if let caveat = anchor.caveat, !anchor.canPlay {
+                Text(caveat)
+                    .vosFont(WorkspaceText.caption)
+                    .foregroundStyle(palette.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func provenance(_ anchor: MaterialNoteAnchorPresentation) -> String {
+        if let time = anchor.timeLabel { return anchor.memberTitle + " · " + time }
+        return anchor.memberTitle
+    }
+}

@@ -361,6 +361,7 @@ struct WorkspaceSourceView: View {
         Binding(get: { folds[keyPath:keyPath] }, set: { folds[keyPath:keyPath]=$0 })
     }
     @State private var toast: String? = nil
+    @State private var materialNotePresent = false
     @State private var extractionFlag: SourceExtractionFlag? = nil
     @State private var correctionsExpanded=false
     @State private var correctionJustSaved=false
@@ -676,11 +677,13 @@ struct WorkspaceSourceView: View {
                 VStack(alignment:.leading,spacing:10) {
                     HStack(alignment:.top,spacing:16) {
                         VStack(alignment:.leading,spacing:6) {
-                            Text((source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + " · " + source.recordingSubtitle)
+                            Text((source.origin == "ai" ? "AI 交付物 · 不代表我的观点" : source.origin == "user" ? "我的表达" : "外部资料 · 不代表我的观点") + (materialNotePresent ? "" : " · " + source.recordingSubtitle))
                                 .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                            Text(titleFit.title).vosFont(WorkspaceText.pageTitle).fixedSize(horizontal:false,vertical:true).textSelection(.enabled).accessibilityAddTraits(.isHeader)
-                            if let origin=titleFit.source {
-                                Text(origin).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText).textSelection(.enabled)
+                            if !materialNotePresent {
+                                Text(titleFit.title).vosFont(WorkspaceText.pageTitle).fixedSize(horizontal:false,vertical:true).textSelection(.enabled).accessibilityAddTraits(.isHeader)
+                                if let origin=titleFit.source {
+                                    Text(origin).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText).textSelection(.enabled)
+                                }
                             }
                         }
                         Spacer(minLength:12)
@@ -713,6 +716,7 @@ struct WorkspaceSourceView: View {
                     }
                     .padding(.top,8)
                 }
+                MaterialNoteReadingView(model:model,source:source,openSource:openSource,hasNote:$materialNotePresent)
                 if extractionFlag == .empty {
                     WorkspaceCard(padding:16) {
                         VStack(alignment:.leading,spacing:10) {
