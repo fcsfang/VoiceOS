@@ -164,12 +164,21 @@ final class TopicOrganizationHardeningChecks: XCTestCase {
         XCTAssertEqual(succeeded["state"], "completed")
     }
 
-    func testFailureCooldownBlocksAutomaticRetryForSixHours() throws {
-        let suite = "voiceos-topic-cooldown-" + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let cooldown = TopicOrganizationCooldown(defaults: defaults)
-        let failedAt = Date(timeIntervalSince1970: 1_000_000)
+    func testCooldownScenariosTable() throws {
+        let scenarios: [(name: String, run: (TopicOrganizationCooldown, Date) -> Void)] = [
+            ("失败冷却六小时且显式重试不受限", runFailureCooldownBlocksAutomaticRetry),
+            ("成功清除失败冷却", runSuccessClearsFailureCooldown),
+        ]
+        for scenario in scenarios {
+            let suite = "voiceos-topic-cooldown-" + UUID().uuidString
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let cooldown = TopicOrganizationCooldown(defaults: defaults)
+            scenario.run(cooldown, Date(timeIntervalSince1970: 1_000_000))
+        }
+    }
+
+    private func runFailureCooldownBlocksAutomaticRetry(_ cooldown: TopicOrganizationCooldown, _ failedAt: Date) {
         XCTAssertNil(cooldown.waitingMessage(now: failedAt))
         cooldown.recordFailure(reason: "主题正文整理超过 600 秒仍未完成", at: failedAt)
         XCTAssertEqual(cooldown.waitingMessage(now: failedAt.addingTimeInterval(6 * 3600 - 60)),
@@ -179,11 +188,7 @@ final class TopicOrganizationHardeningChecks: XCTestCase {
         XCTAssertFalse(cooldown.blocksAutomaticRetry(force: true, now: failedAt.addingTimeInterval(60)), "显式重试不受冷却限制")
     }
 
-    func testSuccessClearsFailureCooldown() throws {
-        let suite = "voiceos-topic-cooldown-" + UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let cooldown = TopicOrganizationCooldown(defaults: defaults)
+    private func runSuccessClearsFailureCooldown(_ cooldown: TopicOrganizationCooldown, _: Date) {
         cooldown.recordFailure(reason: "合成失败")
         XCTAssertNotNil(cooldown.waitingMessage())
         cooldown.recordSuccess()
