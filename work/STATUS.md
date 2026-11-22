@@ -1125,3 +1125,7 @@
 - voiceos-check 新增 `search <data-dir> <query>`：打开库、按需重建索引、输出 JSON 命中——无 GUI 也能验证搜索内容。
 - 隔离副本实证（实时库只读 .backup 到 /tmp，验证后已删）：按笔记标题「充电器是怎么匹配电压的」搜到对应材料（refID=32BA21DD…）；「黑雾」「充电器」的既有命中不回归；`read` 完整性 exit=0。shape v3 迁移在真实旧库副本上完成且索引重建成功。
 - 集成：构建 74 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 182：配置缺失的指路收尾（2026-11-23）
+- 完整录音页模型缺失提示补「仍可先『只保存原件』，配置后再完整整理」。
+- 处理情况页「模型与提醒事项」卡新增本地 Qwen 转写状态行与「配置本地 Qwen 转写…」按钮。
+- 集成：构建 75 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。

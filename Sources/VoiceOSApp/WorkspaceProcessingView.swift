@@ -714,6 +714,12 @@ struct WorkspaceProcessingView: View {
                                 WorkspaceSectionHeading("模型与提醒事项")
                                 WorkspaceListDivider()
                                 Text(model.modelConfigured ? model.modelSummary : "尚未配置模型；完整原文仍可先在本机保存。").vosFont(WorkspaceText.meta)
+                                Text(model.speechConfigured ? "本地 Qwen 转写已就绪。" : "尚未配置本地 Qwen 转写；音频与原文仍会先保存在本机，配置后再转写。").vosFont(WorkspaceText.meta)
+                                if !model.speechConfigured {
+                                    Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }
+                                        .buttonStyle(.workspaceSecondaryCompact)
+                                        .accessibilityIdentifier("processing.localSpeech.configure")
+                                }
                                 Text(model.reminderAccess?.enabled == true ? reminderSyncStatusText : "尚未连接提醒事项；任务可以先在 VoiceOS 内保存。").vosFont(WorkspaceText.meta)
                                 if let error=model.reminderFieldIssue {
                                     reason(error)
