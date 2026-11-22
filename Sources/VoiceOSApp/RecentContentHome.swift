@@ -184,12 +184,17 @@ struct RecentContentHome: View {
     private var timeline: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.groupGap) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     if !recentThoughts.isEmpty { recentThoughtsEntry(recentThoughts).id(recentThoughtsRowID) }
-                    ForEach(visibleDays) { day in
-                        VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(visibleDays.enumerated()), id: \.element.id) { index, day in
+                        VStack(alignment: .leading, spacing: 0) {
+                            // The day label hugs its own rows; the gap before the
+                            // next label is the one that grows, so grouping reads
+                            // before any text does.
                             dayHeader(day)
-                            VStack(alignment: .leading, spacing: 8) {
+                                .padding(.top, index == 0 && recentThoughts.isEmpty ? 2 : 20)
+                                .padding(.bottom, 6)
+                            VStack(alignment: .leading, spacing: 2) {
                                 ForEach(day.items) { item in
                                     Button { keyboardDrivenSelection = false; recentThoughtsHighlighted = false; selectedID = item.id } label: { row(item) }
                                         .buttonStyle(.plain)
@@ -244,11 +249,14 @@ struct RecentContentHome: View {
     }
 
     private func dayHeader(_ day: RecentContentDay) -> some View {
-        HStack(spacing: 6) {
-            RoundedRectangle(cornerRadius: 1).fill(palette.accent).frame(width: 2, height: 12)
-                .accessibilityHidden(true)
+        // A label and a hairline, no accent: accent in this column belongs to
+        // the open row and the actions that lead into the reader.
+        HStack(spacing: 10) {
             Text(dayLabel(day.date)).vosFont(WorkspaceText.meta.size, weight: .semibold)
-                .foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
+                .foregroundStyle(palette.secondaryText)
+                .accessibilityAddTraits(.isHeader)
+                .fixedSize()
+            WorkspaceListDivider()
         }.padding(.horizontal, 10)
     }
 
@@ -319,24 +327,35 @@ struct RecentContentHome: View {
         }
     }
 
+    /// One timeline row: the reading state hangs in a reserved gutter before
+    /// the title, the title wraps instead of truncating, and the first
+    /// paragraph the reader opens with previews up to two quiet lines.
     private func row(_ item: RecentContentItem) -> some View {
         let isSelected = selected?.id == item.id
         let presentation = rowPresentation(item)
-        return HStack(alignment: .top, spacing: 10) {
-            Image(systemName: presentation.icon).vosFont(WorkspaceText.rowTitle.size).foregroundStyle(palette.accent)
-                .frame(width: 28, height: 28).background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+        let state = readingState(item)
+        // A read row stays quiet unless it is the open one; the reader beside
+        // it then shows the same title at full strength.
+        let titleColor = state == .read && !isSelected ? palette.secondaryText : palette.text
+        return HStack(alignment: .top, spacing: 7) {
+            Circle()
+                .fill(state == .unread ? palette.accent : palette.secondaryText)
+                .frame(width: 6, height: 6)
+                .padding(.top, 6 * textScale)
+                .opacity(state == nil || state == .read ? 0 : 1)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                // The title line belongs to the title alone. Every row reads one
-                // title line plus one metadata line, so density stays uniform.
+                // Long titles take the lines they need; the preview and the
+                // meta line are what give way when the column is narrow.
                 Text(presentation.title).vosFont(WorkspaceText.rowTitle)
-                    .foregroundStyle(readingState(item) == .read ? palette.secondaryText : palette.text)
-                    .lineLimit(isLargeText ? 2 : 1).multilineTextAlignment(.leading)
+                    .foregroundStyle(titleColor)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let preview = presentation.preview {
+                    Text(preview).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                        .lineSpacing(2).lineLimit(2).multilineTextAlignment(.leading)
+                }
                 HStack(spacing: 4) {
-                    if let state = readingState(item), state != .read {
-                        Circle().fill(state == .unread ? palette.accent : palette.secondaryText)
-                            .frame(width: 5, height: 5).accessibilityHidden(true)
-                    }
                     Text(presentation.meta).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                         .lineLimit(1)
                     if let trailing = presentation.trailing {
@@ -346,10 +365,10 @@ struct RecentContentHome: View {
                     }
                 }
             }
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .homeCard(isSelected: isSelected)
+        .homeRowChrome(isSelected: isSelected)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(presentation.accessibilityLabel)
         .accessibilityAddTraits(isSelected ? .isSelected : AccessibilityTraits())
@@ -357,14 +376,14 @@ struct RecentContentHome: View {
 
     private struct HomeRowPresentation {
         let title: String
+        let preview: String?
         let meta: String
         let trailing: String?
         let accessibilityLabel: String
-        let icon: String
     }
 
-    /// One title fit and one status read per row; title, meta, trailing, spoken
-    /// label and icon all read from this result.
+    /// One title fit, one preview read and one status read per row; title,
+    /// preview, meta, trailing and spoken label all read from this result.
     private func rowPresentation(_ item: RecentContentItem) -> HomeRowPresentation {
         let fit = WorkspaceTitleFit.present(item.title)
         let title = item.kind == .feedback ? fit.title + " · \(progressCount(item)) 条" : fit.title
@@ -381,12 +400,24 @@ struct RecentContentHome: View {
         if let trailing { spokenParts.append(trailing) }
         return HomeRowPresentation(
             title: title,
+            preview: rowPreview(item, title: fit.title),
             meta: metaParts.joined(separator: " · "),
             trailing: trailing,
-            accessibilityLabel: spokenParts.joined(separator: "，"),
-            icon: model.homeSnapshot.rows[item.id]?.icon
-                ?? (item.kind == .feedback ? "arrow.triangle.2.circlepath" : "waveform")
+            accessibilityLabel: spokenParts.joined(separator: "，")
         )
+    }
+
+    /// The preview is the same first paragraph the reader opens with, flattened
+    /// to one line of flow so a stray newline cannot break the row's rhythm.
+    /// A material without a summary borrows its opening thought.
+    private func rowPreview(_ item: RecentContentItem, title: String) -> String? {
+        guard item.kind == .material else { return nil }
+        let raw = item.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? (item.thoughts.first?.statement ?? "")
+            : item.summary
+        let collapsed = raw.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !collapsed.isEmpty, collapsed != title else { return nil }
+        return collapsed
     }
 
     private func materialSource(_ item: RecentContentItem) -> SourceRecord? {
@@ -793,8 +824,9 @@ struct RecentContentHome: View {
                         Text("\(dayLabel(group.date)) · \(group.entries.count) 条")
                             .vosFont(WorkspaceText.caption, monospacedDigit: true).foregroundStyle(palette.tertiaryText)
                             .padding(.horizontal, 10)
-                        VStack(alignment: .leading, spacing: 8) {
-                            ForEach(group.entries) { entry in
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(Array(group.entries.enumerated()), id: \.element.id) { index, entry in
+                                if index > 0 { WorkspaceListDivider().padding(.horizontal, 10) }
                                 Button { openClaim(entry.id) } label: {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(entry.statement).vosFont(WorkspaceText.meta)
@@ -807,7 +839,7 @@ struct RecentContentHome: View {
                                             .multilineTextAlignment(.leading)
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .homeCard(isSelected: false)
+                                    .homeRowChrome(isSelected: false)
                                 }
                                 .buttonStyle(.plain)
                                 .help("打开这条想法的原话")
@@ -1116,7 +1148,11 @@ private struct ThoughtLine: View {
     }
 }
 
-private struct HomeCard: ViewModifier {
+/// Timeline rows are flat: date labels and hairlines carry the structure, so
+/// stacked frames never read as one repeated outline. The open row fills with
+/// the selection wash and hangs an accent bar in its leading gutter, the same
+/// accent the reader on the right uses for its actions.
+private struct HomeRowChrome: ViewModifier {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1126,17 +1162,22 @@ private struct HomeCard: ViewModifier {
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius)
         content
-            .padding(.horizontal, 12).padding(.vertical, 10)
-            .background(isSelected ? palette.selection : hovered && isEnabled ? palette.hover : palette.surface, in: shape)
-            .overlay { shape.strokeBorder(isSelected ? palette.focusRing : palette.border, lineWidth: 1) }
+            .padding(.horizontal, 10).padding(.vertical, 9)
+            .background(isSelected ? palette.selection : hovered && isEnabled ? palette.hover : .clear, in: shape)
+            .overlay(alignment: .leading) {
+                if isSelected {
+                    Capsule().fill(palette.accent).frame(width: 3).padding(.vertical, 8)
+                }
+            }
             .contentShape(shape)
             .onHover { hovered = $0 && isEnabled }
             .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
+            .animation(reduceMotion ? nil : WorkspaceMotion.selection, value: isSelected)
     }
 }
 
 private extension View {
-    func homeCard(isSelected: Bool) -> some View {
-        modifier(HomeCard(isSelected: isSelected))
+    func homeRowChrome(isSelected: Bool) -> some View {
+        modifier(HomeRowChrome(isSelected: isSelected))
     }
 }
