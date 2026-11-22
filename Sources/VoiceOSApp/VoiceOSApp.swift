@@ -988,6 +988,9 @@ final class ControlCenter: ObservableObject {
     @Published var materialNoteStates: [String: MaterialNoteState] = [:]
     /// 会话内同步的「该材料已有可读笔记」缓存，供页头首帧决定版式。
     @Published var materialNotePresence: [String: Bool] = [:]
+    /// 首页批量笔记读取的会话级缓存：视图重建时首帧就能用笔记标题与预览，
+    /// 不再先按旧标题渲染再跳变。按表达键存放每条最新一版，只增不减。
+    @Published var materialNoteRows: [String: StoredMaterialNote] = [:]
     var materialNoteModel: ResponsesMaterialNotePort?
     func queueTopicOrganization(retry: Bool = false, topUp: Bool = false) {
         guard initialized, topicModel != nil else { return }

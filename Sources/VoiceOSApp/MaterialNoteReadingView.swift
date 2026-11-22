@@ -48,11 +48,15 @@ struct MaterialNoteReadingView: View {
     var relatedActions: [ActionRecord] = []
     var relatedDiscussions: [ConversationRecord] = []
     @Binding var hasNote: Bool
+    /// 材料页的滚动位置；重开页面时据此回到上次读到的段落。
+    var restoreScroll: Binding<ScrollPosition>? = nil
 
     @State private var display: MaterialNoteDisplay?
     @State private var expandedParagraphs: Set<String> = []
     @State private var requested = false
     @State private var loadedOnce = false
+    @State private var probeBox = NoteReadingProbeBox()
+    @State private var hasRestored = false
 
     private var catalog: [String: SourceRecord] { model.sourcePageIndex.recordsByID }
     private var expression: RecordingExpression? { model.sourcePageIndex.expression(for: source.id) }
@@ -93,6 +97,63 @@ struct MaterialNoteReadingView: View {
         }
         .task(id: readKey) { await load() }
         .task(id: requestKey) { await requestNote() }
+        .task(id: positionRestoreKey) { await restoreReadingPositionIfNeeded() }
+    }
+
+    // MARK: - 阅读位置
+
+    /// 段落顶部越过视口顶部这段距离后就算「读到过」，用来判定当前段。
+    private static let readingLineThreshold: CGFloat = 96
+
+    private struct PositionRestoreKey: Hashable {
+        let expressionKey: String
+        let ready: Bool
+    }
+
+    private var positionKey: String { VoiceOSStore.materialNoteExpressionKey(memberIDs) }
+
+    private var positionRestoreKey: PositionRestoreKey {
+        PositionRestoreKey(expressionKey: positionKey, ready: display != nil)
+    }
+
+    private func noteAnchor(_ sectionIndex: Int, _ paragraphIndex: Int) -> String {
+        "note.p.\(sectionIndex).\(paragraphIndex)"
+    }
+
+    /// 探针值不参与观察，避免滚动时每帧触发整页重算。
+    @MainActor
+    private final class NoteReadingProbeBox {
+        var tops: [String: CGFloat] = [:]
+        var lastAnchor: String?
+    }
+
+    private func probe(_ minY: CGFloat, anchor: String) {
+        probeBox.tops[anchor] = minY
+        guard hasRestored else { return }
+        recordReadingPosition()
+    }
+
+    private func recordReadingPosition() {
+        // 视口顶部线之上最近的块就是当前阅读位置；都还在线下方说明没读到笔记。
+        guard let pick = probeBox.tops.filter({ $0.value <= Self.readingLineThreshold })
+            .max(by: { $0.value < $1.value })?.key,
+            pick != probeBox.lastAnchor else { return }
+        probeBox.lastAnchor = pick
+        MaterialNoteReadingPosition.record(pick, for: positionKey)
+    }
+
+    private func restoreReadingPositionIfNeeded() async {
+        guard !hasRestored, display != nil else { return }
+        guard let scroll = restoreScroll,
+              let anchor = MaterialNoteReadingPosition.anchor(for: positionKey) else {
+            hasRestored = true
+            return
+        }
+        // 等首次布局完成再跳；恢复完成前探针不记录，避免把页面顶部写回。
+        try? await Task.sleep(for: .milliseconds(120))
+        guard !Task.isCancelled else { return }
+        scroll.wrappedValue.scrollTo(id: anchor, anchor: .top)
+        hasRestored = true
     }
 
     // MARK: - Article
@@ -111,6 +172,12 @@ struct MaterialNoteReadingView: View {
                         .foregroundStyle(palette.text)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
+                        .id("note.title")
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.frame(in: .scrollView(axis: .vertical)).minY
+                        } action: { minY in
+                            probe(minY, anchor: "note.title")
+                        }
                     metaLine
                 }
                 if let lead = normalized(display.note.note.lead) {
@@ -147,6 +214,12 @@ struct MaterialNoteReadingView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     ForEach(paragraphs, id: \.offset) { paragraphIndex, paragraph in
                         paragraphView(paragraph, paragraphID: "\(index)-\(paragraphIndex)")
+                            .id(noteAnchor(index, paragraphIndex))
+                            .onGeometryChange(for: CGFloat.self) { proxy in
+                                proxy.frame(in: .scrollView(axis: .vertical)).minY
+                            } action: { minY in
+                                probe(minY, anchor: noteAnchor(index, paragraphIndex))
+                            }
                     }
                 }
             }

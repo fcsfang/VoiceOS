@@ -29,7 +29,6 @@ struct RecentContentHome: View {
     /// 阅读态到达前「待处理」过滤无法算出真正的可见集合；过早按全部材料
     /// 读笔记会在状态落回后立刻再读一次，两次查询在 store actor 上串行。
     @State private var readingStatesLoaded = false
-    @State private var materialNotes: [String: StoredMaterialNote] = [:]
     @AppStorage("voiceos.home.pendingOnly") private var showsOnlyPending = true
     @State private var clueRename: ClueRenameRequest?
     @State private var clueFailureText = ""
@@ -614,8 +613,10 @@ struct RecentContentHome: View {
                         .help(source.state == "saved" ? "播放这段录音" : "录音尚未就绪，暂时无法回听")
                 }
                 if let first = item.sourceIDs.first {
-                    Button("打开材料") { openSource(first) }
+                    let hasNote = materialNote(for: item) != nil
+                    Button(hasNote ? "继续读" : "打开材料") { openSource(first) }
                         .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
+                        .help(hasNote ? "继续读这篇笔记，回到上次读到的位置" : "打开这份材料")
                 }
             }
             let note = materialNote(for: item)
@@ -975,17 +976,16 @@ struct RecentContentHome: View {
 
     private func materialNote(for item: RecentContentItem) -> StoredMaterialNote? {
         guard item.kind == .material, let key = materialNoteExpressionKey(for: item) else { return nil }
-        return materialNotes[key]
+        return model.materialNoteRows[key]
     }
 
     @MainActor
     private func reloadMaterialNotes() async {
         let key = materialNotesReadKey
-        let notes: [String: StoredMaterialNote] = key.expressionKeys.isEmpty
-            ? [:]
-            : await model.latestMaterialNotes(expressionKeys: key.expressionKeys)
-        guard key == materialNotesReadKey, !Task.isCancelled else { return }
-        materialNotes = notes
+        guard !key.expressionKeys.isEmpty else { return }
+        // 结果直接并入 ControlCenter 的会话缓存（按条比较新旧，迟到的旧结果
+        // 不会覆盖新版本）；视图从缓存读，返回首页首帧就有笔记标题。
+        _ = await model.latestMaterialNotes(expressionKeys: key.expressionKeys)
     }
 
     private func organizeBlocker(_ source: SourceRecord, organizing: Bool) -> String? {
@@ -1037,11 +1037,24 @@ struct RecentContentHome: View {
 }
 
 extension ControlCenter {
-    /// One read for the visible rows; a failed read leaves every row on its own
-    /// title and preview.
+    /// One read for the visible rows. Results merge into the session cache by
+    /// revision: a late response can never replace a newer note, and a failed
+    /// read keeps the previous rows instead of blanking every title on home.
+    @MainActor
+    @discardableResult
     func latestMaterialNotes(expressionKeys: [String]) async -> [String: StoredMaterialNote] {
-        guard !expressionKeys.isEmpty, let store else { return [:] }
-        return (try? await store.latestMaterialNotes(expressionKeys: expressionKeys)) ?? [:]
+        guard !expressionKeys.isEmpty, let store else { return materialNoteRows }
+        guard let fresh = try? await store.latestMaterialNotes(expressionKeys: expressionKeys) else {
+            return materialNoteRows
+        }
+        var merged = materialNoteRows
+        var changed = false
+        for (key, note) in fresh {
+            if let existing = merged[key], existing.createdAt > note.createdAt { continue }
+            if merged[key] != note { merged[key] = note; changed = true }
+        }
+        if changed { materialNoteRows = merged }
+        return fresh
     }
 }
 

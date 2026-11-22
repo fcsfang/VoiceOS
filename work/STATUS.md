@@ -1088,3 +1088,9 @@
   - 测试 +2：批量读每键只返回最新一版（多键多版本）、单行损坏不拖垮其余笔记（手工写坏 note_json）。
 - 集成：构建 61 全绿（build_exit=0 / test_exit=0，577 tests / dist_build_exit=0，attempt=104 重启）；构建 62（174-A 合并后）全绿（577 tests，attempt=110 重启）；构建 63（174-C）全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
 - 上机实测（构建 62）：打开材料页真实生成新笔记「充电器是怎么匹配电压的？」后返回首页，时间线行与阅读器标题同步换成笔记标题（174-A 生效）；再次打开同一材料落回页面顶部——翻页位置不保留，175-A 阅读位置恢复确有必要。
+## 波 175：继续读——阅读位置恢复与首页首帧笔记（2026-11-22）
+- 来源：产品文档阶段 2「记录与重访」——「继续读」落到同一正文和阅读位置。上机实测（构建 62）：重开材料页落回页面顶部，位置不保留；同时实测 174-A 生效（新生成笔记的标题同步到首页行与阅读器）。
+- 175-A 阅读位置恢复：新文件 MaterialNoteReadingPosition.swift（会话级存储，键＝笔记表达键）；MaterialNoteReadingView 给笔记标题与每段加锚点 id，`.onGeometryChange` 探针读取滚动坐标系 minY（探针值存非观察引用盒，滚动不触发重算）；视口顶部线（96pt）之上最近的块记为阅读位置，变化才写；显示完成后等 120ms 布局再 `scrollTo(id:anchor:.top)` 一次性恢复，恢复完成前不记录（防止把顶部写回）；WorkspaceSourceView 调用点传入 scroll。
+- 175-B 首页首帧笔记：ControlCenter 新增 materialNoteRows 会话缓存（按表达键存最新一版）；批量读取改为并入缓存、按 createdAt 单调合并（迟到的旧结果不会覆盖新版本、读取失败保留旧缓存）；RecentContentHome 删除视图内 @State，直接读缓存，返回首页首帧即用笔记标题与预览；阅读器元数据行有笔记时显示「继续读」（help 明示回到上次读到的位置）。
+- 集成：构建 65 因 materialNoteRows 的 private(set) setter 跨文件不可写失败（build_exit=1 / not restarting）；去掉 private(set) 后构建 66 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
+- 上机验证（175-A 位置恢复、175-B 首帧与「继续读」）因屏幕锁定暂缓：System Events 对 Finder/Claude 同样报 0 窗口，确认是图形会话不可见而非宿主捕捉故障；解锁后补拍截图入 docs/product/audits/2026-11-22/。
