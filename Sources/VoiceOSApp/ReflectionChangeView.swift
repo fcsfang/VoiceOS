@@ -149,7 +149,7 @@ struct ReflectionChangeView: View {
         这次原话：\(connection.update.currentQuote)
         候选关系：\(relation(connection.update.relation))
         AI 当前解释：\(connection.update.understanding)
-        请区分明确的表达变化、条件差异和你的推论；转写纠错不算观点变化，外部主张不算我的立场。追问这条关系成立的限制、可能的反例和仍缺少的证据，帮助我判断是否需要修正认识。不要替我确认成长，也不要把任务完成当成已经学会。
+        请区分明确的表达变化、条件差异和你的推论；转写纠错不算观点变化，外部主张不算我的立场。从这条关系成立的限制、可能的反例与仍缺的证据帮我看清是否需要修正认识。不假定成长已经发生，也不把任务完成当成学会。
         """
     }
 }

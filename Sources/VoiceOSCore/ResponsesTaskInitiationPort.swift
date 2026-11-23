@@ -27,14 +27,14 @@ public struct ResponsesTaskInitiationPort: TaskInitiationModelPort {
 
         任务路线三选一：
         - agent_handoff：用户希望交给 Codex、Claude Code、AI 或专业工具执行，需要一份可复制、脱离本会话也能独立理解的任务提示词。
-        - guided_start：用户想自己动手，需要一份最小可操作教程；guide_steps 给 3 到 7 步，first_action 是现在就能做的第一步，verification 说明怎样确认做到。
-        - clarify：目标或选择仍不清楚，且当前是 interactive 模式时才可以反问；clarify_question 只放一个最能影响下一步的问题。direct 模式绝不能返回 clarify，应带显式假设生成草稿。
+        - guided_start：用户想自己动手，需要一份最小可操作教程；guide_steps 给出操作步骤，first_action 是现在就能做的第一步，verification 说明怎样确认做到。
+        - clarify：目标或选择仍不清楚，且当前是 interactive 模式时才可以反问；clarify_question 问最能影响下一步的问题。direct 模式绝不能返回 clarify，应带显式假设生成草稿。
 
-        answer 只用于直接回答：其它路线的 answer 返回空字符串；answer 路线的回答正文不超过 8000 字。
+        answer 只用于直接回答：其它路线的 answer 返回空字符串。
 
         preferredRoute 是用户明确选择的路线，优先采用；但用户明确拒绝任务化时仍返回 capture_only。execution_preference：以交付为主选 quick_delivery；用户说要弄懂、边做边学或解释实现时选 learn_while_doing。
 
-        事实、假设、待确认必须分开：known_facts 只写用户原话中明确提供的事实；assumptions 写为继续而采用、并需用户核实的假设；missing_information 写真正影响启动的未知项。不得把推测写成事实，不得编造菜单、文件、仓库、已有进度或外部环境内容；缺少环境信息时，要求执行者或用户先检查真实环境。acceptance_criteria 写可检查的完成条件。任务路线的 title 为空时用 objective 首行。reason 用一句中文说明路线判断。所有数组没有内容时返回 []。只返回指定 JSON。
+        事实、假设、待确认必须分开：known_facts 只写用户原话中明确提供的事实；assumptions 写为继续而采用、并需用户核实的假设；missing_information 写真正影响启动的未知项。不得把推测写成事实，不得编造菜单、文件、仓库、已有进度或外部环境内容；缺少环境信息时，要求执行者或用户先检查真实环境。acceptance_criteria 写可检查的完成条件。任务路线的 title 为空时用 objective 首行。reason 用中文说明路线判断。所有数组没有内容时返回 []。只返回指定 JSON。
         """
         payload["text"] = ["format": ["type": "json_schema", "name": "task_initiation", "strict": true, "schema": Self.outputSchema]]
         let data = try await send(payload)
@@ -48,7 +48,7 @@ public struct ResponsesTaskInitiationPort: TaskInitiationModelPort {
         guard !input.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               input.text.unicodeScalars.count <= 4000 else { throw VoiceOSError("没有可用于直接回答的原话") }
         var content = """
-        请用中文直接回答下面这段原话里的问题或请求。输出纯文本，可以分多段；准确、自然、可以直接使用。不知道或不确定时明确说明，不要编造事实，也不要假装读过仓库、文件、日历或外部服务。不要输出 JSON、字段名或你的流程。
+        请用中文直接回答下面这段原话里的问题或请求。输出纯文本，可以分多段。不知道或不确定时明确说明，不编造事实，也不假装读过仓库、文件、日历或外部服务。
         """
         content += "\n\n原话：\n" + input.text
         let clarification = input.answer.trimmingCharacters(in: .whitespacesAndNewlines)

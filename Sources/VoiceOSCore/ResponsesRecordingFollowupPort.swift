@@ -94,7 +94,7 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
                 return item
             }, "tasks": try value(input.tasks),
             "practices": input.practices.map { ["sourceID": $0.sourceID, "feedback": $0.feedback] }]
-        let instructions = Self.selectionInstructions + "\n如有continuousExpression，必须按完整连续表达理解当前片段后再选择历史，避免忽略后文修正。"
+        let instructions = Self.selectionInstructions + "\n如有continuousExpression，连续表达会帮助你理解当前片段并选择历史。"
         return try await request(payload, instructions: instructions, schema: Self.selectionSchema,
             name: "voiceos_followup_history", stage: .selectHistory, evidence: &evidence) { _ in }
     }
@@ -240,13 +240,13 @@ public struct ResponsesRecordingFollowupPort: RecordingFollowupPort {
     feedbackActionID存在时，当前表达是该行动的实际结果或反思，必须结合该行动及所属目标处理，不能因未重复目标标题而忽略。旧录音也可能因任务状态变化而再次跟进；任务完成只表示已完成，不等于用户已报告成功、收获或掌握。仅以feedback中的实际结果判断所得。
     所有引用（currentQuote、historicalQuote、evidenceQuote、original、priorQuote及comparisons中的两端quote）必须从被引用文本中直接连续复制：重复的口头填充词和语气词（如“嗯”“呃”）必须逐字保留；不得删除、合并、压缩、改写，也不得跨过不可引用的段落拼接；如果无法连续复现整段，就改引其中更短的连续片段。
     一、thoughtUpdates：对照thoughts历史观点，寻找当前表达明确支持、限定、反驳或延续的旧思想。相同主题不足以建立关系。每个claimID最多一个关系；currentQuote逐字引用当前录音的完整连续原话，historicalQuote逐字引用该历史思想evidence.quote。保留否定、条件、犹豫和归属。不把转写纠错说成用户改变观点。understanding说明用户当前表达了什么及与旧理解的关系；这是依据用户新表达的理解，不能认定科学事实得到验证。没有可靠关联用空数组。
-    二、goalPlans：对goals中的每个目标恰好输出一次，goalID原样复制。结合当前口播、tasks状态、feedback和previousPlan已有计划，在保留仍适用步骤的基础上调整，生成少量清楚可执行的阶段phases和步骤steps。将时间偏好、前置条件写condition，没有依据不编截止日期。summary说明当前目标；adjustment说明根据哪些新进展调整，没有进展如实说明。nextStep必须是phases里的一个完全相同的步骤，优先当前适合执行的一步。
+    二、goalPlans：对goals中的每个目标恰好输出一次，goalID原样复制。结合当前口播、tasks状态、feedback和previousPlan已有计划，在保留仍适用步骤的基础上调整，生成清楚可执行的阶段phases和步骤steps。将时间偏好、前置条件写condition，没有依据不编截止日期。summary说明当前目标；adjustment说明根据哪些新进展调整，没有进展如实说明。nextStep必须是phases里的一个完全相同的步骤，优先当前适合执行的一步。
     已有未完成任务能作为步骤时，existingTaskID复制其id且title复制其完整标题，不能重复建议同一任务。完成过的任务不能作为未完成下一步；部分进展不等于目标完成。新步骤existingTaskID为空，仅是AI建议，不是用户承诺。不调用工具，不创建提醒，不声称已执行。
     三、english：仅当当前个人录音确实包含英语表达练习时isPractice=true；提到学英语、引用英文标题或少量技术名不算练习。练习时evidenceQuote引用实际练习连续原句；提供语法、表达组织和可复用句型建议，original须逐字来自当前录音。疑似转写错误标possibleTranscriptIssue，不把它当确定语法错误。
-    自动从practices旧练习和真实feedback挑相关反馈，与本次句子作有依据比较，priorSourceID原样复制；两边quote必须各自连续逐字引用。change用repeated重复问题、improved仅明确相同问题改正、changed表达方式变化、uncertain无法判断。不能凭一次没出现错误说掌握了，也不能比较无关句子硬说进步。nextExercise给下一次短练习建议，基于本次问题及历史。首次练习comparisons为空。不给发音、流利度或掌握度评分。非练习时所有文本为空、所有数组为空。
+    自动从practices旧练习和真实feedback挑相关反馈，与本次句子作有依据比较，priorSourceID原样复制；两边quote必须各自连续逐字引用。change用repeated重复问题、improved仅明确相同问题改正、changed表达方式变化、uncertain无法判断。不能凭一次没出现错误说掌握了，也不能比较无关句子硬说进步。nextExercise给下一次短练习建议，基于本次问题及历史。首次练习comparisons为空。非练习时所有文本为空、所有数组为空。
     上下文中的transcriptionReview标记文字依据：正文已完成AI全文校正，直接使用当前文本；unresolved_issues涉及的对象、条件或否定仍未确定，不建立依赖该含义的确定关系或建议。其他明确内容照常处理。
     输出覆盖全部相关内容，禁止为省调用截断录音或跳过目标。引用和对象不明则保留不确定性，不能猜造原话。
-    用普通用户语言说明现状、条件和建议依据；不要在展示文字中提请求过程、previousPlan、JSON字段或open等程序状态词。
+    用普通用户语言说明现状、条件和建议依据；展示文字用用户能懂的说法。
     """
     static var schema: [String: Any] {
         func object(_ fields: [String: Any]) -> [String: Any] { ["type": "object", "properties": fields, "required": fields.keys.sorted(), "additionalProperties": false] }

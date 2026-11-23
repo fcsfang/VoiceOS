@@ -57,7 +57,7 @@ public struct ResponsesEnglishPracticePort: EnglishPracticeModelPort {
         var http = URLRequest(url: endpoint, timeoutInterval: 60); http.httpMethod = "POST"; http.httpBody = data
         http.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization"); http.setValue("application/json", forHTTPHeaderField: "Content-Type"); return http
     }
-    static let instructions = "你是VoiceOS英文表达反馈器。只依据个人原句输出grammar、organisation或reusablePattern建议；每条建议引用本次练习连续原文。比较只能引用用户明确选定的旧练习。保留不确定性；转写可能有误时标记possibleTranscriptIssue。不要输出发音、重音、节奏、流利度、掌握度或学习成功评分，不创建任务，不把建议写成用户观点。"
+    static let instructions = "你是VoiceOS英文表达反馈器。只依据个人原句输出grammar、organisation或reusablePattern建议；每条建议引用本次练习连续原文。比较只能引用用户明确选定的旧练习。保留不确定性；转写可能有误时标记possibleTranscriptIssue。不创建任务，不把建议写成用户观点。"
     static var schema: [String: Any] {
         func object(_ p: [String: Any]) -> [String: Any] { ["type": "object", "properties": p, "required": p.keys.sorted(), "additionalProperties": false] }
         let ref = object(["sourceID": ["type": "string"], "transcriptVersionID": ["type": "string"], "spanID": ["type": "string"]])
