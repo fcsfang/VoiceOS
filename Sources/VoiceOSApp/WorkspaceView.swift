@@ -2373,10 +2373,10 @@ struct WorkspaceView: View {
                         Button("清除") { model.clearTextModel() }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("清除文本模型配置")
                             .help("只停止后续调用；已有理解与标题保留")
                     }
-                    Button("更改") { model.chooseTextModel() }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("更改文本模型配置")
+                    Button("从文件导入") { model.chooseTextModel() }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("从配置文件导入文本模型")
                 }
             }
-            .help(model.modelConfigurationPath ?? "选择本地的 .env 或模型 JSON 配置文件；配置后这里显示文件名")
+            .help(model.modelConfigurationPath ?? "导入本地的 .env 或模型 JSON 配置文件；导入后由应用内部维护")
             WorkspaceListDivider().padding(.horizontal,20)
             internalModelSettings
         }

@@ -522,7 +522,8 @@ final class ControlCenter: ObservableObject {
     @Published var speechSummary = "Qwen 本地转写 · 尚未配置"
     private var speechPort: (any SpeechPort)?
     var speechConfigured: Bool { speechPort is LocalQwenSpeechPort }
-    var textModelConfigured: Bool { modelConfigured && textConfigurationFile != nil }
+    /// 文本模型是否可用：内部配置与导入的配置文件都算就绪；文件不再是前置条件。
+    var textModelConfigured: Bool { modelConfigured }
     var modelConfigurationName: String? { textConfigurationFile?.lastPathComponent }
     var modelConfigurationPath: String? { textConfigurationFile?.path }
     var recordingModelIssue: String? {
