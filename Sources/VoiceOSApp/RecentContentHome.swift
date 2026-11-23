@@ -86,6 +86,20 @@ struct RecentContentHome: View {
                     Group {
                         if days.isEmpty {
                             empty
+                        } else if !recentNotes.isEmpty {
+                            // 全部读完时仍留着重访入口：最近整理的笔记就在上面接着读。
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    recentNotesEntry
+                                    WorkspaceEmptyState(title: "待处理的都处理完了", systemImage: "checkmark.circle",
+                                                        description: "最近整理的笔记留在上面；已读的内容也在「材料」页。") {
+                                        Button("查看全部") { showsOnlyPending = false }.buttonStyle(.workspaceSecondary)
+                                    }
+                                    .padding(.top, 24)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 16)
+                            }
                         } else {
                             WorkspaceEmptyState(title: "待处理的都处理完了", systemImage: "checkmark.circle",
                                                 description: "已读的内容留在「材料」页；也可以看全部最近记录。") {

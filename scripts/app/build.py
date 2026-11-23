@@ -34,14 +34,18 @@ if args.configuration == 'release':
 # Serialize with every other swift build on this machine; 16GB cannot hold two.
 lock = Path('/tmp/voiceos-swift-build.lock')
 import time
+acquired = False
 for _ in range(240):
     try:
         lock.mkdir()
+        acquired = True
         break
     except FileExistsError:
         if time.time() - lock.stat().st_mtime > 2400:
             lock.rmdir()
         time.sleep(10)
+if not acquired:
+    raise SystemExit('另一个 swift 构建长期占用 /tmp/voiceos-swift-build.lock；拒绝无锁构建')
 try:
     subprocess.run(['xcrun', '--sdk', 'macosx', 'swift', 'build', '-c', args.configuration, *flags, '--product', 'VoiceOS'], cwd=ROOT, env=env, check=True)
 finally:
