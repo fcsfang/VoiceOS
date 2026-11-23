@@ -1183,6 +1183,31 @@ struct WorkspaceView: View {
             $0.topic.title.localizedCaseInsensitiveContains(filter) || ($0.topic.organization?.summary ?? "").localizedCaseInsensitiveContains(filter)
         }
     }
+    /// 主题卡的展示分组：固定八个人生维度在前，未归类殿后，空分组不出现。
+    /// 方向键顺序也走同一函数，保证视觉顺序与键盘顺序一致。
+    private func domainSections(_ listings: [TopicListing]) -> [(title: String, listings: [TopicListing])] {
+        var grouped: [String: [TopicListing]] = [:]
+        var ungrouped: [TopicListing] = []
+        for listing in listings {
+            if let domain = listing.topic.organization?.domain { grouped[domain, default: []].append(listing) }
+            else { ungrouped.append(listing) }
+        }
+        var sections = TopicDomain.allCases.compactMap { domain in
+            grouped[domain.rawValue].map { (title: domain.rawValue, listings: $0) }
+        }
+        if !ungrouped.isEmpty { sections.append((title: "未归类", listings: ungrouped)) }
+        return sections
+    }
+
+    @ViewBuilder private func themeCard(_ listing: TopicListing) -> some View {
+        TopicPreviewCard(topic:listing.topic,preview:topicCardPreview(listing.topic,catalog:recordCatalog),
+                         materialCount:listing.materialCount,
+                         sectionCount:listing.topic.organization?.sections?.count,
+                         latestLabel:listing.latestMaterialDate == nil ? nil : clueDateLabel(listing.latestMaterialDate),
+                         highlighted:themeKeyboardFocus.id == listing.id) { selectTopic(listing.topic.id) }
+            .id(listing.id)
+    }
+
     private var unlinkedTopicMaterials: [SourceRecord] {
         let linked = Set(model.workspaceTopicSources.values.flatMap { $0 })
         return distinctExpressions(activeMaterials.filter { !linked.contains($0.id) })
@@ -1203,7 +1228,7 @@ struct WorkspaceView: View {
                     Button("合并到其他主题…") { beginMergingTopic(topic) }
                     Button("重新连接当前材料") { model.queueTopicOrganization(retry:true) }
                 } }
-                WorkspaceHeading(eyebrow:"",title:topic.title,subtitle:"\(reading.sources.count) 份材料")
+                WorkspaceHeading(eyebrow:topic.organization?.domain ?? "",title:topic.title,subtitle:"\(reading.sources.count) 份材料")
                 if let titleSource=model.sourcePageIndex.recordsByID[topic.sourceID] {
                     Button { go(.source(titleSource.id)) } label: {
                         HStack(spacing:5) {
@@ -1227,14 +1252,14 @@ struct WorkspaceView: View {
                 WorkspaceSearchField(text:$topicQuery,placeholder:"搜索主题标题或摘要")
                     .accessibilityIdentifier("topics.search")
                 if !themeListings.isEmpty {
-                    LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing: WorkspaceMetrics.groupGap)],alignment:.leading,spacing: WorkspaceMetrics.groupGap) {
-                        ForEach(themeListings) { listing in
-                            TopicPreviewCard(topic:listing.topic,preview:topicCardPreview(listing.topic,catalog:catalog),
-                                             materialCount:listing.materialCount,
-                                             sectionCount:listing.topic.organization?.sections?.count,
-                                             latestLabel:listing.latestMaterialDate == nil ? nil : clueDateLabel(listing.latestMaterialDate),
-                                             highlighted:themeKeyboardFocus.id == listing.id) { selectTopic(listing.topic.id) }
-                                .id(listing.id)
+                    VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
+                        ForEach(Array(domainSections(themeListings).enumerated()), id: \.offset) { _, section in
+                            VStack(alignment:.leading,spacing:12) {
+                                WorkspaceSectionHeading(section.title, count:"\(section.listings.count)")
+                                LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing: WorkspaceMetrics.groupGap)],alignment:.leading,spacing: WorkspaceMetrics.groupGap) {
+                                    ForEach(section.listings) { listing in themeCard(listing) }
+                                }
+                            }
                         }
                     }
                     .focusable()
@@ -3156,7 +3181,7 @@ struct WorkspaceView: View {
         guard page == .themes, topic == nil, themeListFocused,
               press.modifiers.isDisjoint(with:[.command,.option,.control]) else { return .ignored }
         if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
-        let ids=visibleTopicListings.filter { $0.level == .theme }.map(\.id)
+        let ids = domainSections(visibleTopicListings.filter { $0.level == .theme }).flatMap { $0.listings }.map(\.id)
         switch press.key {
         case .downArrow, .upArrow:
             guard themeKeyboardFocus.step(up: press.key == .upArrow, over: ids) else { return .ignored }

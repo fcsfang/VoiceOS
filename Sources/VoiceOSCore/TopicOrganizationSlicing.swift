@@ -34,10 +34,13 @@ public struct TopicSkeletonTopic: Codable, Sendable {
     public let title: String
     public let summary: String
     public var questions: [String]? = nil
+    /// 人生维度（TopicDomain 的 rawValue）；旧结果没有这个字段，解码为 nil。
+    public var domain: String? = nil
     public let viewpointIDs: [String]
-    public init(topicID: String, title: String, summary: String, questions: [String]? = nil, viewpointIDs: [String]) {
+    public init(topicID: String, title: String, summary: String, questions: [String]? = nil,
+                domain: String? = nil, viewpointIDs: [String]) {
         self.topicID = topicID; self.title = title; self.summary = summary
-        self.questions = questions; self.viewpointIDs = viewpointIDs
+        self.questions = questions; self.domain = domain; self.viewpointIDs = viewpointIDs
     }
 }
 

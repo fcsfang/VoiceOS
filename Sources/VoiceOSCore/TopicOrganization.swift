@@ -35,6 +35,8 @@ public struct TopicOrganizationSummary: Codable, Sendable {
     public var discussionContextIDs: [String]? = nil
     public var sections: [TopicReadingSection]? = nil
     public var claimVersions: [String:Int]? = nil
+    /// 人生维度（TopicDomain 的 rawValue）；旧数据没有这个字段。
+    public var domain: String? = nil
     /// True between the skeleton and this topic's body batch. The topic page
     /// reads this as "正文整理中"; automatic retries only fill pending bodies.
     public var bodyPending: Bool? = nil
@@ -118,9 +120,12 @@ public protocol TopicOrganizationPort: Sendable {
     func organizeSkeleton(_ input: TopicSkeletonInput) async throws -> TopicSkeletonResult
     func organizeSkeletonMerge(_ input: TopicSkeletonMergeInput) async throws -> TopicSkeletonMergeResult
     func organizeBody(_ input: TopicBodyInput) async throws -> TopicBodyResult
+    /// 给缺人生维度的主题补一次归类；不支持该能力的端口返回空。
+    func assignTopicDomains(_ input: TopicDomainInput) async throws -> [TopicDomainAssignment]
     var skeletonIdentity: TopicOrganizationAttemptIdentity { get }
     var mergeIdentity: TopicOrganizationAttemptIdentity { get }
     var bodyIdentity: TopicOrganizationAttemptIdentity { get }
+    var domainIdentity: TopicOrganizationAttemptIdentity { get }
 }
 public extension TopicOrganizationPort {
     var skeletonIdentity: TopicOrganizationAttemptIdentity {
@@ -131,6 +136,10 @@ public extension TopicOrganizationPort {
     }
     var bodyIdentity: TopicOrganizationAttemptIdentity {
         .init(provider:"topic_body",model:"unspecified",promptVersion:"topic-body-v1",schemaVersion:"topics-v1")
+    }
+    func assignTopicDomains(_ input: TopicDomainInput) async throws -> [TopicDomainAssignment] { [] }
+    var domainIdentity: TopicOrganizationAttemptIdentity {
+        .init(provider:"topic_domains",model:"unspecified",promptVersion:"topic-domains-v1",schemaVersion:"topics-v1")
     }
 }
 
@@ -482,7 +491,55 @@ extension VoiceOSStore {
         if !failures.isEmpty {
             throw TopicOrganizationIncomplete(topicCount: failedTopicIDs.count, firstReason: failures.first?.reason ?? "")
         }
+        // 旧主题（或本轮没碰到的主题）还没有人生维度时补一次归类；
+        // 归类只是浏览层的收拢，失败不影响本轮整理结果。
+        try Task.checkCancellation()
+        do { try await assignMissingTopicDomains(using: model) }
+        catch is CancellationError { throw CancellationError() }
+        catch { }
         return true
+    }
+
+    /// 给所有缺 domain 的主题批量补归类（每批 40 个）。只写仍为空的主题，
+    /// 竞态下已有域的主题不会被覆盖。
+    private func assignMissingTopicDomains(using model: any TopicOrganizationPort) async throws {
+        var candidates: [TopicDomainCandidate] = []
+        for row in try db.query("SELECT id,title,organization_json FROM reflection_questions WHERE organization_json IS NOT NULL") {
+            guard let id = row["id"], let title = row["title"], let json = row["organization_json"],
+                  let summary = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(json.utf8)),
+                  summary.domain == nil else { continue }
+            candidates.append(TopicDomainCandidate(topicID: id, title: title, summary: summary.summary))
+        }
+        guard !candidates.isEmpty else { return }
+        var assigned: [String: String] = [:]
+        var offset = 0
+        while offset < candidates.count {
+            let chunk = Array(candidates[offset..<min(offset + 40, candidates.count)])
+            offset += 40
+            let result = try await model.assignTopicDomains(TopicDomainInput(topics: chunk))
+            let known = Set(chunk.map(\.topicID))
+            for item in result where known.contains(item.topicID) {
+                if let domain = TopicDomain.normalized(item.domain) { assigned[item.topicID] = domain }
+            }
+        }
+        guard !assigned.isEmpty else { return }
+        try db.transaction {
+            for (topicID, domain) in assigned {
+                guard let row = try db.query("SELECT organization_json FROM reflection_questions WHERE id=?", [topicID]).first,
+                      let json = row["organization_json"],
+                      var summary = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(json.utf8)),
+                      summary.domain == nil else { continue }
+                summary.domain = domain
+                try db.execute("UPDATE reflection_questions SET organization_json=?,updated_at=? WHERE id=?",
+                               [try Self.relevanceJSON(summary), Self.now(), topicID])
+            }
+        }
+    }
+
+    /// 旧主题的 organization_json 里已经有的域，重写摘要时保留。
+    private static func existingTopicDomain(_ json: String?) -> String? {
+        guard let json, let summary = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(json.utf8)) else { return nil }
+        return summary.domain
     }
 
     // MARK: stage requests
@@ -711,8 +768,10 @@ extension VoiceOSStore {
             summary.discussionContextIDs = input.discussionReplies.filter { !refs.isDisjoint(with: $0.sourceIDs) }.map(\.contextID)
             summary.sections = nil
             summary.bodyPending = true
+            summary.domain = TopicDomain.normalized(proposal.domain) ?? Self.existingTopicDomain(existingRow?.json)
             if let oldJSON = existingRow?.json,
                let old = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(oldJSON.utf8)),
+               old.domain == summary.domain,
                old.bodyPending != true, old.sections?.isEmpty == false,
                old.summary == summary.summary, old.questions == summary.questions,
                old.claimVersions == summary.claimVersions, old.sourceVersions == summary.sourceVersions,
@@ -751,7 +810,8 @@ extension VoiceOSStore {
                                   applied: [(id: String, title: String, summary: String, questions: [String], sourceIDs: [String])]) -> TopicSkeletonResult {
         let topics = zip(skeleton.topics, applied).map { proposal, row in
             TopicSkeletonTopic(topicID: row.id, title: row.title, summary: proposal.summary,
-                               questions: proposal.questions, viewpointIDs: proposal.viewpointIDs)
+                               questions: proposal.questions, domain: proposal.domain,
+                               viewpointIDs: proposal.viewpointIDs)
         }
         return .init(briefing: skeleton.briefing, highlightSourceIDs: skeleton.highlightSourceIDs,
                      topics: topics, responseID: skeleton.responseID)

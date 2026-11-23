@@ -1145,3 +1145,9 @@
 - 「待处理」全部读完时 items 为空、时间线整块被空态替换，最近笔记随之消失；空态分支改为：days 非空且 recentNotes 非空时渲染滚动列（最近笔记在上、「待处理的都处理完了」与「查看全部」在下）。
 - 构建 80 的 dist 阶段因集成脚本自持 build 锁又调用 build.py 而死锁（build.py 内部取同一把锁，旧实现等满 40 分钟后静默无锁继续）。已改：build.py 拿不到锁直接报错退出；集成脚本在 dist 前先释放锁（build.py 自己取锁）。教训写入记忆。
 - 集成：构建 81 全绿（build_exit=0 / test_exit=0，581 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 186：主题按人生维度凝练（2026-11-23）
+- 用户反馈主题太分散，希望按人生角度（爱情、职业等）凝练。方案：维度写进主题的 organization_json，零 schema 迁移。
+- Core：TopicDomain 八域（爱情/家庭/职业/金钱/健康/成长/自我/生活）；TopicOrganizationSummary 增加可选 domain（旧数据兼容）；骨架与合流 schema 增加 domain 枚举并必填、提示词要求按长期关切归域；协议新增 assignTopicDomains（默认空实现，夹具不受影响）与 domainIdentity；Responses 端口实现批量归类（effort low）；applyTopicSkeleton 写入并保留域；organizeTopics 结尾按 40 个一批补归类缺域主题，只写仍为空的行、失败不阻塞。
+- App：主题页按域分组（固定八域在前、未归类殿后、空域不出现、每域带数量）；方向键顺序与视觉一致；详情页眉显示维度。
+- 测试 +3 与夹具修复：旧 summary 解码、白名单、骨架主题解码；切片测试夹具区分「维度归类」与正文请求，断言归类补一次、正文仍 3 批。
+- 集成：构建 82 因夹具误分类 1 条失败；修复后构建 83 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0）；重启闸门因用户活跃延后。

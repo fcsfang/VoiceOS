@@ -42,7 +42,7 @@ private actor SlicingTopicPort: TopicOrganizationPort {
 
 private final class TopicRequestRecorder: @unchecked Sendable {
     private let lock = NSLock()
-    private var skeleton: [Int] = [], merge: [Int] = [], body: [Int] = [], count = 0
+    private var skeleton: [Int] = [], merge: [Int] = [], body: [Int] = [], domain: [Int] = [], count = 0
     func recordSkeleton(_ bytes: Int) -> String {
         lock.lock(); defer { lock.unlock() }
         skeleton.append(bytes); count += 1; return "recording-skeleton-\(count)"
@@ -55,9 +55,13 @@ private final class TopicRequestRecorder: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         body.append(bytes); count += 1; return "recording-body-\(count)"
     }
-    func sizes() -> (skeleton: [Int], merge: [Int], body: [Int]) {
+    func recordDomain(_ bytes: Int) -> String {
         lock.lock(); defer { lock.unlock() }
-        return (skeleton, merge, body)
+        domain.append(bytes); count += 1; return "recording-domain-\(count)"
+    }
+    func sizes() -> (skeleton: [Int], merge: [Int], body: [Int], domain: [Int]) {
+        lock.lock(); defer { lock.unlock() }
+        return (skeleton, merge, body, domain)
     }
 }
 
@@ -104,6 +108,15 @@ private struct RecordingTopicTransport: ModelHTTPTransport {
             }
             let result: [String: Any] = ["briefing": "已按观点建立主题骨架，正文随后分批补齐。",
                                          "highlightSourceIDs": [String](), "topics": topics]
+            text = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
+        } else if let topics = object["topics"] as? [[String: Any]], topics.first?["viewpoints"] == nil {
+            // 维度补归类：只带 topicID/title/summary，没有观点与引文。
+            id = recorder.recordDomain(request.httpBody?.count ?? 0)
+            let answered: [[String: Any]] = topics.compactMap { topic in
+                guard let topicID = topic["topicID"] as? String else { return nil }
+                return ["topicID": topicID, "domain": "生活"]
+            }
+            let result: [String: Any] = ["topics": answered]
             text = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
         } else if let topics = object["topics"] as? [[String: Any]] {
             id = recorder.recordBody(request.httpBody?.count ?? 0)
@@ -227,6 +240,7 @@ final class TopicOrganizationSlicingChecks: XCTestCase {
         XCTAssertEqual(sizes.skeleton.count, 1, "15 条观点落在同一骨架批")
         XCTAssertEqual(sizes.merge.count, 1, "骨架批之后必须走一次合流")
         XCTAssertEqual(sizes.body.count, 3, "15 个主题按 5 个一批分成 3 批")
+        XCTAssertEqual(sizes.domain.count, 1, "夹具主题不带维度，整理结束后补一次归类")
         for skeleton in sizes.skeleton {
             XCTAssertLessThan(skeleton, TopicOrganizationSlicePolicy.skeletonByteLimit, "骨架请求体实测 \(skeleton) 字节")
         }
