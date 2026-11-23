@@ -13,7 +13,7 @@ private struct OnboardingStep: Identifiable, Sendable {
 private let onboardingSteps: [OnboardingStep] = [
     OnboardingStep(id: 0, title: "开始之前", detail: "麦克风用于口述与录音，开口即可记录想法。\n提醒事项用于把待办提醒带回系统，到点由系统提醒你。", symbol: "hand.raised"),
     OnboardingStep(id: 1, title: "记录想法", detail: "按 ⌥⌘D 开始口述，或从菜单栏打开速记（⌥⌘N）。想法先留在本机，再慢慢整理；即使文本模型还没配置，原音也会先保存在本机。", symbol: "mic"),
-    OnboardingStep(id: 2, title: "资料与行动", detail: "导入录音或文字后，音频在本机转写；只有你选择允许的文字会交给云端文本模型，整理成笔记、理解与行动。完成的行动可以回来记录结果。", symbol: "books.vertical"),
+    OnboardingStep(id: 2, title: "资料与行动", detail: "导入录音或文字后，音频在本机转写；只有你选择允许（或开启自动处理）的文字会交给云端文本模型，整理成笔记、理解与行动。完成的行动可以回来记录结果。", symbol: "books.vertical"),
     OnboardingStep(id: 3, title: "快捷键", detail: "", symbol: "keyboard"),
     OnboardingStep(id: 4, title: "完成", detail: "菜单栏图标常驻，随时速记；每周结束到行动页打开每周回顾。", symbol: "checkmark.circle")
 ]

@@ -38,6 +38,9 @@ struct RecentContentHome: View {
     @State private var organizeToast: String?
     @State private var organizeToastSourceID: String?
     @AppStorage("voiceos.home.recentThoughts.expanded") private var recentThoughtsExpanded = false
+    /// 首页「最近笔记」：按笔记整理时间浮现，旧录音今天整理的笔记也能接着读。
+    @AppStorage("voiceos.home.recentNotes.expanded") private var recentNotesExpanded = true
+    @State private var recentNotes: [StoredMaterialNote] = []
     @State private var recentThoughtsHighlighted = false
     @State private var frozenViewpointsItemID: String?
     @FocusState private var timelineFocused: Bool
@@ -48,6 +51,7 @@ struct RecentContentHome: View {
     private let timelineSpace = "home.timeline"
     private let tasksAnchor = "home.tasks.summary"
     private let recentThoughtsRowID = "home.recentThoughts"
+    private let recentNotesRowID = "home.recentNotes"
 
     // Only 特大 (1.45) crosses 1.3; 大 (1.28) keeps the single-line rows.
     private var isLargeText: Bool { textScale >= 1.3 }
@@ -106,6 +110,9 @@ struct RecentContentHome: View {
         .onChange(of: selected?.id) { _, _ in syncSelection() }
         .task(id: model.homeSnapshot) { await reloadReadingStates() }
         .task(id: materialNotesReadKey) { await reloadMaterialNotes() }
+        .task(id: HomeRecentNotesKey(records: model.recordsRevision, notes: model.materialNotesRevision)) {
+            recentNotes = await model.recentMaterialNotes(limit: 8)
+        }
         .onChange(of: model.understandingSource) { _, id in finishOrganizeAttempt(id) }
         .sheet(item: $clueRename) { request in
             RecentClueRenameSheet(model: model, clue: request.clue, title: request.title, resettable: request.resettable) { clueRename = nil }
@@ -189,6 +196,7 @@ struct RecentContentHome: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    if !recentNotes.isEmpty { recentNotesEntry }
                     if !recentThoughts.isEmpty { recentThoughtsEntry(recentThoughts).id(recentThoughtsRowID) }
                     ForEach(Array(visibleDays.enumerated()), id: \.element.id) { index, day in
                         VStack(alignment: .leading, spacing: 0) {
@@ -801,6 +809,70 @@ struct RecentContentHome: View {
         withAnimation(reduceMotion ? nil : WorkspaceMotion.expand) { recentThoughtsExpanded.toggle() }
     }
 
+    /// 最近整理的笔记：标题与预览和材料页同一篇，点开即回到上次读到的位置。
+    private var recentNotesEntry: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(reduceMotion ? nil : WorkspaceMotion.expand) { recentNotesExpanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .rotationEffect(.degrees(recentNotesExpanded ? 90 : 0))
+                        .vosFont(WorkspaceText.caption.size, weight: .semibold)
+                        .foregroundStyle(palette.tertiaryText)
+                        .accessibilityHidden(true)
+                    Text("最近笔记").vosFont(WorkspaceText.meta.size, weight: .semibold)
+                        .foregroundStyle(palette.secondaryText)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("\(recentNotes.count) 篇")
+                        .vosFont(WorkspaceText.caption, monospacedDigit: true).foregroundStyle(palette.tertiaryText)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(recentNotesExpanded ? "收起最近笔记" : "展开最近整理的笔记")
+            .accessibilityIdentifier("home.recentNotes.toggle")
+            .accessibilityValue(recentNotesExpanded ? "已展开" : "已收起")
+            if recentNotesExpanded {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(recentNotes.enumerated()), id: \.element.id) { index, stored in
+                        if index > 0 { WorkspaceListDivider().padding(.horizontal, 10) }
+                        Button { openRecentNote(stored) } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(MaterialNoteHomeText.title(stored.note) ?? "未命名笔记")
+                                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.text)
+                                    .lineLimit(isLargeText ? 3 : 2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .multilineTextAlignment(.leading)
+                                if let preview = MaterialNoteHomeText.preview(stored.note) {
+                                    Text(preview).vosFont(WorkspaceText.caption)
+                                        .foregroundStyle(palette.secondaryText)
+                                        .lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .multilineTextAlignment(.leading)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .homeRowChrome(isSelected: false)
+                        }
+                        .buttonStyle(.plain)
+                        .help("打开这篇笔记，回到上次读到的位置")
+                        .accessibilityIdentifier("home.recentNotes.row")
+                    }
+                }
+            }
+            WorkspaceListDivider().padding(.top, 8)
+        }
+        .id(recentNotesRowID)
+    }
+
+    private func openRecentNote(_ stored: StoredMaterialNote) {
+        guard let first = stored.expressionKey.split(separator: "|").first.map(String.init) else { return }
+        model.revealSource(first)
+    }
+
     private func recentThoughtsEntry(_ groups: [RecentThoughtDay]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
@@ -1040,6 +1112,13 @@ extension ControlCenter {
     /// One read for the visible rows. Results merge into the session cache by
     /// revision: a late response can never replace a newer note, and a failed
     /// read keeps the previous rows instead of blanking every title on home.
+    /// 首页「最近笔记」：每个表达的最新一版，按整理时间倒序。
+    @MainActor
+    func recentMaterialNotes(limit: Int = 8) async -> [StoredMaterialNote] {
+        guard let store else { return [] }
+        return (try? await store.recentMaterialNotes(limit: limit)) ?? []
+    }
+
     @MainActor
     @discardableResult
     func latestMaterialNotes(expressionKeys: [String]) async -> [String: StoredMaterialNote] {
@@ -1194,6 +1273,11 @@ private struct HomeMaterialNotesKey: Equatable {
     let records: Int
     let notes: Int
     let expressionKeys: [String]
+}
+
+private struct HomeRecentNotesKey: Equatable {
+    let records: Int
+    let notes: Int
 }
 
 /// Title and preview text the home rows and the reader take from a saved note.

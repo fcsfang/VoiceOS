@@ -138,6 +138,20 @@ final class MaterialNoteChecks: XCTestCase {
         XCTAssertEqual(latest["b|c"], newestBC)
     }
 
+    func test最近笔记按整理时间倒序且每表达只一篇() async throws {
+        let store = try await openStore()
+        _ = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("较早"),
+                                             transcriptVersions: ["a": "ta-v1"], modelIdentity: nil)
+        let second = try await store.saveMaterialNote(memberSourceIDs: ["b"], note: note("较晚"),
+                                                      transcriptVersions: ["b": "tb-v1"], modelIdentity: nil)
+        _ = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("较早·第二版"),
+                                             transcriptVersions: ["a": "ta-v2"], modelIdentity: nil)
+        let recent = try await store.recentMaterialNotes(limit: 8)
+        XCTAssertEqual(recent.count, 2)
+        XCTAssertEqual(recent.first?.expressionKey, "a")
+        XCTAssertEqual(recent.last, second)
+    }
+
     func test批量读单行损坏不拖垮其余笔记() async throws {
         let store = try await openStore()
         let good = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("完好"),

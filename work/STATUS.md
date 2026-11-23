@@ -1137,3 +1137,7 @@
   - 底部处理条：WorkspaceProcessingStatus 新增 dictationSavesOnly，模型缺失时显示「停止后保存原音/停止并保存」。
   - ToggleDictation Intent：等待 2s→10s，忙时继续等待并按 busy 区分失败文案。
 - 构建 76/77 分别因属性声明漏插（public var 未匹配）与 openMainWindow fileprivate 失败；修正后构建 78 全绿（build_exit=0 / test_exit=0，580 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 184：首页最近笔记与许可口径（2026-11-23）
+- 184-A 首页「最近笔记」：Core 新增 recentMaterialNotes(limit:)（每表达最新一版、按整理时间倒序、相关子查询每键一行）；首页时间线顶部可折叠组（默认展开），笔记标题 + 导语预览，点开经 revealSource 打开同一正文并恢复阅读位置；随 records/materialNotes 代际刷新。测试 +1。
+- 184-B 许可口径：收件箱连接规则明确「连接入口后新录音文字会自动交给已配置文本模型（云端），随时可改仅本机」；引导第 2 步补「（或开启自动处理）」；数据与隐私卡本已准确。
+- 集成：构建 79 全绿（build_exit=0 / test_exit=0，581 tests / dist_build_exit=0，attempt=1 重启）。

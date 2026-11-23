@@ -476,7 +476,7 @@ struct RecordingInboxView: View {
                     DisclosureGroup("查看接收与处理规则") {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("VoiceOS 打开且 Mac 唤醒时，自动完成 Qwen 全长转写，由 AI 识别连续表达并合并理解，再整理观点、任务和提醒事项。").vosFont(WorkspaceText.body)
-                            Text("只接收连接后新增或更新的素材；原文件保留。有变化时立即检查，文件连续两次检查不变后自动处理。同批录音先转写再判断分组；稍后到达的补录自动接续。音频在本机处理，文字使用已配置文本模型。")
+                            Text("只接收连接后新增或更新的素材；原文件保留。有变化时立即检查，文件连续两次检查不变后自动处理。同批录音先转写再判断分组；稍后到达的补录自动接续。音频在本机处理；连接这个入口后，新录音的文字会自动交给已配置的文本模型（云端）识别连续表达、整理观点与任务，随时可在材料里改为仅本机。")
                                 .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                             Text(RecordingMediaInfo.personalRecordingLayout).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
                         }.padding(.top, 8)

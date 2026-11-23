@@ -121,6 +121,22 @@ extension VoiceOSStore {
         return latest
     }
 
+    /// 最近更新的笔记：每个表达取最新一版，按保存时间倒序。首页「最近笔记」
+    /// 用它——旧录音今天才整理出的笔记，也能凭整理时间浮现，而不是按录音日期。
+    public func recentMaterialNotes(limit: Int = 8) throws -> [StoredMaterialNote] {
+        guard limit > 0 else { return [] }
+        let rows = try db.query(
+            """
+            SELECT * FROM material_notes m
+            WHERE m.rowid = (SELECT rowid FROM material_notes
+                             WHERE expression_key = m.expression_key
+                             ORDER BY created_at DESC, rowid DESC LIMIT 1)
+            ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?
+            """,
+            [String(limit)])
+        return rows.compactMap { try? Self.storedMaterialNote($0) }
+    }
+
     /// Current only while every member's transcript version still matches the
     /// version recorded at save time; a member missing from the current library
     /// invalidates the note.
