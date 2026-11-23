@@ -494,15 +494,16 @@ extension VoiceOSStore {
         // 旧主题（或本轮没碰到的主题）还没有人生维度时补一次归类；
         // 归类只是浏览层的收拢，失败不影响本轮整理结果。
         try Task.checkCancellation()
-        do { try await assignMissingTopicDomains(using: model) }
+        do { try await backfillTopicDomains(using: model) }
         catch is CancellationError { throw CancellationError() }
         catch { }
         return true
     }
 
     /// 给所有缺 domain 的主题批量补归类（每批 40 个）。只写仍为空的主题，
-    /// 竞态下已有域的主题不会被覆盖。
-    private func assignMissingTopicDomains(using model: any TopicOrganizationPort) async throws {
+    /// 竞态下已有域的主题不会被覆盖。启动时也可单独调用，不必重跑整套整理。
+    @discardableResult
+    public func backfillTopicDomains(using model: any TopicOrganizationPort) async throws -> Int {
         var candidates: [TopicDomainCandidate] = []
         for row in try db.query("SELECT id,title,organization_json FROM reflection_questions WHERE organization_json IS NOT NULL") {
             guard let id = row["id"], let title = row["title"], let json = row["organization_json"],
@@ -510,7 +511,7 @@ extension VoiceOSStore {
                   summary.domain == nil else { continue }
             candidates.append(TopicDomainCandidate(topicID: id, title: title, summary: summary.summary))
         }
-        guard !candidates.isEmpty else { return }
+        guard !candidates.isEmpty else { return 0 }
         var assigned: [String: String] = [:]
         var offset = 0
         while offset < candidates.count {
@@ -522,7 +523,8 @@ extension VoiceOSStore {
                 if let domain = TopicDomain.normalized(item.domain) { assigned[item.topicID] = domain }
             }
         }
-        guard !assigned.isEmpty else { return }
+        guard !assigned.isEmpty else { return 0 }
+        var written = 0
         try db.transaction {
             for (topicID, domain) in assigned {
                 guard let row = try db.query("SELECT organization_json FROM reflection_questions WHERE id=?", [topicID]).first,
@@ -532,8 +534,10 @@ extension VoiceOSStore {
                 summary.domain = domain
                 try db.execute("UPDATE reflection_questions SET organization_json=?,updated_at=? WHERE id=?",
                                [try Self.relevanceJSON(summary), Self.now(), topicID])
+                written += 1
             }
         }
+        return written
     }
 
     /// 旧主题的 organization_json 里已经有的域，重写摘要时保留。

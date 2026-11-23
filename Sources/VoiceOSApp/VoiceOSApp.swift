@@ -1010,6 +1010,17 @@ final class ControlCenter: ObservableObject {
     /// 不再先按旧标题渲染再跳变。按表达键存放每条最新一版，只增不减。
     @Published var materialNoteRows: [String: StoredMaterialNote] = [:]
     var materialNoteModel: ResponsesMaterialNotePort?
+    private var topicDomainBackfillStarted = false
+    /// 升级后旧主题还没有人生维度：启动时用一次低成本归类补齐，不重跑整套
+    /// 主题整理。每个运行期只尝试一次；失败就等下次启动或下次整理。
+    private func startTopicDomainBackfillIfNeeded() {
+        guard !topicDomainBackfillStarted, initialized, let store, let port = topicModel else { return }
+        topicDomainBackfillStarted = true
+        Task {
+            guard let written = try? await store.backfillTopicDomains(using: port), written > 0 else { return }
+            await refresh()
+        }
+    }
     func queueTopicOrganization(retry: Bool = false, topUp: Bool = false) {
         guard initialized, topicModel != nil else { return }
         topicForcePending = topicForcePending || retry
@@ -1295,6 +1306,7 @@ final class ControlCenter: ObservableObject {
     private var refreshWorker: Task<Bool, Never>?
     private var pendingRefreshPlan: RefreshPlan?
     func refresh(_ scope: RefreshScope = .interactive) async {
+        if scope == .full { startTopicDomainBackfillIfNeeded() }
         let request = RefreshPlan(scope)
         if var pending = pendingRefreshPlan { pending.merge(request); pendingRefreshPlan = pending }
         else { pendingRefreshPlan = request }
@@ -1748,6 +1760,7 @@ final class ControlCenter: ObservableObject {
             discussionModel=suite.discussion;outcomeModel=suite.outcome
             recordingTitleModel=suite.recordingTitles
             topicModel=suite.topics; topicAttemptDigest=nil; materialNoteModel=suite.note
+            startTopicDomainBackfillIfNeeded()
             recordingExpressionModel=suite.recordingExpressions
             assistantModel=suite.assistant
             initiationModel=suite.initiation
