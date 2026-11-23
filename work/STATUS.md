@@ -1197,3 +1197,5 @@
 - 用户：成品/原材料的分层应成为整个软件的原则。收件箱（旧首页）右侧不再渲染【想法】线索分组、编号要点、看原话与「想慢慢做到」；有笔记的条目只显示成品预览（标题+导语）与待处理信息（待办、行动反馈），没有笔记时提示去材料页。
 - 随【想法】面板移除线索重命名/合并/隐藏整块入口与组件（threadSection、ThoughtLine、ClueHeaderMenu、RecentClueRenameSheet、ClueRenameRequest 等，约 −240 行）；保留整理引导、最近想法区与失败提示。
 - 集成：构建 100 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 196：收件箱撤掉回听（2026-11-23）
+- 收件箱元信息行的「回听」删除（原材料动作）；回听集中在材料页。集成：构建 101 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=6 重启）。

@@ -626,12 +626,6 @@ struct RecentContentHome: View {
             HStack(alignment: .firstTextBaseline, spacing: 14) {
                 Text(readerMeta(item)).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 Spacer(minLength: 8)
-                if let source = materialSource(item), ["audio", "video"].contains(source.kind) {
-                    Button("回听") { Task { await model.play(source) } }
-                        .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
-                        .disabled(source.state != "saved")
-                        .help(source.state == "saved" ? "播放这段录音" : "录音尚未就绪，暂时无法回听")
-                }
                 if let first = item.sourceIDs.first {
                     let hasNote = materialNote(for: item) != nil
                     Button(hasNote ? "继续读" : "打开材料") { hasNote ? openNote(first) : openSource(first) }
