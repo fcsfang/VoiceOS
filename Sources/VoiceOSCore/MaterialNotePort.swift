@@ -28,11 +28,28 @@ public struct MaterialNoteMember: Sendable {
     }
 }
 
+/// 板上可引用的行动快照：模型只能引用这些 id，不能发明。
+public struct NoteBoardActionRef: Sendable, Equatable {
+    public let id: String
+    public let title: String
+    public let state: String
+    public init(id: String, title: String, state: String) { self.id = id; self.title = title; self.state = state }
+}
+/// 板上可引用的观点快照。
+public struct NoteBoardClaimRef: Sendable, Equatable {
+    public let id: String
+    public let statement: String
+    public init(id: String, statement: String) { self.id = id; self.statement = statement }
+}
 public struct MaterialNoteRequest: Sendable {
     public let members: [MaterialNoteMember]
     public let expressionDate: String?
-    public init(members: [MaterialNoteMember], expressionDate: String? = nil) {
+    public let actions: [NoteBoardActionRef]
+    public let claims: [NoteBoardClaimRef]
+    public init(members: [MaterialNoteMember], expressionDate: String? = nil,
+                actions: [NoteBoardActionRef] = [], claims: [NoteBoardClaimRef] = []) {
         self.members = members; self.expressionDate = expressionDate
+        self.actions = actions; self.claims = claims
     }
 }
 
@@ -72,31 +89,45 @@ public enum MaterialNoteAnchoring {
         let bySource = Dictionary(members.map { ($0.sourceID, $0) }, uniquingKeysWith: { first, _ in first })
         let sections = note.sections.map { section in
             MaterialNote.Section(heading: section.heading, paragraphs: section.paragraphs.map { paragraph in
-                // 同一段落内的锚点按叙述顺序推进：重复出现的短语优先选择上一个
-                // 锚点之后、且上下文最接近的一次，而不是永远回到全篇最早一次。
-                // 次序只在同一成员内有意义；切换到另一成员时重新从头算。
-                var lastAnchor: (sourceID: String, index: Int)?
-                let anchors = paragraph.anchors.compactMap { anchor -> MaterialNote.Anchor? in
-                    guard let member = bySource[anchor.sourceID] else { return nil }
-                    let needle = Self.normalized(anchor.quote)
-                    guard !needle.isEmpty, Self.normalized(member.transcript).contains(needle) else { return nil }
-                    let after = lastAnchor?.sourceID == anchor.sourceID ? (lastAnchor?.index ?? -1) : -1
-                    let spanID = Self.resolveSpan(quote: anchor.quote, in: member,
-                                                  paragraphText: paragraph.text, after: after)
-                    if let spanID, let index = member.spans.firstIndex(where: { $0.id == spanID }) {
-                        lastAnchor = (anchor.sourceID, index)
-                    }
-                    return MaterialNote.Anchor(quote: anchor.quote, sourceID: anchor.sourceID,
-                                               transcriptVersionID: member.transcriptVersionID,
-                                               spanID: spanID)
-                }
-                return MaterialNote.Paragraph(text: paragraph.text, anchors: anchors, inferred: paragraph.inferred,
-                                              annotations: sanitizedAnnotations(paragraph.annotations, members: members),
-                                              marks: sanitizedMarks(paragraph.marks, in: paragraph.text))
+                sanitizedParagraph(paragraph, members: members, bySource: bySource)
             })
         }
+        let blocks = note.blocks?.map { block -> NoteBlock in
+            guard let paragraphs = block.paragraphs else { return block }
+            return NoteBlock(id: block.id, kind: block.kind, heading: block.heading,
+                             paragraphs: paragraphs.map { sanitizedParagraph($0, members: members, bySource: bySource) },
+                             annotation: block.annotation, actionID: block.actionID, claimID: block.claimID,
+                             sourceID: block.sourceID, spanID: block.spanID, quote: block.quote,
+                             text: block.text, tone: block.tone, titleOverride: block.titleOverride)
+        }
         return MaterialNote(title: note.title, lead: note.lead, sections: sections,
-                            closing: sanitizedAnnotations(note.closing, members: members))
+                            closing: sanitizedAnnotations(note.closing, members: members), blocks: blocks)
+    }
+
+    /// 段落锚点与批注/标记的定位校验；文字块与旧的节共用这一条路径。
+    private static func sanitizedParagraph(_ paragraph: MaterialNote.Paragraph, members: [MaterialNoteMember],
+                                           bySource: [String: MaterialNoteMember]) -> MaterialNote.Paragraph {
+        // 同一段落内的锚点按叙述顺序推进：重复出现的短语优先选择上一个
+        // 锚点之后、且上下文最接近的一次，而不是永远回到全篇最早一次。
+        // 次序只在同一成员内有意义；切换到另一成员时重新从头算。
+        var lastAnchor: (sourceID: String, index: Int)?
+        let anchors = paragraph.anchors.compactMap { anchor -> MaterialNote.Anchor? in
+            guard let member = bySource[anchor.sourceID] else { return nil }
+            let needle = Self.normalized(anchor.quote)
+            guard !needle.isEmpty, Self.normalized(member.transcript).contains(needle) else { return nil }
+            let after = lastAnchor?.sourceID == anchor.sourceID ? (lastAnchor?.index ?? -1) : -1
+            let spanID = Self.resolveSpan(quote: anchor.quote, in: member,
+                                          paragraphText: paragraph.text, after: after)
+            if let spanID, let index = member.spans.firstIndex(where: { $0.id == spanID }) {
+                lastAnchor = (anchor.sourceID, index)
+            }
+            return MaterialNote.Anchor(quote: anchor.quote, sourceID: anchor.sourceID,
+                                       transcriptVersionID: member.transcriptVersionID,
+                                       spanID: spanID)
+        }
+        return MaterialNote.Paragraph(text: paragraph.text, anchors: anchors, inferred: paragraph.inferred,
+                                      annotations: sanitizedAnnotations(paragraph.annotations, members: members),
+                                      marks: sanitizedMarks(paragraph.marks, in: paragraph.text))
     }
 
     /// 行内标记必须逐字落在正文里；模型改写过的标记直接忽略，不破坏文字。

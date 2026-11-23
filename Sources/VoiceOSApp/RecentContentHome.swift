@@ -1037,6 +1037,13 @@ enum MaterialNoteHomeText {
                 if !text.isEmpty { return excerpt(text) }
             }
         }
+        // 笔记板（v6）：预览取第一个文字块的正文。
+        for block in NoteBoardAdapting.blocks(for: note) where block.kind == "text" {
+            for paragraph in block.paragraphs ?? [] {
+                let text = flattened(paragraph.text)
+                if !text.isEmpty { return excerpt(text) }
+            }
+        }
         return nil
     }
 

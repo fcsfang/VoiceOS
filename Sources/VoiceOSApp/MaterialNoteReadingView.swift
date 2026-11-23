@@ -184,66 +184,14 @@ struct MaterialNoteReadingView: View {
                         .lineSpacing(WorkspaceText.body.size * textScale * 0.45)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                ForEach(Array(display.note.note.sections.enumerated()), id: \.offset) { sectionIndex, section in
-                    sectionView(section, index: sectionIndex)
-                }
-                if annotationsVisible, let closing = display.note.note.closing, !closing.isEmpty {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text("再看一眼").vosFont(WorkspaceText.sectionTitle)
-                            .foregroundStyle(palette.text)
-                            .accessibilityAddTraits(.isHeader)
-                        ForEach(closing) { annotation in
-                            VStack(alignment: .leading, spacing: 6) {
-                                if let title = normalized(annotation.title) {
-                                    Text(title).vosFont(WorkspaceText.rowTitle)
-                                        .foregroundStyle(palette.text)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                                annotationView(annotation)
-                            }
-                        }
-                    }
+                ForEach(NoteBoardAdapting.blocks(for: display.note.note)) { block in
+                    blockView(block)
                 }
                 relatedSection
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .textSelection(.enabled)
-    }
-
-    @ViewBuilder
-    private func sectionView(_ section: MaterialNote.Section, index: Int) -> some View {
-        let paragraphs = Array(section.paragraphs.enumerated()).filter {
-            !$0.element.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        if !paragraphs.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                if let heading = normalized(section.heading) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(palette.warning.opacity(0.4))
-                            .frame(width: 3, height: 14 * vosLayoutScale(textScale))
-                            .accessibilityHidden(true)
-                        Text(heading)
-                            .vosFont(WorkspaceText.sectionTitle)
-                            .foregroundStyle(palette.text)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityAddTraits(.isHeader)
-                    }
-                }
-                VStack(alignment: .leading, spacing: 18) {
-                    ForEach(paragraphs, id: \.offset) { paragraphIndex, paragraph in
-                        paragraphView(paragraph)
-                            .id(noteAnchor(index, paragraphIndex))
-                            .onGeometryChange(for: CGFloat.self) { proxy in
-                                proxy.frame(in: .scrollView(axis: .vertical)).minY
-                            } action: { minY in
-                                probe(minY, anchor: noteAnchor(index, paragraphIndex))
-                            }
-                    }
-                }
-            }
-        }
     }
 
     /// 成品视图：段落只有正文与「整理时补充的关联」标记。逐段原话与回听
@@ -317,6 +265,198 @@ struct MaterialNoteReadingView: View {
         case "extension": return "延伸"
         case "advice": return "建议"
         default: return kind.isEmpty ? nil : kind
+        }
+    }
+
+    // MARK: - 笔记板
+
+    /// 一块板的组件渲染。引用块（todo/claim/quote）解析到实时记录；目标
+    /// 不存在的引用降级显示模型写下的文字；未知 kind 以降级卡片呈现。
+    @ViewBuilder
+    private func blockView(_ block: NoteBlock) -> some View {
+        switch block.kind {
+        case "todo":
+            todoBlockView(block)
+        case "claim":
+            claimBlockView(block)
+        case "quote":
+            quoteBlockView(block)
+        case "insight":
+            insightBlockView(block)
+        case "callout":
+            calloutBlockView(block)
+        default:
+            if let paragraphs = block.paragraphs, !paragraphs.isEmpty || block.heading != nil {
+                textBlockView(block)
+            } else {
+                unknownBlockView(block)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func textBlockView(_ block: NoteBlock) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let heading = normalized(block.heading) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(palette.warning.opacity(0.4))
+                        .frame(width: 3, height: 14 * vosLayoutScale(textScale))
+                        .accessibilityHidden(true)
+                    Text(heading)
+                        .vosFont(WorkspaceText.sectionTitle)
+                        .foregroundStyle(palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
+                }
+            }
+            VStack(alignment: .leading, spacing: 18) {
+                ForEach(Array((block.paragraphs ?? []).enumerated()), id: \.offset) { index, paragraph in
+                    paragraphView(paragraph)
+                        .id(blockParagraphAnchor(block, index))
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.frame(in: .scrollView(axis: .vertical)).minY
+                        } action: { minY in
+                            probe(minY, anchor: blockParagraphAnchor(block, index))
+                        }
+                }
+            }
+        }
+    }
+
+    private func blockParagraphAnchor(_ block: NoteBlock, _ index: Int) -> String {
+        "note.b.\(block.id).p\(index)"
+    }
+
+    @ViewBuilder
+    private func todoBlockView(_ block: NoteBlock) -> some View {
+        if let actionID = block.actionID, let action = model.sourcePageIndex.allAction(for: actionID) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Button {
+                    guard action.state != "completed" else { return }
+                    Task { _ = await model.completeActionLocally(action) }
+                } label: {
+                    Image(systemName: action.state == "completed" ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(action.state == "completed" ? palette.success : palette.accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(action.state == "completed")
+                .help(action.state == "completed" ? "已完成" : "勾选完成这件事")
+                .accessibilityLabel(action.state == "completed" ? "已完成" : "勾选完成")
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(normalized(block.titleOverride) ?? action.title)
+                        .vosFont(WorkspaceText.body)
+                        .foregroundStyle(palette.text)
+                        .strikethrough(action.state == "completed", color: palette.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if action.state == "completed" {
+                        Text("已完成").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+            .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border, lineWidth: 1) }
+        } else {
+            unknownBlockView(block)
+        }
+    }
+
+    @ViewBuilder
+    private func claimBlockView(_ block: NoteBlock) -> some View {
+        if let claimID = block.claimID, let claim = model.sourcePageIndex.claim(for: claimID) {
+            let reference = claim.references.first
+            Button {
+                if let reference { openSource(reference.sourceID) }
+            } label: {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(normalized(block.titleOverride) ?? claim.statement)
+                        .vosFont(WorkspaceText.body)
+                        .foregroundStyle(palette.text)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if reference != nil {
+                        Text("打开原话").vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(12)
+                .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                .overlay { RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius).strokeBorder(palette.border, lineWidth: 1) }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(reference == nil)
+        } else {
+            unknownBlockView(block)
+        }
+    }
+
+    @ViewBuilder
+    private func quoteBlockView(_ block: NoteBlock) -> some View {
+        if let quote = normalized(block.quote) ?? normalized(block.text) {
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(palette.secondaryText.opacity(0.25))
+                    .frame(width: 2)
+                    .accessibilityHidden(true)
+                Text(quote)
+                    .vosFont(WorkspaceText.body)
+                    .foregroundStyle(palette.secondaryText)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            .padding(.leading, 2)
+        }
+    }
+
+    @ViewBuilder
+    private func insightBlockView(_ block: NoteBlock) -> some View {
+        if annotationsVisible, let annotation = block.annotation {
+            VStack(alignment: .leading, spacing: 6) {
+                if let title = normalized(annotation.title) ?? normalized(block.titleOverride) {
+                    Text(title)
+                        .vosFont(WorkspaceText.rowTitle)
+                        .foregroundStyle(palette.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                annotationView(annotation)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func calloutBlockView(_ block: NoteBlock) -> some View {
+        if let text = normalized(block.text) ?? normalized(block.titleOverride) {
+            Text(text)
+                .vosFont(WorkspaceText.body)
+                .foregroundStyle(palette.text)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(markToneColor(block.tone), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+        }
+    }
+
+    /// 引用失效或未知组件的降级卡片：保留模型写下的文字，不丢内容。
+    @ViewBuilder
+    private func unknownBlockView(_ block: NoteBlock) -> some View {
+        if let text = normalized(block.titleOverride) ?? normalized(block.text) ?? normalized(block.quote) {
+            VStack(alignment: .leading, spacing: 4) {
+                if !block.kind.isEmpty {
+                    Text("AI 的 " + block.kind).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                }
+                Text(text)
+                    .vosFont(WorkspaceText.meta)
+                    .foregroundStyle(palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(palette.tertiaryText.opacity(0.08), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
         }
     }
 

@@ -202,6 +202,28 @@ final class MaterialNoteChecks: XCTestCase {
         XCTAssertEqual(marks.first?.style, "underline")
     }
 
+    func test旧笔记适配为文字块与批注块() {
+        let note = MaterialNote(title: "标题", lead: "导语", sections: [
+            MaterialNote.Section(heading: "一节", paragraphs: [MaterialNote.Paragraph(text: "一段")])
+        ], closing: [MaterialNote.Annotation(id: "c1", kind: "theory", text: "长文")])
+        let blocks = NoteBoardAdapting.blocks(for: note)
+        XCTAssertEqual(blocks.map(\.kind), ["text", "insight"])
+        XCTAssertEqual(blocks[0].paragraphs?.first?.text, "一段")
+        XCTAssertEqual(blocks[1].annotation?.text, "长文")
+    }
+
+    func test引用失效的块降级为文字块而材料块被丢弃() {
+        let blocks: [NoteBlock] = [
+            NoteBlock(id: "b0", kind: "todo", actionID: "missing", titleOverride: "去买菜"),
+            NoteBlock(id: "b1", kind: "claim", claimID: "c1"),
+            NoteBlock(id: "b2", kind: "materials", sourceID: "s1"),
+            NoteBlock(id: "b3", kind: "mystery", text: "自定义内容")
+        ]
+        let sanitized = NoteBoardSanitizing.sanitized(blocks, actionIDs: [], claimIDs: ["c1"], sourceIDs: ["s1"])
+        XCTAssertEqual(sanitized.map(\.kind), ["text", "claim", "mystery"])
+        XCTAssertEqual(sanitized.first?.paragraphs?.first?.text, "去买菜")
+    }
+
     func test批量读单行损坏不拖垮其余笔记() async throws {
         let store = try await openStore()
         let good = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("完好"),

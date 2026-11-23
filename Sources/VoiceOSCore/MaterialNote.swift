@@ -85,11 +85,15 @@ public struct MaterialNote: Codable, Sendable, Equatable {
     public let sections: [Section]
     /// 文末长文：跨段综合、理论讲授、长回应或发散。
     public let closing: [Annotation]?
-    public init(title: String, lead: String? = nil, sections: [Section], closing: [Annotation]? = nil) {
+    /// 笔记板：v6 起的新形态；旧笔记为 nil，经 NoteBoardAdapting 适配。
+    public let blocks: [NoteBlock]?
+    public init(title: String, lead: String? = nil, sections: [Section], closing: [Annotation]? = nil,
+                blocks: [NoteBlock]? = nil) {
         self.title = title
         self.lead = lead
         self.sections = sections
         self.closing = closing
+        self.blocks = blocks
     }
 }
 

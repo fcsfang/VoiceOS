@@ -165,7 +165,7 @@ final class MaterialNotePortChecks: XCTestCase {
                                                  apiKey: "fixture", model: "fixture-model")
         XCTAssertEqual(port.identity.provider, "responses:api.openai.com")
         XCTAssertEqual(port.identity.model, "fixture-model")
-        XCTAssertEqual(port.identity.promptVersion, "material-note-v5")
-        XCTAssertEqual(port.identity.schemaVersion, "note-v4")
+        XCTAssertEqual(port.identity.promptVersion, "material-note-v6")
+        XCTAssertEqual(port.identity.schemaVersion, "note-v5")
     }
 }

@@ -74,7 +74,26 @@ extension ControlCenter {
                                    spans: materialNoteSpans(for: record),
                                    origin: record.origin, speaker: record.speaker)
             }
-            let note = try await port.writeNote(MaterialNoteRequest(members: noteMembers))
+            // 板上可引用的行动与观点快照：模型只能引用这些 id，不能发明。
+            let memberSet = Set(memberIDs)
+            var claimRefs: [NoteBoardClaimRef] = [], seenClaims = Set<String>()
+            var allClaims: [String: CandidateClaim] = [:]
+            for sourceID in memberIDs {
+                for claim in currentClaimsBySource[sourceID] ?? [] {
+                    allClaims[claim.id] = claim
+                    guard claim.validity == "current", seenClaims.insert(claim.id).inserted else { continue }
+                    claimRefs.append(NoteBoardClaimRef(id: claim.id, statement: claim.statement))
+                }
+            }
+            var seenActions = Set<String>()
+            let actionRefs = actionRecords.compactMap { record -> NoteBoardActionRef? in
+                guard record.validity == "current", record.state != "dismissed",
+                      seenActions.insert(record.id).inserted,
+                      let claim = allClaims[record.claimID],
+                      !memberSet.isDisjoint(with: Set(claim.references.map(\.sourceID))) else { return nil }
+                return NoteBoardActionRef(id: record.id, title: record.title, state: record.state)
+            }
+            let note = try await port.writeNote(MaterialNoteRequest(members: noteMembers, actions: actionRefs, claims: claimRefs))
             let anchored = MaterialNoteAnchoring.anchored(note, members: noteMembers)
             let identity = port.identity
             // 快照比对与保存同在一个 actor 回合内，校验后到落库之间不会再有

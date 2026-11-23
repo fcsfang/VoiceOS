@@ -305,6 +305,14 @@ extension VoiceOSStore {
                     if let heading = section.heading { parts.append(heading) }
                     parts.append(contentsOf: section.paragraphs.map(\.text))
                 }
+                for block in NoteBoardAdapting.blocks(for: note) {
+                    if let heading = block.heading { parts.append(heading) }
+                    if let text = block.text { parts.append(text) }
+                    if let quote = block.quote { parts.append(quote) }
+                    if let title = block.titleOverride { parts.append(title) }
+                    parts.append(contentsOf: (block.paragraphs ?? []).map(\.text))
+                    if let annotation = block.annotation { parts.append(annotation.text) }
+                }
                 map[key] = parts.joined(separator: "\n")
             }
             return map

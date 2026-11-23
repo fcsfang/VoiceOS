@@ -1232,3 +1232,9 @@
 - 提示词升 material-note-v5 / note-v4：marks 必须逐字子串，标多少与样式由模型判断。
 - 锚定：找不到的词句直接忽略；测试 +1。构建 110/111 因 underlineColor 不在 SwiftUI 作用域与测试断言滞后失败；修正后 tests 584 全绿、dist 成功（重启暂缓以免打断用户重整理）。
 - 同期真实数据：v4 首批批注落库（充电器笔记：3 条就地批注 + 1 条学习路线长文，模型自创 explanation/safety/concept/learning_path 类型、自称电子基础老师）。
+## 波 204：笔记板 P1+P2——块模型、板生成 v6 与渲染（2026-11-23）
+- 用户产品转向：笔记是被验证的形态，待办/想法/观点都应承载到一块「笔记板」；板内组件要多样。四项决定：只读+勾选跳转、模型按相关性选、材料完全隐去、旧笔记保持原样。
+- Core：NoteBlock 自由 kind（text/todo/claim/quote/insight/callout/任意）；NoteBoardAdapting 旧笔记→文字块+批注块；NoteBoardSanitizing 引用必须来自输入快照、失效降级文字块、materials 块丢弃；MaterialNote.blocks 可选；锚定同时清洗文字块段落与 insight 批注引文。
+- 生成 v6（material-note-v6 / note-v5）：输入带 actions/claims 快照；模型按相关性把待办与观点摆上板、可发明 kind；引用校验；旧形状 sections 兼容回退（同时保留 sections 与 blocks 双契约，修复端口测试崩溃）。
+- 渲染：BoardView 支持文字块（行内标记/就地批注/阅读位置探针改为块锚点）、待办勾选写回、观点打开原话、引文条、批注块、callout、未知块降级；首页预览与搜索索引读板。
+- 测试 +2（旧笔记适配、引用失效降级）；集成：构建 113/114 因旧断言 sections 与崩溃失败，修正后 586 tests 全绿 / dist 成功（重启延后与 203 一并）。
