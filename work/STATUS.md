@@ -1168,3 +1168,7 @@
 - 笔记页、首页「继续读」、首页最近笔记行都进入 note(id)；无笔记条目仍打开材料页。
 - 集成：构建 93 因 unavailable 调用缺参数标签失败；修复后构建 94 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=7 重启）。
 - 上机验证（构建 94）：笔记页列出 3 篇（标题+预览+日期，按整理时间）；点开为纯文章版式——只有标题、元信息、连续段落与「看原话」，顶部「所有笔记」与「查看材料与原文」两个安静入口，材料工具不出现。截图 docs/product/audits/2026-11-23/03-纯笔记阅读页-构建94.jpg。
+## 波 190：有笔记时要点默认收起（172-A 落地）（2026-11-23）
+- 用户反馈笔记应像文章；对应的 172-A 遗留项：材料页「核心要点」默认展开、与文章抢戏。
+- SourceFoldState.initial 增加 notePresent：有笔记时 thoughts 默认收起（内容摘要本就默认收起）；WorkspaceView.sourceFoldBinding 用 materialHasNote（presence 缓存或首页批量结果）决定初值；笔记在页面打开后异步出现时自动收起一次，用户仍可手动展开。
+- 集成：构建 95 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=1 重启）。

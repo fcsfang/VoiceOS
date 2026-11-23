@@ -1092,7 +1092,18 @@ struct WorkspaceView: View {
         Binding(get: { sourceScrollPositions[id] ?? ScrollPosition(edge: .top) }, set: { sourceScrollPositions[id] = $0 })
     }
     private func sourceFoldBinding(_ id:String,transcript:String?) -> Binding<SourceFoldState> {
-        Binding(get: { sourceFoldStates[id] ?? SourceFoldState.initial(transcript:transcript) }, set: { sourceFoldStates[id] = $0 })
+        // 冷启动也能判断这篇是否有笔记：会话缓存与首页批量结果任一命中即可。
+        let hasNote = materialHasNote(id)
+        return Binding(get: { sourceFoldStates[id] ?? SourceFoldState.initial(transcript:transcript, notePresent: hasNote) }, set: { sourceFoldStates[id] = $0 })
+    }
+    /// 这篇材料所属表达是否已有笔记（存在会话缓存或首页批量读取里）。
+    private func materialHasNote(_ id:String) -> Bool {
+        if model.materialNotePresence[id] == true { return true }
+        let memberIDs = model.sourcePageIndex.expression(for: id).map { expression in
+            expression.sourceIDs + (expression.externalVersions ?? [:]).keys.sorted()
+                .filter { !expression.sourceIDs.contains($0) }
+        } ?? [id]
+        return model.materialNoteRows[VoiceOSStore.materialNoteExpressionKey(memberIDs)] != nil
     }
     private func unavailable(_ title:String,description:String,actionTitle:String = "回到行动",action: (() -> Void)? = nil) -> some View {
         WorkspaceEmptyState(title:title,systemImage:"leaf",description:description) {

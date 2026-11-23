@@ -109,8 +109,11 @@ struct SourceFoldState: Equatable {
     var entities = false
     var extras = false
     var records = false
-    static func initial(transcript:String?) -> SourceFoldState {
-        SourceFoldState()
+    /// 有笔记时要点默认收起：材料页先读文章，要点是需要时才展开的材料工具。
+    static func initial(transcript:String?, notePresent: Bool = false) -> SourceFoldState {
+        var state = SourceFoldState()
+        if notePresent { state.thoughts = false }
+        return state
     }
 }
 private enum SourceLoadPhase: Equatable {
@@ -620,11 +623,20 @@ struct WorkspaceSourceView: View {
         }
     }
     @ViewBuilder private var readingContent:some View {
-        if let scroll { readingScrollView.scrollPosition(scroll) } else { readingScrollView }
+        Group {
+            if let scroll { readingScrollView.scrollPosition(scroll) } else { readingScrollView }
+        }.background(notePresenceObserver)
     }
     // 有笔记时页头让出大字标题。materialNotePresence 是同步的会话内缓存，
     // 使重开与切换材料时首帧就按正确版式排版，避免先画大标题再塌缩。
     private var notePresent: Bool { materialNotePresent || (model.materialNotePresence[source.id] ?? false) }
+    /// 笔记在页面打开后才异步出现时，把默认展开的要点收一次；用户之后仍可手动展开。
+    private var notePresenceObserver: some View {
+        Color.clear
+            .onChange(of: notePresent) { _, present in
+                if present, folds.thoughts { folds.thoughts = false }
+            }
+    }
     private var readingTitle: String {
         if let expression, expression.sourceIDs.count > 1 { return expression.displayTitle(in:catalog) }
         return source.displayTitle
