@@ -408,6 +408,7 @@ struct WorkspaceView: View {
     @State private var modelTopicEffort = "high"
     @State private var modelAPIKey = ""
     @State private var modelSaving = false
+    @State private var modelTestResult: String?
     @State private var materialPageCache = MaterialPageCache()
     @State private var actionPageCache = ActionPageCache()
     @State private var topicListingCache = TopicListingCache()
@@ -2335,6 +2336,7 @@ struct WorkspaceView: View {
         VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(title:"设置", subtitle:"模型、连接、外观与资料维护")
             VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
+                settingsHealthCard
                 settingsModelsCard
                 settingsPrivacyCard
                 settingsConnectionsCard
@@ -2407,7 +2409,16 @@ struct WorkspaceView: View {
                         .buttonStyle(.workspacePrimary)
                         .disabled(modelSaving)
                         .accessibilityIdentifier("settings.model.save")
+                    Button("测试连接", action: testInternalModel)
+                        .buttonStyle(.workspaceSecondaryCompact)
+                        .disabled(modelSaving)
+                        .accessibilityIdentifier("settings.model.test")
                     Spacer()
+                }
+                if let result = modelTestResult {
+                    Text(result).vosFont(WorkspaceText.caption)
+                        .foregroundStyle(result.hasPrefix("连接正常") ? palette.success : palette.warning)
+                        .textSelection(.enabled)
                 }
             }
             .padding(.horizontal,20).padding(.vertical,12)
@@ -2443,6 +2454,65 @@ struct WorkspaceView: View {
             modelSaving = false
             if ok { modelAPIKey = "" } else { error = model.status }
         }
+    }
+    private func testInternalModel() {
+        let name = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let config = TextModelConfiguration(baseURL: modelBaseURL,
+                                            model: name.isEmpty ? LocalTextModel.defaultModel : name,
+                                            noteEffort: modelNoteEffort, topicEffort: modelTopicEffort).validated()
+        guard let config else { modelTestResult = "服务地址无效"; return }
+        let typedKey = modelAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveKey = typedKey.isEmpty ? (TextModelKeychain.apiKey() ?? "") : typedKey
+        guard !effectiveKey.isEmpty else { modelTestResult = "请填写模型密钥"; return }
+        modelTestResult = "测试中…"
+        Task { modelTestResult = await model.testTextModelConfiguration(config, apiKey: effectiveKey) }
+    }
+    /// 概览与健康：进设置十秒内回答「模型可用吗、资料多大、后台忙什么」。
+    private var settingsHealthCard: some View {
+        WorkspaceSettingsCard(title:"概览与健康", subtitle:"一眼看清现在能不能用、后台在忙什么") {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(model.speechConfigured ? palette.success : palette.warning).frame(width:7,height:7).accessibilityHidden(true)
+                Text("本地转写").vosFont(WorkspaceText.body)
+                Spacer()
+                Text(model.speechConfigured ? model.speechSummary : "尚未配置").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            }.padding(.horizontal,20).padding(.vertical,10)
+            WorkspaceListDivider().padding(.horizontal,20)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(model.modelConfigured ? palette.success : palette.warning).frame(width:7,height:7).accessibilityHidden(true)
+                Text("文本模型").vosFont(WorkspaceText.body)
+                Spacer()
+                Text(model.modelConfigured ? model.modelSummary : "尚未配置").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
+            }.padding(.horizontal,20).padding(.vertical,10)
+            WorkspaceListDivider().padding(.horizontal,20)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(queueBusy ? palette.accent : palette.success).frame(width:7,height:7).accessibilityHidden(true)
+                Text("后台队列").vosFont(WorkspaceText.body)
+                Spacer()
+                Text(queueStatusText).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            }.padding(.horizontal,20).padding(.vertical,10)
+            WorkspaceListDivider().padding(.horizontal,20)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(model.initialized ? palette.success : palette.warning).frame(width:7,height:7).accessibilityHidden(true)
+                Text("资料库").vosFont(WorkspaceText.body)
+                Spacer()
+                Text(model.initialized ? "已打开 · \(model.records.count) 份材料" : "尚未打开").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            }.padding(.horizontal,20).padding(.vertical,10)
+        }
+    }
+    private var queueBusy: Bool {
+        model.organizingTopics || model.knowledgeReviewBusy || model.understandingSource != nil || model.dictationBusy || model.fullRecordingBusy || model.importing
+    }
+    private var queueStatusText: String {
+        var parts: [String] = []
+        let queued = model.records.filter { ["queued","running"].contains($0.jobState ?? "") }.count
+        if queued > 0 { parts.append("转写 \(queued)") }
+        if model.organizingTopics { parts.append("主题整理中") }
+        if model.knowledgeReviewBusy { parts.append("知识核查中") }
+        if model.understandingSource != nil { parts.append("理解中") }
+        if model.dictationBusy { parts.append("录音处理中") }
+        if model.fullRecordingBusy { parts.append("完整整理中") }
+        if model.importing { parts.append("导入中") }
+        return parts.isEmpty ? "空闲" : parts.joined(separator: " · ")
     }
     private var settingsPrivacyCard: some View {
         WorkspaceSettingsCard(title:"数据与隐私", subtitle:"哪些只留在这台 Mac，哪些会发送给模型") {

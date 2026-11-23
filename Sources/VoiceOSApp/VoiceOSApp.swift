@@ -1798,6 +1798,30 @@ final class ControlCenter: ObservableObject {
             return false
         }
     }
+    /// 用给定配置发一次极小请求，验证地址、密钥与模型可用；返回面向用户的结果与延迟。
+    func testTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> String {
+        guard let url = URL(string: config.baseURL)?.appendingPathComponent("responses") else { return "服务地址无效" }
+        let payload: [String: Any] = ["model": config.model, "store": false,
+            "reasoning": ["effort": "minimal"], "max_output_tokens": 32, "truncation": "disabled",
+            "instructions": "你是连通性探针。只回复两个字符：ok",
+            "input": [["role": "user", "content": "ping"]]]
+        do {
+            var request = URLRequest(url: url, timeoutInterval: 30)
+            request.httpMethod = "POST"
+            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+            request.setValue("Bearer " + apiKey, forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let started = Date()
+            let reply = try await DirectModelHTTPTransport().send(request)
+            let ms = Int(Date().timeIntervalSince(started) * 1000)
+            guard reply.status == 200 else { return "连接失败：HTTP \(reply.status)" }
+            guard let object = try JSONSerialization.jsonObject(with: reply.body) as? [String: Any],
+                  object["status"] is String else { return "连接失败：响应格式无效" }
+            return "连接正常 · \(config.model) · \(ms) ms"
+        } catch {
+            return "连接失败：" + error.localizedDescription
+        }
+    }
     /// 启动时优先使用应用内部配置；没有时才回退到开发用的配置文件路径。
     private func restoreInternalTextModelConfiguration() -> Bool {
         guard let config = TextModelConfiguration.load(),

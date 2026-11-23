@@ -1251,3 +1251,7 @@
 - ControlCenter：configureTextModel 迁移为内部配置；installTextModelSuite 抽取；applyTextModelConfiguration（设置页保存）；启动优先级 env > 内部配置 > 历史文件；clearTextModel 一并清理。
 - 设置页「应用内模型配置」：地址/模型/密钥/两档思考强度（minimal…xhigh）/保存并启用。
 - 集成：构建 121/122 因缺 import 与钥匙串字典键失败；修正后 123 全绿（build_exit=0 / test_exit=0，589 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 207：设置页 P1——测试连接与概览健康（2026-11-24）
+- 依据《设置页重构设计（控制台）》。ControlCenter.testTextModelConfiguration：用草稿地址/密钥/模型发一次极小请求（minimal、32 tokens、30s），返回「连接正常 · 模型 · 延迟」或失败原因；密钥不打印。
+- 设置页「应用内模型配置」加「测试连接」按钮与结果行；置顶新增「概览与健康」卡：本地转写、文本模型、后台队列（转写排队/主题/知识核查/理解/录音/导入/空闲）、资料库（材料数）四项状态点。
+- 集成：构建 124 全绿（build_exit=0 / test_exit=0，589 tests / dist_build_exit=0，attempt=1 重启）。
