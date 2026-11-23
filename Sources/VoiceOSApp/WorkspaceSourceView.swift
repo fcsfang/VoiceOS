@@ -523,12 +523,12 @@ struct WorkspaceSourceView: View {
                 }.padding(.top,12)
             }
         }
-        if (expression?.sourceIDs.count ?? 0) <= 1,let summary=source.contentSummary,!summary.isEmpty {
+        if !notePresent,(expression?.sourceIDs.count ?? 0) <= 1,let summary=source.contentSummary,!summary.isEmpty {
             SourceFold(title:"内容摘要",icon:"text.alignleft",isExpanded:foldExpanded(\.digest)) {
                 WorkspaceExpandableText(text:summary,label:"完整摘要",size:WorkspaceText.body.size).padding(.top,10)
             }
         }
-        if !thoughts.isEmpty {
+        if !notePresent,!thoughts.isEmpty {
             SourceFold(title:"核心要点",icon:"lightbulb",count:thoughts.count,isExpanded:foldExpanded(\.thoughts)) {
                 let digest=readingDigest
                 if !digest.isEmpty {

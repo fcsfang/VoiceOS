@@ -6,10 +6,10 @@ import VoiceOSCore
 // One navigation state owns the workspace. Discussion is a sibling, so expanding
 // it never replaces the reading view or its disclosure/scroll state.
 enum WorkspacePage: Hashable {
-    case home, themes, materials, notes, note(String), monitor, actions, initiate, source(String), delivery(String), task(String), settings, capture, search, tool(String)
+    case themes, materials, notes, note(String), monitor, actions, initiate, source(String), delivery(String), task(String), settings, capture, search, tool(String)
     var isTopLevel: Bool {
         switch self {
-        case .home, .themes, .materials, .notes, .monitor, .actions, .initiate, .settings: true
+        case .themes, .materials, .notes, .monitor, .actions, .initiate, .settings: true
         default: false
         }
     }
@@ -474,7 +474,6 @@ struct WorkspaceView: View {
         case .monitor: "消息监测"
         case .source: sourceOpenedFromTheme ? "主题" : "材料"
         case .actions,.task,.delivery: "行动"
-        case .home: "首页"
         case .settings: "设置"
         case .capture: "记录想法"
         case .initiate: "启动"
@@ -487,7 +486,7 @@ struct WorkspaceView: View {
         for previous in path.reversed() {
             switch previous.page {
             case .themes: return true
-            case .home, .materials, .actions, .search, .capture, .settings, .initiate: return false
+            case .materials, .actions, .search, .capture, .settings, .initiate: return false
             default: continue
             }
         }
@@ -792,10 +791,9 @@ struct WorkspaceView: View {
     }
     @ViewBuilder private var sidebarBrowseLinks: some View {
         VStack(spacing:5) {
-            nav("首页",icon:"house",target:.home,id:"home")
+            nav("笔记",icon:"doc.text",target:.notes,id:"notes")
             nav("主题",icon:"circle.hexagongrid",target:.themes,id:"themes")
             nav("材料",icon:"books.vertical",target:.materials,id:"materials")
-            nav("笔记",icon:"doc.text",target:.notes,id:"notes")
         }
     }
     @ViewBuilder private var sidebarWorkLinks: some View {
@@ -844,7 +842,7 @@ struct WorkspaceView: View {
                     guard let request else { return }
                     model.pendingWorkspacePageRequest = nil
                     switch request {
-                    case .home: path=[];page = .home;error=""
+                    case .home: path=[];page = .notes;error=""
                     case .themes: path=[];page = .themes;topicID=nil;topicFocus=nil;error=""
                     case .materials: path=[];page = .materials;error=""
                     case .notes: path=[];page = .notes;error=""
@@ -938,18 +936,13 @@ struct WorkspaceView: View {
     }
     @ViewBuilder private var pageContent: some View {
         switch page {
-        case .home:
-            RecentContentHome(model: model, openSource: { go(.source($0)) }, openNote: { go(.note($0)) }, openSpan: { sourceID, spanID in
-                revealSourceSpan(sourceID, spanID: spanID)
-                go(.source(sourceID))
-            }, openTask: { go(.task($0)) }, capture: { go(.capture) })
         case .themes:
             ScrollViewReader { proxy in
                 scrolled { themes(proxy: proxy) }.id(navigationEntry)
             }
         case .notes:
             ScrollViewReader { proxy in
-                scrolled { NotesLibraryView(model: model, openNote: { go(.note($0)) }, openInbox: { go(.home) }) }.id(navigationEntry)
+                scrolled { NotesLibraryView(model: model, openNote: { go(.note($0)) }, openMaterials: { go(.materials) }) }.id(navigationEntry)
             }
         case .note(let id):
             noteReadingPage(id)
@@ -3507,7 +3500,7 @@ struct WorkspaceView: View {
     private func back() {
         if let entry=path.popLast() {
             topicID=entry.topicID;topicTab=entry.topicTab;topicReadingMode=entry.topicReadingMode;page=entry.page
-        } else { page = .home }
+        } else { page = .notes }
         topicFocus=nil;error=""
     }
     private var sourceRailRows: [SourceRecord] {
@@ -3778,12 +3771,6 @@ struct WorkspaceView: View {
         guard key == discussionKey else { return false }
         presentDiscussion(for:key,prompt:prompt);return true
     }
-    private var homeCanDiscuss: Bool {
-        guard page == .home else { return true }
-        return model.homeSnapshot.days.contains { day in
-            day.items.contains { $0.kind == .material && !$0.sourceIDs.isEmpty }
-        }
-    }
     private var discussionEntry: DiscussionEntryToken? {
         switch page {
         case .materials: materialKeyboardFocus.id.map { DiscussionEntryToken(kind: .material, id: $0) }
@@ -3794,7 +3781,6 @@ struct WorkspaceView: View {
     }
     private var discussionEntryAvailable: Bool {
         switch page {
-        case .home: homeCanDiscuss
         case .source, .task, .delivery: true
         case .themes: topic != nil
         case .materials: discussionEntry != nil
@@ -3805,7 +3791,6 @@ struct WorkspaceView: View {
     }
     private var discussionEntryHint: String {
         switch page {
-        case .home: homeCanDiscuss ? "讨论" : "先选择一条材料，再开始讨论"
         case .themes: topic == nil ? "先在主题列表中选择一个主题，再开始讨论" : "讨论"
         case .materials: discussionEntry == nil ? "先选中一条材料，再开始讨论" : "讨论"
         case .actions: selectingActions ? "批量选择中不能开始讨论；先结束选择" : (discussionEntry == nil ? "先选中一条行动，再开始讨论" : "讨论")
@@ -3824,14 +3809,6 @@ struct WorkspaceView: View {
         }
         let opened:Bool
         switch page {
-        case .home:
-            let items = model.homeSnapshot.days.flatMap(\.items)
-            let picked = RecentContentHomeSelection.shared.itemID.flatMap { id in items.first { $0.id == id } }
-                ?? items.first { !$0.thoughts.isEmpty } ?? items.first
-            guard let picked, picked.kind == .material,
-                  let sourceID = picked.sourceIDs.first,
-                  let record = model.sourcePageIndex.recordsByID[sourceID] else { return }
-            opened = await model.beginDiscussion(record)
         case .source(let id): opened = if let source=model.sourcePageIndex.recordsByID[id] { await model.beginDiscussion(source) } else { false }
         case .task(let id): opened = if let action=model.sourcePageIndex.allAction(for: id) { await model.beginActionDiscussion(action) } else { false }
         case .delivery(let id): opened = if let execution=model.assistantExecutions.first(where: { $0.id == id }) { await model.beginAssistantDiscussion(execution) } else { false }

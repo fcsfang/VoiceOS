@@ -1238,3 +1238,9 @@
 - 生成 v6（material-note-v6 / note-v5）：输入带 actions/claims 快照；模型按相关性把待办与观点摆上板、可发明 kind；引用校验；旧形状 sections 兼容回退（同时保留 sections 与 blocks 双契约，修复端口测试崩溃）。
 - 渲染：BoardView 支持文字块（行内标记/就地批注/阅读位置探针改为块锚点）、待办勾选写回、观点打开原话、引文条、批注块、callout、未知块降级；首页预览与搜索索引读板。
 - 测试 +2（旧笔记适配、引用失效降级）；集成：构建 113/114 因旧断言 sections 与崩溃失败，修正后 586 tests 全绿 / dist 成功（重启延后与 203 一并）。
+## 波 205：笔记替代首页（2026-11-23）
+- 产品决定：用笔记页替代旧首页。删除 RecentContentHome.swift 整页（时间线、右侧想法阅读器、选择缓存）；WorkspacePage 移除 home，笔记成为导航首位与默认页；⌘1 菜单改为「笔记」；back() 落到笔记。
+- 笔记页顶部新增「待处理」区：未读材料直接列出（未读/在读），点开即整理成笔记板，读完消失；超过 6 条给「全部材料」。数据直接来自 records+阅读态，不再依赖 homeSnapshot。
+- 材料页收敛：有笔记时「内容摘要」「核心要点」不渲染（板已承载）；原文与回听、处理记录保留。
+- 周回顾所需的行动反馈进度仍由 Core（RecentContentHomeSnapshot.progressRows）提供，未动。
+- 集成：构建 116/117/118 依次修复类型与迁移缺件（HomeSnapshot 依赖、recentMaterialNotes 包装随旧文件删除），119 全绿（build_exit=0 / test_exit=0，586 tests / dist_build_exit=0，attempt=1 重启）。

@@ -9,19 +9,25 @@ struct NotesLibraryView: View {
     @ObservedObject var model: ControlCenter
     /// 打开纯笔记阅读页（文章本体），不是完整的材料页。
     let openNote: (String) -> Void
-    /// 去旧首页的收件箱处理新录音与待办反馈。
-    var openInbox: () -> Void = {}
+    /// 去材料页看全部来源。
+    var openMaterials: () -> Void = {}
 
     @State private var notes: [StoredMaterialNote] = []
     @State private var query = ""
     @State private var readingStates: [String: SourceReadingState] = [:]
 
-    /// 还有没读过的材料时，笔记页顶部留一条去收件箱的入口；没有就不占位置。
-    private var pendingInboxCount: Int {
-        model.homeSnapshot.days.flatMap(\.items).filter { item in
-            guard item.kind == .material, !item.sourceIDs.isEmpty else { return false }
-            return item.sourceIDs.allSatisfy { (readingStates[$0] ?? .unread) != .read }
-        }.count
+    /// 还没读过的材料就是首页的「待处理」：直接从这里点开整理，读完自动消失。
+    private var pendingMaterials: [SourceRecord] {
+        model.records.filter { record in
+            ["saved", "reference_only"].contains(record.state)
+                && record.origin == "user" && record.speaker == "user"
+                && record.feedbackKind == nil && !record.name.hasPrefix("行动反馈")
+                && (readingStates[record.id] ?? .unread) != .read
+        }.sorted {
+            let left = $0.expressedDate ?? ConversationReflectionFocus.date($0.createdAt) ?? .distantPast
+            let right = $1.expressedDate ?? ConversationReflectionFocus.date($1.createdAt) ?? .distantPast
+            return left > right
+        }
     }
 
     private var filtered: [StoredMaterialNote] {
@@ -49,21 +55,44 @@ struct NotesLibraryView: View {
                 Text("\(notes.count) 篇 · 按整理时间").vosFont(WorkspaceText.meta)
                     .foregroundStyle(palette.secondaryText)
             }
-            if pendingInboxCount > 0 {
-                Button { openInbox() } label: {
-                    HStack(spacing:8) {
-                        Image(systemName:"tray").accessibilityHidden(true)
-                        Text("收件箱 · \(pendingInboxCount) 条材料待处理").vosFont(WorkspaceText.meta)
-                        Spacer(minLength:0)
-                        Text("去处理").vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
-                        Image(systemName:"chevron.right").vosFont(WorkspaceText.caption.size,weight:.semibold).accessibilityHidden(true)
+            if !pendingMaterials.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        WorkspaceSectionHeading("待处理", count: "\(pendingMaterials.count)")
+                        Spacer(minLength: 8)
+                        Button("全部材料", action: openMaterials)
+                            .buttonStyle(.workspaceQuietCompact)
                     }
-                    .foregroundStyle(palette.accent)
-                    .contentShape(Rectangle())
+                    WorkspaceListDivider()
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(pendingMaterials.prefix(6).enumerated()), id: \.element.id) { index, record in
+                            if index > 0 { WorkspaceListDivider() }
+                            Button { openNote(record.id) } label: {
+                                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                    Text(record.displayTitle)
+                                        .vosFont(WorkspaceText.meta)
+                                        .foregroundStyle(palette.text)
+                                        .lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Spacer(minLength: 8)
+                                    Text((readingStates[record.id] ?? .unread) == .reading ? "在读" : "未读")
+                                        .vosFont(WorkspaceText.caption)
+                                        .foregroundStyle(palette.tertiaryText)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                                .padding(.vertical, 8)
+                            }
+                            .buttonStyle(.plain)
+                            .help("打开并整理成笔记")
+                            .accessibilityIdentifier("notes.pending.row")
+                        }
+                    }
+                    if pendingMaterials.count > 6 {
+                        Button("还有 \(pendingMaterials.count - 6) 条，去材料页", action: openMaterials)
+                            .buttonStyle(.workspaceQuietCompact)
+                    }
                 }
-                .buttonStyle(.plain)
-                .help("打开首页收件箱，处理新的录音与待办反馈")
-                .accessibilityIdentifier("notes.inbox")
             }
             WorkspaceSearchField(text: $query, placeholder: "搜索笔记标题或正文")
                 .accessibilityIdentifier("notes.search")
@@ -129,4 +158,62 @@ struct NotesLibraryView: View {
 private struct HomeRecentNotesKeyForNotes: Equatable {
     let records: Int
     let notes: Int
+}
+
+extension ControlCenter {
+    /// 每个表达最新一版笔记，按整理时间倒序；首页（笔记页）与最近笔记共用。
+    @MainActor
+    func recentMaterialNotes(limit: Int = 8) async -> [StoredMaterialNote] {
+        guard let store else { return [] }
+        return (try? await store.recentMaterialNotes(limit: limit)) ?? []
+    }
+}
+
+
+/// 首页与笔记页共用的标题与预览文本：lead 优先，其次第一个文字块的首句，
+/// 截断到 80 字；笔记板（v6）与旧 sections 都能取。
+enum MaterialNoteHomeText {
+    static func title(_ note: MaterialNote) -> String? {
+        let title = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? nil : title
+    }
+
+    static func preview(_ note: MaterialNote) -> String? {
+        if let lead = note.lead {
+            let text = flattened(lead)
+            if !text.isEmpty { return text }
+        }
+        for section in note.sections {
+            for paragraph in section.paragraphs {
+                let text = flattened(paragraph.text)
+                if !text.isEmpty { return excerpt(text) }
+            }
+        }
+        // 笔记板（v6）：预览取第一个文字块的正文。
+        for block in NoteBoardAdapting.blocks(for: note) where block.kind == "text" {
+            for paragraph in block.paragraphs ?? [] {
+                let text = flattened(paragraph.text)
+                if !text.isEmpty { return excerpt(text) }
+            }
+        }
+        return nil
+    }
+
+    private static let excerptLength = 80
+    private static let sentenceEndings: Set<Character> = ["。", "！", "？", "!", "?", "…"]
+
+    private static func flattened(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    private static func excerpt(_ text: String) -> String {
+        if let ending = text.firstIndex(where: { sentenceEndings.contains($0) }),
+           text.distance(from: text.startIndex, to: ending) < excerptLength {
+            var end = text.index(after: ending)
+            while end < text.endIndex, text[end] == "…" { end = text.index(after: end) }
+            return String(text[..<end])
+        }
+        guard text.count > excerptLength else { return text }
+        return String(text.prefix(excerptLength)) + "…"
+    }
 }

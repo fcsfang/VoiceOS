@@ -4637,7 +4637,7 @@ struct VoiceOSApp: App {
                     Button("查找…") { delegate.openWorkspaceSearch() }.keyboardShortcut("f")
                     Button("记录想法") { delegate.openCaptureComposer() }
                     Divider()
-                    Button("首页") { delegate.openWorkspacePage(.home) }.keyboardShortcut("1")
+                    Button("笔记") { delegate.openWorkspacePage(.home) }.keyboardShortcut("1")
                     Button("主题") { delegate.openWorkspacePage(.themes) }.keyboardShortcut("2")
                     Button("材料") { delegate.openWorkspacePage(.materials) }.keyboardShortcut("3")
                     Button("行动") { delegate.openWorkspacePage(.actions) }.keyboardShortcut("4")
