@@ -2712,6 +2712,15 @@ struct WorkspaceView: View {
         }
         return fittedDisplayTitle(stored)
     }
+    /// 这篇材料所属表达若已有笔记，行的标题用笔记标题。
+    private func materialNoteTitle(for source: SourceRecord, expression: RecordingExpression?) -> String? {
+        let memberIDs = expression.map { expression in
+            expression.sourceIDs + (expression.externalVersions ?? [:]).keys.sorted()
+                .filter { !expression.sourceIDs.contains($0) }
+        } ?? [source.id]
+        guard let stored = model.materialNoteRows[VoiceOSStore.materialNoteExpressionKey(memberIDs)] else { return nil }
+        return MaterialNoteHomeText.title(stored.note).map(fittedDisplayTitle)
+    }
     private func materialOpeningText(_ transcript:String?) -> String? {
         guard let transcript else { return nil }
         let line=transcript.split(whereSeparator:\.isNewline)
@@ -2734,10 +2743,13 @@ struct WorkspaceView: View {
         let sourceNote=(source.origin == "user" ? "" : " · " + origin) + localOnlyNote
         let subtitle=first.recordingDateLabel + sourceNote
         let openCount=model.sourcePageIndex.openActionCount(for:Set(expression?.sourceIDs ?? [source.id]))
+        // 成品优先：有笔记的行用笔记标题（与首页、笔记页同源）；没有笔记时才
+        // 退回原题或原文首句辨认——材料列表是「去查」的视角，行需要可辨识。
+        let noteTitle=materialNoteTitle(for: source, expression: expression)
         let trailingText=openCount > 0 ? "\(openCount) 条待办" + (issues > 0 ? " · 疑点 \(issues)" : "") : reading?.text ?? ""
         let trailingDisplay=trailingText
         let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .badge(.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
-        return WorkspaceRow(title:materialRowTitle(source,expression:expression,leading:first,catalog:catalog),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }
+        return WorkspaceRow(title:noteTitle ?? materialRowTitle(source,expression:expression,leading:first,catalog:catalog),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }
             .help(metadata)
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }
