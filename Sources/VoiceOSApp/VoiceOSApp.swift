@@ -265,6 +265,11 @@ final class ControlCenter: ObservableObject {
     /// for a source and the workspace consumes the request from its own state.
     @Published var pendingWorkspaceSourceID: String?
     func requestWorkspaceSource(_ id: String) { pendingWorkspaceSourceID = id }
+    /// 从独立面板（速记）回来时用：窗口可能已关闭，先唤起主窗口再打开这份材料。
+    func revealSource(_ id: String) {
+        (NSApp.delegate as? ApplicationDelegate)?.openMainWindow()
+        requestWorkspaceSource(id)
+    }
     @Published var pendingWorkspaceRoute: WorkspaceRoute?
     @Published var pendingWorkspacePageRequest: WorkspacePageRequest?
     @Published var pendingWorkspaceTaskID: String?
@@ -1816,6 +1821,7 @@ final class ControlCenter: ObservableObject {
                     let media = try await FullRecordingOrganizer.inspect(url)
                     self.fullRecordingCount = nil; self.fullRecordingStatus = ""
                     self.fullRecordingOutput = nil; self.fullRecordingImportIssue = nil
+                    self.fullRecordingCompletedSourceID = nil
                     self.fullRecordingInput = FullRecordingInput(url: url, media: media)
                 } catch { self.fullRecordingImportIssue = error.localizedDescription }
             }
@@ -2079,6 +2085,16 @@ final class ControlCenter: ObservableObject {
         fullRecordingWorker = Task {
             defer { fullRecordingBusy = false; fullRecordingWorker = nil }
             do {
+                // 与完整整理共用同一个幂等键：先「只保存原件」再「完整转写并整理」
+                // 会复用同一份材料，重复点击也不会入库第二份。
+                let attrs = try FileManager.default.attributesOfItem(atPath: input.url.path)
+                let identity = input.url.path + ":\(track):" + String(describing: attrs[.size]) + ":" + String(describing: attrs[.modificationDate])
+                let command = "full-recording:" + identity
+                if let existing = try await store.importedSourceID(commandID: command) {
+                    fullRecordingCompletedSourceID = existing
+                    fullRecordingStatus = "这份本人音轨已保存过，未重复导入"
+                    return
+                }
                 let root = await store.root
                 let staging = root.appendingPathComponent("整理/仅保存原件")
                 try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -2086,7 +2102,7 @@ final class ControlCenter: ObservableObject {
                 let audio = staging.appendingPathComponent(input.url.deletingPathExtension().lastPathComponent + "_音轨\(track).wav")
                 if FileManager.default.fileExists(atPath: audio.path) { try FileManager.default.removeItem(at: audio) }
                 try await FullRecordingOrganizer.extract(input.url, track: track, to: audio, log: log)
-                let id = try await store.importPersonalAudio(audio)
+                let id = try await store.importPersonalAudio(audio, commandID: command)
                 try FileManager.default.removeItem(at: audio)
                 await refresh()
                 fullRecordingCompletedSourceID = id
@@ -5654,12 +5670,15 @@ extension ApplicationDelegate: VoiceOSIntentEndpoint {
         // 文本模型缺失时 toggleCaptureDictation 会退化为只保存原音，不再拒绝。
         let previousStatus = model.status
         model.toggleCaptureDictation()
-        let deadline = Date().addingTimeInterval(2)
+        // 首次麦克风授权或启动刷新可能让开始过程持续数秒；忙于启动时不报失败。
+        let deadline = Date().addingTimeInterval(10)
         while Date() < deadline {
             if model.dictationActive { return .started }
+            if !model.dictationBusy, model.status != previousStatus { return .failed(model.status) }
             try? await Task.sleep(for: .milliseconds(50))
         }
         if model.dictationActive { return .started }
+        if model.dictationBusy { return .failed("口述仍在准备（可能需要麦克风授权），请稍后在菜单栏确认") }
         return .failed(model.status == previousStatus ? "口述没有开始，请检查麦克风权限" : model.status)
     }
 }

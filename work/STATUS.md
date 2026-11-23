@@ -1129,3 +1129,11 @@
 - 完整录音页模型缺失提示补「仍可先『只保存原件』，配置后再完整整理」。
 - 处理情况页「模型与提醒事项」卡新增本地 Qwen 转写状态行与「配置本地 Qwen 转写…」按钮。
 - 集成：构建 75 全绿（build_exit=0 / test_exit=0，579 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 183：178–182 评审确认项修复（2026-11-23）
+- 只读评审工作流（三视角 + 对抗验证，13 候选去重后 5 条全部 CONFIRMED）修复：
+  - 只保存原件重复入库：saveFullRecordingOnly 改用与完整整理相同的幂等键 full-recording:<path:track:size:mtime>，重复点击与「先保存后整理」复用同一材料。
+  - 完成 id 残留：chooseFullRecording 复位时清空 fullRecordingCompletedSourceID。
+  - 速记不开窗：新增 ControlCenter.revealSource（唤起主窗口 + 导航），QuickNote 保存后走它；openMainWindow 保持 fileprivate。
+  - 底部处理条：WorkspaceProcessingStatus 新增 dictationSavesOnly，模型缺失时显示「停止后保存原音/停止并保存」。
+  - ToggleDictation Intent：等待 2s→10s，忙时继续等待并按 busy 区分失败文案。
+- 构建 76/77 分别因属性声明漏插（public var 未匹配）与 openMainWindow fileprivate 失败；修正后构建 78 全绿（build_exit=0 / test_exit=0，580 tests / dist_build_exit=0，attempt=1 重启）。

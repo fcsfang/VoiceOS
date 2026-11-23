@@ -88,6 +88,7 @@ extension ControlCenter {
             isInitializing: !initialized,
             hasStartupIssue: !startupIssue.isEmpty,
             isDictating: dictationActive,
+            dictationSavesOnly: recordingModelIssue != nil,
             isOrganizingRecording: fullRecordingBusy,
             recordingStatus: fullRecordingStatus,
             isSealingDictation: dictationBusy,
@@ -244,7 +245,7 @@ struct WorkspaceProcessingBar: View {
                 Button("取消并丢弃…") { confirmingDiscard = true }
                     .buttonStyle(.workspaceDestructive)
                     .accessibilityIdentifier("processing.dictation.discard")
-                Button("停止并整理") { model.stopDictation() }
+                Button(model.recordingModelIssue == nil ? "停止并整理" : "停止并保存") { model.stopDictation() }
                     .buttonStyle(.workspacePrimary)
                     .accessibilityIdentifier("processing.dictation.stop")
             }

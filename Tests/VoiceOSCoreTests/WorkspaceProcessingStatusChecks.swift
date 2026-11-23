@@ -41,6 +41,12 @@ extension CoreFlowTests {
                        "正在录音，停止后保存并整理")
     }
 
+    func testExplicitCommitmentToSaveOnlyDictationShowsItsOwnTitle() {
+        let status = WorkspaceProcessingStatus(isDictating: true, dictationSavesOnly: true)
+        XCTAssertEqual(status.title, "正在录音，停止后保存原音")
+        XCTAssertEqual(status.visibleTitle(preferringPausedBatch: nil), "正在录音，停止后保存原音")
+    }
+
     func testPausedBatchTitleShowsWhenItIsTheOnlyRunningWork() {
         let status = WorkspaceProcessingStatus()
         XCTAssertEqual(status.visibleTitle(preferringPausedBatch: "正在重新识别 1/3"), "正在重新识别 1/3")

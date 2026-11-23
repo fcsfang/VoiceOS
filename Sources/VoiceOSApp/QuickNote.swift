@@ -103,8 +103,8 @@ private struct QuickNoteView: View {
             saving = false
             if let savedID {
                 close()
-                // 保存后回到这次内容，而不是留在原地找刚才写的东西。
-                model.requestWorkspaceSource(savedID)
+                // 速记是独立面板，主窗口可能已关闭：revealSource 会先唤起窗口。
+                model.revealSource(savedID)
             } else { error = model.status.isEmpty ? "保存失败，请稍后重试" : model.status }
         }
     }

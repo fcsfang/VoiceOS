@@ -19,6 +19,8 @@ public struct WorkspaceProcessingStatus: Equatable, Sendable {
     public var isInitializing: Bool
     public var hasStartupIssue: Bool
     public var isDictating: Bool
+    /// 只录音不整理（缺文本模型时的降级）；底部处理条据此改文案。
+    public var dictationSavesOnly: Bool
     public var isOrganizingRecording: Bool
     public var recordingStatus: String
     public var isSealingDictation: Bool
@@ -36,6 +38,7 @@ public struct WorkspaceProcessingStatus: Equatable, Sendable {
         isInitializing: Bool = false,
         hasStartupIssue: Bool = false,
         isDictating: Bool = false,
+        dictationSavesOnly: Bool = false,
         isOrganizingRecording: Bool = false,
         recordingStatus: String = "",
         isSealingDictation: Bool = false,
@@ -52,6 +55,7 @@ public struct WorkspaceProcessingStatus: Equatable, Sendable {
         self.isInitializing = isInitializing
         self.hasStartupIssue = hasStartupIssue
         self.isDictating = isDictating
+        self.dictationSavesOnly = dictationSavesOnly
         self.isOrganizingRecording = isOrganizingRecording
         self.recordingStatus = recordingStatus
         self.isSealingDictation = isSealingDictation
@@ -68,7 +72,7 @@ public struct WorkspaceProcessingStatus: Equatable, Sendable {
 
     public var display: Display {
         if isInitializing { return hasStartupIssue ? .idle : .running("正在恢复资料库与草稿") }
-        if isDictating { return .running("正在录音，停止后保存并整理") }
+        if isDictating { return .running(dictationSavesOnly ? "正在录音，停止后保存原音" : "正在录音，停止后保存并整理") }
         if isOrganizingRecording { return .running(recordingStatus.isEmpty ? "正在完整整理录音" : recordingStatus) }
         if isSealingDictation { return .running("正在封存录音与转写") }
         if isReviewingTranscript { return .running("AI 正在校正完整转写") }
