@@ -38,11 +38,9 @@ struct RecentContentHome: View {
     @State private var organizeAttemptSourceID: String?
     @State private var organizeToast: String?
     @State private var organizeToastSourceID: String?
-    @AppStorage("voiceos.home.recentThoughts.expanded") private var recentThoughtsExpanded = false
     /// 首页「最近笔记」：按笔记整理时间浮现，旧录音今天整理的笔记也能接着读。
     @AppStorage("voiceos.home.recentNotes.expanded") private var recentNotesExpanded = true
     @State private var recentNotes: [StoredMaterialNote] = []
-    @State private var recentThoughtsHighlighted = false
     @State private var frozenViewpointsItemID: String?
     @FocusState private var timelineFocused: Bool
     /// Arrow-key moves both select and scroll; a mouse click selects but must
@@ -51,7 +49,6 @@ struct RecentContentHome: View {
     private let topAnchor = "home.top"
     private let timelineSpace = "home.timeline"
     private let tasksAnchor = "home.tasks.summary"
-    private let recentThoughtsRowID = "home.recentThoughts"
     private let recentNotesRowID = "home.recentNotes"
 
     // Only 特大 (1.45) crosses 1.3; 大 (1.28) keeps the single-line rows.
@@ -209,18 +206,17 @@ struct RecentContentHome: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if !recentNotes.isEmpty { recentNotesEntry }
-                    if !recentThoughts.isEmpty { recentThoughtsEntry(recentThoughts).id(recentThoughtsRowID) }
                     ForEach(Array(visibleDays.enumerated()), id: \.element.id) { index, day in
                         VStack(alignment: .leading, spacing: 0) {
                             // The day label hugs its own rows; the gap before the
                             // next label is the one that grows, so grouping reads
                             // before any text does.
                             dayHeader(day)
-                                .padding(.top, index == 0 && recentThoughts.isEmpty ? 2 : 20)
+                                .padding(.top, index == 0 && recentNotes.isEmpty ? 2 : 20)
                                 .padding(.bottom, 6)
                             VStack(alignment: .leading, spacing: 2) {
                                 ForEach(day.items) { item in
-                                    Button { keyboardDrivenSelection = false; recentThoughtsHighlighted = false; selectedID = item.id } label: { row(item) }
+                                    Button { keyboardDrivenSelection = false; selectedID = item.id } label: { row(item) }
                                         .buttonStyle(.plain)
                                         .id(item.id)
                                         .contextMenu {
@@ -254,14 +250,6 @@ struct RecentContentHome: View {
                 Task { @MainActor in
                     await Task.yield()
                     proxy.scrollTo(id, anchor: .center)
-                }
-            }
-            .onChange(of: recentThoughtsHighlighted) { _, highlighted in
-                guard highlighted else { return }
-                timelineFocused = true
-                Task { @MainActor in
-                    await Task.yield()
-                    proxy.scrollTo(recentThoughtsRowID, anchor: .top)
                 }
             }
             .focusable()
@@ -311,36 +299,21 @@ struct RecentContentHome: View {
     private func handleTimelineKey(_ press: KeyPress) -> KeyPress.Result {
         guard timelineFocused, press.modifiers.isDisjoint(with: [.command, .option, .control]) else { return .ignored }
         if press.phase == .repeat, press.key != .upArrow, press.key != .downArrow { return .ignored }
-        let showsRecentThoughts = !recentThoughts.isEmpty
-        let ids = (showsRecentThoughts ? [recentThoughtsRowID] : []) + items.map(\.id)
+        let ids = items.map(\.id)
         switch press.key {
         case .downArrow, .upArrow:
             guard !ids.isEmpty else { return .ignored }
             let current: Int?
-            if recentThoughtsHighlighted, showsRecentThoughts {
-                current = 0
-            } else if let item = selected, let index = items.firstIndex(where: { $0.id == item.id }) {
-                current = index + (showsRecentThoughts ? 1 : 0)
-            } else {
-                current = nil
-            }
+            if let item = selected, let index = items.firstIndex(where: { $0.id == item.id }) { current = index }
+            else { current = nil }
             let next: Int
             if press.key == .upArrow { next = current.map { max(0, $0 - 1) } ?? ids.count - 1 }
             else { next = current.map { min(ids.count - 1, $0 + 1) } ?? 0 }
-            if showsRecentThoughts, next == 0 {
-                recentThoughtsHighlighted = true
-            } else {
-                recentThoughtsHighlighted = false
-                keyboardDrivenSelection = true
-                selectedID = ids[next]
-            }
+            keyboardDrivenSelection = true
+            selectedID = ids[next]
             return .handled
         case .return, .space:
-            if press.key == .space, !recentThoughtsHighlighted { return .ignored }
-            if recentThoughtsHighlighted, showsRecentThoughts {
-                toggleRecentThoughts()
-                return .handled
-            }
+            if press.key == .space { return .ignored }
             guard let item = selected else { return .ignored }
             guard item.kind == .material else { return .handled }
             guard let sourceID = item.sourceIDs.first else { return .ignored }
@@ -732,14 +705,6 @@ struct RecentContentHome: View {
         }
     }
 
-    private var recentThoughts: [RecentThoughtDay] {
-        model.homeSnapshot.recentThoughts
-    }
-
-    private var recentThoughtCount: Int {
-        recentThoughts.reduce(0) { $0 + $1.entries.count }
-    }
-
     /// The same material filter the index uses, so an empty home can tell an
     /// empty library apart from materials that have no readable content yet.
     private var hasAnyMaterial: Bool {
@@ -750,10 +715,6 @@ struct RecentContentHome: View {
     }
 
     private var pendingOutcomeCount: Int { model.visibleOutcomeFollowups.count }
-
-    private func toggleRecentThoughts() {
-        withAnimation(reduceMotion ? nil : WorkspaceMotion.expand) { recentThoughtsExpanded.toggle() }
-    }
 
     /// 最近整理的笔记：标题与预览和材料页同一篇，点开即回到上次读到的位置。
     private var recentNotesEntry: some View {
@@ -817,68 +778,6 @@ struct RecentContentHome: View {
     private func openRecentNote(_ stored: StoredMaterialNote) {
         guard let first = stored.expressionKey.split(separator: "|").first.map(String.init) else { return }
         openNote(first)
-    }
-
-    private func recentThoughtsEntry(_ groups: [RecentThoughtDay]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                toggleRecentThoughts()
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .rotationEffect(.degrees(recentThoughtsExpanded ? 90 : 0))
-                        .vosFont(WorkspaceText.caption.size, weight: .semibold)
-                        .foregroundStyle(palette.tertiaryText)
-                        .accessibilityHidden(true)
-                    Text("最近想法").vosFont(WorkspaceText.meta.size, weight: .semibold)
-                        .foregroundStyle(palette.secondaryText)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("\(recentThoughtCount) 条 · 近 14 天")
-                        .vosFont(WorkspaceText.caption, monospacedDigit: true).foregroundStyle(palette.tertiaryText)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 10)
-                .background(recentThoughtsHighlighted ? palette.selection : .clear, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                .workspaceFocusRing(recentThoughtsHighlighted, radius: WorkspaceMetrics.controlRadius)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(recentThoughtsExpanded ? "收起最近想法" : "展开最近想法，查看近 14 天的观点")
-            .accessibilityIdentifier("home.recentThoughts.toggle")
-            .accessibilityValue(recentThoughtsExpanded ? "已展开" : "已收起")
-            if recentThoughtsExpanded {
-                ForEach(groups) { group in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("\(dayLabel(group.date)) · \(group.entries.count) 条")
-                            .vosFont(WorkspaceText.caption, monospacedDigit: true).foregroundStyle(palette.tertiaryText)
-                            .padding(.horizontal, 10)
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(group.entries.enumerated()), id: \.element.id) { index, entry in
-                                if index > 0 { WorkspaceListDivider().padding(.horizontal, 10) }
-                                Button { openClaim(entry.id) } label: {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(entry.statement).vosFont(WorkspaceText.meta)
-                                            .foregroundStyle(palette.text).lineLimit(isLargeText ? 4 : 3)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                            .multilineTextAlignment(.leading)
-                                        Text(entry.sourceTitle).vosFont(WorkspaceText.caption)
-                                            .foregroundStyle(palette.secondaryText).lineLimit(isLargeText ? 3 : 2)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                            .multilineTextAlignment(.leading)
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .homeRowChrome(isSelected: false)
-                                }
-                                .buttonStyle(.plain)
-                                .help("打开这条想法的原话")
-                                .accessibilityIdentifier("recent.thought")
-                            }
-                        }
-                    }
-                }
-            }
-            WorkspaceListDivider().padding(.top, 8)
-        }
     }
 
     @ViewBuilder private func organizePrompt(_ item: RecentContentItem) -> some View {

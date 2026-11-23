@@ -1199,3 +1199,6 @@
 - 集成：构建 100 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=1 重启）。
 ## 波 196：收件箱撤掉回听（2026-11-23）
 - 收件箱元信息行的「回听」删除（原材料动作）；回听集中在材料页。集成：构建 101 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=6 重启）。
+## 波 197：收件箱撤掉「最近想法」聚合（2026-11-23）
+- 成品优先第二处：「最近想法」跨材料观点区与【想法】面板同属原材料层，整体移除（−107 行）；键盘上下/回车序列只剩材料行；首日头部间距条件改用 recentNotes。
+- 集成：构建 102 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=9 重启）。
