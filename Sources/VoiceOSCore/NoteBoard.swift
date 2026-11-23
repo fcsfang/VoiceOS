@@ -81,3 +81,36 @@ public enum NoteBoardAdapting {
         return blocks
     }
 }
+
+/// 板内引用解析：渲染与验证共用一份口径，避免「界面能解析、检查工具不能」的偏差。
+public enum NoteBoardResolving {
+    public struct Resolved {
+        public let noteTitle: String
+        public let noteCount: Int
+        public let coreBlocks: Int
+        public let todoBlocks: Int
+        public let claimBlocks: Int
+        public let unresolvedBlocks: Int
+    }
+
+    /// 对一批笔记汇总板结构：todo 与 claim 的引用能否在给定集合中解析。
+    public static func summarize(_ notes: [MaterialNote], actionIDs: Set<String>, claimIDs: Set<String>) -> Resolved {
+        var core = 0, todo = 0, claim = 0, unresolved = 0
+        for note in notes {
+            for block in NoteBoardAdapting.blocks(for: note) {
+                switch block.kind {
+                case "todo":
+                    todo += 1
+                    if let id = block.actionID, actionIDs.contains(id) { core += 1 } else { unresolved += 1 }
+                case "claim":
+                    claim += 1
+                    if let id = block.claimID, claimIDs.contains(id) { core += 1 } else { unresolved += 1 }
+                default:
+                    core += 1
+                }
+            }
+        }
+        return Resolved(noteTitle: notes.first?.title ?? "", noteCount: notes.count, coreBlocks: core,
+                        todoBlocks: todo, claimBlocks: claim, unresolvedBlocks: unresolved)
+    }
+}

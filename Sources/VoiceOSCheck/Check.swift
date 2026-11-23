@@ -58,23 +58,14 @@ struct Check {
                 let actions = try await store.actions(includeHistory: true)
                 let actionByID = Dictionary(actions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 let notes = try await store.recentMaterialNotes(limit: 500)
-                var unresolved = 0, todoBlocks = 0, claimBlocks = 0
                 for note in notes {
-                    for block in NoteBoardAdapting.blocks(for: note.note) {
-                        switch block.kind {
-                        case "todo":
-                            todoBlocks += 1
-                            let action = block.actionID.flatMap { actionByID[$0] }
-                            print("todo  [\(note.note.title)] \(action?.title ?? "!! 引用失效 \(block.actionID ?? "-")") (\(action?.state ?? "?"))")
-                            if action == nil { unresolved += 1 }
-                        case "claim":
-                            claimBlocks += 1
-                            print("claim [\(note.note.title)] \(block.titleOverride ?? block.claimID ?? "")")
-                        default: break
-                        }
+                    for block in NoteBoardAdapting.blocks(for: note.note) where block.kind == "todo" {
+                        let action = block.actionID.flatMap { actionByID[$0] }
+                        print("todo  [\(note.note.title)] \(action?.title ?? "!! 引用失效 \(block.actionID ?? "-")") (\(action?.state ?? "?"))")
                     }
                 }
-                print("boards=\(notes.count) todo=\(todoBlocks) claim=\(claimBlocks) unresolved=\(unresolved)")
+                let summary = NoteBoardResolving.summarize(notes.map(\.note), actionIDs: Set(actionByID.keys), claimIDs: [])
+                print("boards=\(summary.noteCount) todo=\(summary.todoBlocks) claim=\(summary.claimBlocks) unresolved=\(summary.unresolvedBlocks)")
                 return
             case "search":
                 try await store.rebuildSearchIndexIfNeeded()

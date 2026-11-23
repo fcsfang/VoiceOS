@@ -224,6 +224,21 @@ final class MaterialNoteChecks: XCTestCase {
         XCTAssertEqual(sanitized.first?.paragraphs?.first?.text, "去买菜")
     }
 
+    func test板引用解析汇总区分可解析与失效() {
+        let note = MaterialNote(title: "板", sections: [], blocks: [
+            NoteBlock(id: "b0", kind: "text", paragraphs: [MaterialNote.Paragraph(text: "正文")]),
+            NoteBlock(id: "b1", kind: "todo", actionID: "a1"),
+            NoteBlock(id: "b2", kind: "todo", actionID: "gone"),
+            NoteBlock(id: "b3", kind: "claim", claimID: "c1"),
+            NoteBlock(id: "b4", kind: "mystery", text: "自定义")
+        ])
+        let summary = NoteBoardResolving.summarize([note], actionIDs: ["a1"], claimIDs: ["c1"])
+        XCTAssertEqual(summary.noteCount, 1)
+        XCTAssertEqual(summary.todoBlocks, 2)
+        XCTAssertEqual(summary.claimBlocks, 1)
+        XCTAssertEqual(summary.unresolvedBlocks, 1, "失效的行动引用被计入")
+    }
+
     func test批量读单行损坏不拖垮其余笔记() async throws {
         let store = try await openStore()
         let good = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("完好"),

@@ -1281,3 +1281,7 @@
 - voiceos-check 新增 `board <data-dir>`：解析每篇最新笔记的板内引用，输出 todo/claim 对应记录与状态，并汇总 boards/todo/claim/unresolved。
 - 隔离副本实证：5 块板、2 个 todo 组件，全部解析到真实行动记录（unresolved=0）；「引用而非复制」链路在真实数据上成立。
 - 集成：构建 131 编译通过（应用与测试未改动语义，构建 130 已全绿并上机）。
+## 波 214：板引用解析收敛到 Core 并加保护（2026-11-24）
+- NoteBoardResolving.summarize：板结构汇总与引用可解析性；界面与 voiceos-check board 共用同一口径。
+- 测试 +1：失效行动引用被计入 unresolved（此前该路径无单元测试）。
+- 集成：构建 132 全绿（build_exit=0 / test_exit=0，590 tests / dist_build_exit=0，attempt=1 重启）。
