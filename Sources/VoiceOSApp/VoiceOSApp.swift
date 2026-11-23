@@ -1017,8 +1017,13 @@ final class ControlCenter: ObservableObject {
         guard !topicDomainBackfillStarted, initialized, let store, let port = topicModel else { return }
         topicDomainBackfillStarted = true
         Task {
-            guard let written = try? await store.backfillTopicDomains(using: port), written > 0 else { return }
-            await refresh()
+            do {
+                let written = try await store.backfillTopicDomains(using: port)
+                if written > 0 { await refresh() }
+            } catch {
+                // 模型暂时不可用：复位标志，模型重配或下一次全量刷新时再试。
+                topicDomainBackfillStarted = false
+            }
         }
     }
     func queueTopicOrganization(retry: Bool = false, topUp: Bool = false) {
@@ -1760,6 +1765,7 @@ final class ControlCenter: ObservableObject {
             discussionModel=suite.discussion;outcomeModel=suite.outcome
             recordingTitleModel=suite.recordingTitles
             topicModel=suite.topics; topicAttemptDigest=nil; materialNoteModel=suite.note
+            topicDomainBackfillStarted = false
             startTopicDomainBackfillIfNeeded()
             recordingExpressionModel=suite.recordingExpressions
             assistantModel=suite.assistant

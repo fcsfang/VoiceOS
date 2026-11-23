@@ -62,8 +62,11 @@ public struct TopicSkeletonMergeCandidate: Codable, Sendable {
     public let title: String
     public let summary: String
     public let viewpointIDs: [String]
-    public init(topicID: String, title: String, summary: String, viewpointIDs: [String]) {
-        self.topicID = topicID; self.title = title; self.summary = summary; self.viewpointIDs = viewpointIDs
+    /// 骨架阶段给出的维度，带给合流阶段沿用，避免每次重跑重新猜、翻转维度。
+    public var domain: String? = nil
+    public init(topicID: String, title: String, summary: String, viewpointIDs: [String], domain: String? = nil) {
+        self.topicID = topicID; self.title = title; self.summary = summary
+        self.viewpointIDs = viewpointIDs; self.domain = domain
     }
 }
 
@@ -223,7 +226,7 @@ enum TopicSkeletonBatching {
                 viewpointIDs: outcome.plan.input.viewpoints.map(\.id),
                 topics: outcome.result.topics.map {
                     TopicSkeletonMergeCandidate(topicID: $0.topicID, title: $0.title, summary: $0.summary,
-                                                viewpointIDs: $0.viewpointIDs)
+                                                viewpointIDs: $0.viewpointIDs, domain: $0.domain)
                 })
         }
         let base = TopicSkeletonMergeInput(digest: "", batches: batches)

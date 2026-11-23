@@ -1249,8 +1249,9 @@ struct WorkspaceView: View {
         var grouped: [String: [TopicListing]] = [:]
         var ungrouped: [TopicListing] = []
         for listing in listings {
-            if let domain = listing.topic.organization?.domain { grouped[domain, default: []].append(listing) }
-            else { ungrouped.append(listing) }
+            if let domain = listing.topic.organization?.domain, let known = TopicDomain.normalized(domain) {
+                grouped[known, default: []].append(listing)
+            } else { ungrouped.append(listing) }
         }
         var sections = TopicDomain.allCases.compactMap { domain in
             grouped[domain.rawValue].map { (title: domain.rawValue, listings: $0) }

@@ -85,6 +85,16 @@ private struct BatchTopicTransport: ModelHTTPTransport {
             let text = String(decoding: try JSONSerialization.data(withJSONObject: result), as: UTF8.self)
             return Self.reply(text: text, id: "skeleton-\(recorder.snapshot().count)")
         }
+        if let topics = object["topics"] as? [[String: Any]], topics.first?["viewpoints"] == nil {
+            recorder.record(.init(kind: "domain", bytes: request.httpBody?.count ?? 0, timeout: request.timeoutInterval,
+                                  maxOutputTokens: maxTokens, content: content, viewpointCount: 0))
+            let answered: [[String: Any]] = topics.compactMap { topic in
+                guard let topicID = topic["topicID"] as? String else { return nil }
+                return ["topicID": topicID, "domain": "生活"]
+            }
+            let text = String(decoding: try JSONSerialization.data(withJSONObject: ["topics": answered]), as: UTF8.self)
+            return Self.reply(text: text, id: "domain-\(recorder.snapshot().count)")
+        }
         if let topics = object["topics"] as? [[String: Any]] {
             recorder.record(.init(kind: "body", bytes: request.httpBody?.count ?? 0, timeout: request.timeoutInterval,
                                   maxOutputTokens: maxTokens, content: content, viewpointCount: 0))
@@ -207,6 +217,9 @@ final class TopicOrganizationBatchChecks: XCTestCase {
         XCTAssertEqual(stages.filter { $0["stage"] == "skeleton-merge" }.count, 1)
         let questions = try await store.reflectionQuestions()
         XCTAssertTrue(questions.contains { $0.isAIOrganized == true && $0.organization?.bodyPending != true })
+        XCTAssertTrue(questions.allSatisfy { $0.organization?.domain == "生活" },
+                      "夹具不带维度时，整理末尾的归类请求把缺域主题补齐")
+        XCTAssertEqual(calls.filter { $0.kind == "domain" }.count, 1)
     }
 
     func testResumeAfterInterruptionOnlyReplaysUnfinishedBatchesAndMerge() async throws {

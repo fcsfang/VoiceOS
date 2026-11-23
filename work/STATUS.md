@@ -1173,3 +1173,10 @@
 - SourceFoldState.initial 增加 notePresent：有笔记时 thoughts 默认收起（内容摘要本就默认收起）；WorkspaceView.sourceFoldBinding 用 materialHasNote（presence 缓存或首页批量结果）决定初值；笔记在页面打开后异步出现时自动收起一次，用户仍可手动展开。
 - 集成：构建 95 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=1 重启）。
 - 上机验证（构建 95）：从笔记页「查看材料与原文」进入材料页，文章在上，内容摘要与核心要点均默认收起，待办/原文与回听以安静卡片存在——172-A 落地。截图 docs/product/audits/2026-11-23/04-材料页要点默认收起-构建95.jpg。
+## 波 191：186–190 评审修复（2026-11-23）
+- 维度漂移不重跑正文：合流候选携带 domain、提示词要求优先沿用；正文复用判定不再比较 domain（维度只影响分组）。原机制：模型每次重跑可翻转维度 → 清空 sections、置 bodyPending、重发 600 秒正文请求。
+- 归类按批落库：分批归类中途失败不再丢弃前面成功批次。
+- 补齐可重试：失败复位 topicDomainBackfillStarted；configureTextModel 前先复位，换模型即可重试。
+- 未知维度自愈：白名单外的 domain 在主题页按「未归类」显示，补齐视为缺失并覆盖。
+- 夹具与断言：批量夹具识别无 viewpoints 的 topics 为归类请求；首个批量用例断言缺域主题在末尾补齐、归类请求恰一次。
+- 集成：构建 96 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=4 重启）。

@@ -508,33 +508,36 @@ extension VoiceOSStore {
         for row in try db.query("SELECT id,title,organization_json FROM reflection_questions WHERE organization_json IS NOT NULL") {
             guard let id = row["id"], let title = row["title"], let json = row["organization_json"],
                   let summary = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(json.utf8)),
-                  summary.domain == nil else { continue }
+                  TopicDomain.normalized(summary.domain) == nil else { continue }
             candidates.append(TopicDomainCandidate(topicID: id, title: title, summary: summary.summary))
         }
         guard !candidates.isEmpty else { return 0 }
-        var assigned: [String: String] = [:]
+        var written = 0
         var offset = 0
         while offset < candidates.count {
             let chunk = Array(candidates[offset..<min(offset + 40, candidates.count)])
             offset += 40
             let result = try await model.assignTopicDomains(TopicDomainInput(topics: chunk))
             let known = Set(chunk.map(\.topicID))
+            var assigned: [String: String] = [:]
             for item in result where known.contains(item.topicID) {
                 if let domain = TopicDomain.normalized(item.domain) { assigned[item.topicID] = domain }
             }
-        }
-        guard !assigned.isEmpty else { return 0 }
-        var written = 0
-        try db.transaction {
-            for (topicID, domain) in assigned {
-                guard let row = try db.query("SELECT organization_json FROM reflection_questions WHERE id=?", [topicID]).first,
-                      let json = row["organization_json"],
-                      var summary = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(json.utf8)),
-                      summary.domain == nil else { continue }
-                summary.domain = domain
-                try db.execute("UPDATE reflection_questions SET organization_json=?,updated_at=? WHERE id=?",
-                               [try Self.relevanceJSON(summary), Self.now(), topicID])
-                written += 1
+            guard !assigned.isEmpty else { continue }
+            // 按批落库：后面的批次失败不会丢掉前面已经成功的结果。
+            written += try db.transaction {
+                var count = 0
+                for (topicID, domain) in assigned {
+                    guard let row = try db.query("SELECT organization_json FROM reflection_questions WHERE id=?", [topicID]).first,
+                          let json = row["organization_json"],
+                          var summary = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(json.utf8)),
+                          TopicDomain.normalized(summary.domain) == nil else { continue }
+                    summary.domain = domain
+                    try db.execute("UPDATE reflection_questions SET organization_json=?,updated_at=? WHERE id=?",
+                                   [try Self.relevanceJSON(summary), Self.now(), topicID])
+                    count += 1
+                }
+                return count
             }
         }
         return written
@@ -775,7 +778,6 @@ extension VoiceOSStore {
             summary.domain = TopicDomain.normalized(proposal.domain) ?? Self.existingTopicDomain(existingRow?.json)
             if let oldJSON = existingRow?.json,
                let old = try? JSONDecoder().decode(TopicOrganizationSummary.self, from: Data(oldJSON.utf8)),
-               old.domain == summary.domain,
                old.bodyPending != true, old.sections?.isEmpty == false,
                old.summary == summary.summary, old.questions == summary.questions,
                old.claimVersions == summary.claimVersions, old.sourceVersions == summary.sourceVersions,
