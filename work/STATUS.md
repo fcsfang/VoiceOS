@@ -1277,3 +1277,7 @@
 - 笔记页「待处理」每条前加选择圆圈，多选后「整理所选的 N 份」：organizeMaterialsSequentially 顺序执行，逐个 reidentify，失败跳过继续，结束汇总「已整理 N 份，M 份未完成」。
 - 移除旧首页遗留的悬空开关「最近笔记区默认展开」（已无消费者，避免误导）。
 - 集成：构建 130 全绿（build_exit=0 / test_exit=0，589 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 213：无 GUI 验证——板上引用解析（2026-11-24）
+- voiceos-check 新增 `board <data-dir>`：解析每篇最新笔记的板内引用，输出 todo/claim 对应记录与状态，并汇总 boards/todo/claim/unresolved。
+- 隔离副本实证：5 块板、2 个 todo 组件，全部解析到真实行动记录（unresolved=0）；「引用而非复制」链路在真实数据上成立。
+- 集成：构建 131 编译通过（应用与测试未改动语义，构建 130 已全绿并上机）。

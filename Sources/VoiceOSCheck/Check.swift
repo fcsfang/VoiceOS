@@ -8,7 +8,7 @@ struct Check {
     static func main() async {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
-            let usage = "usage: voiceos-check <read|search|import|import-personal-audio|ingest-podcast|task-context|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]\n       voiceos-check ax <dump|click|set-value|wait|scroll-to> --pid <pid> ..."
+            let usage = "usage: voiceos-check <read|board|search|import|import-personal-audio|ingest-podcast|task-context|transcribe|transcribe-qwen|export|restore> <data-dir> [arguments]\n       voiceos-check ax <dump|click|set-value|wait|scroll-to> --pid <pid> ..."
             if args.first == "ax" {
                 try AXCommands.run(Array(args.dropFirst()))
                 return
@@ -33,6 +33,8 @@ struct Check {
                 guard args.count == 2 else { throw VoiceOSError(usage) }
             case "search":
                 guard args.count == 3 else { throw VoiceOSError("search <data-dir> <query>") }
+            case "board":
+                guard args.count == 2 else { throw VoiceOSError("board <data-dir>") }
             case "import", "import-personal-audio":
                 guard (3...4).contains(args.count) else { throw VoiceOSError(usage) }
             case "export":
@@ -50,6 +52,30 @@ struct Check {
             let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
             try await store.recover()
             switch command {
+            case "board":
+                // 解析每篇最新笔记的板内引用（todo→行动、claim→观点），输出可读清单；
+                // 用于在无 GUI 时验证「引用实时数据」这条链路。
+                let actions = try await store.actions(includeHistory: true)
+                let actionByID = Dictionary(actions.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+                let notes = try await store.recentMaterialNotes(limit: 500)
+                var unresolved = 0, todoBlocks = 0, claimBlocks = 0
+                for note in notes {
+                    for block in NoteBoardAdapting.blocks(for: note.note) {
+                        switch block.kind {
+                        case "todo":
+                            todoBlocks += 1
+                            let action = block.actionID.flatMap { actionByID[$0] }
+                            print("todo  [\(note.note.title)] \(action?.title ?? "!! 引用失效 \(block.actionID ?? "-")") (\(action?.state ?? "?"))")
+                            if action == nil { unresolved += 1 }
+                        case "claim":
+                            claimBlocks += 1
+                            print("claim [\(note.note.title)] \(block.titleOverride ?? block.claimID ?? "")")
+                        default: break
+                        }
+                    }
+                }
+                print("boards=\(notes.count) todo=\(todoBlocks) claim=\(claimBlocks) unresolved=\(unresolved)")
+                return
             case "search":
                 try await store.rebuildSearchIndexIfNeeded()
                 let hits = try await store.search(query: args[2], limit: 20)
