@@ -2514,6 +2514,20 @@ struct WorkspaceView: View {
             }.padding(.horizontal,20).padding(.vertical,10)
             WorkspaceListDivider().padding(.horizontal,20)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(latestAttemptHealthy ? palette.success : palette.warning).frame(width:7,height:7).accessibilityHidden(true)
+                Text("最近模型调用").vosFont(WorkspaceText.body)
+                Spacer()
+                Text(latestAttemptText).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
+            }.padding(.horizontal,20).padding(.vertical,10)
+            WorkspaceListDivider().padding(.horizontal,20)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(model.topicOrganizationAttentionText == nil ? palette.success : palette.warning).frame(width:7,height:7).accessibilityHidden(true)
+                Text("主题整理").vosFont(WorkspaceText.body)
+                Spacer()
+                Text(model.topicOrganizationAttentionText ?? "空闲").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
+            }.padding(.horizontal,20).padding(.vertical,10)
+            WorkspaceListDivider().padding(.horizontal,20)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Circle().fill(model.backupRunning ? palette.accent : palette.success).frame(width:7,height:7).accessibilityHidden(true)
                 Text("备份").vosFont(WorkspaceText.body)
                 Spacer()
@@ -2524,6 +2538,25 @@ struct WorkspaceView: View {
                     .disabled(model.backupRunning || model.libraryRoot == nil)
             }.padding(.horizontal,20).padding(.vertical,10)
         }
+    }
+    private var latestAttempt: ModelAttemptRecord? {
+        model.attempts.values.flatMap { $0 }.max { $0.producerSequence < $1.producerSequence }
+    }
+    private var latestAttemptHealthy: Bool {
+        guard let state = latestAttempt?.state else { return true }
+        return ["completed", "reserved"].contains(state)
+    }
+    private var latestAttemptText: String {
+        guard let attempt = latestAttempt else { return "还没有调用" }
+        let state: String
+        switch attempt.state {
+        case "completed": state = "成功"
+        case "reserved": state = "进行中"
+        case "rejected": state = "被拒绝"
+        case "unknown": state = "结果未知"
+        default: state = attempt.state
+        }
+        return state + " · " + (attempt.executionKind.isEmpty ? attempt.model : attempt.executionKind)
     }
     /// 设置页搜索：命中关键词才显示对应卡片；空查询显示全部。
     private func showsSettingsCard(_ keywords: [String]) -> Bool {
