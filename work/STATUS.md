@@ -1219,3 +1219,6 @@
 - MaterialNote v3 的「正文不加建议」属归属结构，等 v4 批注层落地时重构（现在删除会让 AI 判断混入作者正文）。
 - 行为变化：助手交付标题回退为 action 标题；主题骨架去掉双材料门槛后主题可能增多。
 - 集成：构建 105 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=4 重启）。
+## 波 201：清掉「最近想法」数据管线（2026-11-23）
+- 197 删除界面后，RecentContentIndex.recentThoughts、RecentThoughtEntry/Day、快照 recentThoughts 字段与 4 条对应测试已无消费者；整体删除（约 −60 行），保留 digest 使用的 RecentThoughtKind/RecentContentThought。
+- 集成：构建 106 全绿（build_exit=0 / test_exit=0，580 tests / dist_build_exit=0，attempt=21 重启）。
