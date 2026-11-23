@@ -1193,3 +1193,7 @@
 - MaterialNoteReadingView：段落只渲染正文与「整理时补充的关联」；删除逐段看原话、引文行（角色/时间/回听这句/查看原文）、元信息行回听、MaterialNoteParagraphView、MaterialNoteAnchorPresentation、noteRole、timeText 与锚点呈现（约 −206 行）。
 - 数据层不动：引文锚点仍保存并落库校验；原话与回听集中在「查看材料与原文」。
 - 集成：构建 99 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0）。
+## 波 195：成品优先落地到收件箱（2026-11-23）
+- 用户：成品/原材料的分层应成为整个软件的原则。收件箱（旧首页）右侧不再渲染【想法】线索分组、编号要点、看原话与「想慢慢做到」；有笔记的条目只显示成品预览（标题+导语）与待处理信息（待办、行动反馈），没有笔记时提示去材料页。
+- 随【想法】面板移除线索重命名/合并/隐藏整块入口与组件（threadSection、ThoughtLine、ClueHeaderMenu、RecentClueRenameSheet、ClueRenameRequest 等，约 −240 行）；保留整理引导、最近想法区与失败提示。
+- 集成：构建 100 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=1 重启）。

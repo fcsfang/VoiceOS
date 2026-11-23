@@ -32,7 +32,6 @@ struct RecentContentHome: View {
     /// 读笔记会在状态落回后立刻再读一次，两次查询在 store actor 上串行。
     @State private var readingStatesLoaded = false
     @AppStorage("voiceos.home.pendingOnly") private var showsOnlyPending = true
-    @State private var clueRename: ClueRenameRequest?
     @State private var clueFailureText = ""
     @State private var clueFailureTitle = "操作未完成"
     @State private var showingClueFailure = false
@@ -130,9 +129,6 @@ struct RecentContentHome: View {
             recentNotes = await model.recentMaterialNotes(limit: 8)
         }
         .onChange(of: model.understandingSource) { _, id in finishOrganizeAttempt(id) }
-        .sheet(item: $clueRename) { request in
-            RecentClueRenameSheet(model: model, clue: request.clue, title: request.title, resettable: request.resettable) { clueRename = nil }
-        }
         .alert(clueFailureTitle, isPresented: $showingClueFailure) {
             Button("好", role: .cancel) {}
         } message: { Text(clueFailureText) }
@@ -681,12 +677,11 @@ struct RecentContentHome: View {
             }
             if item.thoughts.isEmpty {
                 organizePrompt(item).padding(.top, 44)
-            } else {
-                ForEach(digest.threads) { thread in
-                    threadSection(thread, siblings: digest.threads.filter { $0.id != thread.id })
-                        .padding(.top, WorkspaceMetrics.sectionGap)
-                        .id("home.thread.\(thread.id)")
-                }
+            } else if note == nil {
+                // 成品优先：收件箱不展开要点与原文；还没有笔记时给一句去材料页的指引。
+                Text("这篇还没有整理成笔记；要点与原文在材料页。")
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                    .padding(.top, WorkspaceMetrics.sectionGap)
             }
             tasksSummary(digest.tasks)
         }
@@ -699,69 +694,10 @@ struct RecentContentHome: View {
         return parts.joined(separator: " · ")
     }
 
-    private func threadSection(_ thread: RecentContentThread, siblings: [RecentContentThread]) -> some View {
-        let notes = thread.thoughts.filter { $0.kind != .goal }
-        return VStack(alignment: .leading, spacing: 0) {
-            WorkspaceListDivider().padding(.bottom, WorkspaceMetrics.groupGap)
-            HStack(alignment: .center, spacing: 14) {
-                Text(thread.title).vosFont(WorkspaceText.sectionTitle).foregroundStyle(palette.secondaryText).accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 8)
-                ClueHeaderMenu(title: thread.title,
-                               siblings: siblings,
-                               hidden: model.recentClueOverrides.filter(\.hidden),
-                               rename: { beginClueRename(thread) },
-                               merge: { target in mergeClue(thread, into: target) },
-                               hide: { setClueHidden(thread.id, hidden: true) },
-                               restore: { override in setClueHidden(override.clue, hidden: false) })
-            }
-            if !notes.isEmpty {
-                VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
-                    ForEach(Array(notes.enumerated()), id: \.element.id) { index, thought in
-                        HStack(alignment: .top, spacing: 10) {
-                            Text("\(index + 1)").vosFont(WorkspaceText.caption.size, weight: WorkspaceText.caption.weight, monospacedDigit: true)
-                                .foregroundStyle(palette.tertiaryText).frame(width: 18 * vosLayoutScale(textScale), alignment: .trailing)
-                                .padding(.top, 3)
-                            ThoughtLine(thought: thought, openOriginal: { openOriginal(thought) })
-                        }
-                    }
-                }.padding(.top, WorkspaceMetrics.groupGap).padding(.leading, 42)
-            }
-            if !thread.goals.isEmpty {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("想慢慢做到").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-                    ForEach(thread.goals) { thought in
-                        Text(thought.statement).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
-                    }
-                }
-                .padding(.vertical, 13).padding(.horizontal, 17)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(palette.selection.opacity(0.6), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius))
-                .padding(.top, WorkspaceMetrics.groupGap).padding(.leading, 42)
-            }
-        }.accessibilityIdentifier("home.thread")
-    }
-
-    private func beginClueRename(_ thread: RecentContentThread) {
-        let override = model.recentClueOverrides.first { $0.clue == thread.id }
-        clueRename = ClueRenameRequest(clue: thread.id, title: thread.title, resettable: override?.displayTitle != nil)
-    }
-
-    private func mergeClue(_ thread: RecentContentThread, into target: RecentContentThread) {
-        Task { if !(await model.mergeRecentClue(thread.id, into: target.id)) { showClueFailure() } }
-    }
-
-    private func setClueHidden(_ clue: String, hidden: Bool) {
-        Task { if !(await model.setRecentClueHidden(clue, hidden: hidden)) { showClueFailure() } }
-    }
-
     private func showClueFailure(title: String = "操作未完成", message: String? = nil) {
         clueFailureTitle = title
         clueFailureText = message ?? (model.status.isEmpty ? "操作未完成，请稍后重试。" : model.status)
         showingClueFailure = true
-    }
-
-    private func openOriginal(_ thought: RecentContentThought) {
-        openClaim(thought.claimID)
     }
 
     private func openClaim(_ claimID: String) {
@@ -1174,117 +1110,6 @@ private enum HomeDateFormatting {
     }()
 }
 
-private struct ClueRenameRequest: Identifiable {
-    let clue: String
-    let title: String
-    let resettable: Bool
-    var id: String { clue }
-}
-
-private struct ClueHeaderMenu: View {
-    @Environment(\.workspacePalette) private var palette
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let title: String
-    let siblings: [RecentContentThread]
-    let hidden: [RecentClueOverride]
-    let rename: () -> Void
-    let merge: (RecentContentThread) -> Void
-    let hide: () -> Void
-    let restore: (RecentClueOverride) -> Void
-    @State private var hovered = false
-    @FocusState private var focused: Bool
-
-    private var visible: Bool { hovered || focused }
-
-    var body: some View {
-        Menu {
-            Button("重命名…", action: rename)
-            if !siblings.isEmpty {
-                Menu("合并到…") {
-                    ForEach(siblings) { target in
-                        Button("并入「\(target.title)」") { merge(target) }
-                    }
-                }
-            }
-            Button("隐藏", action: hide)
-            if !hidden.isEmpty {
-                Divider()
-                Menu("显示隐藏的线索") {
-                    ForEach(hidden, id: \.clue) { override in
-                        Button("恢复「\(override.displayTitle ?? RecentContentDigest.threadTitle(override.clue))」") { restore(override) }
-                    }
-                }
-            }
-        } label: {
-            Image(systemName: "ellipsis").vosFont(WorkspaceText.meta.size, weight: .semibold)
-                .foregroundStyle(palette.secondaryText)
-                .frame(width: WorkspaceMetrics.rowActionMinHeight, height: WorkspaceMetrics.rowActionMinHeight)
-                .contentShape(Rectangle())
-        }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-        .focused($focused)
-        .help("更多操作")
-        .accessibilityLabel("更多操作：" + title)
-        .padding(.horizontal, 6).padding(.vertical, 3)
-        .background(palette.surface, in: Capsule())
-        .overlay { Capsule().strokeBorder(palette.border, lineWidth: 1) }
-        .opacity(visible ? 1 : 0)
-        .allowsHitTesting(visible)
-        .onHover { hovered = $0 }
-        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: visible)
-    }
-}
-
-private struct RecentClueRenameSheet: View {
-    @Environment(\.workspacePalette) private var palette
-    @ObservedObject var model: ControlCenter
-    let clue: String
-    let resettable: Bool
-    let dismiss: () -> Void
-    @State private var title: String
-    @State private var saving = false
-    @FocusState private var titleFocused: Bool
-
-    init(model: ControlCenter, clue: String, title: String, resettable: Bool, dismiss: @escaping () -> Void) {
-        self.model = model; self.clue = clue; self.resettable = resettable; self.dismiss = dismiss
-        _title = State(initialValue: title)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("修改线索标题").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            TextField("线索标题", text: $title).focused($titleFocused)
-            Text("只改变这条线索的显示名，原始想法不变。")
-                .vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
-            if !model.status.isEmpty {
-                Text(model.status).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
-            }
-            HStack {
-                if resettable {
-                    Button("恢复默认") {
-                        saving = true
-                        Task { if await model.renameRecentClue(clue, title: nil) { dismiss() }; saving = false }
-                    }
-                }
-                Button("取消", action: dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
-                Spacer()
-                Button("保存") {
-                    saving = true
-                    let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                    Task {
-                        if await model.renameRecentClue(clue, title: trimmed.isEmpty ? nil : trimmed) { dismiss() }
-                        saving = false
-                    }
-                }.buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction).disabled(title.count > 100)
-            }.disabled(saving)
-        }.padding(24).frame(width: 520)
-            .workspaceModalSurface()
-            .task { try? await Task.sleep(for: .milliseconds(100)); titleFocused = true }
-    }
-}
-
-/// The home timeline's batched note read: the library revision, the note
-/// revision and the canonical expression keys of the visible rows.
 private struct HomeMaterialNotesKey: Equatable {
     let records: Int
     let notes: Int
@@ -1345,33 +1170,6 @@ private struct TimelineAnchorKey: PreferenceKey {
     }
 }
 
-private struct ThoughtLine: View {
-    @Environment(\.workspacePalette) private var palette
-    let thought: RecentContentThought
-    let openOriginal: () -> Void
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Text(thought.statement).vosFont(WorkspaceText.body).lineSpacing(5).textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button { openOriginal() } label: {
-                Image(systemName: "text.quote")
-                    .vosFont(WorkspaceText.caption)
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(palette.accent)
-            .help("打开这条想法出自的材料")
-            .accessibilityLabel("看原话")
-        }
-    }
-}
-
-/// Timeline rows are flat: date labels and hairlines carry the structure, so
-/// stacked frames never read as one repeated outline. The open row fills with
-/// the selection wash and hangs an accent bar in its leading gutter, the same
-/// accent the reader on the right uses for its actions.
 private struct HomeRowChrome: ViewModifier {
     @Environment(\.workspacePalette) private var palette
     @Environment(\.isEnabled) private var isEnabled
