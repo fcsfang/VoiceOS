@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import CoreGraphics
 import AVKit
 import VoiceOSCore
 import VoiceOSPlatform
@@ -410,6 +411,8 @@ struct WorkspaceView: View {
     @State private var modelSaving = false
     @State private var modelTestResult: String?
     @State private var settingsQuery = ""
+    @AppStorage("voiceos.note.annotations.visible") private var showNoteAnnotations = true
+    @AppStorage("voiceos.home.recentNotes.expanded") private var recentNotesExpandedPreference = true
     @State private var materialPageCache = MaterialPageCache()
     @State private var actionPageCache = ActionPageCache()
     @State private var topicListingCache = TopicListingCache()
@@ -2346,6 +2349,7 @@ struct WorkspaceView: View {
                 if showsSettingsCard(["连接","收件箱","文件夹","提醒","监测","自动"]) { settingsConnectionsCard }
                 if showsSettingsCard(["系统权限","麦克风","通知","磁盘","屏幕"]) { settingsPermissionsCard }
                 if showsSettingsCard(["外观","主题","字号"]) { settingsAppearanceCard }
+                if showsSettingsCard(["阅读","批注","生成","最近笔记","显示"]) { settingsReadingCard }
                 if showsSettingsCard(["导出","备份","保留","迁移包"]) { settingsExportBackupCard }
                 if showsSettingsCard(["资料库","恢复","检查","打开"]) { settingsLibraryCard }
                 if showsSettingsCard(["存储","占用","磁盘","清理"]) { settingsStorageCard }
@@ -2616,6 +2620,27 @@ struct WorkspaceView: View {
                 Button("打开设置") { model.openNoticeSettings() }.buttonStyle(.workspaceQuietCompact)
             }
             .task { await model.refreshNoticeAuthorization() }
+            WorkspaceSettingsRow(title:"屏幕录制", subtitle: CGPreflightScreenCaptureAccess() ? "已授权" : "未授权；截图相关功能需要它") {
+                Button("系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!) }
+                    .buttonStyle(.workspaceQuietCompact)
+            }
+            WorkspaceSettingsRow(title:"完全磁盘访问", subtitle:"受系统保护，无法在应用内检测；QQ 消息监测需要它") {
+                Button("系统设置") { NSWorkspace.shared.open(URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!) }
+                    .buttonStyle(.workspaceQuietCompact)
+            }
+        }
+    }
+    private var settingsReadingCard: some View {
+        WorkspaceSettingsCard(title:"阅读与生成", subtitle:"笔记页与最近笔记的显示偏好") {
+            WorkspaceSettingsRow(title:"显示 AI 批注", subtitle:"笔记里的启发层；关掉只留你的正文", showsDivider:false) {
+                Toggle("显示 AI 批注", isOn: $showNoteAnnotations)
+                    .toggleStyle(.switch).labelsHidden()
+                    .accessibilityIdentifier("settings.showAnnotations")
+            }
+            WorkspaceSettingsRow(title:"最近笔记区默认展开", subtitle:"笔记页顶部的最近整理列表") {
+                Toggle("最近笔记默认展开", isOn: $recentNotesExpandedPreference)
+                    .toggleStyle(.switch).labelsHidden()
+            }
         }
     }
     private var settingsAppearanceCard: some View {
