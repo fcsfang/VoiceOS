@@ -1180,3 +1180,7 @@
 - 未知维度自愈：白名单外的 domain 在主题页按「未归类」显示，补齐视为缺失并覆盖。
 - 夹具与断言：批量夹具识别无 viewpoints 的 topics 为归类请求；首个批量用例断言缺域主题在末尾补齐、归类请求恰一次。
 - 集成：构建 96 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=4 重启）。
+## 波 192：笔记即首页（2026-11-23）
+- 用户想法：笔记替代首页——旧首页点进材料是【想法】【原文】结构化信息，实际不太想看。判断：方向对，但旧首页的「待处理」提醒需要保留观察。
+- WorkspaceView 默认页改为 .notes；NotesLibraryView 顶部在有未读材料时显示「收件箱 · N 条材料待处理 / 去处理」安静入口（按 homeSnapshot 材料项与阅读态计算，读完即消失），点击进旧首页；侧栏「首页」保留。
+- 集成：构建 97 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=5 重启）。

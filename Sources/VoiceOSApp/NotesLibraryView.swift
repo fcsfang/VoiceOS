@@ -9,9 +9,20 @@ struct NotesLibraryView: View {
     @ObservedObject var model: ControlCenter
     /// 打开纯笔记阅读页（文章本体），不是完整的材料页。
     let openNote: (String) -> Void
+    /// 去旧首页的收件箱处理新录音与待办反馈。
+    var openInbox: () -> Void = {}
 
     @State private var notes: [StoredMaterialNote] = []
     @State private var query = ""
+    @State private var readingStates: [String: SourceReadingState] = [:]
+
+    /// 还有没读过的材料时，笔记页顶部留一条去收件箱的入口；没有就不占位置。
+    private var pendingInboxCount: Int {
+        model.homeSnapshot.days.flatMap(\.items).filter { item in
+            guard item.kind == .material, !item.sourceIDs.isEmpty else { return false }
+            return item.sourceIDs.allSatisfy { (readingStates[$0] ?? .unread) != .read }
+        }.count
+    }
 
     private var filtered: [StoredMaterialNote] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -37,6 +48,22 @@ struct NotesLibraryView: View {
                 Spacer()
                 Text("\(notes.count) 篇 · 按整理时间").vosFont(WorkspaceText.meta)
                     .foregroundStyle(palette.secondaryText)
+            }
+            if pendingInboxCount > 0 {
+                Button { openInbox() } label: {
+                    HStack(spacing:8) {
+                        Image(systemName:"tray").accessibilityHidden(true)
+                        Text("收件箱 · \(pendingInboxCount) 条材料待处理").vosFont(WorkspaceText.meta)
+                        Spacer(minLength:0)
+                        Text("去处理").vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                        Image(systemName:"chevron.right").vosFont(WorkspaceText.caption.size,weight:.semibold).accessibilityHidden(true)
+                    }
+                    .foregroundStyle(palette.accent)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("打开首页收件箱，处理新的录音与待办反馈")
+                .accessibilityIdentifier("notes.inbox")
             }
             WorkspaceSearchField(text: $query, placeholder: "搜索笔记标题或正文")
                 .accessibilityIdentifier("notes.search")
@@ -86,6 +113,7 @@ struct NotesLibraryView: View {
             await reload()
         }
         .task { await reload() }
+        .task(id: model.recordsRevision) { readingStates = await model.readingStates() }
     }
 
     private func open(_ stored: StoredMaterialNote) {

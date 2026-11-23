@@ -352,7 +352,8 @@ struct WorkspaceView: View {
     @Environment(\.vosTextScale) private var textScale
     private var palette: WorkspacePalette { WorkspacePalette(theme: theme) }
     private var brandImage: NSImage? { AppBrand.image(for: colorScheme) }
-    @State private var page: WorkspacePage = .home
+    // 笔记即首页：打开应用先落在文章列表；旧首页作为收件箱一键可达。
+    @State private var page: WorkspacePage = .notes
     @State private var path: [WorkspaceNavigationEntry] = []
     @State private var scrollPositions: [WorkspaceNavigationEntry: ScrollPosition] = [:]
     @State private var sourceScrollPositions: [String: ScrollPosition] = [:]
@@ -948,7 +949,7 @@ struct WorkspaceView: View {
             }
         case .notes:
             ScrollViewReader { proxy in
-                scrolled { NotesLibraryView(model: model, openNote: { go(.note($0)) }) }.id(navigationEntry)
+                scrolled { NotesLibraryView(model: model, openNote: { go(.note($0)) }, openInbox: { go(.home) }) }.id(navigationEntry)
             }
         case .note(let id):
             noteReadingPage(id)
