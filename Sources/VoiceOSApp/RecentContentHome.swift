@@ -18,6 +18,8 @@ struct RecentContentHome: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var model: ControlCenter
     let openSource: (String) -> Void
+    /// 打开纯笔记阅读页（文章本体）；没有笔记的条目仍走 openSource。
+    var openNote: (String) -> Void = { _ in }
     let openSpan: (String, String) -> Void
     let openTask: (String) -> Void
     let capture: () -> Void
@@ -636,7 +638,7 @@ struct RecentContentHome: View {
                 }
                 if let first = item.sourceIDs.first {
                     let hasNote = materialNote(for: item) != nil
-                    Button(hasNote ? "继续读" : "打开材料") { openSource(first) }
+                    Button(hasNote ? "继续读" : "打开材料") { hasNote ? openNote(first) : openSource(first) }
                         .buttonStyle(.plain).vosFont(WorkspaceText.meta).foregroundStyle(palette.accent)
                         .help(hasNote ? "继续读这篇笔记，回到上次读到的位置" : "打开这份材料")
                 }
@@ -884,7 +886,7 @@ struct RecentContentHome: View {
 
     private func openRecentNote(_ stored: StoredMaterialNote) {
         guard let first = stored.expressionKey.split(separator: "|").first.map(String.init) else { return }
-        model.revealSource(first)
+        openNote(first)
     }
 
     private func recentThoughtsEntry(_ groups: [RecentThoughtDay]) -> some View {

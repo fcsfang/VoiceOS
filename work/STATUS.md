@@ -1162,3 +1162,8 @@
 - 新文件 NotesLibraryView：每个表达最新一篇笔记、按整理时间倒序，行内标题+导语预览+日期，搜索框在标题与正文过滤；点开经 expressionKey 首成员打开材料页并落在上次阅读位置；随 records/materialNotes 代际刷新；空态两分。
 - 构建踩坑与修法：MaterialNoteHomeText 改 internal 复用；侧栏七行导航与保存视图区触发类型检查超时——导航拆两组、nav 返回 AnyView 压平类型、保存视图区与行抽成独立函数。
 - 集成：构建 85/86/87/88/89 依次失败于上述三类问题；修复后构建 92 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 189：笔记的纯阅读入口（2026-11-23）
+- 用户反馈：笔记页点进某一篇后与材料页没区别，仍是要点与原文——笔记应是文章。
+- WorkspacePage 增加 note(String)：纯笔记阅读页，仅「所有笔记」返回、文章本体（标题/导语/段落/看原话/相关）与「查看材料与原文」入口；材料工具不出现。滚动绑定按 note-reading:<id> 区分，复用 175-A 位置恢复。
+- 笔记页、首页「继续读」、首页最近笔记行都进入 note(id)；无笔记条目仍打开材料页。
+- 集成：构建 93 因 unavailable 调用缺参数标签失败；修复后构建 94 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=7 重启）。

@@ -6,7 +6,7 @@ import VoiceOSCore
 // One navigation state owns the workspace. Discussion is a sibling, so expanding
 // it never replaces the reading view or its disclosure/scroll state.
 enum WorkspacePage: Hashable {
-    case home, themes, materials, notes, monitor, actions, initiate, source(String), delivery(String), task(String), settings, capture, search, tool(String)
+    case home, themes, materials, notes, note(String), monitor, actions, initiate, source(String), delivery(String), task(String), settings, capture, search, tool(String)
     var isTopLevel: Bool {
         switch self {
         case .home, .themes, .materials, .notes, .monitor, .actions, .initiate, .settings: true
@@ -357,6 +357,7 @@ struct WorkspaceView: View {
     @State private var scrollPositions: [WorkspaceNavigationEntry: ScrollPosition] = [:]
     @State private var sourceScrollPositions: [String: ScrollPosition] = [:]
     @State private var sourceFoldStates: [String: SourceFoldState] = [:]
+    @State private var notePageHasNote = false
     @State private var topicID: String?
     @State private var topicTab = "概览"
     @State private var topicReadingMode = "卡片"
@@ -468,6 +469,7 @@ struct WorkspaceView: View {
         case .themes: "主题"
         case .materials: "材料"
         case .notes: "笔记"
+        case .note: "笔记"
         case .monitor: "消息监测"
         case .source: sourceOpenedFromTheme ? "主题" : "材料"
         case .actions,.task,.delivery: "行动"
@@ -739,6 +741,23 @@ struct WorkspaceView: View {
                             actionKeys: topicActionKeys(for: actionIDs),
                             token: topicLoadToken)
     }
+    /// 纯笔记阅读页：只有文章本体与「查看材料与原文」入口，材料工具不出现。
+    @ViewBuilder private func noteReadingPage(_ id: String) -> some View {
+        if let source = model.sourcePageIndex.recordsByID[id] {
+            ScrollViewReader { proxy in
+                scrolled {
+                    VStack(alignment:.leading, spacing: WorkspaceMetrics.sectionGap) {
+                        HStack {
+                            Button("所有笔记",systemImage:"arrow.left") { back() }.buttonStyle(.workspaceQuietCompact)
+                            Spacer()
+                            Button("查看材料与原文",systemImage:"books.vertical") { go(.source(id)) }.buttonStyle(.workspaceQuietCompact)
+                        }
+                        MaterialNoteReadingView(model:model,source:source,openSource:{ go(.source($0)) },openTask:{ go(.task($0)) },openDiscussion:{ conv in Task { await openSavedDiscussion(conv) } },hasNote:$notePageHasNote,restoreScroll:sourceScrollBinding("note-reading:" + id))
+                    }
+                }
+            }
+        } else { unavailable("这篇笔记暂时不可用",description:"可以回到笔记列表，或打开材料页。",actionTitle:"回到笔记") { go(.notes) } }
+    }
     /// 保存视图区与行都单独成函数：侧栏表达式整体过大会触发类型检查超时。
     @ViewBuilder private var sidebarSavedViews: some View {
         if !savedViews.isEmpty {
@@ -919,7 +938,7 @@ struct WorkspaceView: View {
     @ViewBuilder private var pageContent: some View {
         switch page {
         case .home:
-            RecentContentHome(model: model, openSource: { go(.source($0)) }, openSpan: { sourceID, spanID in
+            RecentContentHome(model: model, openSource: { go(.source($0)) }, openNote: { go(.note($0)) }, openSpan: { sourceID, spanID in
                 revealSourceSpan(sourceID, spanID: spanID)
                 go(.source(sourceID))
             }, openTask: { go(.task($0)) }, capture: { go(.capture) })
@@ -929,8 +948,10 @@ struct WorkspaceView: View {
             }
         case .notes:
             ScrollViewReader { proxy in
-                scrolled { NotesLibraryView(model: model, openSource: { go(.source($0)) }) }.id(navigationEntry)
+                scrolled { NotesLibraryView(model: model, openNote: { go(.note($0)) }) }.id(navigationEntry)
             }
+        case .note(let id):
+            noteReadingPage(id)
         case .materials:
             ScrollViewReader { proxy in
                 scrolled { materials }

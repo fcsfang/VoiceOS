@@ -7,7 +7,8 @@ import VoiceOSCore
 struct NotesLibraryView: View {
     @Environment(\.workspacePalette) private var palette
     @ObservedObject var model: ControlCenter
-    let openSource: (String) -> Void
+    /// 打开纯笔记阅读页（文章本体），不是完整的材料页。
+    let openNote: (String) -> Void
 
     @State private var notes: [StoredMaterialNote] = []
     @State private var query = ""
@@ -89,7 +90,7 @@ struct NotesLibraryView: View {
 
     private func open(_ stored: StoredMaterialNote) {
         guard let first = stored.expressionKey.split(separator: "|").first.map(String.init) else { return }
-        openSource(first)
+        openNote(first)
     }
 
     private func reload() async {
