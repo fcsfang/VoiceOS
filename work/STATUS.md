@@ -1222,3 +1222,8 @@
 ## 波 201：清掉「最近想法」数据管线（2026-11-23）
 - 197 删除界面后，RecentContentIndex.recentThoughts、RecentThoughtEntry/Day、快照 recentThoughts 字段与 4 条对应测试已无消费者；整体删除（约 −60 行），保留 digest 使用的 RecentThoughtKind/RecentContentThought。
 - 集成：构建 106 全绿（build_exit=0 / test_exit=0，580 tests / dist_build_exit=0，attempt=21 重启）。
+## 波 202：启发层实现（2026-11-23）
+- 依据 docs/product/启发层设计（AI批注）.md（全面审计版）：MaterialNote 增加 Annotation（kind/text/quote?/title?/startsFrom?/voice?/source?/confidence?）、段落 annotations、文末 closing；旧笔记兼容。
+- 提示词 v4：promptVersion material-note-v4、schemaVersion note-v3、outputTokens 32768；instructions 按设计全文（能力优先、角色自选、无条数/长度上限、允许发散与讲授、诚实底线）；schema 段落 annotations 与根 closing 必填数组；解码生成稳定 id。锚定保留批注与文末长文，批注引文定位失败只清引文。
+- 界面：段落后就地批注（低饱和暖色底、左缘色条、「AI 批注 · 类型 · voice」小标、出处行、超长自然换行）；文末「再看一眼」区；笔记操作菜单「隐藏/显示 AI 批注」（默认显示、持久化）。
+- 测试 +3：旧 JSON 无批注字段、批注解码、锚定清引文保留本体。构建 107 因解码辅助与 schema 变量同名失败；更名 makeAnnotation 后构建 109 全绿（build_exit=0 / test_exit=0，583 tests / dist_build_exit=0，attempt=30 重启）。

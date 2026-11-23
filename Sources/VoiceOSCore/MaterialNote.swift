@@ -5,15 +5,42 @@ import Foundation
 /// ID records an anchor that could not be located, while a missing transcript
 /// version records an anchor whose version was not known at generation time.
 public struct MaterialNote: Codable, Sendable, Equatable {
+    /// 一条启发批注：AI 的声音，可以短到一句，也可以长到一篇；形式、条数、
+    /// 角色都由模型按内容判断。quote/startsFrom 只是定位辅助，可空。
+    public struct Annotation: Codable, Sendable, Equatable, Identifiable {
+        public let id: String
+        public let kind: String
+        public let text: String
+        public let quote: String?
+        public let title: String?
+        public let startsFrom: String?
+        public let voice: String?
+        public let source: String?
+        public let confidence: String?
+        public init(id: String, kind: String, text: String, quote: String? = nil, title: String? = nil,
+                    startsFrom: String? = nil, voice: String? = nil, source: String? = nil, confidence: String? = nil) {
+            self.id = id; self.kind = kind; self.text = text; self.quote = quote
+            self.title = title; self.startsFrom = startsFrom; self.voice = voice
+            self.source = source; self.confidence = confidence
+        }
+        /// 引文在原文里定位不到时，只清掉定位，批注本体保留。
+        public func clearingQuote() -> Annotation {
+            Annotation(id: id, kind: kind, text: text, quote: nil, title: title,
+                       startsFrom: startsFrom, voice: voice, source: source, confidence: confidence)
+        }
+    }
     public struct Paragraph: Codable, Sendable, Equatable {
         public let text: String
         public let anchors: [Anchor]
         /// 段落包含整理时补充的关联（不是材料明说的意思），阅读界面可轻标。
         public let inferred: Bool?
-        public init(text: String, anchors: [Anchor] = [], inferred: Bool? = nil) {
+        /// 就地批注：挂在这一段上的 AI 启发。
+        public let annotations: [Annotation]?
+        public init(text: String, anchors: [Anchor] = [], inferred: Bool? = nil, annotations: [Annotation]? = nil) {
             self.text = text
             self.anchors = anchors
             self.inferred = inferred
+            self.annotations = annotations
         }
     }
     public struct Anchor: Codable, Sendable, Equatable {
@@ -39,10 +66,13 @@ public struct MaterialNote: Codable, Sendable, Equatable {
     public let title: String
     public let lead: String?
     public let sections: [Section]
-    public init(title: String, lead: String? = nil, sections: [Section]) {
+    /// 文末长文：跨段综合、理论讲授、长回应或发散。
+    public let closing: [Annotation]?
+    public init(title: String, lead: String? = nil, sections: [Section], closing: [Annotation]? = nil) {
         self.title = title
         self.lead = lead
         self.sections = sections
+        self.closing = closing
     }
 }
 

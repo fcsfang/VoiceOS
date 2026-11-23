@@ -152,6 +152,43 @@ final class MaterialNoteChecks: XCTestCase {
         XCTAssertEqual(recent.last, second)
     }
 
+    func test旧笔记JSON无批注字段解码为空() throws {
+        let json = #"{"title":"标题","lead":null,"sections":[{"heading":null,"paragraphs":[{"text":"一段","anchors":[]}]}]}"#
+        let note = try JSONDecoder().decode(MaterialNote.self, from: Data(json.utf8))
+        XCTAssertNil(note.closing)
+        XCTAssertNil(note.sections[0].paragraphs[0].annotations)
+    }
+
+    func test批注字段解码保留类型身份与出处() throws {
+        let json = #"{"title":"标题","lead":null,"sections":[{"heading":null,"paragraphs":[{"text":"一段","anchors":[],"annotations":[{"id":"a1","kind":"theory","text":"某理论认为…","quote":null,"title":null,"startsFrom":null,"voice":"导师","source":"家庭系统理论（Bowen）","confidence":"需核对"}]}]}],"closing":[{"id":"c1","kind":"extension","text":"从这段向外延伸…","quote":null,"title":"再看一眼","startsFrom":"一段","voice":null,"source":null,"confidence":null}]}"#
+        let note = try JSONDecoder().decode(MaterialNote.self, from: Data(json.utf8))
+        let annotation = try XCTUnwrap(note.sections[0].paragraphs[0].annotations?.first)
+        XCTAssertEqual(annotation.kind, "theory")
+        XCTAssertEqual(annotation.voice, "导师")
+        XCTAssertEqual(annotation.source, "家庭系统理论（Bowen）")
+        XCTAssertEqual(note.closing?.first?.kind, "extension")
+    }
+
+    func test锚定清掉无法定位的批注引文但保留批注本体() {
+        let member = MaterialNoteMember(sourceID: "a", title: "材料", transcriptVersionID: nil,
+                                        transcript: "原话在这里。", spans: [MaterialNoteSpan(id: "s1", text: "原话在这里。")])
+        let note = MaterialNote(title: "标题", sections: [
+            MaterialNote.Section(paragraphs: [
+                MaterialNote.Paragraph(text: "一段", anchors: [], annotations: [
+                    MaterialNote.Annotation(id: "a1", kind: "quote", text: "有依据的批注", quote: "原话在这里"),
+                    MaterialNote.Annotation(id: "a2", kind: "extension", text: "发散批注", quote: "原文里没有这句")
+                ])
+            ])
+        ], closing: [MaterialNote.Annotation(id: "c1", kind: "theory", text: "文末长文")])
+        let anchored = MaterialNoteAnchoring.anchored(note, members: [member])
+        let annotations = anchored.sections[0].paragraphs[0].annotations ?? []
+        XCTAssertEqual(annotations.count, 2)
+        XCTAssertEqual(annotations[0].quote, "原话在这里")
+        XCTAssertNil(annotations[1].quote, "定位不到时只清掉引文")
+        XCTAssertEqual(annotations[1].text, "发散批注")
+        XCTAssertEqual(anchored.closing?.first?.text, "文末长文")
+    }
+
     func test批量读单行损坏不拖垮其余笔记() async throws {
         let store = try await openStore()
         let good = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("完好"),

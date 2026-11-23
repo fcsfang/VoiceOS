@@ -90,10 +90,25 @@ public enum MaterialNoteAnchoring {
                                                transcriptVersionID: member.transcriptVersionID,
                                                spanID: spanID)
                 }
-                return MaterialNote.Paragraph(text: paragraph.text, anchors: anchors, inferred: paragraph.inferred)
+                return MaterialNote.Paragraph(text: paragraph.text, anchors: anchors, inferred: paragraph.inferred,
+                                              annotations: sanitizedAnnotations(paragraph.annotations, members: members))
             })
         }
-        return MaterialNote(title: note.title, lead: note.lead, sections: sections)
+        return MaterialNote(title: note.title, lead: note.lead, sections: sections,
+                            closing: sanitizedAnnotations(note.closing, members: members))
+    }
+
+    /// 批注的引文只作定位：能在任一成员转写里逐字找到就保留，否则只清掉引文。
+    /// 批注本体、类型、角色与理论出处一律不动。
+    private static func sanitizedAnnotations(_ annotations: [MaterialNote.Annotation]?, members: [MaterialNoteMember]) -> [MaterialNote.Annotation]? {
+        guard let annotations, !annotations.isEmpty else { return nil }
+        let transcripts = members.map { normalized($0.transcript) }
+        return annotations.map { annotation in
+            guard let quote = annotation.quote, !quote.isEmpty else { return annotation }
+            let needle = normalized(quote)
+            guard !needle.isEmpty else { return annotation.clearingQuote() }
+            return transcripts.contains { $0.contains(needle) } ? annotation : annotation.clearingQuote()
+        }
     }
 
     /// 在成员的单个时间片里定位引文。多次出现时：先按段落内单调次序排除上一个

@@ -44,6 +44,7 @@ struct MaterialNoteReadingView: View {
     @State private var display: MaterialNoteDisplay?
     @State private var requested = false
     @State private var loadedOnce = false
+    @AppStorage("voiceos.note.annotations.visible") private var annotationsVisible = true
     @State private var probeBox = NoteReadingProbeBox()
     @State private var hasRestored = false
 
@@ -181,6 +182,23 @@ struct MaterialNoteReadingView: View {
                 ForEach(Array(display.note.note.sections.enumerated()), id: \.offset) { sectionIndex, section in
                     sectionView(section, index: sectionIndex)
                 }
+                if annotationsVisible, let closing = display.note.note.closing, !closing.isEmpty {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("再看一眼").vosFont(WorkspaceText.sectionTitle)
+                            .foregroundStyle(palette.text)
+                            .accessibilityAddTraits(.isHeader)
+                        ForEach(closing) { annotation in
+                            VStack(alignment: .leading, spacing: 6) {
+                                if let title = normalized(annotation.title) {
+                                    Text(title).vosFont(WorkspaceText.rowTitle)
+                                        .foregroundStyle(palette.text)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                annotationView(annotation)
+                            }
+                        }
+                    }
+                }
                 relatedSection
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -232,6 +250,62 @@ struct MaterialNoteReadingView: View {
                     .foregroundStyle(palette.tertiaryText)
                     .accessibilityLabel("这一段包含整理时补充的关联")
             }
+            if annotationsVisible, let annotations = paragraph.annotations, !annotations.isEmpty {
+                ForEach(annotations) { annotation in
+                    annotationView(annotation)
+                }
+            }
+        }
+    }
+
+    /// 一条 AI 批注：低饱和暖色底、左缘色条、轻标签；形式与长度随内容，
+    /// 理论出处与身份（voice）有就给一行。批注是成品的一部分。
+    private func annotationView(_ annotation: MaterialNote.Annotation) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(palette.warning.opacity(0.45))
+                .frame(width: 2)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text("AI 批注").vosFont(WorkspaceText.caption.size, weight: .semibold)
+                        .foregroundStyle(palette.warning)
+                    if let label = Self.annotationKindLabel(annotation.kind) {
+                        Text(label).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                    }
+                    if let voice = normalized(annotation.voice) {
+                        Text("· " + voice).vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                    }
+                }
+                Text(annotation.text)
+                    .vosFont(WorkspaceText.meta)
+                    .foregroundStyle(palette.text)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                if let source = normalized(annotation.source) {
+                    Text("来源：" + source)
+                        .vosFont(WorkspaceText.caption)
+                        .foregroundStyle(palette.tertiaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(12)
+        .background(palette.warning.opacity(0.06), in: RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("AI 批注" + (Self.annotationKindLabel(annotation.kind).map { "，" + $0 } ?? ""))
+    }
+
+    private static func annotationKindLabel(_ kind: String) -> String? {
+        switch kind {
+        case "pattern": return "照见模式"
+        case "question": return "追问"
+        case "assumption": return "隐含假设"
+        case "theory": return "理论"
+        case "extension": return "延伸"
+        case "advice": return "建议"
+        default: return kind.isEmpty ? nil : kind
         }
     }
 
@@ -244,6 +318,9 @@ struct MaterialNoteReadingView: View {
             Spacer(minLength: 8)
             // 已是最新的笔记也需要一个安静的重整理入口（换模型、改提示词后可用）。
             Menu {
+                Button(annotationsVisible ? "隐藏 AI 批注" : "显示 AI 批注") {
+                    annotationsVisible.toggle()
+                }
                 Button("重新整理笔记") {
                     Task { await model.requestMaterialNote(sourceID: source.id, force: true) }
                 }
