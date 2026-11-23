@@ -31,6 +31,8 @@ struct RecentContentHome: View {
     /// 阅读态到达前「待处理」过滤无法算出真正的可见集合；过早按全部材料
     /// 读笔记会在状态落回后立刻再读一次，两次查询在 store actor 上串行。
     @State private var readingStatesLoaded = false
+    /// 批量笔记读取是否已经完成过一次；完成前不能断言「这篇还没有笔记」。
+    @State private var notesLoaded = false
     @AppStorage("voiceos.home.pendingOnly") private var showsOnlyPending = true
     @State private var clueFailureText = ""
     @State private var clueFailureTitle = "操作未完成"
@@ -212,7 +214,7 @@ struct RecentContentHome: View {
                             // next label is the one that grows, so grouping reads
                             // before any text does.
                             dayHeader(day)
-                                .padding(.top, index == 0 && recentNotes.isEmpty ? 2 : 20)
+                                .padding(.top, 20)
                                 .padding(.bottom, 6)
                             VStack(alignment: .leading, spacing: 2) {
                                 ForEach(day.items) { item in
@@ -644,7 +646,7 @@ struct RecentContentHome: View {
             }
             if item.thoughts.isEmpty {
                 organizePrompt(item).padding(.top, 44)
-            } else if note == nil {
+            } else if note == nil, notesLoaded {
                 // 成品优先：收件箱不展开要点与原文；还没有笔记时给一句去材料页的指引。
                 Text("这篇还没有整理成笔记；要点与原文在材料页。")
                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
@@ -903,6 +905,7 @@ struct RecentContentHome: View {
         // 结果直接并入 ControlCenter 的会话缓存（按条比较新旧，迟到的旧结果
         // 不会覆盖新版本）；视图从缓存读，返回首页首帧就有笔记标题。
         _ = await model.latestMaterialNotes(expressionKeys: key.expressionKeys)
+        notesLoaded = true
     }
 
     private func organizeBlocker(_ source: SourceRecord, organizing: Bool) -> String? {

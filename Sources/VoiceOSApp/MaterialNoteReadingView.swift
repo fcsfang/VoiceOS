@@ -4,8 +4,10 @@ import VoiceOSCore
 
 /// Article-shaped reading surface for one expression's saved note. The center
 /// owns generation and persistence; this view only reads the newest revision,
-/// keeps it current against member transcript versions, and renders each
-/// paragraph beside its verbatim anchors.
+/// keeps it current against member transcript versions, and renders the note as
+/// an article. Paragraph anchors stay in the saved note as an audit trail, but
+/// the product surface does not show them; raw material lives on the material
+/// page behind 「查看材料与原文」.
 private struct MaterialNoteReadKey: Hashable {
     let sourceID: String
     let transcriptVersionID: String?

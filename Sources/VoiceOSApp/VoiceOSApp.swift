@@ -1566,8 +1566,10 @@ final class ControlCenter: ObservableObject {
     private func publishHomeSnapshot() {
         // Same review gate the materials list and source page read.
         let reviewed = Set(actionRecords.lazy.filter { self.sourcePageIndex.requiresReview($0.id) }.map(\.id))
+        // 线索的隐藏/合并入口已随「成品优先」撤掉；旧覆盖不再过滤收件箱，
+        // 否则被隐藏线索下的待办会永久消失且无处恢复。
         homeSnapshot = RecentContentHomeSnapshot.build(sources: records, claims: claims, actions: actionRecords,
-                                                       overrides: recentClueOverrides, reviewRequiredActionIDs: reviewed)
+                                                       overrides: [], reviewRequiredActionIDs: reviewed)
     }
     private func applyCoreSnapshot(_ snapshot: WorkspaceSnapshot, reminderAnomalies: ReminderSyncAnomalySummary = .empty) {
         records = snapshot.sources

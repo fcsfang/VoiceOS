@@ -746,7 +746,7 @@ struct WorkspaceView: View {
     @ViewBuilder private func noteReadingPage(_ id: String) -> some View {
         if let source = model.sourcePageIndex.recordsByID[id] {
             ScrollViewReader { proxy in
-                scrolled {
+                scrolled(scroll: sourceScrollBinding("note-reading:" + id)) {
                     VStack(alignment:.leading, spacing: WorkspaceMetrics.sectionGap) {
                         HStack {
                             Button("所有笔记",systemImage:"arrow.left") { back() }.buttonStyle(.workspaceQuietCompact)
@@ -1067,9 +1067,9 @@ struct WorkspaceView: View {
         case .tool(let name): tool(name)
         }
     }
-    private func scrolled<Content:View>(@ViewBuilder content: () -> Content) -> some View {
+    private func scrolled<Content:View>(scroll: Binding<ScrollPosition>? = nil, @ViewBuilder content: () -> Content) -> some View {
         ScrollView { content().frame(maxWidth: WorkspaceMetrics.pageWidth,alignment:.leading).padding(WorkspaceMetrics.pagePadding).frame(maxWidth:.infinity,alignment:.top) }
-            .scrollPosition(scrollBinding(for: scrollKey))
+            .scrollPosition(scroll ?? scrollBinding(for: scrollKey))
     }
     private func scrollBinding(for key: WorkspaceNavigationEntry) -> Binding<ScrollPosition> {
         Binding(get: { scrollPositions[key] ?? ScrollPosition(edge: .top) }, set: { scrollPositions[key] = $0 })
