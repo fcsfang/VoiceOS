@@ -750,9 +750,9 @@ struct RecentContentHome: View {
                         if index > 0 { WorkspaceListDivider().padding(.horizontal, 10) }
                         Button { openRecentNote(stored) } label: {
                             VStack(alignment: .leading, spacing: 4) {
+                                // 标题不截断：长短由内容决定。
                                 Text(MaterialNoteHomeText.title(stored.note) ?? "未命名笔记")
                                     .vosFont(WorkspaceText.meta).foregroundStyle(palette.text)
-                                    .lineLimit(isLargeText ? 3 : 2)
                                     .fixedSize(horizontal: false, vertical: true)
                                     .multilineTextAlignment(.leading)
                                 if let preview = MaterialNoteHomeText.preview(stored.note) {

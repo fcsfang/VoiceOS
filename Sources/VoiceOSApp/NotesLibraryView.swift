@@ -79,10 +79,10 @@ struct NotesLibraryView: View {
                         Button { open(stored) } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 13) {
                                 VStack(alignment: .leading, spacing: 5) {
+                                    // 标题不截断：长短由内容决定，列表用换行与滚动适配。
                                     Text(MaterialNoteHomeText.title(stored.note) ?? "未命名笔记")
                                         .vosFont(WorkspaceText.rowTitle)
                                         .foregroundStyle(palette.text)
-                                        .lineLimit(2)
                                         .fixedSize(horizontal: false, vertical: true)
                                         .multilineTextAlignment(.leading)
                                     if let preview = MaterialNoteHomeText.preview(stored.note) {
