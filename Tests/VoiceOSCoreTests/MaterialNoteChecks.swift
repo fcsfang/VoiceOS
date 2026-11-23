@@ -189,6 +189,19 @@ final class MaterialNoteChecks: XCTestCase {
         XCTAssertEqual(anchored.closing?.first?.text, "文末长文")
     }
 
+    func test行内标记解码并在锚定时丢弃找不到的词句() throws {
+        let json = #"{"title":"标题","lead":null,"sections":[{"heading":null,"paragraphs":[{"text":"我想弄明白充电匹配。","anchors":[],"marks":[{"id":"m1","text":"充电匹配","style":"underline","tone":"warm"},{"id":"m2","text":"原文里没有这句","style":null,"tone":null}]}]}]}"#
+        let note = try JSONDecoder().decode(MaterialNote.self, from: Data(json.utf8))
+        XCTAssertEqual(note.sections[0].paragraphs[0].marks?.count, 2)
+        let member = MaterialNoteMember(sourceID: "a", title: "材料", transcriptVersionID: nil,
+                                        transcript: "我想弄明白充电匹配。", spans: [])
+        let anchored = MaterialNoteAnchoring.anchored(note, members: [member])
+        let marks = anchored.sections[0].paragraphs[0].marks ?? []
+        XCTAssertEqual(marks.count, 1, "改写过的标记直接忽略")
+        XCTAssertEqual(marks.first?.text, "充电匹配")
+        XCTAssertEqual(marks.first?.style, "underline")
+    }
+
     func test批量读单行损坏不拖垮其余笔记() async throws {
         let store = try await openStore()
         let good = try await store.saveMaterialNote(memberSourceIDs: ["a"], note: note("完好"),

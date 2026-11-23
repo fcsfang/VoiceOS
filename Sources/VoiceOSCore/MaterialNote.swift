@@ -29,6 +29,19 @@ public struct MaterialNote: Codable, Sendable, Equatable {
                        startsFrom: startsFrom, voice: voice, source: source, confidence: confidence)
         }
     }
+    /// 行内样式标记：正文里值得强调的词句。text 必须是该段原文的逐字子串；
+    /// style 与 tone 都是自由字符串（如 marker/underline/bold/italic 与
+    /// warm/accent/muted），渲染层按已知值给样式、未知值按默认渲染——新增
+    /// 样式只改渲染层，数据结构与提示词无需变化。
+    public struct InlineMark: Codable, Sendable, Equatable, Identifiable {
+        public let id: String
+        public let text: String
+        public let style: String?
+        public let tone: String?
+        public init(id: String, text: String, style: String? = nil, tone: String? = nil) {
+            self.id = id; self.text = text; self.style = style; self.tone = tone
+        }
+    }
     public struct Paragraph: Codable, Sendable, Equatable {
         public let text: String
         public let anchors: [Anchor]
@@ -36,11 +49,15 @@ public struct MaterialNote: Codable, Sendable, Equatable {
         public let inferred: Bool?
         /// 就地批注：挂在这一段上的 AI 启发。
         public let annotations: [Annotation]?
-        public init(text: String, anchors: [Anchor] = [], inferred: Bool? = nil, annotations: [Annotation]? = nil) {
+        /// 行内样式标记（手账式重点、下划线、加粗等）。
+        public let marks: [InlineMark]?
+        public init(text: String, anchors: [Anchor] = [], inferred: Bool? = nil,
+                    annotations: [Annotation]? = nil, marks: [InlineMark]? = nil) {
             self.text = text
             self.anchors = anchors
             self.inferred = inferred
             self.annotations = annotations
+            self.marks = marks
         }
     }
     public struct Anchor: Codable, Sendable, Equatable {

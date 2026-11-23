@@ -165,6 +165,11 @@ struct MaterialNoteReadingView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityAddTraits(.isHeader)
                         .id("note.title")
+                    // 手账感下划线：固定视觉语言，不消耗模型选择。
+                    RoundedRectangle(cornerRadius: 1.5)
+                        .fill(palette.warning.opacity(0.35))
+                        .frame(width: 88, height: 3)
+                        .accessibilityHidden(true)
                         .onGeometryChange(for: CGFloat.self) { proxy in
                             proxy.frame(in: .scrollView(axis: .vertical)).minY
                         } action: { minY in
@@ -214,11 +219,17 @@ struct MaterialNoteReadingView: View {
         if !paragraphs.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 if let heading = normalized(section.heading) {
-                    Text(heading)
-                        .vosFont(WorkspaceText.sectionTitle)
-                        .foregroundStyle(palette.text)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityAddTraits(.isHeader)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        RoundedRectangle(cornerRadius: 1)
+                            .fill(palette.warning.opacity(0.4))
+                            .frame(width: 3, height: 14 * vosLayoutScale(textScale))
+                            .accessibilityHidden(true)
+                        Text(heading)
+                            .vosFont(WorkspaceText.sectionTitle)
+                            .foregroundStyle(palette.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityAddTraits(.isHeader)
+                    }
                 }
                 VStack(alignment: .leading, spacing: 18) {
                     ForEach(paragraphs, id: \.offset) { paragraphIndex, paragraph in
@@ -239,7 +250,7 @@ struct MaterialNoteReadingView: View {
     /// 属于原材料侧的信息，只在「查看材料与原文」里出现，不挂在成品上。
     private func paragraphView(_ paragraph: MaterialNote.Paragraph) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(paragraph.text)
+            Text(attributedParagraph(paragraph))
                 .vosFont(WorkspaceText.body)
                 .foregroundStyle(palette.text)
                 .lineSpacing(WorkspaceText.body.size * textScale * 0.45)
@@ -306,6 +317,48 @@ struct MaterialNoteReadingView: View {
         case "extension": return "延伸"
         case "advice": return "建议"
         default: return kind.isEmpty ? nil : kind
+        }
+    }
+
+    /// 行内标记渲染：正文永远是纯文本，样式是并列的一层数据。style/tone 都是
+    /// 自由字符串——已知值映射为背景、下划线、粗细、颜色，未知值按默认渲染；
+    /// 新增样式只改这里，数据结构与提示词无需变化。
+    private func attributedParagraph(_ paragraph: MaterialNote.Paragraph) -> AttributedString {
+        var attributed = AttributedString(paragraph.text)
+        guard let marks = paragraph.marks, !marks.isEmpty else { return attributed }
+        for mark in marks {
+            guard !mark.text.isEmpty else { continue }
+            var searchRange = paragraph.text.startIndex..<paragraph.text.endIndex
+            while let found = paragraph.text.range(of: mark.text, range: searchRange) {
+                if let range = Range(found, in: attributed) {
+                    apply(mark, to: &attributed, range: range)
+                }
+                searchRange = found.upperBound..<paragraph.text.endIndex
+                if searchRange.isEmpty { break }
+            }
+        }
+        return attributed
+    }
+
+    private func apply(_ mark: MaterialNote.InlineMark, to attributed: inout AttributedString, range: Range<AttributedString.Index>) {
+        let color = markToneColor(mark.tone)
+        switch (mark.style ?? "marker").lowercased() {
+        case "underline":
+            attributed[range].underlineStyle = .single
+        case "bold":
+            attributed[range].inlinePresentationIntent = .stronglyEmphasized
+        case "italic":
+            attributed[range].inlinePresentationIntent = .emphasized
+        default:
+            attributed[range].backgroundColor = color
+        }
+    }
+
+    private func markToneColor(_ tone: String?) -> Color {
+        switch (tone ?? "").lowercased() {
+        case "accent": return palette.accent.opacity(0.16)
+        case "muted": return palette.secondaryText.opacity(0.10)
+        default: return palette.warning.opacity(0.20)
         }
     }
 

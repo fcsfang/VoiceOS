@@ -1227,3 +1227,8 @@
 - 提示词 v4：promptVersion material-note-v4、schemaVersion note-v3、outputTokens 32768；instructions 按设计全文（能力优先、角色自选、无条数/长度上限、允许发散与讲授、诚实底线）；schema 段落 annotations 与根 closing 必填数组；解码生成稳定 id。锚定保留批注与文末长文，批注引文定位失败只清引文。
 - 界面：段落后就地批注（低饱和暖色底、左缘色条、「AI 批注 · 类型 · voice」小标、出处行、超长自然换行）；文末「再看一眼」区；笔记操作菜单「隐藏/显示 AI 批注」（默认显示、持久化）。
 - 测试 +3：旧 JSON 无批注字段、批注解码、锚定清引文保留本体。构建 107 因解码辅助与 schema 变量同名失败；更名 makeAnnotation 后构建 109 全绿（build_exit=0 / test_exit=0，583 tests / dist_build_exit=0，attempt=30 重启）。
+## 波 203：手账式行内样式与通用标记载体（2026-11-23）
+- 选型：正文永远纯文本，样式是并列数据 marks{text,style?,tone?}（全自由字符串），渲染层用 AttributedString 映射：marker→低饱和荧光底（warm/accent/muted）、underline→下划线、bold/italic→强调；未知 style/tone 按默认渲染。新增样式只改渲染层，数据结构与提示词不动。标题下短暖色下划线、小标题竖色标为固定视觉语言。
+- 提示词升 material-note-v5 / note-v4：marks 必须逐字子串，标多少与样式由模型判断。
+- 锚定：找不到的词句直接忽略；测试 +1。构建 110/111 因 underlineColor 不在 SwiftUI 作用域与测试断言滞后失败；修正后 tests 584 全绿、dist 成功（重启暂缓以免打断用户重整理）。
+- 同期真实数据：v4 首批批注落库（充电器笔记：3 条就地批注 + 1 条学习路线长文，模型自创 explanation/safety/concept/learning_path 类型、自称电子基础老师）。

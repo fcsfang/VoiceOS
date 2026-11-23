@@ -91,11 +91,19 @@ public enum MaterialNoteAnchoring {
                                                spanID: spanID)
                 }
                 return MaterialNote.Paragraph(text: paragraph.text, anchors: anchors, inferred: paragraph.inferred,
-                                              annotations: sanitizedAnnotations(paragraph.annotations, members: members))
+                                              annotations: sanitizedAnnotations(paragraph.annotations, members: members),
+                                              marks: sanitizedMarks(paragraph.marks, in: paragraph.text))
             })
         }
         return MaterialNote(title: note.title, lead: note.lead, sections: sections,
                             closing: sanitizedAnnotations(note.closing, members: members))
+    }
+
+    /// 行内标记必须逐字落在正文里；模型改写过的标记直接忽略，不破坏文字。
+    private static func sanitizedMarks(_ marks: [MaterialNote.InlineMark]?, in text: String) -> [MaterialNote.InlineMark]? {
+        guard let marks, !marks.isEmpty else { return nil }
+        let kept = marks.filter { !$0.text.isEmpty && text.contains($0.text) }
+        return kept.isEmpty ? nil : kept
     }
 
     /// 批注的引文只作定位：能在任一成员转写里逐字找到就保留，否则只清掉引文。

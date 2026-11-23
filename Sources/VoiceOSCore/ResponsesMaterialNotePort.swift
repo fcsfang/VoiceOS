@@ -6,8 +6,8 @@ public struct ResponsesMaterialNotePort: MaterialNotePort {
     private let model: String
     private let transport: any ModelHTTPTransport
     private let deadline: TimeInterval
-    static let promptVersion = "material-note-v4"
-    static let schemaVersion = "note-v3"
+    static let promptVersion = "material-note-v5"
+    static let schemaVersion = "note-v4"
     static let outputTokens = 32768
     static let instructions = """
     你为 VoiceOS 把一次表达的多份材料写成一篇让作者本人在几天后仍愿意读完、并且能比原文得到更多东西的文章。
@@ -19,6 +19,7 @@ public struct ResponsesMaterialNotePort: MaterialNotePort {
     形状由内容决定：标题浓缩这篇的内容、具体到真实关切、让人想读下去；长短由内容决定。需要几节就几节；短内容可以只有一段。判断标准是作者读完能想起「我当时在想什么、为什么这么想、哪里还没想完」；长度服从内容，值得展开的不压缩。
     行文像写给本人的文章，不像报告或提纲：直接写内容，不把具体名字、数字、时间换成抽象词，不把口语改成书面腔。
     按需给出逐字引文 quotes（数量不限），若给出须逐字复制并附 sourceID；用于审计定位，不渲染给读者。
+    如果想让某段里的一些词句在界面上被强调，在 marks 里给出这些词句（必须是该段 text 的逐字子串）。style 描述样式（如 marker 荧光笔、underline 下划线、bold 加粗、italic 斜体，或你需要的其他词），tone 描述语气（如 warm/accent/muted，或你需要的其他词）；界面按已知值渲染、未知值按默认样式。标多少、标什么、用什么样式由你判断。
 
     批注（你能力的另一处主战场）：
     - 角色、形式、条数、长度、结论强弱都由你按内容判断，没有上限。你可以是任何有经验、能指导人的声音——老师、导师、同行、某领域专家、批评者、朋友、教练，或直接以分析本身出场；同一篇里可以换角色。讲授、解释、引理论、给框架、给建议、提出更锋利的问题、点名隐含假设、照见跨段与跨材料模式、从作者的话向外发散，皆可。愿意的话可用 voice 标出这次的身份。
@@ -54,10 +55,13 @@ public struct ResponsesMaterialNotePort: MaterialNotePort {
             "required": ["kind", "text", "quote", "title", "startsFrom", "voice", "source", "confidence"],
             "additionalProperties": false]
         let annotate: [String: Any] = ["type": "array", "items": annotation]
+        let highlight: [String: Any] = ["type": "object",
+            "properties": ["text": string, "style": nullableString, "tone": nullableString],
+            "required": ["text", "style", "tone"], "additionalProperties": false]
         let paragraph: [String: Any] = ["type": "object",
             "properties": ["text": string, "inferred": ["type": "boolean"], "quotes": ["type": "array", "items": quote],
-                           "annotations": annotate],
-            "required": ["text", "inferred", "quotes", "annotations"], "additionalProperties": false]
+                           "annotations": annotate, "marks": ["type": "array", "items": highlight]],
+            "required": ["text", "inferred", "quotes", "annotations", "marks"], "additionalProperties": false]
         let section: [String: Any] = ["type": "object",
             "properties": ["heading": nullableString, "paragraphs": ["type": "array", "items": paragraph]],
             "required": ["heading", "paragraphs"], "additionalProperties": false]
@@ -88,7 +92,8 @@ public struct ResponsesMaterialNotePort: MaterialNotePort {
                 let kind: String; let text: String; let quote: String?; let title: String?
                 let startsFrom: String?; let voice: String?; let source: String?; let confidence: String?
             }
-            struct Paragraph: Decodable { let text: String; let inferred: Bool?; let quotes: [Quote]; let annotations: [Annotation]? }
+            struct Mark: Decodable { let text: String; let style: String?; let tone: String? }
+            struct Paragraph: Decodable { let text: String; let inferred: Bool?; let quotes: [Quote]; let annotations: [Annotation]?; let marks: [Mark]? }
             struct Section: Decodable { let heading: String?; let paragraphs: [Paragraph] }
             let title: String; let lead: String?; let sections: [Section]; let closing: [Annotation]?
         }
@@ -103,10 +108,14 @@ public struct ResponsesMaterialNotePort: MaterialNotePort {
                 let annotations = (paragraph.annotations ?? []).enumerated().map { index, item in
                     makeAnnotation(item, id: "s\(sectionIndex)p\(paragraphIndex)a\(index)")
                 }
+                let marks = (paragraph.marks ?? []).enumerated().map { index, item in
+                    MaterialNote.InlineMark(id: "s\(sectionIndex)p\(paragraphIndex)m\(index)", text: item.text, style: item.style, tone: item.tone)
+                }
                 return MaterialNote.Paragraph(text: paragraph.text, anchors: paragraph.quotes.map {
                     MaterialNote.Anchor(quote: $0.quote, sourceID: $0.sourceID)
                 }, inferred: paragraph.inferred == true ? true : nil,
-                   annotations: annotations.isEmpty ? nil : annotations)
+                   annotations: annotations.isEmpty ? nil : annotations,
+                   marks: marks.isEmpty ? nil : marks)
             })
         }, closing: (body.closing ?? []).isEmpty ? nil : (body.closing ?? []).enumerated().map { index, item in
             makeAnnotation(item, id: "closing\(index)")
