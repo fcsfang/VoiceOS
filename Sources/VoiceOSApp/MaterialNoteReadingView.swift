@@ -47,6 +47,7 @@ struct MaterialNoteReadingView: View {
     @AppStorage("voiceos.note.annotations.visible") private var annotationsVisible = true
     @State private var probeBox = NoteReadingProbeBox()
     @State private var hasRestored = false
+    @State private var boardNotice: String?
 
     private var catalog: [String: SourceRecord] { model.sourcePageIndex.recordsByID }
     private var expression: RecordingExpression? { model.sourcePageIndex.expression(for: source.id) }
@@ -79,6 +80,12 @@ struct MaterialNoteReadingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            if let boardNotice {
+                Text(boardNotice)
+                    .vosFont(WorkspaceText.meta)
+                    .foregroundStyle(palette.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             statusRows
             if let display {
                 article(display)
@@ -334,7 +341,12 @@ struct MaterialNoteReadingView: View {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Button {
                     guard action.state != "completed" else { return }
-                    Task { _ = await model.completeActionLocally(action) }
+                    // 板上的勾选走通用完成入口：有提醒关联时同步并回读，没有时本地完成。
+                    Task {
+                        if await model.changeAction(action, state: .completed) == nil {
+                            boardNotice = model.status.isEmpty ? "没能完成这条待办，请稍后重试" : model.status
+                        }
+                    }
                 } label: {
                     Image(systemName: action.state == "completed" ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(action.state == "completed" ? palette.success : palette.accent)

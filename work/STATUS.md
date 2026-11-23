@@ -1268,3 +1268,8 @@
 ## 波 210：设置页监控再加两行（2026-11-24）
 - 健康卡新增「最近模型调用」（model_attempts 最新状态：成功/进行中/被拒绝/结果未知＋调用类型，健康点随之）与「主题整理」（空闲/待补齐 N/冷却中）。
 - 集成：构建 128 全绿（build_exit=0 / test_exit=0，589 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 211：板上待办勾选走通用完成入口（2026-11-24）
+- 自查发现同 204 引入的缺陷：板 todo 勾选调用 completeActionLocally，该函数要求已有提醒事项关联，无关联即失败——板上大多数待办无法勾选。
+- 改为 model.changeAction(.completed)：有提醒关联同步并回读、无关联本地完成；失败在笔记顶部显示原因（boardNotice），不再静默。
+- 204–210 的评审工作流运行 4 小时未交卷已停止，改为本地按三视角核对；周回顾 progressRows 与 .home 路由映射均确认正常。
+- 集成：构建 129 全绿（build_exit=0 / test_exit=0，589 tests / dist_build_exit=0，attempt=1 重启）。
