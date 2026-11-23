@@ -1172,3 +1172,4 @@
 - 用户反馈笔记应像文章；对应的 172-A 遗留项：材料页「核心要点」默认展开、与文章抢戏。
 - SourceFoldState.initial 增加 notePresent：有笔记时 thoughts 默认收起（内容摘要本就默认收起）；WorkspaceView.sourceFoldBinding 用 materialHasNote（presence 缓存或首页批量结果）决定初值；笔记在页面打开后异步出现时自动收起一次，用户仍可手动展开。
 - 集成：构建 95 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=1 重启）。
+- 上机验证（构建 95）：从笔记页「查看材料与原文」进入材料页，文章在上，内容摘要与核心要点均默认收起，待办/原文与回听以安静卡片存在——172-A 落地。截图 docs/product/audits/2026-11-23/04-材料页要点默认收起-构建95.jpg。
