@@ -27,3 +27,6 @@ dist/
 .claude/skills/verify-voiceos/evidence/
 .worktrees/
 .playwright-mcp/
+
+# 本地审计截图：只在本机保留，不进 git
+docs/product/audits/
