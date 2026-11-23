@@ -24,18 +24,6 @@ private struct MaterialNoteDisplay: Equatable {
     let isCurrent: Bool
 }
 
-private struct MaterialNoteAnchorPresentation: Identifiable {
-    let id: String
-    let quote: String
-    let memberTitle: String
-    let roleLabel: String?
-    let sourceID: String
-    let spanID: String?
-    let timeLabel: String?
-    let canPlay: Bool
-    let canOpen: Bool
-    let caveat: String?
-}
 
 struct MaterialNoteReadingView: View {
     @Environment(\.workspacePalette) private var palette
@@ -52,7 +40,6 @@ struct MaterialNoteReadingView: View {
     var restoreScroll: Binding<ScrollPosition>? = nil
 
     @State private var display: MaterialNoteDisplay?
-    @State private var expandedParagraphs: Set<String> = []
     @State private var requested = false
     @State private var loadedOnce = false
     @State private var probeBox = NoteReadingProbeBox()
@@ -67,7 +54,6 @@ struct MaterialNoteReadingView: View {
     }
     private var memberRecords: [SourceRecord] { memberIDs.compactMap { catalog[$0] } }
     private var noteState: MaterialNoteState? { model.materialNoteStates[source.id] }
-    private var playbackAvailable: Bool { ["audio", "video"].contains(source.kind) && source.state == "saved" }
 
     // Policy and local-only changes also matter: they can unblock or block the
     // next attempt even when no transcript changed.
@@ -216,7 +202,7 @@ struct MaterialNoteReadingView: View {
                 }
                 VStack(alignment: .leading, spacing: 18) {
                     ForEach(paragraphs, id: \.offset) { paragraphIndex, paragraph in
-                        paragraphView(paragraph, paragraphID: "\(index)-\(paragraphIndex)")
+                        paragraphView(paragraph)
                             .id(noteAnchor(index, paragraphIndex))
                             .onGeometryChange(for: CGFloat.self) { proxy in
                                 proxy.frame(in: .scrollView(axis: .vertical)).minY
@@ -229,20 +215,22 @@ struct MaterialNoteReadingView: View {
         }
     }
 
-    private func paragraphView(_ paragraph: MaterialNote.Paragraph, paragraphID: String) -> some View {
-        MaterialNoteParagraphView(
-            text: paragraph.text,
-            inferred: paragraph.inferred == true,
-            anchors: anchorPresentations(paragraph.anchors, paragraphID: paragraphID),
-            isExpanded: expandedParagraphs.contains(paragraphID),
-            toggle: { toggle(paragraphID) },
-            play: play,
-            openSource: openSource)
-    }
-
-    private func toggle(_ paragraphID: String) {
-        if expandedParagraphs.contains(paragraphID) { expandedParagraphs.remove(paragraphID) }
-        else { expandedParagraphs.insert(paragraphID) }
+    /// 成品视图：段落只有正文与「整理时补充的关联」标记。逐段原话与回听
+    /// 属于原材料侧的信息，只在「查看材料与原文」里出现，不挂在成品上。
+    private func paragraphView(_ paragraph: MaterialNote.Paragraph) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(paragraph.text)
+                .vosFont(WorkspaceText.body)
+                .foregroundStyle(palette.text)
+                .lineSpacing(WorkspaceText.body.size * textScale * 0.45)
+                .fixedSize(horizontal: false, vertical: true)
+            if paragraph.inferred == true {
+                Text("整理时补充的关联")
+                    .vosFont(WorkspaceText.caption)
+                    .foregroundStyle(palette.tertiaryText)
+                    .accessibilityLabel("这一段包含整理时补充的关联")
+            }
+        }
     }
 
     private var metaLine: some View {
@@ -252,22 +240,6 @@ struct MaterialNoteReadingView: View {
                 .foregroundStyle(palette.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
-            if playbackAvailable {
-                Button {
-                    Task { _ = await model.playSpan(source, milliseconds: 0) }
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "play.circle").accessibilityHidden(true)
-                        Text("回听")
-                    }
-                    .vosFont(WorkspaceText.meta.size, weight: .medium)
-                    .foregroundStyle(palette.secondaryText)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("从这次表达的开头回听")
-                .accessibilityLabel("从这次表达的开头回听")
-            }
             // 已是最新的笔记也需要一个安静的重整理入口（换模型、改提示词后可用）。
             Menu {
                 Button("重新整理笔记") {
@@ -365,63 +337,6 @@ struct MaterialNoteReadingView: View {
             Button("重新整理") { retry() }
                 .buttonStyle(.workspaceQuietCompact)
         }
-    }
-
-    // MARK: - Anchors
-
-    private func anchorPresentations(_ anchors: [MaterialNote.Anchor], paragraphID: String) -> [MaterialNoteAnchorPresentation] {
-        anchors.enumerated().compactMap { index, anchor in
-            let quote = anchor.quote.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !quote.isEmpty else { return nil }
-            let id = paragraphID + "-a" + String(index)
-            guard let record = catalog[anchor.sourceID] else {
-                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: "已移出的材料", roleLabel: nil,
-                                                      sourceID: "", spanID: nil, timeLabel: nil,
-                                                      canPlay: false, canOpen: false,
-                                                      caveat: "这段来源已不在资料库。")
-            }
-            let storedTitle = record.displayTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-            let memberTitle = storedTitle.isEmpty ? MaterialNaming.displayName(record.name) : storedTitle
-            let role = noteRole(record)
-            let canOpen = record.id != source.id
-            let localHint = canOpen ? "可回到这段来源核对。" : "可在下方「原文与回听」核对。"
-            let versionMatches = anchor.transcriptVersionID == nil || anchor.transcriptVersionID == record.transcriptVersionID
-            guard versionMatches else {
-                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle, roleLabel: role,
-                                                      sourceID: record.id, spanID: nil, timeLabel: nil,
-                                                      canPlay: false, canOpen: canOpen,
-                                                      caveat: "原文已更正，这段引文不能作为当前原话；" + localHint)
-            }
-            guard let spanID = anchor.spanID,
-                  let span = record.spans.first(where: { $0.id == spanID }),
-                  let start = span.startMS, let end = span.endMS else {
-                return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle, roleLabel: role,
-                                                      sourceID: record.id, spanID: nil, timeLabel: nil,
-                                                      canPlay: false, canOpen: canOpen,
-                                                      caveat: "未能定位到这段原话在录音里的位置；" + localHint)
-            }
-            let playable = ["audio", "video"].contains(record.kind) && record.state == "saved"
-            return MaterialNoteAnchorPresentation(id: id, quote: quote, memberTitle: memberTitle, roleLabel: role,
-                                                  sourceID: record.id, spanID: span.id,
-                                                  timeLabel: timeText(start) + " 至 " + timeText(end),
-                                                  canPlay: playable, canOpen: canOpen,
-                                                  caveat: playable ? nil : "这份来源当前没有可播放的录音。")
-        }
-    }
-
-    /// 非本人材料的角色标注，让引文行能说清「谁说的」。
-    private func noteRole(_ record: SourceRecord) -> String? {
-        if record.origin == "ai" || record.speaker == "assistant" { return "AI 交付" }
-        if record.origin == "user" && record.speaker == "user" { return nil }
-        return ["audio", "video"].contains(record.kind) ? "对方" : "原文作者"
-    }
-
-    private func play(_ anchor: MaterialNoteAnchorPresentation) {
-        guard anchor.canPlay, let record = catalog[anchor.sourceID], let spanID = anchor.spanID,
-              let span = record.spans.first(where: { $0.id == spanID }),
-              let start = span.startMS, let end = span.endMS,
-              ["audio", "video"].contains(record.kind), record.state == "saved" else { return }
-        Task { _ = await model.playSpan(record, milliseconds: start, endMilliseconds: end) }
     }
 
     // MARK: - Status
@@ -581,11 +496,6 @@ struct MaterialNoteReadingView: View {
         }
     }
 
-    private func timeText(_ milliseconds: Int) -> String {
-        let seconds = max(0, milliseconds) / 1000
-        return String(format: "%02d:%02d", seconds / 60, seconds % 60)
-    }
-
     private func normalized(_ value: String?) -> String? {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -596,122 +506,6 @@ struct MaterialNoteReadingView: View {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let last = trimmed.last else { return trimmed }
         return "。！？!?".contains(last) ? trimmed : trimmed + "。"
-    }
-}
-
-/// One paragraph with its static text, the quiet "看原话" trigger and the
-/// expanded verbatim anchors. Quote rows never wrap organized prose in quotes;
-/// they show the anchored text with a source line and only offer playback when
-/// the span resolves to a real time range.
-private struct MaterialNoteParagraphView: View {
-    @Environment(\.workspacePalette) private var palette
-    @Environment(\.vosTextScale) private var textScale
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let text: String
-    let inferred: Bool
-    let anchors: [MaterialNoteAnchorPresentation]
-    let isExpanded: Bool
-    let toggle: () -> Void
-    let play: (MaterialNoteAnchorPresentation) -> Void
-    let openSource: (String) -> Void
-    @State private var hovered = false
-
-    var body: some View {
-        if anchors.isEmpty {
-            content
-        } else {
-            content.contextMenu { menu }
-        }
-    }
-
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(text)
-                .vosFont(WorkspaceText.body)
-                .foregroundStyle(palette.text)
-                .lineSpacing(WorkspaceText.body.size * textScale * 0.45)
-                .fixedSize(horizontal: false, vertical: true)
-            if inferred {
-                Text("整理时补充的关联")
-                    .vosFont(WorkspaceText.caption)
-                    .foregroundStyle(palette.tertiaryText)
-                    .accessibilityLabel("这一段包含整理时补充的关联")
-            }
-            if !anchors.isEmpty {
-                Button(action: toggle) {
-                    HStack(spacing: 5) {
-                        Text(isExpanded ? "收起原话" : "看原话 \(anchors.count)")
-                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                            .vosFont(WorkspaceText.caption.size, weight: .semibold)
-                    }
-                    .vosFont(WorkspaceText.meta.size, weight: .medium)
-                    .foregroundStyle(hovered || isExpanded ? palette.accent : palette.tertiaryText)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("查看这一段对应的原话")
-                .accessibilityLabel(isExpanded ? "收起这一段的原话" : "查看这一段的原话")
-            }
-            if isExpanded {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(anchors) { anchor in
-                        quoteRow(anchor)
-                    }
-                }
-                .padding(.leading, 2)
-            }
-        }
-        .onHover { hovered = $0 }
-        .animation(reduceMotion ? nil : WorkspaceMotion.hover, value: hovered)
-    }
-
-    @ViewBuilder
-    private var menu: some View {
-        Button(isExpanded ? "收起原话" : "看原话 \(anchors.count)", systemImage: "text.quote", action: toggle)
-        if let first = anchors.first(where: { $0.canPlay }) {
-            Button("回听这一段", systemImage: "play.circle") { play(first) }
-        }
-    }
-
-    private func quoteRow(_ anchor: MaterialNoteAnchorPresentation) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(anchor.quote)
-                .vosFont(WorkspaceText.body)
-                .foregroundStyle(palette.secondaryText)
-                .lineSpacing(WorkspaceText.body.size * textScale * 0.35)
-                .fixedSize(horizontal: false, vertical: true)
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(provenance(anchor))
-                    .vosFont(WorkspaceText.caption)
-                    .foregroundStyle(palette.tertiaryText)
-                    .lineLimit(2)
-                Spacer(minLength: 8)
-                if anchor.canPlay {
-                    Button("回听这句", systemImage: "play.circle") { play(anchor) }
-                        .buttonStyle(.workspaceQuietCompact)
-                        .help("回听这句原话")
-                } else if anchor.canOpen {
-                    Button("查看原文", systemImage: "text.magnifyingglass") { openSource(anchor.sourceID) }
-                        .buttonStyle(.workspaceQuietCompact)
-                        .help(anchor.caveat ?? "打开这段来源")
-                }
-            }
-            if let caveat = anchor.caveat, !anchor.canPlay {
-                Text(caveat)
-                    .vosFont(WorkspaceText.caption)
-                    .foregroundStyle(palette.tertiaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.vertical, 2)
-    }
-
-    private func provenance(_ anchor: MaterialNoteAnchorPresentation) -> String {
-        var parts: [String] = []
-        if let role = anchor.roleLabel { parts.append(role) }
-        parts.append(anchor.memberTitle)
-        if let time = anchor.timeLabel { parts.append(time) }
-        return parts.joined(separator: " · ")
     }
 }
 
