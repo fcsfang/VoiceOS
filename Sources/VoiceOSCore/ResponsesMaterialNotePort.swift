@@ -6,6 +6,7 @@ public struct ResponsesMaterialNotePort: MaterialNotePort {
     private let model: String
     private let transport: any ModelHTTPTransport
     private let deadline: TimeInterval
+    private let effort: String
     static let promptVersion = "material-note-v6"
     static let schemaVersion = "note-v5"
     static let outputTokens = 32768
@@ -32,11 +33,12 @@ public struct ResponsesMaterialNotePort: MaterialNotePort {
     """
     public init(baseURL: URL, apiKey: String, model: String,
                 transport: any ModelHTTPTransport = DirectModelHTTPTransport(),
-                deadline: TimeInterval = 600) throws {
+                deadline: TimeInterval = 600, effort: String = "high") throws {
         _ = try ResponsesModelPort(baseURL: baseURL, apiKey: apiKey, model: model)
         guard deadline.isFinite, deadline > 0 else { throw VoiceOSError("笔记生成时限无效") }
         endpoint = baseURL.appendingPathComponent("responses")
         self.apiKey = apiKey; self.model = model; self.transport = transport; self.deadline = deadline
+        self.effort = effort
     }
     public var identity: MaterialNoteAttemptIdentity {
         .init(provider: "responses:" + (endpoint.host ?? "unknown"), model: model,
@@ -83,7 +85,7 @@ public struct ResponsesMaterialNotePort: MaterialNotePort {
                              origin: member.origin, speaker: member.speaker)
         }, actions: request.actions.map { NoteInput.ActionRef(id: $0.id, title: $0.title, state: $0.state) },
            claims: request.claims.map { NoteInput.ClaimRef(id: $0.id, statement: $0.statement) })
-        let payload: [String: Any] = ["model": model, "store": false, "reasoning": ["effort": "high"],
+        let payload: [String: Any] = ["model": model, "store": false, "reasoning": ["effort": effort],
             "max_output_tokens": Self.outputTokens, "truncation": "disabled", "instructions": Self.instructions,
             "input": [["role": "user", "content": try VoiceOSStore.relevanceJSON(input)]],
             "text": ["format": ["type": "json_schema", "name": "voiceos_material_note", "strict": true, "schema": schema]]]

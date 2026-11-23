@@ -1244,3 +1244,10 @@
 - 材料页收敛：有笔记时「内容摘要」「核心要点」不渲染（板已承载）；原文与回听、处理记录保留。
 - 周回顾所需的行动反馈进度仍由 Core（RecentContentHomeSnapshot.progressRows）提供，未动。
 - 集成：构建 116/117/118 依次修复类型与迁移缺件（HomeSnapshot 依赖、recentMaterialNotes 包装随旧文件删除），119 全绿（build_exit=0 / test_exit=0，586 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 206：模型配置应用内化（2026-11-24）
+- 用户要求：型号与思考强度可在设置页直接更改；配置由应用内部维护，不依赖外部 .env。
+- LocalTextModel：Settings（地址/密钥/模型/笔记与主题强度）与 loadSuite(settings:)；文件加载降为导入入口（inspect）；env 键 VOICEOS_TEXT_MODEL / VOICEOS_NOTE_EFFORT / VOICEOS_TOPIC_EFFORT 仅作开发回退。note/topic 端口 effort 可配（默认 high，域分类保持 low）。
+- TextModelConfiguration（UserDefaults）+ TextModelKeychain（Security，service local.voiceos.textmodel）：密钥只进钥匙串；地址校验。
+- ControlCenter：configureTextModel 迁移为内部配置；installTextModelSuite 抽取；applyTextModelConfiguration（设置页保存）；启动优先级 env > 内部配置 > 历史文件；clearTextModel 一并清理。
+- 设置页「应用内模型配置」：地址/模型/密钥/两档思考强度（minimal…xhigh）/保存并启用。
+- 集成：构建 121/122 因缺 import 与钥匙串字典键失败；修正后 123 全绿（build_exit=0 / test_exit=0，589 tests / dist_build_exit=0，attempt=1 重启）。

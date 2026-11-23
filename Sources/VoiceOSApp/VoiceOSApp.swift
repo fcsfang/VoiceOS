@@ -1270,6 +1270,8 @@ final class ControlCenter: ObservableObject {
             restoreSpeechSelection()
             if let path = ProcessInfo.processInfo.environment["VOICEOS_MODEL_CONFIG_FILE"] {
                 configureTextModel(URL(fileURLWithPath: path), resume: false)
+            } else if restoreInternalTextModelConfiguration() {
+                // 应用内部配置优先：模型、地址、强度都在设置页维护。
             } else if UserDefaults.standard.bool(forKey: "voiceos.textModelConfigurationCleared.v1") {
                 // The user cleared the configuration in settings; do not fall
                 // back to the bundle's development .env on the next launch.
@@ -1760,46 +1762,88 @@ final class ControlCenter: ObservableObject {
     }
     private func configureTextModel(_ file: URL, resume: Bool = true) {
         do {
-            // Long segmented cognition uses the explicitly validated SSE
-            // transport and 600-second window. Its versioned identity prevents
-            // queued non-streaming attempts from being silently replayed.
-            let suite=try LocalTextModel.loadSuite(from:file,segmentRequestTimeout:600,segmentStreaming:true),port=suite.cognition
-            discussionModel=suite.discussion;outcomeModel=suite.outcome
-            recordingTitleModel=suite.recordingTitles
-            topicModel=suite.topics; topicAttemptDigest=nil; materialNoteModel=suite.note
-            topicDomainBackfillStarted = false
-            startTopicDomainBackfillIfNeeded()
-            recordingExpressionModel=suite.recordingExpressions
-            assistantModel=suite.assistant
-            initiationModel=suite.initiation
-            followupModel=suite.followup;englishModel=suite.english;associationModel=suite.association;reminderFieldModel=suite.reminderFields
-            knowledgeReviewModel=suite.knowledgeReview
-            relevance.cancel();relevanceModel=suite.relevance
-            segmentExtractionModel=suite.segmentExtraction;segmentAggregationModel=suite.segmentAggregation
-            monitorAnalysisModel=suite.notificationAnalysis
-            textModel = port; modelConfigured = true
-            UserDefaults.standard.set(file.path, forKey: "voiceos.textModelConfigPath.v1")
+            // 文件只作为导入入口：读取后把地址、密钥、模型与强度迁移进应用内部
+            // 配置（密钥进钥匙串），之后不再依赖这个文件。
+            let suite = try LocalTextModel.loadSuite(from: file, segmentRequestTimeout: 600, segmentStreaming: true)
+            if let settings = try? LocalTextModel.inspect(file) {
+                try? TextModelKeychain.save(settings.key)
+                TextModelConfiguration(baseURL: settings.address.absoluteString, model: settings.model,
+                                       noteEffort: settings.noteEffort, topicEffort: settings.topicEffort).save()
+                UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
+            }
+            installTextModelSuite(suite, configurationName: file.lastPathComponent, resume: resume)
             UserDefaults.standard.set(false, forKey: "voiceos.textModelConfigurationCleared.v1")
             textConfigurationFile = file
-            modelSummary = file.lastPathComponent + " · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
-            status = "文本模型已就绪 · 只处理你选择并授权的文字"
-            // A queued intent may have been restored before the user selected a
-            // configuration. Wake the durable worker exactly once after the
-            // new model identity is installed; scheduleProcessing() itself
-            // remains the single-owner gate for concurrent work. Startup defers
-            // this to after the first screen so model work cannot hold the store
-            // actor while the library is opening.
-            if resume {
-                scheduleProcessing()
-                queueRecordingTitles()
-                resumeRecordingFollowups()
-                resumeAssistantExecutions()
-                resumeKnowledgeReviews()
-                queueTopicOrganization()
-            }
         } catch {
             status = error.localizedDescription
             reportWorkspaceError(error.localizedDescription,retry:.textModel)
+        }
+    }
+    /// 设置页保存内部配置：校验 → 密钥进钥匙串 → 配置存应用内 → 安装端口。
+    func applyTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> Bool {
+        guard let url = URL(string: config.baseURL) else { status = "服务地址无效"; return false }
+        do {
+            let suite = try LocalTextModel.loadSuite(
+                settings: LocalTextModel.Settings(address: url, key: apiKey, model: config.model,
+                                                  noteEffort: config.noteEffort, topicEffort: config.topicEffort),
+                segmentRequestTimeout: 600, segmentStreaming: true)
+            try TextModelKeychain.save(apiKey)
+            config.save()
+            UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
+            UserDefaults.standard.set(false, forKey: "voiceos.textModelConfigurationCleared.v1")
+            installTextModelSuite(suite, configurationName: config.model, resume: true)
+            return true
+        } catch {
+            status = "模型配置无效：" + error.localizedDescription
+            return false
+        }
+    }
+    /// 启动时优先使用应用内部配置；没有时才回退到开发用的配置文件路径。
+    private func restoreInternalTextModelConfiguration() -> Bool {
+        guard let config = TextModelConfiguration.load(),
+              let key = TextModelKeychain.apiKey(),
+              let url = URL(string: config.baseURL),
+              let suite = try? LocalTextModel.loadSuite(
+                settings: LocalTextModel.Settings(address: url, key: key, model: config.model,
+                                                  noteEffort: config.noteEffort, topicEffort: config.topicEffort),
+                segmentRequestTimeout: 600, segmentStreaming: true) else { return false }
+        installTextModelSuite(suite, configurationName: config.model, resume: false)
+        return true
+    }
+    private func installTextModelSuite(_ suite: LocalTextModel.Suite, configurationName: String, resume: Bool) {
+        // Long segmented cognition uses the explicitly validated SSE
+        // transport and 600-second window. Its versioned identity prevents
+        // queued non-streaming attempts from being silently replayed.
+        let port = suite.cognition
+        discussionModel=suite.discussion;outcomeModel=suite.outcome
+        recordingTitleModel=suite.recordingTitles
+        topicModel=suite.topics; topicAttemptDigest=nil; materialNoteModel=suite.note
+        topicDomainBackfillStarted = false
+        startTopicDomainBackfillIfNeeded()
+        recordingExpressionModel=suite.recordingExpressions
+        assistantModel=suite.assistant
+        initiationModel=suite.initiation
+        followupModel=suite.followup;englishModel=suite.english;associationModel=suite.association;reminderFieldModel=suite.reminderFields
+        knowledgeReviewModel=suite.knowledgeReview
+        relevance.cancel();relevanceModel=suite.relevance
+        segmentExtractionModel=suite.segmentExtraction;segmentAggregationModel=suite.segmentAggregation
+        monitorAnalysisModel=suite.notificationAnalysis
+        textModel = port; modelConfigured = true
+        modelSummary = configurationName + " · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
+        status = "文本模型已就绪 · 只处理你选择并授权的文字"
+        // A queued intent may have been restored before the user selected a
+        // configuration. Wake the durable worker exactly once after the
+        // new model identity is installed; scheduleProcessing() itself
+        // remains the single-owner gate for concurrent work. Startup defers
+        // this to after the first screen so model work cannot hold the store
+        // actor while the library is opening.
+        if resume {
+            scheduleProcessing()
+            queueRecordingTitles()
+            resumeRecordingFollowups()
+            resumeAssistantExecutions()
+            resumeKnowledgeReviews()
+            queueTopicOrganization()
         }
     }
     /// Clears every model port so AI entries read as unconfigured, and remembers
@@ -1827,6 +1871,8 @@ final class ControlCenter: ObservableObject {
         modelConfigured = false
         modelSummary = "尚未配置文本模型"
         UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
+        TextModelConfiguration.clear()
+        TextModelKeychain.delete()
         UserDefaults.standard.set(true, forKey: "voiceos.textModelConfigurationCleared.v1")
         status = "已清除文本模型配置；AI 功能暂停，直到重新选择配置"
     }

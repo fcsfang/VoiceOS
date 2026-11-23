@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import AVKit
 import VoiceOSCore
+import VoiceOSPlatform
 
 // One navigation state owns the workspace. Discussion is a sibling, so expanding
 // it never replaces the reading view or its disclosure/scroll state.
@@ -401,6 +402,12 @@ struct WorkspaceView: View {
     @FocusState private var topicReviewListFocused: Bool
     @State private var readingStates: [String: SourceReadingState] = [:]
     @State private var readingStatesRevision = 0
+    @State private var modelBaseURL = ""
+    @State private var modelName = LocalTextModel.defaultModel
+    @State private var modelNoteEffort = "high"
+    @State private var modelTopicEffort = "high"
+    @State private var modelAPIKey = ""
+    @State private var modelSaving = false
     @State private var materialPageCache = MaterialPageCache()
     @State private var actionPageCache = ActionPageCache()
     @State private var topicListingCache = TopicListingCache()
@@ -2368,6 +2375,73 @@ struct WorkspaceView: View {
                 }
             }
             .help(model.modelConfigurationPath ?? "选择本地的 .env 或模型 JSON 配置文件；配置后这里显示文件名")
+            WorkspaceListDivider().padding(.horizontal,20)
+            internalModelSettings
+        }
+    }
+    @ViewBuilder private var internalModelSettings: some View {
+            WorkspaceListDivider().padding(.horizontal,20)
+            VStack(alignment:.leading, spacing:12) {
+                Text("应用内模型配置").vosFont(WorkspaceText.meta.size, weight:.semibold)
+                Text("地址、密钥、型号与思考强度都由应用自己维护；密钥只保存进系统钥匙串，不写入任何文件。").vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                WorkspaceSettingsRow(title:"服务地址", subtitle:"Responses API 的 base URL") {
+                    TextField("https://…/v1", text:$modelBaseURL).textFieldStyle(.roundedBorder).frame(width:280)
+                        .accessibilityIdentifier("settings.model.baseURL")
+                }
+                WorkspaceSettingsRow(title:"模型", subtitle:"例如 gpt-6.1-sol、gpt-6.2-sol") {
+                    TextField("模型型号", text:$modelName).textFieldStyle(.roundedBorder).frame(width:280)
+                        .accessibilityIdentifier("settings.model.name")
+                }
+                WorkspaceSettingsRow(title:"密钥", subtitle: TextModelKeychain.apiKey() == nil ? "尚未保存" : "已保存；输入新值可更换") {
+                    SecureField("API Key", text:$modelAPIKey).textFieldStyle(.roundedBorder).frame(width:280)
+                        .accessibilityIdentifier("settings.model.key")
+                }
+                WorkspaceSettingsRow(title:"笔记思考强度", subtitle:"生成笔记与启发层时使用") {
+                    effortPicker($modelNoteEffort, id:"settings.model.noteEffort")
+                }
+                WorkspaceSettingsRow(title:"主题整理思考强度", subtitle:"主题骨架、合流与正文") {
+                    effortPicker($modelTopicEffort, id:"settings.model.topicEffort")
+                }
+                HStack(spacing:10) {
+                    Button(modelSaving ? "保存中…" : "保存并启用", action: saveInternalModel)
+                        .buttonStyle(.workspacePrimary)
+                        .disabled(modelSaving)
+                        .accessibilityIdentifier("settings.model.save")
+                    Spacer()
+                }
+            }
+            .padding(.horizontal,20).padding(.vertical,12)
+        .onAppear(perform: loadInternalModelDrafts)
+    }
+    private func effortPicker(_ selection: Binding<String>, id: String) -> some View {
+        Picker("思考强度", selection: selection) {
+            ForEach(["minimal", "low", "medium", "high", "xhigh"], id: \.self) { Text($0).tag($0) }
+        }
+        .labelsHidden().pickerStyle(.menu).frame(width:120)
+        .accessibilityIdentifier(id)
+    }
+    private func loadInternalModelDrafts() {
+        guard let config = TextModelConfiguration.load() else { return }
+        modelBaseURL = config.baseURL
+        modelName = config.model
+        modelNoteEffort = config.noteEffort
+        modelTopicEffort = config.topicEffort
+    }
+    private func saveInternalModel() {
+        guard !modelSaving else { return }
+        let name = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let config = TextModelConfiguration(baseURL: modelBaseURL,
+                                            model: name.isEmpty ? LocalTextModel.defaultModel : name,
+                                            noteEffort: modelNoteEffort, topicEffort: modelTopicEffort).validated()
+        guard let config else { error = "服务地址无效"; return }
+        let typedKey = modelAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveKey = typedKey.isEmpty ? (TextModelKeychain.apiKey() ?? "") : typedKey
+        guard !effectiveKey.isEmpty else { error = "请填写模型密钥"; return }
+        modelSaving = true
+        Task {
+            let ok = await model.applyTextModelConfiguration(config, apiKey: effectiveKey)
+            modelSaving = false
+            if ok { modelAPIKey = "" } else { error = model.status }
         }
     }
     private var settingsPrivacyCard: some View {

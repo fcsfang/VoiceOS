@@ -24,39 +24,67 @@ public enum LocalTextModel {
         public let notificationAnalysis:ResponsesNotificationAnalysisPort
     }
     /// Read credentials once; publish all ports only after the complete suite validates.
+    public struct Settings {
+        public let address: URL
+        public let key: String
+        public let model: String
+        public let noteEffort: String
+        public let topicEffort: String
+        public init(address: URL, key: String, model: String = LocalTextModel.defaultModel,
+                    noteEffort: String = "high", topicEffort: String = "high") {
+            self.address = address; self.key = key; self.model = model
+            self.noteEffort = noteEffort; self.topicEffort = topicEffort
+        }
+    }
+    public static let defaultModel = "gpt-6.1-sol"
+
     public static func loadSuite(from file:URL, compactSegmentExtraction: Bool = false, compactSegmentAggregation: Bool = false, segmentRequestTimeout: TimeInterval = 120, segmentTransport: any ModelHTTPTransport = DirectModelHTTPTransport(), segmentStreaming: Bool = false, expandAmbiguousQuotes: Bool = false, strictSegmentAggregation: Bool = false) throws -> Suite {
-        let (address,key)=try settings(from:file)
+        try loadSuite(settings: settings(from: file), compactSegmentExtraction: compactSegmentExtraction,
+                      compactSegmentAggregation: compactSegmentAggregation, segmentRequestTimeout: segmentRequestTimeout,
+                      segmentTransport: segmentTransport, segmentStreaming: segmentStreaming,
+                      expandAmbiguousQuotes: expandAmbiguousQuotes, strictSegmentAggregation: strictSegmentAggregation)
+    }
+    /// 应用内部配置构建整套端口：设置页保存的地址、模型与思考强度都走这里。
+    public static func loadSuite(settings cfg: Settings, compactSegmentExtraction: Bool = false, compactSegmentAggregation: Bool = false, segmentRequestTimeout: TimeInterval = 120, segmentTransport: any ModelHTTPTransport = DirectModelHTTPTransport(), segmentStreaming: Bool = false, expandAmbiguousQuotes: Bool = false, strictSegmentAggregation: Bool = false) throws -> Suite {
+        let address = cfg.address, key = cfg.key, model = cfg.model
         do {
             let chosenTransport: any ModelHTTPTransport = segmentStreaming ? DirectStreamingModelHTTPTransport() : segmentTransport
-            return Suite(recordingExpressions: try ResponsesRecordingExpressionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),topics: try ResponsesTopicOrganizationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol",deadline:1800),note: try ResponsesMaterialNotePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),recordingTitles: try ResponsesRecordingTitlePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),reminderFields: try ResponsesReminderFieldPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),followup:try ResponsesRecordingFollowupPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),assistant:try ResponsesAssistantPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),initiation:try ResponsesTaskInitiationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),knowledgeReview:try ResponsesKnowledgeReviewPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),english:try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),association:try ResponsesExpressionAssociationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"),segmentExtraction:try ResponsesSegmentExtractionPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol",transport:chosenTransport,compactInput:compactSegmentExtraction,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,expandAmbiguousQuotes:expandAmbiguousQuotes),segmentAggregation:try ResponsesSegmentAggregationPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol",transport:chosenTransport,compactInput:compactSegmentAggregation,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,strictProvenance:strictSegmentAggregation),notificationAnalysis:try ResponsesNotificationAnalysisPort(baseURL:address,apiKey:key,model:"gpt-6.1-sol"))
+            return Suite(recordingExpressions: try ResponsesRecordingExpressionPort(baseURL:address,apiKey:key,model:model),topics: try ResponsesTopicOrganizationPort(baseURL:address,apiKey:key,model:model,deadline:1800,effort:cfg.topicEffort),note: try ResponsesMaterialNotePort(baseURL:address,apiKey:key,model:model,effort:cfg.noteEffort),recordingTitles: try ResponsesRecordingTitlePort(baseURL:address,apiKey:key,model:model),reminderFields: try ResponsesReminderFieldPort(baseURL:address,apiKey:key,model:model),followup:try ResponsesRecordingFollowupPort(baseURL:address,apiKey:key,model:model),assistant:try ResponsesAssistantPort(baseURL:address,apiKey:key,model:model),initiation:try ResponsesTaskInitiationPort(baseURL:address,apiKey:key,model:model),knowledgeReview:try ResponsesKnowledgeReviewPort(baseURL:address,apiKey:key,model:model),cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:model),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:model),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:model),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:model),english:try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:model),association:try ResponsesExpressionAssociationPort(baseURL:address,apiKey:key,model:model),segmentExtraction:try ResponsesSegmentExtractionPort(baseURL:address,apiKey:key,model:model,transport:chosenTransport,compactInput:compactSegmentExtraction,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,expandAmbiguousQuotes:expandAmbiguousQuotes),segmentAggregation:try ResponsesSegmentAggregationPort(baseURL:address,apiKey:key,model:model,transport:chosenTransport,compactInput:compactSegmentAggregation,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,strictProvenance:strictSegmentAggregation),notificationAnalysis:try ResponsesNotificationAnalysisPort(baseURL:address,apiKey:key,model:model))
         } catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
     public static func load(from file: URL) throws -> ResponsesModelPort {
-        let (address, key) = try settings(from: file)
-        do { return try ResponsesModelPort(baseURL: address, apiKey: key, model: "gpt-6.1-sol") }
+        let cfg = try settings(from: file)
+        let address = cfg.address, key = cfg.key, model = cfg.model
+        do { return try ResponsesModelPort(baseURL: address, apiKey: key, model: model) }
         catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
     public static func loadRelevance(from file: URL) throws -> ResponsesRelevancePort {
-        let (address, key) = try settings(from: file)
-        do { return try ResponsesRelevancePort(baseURL: address, apiKey: key, model: "gpt-6.1-sol") }
+        let cfg = try settings(from: file)
+        let address = cfg.address, key = cfg.key, model = cfg.model
+        do { return try ResponsesRelevancePort(baseURL: address, apiKey: key, model: model) }
         catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
     public static func loadDiscussion(from file: URL) throws -> ResponsesDiscussionPort {
-        let (address, key) = try settings(from: file)
-        do { return try ResponsesDiscussionPort(baseURL: address, apiKey: key, model: "gpt-6.1-sol") }
+        let cfg = try settings(from: file)
+        let address = cfg.address, key = cfg.key, model = cfg.model
+        do { return try ResponsesDiscussionPort(baseURL: address, apiKey: key, model: model) }
         catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
     public static func loadOutcome(from file:URL) throws -> ResponsesOutcomePort {
-        let (address,key)=try settings(from:file)
-        do { return try ResponsesOutcomePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol") }
+        let cfg = try settings(from: file)
+        let address = cfg.address, key = cfg.key, model = cfg.model
+        do { return try ResponsesOutcomePort(baseURL:address,apiKey:key,model:model) }
         catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
     public static func loadEnglish(from file:URL) throws -> ResponsesEnglishPracticePort {
-        let (address,key)=try settings(from:file)
-        do { return try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:"gpt-6.1-sol") }
+        let cfg = try settings(from: file)
+        let address = cfg.address, key = cfg.key, model = cfg.model
+        do { return try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:model) }
         catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
-    private static func settings(from file: URL) throws -> (URL, String) {
+    /// 读取配置文件（导入 / 迁移用），不打印任何密钥。
+    public static func inspect(_ file: URL) throws -> Settings { try settings(from: file) }
+    private static func settings(from file: URL) throws -> Settings {
         do {
             let bytes = try Data(contentsOf: file)
             guard bytes.count <= 16384, let text = String(data: bytes, encoding: .utf8) else { throw VoiceOSError("invalid config") }
@@ -69,7 +97,10 @@ public enum LocalTextModel {
                       let rawAddress = options["baseURL"] as? String,
                       let key = options["apiKey"] as? String,
                       let address = URL(string: rawAddress), !key.isEmpty, key != "REPLACE_LOCALLY" else { throw VoiceOSError("missing config") }
-                return (address, key)
+                let model = (root["model"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? defaultModel
+                let noteEffort = (root["noteEffort"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "high"
+                let topicEffort = (root["topicEffort"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "high"
+                return Settings(address: address, key: key, model: model, noteEffort: noteEffort, topicEffort: topicEffort)
             }
             var settings: [String: String] = [:]
             for raw in text.split(separator: "\n") {
@@ -82,7 +113,14 @@ public enum LocalTextModel {
                 settings[name] = try JSONDecoder().decode(String.self, from: Data(fields[1].utf8))
             }
             guard let address = settings["OPENAI_BASE_URL"].flatMap(URL.init(string:)), let key = settings["OPENAI_API_KEY"], key != "REPLACE_LOCALLY" else { throw VoiceOSError("missing config") }
-            return (address, key)
+            func optional(_ name: String) -> String? {
+                guard let value = settings[name]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
+                return value
+            }
+            return Settings(address: address, key: key,
+                            model: optional("VOICEOS_TEXT_MODEL") ?? defaultModel,
+                            noteEffort: optional("VOICEOS_NOTE_EFFORT") ?? "high",
+                            topicEffort: optional("VOICEOS_TOPIC_EFFORT") ?? "high")
         } catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
     }
 }

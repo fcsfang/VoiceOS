@@ -6,16 +6,18 @@ public struct ResponsesTopicOrganizationPort: TopicOrganizationPort {
     private let model: String
     private let transport: any ModelHTTPTransport
     private let deadline: TimeInterval
+    private let effort: String
     private static let skeletonOutputTokens = 65536
     private static var domainValues: [String] { TopicDomain.allCases.map(\.rawValue) }
     private static let bodyOutputTokens = 16384
     private static let bodyDeadline: TimeInterval = 600
     public init(baseURL: URL, apiKey: String, model: String,
                 transport: any ModelHTTPTransport = DirectStreamingModelHTTPTransport(deadlineCap: 1800),
-                deadline: TimeInterval = 1800) throws {
+                deadline: TimeInterval = 1800, effort: String = "high") throws {
         _ = try ResponsesModelPort(baseURL:baseURL,apiKey:apiKey,model:model)
         guard deadline.isFinite, deadline > 0 else { throw VoiceOSError("主题整理时限无效") }
         endpoint=baseURL.appendingPathComponent("responses");self.apiKey=apiKey;self.model=model;self.transport=transport;self.deadline=deadline
+        self.effort=effort
     }
     public var skeletonIdentity: TopicOrganizationAttemptIdentity {
         .init(provider:"responses:"+(endpoint.host ?? "unknown"),model:model,promptVersion:"topic-skeleton-v1",schemaVersion:"topics-v1")
@@ -40,7 +42,7 @@ public struct ResponsesTopicOrganizationPort: TopicOrganizationPort {
         已有主题能容纳的观点优先复用（topicID填已有id），其余可新建（topicID填空字符串）。标题表达一个持续的关切，summary说明这个主题在谈什么。为每个主题按人生维度选domain，只能取：爱情、家庭、职业、金钱、健康、成长、自我、生活；按主题的长期关切选择。viewpointIDs只能使用本批输入的id；每个观点至少归入一个主题，可确有交叉时归入多个，不能遗漏，不能用数量上限或截断；收紧准入后仍须覆盖全部观点，确实归不进任何主题时才新建，并在一句话摘要中写明它与最接近主题的区分点。已有主题若本次没有观点可以不返回。
         briefing 用中文挑出值得关注的变化和下一步；highlightSourceIDs 按重要性列出对应来源。对外文字用用户能懂的中文名称。
         """
-        let payload:[String:Any] = ["model":model,"store":false,"reasoning":["effort":"high"],"max_output_tokens":Self.skeletonOutputTokens,"truncation":"disabled","instructions":instructions,
+        let payload:[String:Any] = ["model":model,"store":false,"reasoning":["effort":effort],"max_output_tokens":Self.skeletonOutputTokens,"truncation":"disabled","instructions":instructions,
             "input":[["role":"user","content":try VoiceOSStore.relevanceJSON(input)]],"text":["format":["type":"json_schema","name":"voiceos_topic_skeleton","strict":true,"schema":schema]]]
         let response = try await send(payload, operation: "主题骨架整理", deadline: deadline)
         if response.envelope.status == .incomplete
@@ -70,7 +72,7 @@ public struct ResponsesTopicOrganizationPort: TopicOrganizationPort {
         最终列表必须覆盖每批viewpointIDs中的全部观点，可确有交叉时归入多个主题，不能遗漏或丢弃观点；viewpointIDs只能使用输入出现过的id。
         briefing 用中文挑出值得关注的变化和下一步。对外文字用用户能懂的中文名称。
         """
-        let payload:[String:Any] = ["model":model,"store":false,"reasoning":["effort":"high"],"max_output_tokens":Self.skeletonOutputTokens,"truncation":"disabled","instructions":instructions,
+        let payload:[String:Any] = ["model":model,"store":false,"reasoning":["effort":effort],"max_output_tokens":Self.skeletonOutputTokens,"truncation":"disabled","instructions":instructions,
             "input":[["role":"user","content":try VoiceOSStore.relevanceJSON(input)]],"text":["format":["type":"json_schema","name":"voiceos_topic_skeleton_merge","strict":true,"schema":schema]]]
         let response = try await send(payload, operation: "主题骨架合流", deadline: deadline)
         guard response.envelope.status == .completed, let text = response.envelope.text else {
@@ -95,7 +97,7 @@ public struct ResponsesTopicOrganizationPort: TopicOrganizationPort {
         每个topic输出sections，按实际的小问题、小主题或观点组织；section 的 id 在本主题内唯一，title 有内容，summary 脱离上下文可读，并引用一个或多个evidence。quote必须从该主题的quotes中逐字复制，连续一致，不拼接、不改写。包括换行、空格与标点都不得改动；不要用省略号截断，不要把多条引文拼接成一条。claimIDs只能使用该主题viewpoints的id，actionIDs只能使用该主题tasks的id；每条观点和行动至少分配到一个小节，可确有交叉时归入多处。
         completed行动保留已完成身份，opportunity等探索项不变成承诺待办；没有实际反馈时不能虚构效果。questions保留资料支持的未解问题。对外文字用产品语言（待办、已完成等），内部字段名不进入展示文字。
         """
-        let payload:[String:Any] = ["model":model,"store":false,"reasoning":["effort":"high"],"max_output_tokens":Self.bodyOutputTokens,"truncation":"disabled","instructions":instructions,
+        let payload:[String:Any] = ["model":model,"store":false,"reasoning":["effort":effort],"max_output_tokens":Self.bodyOutputTokens,"truncation":"disabled","instructions":instructions,
             "input":[["role":"user","content":try VoiceOSStore.relevanceJSON(input)]],"text":["format":["type":"json_schema","name":"voiceos_topic_body","strict":true,"schema":schema]]]
         let response = try await send(payload, operation: "主题正文整理", deadline: Self.bodyDeadline)
         guard response.envelope.status == .completed, let text = response.envelope.text else {
