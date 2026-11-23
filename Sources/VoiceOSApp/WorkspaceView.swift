@@ -409,6 +409,7 @@ struct WorkspaceView: View {
     @State private var modelAPIKey = ""
     @State private var modelSaving = false
     @State private var modelTestResult: String?
+    @State private var settingsQuery = ""
     @State private var materialPageCache = MaterialPageCache()
     @State private var actionPageCache = ActionPageCache()
     @State private var topicListingCache = TopicListingCache()
@@ -2335,19 +2336,22 @@ struct WorkspaceView: View {
     private var settings: some View {
         VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(title:"设置", subtitle:"模型、连接、外观与资料维护")
+            WorkspaceSearchField(text: $settingsQuery, placeholder: "搜索设置：模型、备份、权限、快捷键…")
+                .frame(maxWidth: 680, alignment: .leading)
+                .accessibilityIdentifier("settings.search")
             VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
-                settingsHealthCard
-                settingsModelsCard
-                settingsPrivacyCard
-                settingsConnectionsCard
-                settingsPermissionsCard
-                settingsAppearanceCard
-                settingsExportBackupCard
-                settingsLibraryCard
-                settingsStorageCard
-                settingsReviewCard
-                settingsKeyboardCard
-                settingsMaintenanceCard
+                if showsSettingsCard(["概览","健康","状态","队列","监控"]) { settingsHealthCard }
+                if showsSettingsCard(["模型","密钥","地址","思考强度","转写","语音","连接测试"]) { settingsModelsCard }
+                if showsSettingsCard(["隐私","数据","上传","云端","权限"]) { settingsPrivacyCard }
+                if showsSettingsCard(["连接","收件箱","文件夹","提醒","监测","自动"]) { settingsConnectionsCard }
+                if showsSettingsCard(["系统权限","麦克风","通知","磁盘","屏幕"]) { settingsPermissionsCard }
+                if showsSettingsCard(["外观","主题","字号"]) { settingsAppearanceCard }
+                if showsSettingsCard(["导出","备份","保留","迁移包"]) { settingsExportBackupCard }
+                if showsSettingsCard(["资料库","恢复","检查","打开"]) { settingsLibraryCard }
+                if showsSettingsCard(["存储","占用","磁盘","清理"]) { settingsStorageCard }
+                if showsSettingsCard(["回顾","查找","读法"]) { settingsReviewCard }
+                if showsSettingsCard(["键盘","快捷键"]) { settingsKeyboardCard }
+                if showsSettingsCard(["维护","诊断","日志","版本","工具"]) { settingsMaintenanceCard }
             }.frame(maxWidth: 680, alignment: .leading)
         }
         .onAppear {
@@ -2497,7 +2501,31 @@ struct WorkspaceView: View {
                 Spacer()
                 Text(model.initialized ? "已打开 · \(model.records.count) 份材料" : "尚未打开").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }.padding(.horizontal,20).padding(.vertical,10)
+            WorkspaceListDivider().padding(.horizontal,20)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(model.reminderAccess?.enabled == true ? palette.success : palette.warning).frame(width:7,height:7).accessibilityHidden(true)
+                Text("提醒与自动入口").vosFont(WorkspaceText.body)
+                Spacer()
+                Text(model.reminderAccess?.enabled == true ? "提醒事项已连接" : "提醒事项未连接").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            }.padding(.horizontal,20).padding(.vertical,10)
+            WorkspaceListDivider().padding(.horizontal,20)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Circle().fill(model.backupRunning ? palette.accent : palette.success).frame(width:7,height:7).accessibilityHidden(true)
+                Text("备份").vosFont(WorkspaceText.body)
+                Spacer()
+                Text(model.backupStatusText.isEmpty ? "尚未生成备份" : model.backupStatusText)
+                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
+                Button(model.backupRunning ? "备份中…" : "立即备份") { model.retryBackup() }
+                    .buttonStyle(.workspaceQuietCompact)
+                    .disabled(model.backupRunning || model.libraryRoot == nil)
+            }.padding(.horizontal,20).padding(.vertical,10)
         }
+    }
+    /// 设置页搜索：命中关键词才显示对应卡片；空查询显示全部。
+    private func showsSettingsCard(_ keywords: [String]) -> Bool {
+        let query = settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        return keywords.contains { $0.localizedCaseInsensitiveContains(query) || query.localizedCaseInsensitiveContains($0) }
     }
     private var queueBusy: Bool {
         model.organizingTopics || model.knowledgeReviewBusy || model.understandingSource != nil || model.dictationBusy || model.fullRecordingBusy || model.importing
@@ -2735,7 +2763,15 @@ struct WorkspaceView: View {
                 Text("展开工具与运行状态").vosFont(WorkspaceText.body).foregroundStyle(palette.text)
             }
             .padding(.horizontal,20).padding(.vertical,12)
+            WorkspaceListDivider().padding(.horizontal,20)
+            WorkspaceSettingsValueRow(label:"版本", value: Self.appVersionText, showsDivider:false)
         }
+    }
+    private static var appVersionText: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "开发版"
+        let build = info?["CFBundleVersion"] as? String
+        return build.map { "\(version) (\($0))" } ?? version
     }
 
     @ViewBuilder private var processingIssues: some View {
