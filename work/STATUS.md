@@ -1273,3 +1273,7 @@
 - 改为 model.changeAction(.completed)：有提醒关联同步并回读、无关联本地完成；失败在笔记顶部显示原因（boardNotice），不再静默。
 - 204–210 的评审工作流运行 4 小时未交卷已停止，改为本地按三视角核对；周回顾 progressRows 与 .home 路由映射均确认正常。
 - 集成：构建 129 全绿（build_exit=0 / test_exit=0，589 tests / dist_build_exit=0，attempt=1 重启）。
+## 波 212：待处理多选批量整理与开关清理（2026-11-24）
+- 笔记页「待处理」每条前加选择圆圈，多选后「整理所选的 N 份」：organizeMaterialsSequentially 顺序执行，逐个 reidentify，失败跳过继续，结束汇总「已整理 N 份，M 份未完成」。
+- 移除旧首页遗留的悬空开关「最近笔记区默认展开」（已无消费者，避免误导）。
+- 集成：构建 130 全绿（build_exit=0 / test_exit=0，589 tests / dist_build_exit=0，attempt=1 重启）。

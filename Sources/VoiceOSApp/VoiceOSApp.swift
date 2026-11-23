@@ -2799,6 +2799,33 @@ final class ControlCenter: ObservableObject {
         scheduleProcessing()
     }
 
+    /// 依次重新整理一批材料：前一条做完再开下一条，失败跳过并继续；
+    /// 用于笔记页「待处理」里挑选的几条一次整理。
+    func organizeMaterialsSequentially(_ records: [SourceRecord]) async {
+        var succeeded = 0, failed = 0
+        for record in records {
+            guard modelConfigured else { failed += 1; continue }
+            guard sourceReidentifyWorker == nil, understandingWorker == nil, pausedActionBatch?.isRunning != true else {
+                failed += records.count - succeeded - failed
+                break
+            }
+            understandingSource = record.id
+            var ok = false
+            let worker = Task {
+                switch await reidentifySource(record.id) {
+                case .finished: ok = true
+                case .skipped, .failed: ok = false
+                }
+            }
+            sourceReidentifyWorker = worker
+            await worker.value
+            await refresh(); requestReminderRefresh()
+            understandingSource = nil
+            sourceReidentifyWorker = nil
+            if ok { succeeded += 1 } else { failed += 1 }
+        }
+        status = failed == 0 ? "已整理 \(succeeded) 份材料" : "已整理 \(succeeded) 份，\(failed) 份未完成"
+    }
     func reidentify(_ record: SourceRecord) {
         guard sourceReidentifyWorker == nil, understandingWorker == nil, pausedActionBatch?.isRunning != true else { return }
         understandingSource = record.id

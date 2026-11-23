@@ -412,7 +412,6 @@ struct WorkspaceView: View {
     @State private var modelTestResult: String?
     @State private var settingsQuery = ""
     @AppStorage("voiceos.note.annotations.visible") private var showNoteAnnotations = true
-    @AppStorage("voiceos.home.recentNotes.expanded") private var recentNotesExpandedPreference = true
     @State private var materialPageCache = MaterialPageCache()
     @State private var actionPageCache = ActionPageCache()
     @State private var topicListingCache = TopicListingCache()
@@ -2669,10 +2668,6 @@ struct WorkspaceView: View {
                 Toggle("显示 AI 批注", isOn: $showNoteAnnotations)
                     .toggleStyle(.switch).labelsHidden()
                     .accessibilityIdentifier("settings.showAnnotations")
-            }
-            WorkspaceSettingsRow(title:"最近笔记区默认展开", subtitle:"笔记页顶部的最近整理列表") {
-                Toggle("最近笔记默认展开", isOn: $recentNotesExpandedPreference)
-                    .toggleStyle(.switch).labelsHidden()
             }
         }
     }

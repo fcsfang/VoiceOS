@@ -15,6 +15,8 @@ struct NotesLibraryView: View {
     @State private var notes: [StoredMaterialNote] = []
     @State private var query = ""
     @State private var readingStates: [String: SourceReadingState] = [:]
+    @State private var selectedPending: Set<String> = []
+    @State private var organizingSelected = false
 
     /// 还没读过的材料就是首页的「待处理」：直接从这里点开整理，读完自动消失。
     private var pendingMaterials: [SourceRecord] {
@@ -64,9 +66,41 @@ struct NotesLibraryView: View {
                             .buttonStyle(.workspaceQuietCompact)
                     }
                     WorkspaceListDivider()
+                    if selectedPending.isEmpty {
+                        Text("点左侧圆圈挑选，或直接点开一份整理")
+                            .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
+                    } else {
+                        HStack(spacing: 10) {
+                            Text("已选 \(selectedPending.count) 份").vosFont(WorkspaceText.meta)
+                            Button(organizingSelected ? "整理中…" : "整理所选的 \(selectedPending.count) 份") {
+                                let records = pendingMaterials.filter { selectedPending.contains($0.id) }
+                                organizingSelected = true
+                                Task {
+                                    await model.organizeMaterialsSequentially(records)
+                                    organizingSelected = false
+                                    selectedPending = []
+                                }
+                            }
+                            .buttonStyle(.workspaceSecondaryCompact)
+                            .disabled(organizingSelected)
+                            Button("取消选择") { selectedPending = [] }.buttonStyle(.workspaceQuietCompact)
+                            Spacer(minLength: 0)
+                        }
+                    }
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(pendingMaterials.prefix(6).enumerated()), id: \.element.id) { index, record in
                             if index > 0 { WorkspaceListDivider() }
+                            HStack(spacing: 8) {
+                                Button {
+                                    if selectedPending.contains(record.id) { selectedPending.remove(record.id) }
+                                    else { selectedPending.insert(record.id) }
+                                } label: {
+                                    Image(systemName: selectedPending.contains(record.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedPending.contains(record.id) ? palette.accent : palette.tertiaryText)
+                                }
+                                .buttonStyle(.plain)
+                                .help(selectedPending.contains(record.id) ? "取消选择" : "选择这份材料")
+                                .accessibilityLabel(selectedPending.contains(record.id) ? "取消选择" : "选择这份材料")
                             Button { openNote(record.id) } label: {
                                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                                     Text(record.displayTitle)
@@ -86,6 +120,7 @@ struct NotesLibraryView: View {
                             .buttonStyle(.plain)
                             .help("打开并整理成笔记")
                             .accessibilityIdentifier("notes.pending.row")
+                            }
                         }
                     }
                     if pendingMaterials.count > 6 {
