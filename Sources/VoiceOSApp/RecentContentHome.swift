@@ -1297,7 +1297,7 @@ private struct HomeRecentNotesKey: Equatable {
 /// Title and preview text the home rows and the reader take from a saved note.
 /// The preview is the lead when present, otherwise the first paragraph's first
 /// sentence, cut to `excerptLength` characters with an ellipsis.
-private enum MaterialNoteHomeText {
+enum MaterialNoteHomeText {
     static func title(_ note: MaterialNote) -> String? {
         let title = note.title.trimmingCharacters(in: .whitespacesAndNewlines)
         return title.isEmpty ? nil : title

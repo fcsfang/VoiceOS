@@ -17,7 +17,7 @@ enum WorkspaceRoute: Equatable {
 }
 
 enum WorkspacePageRequest: Equatable {
-    case home, themes, materials, actions, monitor, initiate, back, processing
+    case home, themes, materials, notes, actions, monitor, initiate, back, processing
 }
 
 /// Which workspace segments one refresh publishes. Interactive keeps the fast

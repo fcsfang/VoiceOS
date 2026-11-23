@@ -6,10 +6,10 @@ import VoiceOSCore
 // One navigation state owns the workspace. Discussion is a sibling, so expanding
 // it never replaces the reading view or its disclosure/scroll state.
 enum WorkspacePage: Hashable {
-    case home, themes, materials, monitor, actions, initiate, source(String), delivery(String), task(String), settings, capture, search, tool(String)
+    case home, themes, materials, notes, monitor, actions, initiate, source(String), delivery(String), task(String), settings, capture, search, tool(String)
     var isTopLevel: Bool {
         switch self {
-        case .home, .themes, .materials, .monitor, .actions, .initiate, .settings: true
+        case .home, .themes, .materials, .notes, .monitor, .actions, .initiate, .settings: true
         default: false
         }
     }
@@ -467,6 +467,7 @@ struct WorkspaceView: View {
         switch page {
         case .themes: "主题"
         case .materials: "材料"
+        case .notes: "笔记"
         case .monitor: "消息监测"
         case .source: sourceOpenedFromTheme ? "主题" : "材料"
         case .actions,.task,.delivery: "行动"
@@ -738,6 +739,52 @@ struct WorkspaceView: View {
                             actionKeys: topicActionKeys(for: actionIDs),
                             token: topicLoadToken)
     }
+    /// 保存视图区与行都单独成函数：侧栏表达式整体过大会触发类型检查超时。
+    @ViewBuilder private var sidebarSavedViews: some View {
+        if !savedViews.isEmpty {
+            VStack(alignment:.leading,spacing:8) {
+                Text("视图").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText).padding(.horizontal,9).accessibilityAddTraits(.isHeader)
+                VStack(spacing:2) {
+                    ForEach(savedViews) { view in savedViewRow(view) }
+                }
+            }
+        }
+    }
+    @ViewBuilder private func savedViewRow(_ view: SavedWorkspaceView) -> some View {
+        let selected: Bool = (view.page == .materials && page == .materials && materialFilter == view.filter) || (view.page == .actions && page == .actions && actionFilter == view.filter)
+        Button { openSavedView(view) } label: {
+            Label(view.name,systemImage:view.page == .materials ? "books.vertical" : "checkmark.circle")
+                .vosFont(WorkspaceText.body).lineLimit(textScale >= 1.3 ? 2 : 1)
+                .frame(maxWidth:.infinity,alignment:.leading)
+                .padding(.horizontal,9).padding(.vertical,7)
+                .background(selected ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain)
+            .help(view.page == .materials ? "材料：" + view.filter : "行动：" + view.filter)
+            .contextMenu { Button("删除视图",role:.destructive) { pendingDeleteView = view } }
+            .accessibilityLabel("打开视图：" + view.name)
+            .accessibilityIdentifier("workspace.savedView." + view.name)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+    /// 一级导航拆成两组：七行 nav 放在同一个表达式里会把类型检查拖到超时。
+    @ViewBuilder private var sidebarNavigation: some View {
+        VStack(spacing:5) { sidebarBrowseLinks; sidebarWorkLinks }
+    }
+    @ViewBuilder private var sidebarBrowseLinks: some View {
+        VStack(spacing:5) {
+            nav("首页",icon:"house",target:.home,id:"home")
+            nav("主题",icon:"circle.hexagongrid",target:.themes,id:"themes")
+            nav("材料",icon:"books.vertical",target:.materials,id:"materials")
+            nav("笔记",icon:"doc.text",target:.notes,id:"notes")
+        }
+    }
+    @ViewBuilder private var sidebarWorkLinks: some View {
+        VStack(spacing:5) {
+            nav("消息监测",icon:"bell.badge",target:.monitor,id:"monitor",badge:model.monitorOpenItemCount,badgeAccessibility:"未处理事项 \(model.monitorOpenItemCount) 条")
+            nav("行动",icon:"checkmark.circle",target:.actions,id:"actions",badge:model.unreadDeliveryCount)
+            nav("启动",icon:"arrow.up.forward",target:.initiate,id:"initiate")
+        }
+    }
     private var sidebar: some View {
         VStack(alignment:.leading,spacing:28) {
             HStack(spacing:9) {
@@ -749,37 +796,8 @@ struct WorkspaceView: View {
                 }
                 Text("VoiceOS").vosFont(19, weight: .medium)
             }.padding(.horizontal,9)
-            VStack(spacing:5) {
-                nav("首页",icon:"house",target:.home,id:"home")
-                nav("主题",icon:"circle.hexagongrid",target:.themes,id:"themes")
-                nav("材料",icon:"books.vertical",target:.materials,id:"materials")
-                nav("消息监测",icon:"bell.badge",target:.monitor,id:"monitor",badge:model.monitorOpenItemCount,badgeAccessibility:"未处理事项 \(model.monitorOpenItemCount) 条")
-                nav("行动",icon:"checkmark.circle",target:.actions,id:"actions",badge:model.unreadDeliveryCount)
-                nav("启动",icon:"arrow.up.forward",target:.initiate,id:"initiate")
-            }
-            if !savedViews.isEmpty {
-                VStack(alignment:.leading,spacing:8) {
-                    Text("视图").vosFont(WorkspaceText.meta.size, weight: .medium).foregroundStyle(palette.secondaryText).padding(.horizontal,9).accessibilityAddTraits(.isHeader)
-                    VStack(spacing:2) {
-                        ForEach(savedViews) { view in
-                            let selected=(view.page == .materials && page == .materials && materialFilter == view.filter) || (view.page == .actions && page == .actions && actionFilter == view.filter)
-                            Button { openSavedView(view) } label: {
-                                Label(view.name,systemImage:view.page == .materials ? "books.vertical" : "checkmark.circle")
-                                    .vosFont(WorkspaceText.body).lineLimit(textScale >= 1.3 ? 2 : 1)
-                                    .frame(maxWidth:.infinity,alignment:.leading)
-                                    .padding(.horizontal,9).padding(.vertical,7)
-                                    .background(selected ? palette.selection : .clear,in:RoundedRectangle(cornerRadius: WorkspaceMetrics.controlRadius))
-                                    .contentShape(Rectangle())
-                            }.buttonStyle(.plain)
-                                .help(view.page == .materials ? "材料：" + view.filter : "行动：" + view.filter)
-                                .contextMenu { Button("删除视图",role:.destructive) { pendingDeleteView = view } }
-                                .accessibilityLabel("打开视图：" + view.name)
-                                .accessibilityIdentifier("workspace.savedView." + view.name)
-                                .accessibilityAddTraits(selected ? .isSelected : [])
-                        }
-                    }
-                }
-            }
+            sidebarNavigation
+            sidebarSavedViews
             Spacer()
             VStack(alignment:.leading,spacing: WorkspaceMetrics.rowGap) {
                 HStack(spacing:7) {
@@ -809,6 +827,7 @@ struct WorkspaceView: View {
                     case .home: path=[];page = .home;error=""
                     case .themes: path=[];page = .themes;topicID=nil;topicFocus=nil;error=""
                     case .materials: path=[];page = .materials;error=""
+                    case .notes: path=[];page = .notes;error=""
                     case .actions: path=[];page = .actions;error=""
                     case .monitor: path=[];page = .monitor;error=""
                     case .initiate: path=[];page = .initiate;error=""
@@ -820,7 +839,12 @@ struct WorkspaceView: View {
             .onAppear { AppBrand.applyApplicationIcon() }
             .onChange(of: colorScheme) { _, _ in AppBrand.applyApplicationIcon() }
     }
-    private func nav(_ title:String,icon:String,target:WorkspacePage,id:String,badge:Int = 0,badgeAccessibility:String? = nil) -> some View {
+    /// AnyView 是刻意的：七个 nav 调用的返回类型叠在一起曾让类型检查超时，
+    /// 压平后侧栏表达式能稳定编译；每项只是一行按钮，渲染开销可忽略。
+    private func nav(_ title:String,icon:String,target:WorkspacePage,id:String,badge:Int = 0,badgeAccessibility:String? = nil) -> AnyView {
+        AnyView(navRow(title,icon:icon,target:target,id:id,badge:badge,badgeAccessibility:badgeAccessibility))
+    }
+    private func navRow(_ title:String,icon:String,target:WorkspacePage,id:String,badge:Int = 0,badgeAccessibility:String? = nil) -> some View {
         Button { path=[];page=target;if target == .themes { topicID=nil;topicFocus=nil };error="" } label: {
             HStack(spacing:8) {
                 Label(title,systemImage:icon).vosFont(WorkspaceText.body.size, weight: section == title ? .semibold : .regular).lineLimit(textScale >= 1.3 ? 2 : 1)
@@ -902,6 +926,10 @@ struct WorkspaceView: View {
         case .themes:
             ScrollViewReader { proxy in
                 scrolled { themes(proxy: proxy) }.id(navigationEntry)
+            }
+        case .notes:
+            ScrollViewReader { proxy in
+                scrolled { NotesLibraryView(model: model, openSource: { go(.source($0)) }) }.id(navigationEntry)
             }
         case .materials:
             ScrollViewReader { proxy in

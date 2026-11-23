@@ -1156,3 +1156,9 @@
 - store.backfillTopicDomains(using:) 转 public（返回写入条数）；ControlCenter 每个运行期一次：初始化且文本模型就绪时补归类（每批 40 个、effort low），写入后 refresh；触发点为启动全量 refresh 与文本模型配置完成。失败不阻塞。
 - 集成：构建 84 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=5 重启）。
 - 上机验证（构建 84，10:18 重启后）：主题页出现八维分组（爱情 1、家庭 1、职业 11…，未归类殿后）——187 的启动自动补齐在真实库上把 102/102 个主题补齐了维度（只读库查询确认），随后刷新生效；截图 docs/product/audits/2026-11-23/01-主题按人生维度分组-构建84.jpg。175-A 跨重启位置恢复实测通过：09:27 实例中滚到笔记末段，经 10:09、10:18 两次重启后点「继续读」仍落回同一段落（截图 02-继续读跨重启落回原位置-构建84.jpg）。
+## 波 188：笔记页（2026-11-23）
+- 用户问「要不要专门弄一个笔记页面」。判断：要，作为第三种视角——材料页按来源、主题页按关切，缺按文章；笔记是表达级产物。
+- WorkspacePage 增加 notes（一级页），侧边栏「材料」后新增「笔记」（doc.text）；WorkspacePageRequest 同步补 notes 分支。
+- 新文件 NotesLibraryView：每个表达最新一篇笔记、按整理时间倒序，行内标题+导语预览+日期，搜索框在标题与正文过滤；点开经 expressionKey 首成员打开材料页并落在上次阅读位置；随 records/materialNotes 代际刷新；空态两分。
+- 构建踩坑与修法：MaterialNoteHomeText 改 internal 复用；侧栏七行导航与保存视图区触发类型检查超时——导航拆两组、nav 返回 AnyView 压平类型、保存视图区与行抽成独立函数。
+- 集成：构建 85/86/87/88/89 依次失败于上述三类问题；修复后构建 92 全绿（build_exit=0 / test_exit=0，584 tests / dist_build_exit=0，attempt=1 重启）。
