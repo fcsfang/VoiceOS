@@ -1,5 +1,7 @@
 # 项目状态
 
+- 2026-11-24 设置分类、跨分类搜索与监测推送入口整理在当前功能分支验证，见[任务卡](tasks/20261124-settings-monitor-ux/TASK.md)。
+
 - 2026-11-24 资料检索、行动专注与备份恢复已在功能分支验证，见[任务卡](tasks/20261124-library-actions-backup/TASK.md)。
 
 - 2026-11-24 自动录音生成可读笔记，见 [任务卡](tasks/20261124-automatic-recording-note/TASK.md)。
