@@ -63,41 +63,18 @@ struct NotesLibraryView: View {
             } else if filtered.isEmpty {
                 Text("没有匹配的笔记").foregroundStyle(palette.secondaryText)
             } else {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(filtered.enumerated()), id: \.element.id) { index, stored in
-                        if index == 0 || stored.day != filtered[index - 1].day {
-                            WorkspaceListGroupHeader(title: stored.day?.formatted(date: .long, time: .omitted) ?? "日期未知")
-                                .padding(.top, index == 0 ? 0 : WorkspaceMetrics.groupGap)
-                        }
-                        if index > 0, stored.day == filtered[index - 1].day { WorkspaceListDivider() }
-                        Button { open(stored) } label: {
-                            HStack(alignment: .firstTextBaseline, spacing: 13) {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    // 标题不截断：长短由内容决定，列表用换行与滚动适配。
-                                    Text(highlight(stored.title))
-                                        .vosFont(WorkspaceText.rowTitle.size, weight: .medium)
-                                        .foregroundStyle(palette.text)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                        .multilineTextAlignment(.leading)
-                                    if let preview = preview(for: stored) {
-                                        Text(highlight(preview)).vosFont(WorkspaceText.meta)
-                                            .foregroundStyle(palette.secondaryText)
-                                            .lineLimit(1)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                            .multilineTextAlignment(.leading)
-                                            .frame(maxWidth: 660, alignment: .leading)
-                                    }
-                                }
-                                Spacer(minLength: 8)
+                let groups = Dictionary(grouping: filtered, by: \.day)
+                ForEach(groups.keys.sorted { ($0 ?? .distantPast) > ($1 ?? .distantPast) }, id: \.self) { day in
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(day?.formatted(date: .long, time: .omitted) ?? "日期未知")
+                            .vosFont(WorkspaceText.meta.size, weight: .semibold)
+                            .foregroundStyle(palette.secondaryText)
+                            .accessibilityAddTraits(.isHeader)
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 14)], alignment: .leading, spacing: 14) {
+                            ForEach(groups[day] ?? []) { stored in
+                                noteTile(stored)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14).padding(.vertical, 14)
-                            .background(palette.surface)
-                            .contentShape(Rectangle()).workspaceHoverHighlight()
                         }
-                        .buttonStyle(.plain)
-                        .help("打开这篇笔记，回到上次读到的位置")
-                        .accessibilityIdentifier("notes.row")
                     }
                 }
             }
@@ -179,6 +156,28 @@ struct NotesLibraryView: View {
     }
 
     private var term: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func noteTile(_ stored: NoteLibraryRow) -> some View {
+        Button { open(stored) } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(highlight(stored.title)).vosFont(WorkspaceText.sectionTitle)
+                    .foregroundStyle(palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let excerpt = preview(for: stored) {
+                    Text(highlight(excerpt)).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.secondaryText).lineLimit(2)
+                }
+            }
+            .multilineTextAlignment(.leading)
+            .padding(18)
+            .frame(maxWidth: .infinity, minHeight: 108, maxHeight: .infinity, alignment: .topLeading)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
+            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(palette.border) }
+            .contentShape(Rectangle()).workspaceHoverHighlight()
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("notes.row")
+    }
 
     private func preview(for row: NoteLibraryRow) -> String? {
         guard !term.isEmpty, row.title.localizedStandardRange(of: term) == nil,

@@ -9,6 +9,7 @@ struct WorkspaceMonitorView: View {
     @ObservedObject private var operations = ControlCenter.monitorOperations
 
     @State private var selectedReportID: String?
+    @State private var historyExpanded = false
     @State private var expandedItems: Set<String> = []
     @State private var qqPythonPath = ""
     @State private var qqKeyPath = ""
@@ -56,10 +57,24 @@ struct WorkspaceMonitorView: View {
                     settingsSection
                     sourceStatusSection
                 } else {
-                    runBar
                     monitorLoadFailureNotice
-                    todayReportSection
-                    historySection
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 24) {
+                            todayReportSection.frame(minWidth: 520)
+                            Divider()
+                            runBar.frame(width: 196, alignment: .leading)
+                        }
+                        VStack(alignment: .leading, spacing: 16) {
+                            todayReportSection
+                            runBar
+                        }
+                    }
+                    DisclosureGroup(isExpanded: $historyExpanded) {
+                        historySection
+                    } label: {
+                        WorkspaceSectionHeading("历史报告", count: monitorLoaded ? String(earlierReports.count) : nil)
+                    }
+                    .accessibilityIdentifier("monitor.history.toggle")
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -135,7 +150,7 @@ struct WorkspaceMonitorView: View {
 
     private var runBar: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
-            HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 Button {
                     Task {
                         await model.runMonitorCheck()
@@ -153,7 +168,6 @@ struct WorkspaceMonitorView: View {
                 .accessibilityLabel(model.monitorChecking ? "正在检查消息监测" : "立即检查消息监测")
                 .accessibilityIdentifier("monitor.runCheck")
                 Text(model.monitorNextRunText).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                Spacer(minLength: 0)
             }
             if !model.monitorStatus.isEmpty {
                 Text(model.monitorStatus).vosFont(WorkspaceText.meta)
@@ -258,7 +272,7 @@ struct WorkspaceMonitorView: View {
     }
 
     private var historySection: some View {
-        WorkspaceSettingsCard(title: "历史报告", subtitle: historyCountText) {
+        Group {
             VStack(alignment: .leading, spacing: 12) {
                 if monitorLoadState == .loading {
                     if showSlowLoad { monitorLoadingRow("正在读取历史报告…") }
@@ -293,9 +307,6 @@ struct WorkspaceMonitorView: View {
         }
     }
 
-    private var historyCountText: String? {
-        monitorLoadState == .loaded || !earlierReports.isEmpty ? "共 \(earlierReports.count) 次，最新在上" : nil
-    }
 
     private func reportCardContent(report: MonitorReport, isLatest: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -485,6 +496,7 @@ struct WorkspaceMonitorView: View {
     }
 
     private func expandEarlierReport(_ reportID: String) {
+        historyExpanded = true
         guard let report = model.monitorReports.first(where: { $0.id == reportID }) else { return }
         selectedReportID = report.id
         Task { await loadItems(report) }

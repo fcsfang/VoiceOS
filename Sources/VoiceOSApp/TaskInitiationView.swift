@@ -100,11 +100,11 @@ struct TaskInitiationView: View {
     }
 
     private var composer: some View {
-        Group {
+        WorkspaceCard(padding: 18, radius: 8) {
             VStack(alignment: .leading, spacing: 14) {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $model.initiationText).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 120)
-                        .workspaceEditorSurface().accessibilityLabel("要启动的原话")
+                        .padding(10).accessibilityLabel("要启动的原话")
                         .accessibilityIdentifier("initiation.input")
                     if model.initiationText.isEmpty {
                         Text("你想了解什么，或从哪里开始？").vosFont(WorkspaceText.body)
