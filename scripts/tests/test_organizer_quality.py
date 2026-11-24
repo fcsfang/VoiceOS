@@ -100,6 +100,22 @@ class MergeRepairTests(unittest.TestCase):
         self.assertEqual(merged["corrections"], [{"span_id": "span-a", "text": "补好的第一段。", "note": "空文字被报错"}])
         self.assertEqual(merged["remaining_issues"], [])
 
+    def test_repair_cannot_introduce_a_span_the_first_round_never_judged(self):
+        first = {"corrections": [{"span_id": "span-a", "text": "改好的第一段。", "note": ""}], "remaining_issues": []}
+        repaired = {"corrections": [{"span_id": "span-a", "text": "改好的第一段。", "note": ""},
+                                    {"span_id": "span-b", "text": "修复轮新写的第二段。", "note": ""}],
+                    "remaining_issues": []}
+        merged = self.merge(first, repaired)
+        self.assertEqual([entry["span_id"] for entry in merged["corrections"]], ["span-a"])
+
+    def test_repair_duplicate_span_id_keeps_first_entry(self):
+        first = {"corrections": [{"span_id": "span-a", "text": "改好的第一段。", "note": ""}], "remaining_issues": []}
+        repaired = {"corrections": [{"span_id": "span-a", "text": "改好的第一段。", "note": ""},
+                                    {"span_id": "span-a", "text": "重复的第二条。", "note": ""}],
+                    "remaining_issues": []}
+        merged = self.merge(first, repaired)
+        self.assertEqual(len(merged["corrections"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

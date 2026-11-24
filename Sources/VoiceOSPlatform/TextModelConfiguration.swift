@@ -46,9 +46,11 @@ public struct TextModelConfiguration: Codable, Equatable, Sendable {
         UserDefaults.standard.removeObject(forKey: defaultsKey)
     }
 
-    /// 由设置页输入组装并校验地址；无效返回 nil。
+    /// 由设置页输入组装并校验地址；无效返回 nil。尾部多余的 `/` 会被规范掉，
+/// 与端口策略要求的精确 `https://主机/v1` 一致。
     public func validated() -> TextModelConfiguration? {
-        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        var trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        while trimmed.hasSuffix("/") { trimmed.removeLast() }
         guard !trimmed.isEmpty, let url = URL(string: trimmed), url.scheme != nil else { return nil }
         var copy = self
         copy.baseURL = trimmed

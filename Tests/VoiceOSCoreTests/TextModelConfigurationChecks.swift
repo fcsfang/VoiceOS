@@ -28,6 +28,8 @@ extension CoreFlowTests {
         XCTAssertNil(TextModelConfiguration(baseURL: "not a url").validated())
         XCTAssertEqual(TextModelConfiguration(baseURL: " https://api.example.com/v1 ").validated()?.baseURL,
                        "https://api.example.com/v1")
+        XCTAssertEqual(TextModelConfiguration(baseURL: "https://api.example.com/v1/").validated()?.baseURL,
+                       "https://api.example.com/v1")
     }
 
     func test内部设置构建套件前先校验地址() {

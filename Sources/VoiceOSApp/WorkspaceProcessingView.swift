@@ -723,7 +723,7 @@ struct WorkspaceProcessingView: View {
                             VStack(alignment:.leading,spacing:12) {
                                 WorkspaceSectionHeading("模型与提醒事项")
                                 WorkspaceListDivider()
-                                Text(model.modelConfigured ? model.modelSummary : "尚未配置模型；完整原文仍可先在本机保存。").vosFont(WorkspaceText.meta)
+                                Text(model.modelConfigured ? model.modelSummary : (model.modelConfigIssue ?? "尚未配置模型；完整原文仍可先在本机保存。")).vosFont(WorkspaceText.meta)
                                 Text(model.speechConfigured ? "本地 Qwen 转写已就绪。" : "尚未配置本地 Qwen 转写；音频与原文仍会先保存在本机，配置后再转写。").vosFont(WorkspaceText.meta)
                                 if !model.speechConfigured {
                                     Button("配置本地 Qwen 转写…") { model.chooseLocalSpeech() }

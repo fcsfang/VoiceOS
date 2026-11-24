@@ -1309,3 +1309,9 @@
 - 新增 `TextModelHostPolicy`（VoiceOSCore）：HTTPS、`api.openai.com`/`api.chiyi.cc`、精确 `/v1`、无用户信息/端口/查询/片段；端口构造与设置页「测试连接」共用，未授权地址不会收到密钥。
 - 新增 1 个单元测试覆盖九种通过/拒绝形态。
 - 验证：build_exit=0；swift test 592/592、test_exit=0；dist 重建。
+## 波 221：复审收口（2026-11-24）
+- 入口：resumeDeferred 只唤醒 attempts=0；消失判定加 fileExists 复核并落盘；摘要只复用已处理条目、新版本退役旧摘要条目；改名更新路径不误报跨入口；移除入口清失败标记；canProcess 与 blocker 对齐。
+- 配置：损坏配置不再当成未配置；新增 modelConfigIssue 并在四处界面显示；安装快照统一端口与整理脚本的配置；导入钥匙串失败显式报错；密钥未变不重写；历史坏路径一次移除；地址尾斜杠规范化；BilingualClient 补策略校验。
+- Python：地址密钥不得跨主机配对；损坏文件容错；修复轮禁止新片段、重复去重、首轮修正必须保留；render-only 去掉无身份回退；只读渲染错误带缓存路径。缓存身份口径写入设计文档。
+- 验证：python 19/19、py_compile 0；build_exit=0；swift test 592/592、test_exit=0；dist 重建。
+- 未做：starting 闸门等待同一启动任务（复审 4.7）；settings 进程级快照（3.5）。
