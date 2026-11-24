@@ -556,19 +556,9 @@ struct WorkspaceSourceView: View {
                         Text(String(format:"%02d",index+1)).vosFont(WorkspaceText.caption.size, weight: .semibold, design: .monospaced).foregroundStyle(palette.secondaryText).padding(.top,3)
                         VStack(alignment:.leading,spacing:8) {
                             WorkspaceExpandableText(text:thought.statement,label:"完整要点",lines:4,size:WorkspaceText.body.size)
-                            Text(thought.ownership == "ai_candidate" ? "AI 分析与建议" : thought.ownership == "external" ? "外部观点" : "从我的表达中提取").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                            HStack(spacing:8) {
-                                Button("记录行动意图") { actionClaim=thought }
-                                    .buttonStyle(.workspaceSecondaryCompact)
-                                    .disabled(thought.validity == "frozen" || thought.reviewState == "rejected")
-                                Spacer(minLength:0)
-                                Menu {
-                                    Button("更正理解或归属",systemImage:"pencil") { claimEditor=thought }
-                                    Button("停止使用") { pendingRejection=thought;confirmingRejection=true }
-                                } label: { Image(systemName:"ellipsis.circle") }
-                                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                                .help("更多操作").accessibilityLabel("更多操作")
-                            }.vosFont(WorkspaceText.meta).disabled(model.reviewingClaim)
+                            Text(thought.ownership == "ai_candidate" ? "AI 分析与建议" : thought.ownership == "external" ? "外部观点" : thought.ownership == "unresolved" ? "归属待确认" : "我的观点").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                            ClaimActionsMenu(edit: { claimEditor=thought }, delete: { pendingRejection=thought;confirmingRejection=true }, createAction: { actionClaim=thought })
+                                .disabled(model.reviewingClaim)
                             DisclosureGroup {
                                 VStack(alignment:.leading,spacing:10) {
                                     ForEach(Array(thought.references.enumerated()),id:\.offset) { _,ref in
@@ -1084,11 +1074,11 @@ struct WorkspaceSourceView: View {
         .sheet(isPresented:$showingIncrementalReading) {
             IncrementalReadingView(model:model,source:source) { showingIncrementalReading=false }
         }
-        .alert("停止使用这条理解？", isPresented:$confirmingRejection, presenting:pendingRejection) { claim in
-            Button("停止使用", role:.destructive) { Task { _=await model.review(claim, action:.reject) } }
+        .alert("删除这条观点？", isPresented:$confirmingRejection, presenting:pendingRejection) { claim in
+            Button("删除", role:.destructive) { Task { _=await model.review(claim, action:.reject) } }
             Button("取消", role:.cancel) {}
         } message: { _ in
-            Text("确定后，这份理解将不再用于当前阅读与行动。原文与处理历史会保留。")
+            Text("原录音、逐字稿和历史记录会保留。依赖这条观点的行动将暂停。")
         }
         .task(id: combinedReadKey) {
             let key=combinedReadKey
@@ -1858,6 +1848,21 @@ struct WorkspaceTranscriptEditor:View {
         }
     }
 }
+struct ClaimActionsMenu: View {
+    let edit: () -> Void
+    let delete: () -> Void
+    var createAction: (() -> Void)? = nil
+    var body: some View {
+        Menu {
+            Button("编辑", systemImage: "pencil", action: edit)
+            if let createAction { Button("创建行动", systemImage: "plus", action: createAction) }
+            Button("删除", systemImage: "trash", role: .destructive, action: delete)
+        } label: { Image(systemName:"ellipsis.circle") }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .help("观点操作").accessibilityLabel("观点操作")
+    }
+}
+
 struct ClaimCorrectionView:View {
     @Environment(\.workspacePalette) private var palette
     let claim:CandidateClaim
@@ -1876,20 +1881,20 @@ struct ClaimCorrectionView:View {
     }
     var body:some View {
         VStack(alignment:.leading,spacing:16) {
-            Text("更正当前理解").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
-            Text("更正不会改写原话，历史与相关行动依据会分别保留。").vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
+            Text("编辑观点").vosFont(WorkspaceText.sectionTitle).accessibilityAddTraits(.isHeader)
+            Text("原话会保留。依赖旧观点的行动将暂停。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             TextEditor(text:$text).frame(minHeight:180).workspaceEditorSurface().focused($textFocused)
             Picker("内容归属",selection:$ownership) {
-                Text("我的暂定表达").tag("user_tentative");Text("外部观点").tag("external");Text("AI 建议").tag("ai_candidate");Text("归属待核对").tag("unresolved")
+                Text("我的表达").tag("user_tentative");Text("他人观点").tag("external");Text("AI 建议").tag("ai_candidate");Text("尚不确定").tag("unresolved")
             }
-            TextField("更正原因",text:$note)
+            TextField("备注（选填）",text:$note)
             if !failure.isEmpty { Text(failure).vosFont(WorkspaceText.meta).foregroundStyle(palette.danger) }
             HStack {
                 Button("取消",action:dismiss).buttonStyle(.workspaceSecondary).keyboardShortcut(.cancelAction)
                 Spacer()
-                Button(saving ? "正在更新…" : "更新理解") { save() }
+                Button(saving ? "正在保存…" : "保存") { save() }
                     .buttonStyle(.workspacePrimary).keyboardShortcut(.defaultAction)
-                    .disabled(saving || model.reviewingClaim || (text == claim.statement && ownership == claim.ownership) || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty || note.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
+                    .disabled(saving || model.reviewingClaim || (text == claim.statement && ownership == claim.ownership) || text.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty)
             }
         }.padding(24).frame(width:WorkspaceMetrics.modalSmall)
             .workspaceModalSurface()

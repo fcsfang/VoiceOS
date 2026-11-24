@@ -171,11 +171,11 @@ struct WorkspaceTopicReadingView: View {
         .onChange(of: sections.map(\.id)) { _,ids in if let selectedSection,!ids.contains(selectedSection) { self.selectedSection=nil } }
         .sheet(item:$correctingClaim) { claim in ClaimCorrectionView(claim:claim,model:model) { correctingClaim=nil } }
         .onChange(of: correctingClaim?.id) { _, id in if id == nil { requestCardListFocus() } }
-        .alert("停止使用这条理解？", isPresented:$confirmingRejection, presenting:pendingRejection) { claim in
+        .alert("删除这条观点？", isPresented:$confirmingRejection, presenting:pendingRejection) { claim in
             Button("取消", role:.cancel) {}
-            Button("停止使用", role:.destructive) { Task { _=await model.review(claim, action:.reject) } }
+            Button("删除", role:.destructive) { Task { _=await model.review(claim, action:.reject) } }
         } message: { _ in
-            Text("确定后，这份理解将不再用于主题阅读与相关行动。原文与处理历史会保留。")
+            Text("原录音、逐字稿和历史记录会保留。依赖这条观点的行动将暂停。")
         }
     }
 
@@ -361,10 +361,8 @@ struct WorkspaceTopicReadingView: View {
                                 VStack(alignment:.leading,spacing:8) {
                                     Text(ownership(claim)).vosFont(WorkspaceText.caption.size, weight: .semibold).foregroundStyle(palette.secondaryText)
                                     Text(claim.statement).vosFont(WorkspaceText.body).textSelection(.enabled)
-                                    HStack {
-                                        Button("更正理解或归属",systemImage:"pencil") { correctingClaim=claim }.buttonStyle(.workspaceQuietCompact)
-                                        Button("停止使用") { pendingRejection=claim;confirmingRejection=true }.buttonStyle(.workspaceQuietCompact)
-                                    }.disabled(model.reviewingClaim)
+                                    ClaimActionsMenu(edit: { correctingClaim=claim }, delete: { pendingRejection=claim;confirmingRejection=true })
+                                        .disabled(model.reviewingClaim)
                                 }
                             }
                         }.padding(.top,12)

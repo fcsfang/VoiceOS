@@ -148,7 +148,7 @@ extension VoiceOSStore {
         return SearchTokens(drivable: drivable, filters: filters)
     }
 
-    private var searchIndexShape: String { "cjk-spaced-v5-notes-" + TimeZone.current.identifier }
+    private var searchIndexShape: String { "cjk-spaced-v6-reviewed-claims-" + TimeZone.current.identifier }
 
     private func searchSpaced(_ text: String) -> String {
         var result = ""
@@ -282,7 +282,11 @@ extension VoiceOSStore {
         let catalog: [String: SourceRecord] = memberIDs.isEmpty ? [:] : Dictionary(
             try sourceRecords(ids: Array(memberIDs)).map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first })
-        let claims = try db.query("SELECT id, statement AS title, statement AS body FROM claims")
+        let claims = try db.query("""
+            SELECT c.id, COALESCE(r.statement, c.statement) AS title
+            FROM claims c LEFT JOIN claim_reviews r ON r.claim_id=c.id AND r.version=c.review_version
+            WHERE c.validity='current' AND COALESCE(r.decision, 'pending') != 'rejected'
+            """)
         let actions = try db.query("SELECT id, title, note AS body FROM actions")
         let topics = try db.query("SELECT id, title, title AS body FROM reflection_questions")
         // 首页显示的是笔记标题；把每个表达最新一版的标题、导语与正文并入材料
@@ -350,7 +354,7 @@ extension VoiceOSStore {
             }
             for row in claims {
                 try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('claim', ?, ?, ?)",
-                               [row["id"], searchSpaced(row["title"] ?? ""), searchSpaced(row["body"] ?? "")])
+                               [row["id"], searchSpaced(row["title"] ?? ""), searchSpaced(row["title"] ?? "")])
             }
             for row in actions {
                 try db.execute("INSERT INTO search_index(kind, ref_id, title, body) VALUES('action', ?, ?, ?)",
@@ -368,7 +372,7 @@ extension VoiceOSStore {
 
     private func searchFingerprint() throws -> String {
         var parts: [String] = []
-        for table in ["sources", "claims", "actions", "transcript_versions", "reflection_questions", "material_notes"] {
+        for table in ["sources", "claims", "claim_reviews", "actions", "transcript_versions", "reflection_questions", "material_notes"] {
             let row = try db.query("SELECT COUNT(*) AS count, COALESCE(MAX(created_at), '') AS latest FROM \(table)").first!
             var part = "\(row["count"]!):\(row["latest"]!)"
             // Topic renames update the row in place and no dirty trigger covers that

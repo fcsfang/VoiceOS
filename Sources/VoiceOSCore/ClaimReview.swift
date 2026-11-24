@@ -34,8 +34,7 @@ extension VoiceOSStore {
             guard decision != current.reviewState else { throw VoiceOSError("审阅状态没有变化") }
         case .correct:
             text = statement ?? current.statement; owner = ownership?.rawValue ?? current.ownership
-            guard !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  text != current.statement || owner != current.ownership else { throw VoiceOSError("更正需要说明原因并修改文字或归属") }
+            guard text != current.statement || owner != current.ownership else { throw VoiceOSError("观点没有变化") }
             decision = "pending"; reason = "correction"
         }
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.unicodeScalars.count <= 2000, note.unicodeScalars.count <= 2000 else { throw VoiceOSError("审阅内容为空或过长") }
@@ -82,7 +81,7 @@ extension VoiceOSStore {
                     let expected = row["reason"] == "explicit_endorsement" ? "endorsed" : "rejected"
                     guard newText == text, newOwner == owner, row["decision"] == expected, decision != expected else { throw VoiceOSError("迁移审阅决策与内容不一致") }
                 case "correction":
-                    guard row["decision"] == "pending", !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    guard row["decision"] == "pending",
                           newText != text || newOwner != owner else { throw VoiceOSError("迁移认知更正原因或内容不一致") }
                 default: throw VoiceOSError("迁移审阅原因无效")
                 }
