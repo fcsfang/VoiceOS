@@ -2034,7 +2034,7 @@ final class ControlCenter: ObservableObject {
         fullRecordingWorker=Task {
             let refreshTask=watchFullRecording()
             var outcomes:[String:RecordingInboxOutcome]=[:]
-            var firstProcessedID:String?
+            var imported: [(digest: String, sourceID: String)] = []
             defer { refreshTask.cancel();fullRecordingBusy=false;fullRecordingWorker=nil;fullRecordingLog=nil;fullRecordingSourceID=nil;finished(outcomes);scheduleProcessing();resumeRecordingFollowups();resumeKnowledgeReviews() }
             do {
                 let root=await store.root
@@ -2062,7 +2062,6 @@ final class ControlCenter: ObservableObject {
                             try FileManager.default.removeItem(at:audio)
                         }
                         fullRecordingSourceID=id
-                        if firstProcessedID == nil { firstProcessedID = id }
                         let policy=try await store.sourcePolicy(sourceID:id)
                         // Automatic intake retains its existing text-processing grant; never regrant an explicit revocation on retry.
                         if policy.localOnly,policy.version == 1 { _ = try await store.setSourceLocalOnly(sourceID:id,expectedVersion:policy.version,localOnly:false) }
@@ -2081,6 +2080,7 @@ final class ControlCenter: ObservableObject {
                             try? await store.clearTranscriptionReviewFailure(sourceID: id)
                         }
                         try await prepareRecordingContext(input:entry.url,media:media,personalSourceID:id,personalTrack:track,staging:staging,speech:speech)
+                        imported.append((entry.digest, id))
                     } catch {
                         outcomes[entry.digest]=automaticRecordingFailure(error)
                     }
@@ -2093,13 +2093,41 @@ final class ControlCenter: ObservableObject {
                 try await preparePendingCorrectedRecordingContexts()
                 _ = try await store.connectRecordingExpressions(using:grouping)
                 try await understandPendingRecordingExpressions(store:store,speech:speech,grouping:grouping,modelEnvironment:configuration,script:script)
-                if let firstID = firstProcessedID {
-                    fullRecordingCompletedSourceID = firstID
-                    LocalNotice.post(title: "录音已整理", body: "这次录音的笔记、观点与任务已保存。", sourceID: firstID)
-                }
-                for entry in batch { outcomes[entry.digest] = .completed }
                 requestReminderRefresh();queueRecordingTitles();queueTopicOrganization()
-                setFullRecordingStatus("连续表达已自动合并理解，原始分段与原话均保留")
+                await refresh()
+                setFullRecordingStatus("正在将录音整理成笔记…")
+                let expressions = try await store.recordingExpressions().filter { $0.state == "completed" }
+                var savedCount = 0
+                var firstFailure: String?
+                for expression in expressions {
+                    let entries = imported.filter { expression.sourceIDs.contains($0.sourceID) }
+                    guard let first = entries.first else { continue }
+                    do {
+                        try Task.checkCancellation()
+                        await requestMaterialNote(sourceID: first.sourceID)
+                        try Task.checkCancellation()
+                        if case .failed(let reason) = materialNoteStates[first.sourceID] { throw VoiceOSError(reason) }
+                        if case .unavailable(let reason) = materialNoteStates[first.sourceID] { throw VoiceOSError(reason) }
+                        guard try await store.hasCurrentRecordingNote(expression) else {
+                            throw VoiceOSError("录音笔记尚未保存，请重试")
+                        }
+                        for entry in entries { outcomes[entry.digest] = .completed }
+                        savedCount += 1
+                        if fullRecordingCompletedSourceID == nil { fullRecordingCompletedSourceID = first.sourceID }
+                    } catch {
+                        for entry in entries { outcomes[entry.digest] = automaticRecordingFailure(error) }
+                        if firstFailure == nil { firstFailure = error.localizedDescription }
+                    }
+                }
+                for entry in imported where outcomes[entry.digest] == nil {
+                    let reason = "录音尚未完成连续表达整理，请重试"
+                    outcomes[entry.digest] = .retryableFailure(reason)
+                    if firstFailure == nil { firstFailure = reason }
+                }
+                if let firstID = fullRecordingCompletedSourceID {
+                    LocalNotice.post(title: "录音笔记已保存", body: "已整理 \(savedCount) 篇笔记，可在笔记页阅读。", sourceID: firstID)
+                }
+                setFullRecordingStatus(firstFailure.map { "已保存 \(savedCount) 篇笔记，另有录音待处理：" + $0 } ?? "已保存 \(savedCount) 篇录音笔记")
             } catch {
                 let failure=automaticRecordingFailure(error)
                 for entry in batch where outcomes[entry.digest] == nil { outcomes[entry.digest]=failure }
@@ -2146,12 +2174,15 @@ final class ControlCenter: ObservableObject {
         return task
     }
     private func acknowledgeCompletedRecordingExpressions(store:VoiceOSStore) async throws {
-        let completed=Set(try await store.recordingExpressions().filter { $0.state == "completed" }.flatMap(\.sourceIDs))
+        guard !recordingInbox.pendingItems.isEmpty else { return }
+        let completed = try await store.recordingExpressions().filter { $0.state == "completed" }
         // Recovery may finish outside the inbox callback, including before a
         // restart. Clear stale failures only when the current group is complete.
         for item in recordingInbox.pendingItems where item.state != .processing {
             for track in [0,1] {
-                if let id=try await store.importedSourceID(commandID:"automatic-recording:"+item.id+":\(track)"),completed.contains(id) {
+                if let id=try await store.importedSourceID(commandID:"automatic-recording:"+item.id+":\(track)"),
+                   let expression = completed.first(where: { $0.sourceIDs.contains(id) }),
+                   try await store.hasCurrentRecordingNote(expression) {
                     recordingInbox.acknowledgeCompleted(item.id);break
                 }
             }

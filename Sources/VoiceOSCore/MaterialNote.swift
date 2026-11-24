@@ -109,6 +109,13 @@ public struct StoredMaterialNote: Sendable, Equatable {
 }
 
 extension VoiceOSStore {
+    /// The inbox receipt covers the entire expression, including a paired interview track.
+    public func hasCurrentRecordingNote(_ expression: RecordingExpression) throws -> Bool {
+        let versions = expression.versions.merging(expression.externalVersions ?? [:]) { personal, _ in personal }
+        guard let note = try latestMaterialNote(memberSourceIDs: Array(versions.keys)) else { return false }
+        return note.transcriptVersions == versions
+    }
+
     /// Canonical member-set identity: sorted, de-duplicated source IDs joined by `|`.
     /// Views that only hold a source ID use it to look the same note up in batch.
     public static func materialNoteExpressionKey(_ memberSourceIDs: [String]) -> String {
