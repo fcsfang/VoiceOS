@@ -288,14 +288,20 @@ private struct WorkspaceAttentionDot: View {
                          inboxAttentionCount > 0 ? "录音 \(inboxAttentionCount)" : nil,
                          !inbox.folderErrors.isEmpty ? "入口读取失败" : nil].compactMap { $0 }
             let title = "需要查看" + (parts.isEmpty ? "" : " · " + parts.joined(separator:" · "))
+            let total = count + inboxAttentionCount
+            // A label plus a count capsule fits the 160pt sidebar on one line;
+            // the full breakdown lives in the tooltip and accessibility label.
             Button(action:open) {
-                HStack(alignment:.firstTextBaseline,spacing:6) {
-                    Circle().fill(palette.accent)
-                        .frame(width:6,height:6).offset(y:-1).accessibilityHidden(true)
-                    Text(title).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
-                        .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                }.contentShape(Rectangle())
-            }.buttonStyle(.plain).help("打开处理情况").accessibilityLabel(title + "，打开处理情况")
+                HStack(spacing:8) {
+                    Circle().fill(palette.warning)
+                        .frame(width:6,height:6).accessibilityHidden(true)
+                    Text("需要查看").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
+                    Spacer(minLength:4)
+                    if total > 0 { WorkspaceBadge(text:"\(total)",tone:.warning) }
+                    else if !inbox.folderErrors.isEmpty { WorkspaceBadge(text:"!",tone:.warning) }
+                }.padding(.horizontal,8).padding(.vertical,6)
+                    .contentShape(Rectangle()).workspaceHoverHighlight()
+            }.buttonStyle(.plain).help(title).accessibilityLabel(title + "，打开处理情况")
         }
     }
 }
@@ -1298,7 +1304,7 @@ struct WorkspaceView: View {
                 let themeListings = visibleListings.filter { $0.level == .theme }
                 let clueListings = visibleListings.filter { $0.level == .clue }
                 HStack { WorkspaceHeading(eyebrow:"",title:"主题")
-                    Spacer();Button("新建主题") { newTopicTitle="";editingTopicID=nil;creatingTopic=true }
+                    Spacer();Button("新建主题",systemImage:"plus") { newTopicTitle="";editingTopicID=nil;creatingTopic=true }.buttonStyle(.workspaceSecondary)
                 }
                 WorkspaceSearchField(text:$topicQuery,placeholder:"搜索主题标题或摘要")
                     .accessibilityIdentifier("topics.search")
@@ -3056,7 +3062,9 @@ struct WorkspaceView: View {
         switch readingStates[id] ?? .unread {
         case .unread: return nil
         case .reading: return ("在读",palette.accent)
-        case .read: return ("已读",palette.tertiaryText)
+        // Finished reading is the resting state; only work in progress earns a
+        // mark, so the 在读 dot is not lost among dozens of 已读 dots.
+        case .read: return nil
         }
     }
     private func setMaterialReading(_ id:String,_ state:SourceReadingState) {
@@ -3185,7 +3193,7 @@ struct WorkspaceView: View {
                     } else { go(.task(action.id)) }
                 }
             })
-            .materialCard(highlighted: keyboardHighlighted)
+            .background(keyboardHighlighted ? palette.selection : .clear)
             .contextMenu {
                 actionMenuItems(action,focused:focused,canChangeDay:canChangeDay,canTransition:actionable)
             }
@@ -4142,10 +4150,15 @@ private struct TopicPreviewCard: View {
     var body: some View {
         Button(action:open) {
             VStack(alignment:.leading,spacing:10) {
-                Text(topic.title).vosFont(WorkspaceText.rowTitle)
-                    .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                if topic.organizationStale == true { TopicStaleBanner() }
-                if topic.organization?.bodyPending == true { WorkspaceBadge(text:"正文整理中") }
+                HStack(alignment:.firstTextBaseline,spacing:8) {
+                    Text(topic.title).vosFont(WorkspaceText.rowTitle)
+                        .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
+                    Spacer(minLength:4)
+                    // States ride the title line as small marks; a banner inside a
+                    // list card outweighed the topic it annotated.
+                    if topic.organizationStale == true { WorkspaceBadge(text:"待重新整理",tone:.accent).help("材料已更新，待重新整理") }
+                    if topic.organization?.bodyPending == true { WorkspaceBadge(text:"正文整理中") }
+                }
                 if let preview { previewBody(preview) }
                 Text(metaLine).vosFont(WorkspaceText.meta,monospacedDigit:true)
                     .foregroundStyle(palette.tertiaryText)
@@ -4392,10 +4405,24 @@ struct MaterialRowFailurePreferenceKey: PreferenceKey {
 private struct ActionCardList<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
+    @Environment(\.workspacePalette) private var palette
+
+    // One surface per group, rows separated by hairlines: a run of eighteen
+    // todos reads as one list instead of eighteen boxes.
     var body: some View {
-        LazyVStack(alignment:.leading,spacing:8) {
-            content()
-        }.padding(.top,8)
+        let shape = RoundedRectangle(cornerRadius: WorkspaceMetrics.panelRadius)
+        LazyVStack(alignment:.leading,spacing:0) {
+            Group(subviews: content()) { rows in
+                ForEach(rows) { row in
+                    row
+                    if row.id != rows.last?.id { WorkspaceListDivider().padding(.leading,48) }
+                }
+            }
+        }
+            .background(palette.surface, in: shape)
+            .overlay { shape.strokeBorder(palette.border, lineWidth: 1) }
+            .clipShape(shape)
+            .padding(.top,8)
     }
 }
 

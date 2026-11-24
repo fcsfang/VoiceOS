@@ -685,10 +685,11 @@ struct WorkspaceTopicTile: View {
                     Spacer()
                     WorkspaceRowChevron()
                 }
-                Text(topic.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                if topic.organizationStale == true { TopicStaleBanner() }
-                if topic.organization?.bodyPending == true {
-                    WorkspaceBadge(text:"正文整理中")
+                HStack(alignment:.firstTextBaseline,spacing:8) {
+                    Text(topic.title).vosFont(WorkspaceText.rowTitle).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
+                    Spacer(minLength:4)
+                    if topic.organizationStale == true { WorkspaceBadge(text:"待重新整理",tone:.accent).help("材料已更新，待重新整理") }
+                    if topic.organization?.bodyPending == true { WorkspaceBadge(text:"正文整理中") }
                 }
                 if let summary=topic.organization?.summary, !summary.isEmpty {
                     Text(summary).vosFont(WorkspaceText.body).lineSpacing(4)

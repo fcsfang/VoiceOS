@@ -66,9 +66,9 @@ struct WorkspacePalette {
         }
     }
     /// Secondary toolbar and metadata copy; one step quieter than `text`.
-    var secondaryText: Color { text.opacity(increasesContrast ? 0.85 : 0.72) }
+    var secondaryText: Color { text.opacity(increasesContrast ? 0.90 : 0.80) }
     /// Counts, footers and third-level facts. One step quieter than `secondaryText`.
-    var tertiaryText: Color { text.opacity(increasesContrast ? 0.80 : 0.70) }
+    var tertiaryText: Color { text.opacity(increasesContrast ? 0.80 : 0.68) }
     var accent: Color {
         switch theme {
         case .graphite: adaptive(0x3A4A5C, 0xAEC3D6)

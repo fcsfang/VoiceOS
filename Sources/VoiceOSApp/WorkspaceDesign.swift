@@ -618,7 +618,7 @@ private struct WorkspaceButtonBody: View {
 
     private var background: Color {
         switch emphasis {
-        case .primary: palette.text
+        case .primary: hovered && isEnabled ? palette.accent.opacity(0.88) : palette.accent
         case .secondary: hovered && isEnabled ? palette.hover : palette.surface
         case .quiet, .destructive: hovered && isEnabled ? palette.hover : .clear
         }

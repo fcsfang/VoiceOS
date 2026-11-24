@@ -490,10 +490,14 @@ struct TaskInitiationView: View {
 
     private var history: some View {
         WorkspaceListSection(title: "启动记录", count: visibleRecords.count) {
-            Toggle("查看归档", isOn: $showArchived)
-                .toggleStyle(.switch)
-                .padding(.vertical, 8)
-                .accessibilityIdentifier("initiation.history.archived")
+            HStack {
+                Text("查看归档").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Spacer()
+                Toggle("查看归档", isOn: $showArchived)
+                    .toggleStyle(.switch).controlSize(.small).labelsHidden()
+                    .accessibilityIdentifier("initiation.history.archived")
+            }
+            .padding(.vertical, 8)
             if visibleRecords.isEmpty {
                 WorkspaceEmptyState(
                     title: showArchived ? "还没有归档的记录" : "还没有启动记录",

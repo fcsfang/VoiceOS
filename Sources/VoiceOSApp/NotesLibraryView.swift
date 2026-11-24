@@ -179,17 +179,22 @@ struct NotesLibraryView: View {
 
     private func noteRow(_ stored: NoteLibraryRow) -> some View {
         Button { open(stored) } label: {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(highlight(stored.title)).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
                     .foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
                 if !term.isEmpty, let excerpt = preview(for: stored) {
                     Text(highlight(excerpt)).vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.secondaryText).lineLimit(2)
+                } else if let lead = stored.preview, lead != stored.title {
+                    // One quiet line of the note's opening gives each title a
+                    // body, so a day of notes stops reading as a wall of heads.
+                    Text(lead).vosFont(WorkspaceText.meta)
+                        .foregroundStyle(palette.tertiaryText).lineLimit(1)
                 }
             }
             .multilineTextAlignment(.leading)
-            .padding(.horizontal, 18).padding(.vertical, 14)
+            .padding(.horizontal, 18).padding(.vertical, 12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle()).workspaceHoverHighlight()
         }

@@ -112,7 +112,11 @@ public enum ActionRowLayout {
         var meta = ""
         if facts.group == .completed, !facts.completedAt.isEmpty {
             meta = facts.completedAt
-        } else if let reminder = reminderSummary(linkState: facts.reminderLinkState, due: facts.reminderDue, now: now, calendar: calendar) {
+        } else if facts.reminderLinkState == "linked", let due = facts.reminderDue, due != .none, let day = linkedReminderDay(due, now: now, calendar: calendar) {
+            // A linked reminder is the normal case; the row names only its day
+            // so the exceptions below stand out instead of drowning in repeats.
+            meta = day
+        } else if facts.reminderLinkState != "linked", let reminder = reminderSummary(linkState: facts.reminderLinkState, due: facts.reminderDue, now: now, calendar: calendar) {
             meta = reminder
         } else if let due = facts.due, !due.isEmpty {
             meta = due
@@ -159,6 +163,12 @@ public enum ActionRowLayout {
             return label + " · 已逾期 " + monthDayLabel(day, calendar: calendar)
         }
         return label + " · " + relativeDayLabel(due, now: now, calendar: calendar)
+    }
+
+    private static func linkedReminderDay(_ due: ReminderDueDate, now: Date, calendar: Calendar) -> String? {
+        guard let day = day(for: due, calendar: calendar) else { return nil }
+        if calendar.startOfDay(for: day) < calendar.startOfDay(for: now) { return "已逾期 " + monthDayLabel(day, calendar: calendar) }
+        return relativeDayLabel(due, now: now, calendar: calendar)
     }
 
     /// Today, tomorrow, yesterday and the coming week read as words; anything

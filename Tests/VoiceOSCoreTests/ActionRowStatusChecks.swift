@@ -200,10 +200,12 @@ final class ActionRowStatusChecks: XCTestCase {
 
     func testReminderMetaMatrix() {
         let cases: [(name: String, state: String, due: ReminderDueDate, meta: String)] = [
-            ("linked due today", "linked", .dateOnly(localDate: "2026-11-19", timeZone: nil), "已写入提醒事项 · 今天"),
-            ("linked due tomorrow", "linked", .dateOnly(localDate: "2026-11-20", timeZone: nil), "已写入提醒事项 · 明天"),
+            ("linked due today", "linked", .dateOnly(localDate: "2026-11-19", timeZone: nil), "今天"),
+            ("linked due tomorrow", "linked", .dateOnly(localDate: "2026-11-20", timeZone: nil), "明天"),
             ("conflict overdue", "conflict", .dateOnly(localDate: "2026-11-18", timeZone: nil), "提醒待核对 · 已逾期 11月18日"),
-            ("linked beyond a week", "linked", .dateOnly(localDate: "2026-12-01", timeZone: nil), "已写入提醒事项 · 12月1日"),
+            ("linked beyond a week", "linked", .dateOnly(localDate: "2026-12-01", timeZone: nil), "12月1日"),
+            ("linked overdue", "linked", .dateOnly(localDate: "2026-11-17", timeZone: nil), "已逾期 11月17日"),
+            ("missing undated", "missing", .none, "提醒缺失"),
         ]
         for c in cases {
             let row = reminderRow(state: c.state, due: c.due)
