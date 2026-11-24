@@ -65,16 +65,36 @@ struct NotesLibraryView: View {
             } else {
                 let groups = Dictionary(grouping: filtered, by: \.day)
                 ForEach(groups.keys.sorted { ($0 ?? .distantPast) > ($1 ?? .distantPast) }, id: \.self) { day in
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(day?.formatted(date: .long, time: .omitted) ?? "日期未知")
-                            .vosFont(WorkspaceText.meta.size, weight: .semibold)
-                            .foregroundStyle(palette.secondaryText)
-                            .accessibilityAddTraits(.isHeader)
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280), spacing: 14)], alignment: .leading, spacing: 14) {
-                            ForEach(groups[day] ?? []) { stored in
-                                noteTile(stored)
+                    let entries = groups[day] ?? []
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if let day {
+                                Text(day.formatted(.dateTime.day(.twoDigits)))
+                                    .vosFont(26, weight: .medium, monospacedDigit: true)
+                                Text(day.formatted(.dateTime.year().month(.abbreviated)))
+                                    .vosFont(WorkspaceText.caption)
+                                    .foregroundStyle(palette.secondaryText)
+                            } else {
+                                Text("日期未知").vosFont(WorkspaceText.meta)
                             }
                         }
+                        .frame(width: 78, alignment: .leading)
+                        .padding(.top, 12)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(day?.formatted(date: .long, time: .omitted) ?? "日期未知")
+                        .accessibilityAddTraits(.isHeader)
+
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(entries) { stored in
+                                if stored.id != entries.first?.id {
+                                    WorkspaceListDivider().padding(.horizontal, 18)
+                                }
+                                noteRow(stored)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 10))
+                        .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(palette.border) }
                     }
                 }
             }
@@ -157,25 +177,24 @@ struct NotesLibraryView: View {
 
     private var term: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    private func noteTile(_ stored: NoteLibraryRow) -> some View {
+    private func noteRow(_ stored: NoteLibraryRow) -> some View {
         Button { open(stored) } label: {
             VStack(alignment: .leading, spacing: 10) {
-                Text(highlight(stored.title)).vosFont(WorkspaceText.sectionTitle)
+                Text(highlight(stored.title)).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
                     .foregroundStyle(palette.text)
                     .fixedSize(horizontal: false, vertical: true)
-                if let excerpt = preview(for: stored) {
+                if !term.isEmpty, let excerpt = preview(for: stored) {
                     Text(highlight(excerpt)).vosFont(WorkspaceText.meta)
                         .foregroundStyle(palette.secondaryText).lineLimit(2)
                 }
             }
             .multilineTextAlignment(.leading)
-            .padding(18)
-            .frame(maxWidth: .infinity, minHeight: 108, maxHeight: .infinity, alignment: .topLeading)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 8))
-            .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(palette.border) }
+            .padding(.horizontal, 18).padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle()).workspaceHoverHighlight()
         }
         .buttonStyle(.plain)
+        .help(stored.preview ?? stored.title)
         .accessibilityIdentifier("notes.row")
     }
 
