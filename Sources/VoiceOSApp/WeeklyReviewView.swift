@@ -559,17 +559,14 @@ struct WeeklyReviewView: View {
     }
 
     private func applyNextWeekFocus() {
-        guard !selectedFocusIDs.isEmpty, !focusSaving else { return }
+        guard !selectedFocusIDs.isEmpty, !focusSaving, let store = model.store else { return }
         let selected = selectedFocusIDs
         focusSaving = true
         Task {
-            let current = await model.focusedActionIDs()
-            focusedIDs = current
             var failure = ""
-            for id in selected where !current.contains(id) {
-                if await model.toggleActionFocus(actionID: id) == nil, failure.isEmpty {
-                    failure = model.status
-                }
+            for id in selected {
+                do { try await store.addActionFocus(actionID: id) }
+                catch { if failure.isEmpty { failure = error.localizedDescription } }
             }
             focusedIDs = await model.focusedActionIDs()
             selectedFocusIDs.removeAll()

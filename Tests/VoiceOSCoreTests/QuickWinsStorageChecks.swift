@@ -58,6 +58,7 @@ final class QuickWinsStorageChecks: XCTestCase {
         XCTAssertTrue(focusedSecond)
         let focusedThird = try await store.toggleActionFocus(actionID: third)
         XCTAssertTrue(focusedThird)
+        try await store.addActionFocus(actionID: second)
         let focused = try await store.focusedActionIDs()
         XCTAssertEqual(focused, Set([first, second, third]))
         do {
