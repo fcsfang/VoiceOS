@@ -172,7 +172,7 @@ public extension SourceRecord {
     }
     var contentSummary: String? {
         guard !needsTranscriptionReview,presentation?.transcriptVersionID == transcriptVersionID, let summary = presentation?.automatic?.summary else { return nil }
-        return (transcriptionReview?.unresolved_issues?.isEmpty == false ? "部分转写待核对。" : "") + summary
+        return summary
     }
     var expressedDate: Date? {
         MaterialDisplayTitle.expressedDate(name: name, kind: kind, createdAt: createdAt, timeZone: timeZone)
@@ -205,8 +205,7 @@ extension VoiceOSStore {
         current.correction_count = current.correction_count ?? current.corrections?.count
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         if let previous = saved.transcriptionReview, try encoder.encode(previous) == encoder.encode(current) { return }
-        let affected = current.changed || current.unresolved_issues?.isEmpty == false ||
-            saved.transcriptionReview?.corrections?.isEmpty == false || saved.transcriptionReview?.unresolved_issues?.isEmpty == false
+        let affected = saved.transcriptVersionID != version
         saved.transcriptionReview = current
         if affected { saved.automatic = nil; saved.transcriptVersionID = nil }
         try savePresentation(saved, sourceID: sourceID)

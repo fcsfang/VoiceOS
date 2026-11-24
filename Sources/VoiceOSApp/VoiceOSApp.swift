@@ -3381,6 +3381,7 @@ final class ControlCenter: ObservableObject {
                     pendingIntent = false
                 }
                 if pendingTranscription || pendingIntent { scheduleProcessing() }
+                else { await resumeSavedRecordingExpressions() }
             }
         }
     }

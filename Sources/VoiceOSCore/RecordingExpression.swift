@@ -108,8 +108,16 @@ extension VoiceOSStore {
     /// for text processing; never scan or grant access to untouched old files.
     public func enrollPreviouslyImportedAutomaticRecordings() throws {
         let imported=Set(try db.query("SELECT id FROM sources WHERE command_id LIKE 'automatic-recording:%'").compactMap { $0["id"] })
-        let attempts=try modelAttemptsBySource()
-        for source in try sources() where imported.contains(source.id) && ["audio","video"].contains(source.kind) && source.presentation?.automaticInput == nil && source.origin == "user" && source.speaker == "user" && !source.localOnly && source.state == "saved" && source.jobState == "completed" && !source.needsTranscriptionReview && !(source.transcript ?? "").isEmpty && attempts[source.id]?.contains(where: { $0.provider == "organized_import" && $0.state == "completed" && $0.contextState == "current" }) == true {
+        let requested = Set(try recordingProcessingRequests().map(\.sourceID))
+        let handled = Set(try db.query("""
+            SELECT DISTINCT i.source_id FROM context_inputs i JOIN contexts c ON c.id=i.context_id
+            JOIN model_attempts m ON m.context_id=c.id JOIN transcripts t ON t.source_id=i.source_id
+            WHERE c.state='current' AND i.transcript_version_id=t.current_version_id
+              AND (m.execution_kind IN ('model_request','segmented_derivation') OR m.provider='organized_import')
+            """).compactMap { $0["source_id"] })
+        for source in try sources() where ["audio","video"].contains(source.kind) && source.presentation?.automaticInput == nil && source.presentation?.expression == nil && source.origin == "user" && source.speaker == "user" && !source.localOnly && !source.isTrashed && !source.isArchived && source.state == "saved" && source.jobState == "completed" && !source.needsTranscriptionReview && !(source.transcript ?? "").isEmpty {
+            let missing = source.transcriptionReview?.isCompleteFullTextReview == true && !handled.contains(source.id) && !requested.contains(source.id)
+            guard imported.contains(source.id) || missing else { continue }
             try registerAutomaticRecording(sourceID:source.id,inbox:"previous-automatic-intake",recordedAt:source.expressedDate?.ISO8601Format(),discoveredAt:source.createdAt)
         }
     }

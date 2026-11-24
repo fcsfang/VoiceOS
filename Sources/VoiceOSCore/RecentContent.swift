@@ -429,7 +429,6 @@ public struct RecentContentHomeSnapshot: Equatable, Sendable {
             if let source, source.localOnly { status = .localOnly }
             else if let source, ["queued", "running", "reserved"].contains(source.jobState ?? "") { status = .organizing }
             else if let source, source.needsTranscriptionReview { status = .needsReview }
-            else if let source, source.unresolvedTranscriptionIssueCount > 0 { status = .issues(source.unresolvedTranscriptionIssueCount) }
             else { status = nil }
             rows[item.id] = RecentHomeRow(icon: source?.kind.contains("text") == true ? "doc.text" : "waveform",
                                           count: 0, status: status)

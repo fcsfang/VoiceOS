@@ -199,9 +199,9 @@ private struct UnresolvedIssuesBlock: View {
             VStack(alignment:.leading,spacing:12) {
                 Button { isExpanded.toggle() } label: {
                     HStack(spacing:9) {
-                        Label("疑点 \(issues.count) · 核对未完成",systemImage:"exclamationmark.triangle")
+                        Label("转写备注（\(issues.count)）",systemImage:"waveform")
                             .vosFont(WorkspaceText.meta.size, weight:.semibold)
-                            .foregroundStyle(palette.warning)
+                            .foregroundStyle(palette.secondaryText)
                             .accessibilityAddTraits(.isHeader)
                         Spacer(minLength:0)
                         Image(systemName:isExpanded ? "chevron.up" : "chevron.down")
@@ -716,8 +716,6 @@ struct WorkspaceSourceView: View {
                         } else {
                             Label(sourceStatus,systemImage:sourceStatusIcon).vosFont(WorkspaceText.caption).foregroundStyle(transcriptionFailed ? palette.warning : palette.secondaryText)
                         }
-                        let issueCount=source.unresolvedTranscriptionIssues.count
-                        if issueCount > 0 { WorkspaceBadge(text:"转写疑点 \(issueCount)",tone:.warning) }
                         if let attachmentURL {
                             Button(attachmentMime == "application/pdf" ? "查看原件" : "查看原图",systemImage:attachmentMime == "application/pdf" ? "doc.richtext" : "photo") { if !NSWorkspace.shared.open(attachmentURL) { error="无法打开原件" } }
                                 .buttonStyle(.workspaceQuietCompact)

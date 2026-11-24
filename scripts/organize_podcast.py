@@ -81,14 +81,18 @@ audio_uncertain仅当该意图确实依赖仍未辨认的音频含义时为true�
     repaired = set()
     for repair in reviewed["citation_repairs"]:
         key = repair["candidate_id"]
-        if key not in by_id or key in repaired or repair["recording"] != by_id[key]["recording"]:
-            raise ValueError("API citation repair changed the recording or candidate identity")
+        # The candidate pins the recording. Accept a suggested quote only
+        # when it can be located in that recording, even if the model mislabels it.
+        if key not in by_id or key in repaired:
+            continue
         item = by_id[key]; transcript = transcripts[item["recording"]]
         found = locate(repair["quote"], transcript["text"], 0)
-        if not found: raise ValueError("API citation repair is not continuous original text")
+        if not found or not repair["quote"].strip():
+            continue
         begin, end = found
         spans = [s for s in transcript["spans"] if s["textEnd"] > begin and s["textStart"] < end]
-        if not spans: raise ValueError("API citation repair has no audio location")
+        if not spans:
+            continue
         item.update(quote=transcript["text"][begin:end], text_start=begin, text_end=end,
                     **citation_location(spans), citation_status="located")
         repaired.add(key)
@@ -432,13 +436,12 @@ target_id必须逐字复制已有任务的id。uncertain=true或任何引用未�
     for decision in result["decisions"]:
         task = by_id[decision["item_id"]]; relation = decision["relation"]
         if relation == "new":
-            if decision["target_id"]: raise ValueError("A new item cannot suppress an existing task")
             continue
         target = targets.get(decision["target_id"])
         if target is None or task["uncertain"] or any(r["citation_status"] != "located" or not r["quote"] for r in task["references"]):
-            raise ValueError("Task continuation is missing a clear target or original quote")
+            continue
         if relation == "repeat" and (target["state"] != "open" or task["intent_type"] != "task" or task["followup_state"] != "pending"):
-            raise ValueError("Only the same pending task can be merged as a repeat")
+            continue
         task["continuation"] = {"relation": relation, "target": target, "notes": decision["notes"]}
     saved = json.loads(receipt.read_text())
     if not saved.get("response_id"): raise ValueError("Task continuation API receipt is missing")

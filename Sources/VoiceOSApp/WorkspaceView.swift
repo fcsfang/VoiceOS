@@ -284,14 +284,13 @@ private struct WorkspaceAttentionDot: View {
         let inboxAttentionCount = inbox.pendingItems.filter { $0.state == .needsAttention }.count
         let inboxNeedsAttention = inboxAttentionCount > 0 || !inbox.folderErrors.isEmpty
         if count > 0 || inboxNeedsAttention {
-            let parts = [attention.transcriptIssueCount > 0 ? "转写疑点 \(attention.transcriptIssueCount)" : nil,
-                         attention.otherCount > 0 ? "其他 \(attention.otherCount)" : nil,
+            let parts = [count > 0 ? "处理事项 \(count)" : nil,
                          inboxAttentionCount > 0 ? "录音 \(inboxAttentionCount)" : nil,
                          !inbox.folderErrors.isEmpty ? "入口读取失败" : nil].compactMap { $0 }
             let title = "需要查看" + (parts.isEmpty ? "" : " · " + parts.joined(separator:" · "))
             Button(action:open) {
                 HStack(alignment:.firstTextBaseline,spacing:6) {
-                    Circle().fill(attention.transcriptIssueCount > 0 ? palette.warning : palette.accent)
+                    Circle().fill(palette.accent)
                         .frame(width:6,height:6).offset(y:-1).accessibilityHidden(true)
                     Text(title).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
                         .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
@@ -3011,8 +3010,7 @@ struct WorkspaceView: View {
         let combined=(expression?.sourceIDs.count ?? 0) > 1
         let first=combined ? expression!.sourceIDs.first.flatMap { catalog[$0] } ?? source : source
         let origin=source.origin == "ai" ? "AI 交付" : source.origin == "user" ? "我的表达" : "外部资料"
-        let issues=source.unresolvedTranscriptionIssueCount
-        let reading:(text:String,color:Color)? = issues > 0 ? ("疑点 \(issues)",palette.warning) : materialReadingStatus(source.id)
+        let reading = materialReadingStatus(source.id)
         let groupNote=reason ?? (model.sourcePageIndex.expressionIssue(for: source.id) != nil ? "分组待重新判断" : nil)
         let localOnlyNote=source.localOnly ? " · 仅本地" : ""
         let metadata=origin + localOnlyNote + (groupNote.map { " · " + $0 } ?? "")
@@ -3022,7 +3020,7 @@ struct WorkspaceView: View {
         // 成品优先：有笔记的行用笔记标题（与首页、笔记页同源）；没有笔记时才
         // 退回原题或原文首句辨认——材料列表是「去查」的视角，行需要可辨识。
         let noteTitle=materialNoteTitle(for: source, expression: expression)
-        let trailingText=openCount > 0 ? "\(openCount) 条待办" + (issues > 0 ? " · 疑点 \(issues)" : "") : reading?.text ?? ""
+        let trailingText=openCount > 0 ? "\(openCount) 条待办" : reading?.text ?? ""
         let trailingDisplay=trailingText
         let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .badge(.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
         return WorkspaceRow(title:noteTitle ?? materialRowTitle(source,expression:expression,leading:first,catalog:catalog),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }

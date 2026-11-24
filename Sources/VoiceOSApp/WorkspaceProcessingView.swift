@@ -67,7 +67,6 @@ enum WorkspaceProcessingErrorText {
 /// One processing-page body evaluation. The sidebar dot and the processing
 /// page read the same snapshot instead of each accessor rescanning the library.
 struct WorkspaceAttentionSnapshot {
-    let transcriptReviewPoints: [WorkspaceTranscriptReviewPoint]
     let unfinishedIntents: [ExpressionProcessingIntentRecord]
     let failedFollowups: [RecordingFollowupReceipt]
     let failedKnowledgeReviews: [KnowledgeReviewRecord]
@@ -77,8 +76,6 @@ struct WorkspaceAttentionSnapshot {
     let monitorNeedsAttention: Bool
     let needsAttention: Bool
     let count: Int
-    let transcriptIssueCount: Int
-    let otherCount: Int
     let processingOutstanding: Bool
 }
 
@@ -176,7 +173,6 @@ extension ControlCenter {
             .sorted { ($0.createdAt, $0.id) > ($1.createdAt, $1.id) }
     }
     var workspaceAttentionSnapshot: WorkspaceAttentionSnapshot {
-        let points = sourcePageIndex.transcriptReviewPoints
         let intents = workspaceUnfinishedIntents
         let followups = workspaceFailedFollowups
         let knowledge = workspaceFailedKnowledgeReviews
@@ -194,26 +190,20 @@ extension ControlCenter {
             || !assistantAssessmentIssues.isEmpty
         let topicAttention = topicOrganizationNeedsAttention
         let monitorAttention = monitorNeedsAttention
-        let transcriptIssueCount = points.reduce(0) { $0 + $1.count }
-        let count = transcriptIssueCount
-            + followups.count + knowledge.count
+        let count = followups.count + knowledge.count
             + (topicAttention ? 1 : 0) + (needsAttention ? 1 : 0) + (monitorAttention ? 1 : 0)
-        let outstanding = needsAttention || topicAttention || !points.isEmpty
+        let outstanding = needsAttention || topicAttention
             || !followups.isEmpty || !knowledge.isEmpty || monitorAttention
             || recordingRequests.contains { $0.state == "waiting" }
             || intents.contains { $0.state == .queued || $0.state == .running }
-        return .init(transcriptReviewPoints: points, unfinishedIntents: intents,
+        return .init(unfinishedIntents: intents,
                      failedFollowups: followups, failedKnowledgeReviews: knowledge,
                      failedAssistantExecutions: failedAssistant,
                      segmentedBatchFailures: segmentedFailures,
                      topicOrganizationNeedsAttention: topicAttention,
                      monitorNeedsAttention: monitorAttention,
                      needsAttention: needsAttention, count: count,
-                     transcriptIssueCount: transcriptIssueCount, otherCount: count - transcriptIssueCount,
                      processingOutstanding: outstanding)
-    }
-    var workspaceTranscriptReviewPoints: [WorkspaceTranscriptReviewPoint] {
-        sourcePageIndex.transcriptReviewPoints
     }
     var workspaceAttentionCount: Int { workspaceAttentionSnapshot.count }
     var workspaceNeedsAttention: Bool { workspaceAttentionSnapshot.needsAttention }
@@ -280,7 +270,6 @@ struct WorkspaceProcessingView: View {
                 let segmentedFailures=attention.segmentedBatchFailures
                 let pausedTasks=model.workspacePausedTasks
                 let reviewSources=model.records.filter { model.transcriptReviewIssue(for:$0) != nil }
-                let reviewPoints=attention.transcriptReviewPoints
                 let failedFollowups=attention.failedFollowups
                 let failedKnowledgeReviews=attention.failedKnowledgeReviews
                 let reminderAnomalies=model.reminderSyncAnomalies
@@ -291,7 +280,6 @@ struct WorkspaceProcessingView: View {
                 let showWaiting = !waiting.isEmpty
                 let showSegmentedFailures = !segmentedFailures.isEmpty
                 let showReviewSources = !reviewSources.isEmpty
-                let showReviewPoints = !reviewPoints.isEmpty
                 let showPausedBatch=model.pausedActionBatch != nil
                 let showPausedTasks = !pausedTasks.isEmpty
                 let showFailedFollowups = !failedFollowups.isEmpty
@@ -327,7 +315,7 @@ struct WorkspaceProcessingView: View {
                 if !quarantinedSources.isEmpty {
                     Text("需要核对的原件见上方『需要重新核对的原件』").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }
-                if showIntents || showFailedSources || showEmptySources || showWaiting || showSegmentedFailures || showReviewSources || showReviewPoints || showPausedBatch {
+                if showIntents || showFailedSources || showEmptySources || showWaiting || showSegmentedFailures || showReviewSources || showPausedBatch {
                     WorkspaceSettingsCard(title:"转写与理解", subtitle:"失败、待核对与可重试的处理项") {
                         if showIntents {
                             VStack(alignment:.leading,spacing:12) {
@@ -462,20 +450,8 @@ struct WorkspaceProcessingView: View {
                                 }
                             }.padding(.horizontal,20).padding(.top,14)
                         }
-                        if showReviewPoints {
-                            if showIntents || showFailedSources || showEmptySources || showWaiting || showSegmentedFailures || showReviewSources { WorkspaceListDivider().padding(.horizontal,20) }
-                            let issueTotal=reviewPoints.reduce(0) { $0 + $1.count }
-                            VStack(alignment:.leading,spacing:12) {
-                                WorkspaceSectionHeading(title:"转写疑点待核对") { WorkspaceBadge(text:"\(issueTotal)", tone:.warning) }
-                                Text("核对完成，仍有未解决疑点。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineSpacing(3).help("打开材料可以逐条回听原音与查看原文")
-                                WorkspaceListDivider()
-                                ForEach(reviewPoints) { point in
-                                    WorkspaceRow(title:point.source.displayTitle,subtitle:"仍有 \(point.count) 条疑点未解决",trailing:"查看材料") { openSource(point.source.id) }.processingRowInset()
-                                }
-                            }.padding(.horizontal,20).padding(.top,14)
-                        }
                         if showPausedBatch {
-                            if showIntents || showFailedSources || showEmptySources || showWaiting || showSegmentedFailures || showReviewSources || showReviewPoints { WorkspaceListDivider().padding(.horizontal,20) }
+                            if showIntents || showFailedSources || showEmptySources || showWaiting || showSegmentedFailures || showReviewSources { WorkspaceListDivider().padding(.horizontal,20) }
                             VStack(alignment:.leading,spacing:12) {
                                 WorkspaceSectionHeading("批量重新识别")
                                 WorkspaceListDivider()
