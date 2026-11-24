@@ -1125,11 +1125,6 @@ struct WorkspaceView: View {
     private var materials: some View {
         let catalog = recordCatalog
         let page = materialPage
-        // Counts stay on the tabs as a quiet number; the page title carries no floating total.
-        let tabs = SavedViewPage.materials.filters.map { filter in
-            WorkspaceFilterTabItem(filter: filter, title: filter, count: String(page.counts[filter] ?? 0),
-                                   help: filter == "回收站" ? "Apple 提醒事项未被删除或取消。" : "")
-        }
         let rows = page.rows
         return LazyVStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
             WorkspacePageHeading(title:"材料") {
@@ -1147,7 +1142,23 @@ struct WorkspaceView: View {
                     }
                 }
             }
-            WorkspaceFilterTabs(items: tabs, selection: materialFilter, onSelect: { materialFilter = $0 })
+            HStack {
+                Picker("阅读状态", selection: $materialFilter) {
+                    ForEach(["日常材料", "未读", "在读"], id: \.self) { filter in
+                        Text("\(filter)  \(page.counts[filter] ?? 0)").tag(filter)
+                    }
+                    if materialFilter == "已归档" || materialFilter == "回收站" {
+                        Text("\(materialFilter)  \(rows.count)").tag(materialFilter)
+                    }
+                }.pickerStyle(.segmented).labelsHidden().fixedSize()
+                Spacer()
+                Menu {
+                    Button("已归档（\(page.counts["已归档"] ?? 0)）", systemImage:"archivebox") { materialFilter="已归档" }
+                    Button("回收站（\(page.counts["回收站"] ?? 0)）", systemImage:"trash") { materialFilter="回收站" }
+                } label: {
+                    Label("归档与回收站", systemImage:"archivebox")
+                }.fixedSize()
+            }
             if !rows.isEmpty, ["已归档","回收站"].contains(materialFilter) {
                 Text(materialFilter == "已归档" ? "归档材料仍可作为历史依据；打开材料可取消归档。" : "原件与历史保留；恢复后仅本机保存。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }
@@ -2979,11 +2990,17 @@ struct WorkspaceView: View {
         let openCount=model.sourcePageIndex.openActionCount(for:Set(expression?.sourceIDs ?? [source.id]))
         // 成品优先：有笔记的行用笔记标题（与首页、笔记页同源）；没有笔记时才
         // 退回原题或原文首句辨认——材料列表是「去查」的视角，行需要可辨识。
-        let noteTitle=materialNoteTitle(for: source, expression: expression)
+        let rawTitle = materialNoteTitle(for: source, expression: expression) ?? materialRowTitle(source,expression:expression,leading:first,catalog:catalog)
+        let title: String
+        if rawTitle.contains("**"), let inline = try? AttributedString(markdown:rawTitle, options:.init(interpretedSyntax:.inlineOnlyPreservingWhitespace)) {
+            title = String(inline.characters)
+        } else {
+            title = rawTitle
+        }
         let trailingText=openCount > 0 ? "\(openCount) 条待办" : reading?.text ?? ""
         let trailingDisplay=trailingText
         let trailingStyle:WorkspaceRow.TrailingStyle = openCount > 0 ? .badge(.accent) : reading.map { WorkspaceRow.TrailingStyle.dot($0.color) } ?? .secondary
-        return WorkspaceRow(title:noteTitle ?? materialRowTitle(source,expression:expression,leading:first,catalog:catalog),subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }
+        return WorkspaceRow(title:title,subtitle:subtitle,icon:source.kind.contains("text") ? "doc.text" : "waveform",trailing:trailingDisplay,trailingStyle:trailingStyle,statusAccessibility:trailingText,trailingGutter:trailingGutter,titleLineLimit:Int.max) { go(.source(source.id)) }
             .help(metadata)
             .contextMenu {
                 Button("标为未读") { setMaterialReading(source.id,.unread) }

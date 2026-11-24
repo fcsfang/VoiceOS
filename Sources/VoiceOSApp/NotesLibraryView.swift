@@ -56,7 +56,10 @@ struct NotesLibraryView: View {
             } else {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(filtered.enumerated()), id: \.element.id) { index, stored in
-                        if index > 0 { WorkspaceListDivider() }
+                        if index == 0 || stored.day != filtered[index - 1].day {
+                            WorkspaceListGroupHeader(title: stored.day?.formatted(date: .long, time: .omitted) ?? "日期未知")
+                                .padding(.top, index == 0 ? 0 : 14)
+                        }
                         Button { open(stored) } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 13) {
                                 VStack(alignment: .leading, spacing: 5) {
@@ -75,12 +78,9 @@ struct NotesLibraryView: View {
                                     }
                                 }
                                 Spacer(minLength: 8)
-                                Text(ConversationReflectionFocus.date(stored.createdAt)?.formatted(date: .abbreviated, time: .omitted) ?? String(stored.createdAt.prefix(10)))
-                                    .vosFont(WorkspaceText.caption, monospacedDigit: true)
-                                    .foregroundStyle(palette.tertiaryText)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 10)
+                            .padding(.vertical, 13)
                             .padding(.horizontal, 6)
                             .contentShape(Rectangle()).workspaceHoverHighlight()
                         }
@@ -198,7 +198,7 @@ private struct NoteLibraryRow: Identifiable, Sendable {
     let expressionKey: String
     let title: String
     let preview: String?
-    let createdAt: String
+    let day: Date?
     let searchableText: String
 }
 
@@ -209,7 +209,8 @@ private extension VoiceOSStore {
             return NoteLibraryRow(id: stored.id, expressionKey: stored.expressionKey,
                            title: MaterialNoteHomeText.title(stored.note) ?? "未命名笔记",
                            preview: MaterialNoteHomeText.preview(stored.note),
-                           createdAt: stored.createdAt, searchableText: stored.note.searchableText)
+                           day: ConversationReflectionFocus.date(stored.createdAt).map { Calendar.current.startOfDay(for: $0) },
+                           searchableText: stored.note.searchableText)
         }
     }
 }
