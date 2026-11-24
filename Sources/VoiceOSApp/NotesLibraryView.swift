@@ -43,86 +43,11 @@ struct NotesLibraryView: View {
         let pendingMaterials = self.pendingMaterials
         let filtered = self.filtered
         return LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
-            HStack(alignment: .firstTextBaseline) {
-                WorkspaceHeading(eyebrow: "", title: "笔记")
-                Spacer()
-                Text("\(notes.count) 篇 · 按整理时间").vosFont(WorkspaceText.meta)
-                    .foregroundStyle(palette.secondaryText)
+            WorkspacePageHeading(title: "笔记", subtitle: notes.isEmpty ? "" : "共 \(notes.count) 篇") {
+                WorkspaceSearchField(text: $query, placeholder: "搜索笔记")
+                    .frame(maxWidth: 240)
+                    .accessibilityIdentifier("notes.search")
             }
-            if !pendingMaterials.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .firstTextBaseline) {
-                        WorkspaceSectionHeading("待处理", count: "\(pendingMaterials.count)")
-                        Spacer(minLength: 8)
-                        Button("全部材料", action: openMaterials)
-                            .buttonStyle(.workspaceQuietCompact)
-                    }
-                    WorkspaceListDivider()
-                    if selectedPending.isEmpty {
-                        Text("点左侧圆圈挑选，或直接点开一份整理")
-                            .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
-                    } else {
-                        HStack(spacing: 10) {
-                            Text("已选 \(selectedPending.count) 份").vosFont(WorkspaceText.meta)
-                            Button(organizingSelected ? "整理中…" : "整理成笔记（\(selectedPending.count) 份）") {
-                                let records = pendingMaterials.filter { selectedPending.contains($0.id) }
-                                organizingSelected = true
-                                Task {
-                                    await model.generateNotesSequentially(records)
-                                    organizingSelected = false
-                                    selectedPending = []
-                                }
-                            }
-                            .buttonStyle(.workspaceSecondaryCompact)
-                            .disabled(organizingSelected)
-                            Button("取消选择") { selectedPending = [] }.buttonStyle(.workspaceQuietCompact)
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(pendingMaterials.prefix(12).enumerated()), id: \.element.id) { index, record in
-                            if index > 0 { WorkspaceListDivider() }
-                            HStack(spacing: 8) {
-                                Button {
-                                    if selectedPending.contains(record.id) { selectedPending.remove(record.id) }
-                                    else { selectedPending.insert(record.id) }
-                                } label: {
-                                    Image(systemName: selectedPending.contains(record.id) ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(selectedPending.contains(record.id) ? palette.accent : palette.tertiaryText)
-                                }
-                                .buttonStyle(.plain)
-                                .help(selectedPending.contains(record.id) ? "取消选择" : "选择这份材料")
-                                .accessibilityLabel(selectedPending.contains(record.id) ? "取消选择" : "选择这份材料")
-                            Button { openNote(record.id) } label: {
-                                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                                    Text(record.displayTitle)
-                                        .vosFont(WorkspaceText.meta)
-                                        .foregroundStyle(palette.text)
-                                        .lineLimit(2)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    Spacer(minLength: 8)
-                                    Text((readingStates[record.id] ?? .unread) == .reading ? "在读" : "未读")
-                                        .vosFont(WorkspaceText.caption)
-                                        .foregroundStyle(palette.tertiaryText)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                                .padding(.vertical, 8)
-                            }
-                            .buttonStyle(.plain)
-                            .help("打开并整理成笔记")
-                            .accessibilityIdentifier("notes.pending.row")
-                            }
-                        }
-                    }
-                    if pendingMaterials.count > 12 {
-                        Button("还有 \(pendingMaterials.count - 12) 条，去材料页", action: openMaterials)
-                            .buttonStyle(.workspaceQuietCompact)
-                    }
-                }
-            }
-            WorkspaceSearchField(text: $query, placeholder: "搜索笔记标题或正文")
-                .accessibilityIdentifier("notes.search")
             if notes.isEmpty {
                 Text("还没有整理出笔记。打开一份材料让它整理成笔记后，会出现在这里。")
                     .foregroundStyle(palette.secondaryText)
@@ -150,17 +75,89 @@ struct NotesLibraryView: View {
                                     }
                                 }
                                 Spacer(minLength: 8)
-                                Text(String(stored.createdAt.prefix(10)))
+                                Text(ConversationReflectionFocus.date(stored.createdAt)?.formatted(date: .abbreviated, time: .omitted) ?? String(stored.createdAt.prefix(10)))
                                     .vosFont(WorkspaceText.caption, monospacedDigit: true)
                                     .foregroundStyle(palette.tertiaryText)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
                             .padding(.vertical, 10)
+                            .padding(.horizontal, 6)
+                            .contentShape(Rectangle()).workspaceHoverHighlight()
                         }
                         .buttonStyle(.plain)
                         .help("打开这篇笔记，回到上次读到的位置")
                         .accessibilityIdentifier("notes.row")
+                    }
+                }
+            }
+            if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !pendingMaterials.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .firstTextBaseline) {
+                        WorkspaceSectionHeading("待阅读的材料", count: "\(pendingMaterials.count)")
+                        Spacer(minLength: 8)
+                        Button("全部材料", action: openMaterials)
+                            .buttonStyle(.workspaceQuietCompact)
+                    }
+                    WorkspaceListDivider()
+                    if !selectedPending.isEmpty {
+                        HStack(spacing: 10) {
+                            Text("已选 \(selectedPending.count) 份").vosFont(WorkspaceText.meta)
+                            Button(organizingSelected ? "整理中…" : "整理成笔记（\(selectedPending.count) 份）") {
+                                let records = pendingMaterials.filter { selectedPending.contains($0.id) }
+                                organizingSelected = true
+                                Task {
+                                    await model.generateNotesSequentially(records)
+                                    organizingSelected = false
+                                    selectedPending = []
+                                }
+                            }
+                            .buttonStyle(.workspaceSecondaryCompact)
+                            .disabled(organizingSelected)
+                            Button("取消选择") { selectedPending = [] }.buttonStyle(.workspaceQuietCompact)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(pendingMaterials.prefix(12).enumerated()), id: \.element.id) { index, record in
+                            if index > 0 { WorkspaceListDivider() }
+                            HStack(spacing: 8) {
+                                Button {
+                                    if selectedPending.contains(record.id) { selectedPending.remove(record.id) }
+                                    else { selectedPending.insert(record.id) }
+                                } label: {
+                                    Image(systemName: selectedPending.contains(record.id) ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(selectedPending.contains(record.id) ? palette.accent : palette.tertiaryText)
+                                        .padding(4).contentShape(Rectangle()).workspaceHoverHighlight()
+                                }
+                                .buttonStyle(.plain)
+                                .help(selectedPending.contains(record.id) ? "取消选择" : "选择这份材料")
+                                .accessibilityLabel(selectedPending.contains(record.id) ? "取消选择" : "选择这份材料")
+                            Button { openNote(record.id) } label: {
+                                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                    Text(record.displayTitle)
+                                        .vosFont(WorkspaceText.meta)
+                                        .foregroundStyle(palette.text)
+                                        .lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Spacer(minLength: 8)
+                                    Text((readingStates[record.id] ?? .unread) == .reading ? "在读" : "未读")
+                                        .vosFont(WorkspaceText.caption)
+                                        .foregroundStyle(palette.tertiaryText)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 6)
+                                .contentShape(Rectangle()).workspaceHoverHighlight()
+                            }
+                            .buttonStyle(.plain)
+                            .help("打开并整理成笔记")
+                            .accessibilityIdentifier("notes.pending.row")
+                            }
+                        }
+                    }
+                    if pendingMaterials.count > 12 {
+                        Button("还有 \(pendingMaterials.count - 12) 条，去材料页", action: openMaterials)
+                            .buttonStyle(.workspaceQuietCompact)
                     }
                 }
             }

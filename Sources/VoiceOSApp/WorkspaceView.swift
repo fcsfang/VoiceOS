@@ -827,7 +827,11 @@ struct WorkspaceView: View {
             List(selection: sidebarSelection) {
                 ForEach(sidebarItems, id: \.id) { item in
                     Button { openSidebarPage(item.page) } label: {
-                        Label(item.title, systemImage:item.icon).frame(maxWidth:.infinity, alignment:.leading).contentShape(Rectangle())
+                        Label(item.title, systemImage:item.icon)
+                            .frame(maxWidth:.infinity, alignment:.leading)
+                            .padding(.horizontal, 4).padding(.vertical, 3)
+                            .contentShape(Rectangle())
+                            .workspaceHoverHighlight()
                     }
                     .buttonStyle(.plain).tag(item.title).badge(item.count)
                     .accessibilityIdentifier("nav." + item.id)
@@ -836,6 +840,10 @@ struct WorkspaceView: View {
                     Section("视图") {
                         ForEach(savedViews) { view in
                             Label(view.name, systemImage:view.page == .materials ? "books.vertical" : "checkmark.circle")
+                                .frame(maxWidth:.infinity, alignment:.leading)
+                                .padding(.horizontal, 4).padding(.vertical, 3)
+                                .contentShape(Rectangle())
+                                .workspaceHoverHighlight()
                                 .tag(view.id)
                                 .help(view.filter)
                                 .accessibilityIdentifier("workspace.savedView." + view.name)
@@ -855,8 +863,12 @@ struct WorkspaceView: View {
                 if page != .tool("处理情况") {
                     WorkspaceAttentionDot(model: model, inbox: model.recordingInbox) { go(.tool("处理情况")) }
                 }
-                Button("设置", systemImage:"gearshape") { go(.settings);showingDiscussion=false }
-                    .buttonStyle(.borderless)
+                Button { go(.settings);showingDiscussion=false } label: {
+                    Label("设置", systemImage:"gearshape")
+                        .frame(maxWidth:.infinity, alignment:.leading)
+                        .padding(5).contentShape(Rectangle()).workspaceHoverHighlight()
+                }
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("nav.settings")
                     .accessibilityAddTraits(page == .settings ? .isSelected : [])
             }.padding([.horizontal,.bottom], 14)

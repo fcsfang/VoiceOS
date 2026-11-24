@@ -93,7 +93,7 @@ struct WorkspacePalette {
             increasesContrast ? adaptive(0xA5B2A2, 0x6C7F72) : adaptive(0xE1E6D8, 0x4A5A4E)
         }
     }
-    var hover: Color { selection.opacity(0.55) }
+    var hover: Color { text.opacity(increasesContrast ? 0.16 : 0.075) }
     var pressed: Color { selection.opacity(0.9) }
     var disabledText: Color { text.opacity(increasesContrast ? 0.6 : 0.35) }
     var focusRing: Color { accent }
