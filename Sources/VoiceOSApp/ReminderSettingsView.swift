@@ -27,11 +27,13 @@ struct ReminderSettingsView: View {
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = zone
         return calendar
     }
-    private var defaultAlertText: String? {
+    private var dateOnlyDue: ReminderDueDate {
         let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd"; formatter.timeZone = zone
-        guard let defaultAlert = ReminderFields.nextDefaultAlert(due: .dateOnly(localDate: formatter.string(from: due), timeZone: nil), now: Date(), calendar: alertCalendar) else { return nil }
-        formatter.locale = Locale(identifier: "zh_CN"); formatter.dateFormat = "MM-dd HH:mm"
-        return formatter.string(from: defaultAlert)
+        let day = formatter.string(from: due)
+        if case let .dateOnly(originalDay, originalZone) = snapshot.fields?.due, originalDay == day {
+            return .dateOnly(localDate: day, timeZone: originalZone)
+        }
+        return .dateOnly(localDate: day, timeZone: nil)
     }
     private var hasNonDefaultAlert: Bool {
         guard let fields = snapshot.fields, !fields.alerts.isEmpty else { return false }
@@ -48,9 +50,13 @@ struct ReminderSettingsView: View {
     }
     private var timeNote: String? {
         guard hasDate, !hasTime else { return nil }
-        let fixed = "仅日期任务固定 09:00 提醒（当前不可关闭）"
-        guard let text = defaultAlertText else { return fixed }
-        return fixed + "\n实际通知时间 " + text
+        let schedule = dateOnlyFields
+        return schedule.alertSummary
+    }
+    private var dateOnlyFields: ReminderFields {
+        let selected = dateOnlyDue
+        if let existing = snapshot.fields, existing.due == selected, !existing.alerts.isEmpty { return existing }
+        return ReminderFields(due: selected).withDefaultAlert(now: Date(), calendar: alertCalendar)
     }
     var body: some View {
         VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
@@ -61,27 +67,25 @@ struct ReminderSettingsView: View {
                     Text("保存前会重新核对提醒事项当前设置。").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
                 }.padding(.horizontal, 24)
                 VStack(alignment: .leading, spacing: 0) {
-                    WorkspaceSettingsRow(title: "安排日期", showsDivider: false) {
+                    WorkspaceSettingsRow(title: "安排日期", subtitle: !hasDate && snapshot.fields?.alerts.isEmpty == false ? "保存后会移除原有的定时通知。" : nil, showsDivider: false) {
                         Toggle("安排日期", isOn: $hasDate).toggleStyle(.switch).labelsHidden()
                     }
                     if hasDate {
                         WorkspaceSettingsRow(title: "日期") {
                             DatePicker("日期", selection: $due, displayedComponents: [.date]).labelsHidden().datePickerStyle(.field)
                         }
-                    }
-                    WorkspaceSettingsRow(title: "具体时刻", subtitle: timeNote) {
-                        Toggle("具体时刻", isOn: $hasTime).disabled(!hasDate).toggleStyle(.switch).labelsHidden()
+                        WorkspaceSettingsRow(title: "具体时刻", subtitle: timeNote) {
+                            Toggle("具体时刻", isOn: $hasTime).toggleStyle(.switch).labelsHidden()
+                        }
                     }
                     if hasDate, hasTime {
                         WorkspaceSettingsRow(title: "时刻") {
                             DatePicker("时刻", selection: $due, displayedComponents: [.hourAndMinute]).labelsHidden().datePickerStyle(.field)
                         }
-                    }
-                    if hasTime {
                         WorkspaceSettingsRow(title: "发送通知") {
-                            Toggle("发送通知", isOn: alertToggle).disabled(!hasDate).toggleStyle(.switch).labelsHidden()
+                            Toggle("发送通知", isOn: alertToggle).toggleStyle(.switch).labelsHidden()
                         }
-                        if hasDate, hasAlert {
+                        if hasAlert {
                             WorkspaceSettingsRow(title: "提醒我", subtitle: "通知时间独立于安排日期。其他已有通知会保留。") {
                                 DatePicker("提醒我", selection: $alert, displayedComponents: [.date, .hourAndMinute]).labelsHidden().datePickerStyle(.field)
                             }
@@ -97,7 +101,7 @@ struct ReminderSettingsView: View {
             }
             WorkspaceListDivider()
             VStack(alignment: .leading, spacing: WorkspaceMetrics.controlPadding) {
-                WorkspaceSectionHeading("稍后提醒").padding(.horizontal, 24)
+                WorkspaceSectionHeading("快捷改期").padding(.horizontal, 24)
                 HStack(spacing: 8) {
                     ForEach(SnoozePreset.allCases, id: \.self) { preset in
                         Button(preset.title) { apply(preset) }.buttonStyle(.workspaceSecondaryCompact)
@@ -171,19 +175,18 @@ struct ReminderSettingsView: View {
         var fields = snapshot.fields ?? ReminderFields(); fields.priority = priority
         if hasDate {
             if hasTime { fields.due = .instant(utc: ReminderFields.timestamp(minute(due)), timeZone: zone.identifier) }
-            else {
-                let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd"; formatter.timeZone = zone
-                fields.due = .dateOnly(localDate: formatter.string(from: due), timeZone: nil)
-            }
+            else { fields.due = dateOnlyDue }
         } else { fields.due = .none }
-        if hasAlert {
-            let value = ReminderFields.timestamp(minute(alert))
+        if hasDate, !hasTime {
+            fields.alerts = dateOnlyFields.alerts
+        } else if hasDate, hasAlert {
+            let value = snapshot.fields?.alerts.first.flatMap(ReminderFields.date) == alert
+                ? ReminderFields.timestamp(alert) : ReminderFields.timestamp(minute(alert))
             if value != snapshot.fields?.alerts.first, alert <= Date() { throw VoiceOSError("请选择未来的通知时间") }
             fields.alerts = ([value] + Array((snapshot.fields?.alerts ?? []).dropFirst())).sorted()
         } else { fields.alerts = [] }
         if hasLocation { fields.location = ReminderLocation(title: locationName.trimmingCharacters(in: .whitespacesAndNewlines), proximity: locationProximity) }
         else { fields.location = nil }
-        fields = fields.withDefaultAlert(now: Date(), calendar: alertCalendar)
         try fields.validate(); return fields
     }
     private func apply(_ preset: SnoozePreset) {

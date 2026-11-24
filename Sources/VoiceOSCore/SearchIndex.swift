@@ -148,7 +148,7 @@ extension VoiceOSStore {
         return SearchTokens(drivable: drivable, filters: filters)
     }
 
-    private var searchIndexShape: String { "cjk-spaced-v3-notes-" + TimeZone.current.identifier }
+    private var searchIndexShape: String { "cjk-spaced-v5-notes-" + TimeZone.current.identifier }
 
     private func searchSpaced(_ text: String) -> String {
         var result = ""
@@ -299,24 +299,11 @@ extension VoiceOSStore {
             for row in rows {
                 guard let key = row["expression_key"], let json = row["note_json"],
                       let note = try? JSONDecoder().decode(MaterialNote.self, from: Data(json.utf8)) else { continue }
-                var parts = [note.title]
-                if let lead = note.lead { parts.append(lead) }
-                for section in note.sections {
-                    if let heading = section.heading { parts.append(heading) }
-                    parts.append(contentsOf: section.paragraphs.map(\.text))
-                }
-                for block in NoteBoardAdapting.blocks(for: note) {
-                    if let heading = block.heading { parts.append(heading) }
-                    if let text = block.text { parts.append(text) }
-                    if let quote = block.quote { parts.append(quote) }
-                    if let title = block.titleOverride { parts.append(title) }
-                    parts.append(contentsOf: (block.paragraphs ?? []).map(\.text))
-                    if let annotation = block.annotation { parts.append(annotation.text) }
-                }
-                map[key] = parts.joined(separator: "\n")
+                map[key] = note.searchableText
             }
             return map
         }()
+        let searchableSourceIDs = Set(groups.compactMap { $0.row["id"] })
         try db.transaction {
             try db.execute("DELETE FROM search_index")
             for group in groups {
@@ -341,7 +328,8 @@ extension VoiceOSStore {
                     let external = (expression.externalVersions ?? [:]).keys.sorted()
                     memberIDs = expression.sourceIDs + external.filter { !expression.sourceIDs.contains($0) }
                 } else { memberIDs = [id] }
-                let noteText = noteTexts[Self.materialNoteExpressionKey(memberIDs)]
+                let noteText = memberIDs.allSatisfy(searchableSourceIDs.contains)
+                    ? noteTexts[Self.materialNoteExpressionKey(memberIDs)] : nil
                 var selected = group.transcripts.last
                 if let version = presentation?.transcriptVersionID,
                    let match = group.transcripts.last(where: { $0.versionID == version }) {

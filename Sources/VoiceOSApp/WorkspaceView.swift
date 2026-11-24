@@ -415,6 +415,7 @@ struct WorkspaceView: View {
     @State private var modelSaving = false
     @State private var modelTestResult: String?
     @State private var settingsQuery = ""
+    @State private var settingsCategory = SettingsCategory.common
     @AppStorage("voiceos.note.annotations.visible") private var showNoteAnnotations = true
     @State private var materialPageCache = MaterialPageCache()
     @State private var actionPageCache = ActionPageCache()
@@ -2346,19 +2347,35 @@ struct WorkspaceView: View {
                 .frame(maxWidth: 680, alignment: .leading)
                 .accessibilityIdentifier("settings.search")
             VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
-                if showsSettingsCard(["概览","健康","状态","队列","监控"]) { settingsHealthCard }
-                if showsSettingsCard(["模型","密钥","地址","思考强度","转写","语音","连接测试"]) { settingsModelsCard }
-                if showsSettingsCard(["隐私","数据","上传","云端","权限"]) { settingsPrivacyCard }
-                if showsSettingsCard(["连接","收件箱","文件夹","提醒","监测","自动"]) { settingsConnectionsCard }
-                if showsSettingsCard(["系统权限","麦克风","通知","磁盘","屏幕"]) { settingsPermissionsCard }
-                if showsSettingsCard(["外观","主题","字号"]) { settingsAppearanceCard }
-                if showsSettingsCard(["阅读","批注","生成","最近笔记","显示"]) { settingsReadingCard }
-                if showsSettingsCard(["导出","备份","保留","迁移包"]) { settingsExportBackupCard }
-                if showsSettingsCard(["资料库","恢复","检查","打开"]) { settingsLibraryCard }
-                if showsSettingsCard(["存储","占用","磁盘","清理"]) { settingsStorageCard }
-                if showsSettingsCard(["回顾","查找","读法"]) { settingsReviewCard }
-                if showsSettingsCard(["键盘","快捷键"]) { settingsKeyboardCard }
-                if showsSettingsCard(["维护","诊断","日志","版本","工具"]) { settingsMaintenanceCard }
+                let searching = !settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if !searching {
+                    Picker("设置分类", selection: $settingsCategory) {
+                        ForEach(SettingsCategory.allCases, id: \.self) { category in
+                            Text(category.rawValue).tag(category)
+                        }
+                    }.pickerStyle(.segmented).labelsHidden()
+                }
+                let matches = searching ? SettingsSection.allCases.filter { $0.matches(settingsQuery) } : settingsCategory.sections
+                if matches.isEmpty {
+                    Text("没有找到相关设置").foregroundStyle(palette.secondaryText)
+                }
+                ForEach(matches, id: \.self) { section in
+                    switch section {
+                    case .health: settingsHealthCard
+                    case .models: settingsModelsCard
+                    case .privacy: settingsPrivacyCard
+                    case .connections: settingsConnectionsCard
+                    case .permissions: settingsPermissionsCard
+                    case .appearance: settingsAppearanceCard
+                    case .reading: settingsReadingCard
+                    case .exportBackup: settingsExportBackupCard
+                    case .library: settingsLibraryCard
+                    case .storage: settingsStorageCard
+                    case .review: settingsReviewCard
+                    case .keyboard: settingsKeyboardCard
+                    case .maintenance: settingsMaintenanceCard
+                    }
+                }
             }.frame(maxWidth: 680, alignment: .leading)
         }
         .onAppear {
@@ -2388,7 +2405,6 @@ struct WorkspaceView: View {
                 }
             }
             .help(model.modelConfigurationPath ?? "导入本地的 .env 或模型 JSON 配置文件；导入后由应用内部维护")
-            WorkspaceListDivider().padding(.horizontal,20)
             internalModelSettings
         }
     }
@@ -2517,7 +2533,7 @@ struct WorkspaceView: View {
             WorkspaceListDivider().padding(.horizontal,20)
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Circle().fill(model.reminderAccess?.enabled == true ? palette.success : palette.warning).frame(width:7,height:7).accessibilityHidden(true)
-                Text("提醒与自动入口").vosFont(WorkspaceText.body)
+                Text("Apple 提醒事项").vosFont(WorkspaceText.body)
                 Spacer()
                 Text(model.reminderAccess?.enabled == true ? "提醒事项已连接" : "提醒事项未连接").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
             }.padding(.horizontal,20).padding(.vertical,10)
@@ -2567,11 +2583,44 @@ struct WorkspaceView: View {
         }
         return state + " · " + (attempt.executionKind.isEmpty ? attempt.model : attempt.executionKind)
     }
-    /// 设置页搜索：命中关键词才显示对应卡片；空查询显示全部。
-    private func showsSettingsCard(_ keywords: [String]) -> Bool {
-        let query = settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return true }
-        return keywords.contains { $0.localizedCaseInsensitiveContains(query) || query.localizedCaseInsensitiveContains($0) }
+    private enum SettingsCategory: String, CaseIterable {
+        case common = "常用", model = "模型与权限", library = "资料管理", tools = "工具"
+
+        var sections: [SettingsSection] {
+            switch self {
+            case .common: [.health, .connections, .appearance, .reading]
+            case .model: [.models, .permissions, .privacy]
+            case .library: [.exportBackup, .library, .storage]
+            case .tools: [.review, .keyboard, .maintenance]
+            }
+        }
+    }
+
+    private enum SettingsSection: CaseIterable {
+        case health, models, privacy, connections, permissions, appearance, reading
+        case exportBackup, library, storage, review, keyboard, maintenance
+
+        private var searchText: String {
+            switch self {
+            case .health: "概览 健康 状态 队列 监控 概览与健康 后台队列 最近模型调用"
+            case .models: "模型与服务 语音转文字 转写 理解、核对与AI助理 应用内模型配置 服务地址 型号 密钥 API Key 笔记思考强度 主题整理思考强度 核对与整理思考强度 连接测试 测试连接 保存并启用 从文件导入"
+            case .privacy: "隐私 数据 上传 云端 权限 数据与隐私"
+            case .connections: "连接 收件箱 文件夹 提醒 监测 自动 连接与自动入口 自动接收录音 语音备忘录 消息监测 微信推送 QQ群 Apple提醒事项 登录时启动 开机启动"
+            case .permissions: "系统权限 麦克风 系统通知 完全磁盘访问 屏幕录制"
+            case .appearance: "外观 主题 字号 文字大小"
+            case .reading: "阅读与生成 最近笔记 显示AI批注 启发层"
+            case .exportBackup: "导出与备份 迁移包 导出结构化资料 导出资料与原件 自动备份 立即备份 保留份数 立即清理旧备份"
+            case .library: "资料库 恢复 检查 打开 检查资料库 从最近备份新建资料库 打开已有资料库 从迁移包恢复"
+            case .storage: "存储 占用 磁盘 清理 原件 镜像 删除本地语音模型 在访达中显示资料库"
+            case .review: "回顾与查找 读法 静默回顾 查找历史文字 英文表达反馈"
+            case .keyboard: "键盘快捷键 引导 首次使用 撤销"
+            case .maintenance: "其他工作与维护 工具与运行状态 版本 思想关联 目标下一步 英语反馈 纠错后的行动影响 表达处理与重试 重新整理主题与简报"
+            }
+        }
+
+        func matches(_ query: String) -> Bool {
+            query.split(whereSeparator: \.isWhitespace).allSatisfy { searchText.localizedCaseInsensitiveContains(String($0)) }
+        }
     }
     private var queueBusy: Bool {
         model.organizingTopics || model.knowledgeReviewBusy || model.understandingSource != nil || model.dictationBusy || model.fullRecordingBusy || model.importing
@@ -2645,7 +2694,7 @@ struct WorkspaceView: View {
         }
     }
     private var settingsPermissionsCard: some View {
-        WorkspaceSettingsCard(title:"系统权限", subtitle:"麦克风与通知") {
+        WorkspaceSettingsCard(title:"系统权限", subtitle:"麦克风、通知、屏幕录制与完全磁盘访问") {
             WorkspaceSettingsRow(title:"麦克风", subtitle:microphoneStatus, showsDivider:false) {
                 if model.microphoneAuthorization == .notDetermined {
                     Button("授权") { Task { _ = await model.requestMicrophoneAccess() } }.buttonStyle(.workspacePrimary)
@@ -2899,15 +2948,6 @@ struct WorkspaceView: View {
         case .unreadable: return "无法读取"
         case .bytes(let bytes): return sizeText(bytes)
         }
-    }
-    private func storageLine(_ label:String,_ readout: StorageReadout,detail:String? = nil,emphasized:Bool = false) -> some View {
-        HStack(spacing:8) {
-            Text(label + (detail.map { " · " + $0 } ?? ""))
-                .vosFont(emphasized ? WorkspaceText.rowTitle : WorkspaceText.body)
-                .foregroundStyle(emphasized ? palette.text : palette.secondaryText)
-            Spacer(minLength:12)
-            Text(storageReadoutText(readout)).vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
-        }.frame(maxWidth:420,alignment:.leading)
     }
     private func sourceNavigationTitle(_ id:String) -> String {
         let pageIndex=model.sourcePageIndex
@@ -3721,7 +3761,6 @@ struct WorkspaceView: View {
         }.padding(24).frame(minWidth:520)
             .workspaceModalSurface()
     }
-    private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
     private var navigationEntry: WorkspaceNavigationEntry { .init(page:page,topicID:topicID,topicTab:topicTab,topicReadingMode:topicReadingMode) }
     private func go(_ next:WorkspacePage) {

@@ -1022,10 +1022,16 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertNil(corrected?.contentTitle)
         let regenerated = try await store.generateRecordingTitles(using: FlowRecordingTitles(), sourceIDs: [intent.sourceID])
         XCTAssertEqual(regenerated, 1)
-        // An old successful inbox receipt must not skip continuity enrolment.
+        let oldAudio = try await store.playableURL(sourceID: intent.sourceID)
+        try await verifyLegacyInboxEnrollment(audio: oldAudio)
+        try await verifyContinuousRecordingGroup()
+        try await verifyScopedExpressionActionReview(at: root)
+        try await verifyPairedRecording(audio: oldAudio)
+    }
+
+    private func verifyLegacyInboxEnrollment(audio oldAudio: URL) async throws {
         let legacy=try VoiceOSStore(root:root.appendingPathComponent("legacy-intake"),inspector:NativeMediaInspector())
         try await legacy.recover()
-        let oldAudio=try await store.playableURL(sourceID:intent.sourceID)
         let oldID=try await legacy.importPersonalAudio(oldAudio,commandID:"automatic-recording:legacy-fixture:0")
         _ = try await legacy.setSourceLocalOnly(sourceID:oldID,expectedVersion:1,localOnly:false)
         try await legacy.processTranscriptions(using:FlowSpeech(),sourceIDs:[oldID])
@@ -1048,7 +1054,9 @@ final class CoreFlowTests: XCTestCase {
         _ = try await legacy.setSourceLocalOnly(sourceID:oldID,expectedVersion:2,localOnly:true)
         let revokedLegacy=try await legacy.prepareRecordingExpressions()
         XCTAssertNil(revokedLegacy)
-        // Automatic intake: two continuous clips, an unrelated clip, then a late correction.
+    }
+
+    private func verifyContinuousRecordingGroup() async throws {
         let groupedRoot=root.appendingPathComponent("automatic-expressions")
         let grouped=try VoiceOSStore(root:groupedRoot,inspector:NativeMediaInspector())
         try await grouped.recover()
@@ -1232,8 +1240,10 @@ final class CoreFlowTests: XCTestCase {
         XCTAssertEqual(restoredMembers.first { $0.id == members[0] }?.presentation?.expression?.sourceIDs,whole.sourceIDs)
         let restoredActions=try await groupRestored.actions(includeHistory:true)
         XCTAssertEqual(restoredActions.first { $0.id == completed.id }?.state,"completed")
-        // A podcast and personal response share a recording clock, not ownership.
-        try await verifyScopedExpressionActionReview(at:root)
+    }
+
+    private func verifyPairedRecording(audio oldAudio: URL) async throws {
+        let fixture = FlowRecordingExpressions()
         let dual=try VoiceOSStore(root:root.appendingPathComponent("dual-recording"),inspector:NativeMediaInspector())
         try await dual.recover()
         let personalText="嘉宾说应完全自主，我认为还需要可靠验证。我会做一次界面验证。"

@@ -61,7 +61,7 @@ final class NotificationAnalysisChecks: XCTestCase {
     func testQuotedEvidenceIsAcceptedAndPromptVersionIsPinned() async throws {
         let box = AnalysisReplyBox(replies: [replyJSON([("申请奖学金", "奖学金申请截止 11 月 20 日", "m1", nil)])])
         let port = try analysisPort(box)
-        XCTAssertEqual(port.identity.promptVersion, "message-monitor-daily-v2", "提示词版本应为 message-monitor-daily-v2")
+        XCTAssertEqual(port.identity.promptVersion, "message-monitor-daily-v3", "提示词版本应为 message-monitor-daily-v3")
         let result = try await port.analyze(analysisInput(text: text))
         XCTAssertEqual(result.items.count, 1)
         XCTAssertEqual(result.items[0].evidenceQuote, "奖学金申请截止 11 月 20 日")
