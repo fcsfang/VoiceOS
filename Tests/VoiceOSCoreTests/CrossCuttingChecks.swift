@@ -81,6 +81,11 @@ final class CrossCuttingChecks: XCTestCase {
         let store = try VoiceOSStore(root: root, inspector: NativeMediaInspector())
         try await store.recover()
         let database = root.appendingPathComponent("voiceos.sqlite")
+        let db = await store.db
+        try db.execute("PRAGMA wal_autocheckpoint=0")
+        try db.execute("CREATE TABLE backup_probe(value TEXT)")
+        _ = try db.query("PRAGMA wal_checkpoint(TRUNCATE)")
+        try db.execute("INSERT INTO backup_probe VALUES('committed')")
         let before = try Data(contentsOf: database)
         let directory = root.appendingPathComponent("Backups", isDirectory: true)
         let start = Date(timeIntervalSince1970: 1_800_000_000)
@@ -96,6 +101,10 @@ final class CrossCuttingChecks: XCTestCase {
         XCTAssertFalse(names.contains(created[1].lastPathComponent))
         XCTAssertTrue(names.contains(created[8].lastPathComponent))
         XCTAssertTrue(DatabaseBackup.integrityCheck(at: try XCTUnwrap(created.last)))
+        let restored = try DatabaseBackup.createLibraryFromLatestBackup(currentRoot: root, destination: root.deletingLastPathComponent().appendingPathComponent(UUID().uuidString))
+        defer { try? FileManager.default.removeItem(at: restored) }
+        let restoredDB = try Database(restored.appendingPathComponent("voiceos.sqlite"))
+        XCTAssertEqual(try restoredDB.query("SELECT value FROM backup_probe").first?["value"], "committed")
         XCTAssertEqual(try Data(contentsOf: database), before)
     }
 }

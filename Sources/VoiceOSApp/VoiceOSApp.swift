@@ -1362,7 +1362,7 @@ final class ControlCenter: ObservableObject {
     }
     func retryBackup() {
         guard let root = libraryRoot else { return }
-        backupLibrary(at: root)
+        backupLibrary(at: root, manual: true)
     }
     func revealBackups() {
         guard let root = libraryRoot else { return }
@@ -1472,7 +1472,7 @@ final class ControlCenter: ObservableObject {
             launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
         }
     }
-    private func backupLibrary(at root: URL) {
+    private func backupLibrary(at root: URL, manual: Bool = false) {
         guard !backupRunning else { return }
         backupRunning = true
         let database = root.appendingPathComponent("voiceos.sqlite")
@@ -1481,7 +1481,11 @@ final class ControlCenter: ObservableObject {
         Task.detached(priority: .utility) { [weak self] in
             defer { Task { await MainActor.run { self?.backupRunning = false } } }
             do {
-                _ = try DatabaseBackup.createDailyIfNeeded(database: database, directory: directory, retain: retain)
+                if manual {
+                    _ = try DatabaseBackup.create(database: database, directory: directory, retain: retain)
+                } else {
+                    _ = try DatabaseBackup.createDailyIfNeeded(database: database, directory: directory, retain: retain)
+                }
                 DatabaseBackup.removeOrphanSidecars(directory: directory)
                 let availability = DatabaseBackup.availability(directory: directory)
                 await MainActor.run { self?.recordBackupSummary(availability) }
