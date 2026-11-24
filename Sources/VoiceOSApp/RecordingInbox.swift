@@ -398,10 +398,12 @@ final class RecordingInbox: ObservableObject {
         var waitingForCondition = 0
         if canProcess() { await resumeSaved() }
         var nextObserved: [String: String] = [:]
+        var foundByFolder: [String: Set<String>] = [:]
         var batch: [RecordingInboxInput] = []
         for folder in folders where folder.enabled {
             do {
                 let found = try await Self.readFiles(in: URL(fileURLWithPath: folder.path), voiceMemos: folder.voiceMemos)
+                foundByFolder[folder.id] = Set(found.keys)
                 let canProcessNow = canProcess()
                 guard folders.contains(where: { $0.id == folder.id && $0.enabled && $0.path == folder.path }) else { continue }
                 if folderErrors[folder.id] != nil { folderErrors[folder.id] = nil }
@@ -436,8 +438,10 @@ final class RecordingInbox: ObservableObject {
                     }
                     if failures.contains(digest) {
                         if items[digest] == nil {
-                            items[digest] = .init(id: digest, folderID: folder.id, path: path, state: .needsAttention, attempts: 0, explanation: "上次整理未完成，请手动重试", updatedAt: now())
+                            items[digest] = .init(id: digest, folderID: folder.id, path: path, state: .needsAttention, attempts: 0, explanation: "上次整理未完成，请手动重试", updatedAt: now(), fileStamp: stamp)
                             save()
+                        } else if let known = items[digest], known.folderID != folder.id || known.path != path {
+                            status = "同一份录音在另一个入口未完成：\(URL(fileURLWithPath: known.path).lastPathComponent)；请到入口列表重试"
                         }
                         continue
                     }
@@ -470,6 +474,18 @@ final class RecordingInbox: ObservableObject {
             }
         }
         observed = nextObserved
+        // 文件被移走或删除后，条目原本会永远停在「将在…自动重试」；放到「需要处理」里说清楚。
+        for id in Array(items.keys) {
+            guard var item = items[id], item.state != .processing,
+                  let paths = foundByFolder[item.folderID], !paths.contains(item.path) else { continue }
+            if item.state == .needsAttention, item.explanation.hasPrefix("入口里已找不到这份录音") { continue }
+            item.state = .needsAttention; item.nextAttempt = nil
+            item.explanation = "入口里已找不到这份录音（可能被移走或删除）；把文件放回后点「重试这份素材」"
+            item.updatedAt = now()
+            items[id] = item
+            failures.insert(id)
+            status = "「\(URL(fileURLWithPath: item.path).lastPathComponent)」已不在入口目录；等待放回或不再处理"
+        }
         if blocked, waitingForCondition > 0 {
             status = "发现 \(waitingForCondition) 份新录音，等待处理条件：文本模型或本地转写就绪、另一段整理完成"
         }
