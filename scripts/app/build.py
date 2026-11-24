@@ -99,7 +99,7 @@ bundle_resources.mkdir(parents=True, exist_ok=True)
 shutil.copy2(light_logo, bundle_resources / 'VoiceOSLogoLight.png')
 shutil.copy2(dark_logo, bundle_resources / 'VoiceOSLogoDark.png')
 shutil.copy2(ROOT / 'Resources' / 'PrivacyInfo.xcprivacy', bundle_resources / 'PrivacyInfo.xcprivacy')
-with tempfile.TemporaryDirectory() as scratch:
+def generate_icon(scratch, output):
     padded = Path(scratch) / 'IconMaster.png'
     subprocess.run(['xcrun', 'swift', str(ROOT / 'scripts' / 'app' / 'pad_icon.swift'),
                     str(light_logo), str(padded), '0.91'], check=True)
@@ -110,8 +110,21 @@ with tempfile.TemporaryDirectory() as scratch:
             subprocess.run(['sips', '-z', str(pixels), str(pixels), str(padded),
                             '--out', str(iconset / f'icon_{size}x{size}{suffix}.png')],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(['iconutil', '-c', 'icns', str(iconset),
-                    '-o', str(bundle_resources / 'AppIcon.icns')], check=True)
+    subprocess.run(['iconutil', '-c', 'icns', str(iconset), '-o', str(output)], check=True)
+
+# Keep derived artwork in the build cache; changes to the source or recipe invalidate it.
+icon_digest = hashlib.sha256()
+for path in (light_logo, ROOT / 'scripts/app/pad_icon.swift', Path(__file__)):
+    icon_digest.update(path.read_bytes())
+icon_cache = ROOT / '.build' / 'icons'
+icon_cache.mkdir(parents=True, exist_ok=True)
+cached_icon = icon_cache / (icon_digest.hexdigest() + '.icns')
+if not cached_icon.exists():
+    with tempfile.TemporaryDirectory(dir=icon_cache) as scratch:
+        generated_icon = Path(scratch) / 'AppIcon.icns'
+        generate_icon(scratch, generated_icon)
+        generated_icon.replace(cached_icon)
+shutil.copy2(cached_icon, bundle_resources / 'AppIcon.icns')
 info = dict(CFBundleIdentifier='local.voiceos.app', CFBundleName='VoiceOS', CFBundleDisplayName='VoiceOS', CFBundleExecutable='VoiceOS', CFBundleIconFile='AppIcon', CFBundlePackageType='APPL', CFBundleShortVersionString='0.1.0', CFBundleVersion='1', LSMinimumSystemVersion='26.0', NSHighResolutionCapable=True, NSMicrophoneUsageDescription='VoiceOS 仅在你主动开始口述时录制麦克风，停止后封存原件并在本机转写；不会自动上传音频。', NSRemindersFullAccessUsageDescription='VoiceOS 在你明确选定的清单创建任务并回读完成状态；其他清单的任务不会读取或修改。')
 if (ROOT / '.env').is_file(): info['VoiceOSModelConfigurationPath'] = str(ROOT / '.env')
 info['CFBundleURLTypes'] = [dict(CFBundleURLName='VoiceOS task', CFBundleURLSchemes=['voiceos'])]

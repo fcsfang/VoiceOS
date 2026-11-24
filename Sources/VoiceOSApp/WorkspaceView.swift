@@ -2897,15 +2897,6 @@ struct WorkspaceView: View {
         case .bytes(let bytes): return sizeText(bytes)
         }
     }
-    private func storageLine(_ label:String,_ readout: StorageReadout,detail:String? = nil,emphasized:Bool = false) -> some View {
-        HStack(spacing:8) {
-            Text(label + (detail.map { " · " + $0 } ?? ""))
-                .vosFont(emphasized ? WorkspaceText.rowTitle : WorkspaceText.body)
-                .foregroundStyle(emphasized ? palette.text : palette.secondaryText)
-            Spacer(minLength:12)
-            Text(storageReadoutText(readout)).vosFont(WorkspaceText.meta, monospacedDigit: true).foregroundStyle(palette.secondaryText)
-        }.frame(maxWidth:420,alignment:.leading)
-    }
     private func sourceNavigationTitle(_ id:String) -> String {
         let pageIndex=model.sourcePageIndex
         let catalog=pageIndex.recordsByID
@@ -3718,7 +3709,6 @@ struct WorkspaceView: View {
         }.padding(24).frame(minWidth:520)
             .workspaceModalSurface()
     }
-    private func thoughtRow(_ claim:CandidateClaim) -> some View { WorkspaceRow(title:claim.statement,subtitle:claim.ownership == "ai_candidate" ? "AI 分析 · 不代表我的观点" : claim.ownership == "external" ? "外部观点" : "从我的表达中整理",icon:"lightbulb") { if let id=claim.references.first?.sourceID { go(.source(id)) } } }
     private func dateLabel(_ text:String) -> String { ConversationReflectionFocus.date(text)?.formatted(date:.abbreviated,time:.omitted) ?? text }
     private var navigationEntry: WorkspaceNavigationEntry { .init(page:page,topicID:topicID,topicTab:topicTab,topicReadingMode:topicReadingMode) }
     private func go(_ next:WorkspacePage) {

@@ -3,7 +3,7 @@ status: in_progress
 started: 2026-11-24
 updated: 2026-11-24
 branch: codex/automatic-recording-note-20261124
-pr: pending
+pr: '#248 closed; batch delivery deferred'
 owner: Codex
 ---
 # 自动录音整理后可直接读笔记
@@ -18,4 +18,4 @@ owner: Codex
 
 ## 验证与下一步
 
-在隔离资料库运行真实应用，使用合成语音检查自动入库、首页可读和重启后的笔记数量。验证记录见 CHECKPOINTS.md。
+已在隔离实例跑通自动接收和重开。按所有者要求，后续体验与冗余清理沿用本分支，统一交付。验证记录见 CHECKPOINTS.md。

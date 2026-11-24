@@ -50,7 +50,9 @@ struct NotesLibraryView: View {
     }
 
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
+        let pendingMaterials = self.pendingMaterials
+        let filtered = self.filtered
+        return LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
             HStack(alignment: .firstTextBaseline) {
                 WorkspaceHeading(eyebrow: "", title: "笔记")
                 Spacer()
@@ -176,7 +178,6 @@ struct NotesLibraryView: View {
         .task(id: HomeRecentNotesKeyForNotes(records: model.recordsRevision, notes: model.materialNotesRevision)) {
             await reload()
         }
-        .task { await reload() }
         .task(id: model.recordsRevision) { readingStates = await model.readingStates() }
     }
 

@@ -114,10 +114,6 @@ struct MaterialNoteReadingView: View {
         PositionRestoreKey(expressionKey: positionKey, ready: display != nil)
     }
 
-    private func noteAnchor(_ sectionIndex: Int, _ paragraphIndex: Int) -> String {
-        "note.p.\(sectionIndex).\(paragraphIndex)"
-    }
-
     /// 探针值不参与观察，避免滚动时每帧触发整页重算。
     @MainActor
     private final class NoteReadingProbeBox {
