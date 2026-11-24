@@ -1307,7 +1307,7 @@ struct WorkspaceView: View {
                         ForEach(Array(domainSections(themeListings).enumerated()), id: \.offset) { _, section in
                             VStack(alignment:.leading,spacing:12) {
                                 WorkspaceSectionHeading(section.title, count:"\(section.listings.count)")
-                                LazyVGrid(columns:[GridItem(.adaptive(minimum:290),spacing: WorkspaceMetrics.groupGap)],alignment:.leading,spacing: WorkspaceMetrics.groupGap) {
+                                LazyVStack(alignment: .leading, spacing: WorkspaceMetrics.rowGap) {
                                     ForEach(section.listings) { listing in themeCard(listing) }
                                 }
                             }
@@ -2330,7 +2330,7 @@ struct WorkspaceView: View {
                 WorkspaceSearchField(text:$settingsQuery, placeholder:"搜索设置")
                     .frame(maxWidth:240)
                     .accessibilityIdentifier("settings.search")
-            }.frame(maxWidth:680, alignment:.leading)
+            }
             VStack(alignment:.leading,spacing: WorkspaceMetrics.sectionGap) {
                 let searching = !settingsQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 if !searching {
@@ -2361,7 +2361,7 @@ struct WorkspaceView: View {
                     case .maintenance: settingsMaintenanceCard
                     }
                 }
-            }.frame(maxWidth: 680, alignment: .leading)
+            }
         }
         .onAppear {
             model.refreshStorageUsage()
@@ -4142,16 +4142,15 @@ private struct TopicPreviewCard: View {
     var body: some View {
         Button(action:open) {
             VStack(alignment:.leading,spacing:10) {
-                Text(topic.title).vosFont(WorkspaceText.sectionTitle)
+                Text(topic.title).vosFont(WorkspaceText.rowTitle)
                     .multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
                 if topic.organizationStale == true { TopicStaleBanner() }
                 if topic.organization?.bodyPending == true { WorkspaceBadge(text:"正文整理中") }
                 if let preview { previewBody(preview) }
-                Spacer(minLength:0)
                 Text(metaLine).vosFont(WorkspaceText.meta,monospacedDigit:true)
                     .foregroundStyle(palette.tertiaryText)
-            }.frame(maxWidth:.infinity,maxHeight:.infinity,alignment:.topLeading)
-                .padding(20)
+            }.frame(maxWidth:.infinity,alignment:.topLeading)
+                .padding(.horizontal, 16).padding(.vertical, 12)
                 .background(highlighted ? palette.selection : hovered ? palette.hover : palette.surface,in:RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))
                 .overlay { RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius).strokeBorder(highlighted ? palette.focusRing : palette.border,lineWidth:1) }
                 .contentShape(RoundedRectangle(cornerRadius:WorkspaceMetrics.sectionRadius))

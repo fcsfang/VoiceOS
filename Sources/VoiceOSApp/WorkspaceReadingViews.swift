@@ -102,13 +102,12 @@ struct WorkspaceListGroupHeader: View {
     let title: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold)
-                .foregroundStyle(palette.secondaryText)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.vertical, 8)
-            WorkspaceListDivider()
-        }
+        Text(title).vosFont(WorkspaceText.meta.size, weight: .semibold, monospacedDigit: true)
+            .foregroundStyle(palette.secondaryText)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.horizontal, 14).padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(palette.selection)
     }
 }
 
@@ -166,7 +165,9 @@ struct WorkspaceListSection<Content: View>: View {
             }
         }
         .padding(.vertical, 10)
+        .padding(.horizontal, WorkspaceMetrics.controlPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.selection)
         .contentShape(Rectangle())
     }
 }

@@ -924,15 +924,15 @@ struct WorkspaceSettingsCard<Content: View>: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 12)
-            content()
-        }
-        .padding(.bottom, 14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(palette.surface, in: RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius))
-        .overlay {
-            RoundedRectangle(cornerRadius: WorkspaceMetrics.sectionRadius)
-                .strokeBorder(palette.border, lineWidth: 1)
+            .padding(.bottom, 10)
+            VStack(alignment: .leading, spacing: 0) {
+                content()
+            }
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(palette.surface)
+            .overlay(alignment: .top) { WorkspaceListDivider() }
+            .overlay(alignment: .bottom) { WorkspaceListDivider() }
         }
     }
 }

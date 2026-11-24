@@ -413,7 +413,7 @@ struct WorkspaceMonitorView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(minWidth: 140)
+                .fixedSize(horizontal: true, vertical: false)
                 .padding(.top, 4)
                 .accessibilityIdentifier("monitor.filter")
             }
@@ -553,13 +553,13 @@ struct WorkspaceMonitorView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         .font(.caption).foregroundStyle(palette.secondaryText).frame(width: 12)
-                    Text(item.title).vosFont(WorkspaceText.rowTitle)
+                    Text(item.title).vosFont(WorkspaceText.rowTitle.size, weight: .medium)
                         .strikethrough(item.status == .dismissed)
-                    Spacer()
+                    Spacer(minLength: 12)
                     Text(timeLabel(item))
                         .vosFont(WorkspaceText.meta)
                         .foregroundStyle(item.deadlineDate == nil && item.deadlineText == nil
-                                         ? palette.warning : palette.secondaryText)
+                                         ? palette.tertiaryText : palette.secondaryText)
                 }
                 .padding(.vertical, 10).padding(.horizontal, 6)
                 .contentShape(Rectangle()).workspaceHoverHighlight()

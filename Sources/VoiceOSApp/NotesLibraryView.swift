@@ -66,12 +66,8 @@ struct NotesLibraryView: View {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(filtered.enumerated()), id: \.element.id) { index, stored in
                         if index == 0 || stored.day != filtered[index - 1].day {
-                            Text(stored.day?.formatted(date: .long, time: .omitted) ?? "日期未知")
-                                .vosFont(WorkspaceText.caption, monospacedDigit: true)
-                                .foregroundStyle(palette.secondaryText)
-                                .accessibilityAddTraits(.isHeader)
-                                .padding(.top, index == 0 ? 0 : 14)
-                                .padding(.bottom, 4)
+                            WorkspaceListGroupHeader(title: stored.day?.formatted(date: .long, time: .omitted) ?? "日期未知")
+                                .padding(.top, index == 0 ? 0 : WorkspaceMetrics.groupGap)
                         }
                         if index > 0, stored.day == filtered[index - 1].day { WorkspaceListDivider() }
                         Button { open(stored) } label: {
@@ -95,7 +91,8 @@ struct NotesLibraryView: View {
                                 Spacer(minLength: 8)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 8).padding(.vertical, 11)
+                            .padding(.horizontal, 14).padding(.vertical, 14)
+                            .background(palette.surface)
                             .contentShape(Rectangle()).workspaceHoverHighlight()
                         }
                         .buttonStyle(.plain)

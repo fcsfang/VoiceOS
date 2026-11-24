@@ -63,7 +63,7 @@ struct TaskInitiationView: View {
                 }
                 .frame(maxWidth: WorkspaceMetrics.pageWidth, alignment: .leading)
                 .padding(WorkspaceMetrics.pagePadding)
-                .frame(maxWidth: .infinity, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
             .onChange(of: selectedID) { _, _ in
                 stepDraft = ""
@@ -133,7 +133,7 @@ struct TaskInitiationView: View {
                 Picker("生成方式", selection: $mode) {
                     Text("直接给草稿").tag(TaskInitiationMode.direct)
                     Text("先问一个关键问题").tag(TaskInitiationMode.interactive)
-                }.pickerStyle(.segmented)
+                }.pickerStyle(.segmented).fixedSize(horizontal: true, vertical: false)
                 if !model.modelConfigured {
                     Text("尚未配置文本模型；请先在设置中连接模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                 }
