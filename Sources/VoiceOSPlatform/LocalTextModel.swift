@@ -52,7 +52,7 @@ public enum LocalTextModel {
         do {
             let chosenTransport: any ModelHTTPTransport = segmentStreaming ? DirectStreamingModelHTTPTransport() : segmentTransport
             return Suite(recordingExpressions: try ResponsesRecordingExpressionPort(baseURL:address,apiKey:key,model:model),topics: try ResponsesTopicOrganizationPort(baseURL:address,apiKey:key,model:model,deadline:1800,effort:cfg.topicEffort),note: try ResponsesMaterialNotePort(baseURL:address,apiKey:key,model:model,effort:cfg.noteEffort),recordingTitles: try ResponsesRecordingTitlePort(baseURL:address,apiKey:key,model:model),reminderFields: try ResponsesReminderFieldPort(baseURL:address,apiKey:key,model:model),followup:try ResponsesRecordingFollowupPort(baseURL:address,apiKey:key,model:model),assistant:try ResponsesAssistantPort(baseURL:address,apiKey:key,model:model),initiation:try ResponsesTaskInitiationPort(baseURL:address,apiKey:key,model:model),knowledgeReview:try ResponsesKnowledgeReviewPort(baseURL:address,apiKey:key,model:model),cognition:try ResponsesModelPort(baseURL:address,apiKey:key,model:model),relevance:try ResponsesRelevancePort(baseURL:address,apiKey:key,model:model),discussion:try ResponsesDiscussionPort(baseURL:address,apiKey:key,model:model),outcome:try ResponsesOutcomePort(baseURL:address,apiKey:key,model:model),english:try ResponsesEnglishPracticePort(baseURL:address,apiKey:key,model:model),association:try ResponsesExpressionAssociationPort(baseURL:address,apiKey:key,model:model),segmentExtraction:try ResponsesSegmentExtractionPort(baseURL:address,apiKey:key,model:model,transport:chosenTransport,compactInput:compactSegmentExtraction,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,expandAmbiguousQuotes:expandAmbiguousQuotes),segmentAggregation:try ResponsesSegmentAggregationPort(baseURL:address,apiKey:key,model:model,transport:chosenTransport,compactInput:compactSegmentAggregation,requestTimeout:segmentRequestTimeout,streaming:segmentStreaming,strictProvenance:strictSegmentAggregation),notificationAnalysis:try ResponsesNotificationAnalysisPort(baseURL:address,apiKey:key,model:model))
-        } catch { throw VoiceOSError("无法读取有效的文本模型配置；请选择项目的本地 .env 文件") }
+        } catch { throw VoiceOSError("无法使用当前文本模型配置；请检查服务地址、模型与密钥") }
     }
     public static func load(from file: URL) throws -> ResponsesModelPort {
         let cfg = try settings(from: file)
@@ -102,7 +102,8 @@ public enum LocalTextModel {
                 let model = (root["model"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? defaultModel
                 let noteEffort = (root["noteEffort"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "high"
                 let topicEffort = (root["topicEffort"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "high"
-                return Settings(address: address, key: key, model: model, noteEffort: noteEffort, topicEffort: topicEffort)
+                let reviewEffort = (root["reviewEffort"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "high"
+                return Settings(address: address, key: key, model: model, noteEffort: noteEffort, topicEffort: topicEffort, reviewEffort: reviewEffort)
             }
             var settings: [String: String] = [:]
             for raw in text.split(separator: "\n") {

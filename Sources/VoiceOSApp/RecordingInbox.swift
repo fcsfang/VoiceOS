@@ -24,6 +24,8 @@ struct RecordingInboxInput {
 enum RecordingInboxOutcome {
     case completed
     case retryableFailure(String)
+    /// 条件尚未就绪（等待配置、另一段整理占用、应用退出中断）：不计入三次自动重试预算。
+    case deferred(String)
     case needsAttention(String)
 }
 
@@ -96,18 +98,22 @@ final class RecordingInbox: ObservableObject {
             items = Dictionary(saved.map { ($0.id, $0) }, uniquingKeysWith: { _, latest in latest })
         }
         for id in Array(items.keys) where items[id]?.state == .processing {
-            finish(id, outcome: .retryableFailure("上次整理被中断；将继续同一份素材"))
+            finish(id, outcome: .deferred("上次整理被中断；将继续同一份素材"))
         }
         for index in folders.indices {
             if let data = folders[index].bookmark {
                 var stale = false
                 if let url = try? URL(resolvingBookmarkData: data, options: [.withSecurityScope], relativeTo: nil, bookmarkDataIsStale: &stale) {
                     folders[index].path = url.path
+                    if stale, let fresh = try? url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess], includingResourceValuesForKeys: nil, relativeTo: nil) {
+                        folders[index].bookmark = fresh
+                    }
                     if url.startAccessingSecurityScopedResource() { scopedURLs.append(url) }
                 }
             }
         }
         publishItems()
+        save()
         status = folders.isEmpty ? "尚未连接自动入口" : (pendingItems.isEmpty ? "等待新录音 · 有新文件时自动检查" : "已恢复 \(pendingItems.count) 份未完成素材 · 同时接收新录音")
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in await self?.scan() }
@@ -271,6 +277,15 @@ final class RecordingInbox: ObservableObject {
         save(); status = "将在下一次检查重试未完成的素材"
         Task { await scan() }
     }
+    /// 模型配置刚就绪时让等待中的素材立刻再试一次，而不是等满暂缓间隔。
+    func resumeDeferred() {
+        guard started else { return }
+        var changed = false
+        for id in Array(items.keys) where items[id]?.state == .retryScheduled {
+            items[id]?.nextAttempt = now(); changed = true
+        }
+        if changed { save(); Task { await scan() } }
+    }
     func retry(_ id: String) {
         guard var item = items[id], item.state != .processing else { return }
         failures.remove(id)
@@ -295,7 +310,8 @@ final class RecordingInbox: ObservableObject {
     private func recordProcessed(_ item: RecordingInboxItem) {
         receipts.insert(item.id); failures.remove(item.id); items[item.id] = nil
         // 同一文件先失败、重试后成功时，旧条目会留在入口里继续显示失败；一并清掉。
-        for key in items.filter({ $0.value.folderID == item.folderID && $0.value.path == item.path }).map(\.key) {
+        // 正在处理的条目不能清：它的 finish 找不到条目时扫描闸门就再也放不开了。
+        for key in items.filter({ $0.value.folderID == item.folderID && $0.value.path == item.path && $0.value.state != .processing }).map(\.key) {
             items[key] = nil; failures.remove(key)
         }
         if let stamp = item.fileStamp, let index = folders.firstIndex(where: { $0.id == item.folderID }) {
@@ -303,12 +319,15 @@ final class RecordingInbox: ObservableObject {
         }
     }
     private func finish(_ id: String, outcome: RecordingInboxOutcome) {
+        // 无论条目是否还在，本次整理都已结束；扫描闸门必须释放，否则入口永久停摆。
+        defer { activeFolderID = nil; save(); scheduleRetryWake() }
         guard var item = items[id] else { return }
         item.updatedAt = now(); item.nextAttempt = nil
+        let name = URL(fileURLWithPath: item.path).lastPathComponent
         switch outcome {
         case .completed:
             recordProcessed(item)
-            status = "已完成：\(URL(fileURLWithPath: item.path).lastPathComponent) · 等待下一份录音"
+            status = "已完成：\(name) · 等待下一份录音"
         case .retryableFailure(let explanation):
             item.explanation = explanation
             if item.attempts > 0, item.attempts <= retryDelays.count {
@@ -317,16 +336,23 @@ final class RecordingInbox: ObservableObject {
                 status = "整理暂未完成，将有限自动重试；原件保留"
             } else {
                 item.state = .needsAttention; failures.insert(id)
-                status = "自动重试仍未完成；原件保留，请查看原因后手动重试"
+                status = "「\(name)」需要处理：\(explanation)"
+                LocalNotice.post(title: "有录音需要处理", body: "「\(name)」\(explanation)")
             }
             items[id] = item
+        case .deferred(let explanation):
+            item.explanation = explanation
+            item.attempts = max(0, item.attempts - 1)
+            item.state = .retryScheduled
+            item.nextAttempt = now().addingTimeInterval(retryDelays.last ?? 300)
+            items[id] = item
+            status = "「\(name)」暂缓：\(explanation)"
         case .needsAttention(let explanation):
             item.state = .needsAttention; item.explanation = explanation
             failures.insert(id); items[id] = item
-            status = "素材需要处理后再重试；原件保留"
+            status = "「\(name)」需要处理：\(explanation)"
+            LocalNotice.post(title: "有录音需要处理", body: "「\(name)」\(explanation)")
         }
-        activeFolderID = nil; save()
-        scheduleRetryWake()
     }
     func open(_ folder: RecordingInboxFolder) { NSWorkspace.shared.open(URL(fileURLWithPath: folder.path)) }
     func openPrivacySettings() { NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!) }
@@ -369,6 +395,7 @@ final class RecordingInbox: ObservableObject {
         scanning = true; defer { scanning = false }
         var unstable = false
         var blocked = false
+        var waitingForCondition = 0
         if canProcess() { await resumeSaved() }
         var nextObserved: [String: String] = [:]
         var batch: [RecordingInboxInput] = []
@@ -383,7 +410,7 @@ final class RecordingInbox: ObservableObject {
                     nextObserved[path] = stamp
                     guard folder.baseline[path] != stamp else { continue }
                     guard observed[path] == stamp else { unstable = true; continue }
-                    guard canProcessNow else { blocked = true; continue }
+                    guard canProcessNow else { blocked = true; waitingForCondition += 1; continue }
                     let url = URL(fileURLWithPath: path)
                     let digest: String
                     if let pending = items.values.first(where: { $0.folderID == folder.id && $0.path == path && $0.fileStamp == stamp }) {
@@ -425,6 +452,9 @@ final class RecordingInbox: ObservableObject {
             }
         }
         observed = nextObserved
+        if blocked, waitingForCondition > 0 {
+            status = "发现 \(waitingForCondition) 份新录音，等待处理条件：文本模型或本地转写就绪、另一段整理完成"
+        }
         guard !batch.isEmpty else { scheduleFollowUp(unstable: unstable, blocked: blocked); return }
         activeFolderID = items[batch[0].digest]?.folderID
         status = "正在转写并判断 \(batch.count) 段录音的连续表达"

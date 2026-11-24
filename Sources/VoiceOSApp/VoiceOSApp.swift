@@ -529,6 +529,9 @@ final class ControlCenter: ObservableObject {
     /// 应用内配置（或导入的配置文件）转成 Python 子进程环境。地址、型号与核对强度
     /// 都跟随设置页；密钥只存在于内存与子进程环境，不写盘、不打印。
     var textModelOrganizerEnvironment: [String: String]? {
+        // 只有端口策略已接受的配置才会交给 Python：避免设置页里一个尚未通过
+        // 校验的地址把密钥带进整理脚本。
+        guard modelConfigured else { return nil }
         if let config = TextModelConfiguration.load(), let key = TextModelKeychain.apiKey(), !key.isEmpty,
            let url = URL(string: config.baseURL), url.scheme != nil {
             return ["VOICEOS_TEXT_BASE_URL": url.absoluteString, "VOICEOS_TEXT_API_KEY": key,
@@ -1795,30 +1798,29 @@ final class ControlCenter: ObservableObject {
             reportWorkspaceError(error.localizedDescription,retry:.textModel)
         }
     }
-    /// 设置页保存内部配置：校验 → 密钥进钥匙串 → 配置存应用内 → 安装端口。
+    /// 设置页保存内部配置：先让端口策略接受这份地址与密钥，再落盘；校验失败不留半保存状态。
     func applyTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> Bool {
         guard let url = URL(string: config.baseURL) else { status = "服务地址无效"; return false }
-        // 先落盘再构建端口：钥匙串授权被拒绝或端口构建失败时，用户的输入不会丢，
-        // 也不会出现「配置已存、密钥为空」的半保存状态。
-        do {
-            try TextModelKeychain.save(apiKey)
-        } catch {
-            status = "无法把密钥保存到系统钥匙串：" + error.localizedDescription + "（请在弹窗中点「允许」后重试）"
-            return false
-        }
-        config.save()
         do {
             let suite = try LocalTextModel.loadSuite(
                 settings: LocalTextModel.Settings(address: url, key: apiKey, model: config.model,
                                                   noteEffort: config.noteEffort, topicEffort: config.topicEffort,
                                                   reviewEffort: config.reviewEffort),
                 segmentRequestTimeout: 600, segmentStreaming: true)
+            do {
+                try TextModelKeychain.save(apiKey)
+            } catch {
+                status = "无法把密钥保存到系统钥匙串：" + error.localizedDescription + "（请在弹窗中点「允许」后重试）"
+                return false
+            }
+            config.save()
             UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
             UserDefaults.standard.set(false, forKey: "voiceos.textModelConfigurationCleared.v1")
+            textConfigurationFile = nil
             installTextModelSuite(suite, configurationName: config.model, resume: true)
             return true
         } catch {
-            status = "已保存配置，但端口初始化失败：" + error.localizedDescription + "；可先点「测试连接」确认服务"
+            status = "配置未保存：" + error.localizedDescription + "；可先点「测试连接」确认服务"
             return false
         }
     }
@@ -1889,6 +1891,8 @@ final class ControlCenter: ObservableObject {
         textModel = port; modelConfigured = true
         modelSummary = configurationName + " · " + port.configuration.provider.replacingOccurrences(of: "responses:", with: "")
         status = "文本模型已就绪 · 只处理你选择并授权的文字"
+        // 之前因配置未就绪而暂缓的录音，现在立刻续上，不等暂缓间隔到期。
+        recordingInbox.resumeDeferred()
         // A queued intent may have been restored before the user selected a
         // configuration. Wake the durable worker exactly once after the
         // new model identity is installed; scheduleProcessing() itself
@@ -2027,7 +2031,7 @@ final class ControlCenter: ObservableObject {
         }()
         guard blocker == nil,let store,var speech=speechPort as? LocalQwenSpeechPort,let grouping=recordingExpressionModel,
               let configuration=textModelOrganizerEnvironment,let script=Bundle.main.url(forResource:"organize_podcast",withExtension:"py"),organizingSourceID == nil,!fullRecordingBusy else {
-            finished(Dictionary(uniqueKeysWithValues:batch.map { ($0.digest,.retryableFailure(blocker ?? "请等待模型就绪与当前整理完成")) }));return
+            finished(Dictionary(uniqueKeysWithValues:batch.map { ($0.digest,.deferred(blocker ?? "前置条件尚未就绪，稍后自动继续")) }));return
         }
         fullRecordingBusy=true;fullRecordingCount=nil
         fullRecordingCompletedSourceID=nil
@@ -2201,9 +2205,23 @@ final class ControlCenter: ObservableObject {
     }
     private func automaticRecordingFailure(_ error:Error) -> RecordingInboxOutcome {
         let message=error.localizedDescription
-        if error is CancellationError { return .retryableFailure("处理被中断，将从已保存的转写与分组继续") }
-        let temporary=["HTTP 429","HTTP 502","HTTP 503","HTTP 504","网络","timed out","connection","response.completed","本批录音","素材仍在更新"].contains { message.localizedCaseInsensitiveContains($0) }
-        return temporary ? .retryableFailure(message) : .needsAttention(message)
+        if error is CancellationError { return .deferred("处理被中断，将从已保存的转写与分组继续") }
+        // 按 HTTP 状态分类：408/429 与 5xx 是瞬时问题；401/403 是密钥或权限问题，需要用户处理。
+        if let status = Self.httpStatus(in: message) {
+            if status == 401 || status == 403 {
+                return .needsAttention("文本服务拒绝访问（HTTP \(status)）；请检查模型密钥与权限，重新保存后重试")
+            }
+            if status == 408 || status == 429 || (500...599).contains(status) {
+                return .retryableFailure(message)
+            }
+            return .needsAttention(message)
+        }
+        let temporary=["网络","timed out","connection","response.completed","本批录音","素材仍在更新","尚未完成","没有完成回执"]
+        return temporary.contains { message.localizedCaseInsensitiveContains($0) } ? .retryableFailure(message) : .needsAttention(message)
+    }
+    private static func httpStatus(in message:String) -> Int? {
+        guard let range=message.range(of: #"HTTP (\d{3})"#, options:.regularExpression) else { return nil }
+        return Int(message[range].dropFirst(5))
     }
     /// 完成面板的「打开这篇笔记」：收起面板并打开这次录音的材料页。
     func openCompletedFullRecording(_ sourceID: String) {
