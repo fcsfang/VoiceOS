@@ -53,13 +53,12 @@ struct WorkspaceMonitorView: View {
             VStack(alignment: .leading, spacing: WorkspaceMetrics.sectionGap) {
                 if showsSettings {
                     settingsSection
+                    sourceStatusSection
                 } else {
                     runBar
-                    pushNotConfiguredBanner
                     monitorLoadFailureNotice
                     todayReportSection
                     historySection
-                    sourceStatusSection
                 }
             }
             .frame(maxWidth: 680, alignment: .leading)
@@ -182,19 +181,6 @@ struct WorkspaceMonitorView: View {
         return open > 0 ? "\(open) 项待办" : "没有待办"
     }
 
-    @ViewBuilder private var pushNotConfiguredBanner: some View {
-        if monitorLoaded, let report = model.monitorLatestReport, report.reportDate != todayKey,
-           report.state != .failed, !model.monitorPushConfigured {
-            HStack(spacing: 10) {
-                WorkspaceNoticeText(message: "最近一次报告已生成，微信推送尚未配置",
-                                    severity: .warning)
-                Button("配置微信推送") { showsSettings = true }
-                    .buttonStyle(.workspaceQuietCompact)
-                    .accessibilityIdentifier("monitor.push.banner.settings")
-            }
-            .accessibilityIdentifier("monitor.push.banner")
-        }
-    }
 
     @ViewBuilder private var monitorLoadFailureNotice: some View {
         if monitorLoadState == .failed {
@@ -251,9 +237,6 @@ struct WorkspaceMonitorView: View {
                         Text(model.monitorLatestReport.map { "最近一次报告是 " + $0.reportDate + "；今天还没有检查。" }
                              ?? "还没有报告；点击「立即检查」开始第一次检查。")
                             .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
-                        WorkspaceListDivider()
-                        Text("检查会先从已启用的来源采集，再按授权情况交给模型分析。云端分析未授权时不会发送任何原文。")
-                            .vosFont(WorkspaceText.caption).foregroundStyle(palette.tertiaryText)
                         earlierOpenItemsHint
                     }
                     .padding(.horizontal, 20)
@@ -315,9 +298,8 @@ struct WorkspaceMonitorView: View {
 
     private func reportCardContent(report: MonitorReport, isLatest: Bool) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            if let generated = ControlCenter.monitorGeneratedText(report) {
-                Text(generated).vosFont(WorkspaceText.meta).foregroundStyle(palette.tertiaryText)
-            }
+            itemsView(report: report)
+            if isLatest { earlierOpenItemsHint }
             WorkspaceListDivider()
             VStack(alignment: .leading, spacing: 10) {
                 Text(report.headline.isEmpty ? "没有标题" : report.headline).vosFont(WorkspaceText.rowTitle)
@@ -368,9 +350,9 @@ struct WorkspaceMonitorView: View {
                         .foregroundStyle(palette.secondaryText).textSelection(.enabled)
                 }
                 sourceFailureReasons(report)
-                WorkspaceListDivider()
-                itemsView(report: report)
-                if isLatest { earlierOpenItemsHint }
+                if let generated = ControlCenter.monitorGeneratedText(report) {
+                    Text(generated).vosFont(WorkspaceText.caption).foregroundStyle(palette.secondaryText)
+                }
             }
         }
         .padding(.horizontal, 20)
@@ -572,18 +554,11 @@ struct WorkspaceMonitorView: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(itemRowAccessibilityLabel(item))
-            Text("为什么相关：" + item.whyRelevant).vosFont(WorkspaceText.body)
-            Text("建议行动：" + item.suggestedAction).vosFont(WorkspaceText.body)
-                .foregroundStyle(palette.secondaryText)
-            if let conditions = item.conditions, !conditions.isEmpty {
-                Text("条件：" + conditions).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+            if !item.suggestedAction.isEmpty {
+                Text(item.suggestedAction).vosFont(WorkspaceText.body).foregroundStyle(palette.secondaryText)
             }
             if let uncertainty = item.uncertainty, !uncertainty.isEmpty {
-                Text("待核对：" + uncertainty).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
-            }
-            if item.relatedItemID != nil {
-                Text("与已有事项关联，本次更新了原事项并保留你的处理状态。")
-                    .vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText)
+                Text(uncertainty).vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
             }
             evidenceView(item)
             HStack(spacing: 12) {
@@ -640,6 +615,9 @@ struct WorkspaceMonitorView: View {
                 if expanded { expandedItems.insert(item.id) } else { expandedItems.remove(item.id) }
             })) {
             VStack(alignment: .leading, spacing: 10) {
+                if !item.whyRelevant.isEmpty { Text(item.whyRelevant).vosFont(WorkspaceText.meta) }
+                if let conditions = item.conditions, !conditions.isEmpty { Text("条件：" + conditions).vosFont(WorkspaceText.meta) }
+                if item.relatedItemID != nil { Text("已更新关联事项，处理状态已保留。").vosFont(WorkspaceText.meta) }
                 Text(item.evidenceQuote).vosFont(WorkspaceText.body)
                     .padding(.leading, 10)
                     .overlay(alignment: .leading) { Rectangle().fill(palette.border).frame(width: 2) }

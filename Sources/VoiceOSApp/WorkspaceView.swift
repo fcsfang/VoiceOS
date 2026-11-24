@@ -828,7 +828,13 @@ struct WorkspaceView: View {
                 ForEach(sidebarItems, id: \.id) { item in
                     let selected = sidebarSelection.wrappedValue == item.title
                     Button { openSidebarPage(item.page) } label: {
-                        Label(item.title, systemImage:item.icon)
+                        Label {
+                            Text(item.title)
+                        } icon: {
+                            Image(systemName:item.icon)
+                                .symbolRenderingMode(.monochrome)
+                                .foregroundStyle(selected ? Color.primary : Color.secondary)
+                        }
                             .foregroundStyle(selected ? Color.primary : Color.secondary)
                             .fontWeight(selected ? .semibold : .regular)
                             .frame(maxWidth:.infinity, alignment:.leading)
@@ -858,6 +864,7 @@ struct WorkspaceView: View {
                 }
             }
             .listStyle(.sidebar)
+            .tint(.primary)
             VStack(alignment:.leading,spacing:8) {
                 if model.organizingTopics || model.assistantBusy || model.followupBusy {
                     HStack {

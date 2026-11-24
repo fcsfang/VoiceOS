@@ -32,7 +32,6 @@ struct TaskInitiationView: View {
     @State private var stepsByRecord: [String: [TaskInitiationStep]] = [:]
     @State private var archivedRecords: [TaskInitiationRecord] = []
     @State private var showArchived = false
-    @State private var didAutoSelect = false
 
     private var records: [TaskInitiationRecord] { model.taskInitiations }
     private var visibleRecords: [TaskInitiationRecord] { showArchived ? archivedRecords : records }
@@ -76,11 +75,9 @@ struct TaskInitiationView: View {
         }
         .onAppear {
             artifactDraft = selected?.artifact ?? ""
-            autoSelectLatestDraft()
             reloadSteps()
         }
         .onChange(of: records.map(\.id)) { _, _ in
-            autoSelectLatestDraft()
             reloadSteps()
         }
         .onChange(of: showArchived) { _, shown in
@@ -103,7 +100,7 @@ struct TaskInitiationView: View {
     }
 
     private var composer: some View {
-        WorkspaceSection(title: "新的问题或任务", icon: "square.and.pencil") {
+        Group {
             VStack(alignment: .leading, spacing: 14) {
                 ZStack(alignment: .topLeading) {
                     TextEditor(text: $model.initiationText).vosFont(WorkspaceText.body).scrollContentBackground(.hidden).frame(minHeight: 120)
@@ -137,17 +134,17 @@ struct TaskInitiationView: View {
                     Text("直接给草稿").tag(TaskInitiationMode.direct)
                     Text("先问一个关键问题").tag(TaskInitiationMode.interactive)
                 }.pickerStyle(.segmented)
-                Toggle("允许将这段文字发送给云端模型", isOn: $allowCloud)
                 if !model.modelConfigured {
                     Text("尚未配置文本模型；请先在设置中连接模型。").vosFont(WorkspaceText.meta).foregroundStyle(palette.warning)
                 }
                 HStack(spacing: 12) {
-                    Button(model.initiationBusy ? "正在处理…" : "开始") { generate() }
+                    Toggle("允许将这段文字发送给云端模型", isOn: $allowCloud)
+                    Spacer()
+                    Button(model.initiationBusy ? "正在处理…" : (mode == .direct ? "生成草稿" : "开始讨论")) { generate() }
                     .buttonStyle(generateStyle)
                     .disabled(model.initiationBusy || !model.modelConfigured || !allowCloud)
                     .accessibilityIdentifier("initiation.generate")
                     if model.initiationBusy { ProgressView().controlSize(.small) }
-                    Spacer()
                 }
                 if !model.initiationStatus.isEmpty {
                     Text(model.initiationStatus).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).textSelection(.enabled)
@@ -448,12 +445,6 @@ struct TaskInitiationView: View {
         }
     }
 
-    private func autoSelectLatestDraft() {
-        guard !didAutoSelect, selectedID == nil else { return }
-        guard let latest = records.first(where: { $0.state == "draft" && $0.copiedAt == nil }) else { return }
-        didAutoSelect = true
-        selectedID = latest.id
-    }
 
     private func reloadSteps() {
         guard let store = model.store else { stepsByRecord = [:]; return }
