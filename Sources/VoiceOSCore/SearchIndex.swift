@@ -148,7 +148,7 @@ extension VoiceOSStore {
         return SearchTokens(drivable: drivable, filters: filters)
     }
 
-    private var searchIndexShape: String { "cjk-spaced-v3-notes-" + TimeZone.current.identifier }
+    private var searchIndexShape: String { "cjk-spaced-v4-notes-" + TimeZone.current.identifier }
 
     private func searchSpaced(_ text: String) -> String {
         var result = ""
@@ -299,21 +299,7 @@ extension VoiceOSStore {
             for row in rows {
                 guard let key = row["expression_key"], let json = row["note_json"],
                       let note = try? JSONDecoder().decode(MaterialNote.self, from: Data(json.utf8)) else { continue }
-                var parts = [note.title]
-                if let lead = note.lead { parts.append(lead) }
-                for section in note.sections {
-                    if let heading = section.heading { parts.append(heading) }
-                    parts.append(contentsOf: section.paragraphs.map(\.text))
-                }
-                for block in NoteBoardAdapting.blocks(for: note) {
-                    if let heading = block.heading { parts.append(heading) }
-                    if let text = block.text { parts.append(text) }
-                    if let quote = block.quote { parts.append(quote) }
-                    if let title = block.titleOverride { parts.append(title) }
-                    parts.append(contentsOf: (block.paragraphs ?? []).map(\.text))
-                    if let annotation = block.annotation { parts.append(annotation.text) }
-                }
-                map[key] = parts.joined(separator: "\n")
+                map[key] = note.searchableText
             }
             return map
         }()

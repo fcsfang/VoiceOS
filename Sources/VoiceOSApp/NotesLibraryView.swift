@@ -12,7 +12,7 @@ struct NotesLibraryView: View {
     /// 去材料页看全部来源。
     var openMaterials: () -> Void = {}
 
-    @State private var notes: [StoredMaterialNote] = []
+    @State private var notes: [NoteLibraryRow] = []
     @State private var query = ""
     @State private var readingStates: [String: SourceReadingState] = [:]
     @State private var selectedPending: Set<String> = []
@@ -32,21 +32,10 @@ struct NotesLibraryView: View {
         }
     }
 
-    private var filtered: [StoredMaterialNote] {
+    private var filtered: [NoteLibraryRow] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return notes }
-        return notes.filter { stored in self.matches(stored, query: q) }
-    }
-
-    private func matches(_ stored: StoredMaterialNote, query: String) -> Bool {
-        let note = stored.note
-        var parts = [note.title]
-        if let lead = note.lead { parts.append(lead) }
-        for section in note.sections {
-            if let heading = section.heading { parts.append(heading) }
-            parts.append(contentsOf: section.paragraphs.map(\.text))
-        }
-        return parts.joined(separator: "\n").localizedCaseInsensitiveContains(query)
+        return notes.filter { $0.searchableText.localizedCaseInsensitiveContains(q) }
     }
 
     var body: some View {
@@ -139,19 +128,19 @@ struct NotesLibraryView: View {
             } else if filtered.isEmpty {
                 Text("没有匹配的笔记").foregroundStyle(palette.secondaryText)
             } else {
-                VStack(alignment: .leading, spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(filtered.enumerated()), id: \.element.id) { index, stored in
                         if index > 0 { WorkspaceListDivider() }
                         Button { open(stored) } label: {
                             HStack(alignment: .firstTextBaseline, spacing: 13) {
                                 VStack(alignment: .leading, spacing: 5) {
                                     // 标题不截断：长短由内容决定，列表用换行与滚动适配。
-                                    Text(MaterialNoteHomeText.title(stored.note) ?? "未命名笔记")
+                                    Text(stored.title)
                                         .vosFont(WorkspaceText.rowTitle)
                                         .foregroundStyle(palette.text)
                                         .fixedSize(horizontal: false, vertical: true)
                                         .multilineTextAlignment(.leading)
-                                    if let preview = MaterialNoteHomeText.preview(stored.note) {
+                                    if let preview = stored.preview {
                                         Text(preview).vosFont(WorkspaceText.meta)
                                             .foregroundStyle(palette.secondaryText)
                                             .lineLimit(2)
@@ -176,18 +165,27 @@ struct NotesLibraryView: View {
             }
         }
         .task(id: HomeRecentNotesKeyForNotes(records: model.recordsRevision, notes: model.materialNotesRevision)) {
-            await reload()
+            guard let store = model.store else { return }
+            let rows = try? await store.noteLibraryRows()
+            if !Task.isCancelled, let rows { notes = rows }
         }
         .task(id: model.recordsRevision) { readingStates = await model.readingStates() }
     }
 
-    private func open(_ stored: StoredMaterialNote) {
-        guard let first = stored.expressionKey.split(separator: "|").first.map(String.init) else { return }
-        openNote(first)
-    }
-
-    private func reload() async {
-        notes = await model.recentMaterialNotes(limit: 500)
+    private func open(_ stored: NoteLibraryRow) {
+        let ids = stored.expressionKey.split(separator: "|").map(String.init)
+        let index = model.sourcePageIndex
+        for id in ids {
+            if let expression = index.expression(for: id),
+               VoiceOSStore.materialNoteExpressionKey(expression.sourceIDs + Array((expression.externalVersions ?? [:]).keys)) == stored.expressionKey,
+               let personalID = expression.sourceIDs.first {
+                openNote(personalID)
+                return
+            }
+        }
+        if let id = ids.first(where: { index.recordsByID[$0]?.origin == "user" }) ?? ids.first {
+            openNote(id)
+        }
     }
 }
 
@@ -196,12 +194,23 @@ private struct HomeRecentNotesKeyForNotes: Equatable {
     let notes: Int
 }
 
-extension ControlCenter {
-    /// 每个表达最新一版笔记，按整理时间倒序；首页（笔记页）与最近笔记共用。
-    @MainActor
-    func recentMaterialNotes(limit: Int = 8) async -> [StoredMaterialNote] {
-        guard let store else { return [] }
-        return (try? await store.recentMaterialNotes(limit: limit)) ?? []
+private struct NoteLibraryRow: Identifiable, Sendable {
+    let id: String
+    let expressionKey: String
+    let title: String
+    let preview: String?
+    let createdAt: String
+    let searchableText: String
+}
+
+private extension VoiceOSStore {
+    func noteLibraryRows() throws -> [NoteLibraryRow] {
+        try recentMaterialNotes(limit: nil).map { stored in
+            NoteLibraryRow(id: stored.id, expressionKey: stored.expressionKey,
+                           title: MaterialNoteHomeText.title(stored.note) ?? "未命名笔记",
+                           preview: MaterialNoteHomeText.preview(stored.note),
+                           createdAt: stored.createdAt, searchableText: stored.note.searchableText)
+        }
     }
 }
 

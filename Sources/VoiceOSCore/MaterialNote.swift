@@ -5,6 +5,23 @@ import Foundation
 /// ID records an anchor that could not be located, while a missing transcript
 /// version records an anchor whose version was not known at generation time.
 public struct MaterialNote: Codable, Sendable, Equatable {
+    public var searchableText: String {
+        var parts = [title]
+        if let lead { parts.append(lead) }
+        for block in NoteBoardAdapting.blocks(for: self) {
+            parts.append(contentsOf: [block.heading, block.text, block.quote, block.titleOverride,
+                                      block.annotation?.title, block.annotation?.text].compactMap { $0 })
+            for paragraph in block.paragraphs ?? [] {
+                parts.append(paragraph.text)
+                for annotation in paragraph.annotations ?? [] {
+                    if let title = annotation.title { parts.append(title) }
+                    parts.append(annotation.text)
+                }
+            }
+        }
+        return parts.joined(separator: "\n")
+    }
+
     /// 一条启发批注：AI 的声音，可以短到一句，也可以长到一篇；形式、条数、
     /// 角色都由模型按内容判断。quote/startsFrom 只是定位辅助，可空。
     public struct Annotation: Codable, Sendable, Equatable, Identifiable {
@@ -181,8 +198,8 @@ extension VoiceOSStore {
 
     /// 最近更新的笔记：每个表达取最新一版，按保存时间倒序。首页「最近笔记」
     /// 用它——旧录音今天才整理出的笔记，也能凭整理时间浮现，而不是按录音日期。
-    public func recentMaterialNotes(limit: Int = 8) throws -> [StoredMaterialNote] {
-        guard limit > 0 else { return [] }
+    public func recentMaterialNotes(limit: Int? = 8) throws -> [StoredMaterialNote] {
+        if let limit, limit <= 0 { return [] }
         let rows = try db.query(
             """
             SELECT * FROM material_notes m
@@ -191,7 +208,7 @@ extension VoiceOSStore {
                              ORDER BY created_at DESC, rowid DESC LIMIT 1)
             ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?
             """,
-            [String(limit)])
+            [String(limit ?? -1)])
         return rows.compactMap { try? Self.storedMaterialNote($0) }
     }
 
