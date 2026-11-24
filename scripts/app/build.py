@@ -30,7 +30,7 @@ env.pop('SDKROOT', None)
 # on a 16GB machine. Per-file optimization stays within ~2GB and builds faster.
 flags = ['-j', '4']
 if args.configuration == 'release':
-    flags += ['-Xswiftc', '-no-whole-module-optimization']
+    flags += ['-Xswiftc', '-no-whole-module-optimization', '-Xswiftc', '-incremental']
 # Serialize with every other swift build on this machine; 16GB cannot hold two.
 lock = Path('/tmp/voiceos-swift-build.lock')
 import time
