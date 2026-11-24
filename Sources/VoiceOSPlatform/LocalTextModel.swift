@@ -86,6 +86,11 @@ public enum LocalTextModel {
     }
     /// 读取配置文件（导入 / 迁移用），不打印任何密钥。
     public static func inspect(_ file: URL) throws -> Settings { try settings(from: file) }
+    private static func normalizedAddress(_ raw: String) -> URL? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        while text.hasSuffix("/") { text.removeLast() }
+        return URL(string: text)
+    }
     private static func settings(from file: URL) throws -> Settings {
         do {
             let bytes = try Data(contentsOf: file)
@@ -98,7 +103,7 @@ public enum LocalTextModel {
                       let options = openAI["options"] as? [String: Any],
                       let rawAddress = options["baseURL"] as? String,
                       let key = options["apiKey"] as? String,
-                      let address = URL(string: rawAddress), !key.isEmpty, key != "REPLACE_LOCALLY" else { throw VoiceOSError("missing config") }
+                      let address = normalizedAddress(rawAddress), !key.isEmpty, key != "REPLACE_LOCALLY" else { throw VoiceOSError("missing config") }
                 let model = (root["model"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? defaultModel
                 let noteEffort = (root["noteEffort"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "high"
                 let topicEffort = (root["topicEffort"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "high"
@@ -115,7 +120,7 @@ public enum LocalTextModel {
                 guard settings[name] == nil else { throw VoiceOSError("duplicate config") }
                 settings[name] = try JSONDecoder().decode(String.self, from: Data(fields[1].utf8))
             }
-            guard let address = settings["OPENAI_BASE_URL"].flatMap(URL.init(string:)), let key = settings["OPENAI_API_KEY"], key != "REPLACE_LOCALLY" else { throw VoiceOSError("missing config") }
+            guard let address = settings["OPENAI_BASE_URL"].flatMap(normalizedAddress), let key = settings["OPENAI_API_KEY"], key != "REPLACE_LOCALLY" else { throw VoiceOSError("missing config") }
             func optional(_ name: String) -> String? {
                 guard let value = settings[name]?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else { return nil }
                 return value

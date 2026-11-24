@@ -41,7 +41,9 @@ def quality_directory(base, items, folders, render_only=False):
     context = [{"transcript": reviewed_transcript(folder), "source": json.loads((folder / "source.json").read_text())} for folder in folders]
     digest = hashlib.sha256(json.dumps([items, context, EXPRESSION_CONTEXT, model_identity()], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     directory = base / "质量核对-v7" / digest[:16]
-    if render_only and not directory.exists(): return base / "质量核对-v5"
+    if render_only and not directory.exists():
+        # 不带身份的回退目录会把别的模型/旧管线的结果当作本次输入；直接报清楚缺什么。
+        raise ValueError("当前端点、模型与强度没有已完成的核对缓存：" + str(directory) + "；请先运行整理再渲染")
     return directory
 
 
@@ -114,7 +116,7 @@ def settings():
     if not (env_address and env_key and env_model and env_effort):
         try:
             text = Path(os.environ.get("VOICEOS_MODEL_CONFIG_FILE", ROOT / ".env")).read_text().strip()
-        except OSError:
+        except (OSError, UnicodeError):
             text = ""
         try:
             if text.startswith("{"):
@@ -135,8 +137,11 @@ def settings():
                 # Accept the same aliases the in-app importer understands.
                 file_model = values.get("OPENAI_MODEL") or values.get("VOICEOS_TEXT_MODEL", "")
                 file_effort = values.get("OPENAI_REVIEW_EFFORT") or values.get("VOICEOS_REVIEW_EFFORT", "")
-        except (ValueError, KeyError, TypeError):
+        except (ValueError, KeyError, TypeError, AttributeError):
             file_address = file_key = file_model = file_effort = ""
+    # 地址与密钥必须同源或同主机：只注入地址时，文件里的密钥不能跟进新主机。
+    if env_address and not env_key and file_key and urllib.parse.urlparse(env_address).hostname != urllib.parse.urlparse(file_address).hostname:
+        raise ValueError("环境变量只提供了文本服务地址，文件中的密钥不会发往这个主机；请同时注入 VOICEOS_TEXT_API_KEY")
     address = (env_address or file_address).strip().rstrip("/")
     key = (env_key or file_key).strip()
     model = env_model or file_model
@@ -205,7 +210,12 @@ def preserve_rejected(cache, content, error):
 
 
 def ask(payload, instructions, cache, schema=SCHEMA, max_output_tokens=65536, read_only=False):
-    address, key, model, effort = settings()
+    try:
+        address, key, model, effort = settings()
+    except ValueError as error:
+        if read_only:
+            raise ValueError(f"渲染需要生成该结果时的模型配置（{error}）；缓存：{cache}") from None
+        raise
     # The cache identity names the endpoint, model and effort that produced the
     # result: changing any of them must re-run, not replay an old response.
     identity = hashlib.sha256(json.dumps([payload, instructions, schema, address, model, effort], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -601,7 +611,8 @@ def merge(folders, items, base, render_only=False):
         prompt += "\n用户自己的观点、判断、解释、学习收获单独保留为claim，跟进状态用knowledge；不要把它们改写成未来任务。只转述嘉宾且没有用户明确认同的观点不冒充用户观点。实际未来意图仍按task/question/goal/idea分类，不把任务改成普通观点而漏掉跟进。"
     print("正在合并重复意图并核对跟进状态；全部候选保留", flush=True)
     draft_receipt = quality_directory(base, items, folders, render_only) / "清单合并模型结果.json"
-    if render_only and not draft_receipt.exists(): draft_receipt = base / "清单合并模型结果.json"
+    if render_only and not draft_receipt.exists():
+        raise ValueError("当前端点、模型与强度没有已完成的清单合并缓存：" + str(draft_receipt) + "；请先运行整理再渲染")
     if render_only:
         draft = json.loads(draft_receipt.read_text())["result"]
         validate_result(draft, group_schema)

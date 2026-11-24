@@ -2395,7 +2395,7 @@ struct WorkspaceView: View {
                 Button("更改") { model.chooseLocalSpeech() }.buttonStyle(.workspaceSecondaryCompact).accessibilityLabel("更改语音转文字")
             }
             WorkspaceSettingsRow(title:"理解、核对与 AI 助理",
-                                 subtitle:model.textModelConfigured ? model.modelSummary : "尚未配置文本模型") {
+                                 subtitle:model.textModelConfigured ? model.modelSummary : (model.modelConfigIssue ?? "尚未配置文本模型")) {
                 HStack(spacing:8) {
                     if model.modelConfigured {
                         Button("清除") { model.clearTextModel() }.buttonStyle(.workspaceQuietCompact).accessibilityLabel("清除文本模型配置")
@@ -2514,7 +2514,7 @@ struct WorkspaceView: View {
                 Circle().fill(model.modelConfigured ? palette.success : palette.warning).frame(width:7,height:7).accessibilityHidden(true)
                 Text("文本模型").vosFont(WorkspaceText.body)
                 Spacer()
-                Text(model.modelConfigured ? model.modelSummary : "尚未配置").vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
+                Text(model.modelConfigured ? model.modelSummary : (model.modelConfigIssue ?? "尚未配置")).vosFont(WorkspaceText.meta).foregroundStyle(palette.secondaryText).lineLimit(1)
             }.padding(.horizontal,20).padding(.vertical,10)
             WorkspaceListDivider().padding(.horizontal,20)
             HStack(alignment: .firstTextBaseline, spacing: 8) {

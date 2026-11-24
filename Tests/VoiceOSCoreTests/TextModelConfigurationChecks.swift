@@ -28,6 +28,8 @@ extension CoreFlowTests {
         XCTAssertNil(TextModelConfiguration(baseURL: "not a url").validated())
         XCTAssertEqual(TextModelConfiguration(baseURL: " https://api.example.com/v1 ").validated()?.baseURL,
                        "https://api.example.com/v1")
+        XCTAssertEqual(TextModelConfiguration(baseURL: "https://api.example.com/v1/").validated()?.baseURL,
+                       "https://api.example.com/v1")
     }
 
     func test内部设置构建套件前先校验地址() {
@@ -36,5 +38,17 @@ extension CoreFlowTests {
         XCTAssertEqual(settings.model, "gpt-6.2-sol")
         XCTAssertEqual(settings.noteEffort, "xhigh")
         XCTAssertEqual(settings.topicEffort, "medium")
+    }
+
+    func test文本服务地址策略只接受授权主机的精确端点() {
+        XCTAssertTrue(TextModelHostPolicy.isAllowed(URL(string: "https://api.openai.com/v1")!))
+        XCTAssertTrue(TextModelHostPolicy.isAllowed(URL(string: "https://api.chiyi.cc/v1")!))
+        XCTAssertFalse(TextModelHostPolicy.isAllowed(URL(string: "http://api.openai.com/v1")!))
+        XCTAssertFalse(TextModelHostPolicy.isAllowed(URL(string: "https://api.example.com/v1")!))
+        XCTAssertFalse(TextModelHostPolicy.isAllowed(URL(string: "https://api.openai.com/v2")!))
+        XCTAssertFalse(TextModelHostPolicy.isAllowed(URL(string: "https://api.openai.com/v1/extra")!))
+        XCTAssertFalse(TextModelHostPolicy.isAllowed(URL(string: "https://api.openai.com/v1?x=1")!))
+        XCTAssertFalse(TextModelHostPolicy.isAllowed(URL(string: "https://api.openai.com:443/v1")!))
+        XCTAssertFalse(TextModelHostPolicy.isAllowed(URL(string: "https://user@api.openai.com/v1")!))
     }
 }

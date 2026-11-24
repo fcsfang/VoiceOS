@@ -518,7 +518,10 @@ final class ControlCenter: ObservableObject {
     @Published var understandingSource: String?
     @Published var modelConfigured = false
     @Published var modelSummary = "尚未配置文本模型"
+    /// 有配置但不可用时的具体原因；界面优先显示它，而不是笼统的「尚未配置」。
+    @Published var modelConfigIssue: String?
     @Published var speechSummary = "Qwen 本地转写 · 尚未配置"
+    private var organizerModelSnapshot: [String: String]?
     private var speechPort: (any SpeechPort)?
     var speechConfigured: Bool { speechPort is LocalQwenSpeechPort }
     /// 文本模型是否可用：内部配置与导入的配置文件都算就绪；文件不再是前置条件。
@@ -528,19 +531,9 @@ final class ControlCenter: ObservableObject {
     /// 应用内配置（或导入的配置文件）转成 Python 子进程环境。地址、型号与核对强度
     /// 都跟随设置页；密钥只存在于内存与子进程环境，不写盘、不打印。
     var textModelOrganizerEnvironment: [String: String]? {
-        // 只有端口策略已接受的配置才会交给 Python：避免设置页里一个尚未通过
-        // 校验的地址把密钥带进整理脚本。
+        // 端口安装时的同一份地址/密钥/型号/强度快照：端口与整理脚本不会读到两份不同的配置。
         guard modelConfigured else { return nil }
-        if let config = TextModelConfiguration.load(), let key = TextModelKeychain.apiKey(), !key.isEmpty,
-           let url = URL(string: config.baseURL), url.scheme != nil {
-            return ["VOICEOS_TEXT_BASE_URL": url.absoluteString, "VOICEOS_TEXT_API_KEY": key,
-                    "VOICEOS_TEXT_MODEL": config.model, "VOICEOS_TEXT_EFFORT": config.reviewEffort]
-        }
-        if let file = textConfigurationFile, let settings = try? LocalTextModel.inspect(file) {
-            return ["VOICEOS_TEXT_BASE_URL": settings.address.absoluteString, "VOICEOS_TEXT_API_KEY": settings.key,
-                    "VOICEOS_TEXT_MODEL": settings.model, "VOICEOS_TEXT_EFFORT": settings.reviewEffort]
-        }
-        return nil
+        return organizerModelSnapshot
     }
     var recordingModelIssue: String? {
         if !speechConfigured { return "尚未配置本地 Qwen 转写模型。" }
@@ -1288,13 +1281,21 @@ final class ControlCenter: ObservableObject {
             initialized = true; status = "准备就绪 · 媒体只在本机处理"
             StartupTrace.mark("start.initialized")
             restoreSpeechSelection()
+            let storedModelConfig = UserDefaults.standard.object(forKey: TextModelConfiguration.defaultsKey) != nil
             if TextModelConfiguration.load() != nil {
                 // 应用内部配置是权威：存在但读不到密钥时明确报告，绝不回退去覆盖它。
                 if !restoreInternalTextModelConfiguration() {
                     modelConfigured = false
+                    modelConfigIssue = "模型配置存在，但钥匙串中的密钥或服务地址不可用；请在设置中重新保存"
                     modelSummary = "模型配置需要重新保存"
-                    status = "文本模型配置存在，但钥匙串中的密钥或服务地址不可用；请在设置中重新保存"
+                    status = modelConfigIssue ?? ""
                 }
+            } else if storedModelConfig {
+                // 有数据却解不出来是「损坏」，不是「未配置」；不能静默回退去覆盖用户配置。
+                modelConfigured = false
+                modelConfigIssue = "模型配置已损坏；请在设置中重新保存"
+                modelSummary = "模型配置已损坏，需要重新保存"
+                status = modelConfigIssue ?? ""
             } else if UserDefaults.standard.bool(forKey: "voiceos.textModelConfigurationCleared.v1") {
                 // The user cleared the configuration in settings; do not fall
                 // back to the bundle's development .env on the next launch.
@@ -1321,6 +1322,8 @@ final class ControlCenter: ObservableObject {
                 recordingInbox.start(canProcess: { [weak self] in
                     guard let self else { return false }
                     return self.initialized && self.modelConfigured && self.speechPort is LocalQwenSpeechPort && self.organizingSourceID == nil && !self.fullRecordingBusy && self.worker == nil && self.understandingWorker == nil && !self.dictationActive && !self.dictationBusy && !self.importing && self.pausedActionBatch?.isRunning != true
+                        && self.textModelOrganizerEnvironment != nil && self.recordingExpressionModel != nil
+                        && Bundle.main.url(forResource: "organize_podcast", withExtension: "py") != nil
                 }, resumeSaved: { [weak self] in
                     await self?.resumeSavedRecordingExpressions()
                 }, receive: { [weak self] batch, finished in
@@ -1792,20 +1795,33 @@ final class ControlCenter: ObservableObject {
             // 文件只作为导入入口：读取后把地址、密钥、模型与强度迁移进应用内部
             // 配置（密钥进钥匙串），之后不再依赖这个文件。
             let suite = try LocalTextModel.loadSuite(from: file, segmentRequestTimeout: 600, segmentStreaming: true)
-            if let settings = try? LocalTextModel.inspect(file) {
-                try? TextModelKeychain.save(settings.key)
-                TextModelConfiguration(baseURL: settings.address.absoluteString, model: settings.model,
-                                       noteEffort: settings.noteEffort, topicEffort: settings.topicEffort,
-                                       reviewEffort: settings.reviewEffort).save()
-                UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
+            let settings = try LocalTextModel.inspect(file)
+            do {
+                try TextModelKeychain.save(settings.key)
+            } catch {
+                status = "无法把导入配置的密钥写入系统钥匙串：" + error.localizedDescription + "（请在弹窗中点「允许」后重试）"
+                reportWorkspaceError(status, retry: .textModel)
+                return
             }
-            installTextModelSuite(suite, configurationName: file.lastPathComponent, resume: resume)
+            TextModelConfiguration(baseURL: settings.address.absoluteString, model: settings.model,
+                                   noteEffort: settings.noteEffort, topicEffort: settings.topicEffort,
+                                   reviewEffort: settings.reviewEffort).save()
+            UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
+            installTextModelSuite(suite, configurationName: file.lastPathComponent, resume: resume,
+                                  organizerEnvironment: Self.organizerEnvironment(address: settings.address.absoluteString, key: settings.key,
+                                                                                    model: settings.model, effort: settings.reviewEffort))
             UserDefaults.standard.set(false, forKey: "voiceos.textModelConfigurationCleared.v1")
             textConfigurationFile = file
         } catch {
-            status = error.localizedDescription
-            reportWorkspaceError(error.localizedDescription,retry:.textModel)
+            // 历史路径指向的文件已经不可用：一次性移除，避免每次启动都重试同一个坏路径。
+            UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
+            status = "模型配置不可用（" + error.localizedDescription + "）；请在设置中重新填写或导入"
+            reportWorkspaceError(status,retry:.textModel)
         }
+    }
+    private static func organizerEnvironment(address: String, key: String, model: String, effort: String) -> [String: String] {
+        ["VOICEOS_TEXT_BASE_URL": address, "VOICEOS_TEXT_API_KEY": key,
+         "VOICEOS_TEXT_MODEL": model, "VOICEOS_TEXT_EFFORT": effort]
     }
     /// 设置页保存内部配置：先让端口策略接受这份地址与密钥，再落盘；校验失败不留半保存状态。
     func applyTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> Bool {
@@ -1816,17 +1832,22 @@ final class ControlCenter: ObservableObject {
                                                   noteEffort: config.noteEffort, topicEffort: config.topicEffort,
                                                   reviewEffort: config.reviewEffort),
                 segmentRequestTimeout: 600, segmentStreaming: true)
-            do {
-                try TextModelKeychain.save(apiKey)
-            } catch {
-                status = "无法把密钥保存到系统钥匙串：" + error.localizedDescription + "（请在弹窗中点「允许」后重试）"
-                return false
+            // 密钥没变时不重写钥匙串：只改型号或强度不该因为钥匙串锁定而保存失败。
+            if apiKey != (TextModelKeychain.apiKey() ?? "") {
+                do {
+                    try TextModelKeychain.save(apiKey)
+                } catch {
+                    status = "无法把密钥保存到系统钥匙串：" + error.localizedDescription + "（请在弹窗中点「允许」后重试）"
+                    return false
+                }
             }
             config.save()
             UserDefaults.standard.removeObject(forKey: "voiceos.textModelConfigPath.v1")
             UserDefaults.standard.set(false, forKey: "voiceos.textModelConfigurationCleared.v1")
             textConfigurationFile = nil
-            installTextModelSuite(suite, configurationName: config.model, resume: true)
+            installTextModelSuite(suite, configurationName: config.model, resume: true,
+                                  organizerEnvironment: Self.organizerEnvironment(address: url.absoluteString, key: apiKey,
+                                                                                    model: config.model, effort: config.reviewEffort))
             return true
         } catch {
             status = "配置未保存：" + error.localizedDescription + "；可先点「测试连接」确认服务"
@@ -1840,7 +1861,12 @@ final class ControlCenter: ObservableObject {
     }
     /// 用给定配置发一次极小请求，验证地址、密钥与模型可用；返回面向用户的结果与延迟。
     func testTextModelConfiguration(_ config: TextModelConfiguration, apiKey: String) async -> String {
-        guard let url = URL(string: config.baseURL)?.appendingPathComponent("responses") else { return "服务地址无效" }
+        guard let base = URL(string: config.baseURL) else { return "服务地址无效" }
+        // 与端口构造同一口径：未通过授权的地址不会收到这份密钥，测试连接也不例外。
+        guard TextModelHostPolicy.isAllowed(base) else {
+            return "服务地址须为 https://api.openai.com/v1 或 https://api.chiyi.cc/v1（不带端口、查询或子路径）"
+        }
+        let url = base.appendingPathComponent("responses")
         guard !apiKey.isEmpty else { return "没有可用的密钥：请填写后点「保存并启用」（若已在弹窗中拒绝钥匙串访问，请允许后重试）" }
         let payload: [String: Any] = ["model": config.model, "store": false,
             "reasoning": ["effort": "minimal"], "max_output_tokens": 32, "truncation": "disabled",
@@ -1876,10 +1902,15 @@ final class ControlCenter: ObservableObject {
                                                   noteEffort: config.noteEffort, topicEffort: config.topicEffort,
                                                   reviewEffort: config.reviewEffort),
                 segmentRequestTimeout: 600, segmentStreaming: true) else { return false }
-        installTextModelSuite(suite, configurationName: config.model, resume: false)
+        installTextModelSuite(suite, configurationName: config.model, resume: false,
+                              organizerEnvironment: Self.organizerEnvironment(address: url.absoluteString, key: key,
+                                                                                model: config.model, effort: config.reviewEffort))
         return true
     }
-    private func installTextModelSuite(_ suite: LocalTextModel.Suite, configurationName: String, resume: Bool) {
+    private func installTextModelSuite(_ suite: LocalTextModel.Suite, configurationName: String, resume: Bool,
+                                       organizerEnvironment: [String: String]? = nil) {
+        organizerModelSnapshot = organizerEnvironment
+        modelConfigIssue = nil
         // Long segmented cognition uses the explicitly validated SSE
         // transport and 600-second window. Its versioned identity prevents
         // queued non-streaming attempts from being silently replayed.

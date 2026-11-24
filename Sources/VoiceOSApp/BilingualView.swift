@@ -145,6 +145,9 @@ struct BilingualClient {
               let address = URL(string: config.baseURL) else {
             throw VoiceOSError("先在设置中选择文本模型")
         }
+        guard TextModelHostPolicy.isAllowed(address) else {
+            throw VoiceOSError("文本服务地址未通过授权校验；请在设置中重新保存")
+        }
         guard let key = TextModelKeychain.apiKey(), !key.isEmpty else {
             throw VoiceOSError("钥匙串中的模型密钥不可用；请在设置中重新保存模型配置")
         }
@@ -155,7 +158,10 @@ struct BilingualClient {
     }
 
     static var configuredModelName: String? {
-        TextModelConfiguration.load()?.model
+        guard let config = TextModelConfiguration.load(),
+              let address = URL(string: config.baseURL), TextModelHostPolicy.isAllowed(address),
+              let key = TextModelKeychain.apiKey(), !key.isEmpty else { return nil }
+        return config.model
     }
 
     func translate(_ paragraphs: [BilingualParagraph]) async throws -> [String?] {

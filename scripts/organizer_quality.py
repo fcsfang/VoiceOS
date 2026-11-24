@@ -102,16 +102,29 @@ def _merge_repair(first, repaired, span_ids):
         if span_id not in span_ids or not isinstance(text, str) or not text.strip() or counts[span_id] != 1:
             continue
         kept[span_id] = entry
-    merged = [dict(entry) for entry in entries(repaired)]
-    repaired_by_id = {}
-    for entry in merged:
-        repaired_by_id.setdefault(entry.get("span_id"), entry)
+    first_ids = {entry.get("span_id") for entry in first_entries}
+    merged = []
+    seen_ids = set()
+    ignored = []
+    for entry in entries(repaired):
+        span_id = entry.get("span_id")
+        # 修复轮只准处理第一轮出现过的片段：全新片段与重复引用都不采纳。
+        if span_id not in first_ids or span_id not in span_ids:
+            ignored.append(span_id)
+            continue
+        if span_id in seen_ids:
+            continue
+        seen_ids.add(span_id)
+        merged.append(dict(entry))
+    if ignored:
+        print("修复轮引入了首轮未判断的片段，已忽略：" + ", ".join(sorted({str(item) for item in ignored})), flush=True)
     for span_id, entry in kept.items():
-        current = repaired_by_id.get(span_id)
-        if current is None:
+        if span_id not in seen_ids:
             merged.append(dict(entry))
-        elif current.get("text") != entry.get("text"):
-            raise _TranscriptCorrectionError(f"修复轮改动了第一轮已通过校验的片段 {span_id}，拒绝采用这一轮结果")
+        else:
+            current = next(entry2 for entry2 in merged if entry2.get("span_id") == span_id)
+            if current.get("text") != entry.get("text"):
+                raise _TranscriptCorrectionError(f"修复轮改动了第一轮已通过校验的片段 {span_id}，拒绝采用这一轮结果")
     issues = [dict(issue) for issue in repaired.get("remaining_issues", []) if isinstance(issue, dict)]
     seen = {(issue.get("span_id"), issue.get("reason")) for issue in issues}
     for issue in first.get("remaining_issues", []):

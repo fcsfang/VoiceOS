@@ -112,6 +112,7 @@ final class RecordingInbox: ObservableObject {
                 }
             }
         }
+        Task { [weak self] in await self?.reconcileProcessedItems() }
         publishItems()
         save()
         status = folders.isEmpty ? "尚未连接自动入口" : (pendingItems.isEmpty ? "等待新录音 · 有新文件时自动检查" : "已恢复 \(pendingItems.count) 份未完成素材 · 同时接收新录音")
@@ -257,12 +258,15 @@ final class RecordingInbox: ObservableObject {
     func removeFolder(_ folder: RecordingInboxFolder) {
         guard let index = folders.firstIndex(where: { $0.id == folder.id }) else { return }
         let removed = folders.remove(at: index)
+        let removedItemIDs = items.filter { $0.value.folderID == removed.id }.map(\.key)
         let removedPath = URL(fileURLWithPath: removed.path).standardizedFileURL.path
         for url in scopedURLs where url.standardizedFileURL.path == removedPath {
             url.stopAccessingSecurityScopedResource()
         }
         scopedURLs.removeAll { $0.standardizedFileURL.path == removedPath }
         items = items.filter { $0.value.folderID != removed.id }
+        // 删掉入口也要消掉它留下的失败标记，否则同一内容在新入口会被当成旧失败。
+        for id in removedItemIDs { failures.remove(id) }
         folderErrors[removed.id] = nil
         if activeFolderID == removed.id { activeFolderID = nil }
         status = "已移除入口：\(removed.voiceMemos ? "语音备忘录" : URL(fileURLWithPath: removed.path).lastPathComponent) · 原文件保留在原处"
@@ -278,10 +282,11 @@ final class RecordingInbox: ObservableObject {
         Task { await scan() }
     }
     /// 模型配置刚就绪时让等待中的素材立刻再试一次，而不是等满暂缓间隔。
+    /// 只唤醒 attempts 为 0 的暂缓条目：真实瞬时失败至少重试过一次，提前唤醒会烧掉预算。
     func resumeDeferred() {
         guard started else { return }
         var changed = false
-        for id in Array(items.keys) where items[id]?.state == .retryScheduled {
+        for id in Array(items.keys) where items[id]?.state == .retryScheduled && items[id]?.attempts == 0 {
             items[id]?.nextAttempt = now(); changed = true
         }
         if changed { save(); Task { await scan() } }
@@ -293,6 +298,31 @@ final class RecordingInbox: ObservableObject {
         item.nextAttempt = now(); item.explanation = "已请求重试；复用已保存的音轨和转写进度"
         items[id] = item
         save(); Task { await scan() }
+    }
+    /// 启动对账：条目上保存的摘要可能早于文件最终内容（文件时间戳没变时扫描会直接跳过），
+    /// 但 receipts 说明当前内容已经处理过；这类条目应退役，而不是永远停在列表里。
+    private func reconcileProcessedItems() async {
+        guard !receipts.isEmpty else { return }
+        var changed = false
+        for id in Array(items.keys) {
+            guard let item = items[id], item.state != .processing, item.fileStamp != nil,
+                  FileManager.default.fileExists(atPath: item.path) else { continue }
+            let url = URL(fileURLWithPath: item.path)
+            let digest = await Task.detached(priority: .utility) { () -> String? in
+                do {
+                    let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
+                    var hash = SHA256()
+                    while let data = try file.read(upToCount: 1_048_576), !data.isEmpty { hash.update(data: data) }
+                    return hash.finalize().map { String(format: "%02x", $0) }.joined()
+                } catch { return nil }
+            }.value
+            guard let digest, digest != id, receipts.contains(digest),
+                  let current = items[id], current.state != .processing, current.folderID == item.folderID,
+                  current.path == item.path, current.fileStamp == item.fileStamp,
+                  current.updatedAt == item.updatedAt, current.nextAttempt == item.nextAttempt else { continue }
+            items[id] = nil; failures.remove(id); changed = true
+        }
+        if changed { save() }
     }
     private func publishItems() {
         pendingItems = items.values.sorted { $0.updatedAt > $1.updatedAt }
@@ -344,7 +374,7 @@ final class RecordingInbox: ObservableObject {
             item.explanation = explanation
             item.attempts = max(0, item.attempts - 1)
             item.state = .retryScheduled
-            item.nextAttempt = now().addingTimeInterval(retryDelays.last ?? 300)
+            item.nextAttempt = now().addingTimeInterval(retryDelays.first ?? 60)
             items[id] = item
             status = "「\(name)」暂缓：\(explanation)"
         case .needsAttention(let explanation):
@@ -418,8 +448,9 @@ final class RecordingInbox: ObservableObject {
                     guard canProcessNow else { blocked = true; waitingForCondition += 1; continue }
                     let url = URL(fileURLWithPath: path)
                     let digest: String
-                    if let pending = items.values.first(where: { $0.folderID == folder.id && $0.path == path && $0.fileStamp == stamp }) {
-                        // This file was already hashed when its durable intake was saved.
+                    if let pending = items.values.first(where: { $0.folderID == folder.id && $0.path == path && $0.fileStamp == stamp }), receipts.contains(pending.id) {
+                        // 只有已知处理完的条目才复用保存的摘要；其余按当前内容重新计算，
+                        // 避免沿用一个文件早期版本留下的摘要。
                         digest = pending.id
                     } else if let cached = contentDigests[path], cached.stamp == stamp { digest = cached.digest }
                     else { digest = try await Task.detached(priority: .utility) {
@@ -437,6 +468,10 @@ final class RecordingInbox: ObservableObject {
                     guard currentStamp == stamp else { unstable = true; continue }
                     guard canProcess(), folders.contains(where: { $0.id == folder.id && $0.enabled && $0.path == folder.path }) else { continue }
                     if receipts.contains(digest) {
+                        // 这个文件版本已经处理完：退役同路径上仍挂着的旧摘要条目，避免它们停在列表里。
+                        for key in items.filter({ $0.value.folderID == folder.id && $0.value.path == path && $0.value.state != .processing && $0.key != digest }).map(\.key) {
+                            items[key] = nil; failures.remove(key)
+                        }
                         if let index = folders.firstIndex(where: { $0.id == folder.id }) {
                             folders[index].baseline[path] = stamp; save()
                         }
@@ -447,12 +482,22 @@ final class RecordingInbox: ObservableObject {
                         if items[digest] == nil {
                             items[digest] = .init(id: digest, folderID: folder.id, path: path, state: .needsAttention, attempts: 0, explanation: "上次整理未完成，请手动重试", updatedAt: now(), fileStamp: stamp)
                             save()
-                        } else if let known = items[digest], known.folderID != folder.id || known.path != path {
+                        } else if var moved = items[digest], moved.folderID == folder.id, moved.path != path,
+                                  !FileManager.default.fileExists(atPath: moved.path) {
+                            // 同一入口内文件被改名或移动：继续跟踪新路径，不当作跨入口。
+                            moved.path = path; moved.fileStamp = stamp; items[digest] = moved
+                            save()
+                            status = "文件已移动或改名，继续跟踪：\(URL(fileURLWithPath: path).lastPathComponent)"
+                        } else if let known = items[digest], known.folderID != folder.id {
                             status = "同一份录音在另一个入口未完成：\(URL(fileURLWithPath: known.path).lastPathComponent)；请到入口列表重试"
                         }
                         continue
                     }
                     if let pending = items[digest], pending.state != .retryScheduled || (pending.nextAttempt ?? .distantPast) > now() { continue }
+                    // 新版本开始处理：同路径上旧摘要的条目已被取代，退役它们。
+                    for key in items.filter({ $0.value.folderID == folder.id && $0.value.path == path && $0.value.state != .processing && $0.key != digest }).map(\.key) {
+                        items[key] = nil; failures.remove(key)
+                    }
                     let attempt = (items[digest]?.attempts ?? 0) + 1
                     items[digest] = .init(id: digest, folderID: folder.id, path: path, state: .processing, attempts: attempt, explanation: "正在整理", updatedAt: now(), fileStamp: stamp)
                     batch.append(.init(url:url,voiceMemos:folder.voiceMemos,digest:digest,inbox:folder.path))
@@ -483,9 +528,11 @@ final class RecordingInbox: ObservableObject {
         observed = nextObserved
         var missingItemsChanged = false
         // 文件被移走或删除后，条目原本会永远停在「将在…自动重试」；放到「需要处理」里说清楚。
+        // 只有路径真的不存在才算消失：写入中、被过滤的 0 字节文件与同步临时名都可能整轮缺席。
         for id in Array(items.keys) {
             guard var item = items[id], item.state != .processing,
-                  let paths = foundByFolder[item.folderID], !paths.contains(item.path) else { continue }
+                  let paths = foundByFolder[item.folderID], !paths.contains(item.path),
+                  !FileManager.default.fileExists(atPath: item.path) else { continue }
             if item.state == .needsAttention, item.explanation.hasPrefix("入口里已找不到这份录音") { continue }
             item.state = .needsAttention; item.nextAttempt = nil
             item.explanation = "入口里已找不到这份录音（可能被移走或删除）；把文件放回后点「重试这份素材」"

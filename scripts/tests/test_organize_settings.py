@@ -41,6 +41,19 @@ class SettingsMergeTests(unittest.TestCase):
         self.assertEqual(address, "https://api.example.com/v1")
         self.assertEqual(key, "fresh-key")
 
+    def test_injected_address_never_pairs_with_the_file_key_from_another_host(self):
+        with self.assertRaises(ValueError) as caught:
+            self.settings_with(
+                'OPENAI_BASE_URL="https://api.example.com/v1"\nOPENAI_API_KEY="file-key"\n',
+                {"VOICEOS_TEXT_BASE_URL": "https://other.example.com/v1"})
+        self.assertIn("密钥不会发往这个主机", str(caught.exception))
+
+    def test_injected_address_pairs_with_file_key_on_the_same_host(self):
+        address, key, _, _ = self.settings_with(
+            'OPENAI_BASE_URL="https://api.example.com/v1"\nOPENAI_API_KEY="file-key"\n',
+            {"VOICEOS_TEXT_BASE_URL": "https://api.example.com/v1"})
+        self.assertEqual((address, key), ("https://api.example.com/v1", "file-key"))
+
     def test_env_accepts_the_importer_alias_names(self):
         _, _, model, effort = self.settings_with(
             'OPENAI_BASE_URL="https://api.example.com/v1"\nOPENAI_API_KEY="file-key"\n'
