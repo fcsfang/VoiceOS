@@ -4415,7 +4415,7 @@ private struct ActionCardList<Content: View>: View {
             Group(subviews: content()) { rows in
                 ForEach(rows) { row in
                     row
-                    if row.id != rows.last?.id { WorkspaceListDivider().padding(.leading,48) }
+                    if row.id != rows.last?.id { WorkspaceListDivider().padding(.leading,54) }
                 }
             }
         }
